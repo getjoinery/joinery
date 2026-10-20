@@ -1645,7 +1645,12 @@ joinery-drive --version
 Everything except `login` and `daemon` is a request to the running daemon, so
 every answer is what the daemon actually believes rather than a second opinion.
 `status` exits non-zero when the client is stopped or not linked, so a
-monitoring script does not have to parse prose.
+monitoring script does not have to parse prose. `stop` comes back once the
+daemon is gone, so a script that stops it and then touches its folder or its
+state does not race a pass still finishing. A pass hears a stop between two
+operations or two chunks of a transfer; one still going a little over a minute
+later (past a stalled download's silence limit) makes `stop` exit non-zero,
+naming the process, and it stops on its own at its next safe point.
 
 `login` takes the same addresses the settings page does, checked by the same
 code before anything is sent: a missing scheme is read as `https://`, and plain
@@ -1681,7 +1686,10 @@ state folder cannot be locked at all, the daemon says so and runs unguarded.
 A daemon relaunching itself (an update, a replaced program file) lets go of the
 lock only after its control endpoint is gone, and the copy watching an update
 come up does not read a new copy that stood down for a running daemon as a
-failed update.
+failed update. Because the lock goes last, after the state store and the
+endpoint, it is what `stop`, `unlink` and `login` wait on to know the daemon is
+gone; where the state folder cannot be locked, they wait for its control
+channel to stop answering instead.
 
 A supervisor that restarts the daemon after every exit, success included (s6,
 runit, a container's restart policy), restarts a copy that stood down every ten
@@ -1690,9 +1698,12 @@ installed here do not. The other side of that: when autostart's copy is the one
 that stood down (a daemon was already running by hand), quitting the hand-run
 one leaves nothing syncing until autostart runs again, at the next login.
 
-`unlink` revokes the device's key on the server *before* forgetting it locally —
-the other order leaves a live credential nothing on this machine can name, which
-is exactly the key a lost laptop carries. It then removes every copy of the three
+`unlink` stops the daemon first and waits for it to be gone; if it is still
+finishing a pass a little over a minute later, `unlink` changes nothing and
+says to run it again once the daemon has stopped. It revokes the device's key
+on the server *before* forgetting it locally — the other order leaves a live
+credential nothing on this machine can name, which is exactly the key a lost
+laptop carries. It then removes every copy of the three
 secrets: the file and this installation's credential-store items — items this
 installation finds under the shared name are moved onto those when `unlink`
 reads its key ([Credentials](#credentials)). It leaves the synced files alone.
@@ -1703,11 +1714,13 @@ the old device off the account (`auth/logout` with its own credential, which
 removes its device row) — only then, so a ceremony that fails part way does not
 cost the user the link they had. If the old key is not on the computer any more,
 `login` says to remove the old device from Security on the web. A daemon that is
-syncing is stopped first, rather than left running on a key about to be revoked;
-one still in first-run setup picks up the new config by itself. Linking the same
-drive into the same folder again (to turn on encrypted folders, say) keeps that
-folder's settings: the excluded subfolders, the poll interval, and whether it
-starts at login.
+syncing is stopped first, rather than left running on a key about to be revoked,
+and `login` waits a little over a minute for it to be gone before it writes
+the new config; one still finishing a pass after that stops on its own, and
+`login` says so rather than that it stopped. One still in first-run setup
+picks up the new config by itself. Linking the same drive into the same folder
+again (to turn on encrypted folders, say) keeps that folder's settings: the
+excluded subfolders, the poll interval, and whether it starts at login.
 
 Unlinking also leaves the state store, so relinking to the same folder resumes
 without reading everything again. The store records which site, folder and

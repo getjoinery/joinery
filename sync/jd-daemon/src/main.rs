@@ -23,6 +23,7 @@
 //! syncing the moment the setup finishes — or the moment `login`, run in a
 //! terminal, writes a config.
 
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
@@ -59,7 +60,7 @@ fn main() -> ExitCode {
         "pause" => simple_command("/pause", "Syncing paused."),
         "resume" => simple_command("/resume", "Syncing resumed."),
         "sync-now" => simple_command("/sync-now", "Checking now."),
-        "stop" => simple_command("/stop", "Stopping."),
+        "stop" => cmd_stop(),
         "autostart" => cmd_autostart(&rest),
         "check-update" => simple_command("/check-update", "Checking for updates."),
         "approve-deletes" => cmd_approve_deletes(&rest),
@@ -184,7 +185,11 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
 
     // A daemon syncing the link this replaces would carry on with a key about
     // to be revoked, against a state store that may be about to be set aside.
-    let stopped = previous.is_some() && stop_a_syncing_daemon();
+    let stopped = if previous.is_some() {
+        stop_a_syncing_daemon(&paths.state)
+    } else {
+        Stopped::NothingRunning
+    };
 
     std::fs::create_dir_all(&sync_root)
         .map_err(|e| format!("cannot create {}: {e}", sync_root.display()))?;
@@ -266,39 +271,114 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
             );
         }
     }
-    if stopped {
-        println!(
+    match stopped {
+        Stopped::Gone => println!(
             "\nThe sync that was running was stopped. Start it again with:  joinery-drive daemon"
-        );
-    } else {
-        println!("\nStart syncing with:  joinery-drive daemon");
+        ),
+        Stopped::StillGoing => println!(
+            "\nThe sync that was running was asked to stop{}, and is finishing what it was doing. \
+             Once it has stopped, start it again with:  joinery-drive daemon",
+            who_holds(&paths.state)
+        ),
+        Stopped::NothingRunning => println!("\nStart syncing with:  joinery-drive daemon"),
     }
     Ok(())
 }
 
+/// What asking the daemon to stop came to.
+#[derive(Debug, PartialEq, Eq)]
+enum Stopped {
+    /// There was none to stop (or none `login` stops: one in first-run setup).
+    NothingRunning,
+    /// It stopped, and has let go of everything it held.
+    Gone,
+    /// It was asked, and is still finishing what it was doing when `STOP_WAIT`
+    /// ran out. It stops on its own at its next safe point.
+    StillGoing,
+}
+
+/// How long `stop`, `unlink`, and a `login` that replaces a link wait for the
+/// daemon to be gone once it is asked to stop. A pass hears a stop between two
+/// operations or two chunks of a transfer, so this is normally under a second.
+/// The bound is a transfer whose connection has gone quiet, which is when a
+/// person reaches for stop: it gives up at the silence limit, and the daemon
+/// stands down just after.
+const STOP_WAIT: std::time::Duration =
+    jd_proto::SILENCE_LIMIT.saturating_add(std::time::Duration::from_secs(15));
+
+/// Whether the daemon of the home whose state folder is `state` is gone. The
+/// home's lock says, and truthfully: the daemon lets go of it last, after its
+/// state store and its endpoint, and a crash lets go of it too. Where the lock
+/// cannot tell (a state folder that cannot be locked), a control channel that
+/// still answers is a daemon still there.
+fn daemon_gone(state: &Path) -> bool {
+    match jd_platform::instance::holder(state) {
+        jd_platform::instance::Holder::Running => false,
+        jd_platform::instance::Holder::Gone => true,
+        jd_platform::instance::Holder::CannotTell => !Endpoint::load(&state.join("control.json"))
+            .is_some_and(|running| ask(&running, "GET", "/status", Value::Null).is_some()),
+    }
+}
+
+/// Wait up to `wait` for the daemon to be gone. True when it is.
+fn wait_until_gone(state: &Path, wait: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if daemon_gone(state) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// " (process N)" for the daemon holding the home, when it wrote its id.
+fn who_holds(state: &Path) -> String {
+    jd_platform::instance::holder_pid(state)
+        .map(|pid| format!(" (process {pid})"))
+        .unwrap_or_default()
+}
+
+/// Stop the daemon of this home, if one runs, and wait up to `wait` for it to
+/// be gone. A daemon that holds the home but has no control channel yet (it
+/// is still starting) cannot be asked; it is waited for the same.
+fn stop_and_wait(state: &Path, wait: std::time::Duration) -> Stopped {
+    if daemon_gone(state) {
+        return Stopped::NothingRunning;
+    }
+    if let Some(running) = Endpoint::load(&state.join("control.json")) {
+        let _ = ask(&running, "POST", "/stop", Value::Null);
+    }
+    if !daemon_gone(state) {
+        eprintln!("Waiting for the sync to stop\u{2026}");
+    }
+    if wait_until_gone(state, wait) {
+        Stopped::Gone
+    } else {
+        Stopped::StillGoing
+    }
+}
+
 /// Stop a daemon that is syncing, so a `login` that replaces its link does not
 /// leave it running on a revoked key. A daemon still in first-run setup is left
-/// alone: it notices the new config and starts syncing with it. Returns whether
-/// one was stopped.
+/// alone: it notices the new config and starts syncing with it.
 ///
-/// Waits, for a while, for it to be gone — its endpoint file goes with it —
-/// so the state store it held is closed before `login` writes into it. A pass
-/// in the middle of a long transfer can outlast the wait; `login` then carries
-/// on, and the store is only written if it is free.
-fn stop_a_syncing_daemon() -> bool {
+/// Waits for it to be gone, so the state store it held is closed before
+/// `login` writes into it. A pass in the middle of a long transfer can outlast
+/// the wait; `login` then carries on, the store is only written if it is free,
+/// and the person is told the sync is still finishing.
+fn stop_a_syncing_daemon(state: &Path) -> Stopped {
     let Ok(running) = endpoint() else {
-        return false;
+        return Stopped::NothingRunning;
     };
     let syncing = ask(&running, "GET", "/status", Value::Null)
         .is_some_and(|status| status.get("linked").and_then(Value::as_bool) == Some(true));
-    if !syncing || ask(&running, "POST", "/stop", Value::Null).is_none() {
-        return false;
+    if !syncing {
+        return Stopped::NothingRunning;
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while std::time::Instant::now() < deadline && endpoint().is_ok() {
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-    true
+    stop_and_wait(state, STOP_WAIT)
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +584,23 @@ fn endpoint() -> Result<Endpoint, String> {
     Endpoint::load(&paths.state.join("control.json")).ok_or_else(|| {
         "the sync daemon is not running — start it with: joinery-drive daemon".to_string()
     })
+}
+
+/// `stop` returns once the daemon is gone, not once it has been asked: a
+/// script that stops it and then touches its folder or its state must not race
+/// a pass still finishing.
+fn cmd_stop() -> Result<(), String> {
+    let paths = Paths::discover();
+    simple_command("/stop", "Stopping.")?;
+    if wait_until_gone(&paths.state, STOP_WAIT) {
+        println!("Stopped.");
+        Ok(())
+    } else {
+        Err(format!(
+            "the sync daemon{} is still finishing what it was doing; it stops on its own once that is done",
+            who_holds(&paths.state)
+        ))
+    }
 }
 
 fn simple_command(path: &str, said: &str) -> Result<(), String> {
@@ -786,12 +883,11 @@ fn cmd_unlink() -> Result<(), String> {
     // sync down on its way to saying so.
     link::check_unlink(&config, &secrets)?;
 
-    // Stop first. A daemon still running against a credential we are about to
-    // revoke would spend the next minute failing every request and reporting
-    // itself broken.
-    if let Ok(endpoint) = endpoint() {
-        let _ = ask(&endpoint, "POST", "/stop", Value::Null);
-    }
+    // Stop first, and wait for it to be gone. A daemon still running against a
+    // credential we are about to revoke would spend the next minute failing
+    // every request and reporting itself broken, and one still in a pass would
+    // be writing into the state store and the folder unlinking leaves behind.
+    stopped_for_unlink(&paths.state, STOP_WAIT)?;
 
     let done = link::unlink(&paths, &config, &secrets)?;
     match &done.revoked {
@@ -813,6 +909,20 @@ fn cmd_unlink() -> Result<(), String> {
         paths.state.display()
     );
     Ok(())
+}
+
+/// `unlink` goes ahead only once no daemon holds the home. One that outlasts
+/// the wait is still in a pass; unlinking under it is refused, with nothing
+/// changed, rather than done beside it.
+fn stopped_for_unlink(state: &Path, wait: std::time::Duration) -> Result<(), String> {
+    match stop_and_wait(state, wait) {
+        Stopped::NothingRunning | Stopped::Gone => Ok(()),
+        Stopped::StillGoing => Err(format!(
+            "the sync daemon{} was asked to stop and is still finishing what it was doing, so \
+             nothing was unlinked. Run joinery-drive unlink again once it has stopped.",
+            who_holds(state)
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -858,6 +968,89 @@ impl Args {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("jd-main-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Answer every connection with `reply`, once its request has been read.
+    fn answering(reply: &'static str) -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut got = Vec::new();
+                let mut buf = [0u8; 4096];
+                while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => got.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        port
+    }
+
+    /// Where the lock cannot tell (no lock file: a daemon from before the
+    /// lock, still running after the program was upgraded), a control channel
+    /// that answers is a daemon still there, and a stale or dead one is not.
+    #[test]
+    fn where_the_lock_cannot_tell_an_answering_daemon_is_still_there() {
+        let state = state_dir("cannot-tell");
+        assert_eq!(jd_platform::instance::holder(&state), jd_platform::instance::Holder::CannotTell);
+        assert!(daemon_gone(&state), "no control channel at all");
+
+        let endpoint = |port| Endpoint { port, token: "t".into(), pid: 1 };
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        endpoint(closed).save(&state.join("control.json")).unwrap();
+        assert!(daemon_gone(&state), "a stale control channel after a crash");
+
+        let running = answering(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"linked\":true}",
+        );
+        endpoint(running).save(&state.join("control.json")).unwrap();
+        assert!(!daemon_gone(&state), "a daemon that answers is there");
+        assert!(!wait_until_gone(&state, std::time::Duration::from_millis(500)));
+        assert!(
+            stopped_for_unlink(&state, std::time::Duration::from_millis(300)).is_err(),
+            "unlinked under a daemon from before the lock"
+        );
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// `unlink` waits for the daemon holding the home to be gone, and does
+    /// not go ahead under one that is still there when the wait runs out.
+    #[test]
+    fn unlink_waits_for_the_daemon_and_never_goes_ahead_under_one() {
+        use jd_platform::instance::{take, Taken};
+        let state = state_dir("unlink");
+        assert!(stopped_for_unlink(&state, std::time::Duration::ZERO).is_ok(), "nothing runs here");
+
+        let Taken::Held(daemon) = take(&state, std::time::Duration::ZERO) else {
+            panic!("the home was not taken");
+        };
+        let refused = stopped_for_unlink(&state, std::time::Duration::from_millis(300))
+            .expect_err("unlinked under a daemon that still holds the home");
+        assert!(refused.contains("nothing was unlinked"), "{refused}");
+        assert!(refused.contains(&format!("process {}", std::process::id())), "{refused}");
+
+        // One that finishes inside the wait is waited for.
+        let finishing = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(daemon);
+        });
+        assert!(stopped_for_unlink(&state, std::time::Duration::from_secs(10)).is_ok());
+        finishing.join().unwrap();
+        assert_eq!(jd_platform::instance::holder(&state), jd_platform::instance::Holder::Gone);
+        let _ = std::fs::remove_dir_all(&state);
+    }
 
     fn status_holding(set: &str) -> Value {
         json!({

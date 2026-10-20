@@ -101,27 +101,44 @@ pub fn take(state: &Path, wait: Duration) -> Taken {
     }
 }
 
-/// Is the home whose state folder is `state` held by a live daemon? Asked by
-/// the copy that watches an update come up: a new copy that found the home
-/// held exits at once, cleanly, and that is not the update failing. Takes the
-/// lock for a moment if it is free; a daemon starting in that moment waits it
-/// out (`WAIT`).
-pub fn held_elsewhere(state: &Path) -> bool {
+/// What the lock says about the home whose state folder is `state`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holder {
+    /// A daemon holds it.
+    Running,
+    /// Nobody does: whatever daemon had it has closed everything it held,
+    /// since the lock goes last.
+    Gone,
+    /// The lock cannot say: there is no lock file (no daemon that takes one
+    /// has run here), or the state folder cannot be locked.
+    CannotTell,
+}
+
+/// Ask the lock who holds the home. Takes it for a moment if it is free; a
+/// daemon starting in that moment waits it out (`WAIT`).
+pub fn holder(state: &Path) -> Holder {
     let Ok(file) = File::options()
         .read(true)
         .write(true)
         .open(state.join(LOCK_FILE))
     else {
-        return false;
+        return Holder::CannotTell;
     };
     match file.try_lock() {
-        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::WouldBlock) => Holder::Running,
         Ok(()) => {
             let _ = file.unlock();
-            false
+            Holder::Gone
         }
-        Err(TryLockError::Error(_)) => false,
+        Err(TryLockError::Error(_)) => Holder::CannotTell,
     }
+}
+
+/// Is the home whose state folder is `state` held by a live daemon? Asked by
+/// the copy that watches an update come up: a new copy that found the home
+/// held exits at once, cleanly, and that is not the update failing.
+pub fn held_elsewhere(state: &Path) -> bool {
+    holder(state) == Holder::Running
 }
 
 /// The holder's process id, if it wrote one.
@@ -197,6 +214,22 @@ mod tests {
         assert!(holder_pid(&state).is_none(), "the id outlived its guard");
         assert!(released(&state), "the lock outlived its guard");
         assert!(matches!(take(&state, Duration::from_secs(2)), Taken::Held(_)));
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// The lock tells a held home from a let-go one, and says when it cannot
+    /// tell rather than guess.
+    #[test]
+    fn the_lock_says_running_gone_or_that_it_cannot_tell() {
+        let state = temp("holder");
+        assert_eq!(holder(&state), Holder::CannotTell, "no daemon has taken this home");
+        let Taken::Held(first) = take(&state, Duration::ZERO) else {
+            panic!("a free home was not taken");
+        };
+        assert_eq!(holder(&state), Holder::Running);
+        drop(first);
+        assert!(released(&state), "the lock outlived its guard");
+        assert_eq!(holder(&state), Holder::Gone);
         let _ = std::fs::remove_dir_all(&state);
     }
 
