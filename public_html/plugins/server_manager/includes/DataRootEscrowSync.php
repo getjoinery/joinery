@@ -37,6 +37,8 @@
  * does a node removed permanently (ManagedNode::permanent_delete, B69); a
  * hidden one keeps its key, as it keeps every record, until it is restored.
  *
+ * @version 1.11 - a machine sealed to this node's key that does not record it as the operator's is sent it again,
+ *                marked as the operator's (host_report 1.35 recipient_set_by)
  * @version 1.10 - opened_since_report(): a machine that told this holder it opened its data root after its last host
  *                 report is asked for a new one within minutes, whatever restarted it (a site copy's go-back, the
  *                 provider, a crash); its node page said 'opened by' the boot before for up to the hour (B74)
@@ -242,13 +244,20 @@ class DataRootEscrowSync {
 		}
 	}
 
-	/** A hosted machine sealed to another key than this node's current one is sent the current one (D8). */
+	/**
+	 * A hosted machine sealed to another key than this node's current one is
+	 * sent the current one (D8). So is one sealed to it that does not say the
+	 * key is this node's: a server made here is given the key at its install,
+	 * which records it as the install's, and its site's Backups page would call
+	 * it another key and offer to seal it to the site's own instead.
+	 */
 	public static function push_operator_recipient(ManagedNode $node, array $enc): void {
 		if (!self::sealed_to_operator($node)) {
 			return;
 		}
 		$fpr = self::operator_fingerprint();
-		if ($fpr === '' || ($enc['recipient_fingerprint'] ?? '') === $fpr) {
+		$set_by = (string)($enc['recipient_set_by'] ?? '');
+		if ($fpr === '' || (($enc['recipient_fingerprint'] ?? '') === $fpr && ($set_by === '' || $set_by === 'operator'))) {
 			return;
 		}
 		$key = base64_encode(BackupRecoveryKey::public_key());

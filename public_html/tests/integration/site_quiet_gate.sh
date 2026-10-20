@@ -188,6 +188,7 @@ chk "a frozen site forwards: exit 0, the address recorded" "$rc:$(cat "$SD/forwa
 chk "the web user may reach that one address on 80 and 443, before the reject" "$(grep -c 'ip daddr 198.51.100.9 tcp dport { 80, 443 } accept' "$ST/nft_loaded"):$(( $(grep -n -m1 'ip daddr 198.51.100.9' "$ST/nft_loaded" | cut -d: -f1) < $(grep -n -m1 'reject' "$ST/nft_loaded" | cut -d: -f1) ))" "1:1"
 chk "every request is proxied to the copy over https" "$(grep -c 'ProxyPass "https://198.51.100.9/"' "$CONF"):$(grep -c 'ProxyPreserveHost On' "$CONF")" "1:2"
 chk "its certificate checked against the site's own name" "$(grep -c -e '^SSLProxyVerify require$' -e '^SSLProxyCheckPeerName on$' -e '^SSLProxyCheckPeerExpire on$' "$CONF")" "3"
+chk "its whole chain checked, not refused past the first certificate" "$(grep -c '^SSLProxyVerifyDepth 10$' "$CONF")" "1"
 chk "the ACME challenge goes over http, so the copy can be issued one" "$(grep -c 'ProxyPass "http://198.51.100.9/.well-known/acme-challenge/"' "$CONF")" "1"
 chk "any other http request goes to https first, and a refused request does not hold the copy off" "$(grep -c "If \"%{HTTPS} != 'on' && ! %{REQUEST_URI} =~ m#^/\\\\.well-known/acme-challenge/#\"" "$CONF"):$(grep -c 'Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"' "$CONF"):$(grep -c 'retry=0$' "$CONF")" "1:1:2"
 chk "no maintenance page while forwarding" "$(grep -c 'Redirect 503' "$CONF")" "0"
@@ -301,8 +302,9 @@ chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2
 # with the copy's other records: a promoted copy trusts its source's key no more.
 printf '%s chain-20260927_120000\n' "$(printf '0%.0s' $(seq 64))" > "$SD/vouched"; chmod 600 "$SD/vouched"
 echo "2026-10-01T00:00:00Z" > "$SD/copy_import_issued"; chmod 600 "$SD/copy_import_issued"
+printf 'profile manager\nchain-20260920_120000 %s 512 1758369600\n' "$(printf '0%.0s' $(seq 64))" > "$SD/history"; chmod 600 "$SD/history"
 out="$(bash "$Q" off --copy-promoted 2>&1)"; rc=$?
-chk "off --copy-promoted clears a copy, its vouched runs, source key and last import included" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
+chk "off --copy-promoted clears a copy, its vouched runs, backup history, source key and last import included" "$rc:$([ -e "$SD" ] && echo left || echo gone)" "0:gone"
 
 echo "=== A state file that says anything else is quiet, the strict way ==="
 site_state_write switchover; echo "garbage" > "$SD/state"

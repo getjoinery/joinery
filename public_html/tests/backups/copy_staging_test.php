@@ -16,11 +16,15 @@
  *     manifest's size and hash; a damaged one is refused and removed;
  *   - an artifact already staged and matching is kept, not fetched again;
  *   - no key is written;
+ *   - what the source signed for is recorded in this machine's upload ledger,
+ *     marked handed over: its other chains' manifests, the vouched manifest
+ *     and every artifact it names, so they restore here after the switch;
  *   - the request is refused when the agent's workspace and the chain id
  *     disagree, when no run is vouched, or when it carries an unknown key.
  *
  * Run: php tests/backups/copy_staging_test.php
  *
+ * @version 1.1 - the source's backups are recorded in the copy's ledger (B20)
  * @version 1.0
  */
 
@@ -34,6 +38,15 @@ require_once(PathHelper::getIncludePath('includes/CopyStaging.php'));
 $base = sys_get_temp_dir() . '/copy_staging_test_' . getmypid();
 harness_defer(function() use ($base) { exec('rm -rf ' . escapeshellarg($base)); });
 @mkdir($base, 0700, true);
+
+/** The shipped ledger, kept in this test's directory rather than the site's. */
+class CopyStagingTestLedger extends BackupLedger {
+	public static $test_dir = '';
+	public static function dir() { return self::$test_dir; }
+}
+CopyStagingTestLedger::$test_dir = $base . '/backup-ledger';
+CopyStaging::$ledger = CopyStagingTestLedger::class;
+harness_defer(function() { CopyStaging::$ledger = BackupLedger::class; });
 
 $chain_id = 'chain-20260930_010203';
 $work = $base . '/restore_' . $chain_id;
@@ -94,6 +107,40 @@ check(file_get_contents($work . '/manifest.json') === $manifest_json, 'the manif
 check(!file_exists($work . '/manifest.json.incoming'), 'and nothing is left beside it');
 check(!file_exists($work . '/' . BackupStaging::KEY_NAME), 'no key is written: copy_import writes it');
 
+section('What the source signed for is recorded in this machine\'s ledger');
+
+$L = CopyStagingTestLedger::class;
+$m = $L::verify('manager', $chain_id . '/manifest.json', $work . '/manifest.json');
+check($m['ok'] && ($m['entry']['source'] ?? '') === BackupLedger::SOURCE_HANDED_OVER,
+	'the vouched manifest is recorded under the manager profile, marked handed over', json_encode($m));
+check(($m['entry']['uploaded_time'] ?? '') === gmdate('Y-m-d H:i:s', strtotime($manifest['updated'])),
+	'with the time its chain last grew, not when the copy staged it', (string)($m['entry']['uploaded_time'] ?? ''));
+$e = $L::lookup('manager', $chain_id . '/db-0000.sql.gz.enc');
+check(($e['sha256'] ?? '') === hash('sha256', $db0) && ($e['source'] ?? '') === BackupLedger::SOURCE_MANIFEST,
+	'every artifact it names is recorded, an earlier run\'s dump included, from the manifest', json_encode($e));
+check($L::lookup('site', $chain_id . '/manifest.json') === null, 'nothing is recorded under the other profile');
+
+$older = 'chain-20260923_010203';
+$older_sum = hash('sha256', 'the source\'s chain of the week before');
+$hist = array_merge($args, array('--history', $older . ',' . $older_sum . ',4096,' . strtotime('2026-09-29 23:00:00 UTC')));
+CopyStaging::stage(CopyStaging::parse_request($hist, $config));
+$o = $L::lookup('manager', $older . '/manifest.json');
+check(($o['sha256'] ?? '') === $older_sum && (int)($o['bytes'] ?? 0) === 4096
+		&& ($o['uploaded_time'] ?? '') === '2026-09-29 23:00:00' && ($o['source'] ?? '') === BackupLedger::SOURCE_HANDED_OVER,
+	'each of the source\'s other chains its export listed is recorded, with its upload time', json_encode($o));
+check($L::verify('manager', $chain_id . '/manifest.json', $work . '/manifest.json')['ok'],
+	'and the vouched manifest is still the current version of its name');
+
+$unwritable = $base . '/no-ledger-here';
+@mkdir($unwritable, 0500);
+CopyStagingTestLedger::$test_dir = $unwritable . '/backup-ledger';
+$threw = null;
+try { CopyStaging::stage(CopyStaging::parse_request($args, $config)); } catch (BackupStagingException $e2) { $threw = $e2; }
+check($threw !== null && strpos($threw->getMessage(), 'upload ledger') !== false,
+	'a copy that cannot record them is refused by name, rather than switching over unable to restore them',
+	$threw ? $threw->getMessage() : 'no refusal (running as root ignores the directory\'s mode)');
+CopyStagingTestLedger::$test_dir = $base . '/backup-ledger';
+
 $fetched = array();
 $out = CopyStaging::stage(CopyStaging::parse_request($args, $config));
 check($fetched === array('manifest.json') && $out['fetched'] === 3,
@@ -152,6 +199,11 @@ check($malformed(array('--workspace', 'relative/restore_' . $chain_id, '--vouche
 	'a workspace that is not an absolute path');
 check($malformed($args, $config + array('key_file' => '/x')), 'a key it does not know');
 check($malformed(array_merge($args, array('--key', 'x')), $config), 'an argument it does not know');
+check($malformed(array_merge($args, array('--profile', 'other')), $config), 'a profile that is neither site nor manager');
+check($malformed(array_merge($args, array('--history', $chain_id . ',' . $vouched . ',12')), $config),
+	'a history line missing its time');
+check($malformed(array_merge($args, array('--history', '../x,' . $vouched . ',12,1')), $config),
+	'a history line whose chain id is a path');
 $c = $config; $c['manifest_url'] = 'http://bucket.invalid/manifest.json';
 check($malformed($args, $c), 'a manifest link that is not https');
 

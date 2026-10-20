@@ -411,6 +411,34 @@ $recent = new ReflectionMethod('DataRootEscrowSync', 'recipient_sent_recently');
 $recent->setAccessible(true);
 check($recent->invoke(null, $node, $key_a) && !$recent->invoke(null, $node, $key_b),
 	'A recipient sent within the hour holds back only that key again; a rotated key goes at once (B35)');
+// A server made here, sealed to this node's key at its install, is sent the
+// key again marked as the operator's, so its site does not call it another
+// key (found in the site copy final test's C3); one that says so, or an older
+// report that does not say, is not.
+$onode = new ManagedNode(NULL);
+$onode->set('mgn_name', 'HarnessTest escrow ours');
+$onode->set('mgn_slug', 'escrowtest-' . bin2hex(random_bytes(3)));
+$onode->set('mgn_host', '127.0.0.1');
+$onode->set('mgn_uptime_enabled', false);
+$onode->set('mgn_cloud_account', CloudAccounts::MAIN);
+$onode->set('mgn_agent_primitives', 'data_root_enrol,data_root_recipient,host_report');
+$onode->set('mgn_agent_version', DataRootEscrowSync::DORMANT_COPY_MIN_AGENT_VERSION);
+$onode->set('mgn_agent_public_key', base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())));
+$onode->save();
+$made_nodes[] = $onode->key;
+$recipients = function (ManagedNode $n) {
+	return (int)DbConnector::get_instance()->get_db_link()->query('SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = '
+		. (int)$n->key . " AND mjb_job_type = 'data_root_recipient'")->fetchColumn();
+};
+$op_fpr = DataRootEscrowSync::operator_fingerprint();
+DataRootEscrowSync::push_operator_recipient($onode, array('recipient_fingerprint' => $op_fpr, 'recipient_set_by' => 'operator'));
+DataRootEscrowSync::push_operator_recipient($onode, array('recipient_fingerprint' => $op_fpr, 'recipient_set_by' => ''));
+$quiet = $recipients($onode);
+DataRootEscrowSync::push_operator_recipient($onode, array('recipient_fingerprint' => $op_fpr, 'recipient_set_by' => 'install'));
+check($op_fpr !== '' && $quiet === 0 && $recipients($onode) === 1,
+	'A server made here sealed to this node\'s key as the install\'s is sent it again as the operator\'s; one marked so, or an older report, is not',
+	'fpr ' . ($op_fpr !== '' ? 'known' : 'none') . ', before ' . $quiet . ', after ' . $recipients($onode));
+
 // B55: decrypted to the end, it holds no slot of this holder's.
 $gone = new DataRootEscrow(NULL);
 $gone->set('dre_identity_key', base64_encode(random_bytes(32)));
@@ -429,6 +457,10 @@ check($still($drow), 'A report with no data root mounted says nothing of one: wh
 DataRootEscrowSync::from_plain_report($dnode, array('path' => '/srv/joinery', 'fstype' => 'xfs'));
 check(!$still($drow) && $still($gone) && $still($crow) && DataRootEscrow::for_node((int)$dnode->key) === null,
 	'Its data root mounted and plain: its enrolment here goes, a key given up stays on record, another node\'s row is untouched (B55)');
+check(JobResultProcessor::host_report_data_root_encryption(array('recipient_set_by' => 'operator'))['recipient_set_by'] === 'operator'
+	&& JobResultProcessor::host_report_data_root_encryption(array('recipient_set_by' => 'someone'))['recipient_set_by'] === ''
+	&& JobResultProcessor::host_report_data_root_encryption(array())['recipient_set_by'] === '',
+	'Who named the recovery key is kept when it is site, operator or install, and empty otherwise (host_report 1.35)');
 check(JobResultProcessor::host_report_data_root_encryption('none') === 'none'
 	&& JobResultProcessor::host_report_data_root_encryption(array('identity' => 'not base64!', 'holder' => 'http://x', 'slot' => 99))['identity'] === '',
 	'The report section is held to its shape');

@@ -4,21 +4,25 @@
  * (specs/site_copy.md WP4, G7). The work is CopyStaging's; this is the
  * script the copy_stage agent word runs, as root:
  *
- *   php utils/copy_stage.php --workspace /backups/restore_chain-… --vouched <sha256> [--vouched …] <<'EOF'
+ *   php utils/copy_stage.php --workspace /backups/restore_chain-… --vouched <sha256> [--vouched …] \
+ *       [--profile manager] [--history chain-…,<sha256>,<bytes>,<unix time> …] <<'EOF'
  *   {"chain_id":"chain-20260830_010203",
  *    "manifest_url":"https://…signed…",
  *    "artifact_urls":{"files-0000.tar.gz.enc":"https://…"},
  *    "seq":3}
  *   EOF
  *
- * The workspace and the vouched manifest hashes come from the agent, which
- * derives the first from the chain id and reads the second from the copy's
- * own state directory. The links come from the management node, which has no
- * say in which are used.
+ * The workspace, the vouched manifest hashes and the source's other chains
+ * come from the agent, which derives the first from the chain id and reads
+ * the rest from the copy's own state directory, where copy_import wrote them
+ * from the source's signed export. The links come from the management node,
+ * which has no say in which are used. What the source signed for is recorded
+ * in this machine's upload ledger (CopyStaging::record_in_ledger).
  *
  * Exits 0 on success, 1 on a transfer or integrity failure, 2 on a malformed
  * request.
  *
+ * @version 1.1 - --profile and --history: the source's backups are recorded in this machine's upload ledger
  * @version 1.0
  */
 

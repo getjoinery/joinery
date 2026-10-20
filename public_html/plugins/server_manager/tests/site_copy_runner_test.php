@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.6 - an ended copy whose row and provision were removed still names its server's instance
  * @version 1.5 - a run backs the source up first and copies the chain that backup is in (B53)
  * @version 1.4 - the release a copy installs is asked of the site itself (B48)
  * @version 1.3 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
@@ -573,7 +574,17 @@ check($asked !== null && $asked['withdrawn'] === false, 'while the export waits 
 check(AgentChannelEndpoint::job_status_answer((int)$cnode->key, (int)$export->key) === null,
 	'and another node asking about it hears nothing');
 
-// Discard.
+// Discard. The copy's server was made for it; removing the row removes its
+// provision, and the tab, which asks after, still names the instance.
+$made = new CustomerCloudProvision(NULL);
+foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scpmade.example.org',
+	'cvp_slug' => 'harnessscr-made-' . bin2hex(random_bytes(3)), 'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal',
+	'cvp_provider' => 'linode', 'cvp_instance_id' => '55443322', 'cvp_instance_ip' => '192.0.2.70',
+	'cvp_mgn_managed_node_id' => (int)$cnode->key) as $k => $v) {
+	$made->set($k, $v);
+}
+$made->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $made->key);
 $server = SiteCopyRunner::server_to_delete($copy);
 SiteCopyRunner::discard($copy); $copy->load(); $cnode->load();
 $export->load();
@@ -583,6 +594,10 @@ check((string)$export->get('mjb_status') === 'cancelled' && $asked !== null && $
 check($copy->status() === SiteCopy::STATUS_DISCARDED && $cnode->get('mgn_delete_time') && strpos($server, '192.0.2.70') !== false,
 	'Discard ends the copy and removes its row, and names the server for its owner to delete at the provider', $server);
 check(SiteCopy::live_for_source((int)$src->key) === null, 'and the site can be copied again');
+$made->load();
+$after = SiteCopyRunner::server_to_delete($copy);
+check($made->get('cvp_delete_time') && strpos($after, 'instance 55443322') !== false,
+	'once the row and its provision are removed, the server is still named by its instance', $after);
 
 // ---------------------------------------------------------------------------
 section('After a kept switch-over, the server to delete is the old machine, never the live one (B58)');

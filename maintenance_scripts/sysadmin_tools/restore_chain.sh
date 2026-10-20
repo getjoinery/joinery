@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.10.0 - the database restore is told which run it restores (--restored-run), and records it as
+#                  finished: the dump held it as running, for ever (B19)
 # Version: 1.9.0 - an upgrade's own trees (deploy/, upgrades/, upgrade_archives/, public_html_*) are never
 #                  written from a chain, on every host; this machine keeps its own copy of every file in MACHINE_CONFIG_FILES (_restore_guard.sh);
 #                  on a host that refuses unsigned code the chain is unpacked into a scratch directory and
@@ -313,6 +315,15 @@ if 'meta' in last:
 
 lines.append("SEQ\t%d" % seq)
 lines.append("CHAIN\t%s" % m.get('chain_id', ''))
+# The run itself, for the database restore to record as finished (B19): its
+# level (0 = full), its artifacts' bytes, and when it was recorded.
+import calendar, time as _time
+try:
+    at = calendar.timegm(_time.strptime(str(runs[seq].get('time', '')), '%Y-%m-%dT%H:%M:%SZ'))
+except ValueError:
+    at = 0
+lines.append("RUN\t%d:%d:%d" % (int(runs[seq].get('level', 1)),
+    sum(int((a or {}).get('bytes') or 0) for a in last.values()), at))
 print("\n".join(lines))
 PY
 ) || { print_error "$PLAN"; exit 1; }
@@ -324,6 +335,7 @@ DB_ARCHIVE=""
 META_ARCHIVE=""
 CHAIN_ID=""
 RESTORE_SEQ=""
+RESTORE_RUN=""
 while IFS=$'\t' read -r kind value; do
     case "$kind" in
         FILES) FILES_ARCHIVES+=("$value") ;;
@@ -333,6 +345,7 @@ while IFS=$'\t' read -r kind value; do
         META)  META_ARCHIVE="$value" ;;
         SEQ)   RESTORE_SEQ="$value" ;;
         CHAIN) CHAIN_ID="$value" ;;
+        RUN)   RESTORE_RUN="$value" ;;
     esac
 done <<< "$PLAN"
 
@@ -773,7 +786,13 @@ if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
     ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/restore_database.sh"
     if [ -f "$ENGINE" ]; then
         print_info "Restoring database from $(basename "$DB_ARCHIVE")"
-        if bash "$ENGINE" "$PROJECT_NAME" "$DB_ARCHIVE" --non-interactive --key-file "$KEY_FILE"; then
+        RUN_ARGS=()
+        # The run this restores, so the database restore records it as finished (B19).
+        IFS=: read -r run_level run_bytes run_at <<< "${RESTORE_RUN:-}"
+        if [ -n "${run_at:-}" ] && [ "${run_at}" != "0" ]; then
+            RUN_ARGS=(--restored-run "${CHAIN_ID}:${RESTORE_SEQ}:${run_level}:${run_bytes}:${run_at}")
+        fi
+        if bash "$ENGINE" "$PROJECT_NAME" "$DB_ARCHIVE" --non-interactive --key-file "$KEY_FILE" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}; then
             print_success "Database restored"
         else
             print_error "Database restore failed. The files are restored; the database is not."

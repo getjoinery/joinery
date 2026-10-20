@@ -2781,6 +2781,20 @@ check($cp_export === array('primitive' => 'copy_export', 'params' => array(
 	'the export names the chain and the copy\'s recorded agent key, and nothing else', var_export($cp_export, true));
 check(in_array('copy_export', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
 	'an export is routed as a destructive word: only to an agent that asks its own operator');
+// The site's backup history goes when both agents carry it, and never otherwise:
+// an older copy refuses a bundle with anything in it that it does not know.
+foreach (array(array(true, true, true), array(true, false, false), array(false, true, false)) as list($src_new, $copy_new, $want)) {
+	$cp_source->set('mgn_agent_version', $src_new ? JobCommandBuilder::COPY_HISTORY_MIN_AGENT_VERSION : '1.84.2');
+	$cp_copy->set('mgn_agent_version', $copy_new ? JobCommandBuilder::COPY_HISTORY_MIN_AGENT_VERSION : '1.84.2');
+	$cp_h = JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
+	check(!empty($cp_h['params']['history']) === $want,
+		'source ' . ($src_new ? 'new' : 'old') . ', copy ' . ($copy_new ? 'new' : 'old') . ': the history is '
+		. ($want ? 'asked for' : 'not asked for'), json_encode($cp_h['params']));
+}
+$cp_vouch_h = JobCommandBuilder::build_copy_vouch($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
+check(!isset($cp_vouch_h['params']['history']), 'a vouch never asks for the history: copy_vouch has no such parameter');
+$cp_source->set('mgn_agent_version', AgentVocabulary::FLOOR);
+$cp_copy->set('mgn_agent_version', AgentVocabulary::FLOOR);
 foreach (array('a working node' => $cp_source, 'a copy of another node' => $cp_orphan) as $what => $not_its_copy) {
 	$threw = '';
 	try { JobCommandBuilder::build_copy_export($cp_source, $not_its_copy, array('chain_id' => 'chain-20260930_010203')); }

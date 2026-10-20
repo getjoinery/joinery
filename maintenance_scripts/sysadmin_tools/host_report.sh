@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.35 - data_root_encryption.recipient_set_by: who named the recovery key the break-glass copy is sealed to
+#               (site, operator or install), so a management node can mark its own key given at install as its own
 # Version: 1.34 - kernel_warning counts a WARN() by its "WARNING: CPU:" line, not a boot notice about a CPU's
 #               mitigations, which says WARNING on every boot of every machine with that CPU
 # Version: 1.33 - site_security: the sha256 of the system call filter this host's sites are made under and the
@@ -480,13 +482,13 @@ emit_disk_pool() {
 # The encrypted data root (specs/hosted_data_promise_disk_encryption.md D3,
 # D2b): whether it is open and what opened it, the unlock identity's PUBLIC
 # half (the private seed beside it is never read), the escrow holder and key
-# slot, the recovery recipient's fingerprint, and the break-glass box, which
+# slot, the recovery recipient's fingerprint and who named it, and the break-glass box, which
 # is sealed to the recovery key and so public. Through this report, which the
 # node's own key signs, its management node learns which unlock identity is
 # this node's. "none" where the data root is not encrypted.
 emit_data_root_encryption() {
     local conf="${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}" dir="${HOST_REPORT_DATA_ROOT_DIR:-/etc/joinery/data-root}"
-    local backing sidecar open=false identity holder slot recipient fpr sealed opened held
+    local backing sidecar open=false identity holder slot recipient set_by fpr sealed opened held
     backing="$(awk -F= '$1=="backing" { print $2; exit }' "$conf" 2>/dev/null)"
     [[ "$backing" == luks-* ]] || { printf '"none"'; return; }
     [[ -e "${HOST_REPORT_MAPPER:-/dev/mapper/joinery-data}" ]] && open=true
@@ -496,6 +498,7 @@ emit_data_root_encryption() {
     holder="$(kv url "$dir/holder" | tr -cd 'A-Za-z0-9.:/-' | head -c 200)"
     slot="$(kv slot "$dir/holder")"
     recipient="$(kv fingerprint "$dir/recovery_recipient" | tr -cd '0-9a-f' | head -c 64)"
+    set_by="$(kv set_by "$dir/recovery_recipient" | tr -cd 'a-z' | head -c 16)"
     fpr="$(grep -o '"fingerprint": *"[0-9a-f]*"' "${HOST_REPORT_ROOT:-}${sidecar}" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' | head -n 1)"
     sealed="$(grep -o '"sealed": *"[A-Za-z0-9+/=]*"' "${HOST_REPORT_ROOT:-}${sidecar}" 2>/dev/null | head -n 1 | sed 's/.*: *"//; s/"$//' | tr -cd 'A-Za-z0-9+/=' | head -c 400)"
     opened="$(head -c 200 /run/joinery/data-root.opened-by 2>/dev/null | tr -cd 'A-Za-z0-9 ,.:/-')"
@@ -508,8 +511,8 @@ emit_data_root_encryption() {
         progress="$(head -c 600 /run/joinery/data-root-encrypt.progress 2>/dev/null)"
         pct="$(printf '%s' "$progress" | sed -n 's/.*"device_bytes":"\{0,1\}\([0-9]*\).*"device_size":"\{0,1\}\([0-9]*\).*/\1 \2/p' | awk '$2 > 0 { printf "%.1f", $1 * 100 / $2 }')"
     fi
-    printf '{"backing":%s,"open":%s,"opened_by":"%s","identity":"%s","holder":"%s","slot":%s,"recipient_fingerprint":"%s","box_fingerprint":"%s","box_sealed":"%s","reboot_held":"%s","reencrypt":"%s","reencrypt_percent":"%s"}' \
-        "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$fpr" "$sealed" "$held" "$mode" "$pct"
+    printf '{"backing":%s,"open":%s,"opened_by":"%s","identity":"%s","holder":"%s","slot":%s,"recipient_fingerprint":"%s","recipient_set_by":"%s","box_fingerprint":"%s","box_sealed":"%s","reboot_held":"%s","reencrypt":"%s","reencrypt_percent":"%s"}' \
+        "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$set_by" "$fpr" "$sealed" "$held" "$mode" "$pct"
 }
 
 # A data root stopped by hand (joinery_data_root.sh stop; reviewer2 B17 D2):

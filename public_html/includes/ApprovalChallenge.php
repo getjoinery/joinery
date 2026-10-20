@@ -59,6 +59,8 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.4 - a restore of a backup another server made carries its key box: pending() shows it and answer()
+ *                takes what the browser worked out with the same pasted key, which the agent opens it with (B20)
  * @version 1.3 - pending() says whether the waiting request has been answered, and a second answer to
  *                one already answered is refused: the page reloads before the agent has read the
  *                first, and showed the same request again as if nothing had been sent
@@ -285,6 +287,8 @@ class ApprovalChallenge {
 	 *   @type string info             HKDF context the browser must use
 	 *   @type string expires_time     UTC 'Y-m-d H:i:s'
 	 *   @type int    seconds_left     How long the administrator has
+	 *   @type array|null key_box      A backup's key the same pasted key opens:
+	 *                                 ['ephemeral_public' => base64, 'recovery_fingerprint' => hex]
 	 * }
 	 */
 	public static function pending(string $scope) {
@@ -324,7 +328,26 @@ class ApprovalChallenge {
 			'issued_time'  => (string)($req['issued_time'] ?? ''),
 			'expires_time' => (string)($req['expires_time'] ?? ''),
 			'seconds_left' => (int)$left,
+			'key_box'      => self::key_box($req['key_box'] ?? null),
 		);
+	}
+
+	/**
+	 * The backup key box an agent staged with a restore, or null: a chain
+	 * another server made opens only with the recovery key, and the page opens
+	 * it with the key the administrator pastes to approve (the agent's
+	 * ApprovalKeyBox).
+	 */
+	private static function key_box($box) {
+		if (!is_array($box)) {
+			return null;
+		}
+		$eph = base64_decode((string)($box['ephemeral_public'] ?? ''), true);
+		$fpr = (string)($box['recovery_fingerprint'] ?? '');
+		if ($eph === false || strlen($eph) !== 32 || !preg_match('/^[0-9a-f]{64}$/', $fpr)) {
+			return null;
+		}
+		return array('ephemeral_public' => (string)$box['ephemeral_public'], 'recovery_fingerprint' => $fpr);
 	}
 
 	/**
@@ -342,7 +365,7 @@ class ApprovalChallenge {
 	 * convenience for the agent's own matching rather than something an
 	 * attacker gains by editing.
 	 */
-	public static function answer(string $scope, $job_id, $answer) {
+	public static function answer(string $scope, $job_id, $answer, $shared = '', $public_key = '') {
 		$s = self::scope($scope);
 		$pending = self::pending($scope);
 		if ($pending === null) {
@@ -362,11 +385,23 @@ class ApprovalChallenge {
 		if (strlen($answer) > 4096) {
 			throw new ApprovalChallengeException('That is not what the challenge opens to.');
 		}
+		$reply = array('job_id' => (int)$job_id, 'answer' => $answer);
 
-		self::write_setting($s['answer_setting'], (string)json_encode(array(
-			'job_id' => (int)$job_id,
-			'answer' => $answer,
-		)));
+		// A backup's key to open as well: what the browser worked out for its
+		// box, by shape only. The agent checks the key's fingerprint and opens
+		// the box, and refuses the restore if it does not open.
+		if ($pending['key_box'] !== null) {
+			foreach (array('shared' => $shared, 'public_key' => $public_key) as $what => $value) {
+				$raw = base64_decode(trim((string)$value), true);
+				if ($raw === false || strlen($raw) !== 32) {
+					throw new ApprovalChallengeException('This backup\'s key opens with your recovery key too, and '
+						. 'this page did not work it out. Reload the page and approve again.');
+				}
+				$reply[$what] = trim((string)$value);
+			}
+		}
+
+		self::write_setting($s['answer_setting'], (string)json_encode($reply));
 	}
 
 	/**
