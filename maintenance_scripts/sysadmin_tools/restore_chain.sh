@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.11.0 - the database restore and the reconcile run with this release's tools, copied before the
+#                  extraction: an older run puts older tools back, and one refused what this release asks (B23)
 # Version: 1.10.0 - the database restore is told which run it restores (--restored-run), and records it as
 #                  finished: the dump held it as running, for ever (B19)
 # Version: 1.9.0 - an upgrade's own trees (deploy/, upgrades/, upgrade_archives/, public_html_*) are never
@@ -536,6 +538,19 @@ KEPT_FILES=()
 cleanup_kept() { rm -rf "${KEEP_TMP:?}"; }
 trap cleanup_kept EXIT
 
+# The steps after the extraction (the database, the reconcile) are this
+# release's, so they run with this release's tools, never the ones the
+# extraction puts back beside this script: an older run brings back older
+# tools, which do not know what this release asks of them. One refused
+# --restored-run after the files were already restored (B23).
+TOOLS_TMP="${KEEP_TMP}/tools"
+mkdir -p "${TOOLS_TMP}/sysadmin_tools" "${TOOLS_TMP}/install_tools"
+if ! cp -a "${SCRIPT_DIR}/." "${TOOLS_TMP}/sysadmin_tools/" \
+   || ! cp -a "${SCRIPT_DIR}/../install_tools/"*.sh "${SCRIPT_DIR}/../install_tools/"*.conf "${TOOLS_TMP}/install_tools/"; then
+    print_error "Could not take a copy of this release's restore tools before extraction. Nothing was restored."
+    exit 1
+fi
+
 # Every file in MACHINE_CONFIG_FILES (_restore_guard.sh) is held the same way:
 # the two above, and the files that decide what this machine trusts. One this
 # machine has none of comes from the chain (a machine rebuilt from its own
@@ -783,7 +798,7 @@ if [ -n "$META_ARCHIVE" ]; then
 fi
 
 if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
-    ENGINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/restore_database.sh"
+    ENGINE="${TOOLS_TMP}/sysadmin_tools/restore_database.sh"
     if [ -f "$ENGINE" ]; then
         print_info "Restoring database from $(basename "$DB_ARCHIVE")"
         RUN_ARGS=()
@@ -799,7 +814,7 @@ if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
             exit 1
         fi
     else
-        print_warning "restore_database.sh not found beside this script; database not restored."
+        print_warning "restore_database.sh is not among this release's tools; database not restored."
     fi
 fi
 
@@ -868,9 +883,9 @@ fi
 if [ "$SKIP_RECONCILE" = true ] || [ -n "$TARGET_DIR_OVERRIDE" ]; then
     print_info "Not reconciling (restored to ${PROJECT_DIR} as files only)."
 else
-    RECONCILE="${SCRIPT_DIR}/reconcile_site.sh"
+    RECONCILE="${TOOLS_TMP}/sysadmin_tools/reconcile_site.sh"
     if [ ! -f "$RECONCILE" ]; then
-        print_error "reconcile_site.sh is not beside this script — the restored site would be left"
+        print_error "reconcile_site.sh is not among this release's tools — the restored site would be left"
         print_error "pointing at the source machine's domain, shape and serving config."
         exit 1
     fi

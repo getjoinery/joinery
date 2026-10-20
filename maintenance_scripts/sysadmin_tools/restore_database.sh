@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.16 - The database is renamed out of the way for the load and back once it is whole (or as it is, if
+#              the load fails): a page or scheduled task writing mid-load collided with the dump's own rows,
+#              and the load stopped with the schema already dropped (B24)
 #Version 3.15 - After the load, the backup runs the dump holds as running are settled: none is running on this
 #              machine. The run a chain restore names (--restored-run) is recorded as finished, since its
 #              archive is what was loaded; any other is marked never finished. A restored site listed the
@@ -61,11 +64,15 @@
 #     truncated file, or corrupt archive exits with the database untouched.
 #   * Replace semantics: DROP SCHEMA public CASCADE; CREATE SCHEMA public; then
 #     load under ON_ERROR_STOP=1 as --db-user (no dropdb/createdb superuser need).
+#   * Closed while it is replaced: the database is renamed DB_NAME__restoring for
+#     the load, so nothing that asks for it by name writes to it mid-load, and is
+#     renamed back once loaded, or as it is if the load fails (stage 3).
 #   * All informational output goes to stderr. stdout carries ONLY one terminal
 #     marker so callers (JobResultProcessor) can parse the outcome:
 #         RESTORE_OK | BACKUP_KEY_MISSING | DECRYPT_FAILED
 #         ARCHIVE_CORRUPT | RESTORE_LOAD_FAILED | DB_UNREACHABLE
 #         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD | RESTORE_ROLE_MISSING
+#         RESTORE_DB_BUSY
 #     Only RESTORE_LOAD_FAILED can leave the database modified; every other
 #     failure exits with it untouched.
 #   * Roles: a role the dump names and the server lacks is created without
@@ -151,12 +158,17 @@ GZ_TMP=""
 SQL_TMP=""
 KEY_TMP=""
 cleanup() {
+    # A database renamed out of the way for its load goes back under its own
+    # name, however this run ends (stage 3).
+    put_back_database
     [ -n "$GZ_TMP" ]  && rm -f "$GZ_TMP"
     [ -n "$SQL_TMP" ] && rm -f "$SQL_TMP"
     [ -n "$STAGE_DIR" ] && rm -rf "${STAGE_DIR:?}"
     # An unsealed archive key must not outlive the restore that needed it.
     [ -n "$KEY_TMP" ] && rm -f "$KEY_TMP"
 }
+LOAD_DB=""; WORK_DB=""
+put_back_database() { :; }
 trap cleanup EXIT
 
 # --- Database authentication (standalone convenience) --------------------------
@@ -503,12 +515,38 @@ done
 # knowingly, in exchange for not keeping a second copy of every database around
 # to protect against a case the operator has already been shown and accepted.
 
-# --- Stage 3: terminate connections, replace schema, load ----------------------
-info "🔌 Terminating active connections to '$DB_NAME'..."
-psql -U "$DB_USER" -d postgres -c \
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();" \
-    > /dev/null 2>&1
-sleep 1
+# --- Stage 3: close the database, replace schema, load --------------------------
+#
+# Nothing but this restore may write to the database while it is replaced. A
+# page served or a scheduled task run during the load writes rows the dump then
+# collides with: a logged error took id 1 of err_general_errors, the primary key
+# could not be built, and the load stopped with the schema already dropped
+# (B24). A site connects as a superuser, so no connection limit keeps it out,
+# and a session cannot close its own database to others. So the database is
+# renamed out of the way: whatever asks for it by its name finds nothing and
+# writes nothing. The load works on the other name (LOAD_DB), and the database
+# goes back under its own name once it is whole, or as it is if the load fails.
+WORK_DB="${DB_NAME:0:50}__restoring"
+LOAD_DB="$DB_NAME"
+db_rename() {  # FROM TO: end every session on FROM, then rename it; one that slips in between is ended again
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        printf '%s\n' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'from' AND pid <> pg_backend_pid();" \
+            'SELECT pg_sleep(0.5);' 'ALTER DATABASE :"from" RENAME TO :"to";' \
+            | psql -U "$DB_USER" -d postgres -XqA -v ON_ERROR_STOP=1 -v from="$1" -v to="$2" >/dev/null 2>&1 && return 0
+        sleep 1
+    done
+    return 1
+}
+put_back_database() {
+    [ "$LOAD_DB" = "$WORK_DB" ] || return 0
+    if db_rename "$WORK_DB" "$DB_NAME"; then
+        LOAD_DB="$DB_NAME"
+    else
+        info "✗ The database is still named '$WORK_DB'. Rename it back to '$DB_NAME' before the site is used:"
+        info "  ALTER DATABASE \"$WORK_DB\" RENAME TO \"$DB_NAME\";"
+    fi
+}
 
 # Checked probe: a connectivity/auth failure here must NOT read as "database
 # absent" — that path runs createdb and misreports a connection problem as a
@@ -517,6 +555,21 @@ if ! DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datna
     info "✗ Could not query PostgreSQL: $DB_EXISTS"
     echo "DB_UNREACHABLE"
     exit 7
+fi
+# A restore stopped where no trap runs (killed) leaves the database under the
+# work name. With nothing under the site's own name, it is that database, and
+# this restore replaces it. With both, which is the site's is not guessed.
+WORK_EXISTS="$(printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'w';" \
+    | psql -U "$DB_USER" -d postgres -XtA -v w="$WORK_DB" 2>/dev/null || true)"
+if [ "$WORK_EXISTS" = "1" ]; then
+    if [ "$DB_EXISTS" = "1" ]; then
+        info "✗ Both '$DB_NAME' and '$WORK_DB' exist: an earlier restore was stopped part way."
+        info "  Nothing was touched. Drop whichever is not the site's, then restore again."
+        echo "RESTORE_DB_BUSY"
+        exit 8
+    fi
+    info "↩ An earlier restore was stopped part way; its database '$WORK_DB' is the one replaced."
+    LOAD_DB="$WORK_DB"
 fi
 # The recovery key this site has proven. Backups and the encrypted data root
 # are sealed to it, and it changes only by its rotation ceremony: a dump taken
@@ -527,7 +580,7 @@ fi
 # proven (none yet, or one being rotated to) gives way to the dump's.
 KEPT_KEY=""; KEPT_PROOF=""
 recovery_key_settings() {  # -> "KEY<TAB>PROOF" from DB_NAME, or nothing
-    psql -U "$DB_USER" -d "$DB_NAME" -XtA -F $'\t' -c "SELECT
+    psql -U "$DB_USER" -d "$LOAD_DB" -XtA -F $'\t' -c "SELECT
         (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key'),
         (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key_proven_fpr')" 2>/dev/null || true
 }
@@ -551,7 +604,7 @@ keep_recovery_key() {
         "INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) SELECT 'backup_recovery_public_key', :'k', 'backups' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_recovery_public_key');" \
         "UPDATE stg_settings SET stg_value = :'p', stg_update_time = now() WHERE stg_name = 'backup_recovery_public_key_proven_fpr';" \
         "INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) SELECT 'backup_recovery_public_key_proven_fpr', :'p', 'backups' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_recovery_public_key_proven_fpr');" \
-        | psql -U "$DB_USER" -d "$DB_NAME" -XqA -v ON_ERROR_STOP=1 -v k="$KEPT_KEY" -v p="$KEPT_PROOF" --single-transaction 1>&2; then
+        | psql -U "$DB_USER" -d "$LOAD_DB" -XqA -v ON_ERROR_STOP=1 -v k="$KEPT_KEY" -v p="$KEPT_PROOF" --single-transaction 1>&2; then
         info "🔑 Kept this site's recovery key ${KEPT_PROOF:0:16}. The backup names $( [ -n "$loaded" ] && printf '%s, a key it was rotated from' "${loaded_fpr:0:16}" || printf 'none')."
     else
         info "⚠ The backup's recovery key ${loaded_fpr:0:16} could not be replaced with this site's own ${KEPT_PROOF:0:16}."
@@ -560,20 +613,30 @@ keep_recovery_key() {
 }
 
 if [ "$DB_EXISTS" = "1" ]; then
+    info "🔒 Closing '$DB_NAME' to everything but this restore (renamed '$WORK_DB' for the load)..."
+    if ! db_rename "$DB_NAME" "$WORK_DB"; then
+        info "✗ '$DB_NAME' could not be closed: something kept connecting to it. Nothing was touched."
+        echo "RESTORE_DB_BUSY"
+        exit 8
+    fi
+    LOAD_DB="$WORK_DB"
+fi
+if [ "$LOAD_DB" = "$WORK_DB" ]; then
     info "🧹 Replacing schema (DROP SCHEMA public CASCADE; CREATE SCHEMA public)..."
-    if ! psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+    if ! psql -U "$DB_USER" -d "$LOAD_DB" -v ON_ERROR_STOP=1 \
             -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" 1>&2; then
         info "✗ Schema replace failed. Load not attempted."
         echo "RESTORE_LOAD_FAILED"
         exit 6
     fi
 else
-    info "🏗️  Database '$DB_NAME' does not exist — creating it."
-    if ! createdb -T template0 -U "$DB_USER" "$DB_NAME" 1>&2; then
+    info "🏗️  Database '$DB_NAME' does not exist — creating it (as '$WORK_DB' until it is loaded)."
+    if ! createdb -T template0 -U "$DB_USER" "$WORK_DB" 1>&2; then
         info "✗ Could not create database '$DB_NAME'."
         echo "RESTORE_LOAD_FAILED"
         exit 6
     fi
+    LOAD_DB="$WORK_DB"
 fi
 
 # A backup run records itself as running before it dumps the database, so
@@ -589,7 +652,7 @@ fi
 RESTORED_RUN="${RESTORED_RUN:-}"
 settle_running_backups() {
     local has rc rs rl rb rt kind message settled others
-    has="$(psql -U "$DB_USER" -d "$DB_NAME" -XtAc "SELECT to_regclass('public.bkh_backup_history') IS NOT NULL" 2>/dev/null || true)"
+    has="$(psql -U "$DB_USER" -d "$LOAD_DB" -XtAc "SELECT to_regclass('public.bkh_backup_history') IS NOT NULL" 2>/dev/null || true)"
     [ "$has" = "t" ] || return 0
     settled=0
     if [ -n "$RESTORED_RUN" ]; then
@@ -597,7 +660,7 @@ settle_running_backups() {
         if [[ "$rc" =~ ^chain-[0-9_]+$ && "$rs" =~ ^[0-9]+$ && "$rl" =~ ^[0-9]+$ && "$rb" =~ ^[0-9]+$ && "$rt" =~ ^[0-9]+$ ]]; then
             kind="Incremental"; [ "$rl" = "0" ] && kind="Full"
             message="${kind} run ${rs} of ${rc}, taken while the server that made it ran it. This database was restored from it, so it finished there"
-            settled="$(psql -U "$DB_USER" -d "$DB_NAME" -XtA -v ON_ERROR_STOP=1 -v c="$rc" -v s="$rs" -v b="$rb" -v t="$rt" -v m="$message" <<'SQL' 2>/dev/null || true
+            settled="$(psql -U "$DB_USER" -d "$LOAD_DB" -XtA -v ON_ERROR_STOP=1 -v c="$rc" -v s="$rs" -v b="$rb" -v t="$rt" -v m="$message" <<'SQL' 2>/dev/null || true
 WITH run AS (
     SELECT bkh_backup_history_id FROM bkh_backup_history
     WHERE bkh_outcome = 'running' AND bkh_start_time <= (to_timestamp(:'t'::bigint) AT TIME ZONE 'UTC')
@@ -614,7 +677,7 @@ SQL
 )"
         fi
     fi
-    others="$(psql -U "$DB_USER" -d "$DB_NAME" -XtA -v ON_ERROR_STOP=1 <<'SQL' 2>/dev/null || true
+    others="$(psql -U "$DB_USER" -d "$LOAD_DB" -XtA -v ON_ERROR_STOP=1 <<'SQL' 2>/dev/null || true
 WITH done AS (
     UPDATE bkh_backup_history SET bkh_outcome = 'failed', bkh_finish_time = (now() AT TIME ZONE 'UTC'),
         bkh_message = 'Never finished: it was running when the backup this database was restored from was taken, and it did not run on this machine'
@@ -655,9 +718,14 @@ check_secret_key() {
 }
 
 info "📥 Loading dump under ON_ERROR_STOP..."
-if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
+if psql -U "$DB_USER" -d "$LOAD_DB" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     keep_recovery_key
     settle_running_backups
+    put_back_database
+    if [ "$LOAD_DB" != "$DB_NAME" ]; then
+        echo "RESTORE_LOAD_FAILED"
+        exit 6
+    fi
     # A dump carries no planner statistics: until ANALYZE, every table reads as
     # never analyzed and the site plans its queries blind (the nightly Database
     # maintenance task would catch it, up to a day later). The restore has

@@ -4,6 +4,7 @@
  * tier: test-db
  * env: any
  * needs: [test-db]
+ * covers: [public_html/adm/admin_backups.php]
  */
 /**
  * The site's own side of backup verification: what the Backups page says
@@ -224,7 +225,19 @@ check(strpos($rendered, 'Sep 10, 2026 10:00 AM UTC') !== false && strpos($render
 	'dated and named by level');
 check(strpos($rendered, 'Verification failed Sep 12, 2026 10:00 AM UTC') !== false && strpos($rendered, 'db-0005.sql.gz.enc') !== false,
 	'a failure newer than the pass is shown in red with its reason');
-check(strpos($rendered, 'recovery key was last proven') !== false, 'the ceremony date sits beside it');
+// The ceremony beside it: its date, or that there has been none.
+$ceremony_was = $ceremony;
+$by_ceremony = array();
+foreach (array('2026-09-11 10:00:00', null) as $ceremony) {
+	ob_start();
+	eval('?>' . '<?php ' . substr($source, $status_start, $status_end - $status_start));
+	$by_ceremony[] = ob_get_clean();
+}
+$ceremony = $ceremony_was;
+check(strpos($by_ceremony[0], 'recovery key was last proven Sep 11, 2026 10:00 AM UTC') !== false,
+	'a proven key says when it was proven');
+check(strpos($by_ceremony[1], 'recovery key has never been proven') !== false && strpos($by_ceremony[1], 'proven never') === false,
+	'a key never proven says so');
 check(substr_count($rendered, 'verified restorable &middot;') === 1, 'Recent backups says verified restorable on the stamped run, and only there',
 	(string)substr_count($rendered, 'verified restorable &middot;'));
 check(strpos($rendered, 'verification failed &middot; Sep 12, 2026 10:00 AM UTC') !== false,

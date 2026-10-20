@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.7 - a kept switch-over names the old server Keep named, after its row is removed too (B22)
  * @version 1.6 - an ended copy whose row and provision were removed still names its server's instance
  * @version 1.5 - a run backs the source up first and copies the chain that backup is in (B53)
  * @version 1.4 - the release a copy installs is asked of the site itself (B48)
@@ -631,6 +632,36 @@ check(SiteCopyRunner::server_to_delete($copy) === '',
 $found = SiteCopyRunner::old_container($copy);
 check($found && (int)$found->key === (int)$old_ctr->key,
 	'and old_container() names its row, for Permanently Delete Site');
+
+// Keep names the old server, and the copy keeps that answer: the owner then
+// removes the old row, and with it its provision (B22).
+$kept_box = $mk_node('keptbox', array('mgn_install_state' => 'retired', 'mgn_host' => '192.0.2.62'));
+$kept_prov = new CustomerCloudProvision(NULL);
+foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scpkept.example.org',
+	'cvp_slug' => 'harnessscr-kept-' . bin2hex(random_bytes(3)), 'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal',
+	'cvp_provider' => 'linode', 'cvp_instance_id' => '11223344', 'cvp_instance_ip' => '192.0.2.62',
+	'cvp_mgn_managed_node_id' => (int)$kept_box->key) as $k => $v) {
+	$kept_prov->set($k, $v);
+}
+$kept_prov->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $kept_prov->key);
+$copy->set('scp_copy_node_id', (int)$kept_box->key);
+$copy->set('scp_status', SiteCopy::STATUS_SWITCHED);
+$copy->set_switch_record(array('method' => SiteCopyRunner::METHOD_IP_SWAP, 'phase' => 'settle'));
+$copy->save();
+$kept_named = SiteCopyRunner::finish($copy);
+$copy->load();
+check($copy->status() === SiteCopy::STATUS_FINISHED && strpos($kept_named, 'instance 11223344') !== false,
+	'Keep names the old server by its instance', $kept_named);
+$kept_box->load();
+$kept_box->permanent_delete();
+$after_removal = SiteCopyRunner::server_to_delete($copy);
+check(strpos($after_removal, 'instance 11223344') !== false && strpos($after_removal, '99887766') === false,
+	'once the old row is removed, the kept copy still names the old server, never the one the site runs on', $after_removal);
+$copy->set_switch_record(array('method' => SiteCopyRunner::METHOD_IP_SWAP));
+$copy->save();
+check(SiteCopyRunner::server_to_delete($copy) === '',
+	'a kept copy with no server on record names none, rather than the live one', SiteCopyRunner::server_to_delete($copy));
 
 // ---------------------------------------------------------------------------
 section('The release a copy installs is asked of the site itself (B48)');

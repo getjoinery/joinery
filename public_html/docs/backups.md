@@ -1453,6 +1453,21 @@ the box as `copy_take_key` does, writes the chain key where Prepare would have,
 and only then restores. A right answer without the value, or a value that does
 not open the box, refuses the restore.
 
+**Nothing else writes while it loads.** `restore_database.sh` renames the
+database `{name}__restoring` for the load, so a page or a scheduled task that
+asks for it by name finds nothing and writes nothing: a row written mid-load
+collides with the dump's own and stops the load after the schema is dropped.
+It is renamed back once loaded, or as it is when the load fails. A work
+database left by a restore that was killed is the one replaced when nothing has
+the site's name; with both present the restore refuses (`RESTORE_DB_BUSY`) and
+touches nothing.
+
+**A chain restore finishes with its own release's tools.** Its extraction puts
+back the `maintenance_scripts/` the backup carried, which for an older run are
+older tools. `restore_chain.sh` copies this release's `sysadmin_tools/` and the
+`install_tools/` scripts aside before extracting, and runs the database restore
+and `reconcile_site.sh` from that copy.
+
 **What a database restore leaves behind, and what it does not roll back.** A
 database restore replaces the database and nothing else, so a dump taken before
 an upgrade lands under files that are still on the newer release: the site's
