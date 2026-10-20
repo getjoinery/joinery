@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.52 - a job is addressed to the node id its claim was signed as, which a moved machine still holds
+ *                 as its own; the agent refuses any other (found in the site copy final test's C3)
  * @version 1.51 - a machine of a live switch-over that signs as the node with the key of the copy's row (the
  *                 old machine after the take-over, the copy's after going back) is that row's (moved_machine(),
  *                 B14); a body's node_id is compared with the id signed as
@@ -303,7 +305,8 @@ class AgentChannelEndpoint {
 	/**
 	 * The node id a request was signed as (its X-Joinery-Agent-Node). The node
 	 * the signature proves is the same row, except for a machine whose row
-	 * moved under it (moved_machine()); a body's node_id is compared with this.
+	 * moved under it (moved_machine()); a body's node_id is compared with this,
+	 * and a job handed out is addressed to it.
 	 */
 	private static $stated_node = 0;
 	/** The address's bucket: false until asked, then its state when over its limit, else null. */
@@ -1430,9 +1433,11 @@ class AgentChannelEndpoint {
 			api_success(['job' => null], '', 200);
 		}
 
+		// Addressed to the id the claim was signed as: the machine refuses a
+		// job for any other, and a moved machine still holds the node's id.
 		$payload = [
 			'job_id'    => (int)$job->key,
-			'node_id'   => (int)$node->key,
+			'node_id'   => self::$stated_node,
 			'primitive' => (string)($commands['primitive'] ?? ''),
 			'params'    => self::params_as_object($params),
 			'issued_at' => gmdate('c'),

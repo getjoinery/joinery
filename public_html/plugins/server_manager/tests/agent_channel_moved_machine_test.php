@@ -14,7 +14,8 @@
  * work for it (the forward, then its quiet). Real signed requests to the
  * channel pin:
  *   - the old machine, signing as the node with its own key, is the retired
- *     row: its claim takes the retired row's job and records its poll there;
+ *     row: its claim takes the retired row's job, addressed to the node's id
+ *     (the agent refuses a job for any other), and records its poll there;
  *   - the node's own machine is still the node, and after going back the
  *     copy's machine, which took the node's id, is the copy's row;
  *   - a key that is not the retired row's of the node's live switch-over is
@@ -22,7 +23,7 @@
  *   - a body naming the retired row's id, signed as the node, is refused.
  * The rows this test makes are removed in cleanup.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -91,6 +92,9 @@ $r = $claim((int)$node->key, sodium_crypto_sign_secretkey($old_machine));
 $got = (int)($r['json']['data']['job']['job_id'] ?? $r['json']['job']['job_id'] ?? 0);
 check($r['status'] === 200 && $got === (int)$job->key, 'its claim verifies and takes the retired row\'s job',
 	$r['status'] . ' ' . substr((string)$r['body'], 0, 300));
+$addressed = (int)($r['json']['data']['job']['node_id'] ?? $r['json']['job']['node_id'] ?? 0);
+check($addressed === (int)$node->key, 'the job is addressed to the node id it signed as, which the machine holds as its own',
+	'addressed to ' . $addressed);
 check($poll($retired) !== '' && $poll($node) === '', 'the poll is recorded on the retired row, not the node');
 
 // ---------------------------------------------------------------------------
