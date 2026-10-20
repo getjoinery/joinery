@@ -25,6 +25,9 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.7 - fetch_manifest() records the artifacts a matched manifest names that the ledger lacks, so a chain
+ *                the site's previous server handed over stages here (B20); stage_key() stages a chain this
+ *                machine's key does not open for its recovery key, which the restore's approval opens
  * @version 1.6 - fetch_object() places a namespaced object (offloaded mail) one folder down, as backup storage does
  * @version 1.5 - wanted() lists a plan's artifacts in restore order from BackupChain::plan_artifacts, so a
  *                version-2 chain's code, data and database kinds are staged as a version-1 chain's files are
@@ -263,7 +266,15 @@ class BackupStaging {
 		if (!$got['ok']) {
 			throw new BackupStagingException('could not bring back the chain manifest: ' . $got['error']);
 		}
-		return self::read_manifest($work, $chain_id);
+		$manifest = self::read_manifest($work, $chain_id);
+		// The manifest's bytes matched the ledger, so the artifacts it names
+		// are the ones it fixes: a chain the site's previous server handed over
+		// is recorded by its manifest alone (BackupLedger header).
+		if (BackupLedger::record_manifest_artifacts($profile, $chain_id, $manifest) === false) {
+			throw new BackupStagingException('could not record ' . $chain_id . '\'s artifacts in this machine\'s upload '
+				. 'ledger (' . BackupLedger::dir() . '), so they cannot be checked as they arrive');
+		}
+		return $manifest;
 	}
 
 	/**
@@ -355,6 +366,55 @@ class BackupStaging {
 		}
 		@chmod($key_path, 0600);
 		return $key_path;
+	}
+
+	/** stage_key(): the chain key was recovered from this machine's own key. */
+	const KEY_SITE = 'site';
+
+	/** stage_key(): the chain opens only with the recovery key, which the restore's approval asks for. */
+	const KEY_RECOVERY = 'recovery';
+
+	/**
+	 * Stage the chain's key for a restore: recovered from this machine's own
+	 * key (write_chain_key), or, for a chain this machine did not make, left
+	 * for the recovery key.
+	 *
+	 * A chain the site's previous server made is sealed to that server's own
+	 * key, which never left it, and to the site's recovery key. No key is
+	 * written for one: the restore's approval asks for the recovery key anyway,
+	 * and the same step opens the chain's key in the browser (the agent's
+	 * restore_chain). Any key file already in the workspace is removed, so
+	 * the key a restore uses is always one of those two. A chain sealed to
+	 * no recovery key is refused, as before.
+	 *
+	 * @return string KEY_SITE or KEY_RECOVERY
+	 * @throws BackupStagingException
+	 */
+	public static function stage_key(array $manifest, $work) {
+		try {
+			self::write_chain_key($manifest, $work);
+			return self::KEY_SITE;
+		} catch (BackupStagingException $e) {
+			if (self::recovery_box($manifest) === null) {
+				throw $e;
+			}
+			@unlink(rtrim($work, '/') . '/' . self::KEY_NAME);
+			return self::KEY_RECOVERY;
+		}
+	}
+
+	/**
+	 * The chain key's box sealed to the recovery key, as the manifest's
+	 * envelope carries it: ['sealed' => base64, 'fingerprint' => hex], or null.
+	 */
+	public static function recovery_box(array $manifest) {
+		foreach ((array)($manifest['envelope']['recipients'] ?? array()) as $r) {
+			if (is_array($r) && ($r['kind'] ?? '') === 'recovery' && !empty($r['sealed'])
+				&& preg_match('/^[0-9a-f]{64}$/', (string)($r['fingerprint'] ?? ''))) {
+				return array('sealed' => (string)$r['sealed'], 'fingerprint' => (string)$r['fingerprint']);
+			}
+		}
+		return null;
 	}
 
 	// ------------------------------------------------------------ artifacts

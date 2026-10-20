@@ -745,6 +745,17 @@ ln -s "$T/drs/stopped" "$T/drs/link"
 chk "a symlink in its place: null" "$(drst "$T/drs/conf" "$T/drs/link")" "null"
 chk "the real run carries the key (null here: nothing is stopped)" "$(jv "$T/real.json" data_root_stopped)" "null"
 
+echo "=== Who named the break-glass copy's recovery key (host_report 1.35) ==="
+eval "$(sed -n -e '/^json_num_or_unknown() {/,/^}/p' -e '/^emit_data_root_encryption() {/,/^}/p' "$SCRIPT")"
+mkdir -p "$T/dre"
+printf 'backing=luks-file\nsidecar=/nonexistent\n' > "$T/dre/conf"
+dre() { printf 'public_key=x\nfingerprint=%s\nset_by=%s\n' "$(printf 'ab%.0s' {1..32})" "$1" > "$T/dre/recovery_recipient"
+    HOST_REPORT_DATA_ROOT_CONF="$T/dre/conf" HOST_REPORT_DATA_ROOT_DIR="$T/dre" HOST_REPORT_MAPPER="$T/dre/none" emit_data_root_encryption \
+        | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo is_array($o) ? strlen($o["recipient_fingerprint"]) . "|" . $o["recipient_set_by"] : "NOTJSON";'; }
+chk "the key a management node named is marked as the operator's" "$(dre operator)" "64|operator"
+chk "the key the install was given is marked as the install's" "$(dre install)" "64|install"
+chk "anything but letters is dropped" "$(dre 'op\"erator;')" "64|operator"
+
 echo "=== A command that hangs costs its key, not the report ==="
 cat > "$T/bin/fail2ban-client" <<'STUB'
 #!/bin/bash

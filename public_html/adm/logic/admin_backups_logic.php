@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.24 - an approval passes on what the browser worked out for a backup's key box (approval_shared,
+ *                approval_public_key)
  * @version 1.23 - data_root_encrypt takes tpm2 'off' from its second form (the key at every boot, never the TPM2
  *                chip), and data_root_tpm2_off stops the chip opening an encrypted data root (B43)
  * @version 1.22 - data_root_encrypt's answer says the services stop again for a few seconds when it finishes (B45)
@@ -225,7 +227,8 @@ function _admin_backups_handle($action, array $input, $session) {
 				}
 				$job_id = (int)($input['approval_job_id'] ?? 0);
 				if ($which['approve']) {
-					ApprovalChallenge::answer($which['scope'], $job_id, (string)($input['approval_answer'] ?? ''));
+					ApprovalChallenge::answer($which['scope'], $job_id, (string)($input['approval_answer'] ?? ''),
+						(string)($input['approval_shared'] ?? ''), (string)($input['approval_public_key'] ?? ''));
 					$say($scope['approved_notice'], true);
 				} else {
 					ApprovalChallenge::decline($which['scope'], $job_id);

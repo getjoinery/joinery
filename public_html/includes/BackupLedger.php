@@ -63,6 +63,26 @@
  * backups that matter are taken by the root agent (the backup_run primitive), so
  * they are ledgered as a matter of course.
  *
+ * TWO OTHER WAYS IN, each from a record this machine has already checked, and
+ * each marked on the entry ('source'), so the record still says where every
+ * line came from:
+ *
+ *   - HANDED OVER. A site copied onto this machine brings the backups its
+ *     previous server made: that server lists its chains' manifests, from its
+ *     own ledger, in the export it signs for this machine (copy_export), and
+ *     the copy's final manifest in the vouch it signs at the switch. The copy
+ *     records them here (record_handed_over), so after the switch the site's
+ *     backups from before it restore here under their own names. A manifest
+ *     it did not sign is still one this machine never heard of.
+ *   - FROM A MANIFEST. A manifest fixes the name, size and hash of every
+ *     artifact its runs made. Once a manifest's bytes match this ledger, the
+ *     artifacts it names are recorded from it (record_manifest_artifacts), so
+ *     a handed-over chain's files, or this machine's own whose lines were
+ *     evicted, come back under the names the manifest gives them. An existing
+ *     line is never changed: a name this ledger already holds keeps its hash.
+ *
+ * @version 1.6 - record_handed_over() and record_manifest_artifacts(): a site copied here keeps its backups
+ *                from before the switch restorable (B20); each entry says its source
  * @version 1.5 - a root run hands each file it writes to the directory's owner, so the site's
  *                own scheduled backup, run as that user, can still read the ledger
  * @version 1.4 - a ledger directory this account cannot read is named as such, not as a missing ledger
@@ -120,6 +140,12 @@ class BackupLedger {
 	 * is a file that grows without anyone deciding it should.
 	 */
 	const MAX_PREVIOUS = 8;
+
+	/** An entry's 'source' when the site's previous server signed for it (record_handed_over). */
+	const SOURCE_HANDED_OVER = 'handed_over';
+
+	/** An entry's 'source' when a manifest this ledger matched named it (record_manifest_artifacts). */
+	const SOURCE_MANIFEST = 'manifest';
 
 	/**
 	 * Where the ledger lives. A method rather than a constant so a test can
@@ -181,9 +207,19 @@ class BackupLedger {
 		return self::store($profile, $relname, $sha256, (int)$bytes, $object_key);
 	}
 
-	/** The one place an entry is built, versioned and evicted; record() and record_hash() both land here. */
-	private static function store($profile, $relname, $sha, $bytes, $object_key) {
+	/** One entry, read, put, evicted and written; record() and record_hash() both land here. */
+	private static function store($profile, $relname, $sha, $bytes, $object_key, array $extra = array()) {
 		$entries = static::read($profile);
+		self::put($entries, $relname, $sha, $bytes, $object_key, $extra);
+		self::evict($entries);
+		return static::write($profile, $entries);
+	}
+
+	/**
+	 * The one place an entry is built and versioned. $extra may set
+	 * 'uploaded_time' (a handed-over entry keeps its server's) and 'source'.
+	 */
+	private static function put(array &$entries, $relname, $sha, $bytes, $object_key, array $extra = array()) {
 
 		// A NAME CAN LEGITIMATELY BE REWRITTEN, and when it is, the version it
 		// used to hold is still one this machine uploaded.
@@ -206,11 +242,15 @@ class BackupLedger {
 		$previous = array();
 		if ($existing !== null && (string)($existing['sha256'] ?? '') !== '' && $existing['sha256'] !== $sha) {
 			$previous = array_values(array_filter((array)($existing['previous'] ?? []), 'is_array'));
-			array_unshift($previous, array(
+			$was = array(
 				'sha256'        => (string)$existing['sha256'],
 				'bytes'         => (int)($existing['bytes'] ?? 0),
 				'uploaded_time' => (string)($existing['uploaded_time'] ?? ''),
-			));
+			);
+			if (!empty($existing['source'])) {
+				$was['source'] = (string)$existing['source'];
+			}
+			array_unshift($previous, $was);
 			$previous = array_slice($previous, 0, self::MAX_PREVIOUS);
 		} elseif ($existing !== null) {
 			// Re-recorded with the same bytes: carry the history unchanged
@@ -221,13 +261,19 @@ class BackupLedger {
 		$entries[$relname] = array(
 			'sha256'        => $sha,
 			'bytes'         => (int)$bytes,
-			'uploaded_time' => gmdate('Y-m-d H:i:s'),
+			'uploaded_time' => (string)($extra['uploaded_time'] ?? gmdate('Y-m-d H:i:s')),
 			'object_key'    => (string)$object_key,
 		);
+		if (!empty($extra['source'])) {
+			$entries[$relname]['source'] = (string)$extra['source'];
+		}
 		if ($previous) {
 			$entries[$relname]['previous'] = $previous;
 		}
+	}
 
+	/** Bounded by count: the oldest recorded go first. */
+	private static function evict(array &$entries) {
 		if (count($entries) > self::MAX_ENTRIES) {
 			// Oldest recorded first. uasort keeps the association, which is the
 			// whole index — a sort that dropped the keys would empty the ledger.
@@ -236,8 +282,62 @@ class BackupLedger {
 			});
 			$entries = array_slice($entries, count($entries) - self::MAX_ENTRIES, null, true);
 		}
+	}
 
+	/**
+	 * Record a chain manifest the site's previous server uploaded, as that
+	 * server signed for it: in the export it sealed to this machine, or in the
+	 * vouch it signed at the switch (see the header). Its upload time is the
+	 * other server's, so a restore's approval states the backup's real age.
+	 *
+	 * @param array $manifests [['relname','sha256','bytes','uploaded_time'], ...]
+	 * @return bool false when a line is malformed or the ledger cannot be written
+	 */
+	public static function record_handed_over($profile, array $manifests) {
+		$entries = static::read($profile);
+		foreach ($manifests as $m) {
+			$relname = self::normalize_relname($m['relname'] ?? '');
+			$sha256 = strtolower(trim((string)($m['sha256'] ?? '')));
+			$when = (string)($m['uploaded_time'] ?? '');
+			if ($relname === '' || !preg_match('/^[0-9a-f]{64}$/', $sha256) || (int)($m['bytes'] ?? -1) < 0
+				|| !preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/', $when)) {
+				return false;
+			}
+			self::put($entries, $relname, $sha256, (int)$m['bytes'], '',
+				array('uploaded_time' => $when, 'source' => self::SOURCE_HANDED_OVER));
+		}
+		self::evict($entries);
 		return static::write($profile, $entries);
+	}
+
+	/**
+	 * Record every artifact a chain manifest names that this ledger holds no
+	 * line for, from the manifest's own name, size and hash. The caller has
+	 * matched the manifest's bytes against this ledger (or, on a copy, against
+	 * its source's vouch) first. A name already recorded is left as it is.
+	 *
+	 * @return int|false how many were recorded, or false when the ledger cannot be written
+	 */
+	public static function record_manifest_artifacts($profile, $chain_id, array $manifest) {
+		$entries = static::read($profile);
+		$added = 0;
+		foreach ((array)($manifest['runs'] ?? array()) as $run) {
+			foreach ((array)($run['artifacts'] ?? array()) as $a) {
+				$name = (string)($a['name'] ?? '');
+				$relname = ($name !== '' && $name === basename($name)) ? self::normalize_relname($chain_id . '/' . $name) : '';
+				$sha256 = strtolower((string)($a['sha256'] ?? ''));
+				if ($relname === '' || !preg_match('/^[0-9a-f]{64}$/', $sha256) || isset($entries[$relname])) {
+					continue;
+				}
+				self::put($entries, $relname, $sha256, (int)($a['bytes'] ?? 0), '', array('source' => self::SOURCE_MANIFEST));
+				$added++;
+			}
+		}
+		if ($added === 0) {
+			return 0;
+		}
+		self::evict($entries);
+		return static::write($profile, $entries) ? $added : false;
 	}
 
 	/** What this machine recorded for one artifact, or null. */

@@ -703,9 +703,13 @@ backup held stated above the list — and, when a run in backup storage carries 
 offloaded-files index, an **Offloaded files** row with **Bring them back**,
 which runs the `restore_objects` loop below in `missing` mode against the
 newest such run without restoring anything else; each row's Restore button
-runs the `restore_chain` job for that run. That job recovers the chain key on the node
-from the node's own `backup_site_key`, so no recovery private key travels in a
-job record. Once it completes, the run's offloaded files follow in `missing`
+runs the `restore_chain` job for that run. Prepare (`stage_chain`) recovers the
+chain key on the node from the node's own `backup_site_key`, so no recovery
+private key travels in a job record. A chain another server made (the server
+this site was on before a switch-over) does not open with this machine's key:
+Prepare stages it without one (`STAGE_KEY=recovery`), and the restore's
+approval opens it with the recovery key the operator pastes to approve, in
+their browser (*Approve it on the node*, below). Once the restore completes, the run's offloaded files follow in `missing`
 mode as the paged `restore_objects` jobs described under *Restoring a managed
 node* below. A chain taken by a machine that no longer exists goes onto a new
 one as a copy from backups (*Handing a chain to a copy*, below), or from a shell
@@ -772,14 +776,24 @@ node that dispatches them can read none of it:
   data key with its own `config/backup_site_key`, and seals the key, the
   manifest's hash (the vouch) and the host's certificate and DKIM keys to the
   copy's agent key, signed with its own. `backup_site_key` itself never leaves.
+  When both agents carry it (`JobCommandBuilder::COPY_HISTORY_MIN_AGENT_VERSION`),
+  the export also lists the site's backup history: the newest manifest of each
+  chain the source's ledger holds, by hash, size and upload time.
 - **`copy_import`, on the copy.** It checks the signature by the source key its
   dormant install recorded, the target, the expiry and that the bundle is newer
   than the last one taken, then writes `chain.key` into `restore_<chain_id>`,
-  the vouch to `/etc/joinery/sites/<site>/vouched`, and the certificates.
+  the vouch to `/etc/joinery/sites/<site>/vouched`, the history to `history`
+  beside it, and the certificates.
 - **`copy_stage`, on the copy.** It downloads the chain from the source's
   backup storage, keeps the manifest only when its hash is vouched for, and
   checks every artifact against it (`CopyStaging`). The ordinary staging,
-  which trusts only this machine's own ledger and key, is not used.
+  which trusts only this machine's own ledger and key, is not used. It also
+  records in the copy's own upload ledger, marked handed over, the vouched
+  manifest, every artifact it names, and the history's manifests (*The upload
+  ledger*, below), so once the copy is the site, its backups from before the
+  switch restore there through the ordinary staging; their key opens with the
+  recovery key at the restore's approval. A copy that cannot write its ledger
+  refuses to stage, by name.
 
 `copy_restore` then runs `restore_chain.sh --adopt-secret-key --skip-ssl` over
 that workspace.
@@ -1127,6 +1141,23 @@ happened to land while somebody was reading the approval screen. What is
 reported back is the version that matched, so the age shown on that screen is
 the age of the bytes being restored.
 
+Two other kinds of line come in, each from a record the machine has already
+checked, and each says how it came in (`source`):
+
+- **Handed over** (`record_handed_over()`). A site copied onto this machine
+  keeps the backups its previous server made. That server lists the newest
+  manifest of each chain from its own ledger, in the export it signs for the
+  copy, and the copy's final manifest in the vouch it signs at the switch
+  (*Handing a chain to a copy*, below). The copy records them with the other
+  server's upload times, so after the switch the site's backups from before it
+  restore here under their own names. A manifest that server did not sign for
+  is still one this machine never heard of.
+- **From a manifest** (`record_manifest_artifacts()`). A manifest fixes the
+  name, size and hash of every artifact its runs made. Once a manifest's bytes
+  match the ledger, staging records the artifacts it names that the ledger
+  holds no line for, before fetching any of them. A name the ledger already
+  holds keeps its hash.
+
 The address is chosen for two properties that are invisible from the code that
 reads it. `config/` is a named volume on a container node, so the ledger survives
 a container rebuild — a ledger under `/var/lib` would not, and since a ledger
@@ -1409,6 +1440,19 @@ node's Backups page shows the pending approval; the operator opens the challenge
 there with their recovery key, in their browser, and answers. The agent verifies
 the answer against what it sealed and only then restores.
 
+A chain staged without a key (another server made it) carries its key box in
+the statement: the recovery recipient's ephemeral public key and the recovery
+key's fingerprint, bound into the challenge with the rest. The statement says
+the backup opens only with the recovery key, and names the server before the
+switch-over as its maker when the ledger line was handed over. The page works
+out, from the same pasted key, the X25519 of that key with the box's ephemeral
+key (`recovery-readiness.js` `openKeyBox`), the one value that opens that box,
+and posts it with the answer; a backup sealed to an earlier recovery key asks
+for that key in a second box, by its fingerprint. The agent finishes opening
+the box as `copy_take_key` does, writes the chain key where Prepare would have,
+and only then restores. A right answer without the value, or a value that does
+not open the box, refuses the restore.
+
 **What a database restore leaves behind, and what it does not roll back.** A
 database restore replaces the database and nothing else, so a dump taken before
 an upgrade lands under files that are still on the newer release: the site's
@@ -1418,6 +1462,14 @@ migrations, which are idempotent — but it means the version a freshly restored
 node reports from its database can trail its files until then. A restore also leaves the
 archive it was given in the backup directory; the local sweep expires it on the
 ordinary `keep_local_days` schedule.
+
+A run records itself as running before it dumps the database, so every dump
+holds the run that took it as running. After the load, `restore_database.sh`
+settles every such row, since none is running on this machine: the run a chain
+restore names (`--restored-run`, which `restore_chain.sh` reads from the
+manifest) is recorded as finished, with its chain, run, size and time, because
+its archive is the one just loaded; it is the newest row running at or before
+that time. Any other running row is marked never finished.
 
 **Bring the offloaded files home.** The archives carry no file the site
 offloaded to its file bucket, so once the chain restore completes the plane

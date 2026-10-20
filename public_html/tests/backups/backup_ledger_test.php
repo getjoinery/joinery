@@ -331,4 +331,72 @@ $r = $w === false ? false : strpos($ledger_src, '@rename($tmp, $path)', $w);
 check($h !== false && $r !== false && $h < $r,
 	'write() hands the file on before it is renamed into place, so no reader ever sees it root-owned');
 
+// ── What a site's previous server uploaded ──────────────────────────────────
+section('A manifest handed over by the site\'s previous server is recorded as it signed it');
+
+$old_manifest = $tmp . '/old-manifest.json';
+file_put_contents($old_manifest, 'the old server\'s manifest');
+$old_sum = hash_file('sha256', $old_manifest);
+check(TestBackupLedger::record_handed_over('site', array(array(
+		'relname' => 'chain-20261001_000000/manifest.json', 'sha256' => $old_sum,
+		'bytes' => filesize($old_manifest), 'uploaded_time' => '2026-10-01 00:05:00'))) === true,
+	'a signed list of the old server\'s manifests is recorded');
+$v = TestBackupLedger::verify('site', 'chain-20261001_000000/manifest.json', $old_manifest);
+check($v['ok'] && ($v['entry']['source'] ?? '') === BackupLedger::SOURCE_HANDED_OVER
+		&& ($v['entry']['uploaded_time'] ?? '') === '2026-10-01 00:05:00',
+	'the old server\'s manifest is recognised, marked handed over, with that server\'s upload time',
+	json_encode($v['entry']));
+check(!TestBackupLedger::verify('site', 'chain-20261001_000000/manifest.json', $imposter)['ok'],
+	'other bytes under that name are still refused');
+check(!TestBackupLedger::verify('site', 'chain-20261008_000000/manifest.json', $old_manifest)['ok'],
+	'and the same bytes under another chain\'s name');
+foreach (array(
+	'a malformed hash'     => array('relname' => 'chain-1/manifest.json', 'sha256' => 'nothex', 'bytes' => 1, 'uploaded_time' => '2026-10-01 00:00:00'),
+	'a traversal'          => array('relname' => '../manifest.json', 'sha256' => $old_sum, 'bytes' => 1, 'uploaded_time' => '2026-10-01 00:00:00'),
+	'an unreadable time'   => array('relname' => 'chain-1/manifest.json', 'sha256' => $old_sum, 'bytes' => 1, 'uploaded_time' => 'yesterday'),
+) as $what => $line) {
+	check(TestBackupLedger::record_handed_over('site', array($line)) === false
+			&& TestBackupLedger::lookup('site', 'chain-1/manifest.json') === null,
+		'a list with ' . $what . ' records nothing');
+}
+// Re-signed at the switch with a newer manifest: the earlier one stays a known version.
+$newer = $tmp . '/old-manifest-newer.json';
+file_put_contents($newer, 'the old server\'s manifest, one run longer');
+TestBackupLedger::record_handed_over('site', array(array('relname' => 'chain-20261001_000000/manifest.json',
+	'sha256' => hash_file('sha256', $newer), 'bytes' => filesize($newer), 'uploaded_time' => '2026-10-02 00:05:00')));
+$v = TestBackupLedger::verify('site', 'chain-20261001_000000/manifest.json', $old_manifest);
+check($v['ok'] && ($v['entry']['source'] ?? '') === BackupLedger::SOURCE_HANDED_OVER,
+	'a newer handed-over manifest keeps the earlier one as a version, still marked handed over');
+
+// ── The artifacts a matched manifest names ──────────────────────────────────
+section('The artifacts a matched manifest names are recorded from it, and nothing is overwritten');
+
+$sha = function ($s) { return hash('sha256', $s); };
+TestBackupLedger::record_hash('site', 'chain-20261001_000000/files-0000.tar.gz.enc', $sha('already here'), 12);
+$manifest = array('chain_id' => 'chain-20261001_000000', 'runs' => array(
+	array('seq' => 0, 'artifacts' => array(
+		'files'    => array('name' => 'files-0000.tar.gz.enc', 'bytes' => 99, 'sha256' => $sha('a different claim')),
+		'database' => array('name' => 'db-0000.sql.gz.enc', 'bytes' => 20, 'sha256' => $sha('db 0')),
+	)),
+	array('seq' => 1, 'artifacts' => array(
+		'files'    => array('name' => 'files-0001.tar.gz.enc', 'bytes' => 7, 'sha256' => $sha('files 1')),
+		'database' => array('name' => 'db-0001.sql.gz.enc', 'bytes' => 21, 'sha256' => $sha('db 1')),
+		'odd'      => array('name' => '../escape.enc', 'bytes' => 1, 'sha256' => $sha('x')),
+		'bad'      => array('name' => 'nohash.enc', 'bytes' => 1, 'sha256' => ''),
+	)),
+));
+check(TestBackupLedger::record_manifest_artifacts('site', 'chain-20261001_000000', $manifest) === 3,
+	'each run\'s artifacts the ledger lacks are recorded (3), and a name it holds is not',
+	var_export(TestBackupLedger::record_manifest_artifacts('site', 'chain-20261001_000000', $manifest), true));
+$db1 = TestBackupLedger::lookup('site', 'chain-20261001_000000/db-0001.sql.gz.enc');
+check(($db1['sha256'] ?? '') === $sha('db 1') && (int)($db1['bytes'] ?? 0) === 21
+		&& ($db1['source'] ?? '') === BackupLedger::SOURCE_MANIFEST,
+	'an earlier run\'s database is recorded with the manifest\'s size and hash, marked from a manifest');
+check((TestBackupLedger::lookup('site', 'chain-20261001_000000/files-0000.tar.gz.enc')['sha256'] ?? '') === $sha('already here'),
+	'a name already recorded keeps its hash: a manifest never rewrites a line');
+check(TestBackupLedger::lookup('site', 'escape.enc') === null && TestBackupLedger::lookup('site', 'chain-20261001_000000/nohash.enc') === null,
+	'a name with a separator, or with no hash, is not recorded');
+check(TestBackupLedger::record_manifest_artifacts('site', 'chain-20261001_000000', $manifest) === 0,
+	'recording the same manifest again records nothing');
+
 harness_finish();

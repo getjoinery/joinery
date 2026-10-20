@@ -19,6 +19,8 @@
  * @version 1.130 - objects_missing goes as two flat parameters the agent declares (objects_missing_space and
  *                 the list objects_missing), only to an agent at BACKUP_RUN_MISSING_MIN_AGENT_VERSION or newer
  *                 (an older one refused the whole run), and a page of it that fits in the job
+ * @version 1.130 - build_copy_export asks for the site's backup history when the source and the copy both carry it
+ *                  (COPY_HISTORY_MIN_AGENT_VERSION), so the site's backups from before a switch restore on the copy (B20)
  * @version 1.129 - a backup run carries objects_missing from the scheduler: the locations its space's listing proved
  *                 absent, for the node to store again (FleetBackupRetention::check_shelf())
  * @version 1.128 - build_recreate_site: a host replaces one site's container on a fresh image of its current base
@@ -535,6 +537,14 @@ class JobCommandBuilder {
 	const FORWARD_MIN_AGENT_VERSION = '1.84.0';
 	/** The first agent that knows copy_probes. */
 	const COPY_PROBES_MIN_AGENT_VERSION = '1.84.2';
+
+	/**
+	 * The first agent whose copy_export hands over the site's backup history
+	 * and whose copy_import takes it (B20). Asked for only when the source and
+	 * the copy are both at it: an older source refuses the parameter, and an
+	 * older copy refuses a bundle carrying anything it does not know.
+	 */
+	const COPY_HISTORY_MIN_AGENT_VERSION = '1.85.0';
 
 	/**
 	 * IPv4 ranges that pass PHP's private and reserved filters and are still
@@ -2816,7 +2826,24 @@ class JobCommandBuilder {
 				"Node '{$node->get('mgn_slug')}' cannot hand its site to a copy. "
 				. AgentVocabulary::needs_newer_agent_text($node, ['copy_export']));
 		}
-		return self::build_copy_export_primitive($node, $copy, $params);
+		$built = self::build_copy_export_primitive($node, $copy, $params);
+		// The site's backup history goes with it, so its backups from before a
+		// switch restore on the copy, when both agents read it.
+		if (self::copy_takes_history($node, $copy)) {
+			$built['params']['history'] = true;
+		}
+		return $built;
+	}
+
+	/** Whether a source and its copy both hand over and take the site's backup history. */
+	public static function copy_takes_history($source, $copy): bool {
+		foreach (array($source, $copy) as $n) {
+			$v = $n ? (string)AgentVocabulary::version($n) : '';
+			if ($v === '' || version_compare($v, self::COPY_HISTORY_MIN_AGENT_VERSION, '<')) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	public static function build_copy_export_primitive($node, $copy = null, $params = []) {

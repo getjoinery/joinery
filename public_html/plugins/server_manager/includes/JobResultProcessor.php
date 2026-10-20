@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.95 - a data root's recipient_set_by (host_report 1.35) is kept
  * @version 1.94 - a container inventory's security (container_inventory 1.3); the host report's sites (host_report 1.32), and its sites' filter and capabilities
  *                (host_report 1.33, site_security) are kept; a proven recovery key's public half, when a report carries it and it matches the fingerprint, is
  *                kept on the node (mgn_backup_recovery_public_key): a copy into its owner's account is born sealed to it
@@ -4575,6 +4576,8 @@ HTML;
 			'holder'                => preg_match('#^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$#', $holder) ? rtrim($holder, '/') : '',
 			'slot'                  => is_int($v['slot'] ?? null) && $v['slot'] >= 0 && $v['slot'] < 32 ? $v['slot'] : null,
 			'recipient_fingerprint' => preg_match('/^[0-9a-f]{64}$/', (string)($v['recipient_fingerprint'] ?? '')) ? $v['recipient_fingerprint'] : '',
+			// Who named that key (host_report 1.35): '' from an older report.
+			'recipient_set_by'      => in_array($v['recipient_set_by'] ?? '', ['site', 'operator', 'install'], true) ? $v['recipient_set_by'] : '',
 			'box_fingerprint'       => preg_match('/^[0-9a-f]{64}$/', (string)($v['box_fingerprint'] ?? '')) ? $v['box_fingerprint'] : '',
 			'box_sealed'            => $b64($v['box_sealed'] ?? '', 400),
 			// An encryption or its undo running (D5), and how far.

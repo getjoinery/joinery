@@ -24,8 +24,10 @@
  *     key is recovered here, from this machine's own config/backup_site_key,
  *     against the envelope inside the manifest. A key on the wire is a key in
  *     every stored job record. A chain that does not open with this machine's
- *     own key belongs to a different machine, and that is a refusal, not a
- *     prompt for a better key.
+ *     own key was made by another server, such as the one this site moved
+ *     from: it is staged without a key (STAGE_KEY=recovery), and the
+ *     restore's approval opens it with the site's recovery key, in the
+ *     browser of whoever approves (BackupStaging::stage_key).
  *   - It will not accept a bucket credential. Signed URLs, one object each,
  *     expiring — see BackupFetch.
  *   - It will not stage an artifact this machine has no record of uploading.
@@ -47,6 +49,7 @@
  * Exits 0 on success, 1 on a transfer, envelope or integrity failure, 2 on a
  * malformed request.
  *
+ * @version 1.2 - a chain this machine's key does not open is staged for the recovery key (STAGE_KEY), not refused
  * @version 1.1 - the fetch, ledger check, envelope open and key file live in BackupStaging,
  *                shared with utils/verify_backup.php so a verify can never fetch something a
  *                Prepare would refuse; the stdout/stderr/exit contract is unchanged
@@ -105,7 +108,7 @@ try {
 	// the order a restore applies them. Every decision is BackupStaging's.
 	$manifest = BackupStaging::fetch_manifest($profile, $work, $chain_id, $manifest_url);
 	$plan     = BackupStaging::plan($manifest, $seq);
-	BackupStaging::write_chain_key($manifest, $work);
+	$key      = BackupStaging::stage_key($manifest, $work);
 
 	$staged = BackupStaging::fetch_artifacts($profile, $work, $chain_id, BackupStaging::wanted($plan),
 		$artifact_urls, $plan['seq'], function ($what, $name) {
@@ -119,8 +122,13 @@ $fetched = $staged['fetched'];
 $bytes   = $staged['bytes'];
 
 echo 'Staged ' . $fetched . ' artifact' . ($fetched === 1 ? '' : 's') . ' of ' . $chain_id
-	. ' (' . BackupFetch::human($bytes) . ') in ' . $work . ', with the chain key recovered from this machine\'s own key.' . "\n";
+	. ' (' . BackupFetch::human($bytes) . ') in ' . $work
+	. ($key === BackupStaging::KEY_SITE
+		? ', with the chain key recovered from this machine\'s own key.'
+		: '. Another server made this chain, so its key opens with the site\'s recovery key, when the restore is approved.')
+	. "\n";
 echo "STAGE_RESULT=ok\n";
+echo 'STAGE_KEY=' . $key . "\n";
 echo 'STAGE_CHAIN=' . $chain_id . "\n";
 echo 'STAGE_SEQ=' . (int)$plan['seq'] . "\n";
 echo 'STAGE_ARTIFACTS=' . $fetched . "\n";

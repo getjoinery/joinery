@@ -113,6 +113,39 @@ try {
 	console.log('PASS: a different recovery key does not open it.');
 }
 
+// A backup another server made (B20): the same pasted key works out the value
+// that opens its key box, which the agent finishes opening. The fixture's
+// value was checked to open the box in Go; the shipped code must produce it,
+// and the key's public half, and refuse a key the box is not sealed to.
+if (fixture.boxEphemeral) {
+	const openKeyBox = api && api.openKeyBox;
+	if (typeof openKeyBox !== 'function') {
+		console.error('FAIL: recovery-readiness.js exposes no openKeyBox, so a restore of a backup another server '
+			+ 'made could never be approved.');
+		process.exit(1);
+	}
+	try {
+		const r = await openKeyBox(fixture.privateKey, fixture.boxEphemeral, fixture.boxFingerprint);
+		if (r.shared !== fixture.boxShared || r.pub !== fixture.publicKey) {
+			console.error('FAIL: the browser worked out a different value for the backup key box.');
+			console.error('  expected: ' + fixture.boxShared + ' / ' + fixture.publicKey);
+			console.error('  got     : ' + r.shared + ' / ' + r.pub);
+			process.exit(1);
+		}
+		console.log('PASS: the shipped browser code works out the value that opens a backup\'s key box.');
+	} catch (err) {
+		console.error('FAIL: the browser code could not work out the key box value: ' + (err && err.message));
+		process.exit(1);
+	}
+	try {
+		await openKeyBox(Buffer.alloc(32, 7).toString('base64'), fixture.boxEphemeral, fixture.boxFingerprint);
+		console.error('FAIL: a key the backup is not sealed to was used for its key box.');
+		process.exit(1);
+	} catch (err) {
+		console.log('PASS: a key the backup is not sealed to is refused by its fingerprint.');
+	}
+}
+
 // And the wrong HKDF context must not either — that separation is what stops an
 // approval challenge and a possession challenge being answers to each other.
 try {

@@ -76,11 +76,11 @@ function ac_clear_all() {
 harness_defer('ac_clear_all');
 ac_clear_all();
 
-/** Stage a challenge the way the agent does, expiring $seconds from now. */
-function ac_stage($scope, $job_id, $seconds) {
+/** Stage a challenge the way the agent does, expiring $seconds from now; $extra joins the request. */
+function ac_stage($scope, $job_id, $seconds, array $extra = array()) {
 	$s = ApprovalChallenge::scope($scope);
 	$now = time();
-	ac_put($s['request_setting'], (string)json_encode(array(
+	ac_put($s['request_setting'], (string)json_encode($extra + array(
 		'job_id'           => $job_id,
 		'primitive'        => $scope === ApprovalChallenge::RESTORE ? 'restore_database' : 'decommission_site',
 		'summary'          => 'This will erase the database joinerytest on this machine and load an old copy.',
@@ -96,6 +96,13 @@ function ac_stage($scope, $job_id, $seconds) {
 		'expires_time'     => gmdate('Y-m-d H:i:s', $now + $seconds),
 	)));
 	ac_put($s['answer_setting'], '');
+}
+
+/** A handoff row as it is now, read past the settings cache. */
+function ac_read($name) {
+	$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+	$q->execute(array($name));
+	return (string)$q->fetchColumn();
 }
 
 /** Whether $fn throws ApprovalChallengeException. */
@@ -312,5 +319,48 @@ foreach (ApprovalChallenge::SCOPES as $name => $s) {
 	ob_end_clean();
 	check($rendered === false, "and renders nothing when none is waiting");
 }
+
+section('A restore of a backup another server made opens its key with the same approval');
+
+$recovery_pub = random_bytes(32);
+$box = array('ephemeral_public' => base64_encode(random_bytes(32)), 'recovery_fingerprint' => hash('sha256', $recovery_pub));
+ac_stage(ApprovalChallenge::RESTORE, 7000, 900, array('public_key' => base64_encode($recovery_pub), 'key_box' => $box));
+$p = ApprovalChallenge::pending(ApprovalChallenge::RESTORE);
+check(($p['key_box'] ?? null) === $box, 'the box the agent staged is shown as it was staged');
+check(ac_refused(function () { ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7000, 'restore abc'); }),
+	'an answer that does not carry what opens the box is refused, so the agent is never handed half');
+check(ac_refused(function () { ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7000, 'restore abc', 'short', base64_encode(random_bytes(32))); }),
+	'nor one whose value is not 32 bytes');
+ob_start();
+ApprovalChallengePanel::render($page, ApprovalChallenge::RESTORE);
+$html = ob_get_clean();
+check(strpos($html, 'name="approval_shared"') !== false && strpos($html, 'name="approval_public_key"') !== false
+		&& strpos($html, '"ephemeralPublic":"' . $box['ephemeral_public'] . '"') !== false
+		&& strpos($html, '"fingerprint":"' . $box['recovery_fingerprint'] . '"') !== false,
+	'the panel carries the box to the browser and has fields for what the browser works out');
+check(strpos($html, 'ra-boxkey') === false && strpos($html, 'Another server made this backup') !== false,
+	'sealed to the current recovery key: the one pasted key does both, and the page says so');
+$shared = base64_encode(random_bytes(32));
+ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7000, 'restore abc', $shared, base64_encode($recovery_pub));
+$a = json_decode(ac_read('restore_approval_answer'), true);
+check(($a['shared'] ?? '') === $shared && ($a['public_key'] ?? '') === base64_encode($recovery_pub) && ($a['answer'] ?? '') === 'restore abc',
+	'the answer carries the box\'s value beside the recovered sentence', json_encode($a));
+
+// Sealed to an earlier recovery key: a second box asks for that one.
+ac_stage(ApprovalChallenge::RESTORE, 7001, 900, array('public_key' => base64_encode(random_bytes(32)), 'key_box' => $box));
+ob_start();
+ApprovalChallengePanel::render($page, ApprovalChallenge::RESTORE);
+$html = ob_get_clean();
+check(strpos($html, 'id="ra-boxkey"') !== false && strpos($html, '"keyInputId":"ra-boxkey"') !== false
+		&& strpos($html, substr($box['recovery_fingerprint'], 0, 16)) !== false,
+	'a backup sealed to an earlier recovery key asks for that key too, by its fingerprint');
+
+// A request with no box, or a malformed one, carries none.
+ac_stage(ApprovalChallenge::RESTORE, 7002, 900, array('key_box' => array('ephemeral_public' => 'x', 'recovery_fingerprint' => 'y')));
+check(ApprovalChallenge::pending(ApprovalChallenge::RESTORE)['key_box'] === null, 'a malformed box is no box');
+ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7002, 'restore abc', 'ignored', 'ignored');
+$a = json_decode(ac_read('restore_approval_answer'), true);
+check(!isset($a['shared']) && !isset($a['public_key']), 'and an answer to a request with no box carries nothing for one');
+ac_clear_all();
 
 harness_finish();

@@ -24,6 +24,14 @@
  * the unwrap against the user's own wrapping rows, report pass/fail. Nothing
  * is consumed and nothing secret is transmitted.
  *
+ * Backup key box: a restore of a backup another server made carries the box
+ * its key is sealed in to the recovery key. The approval works out, from the
+ * same pasted key (or the earlier key the backup was sealed to, pasted in a
+ * box of its own), the X25519 of that key with the box's ephemeral key: the
+ * one value that opens that box, which the agent finishes opening. That value
+ * and the key's public half go into the form; the key does not.
+ *
+ * @version 1.4.0 - the approval opens a backup's key box with the pasted key (openKeyBox)
  * @version 1.3.1 - a comment names ApprovalChallengePanel, the one approval screen for every scope
  * @version 1.3.0 - the save call carries the generator config's rotate flag, so the
  *                  rotation screen replaces a proven key through the same ceremony
@@ -179,12 +187,55 @@ window.recoveryReadiness = (function () {
 		return new TextDecoder().decode(plain);
 	}
 
+	/**
+	 * Work out what opens a sealed box with a pasted recovery key: the X25519
+	 * of the key with the box's ephemeral public key, and the key's public
+	 * half, after checking that half is the one the box is sealed to.
+	 * @returns {Promise<{shared: string, pub: string}>} both base64
+	 */
+	async function openKeyBox(privateKeyB64, ephemeralB64, fingerprint) {
+		if (!subtle) {
+			throw new Error('This browser has no WebCrypto — use a current Chrome, Firefox or Safari.');
+		}
+		var priv;
+		try { priv = b64decode(privateKeyB64); } catch (e) { throw new Error('That is not a recovery key — it should be one line of base64.'); }
+		if (priv.length !== 32) {
+			throw new Error('That is not a recovery key: expected 32 bytes, got ' + priv.length + '.');
+		}
+		var pkcs8 = concat(PKCS8_PREFIX, priv);
+		zero(priv);
+		var key;
+		try {
+			// Extractable only so its public half can be read back below.
+			key = await subtle.importKey('pkcs8', pkcs8, { name: 'X25519' }, true, ['deriveBits']);
+		} catch (e) {
+			throw new Error('This browser cannot do X25519 in JavaScript.');
+		} finally {
+			zero(pkcs8);
+		}
+		var jwk = await subtle.exportKey('jwk', key);
+		var pub = b64decode(jwk.x.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - jwk.x.length % 4) % 4));
+		jwk.d = '';
+		var fp = Array.prototype.map.call(new Uint8Array(await subtle.digest('SHA-256', pub)), function (b) {
+			return ('0' + b.toString(16)).slice(-2);
+		}).join('');
+		if (fp !== fingerprint) {
+			throw new Error('That recovery key has fingerprint ' + fp.slice(0, 16) + ', and this backup is sealed to ' +
+				fingerprint.slice(0, 16) + '. Check you copied the right entry.');
+		}
+		var eph = await subtle.importKey('raw', b64decode(ephemeralB64), { name: 'X25519' }, false, []);
+		var shared = await subtle.deriveBits({ name: 'X25519', public: eph }, key, 256);
+		return { shared: b64encode(new Uint8Array(shared)), pub: b64encode(pub) };
+	}
+
 	function attachCeremony(c) {
 		var keyInput = document.getElementById(c.keyInputId);
 		var button = document.getElementById(c.buttonId);
 		var status = document.getElementById(c.statusId);
 		var proofInput = document.getElementById(c.proofId);
 		if (!keyInput || !button || !status || !proofInput) return;
+		var box = c.keyBox || null;
+		var boxInput = box && box.keyInputId ? document.getElementById(box.keyInputId) : null;
 
 		function say(message, ok) {
 			status.textContent = message;
@@ -195,9 +246,21 @@ window.recoveryReadiness = (function () {
 			var pasted = keyInput.value.trim();
 			if (!pasted) { say('Paste your recovery key first.', false); return; }
 
+			var boxKey = boxInput ? boxInput.value.trim() : pasted;
+			if (box && !boxKey) { say('Paste the recovery key this backup was sealed to as well.', false); return; }
+
 			button.disabled = true;
 			say('Checking in this browser…', true);
-			openChallenge(c.challenge, pasted, c.publicKey, c.infoPrefix).then(function (proof) {
+			// The backup's key box first, when there is one: its value goes into
+			// the form beside the answer, and the answer submits the form.
+			var opened = box ? openKeyBox(boxKey, box.ephemeralPublic, box.fingerprint).then(function (r) {
+				document.getElementById(box.sharedId).value = r.shared;
+				document.getElementById(box.publicId).value = r.pub;
+				if (boxInput) { boxInput.value = ''; }
+			}) : Promise.resolve();
+			opened.then(function () {
+				return openChallenge(c.challenge, pasted, c.publicKey, c.infoPrefix);
+			}).then(function (proof) {
 				keyInput.value = ''; // the key is done with — do not keep it around
 				proofInput.value = proof;
 				say('Your key opened the challenge — recording…', true);
@@ -468,6 +531,7 @@ window.recoveryReadiness = (function () {
 
 	return {
 		openChallenge: openChallenge,
+		openKeyBox: openKeyBox,
 		generateKeypair: generateKeypair,
 		attachCeremony: attachCeremony,
 		attachGenerator: attachGenerator,

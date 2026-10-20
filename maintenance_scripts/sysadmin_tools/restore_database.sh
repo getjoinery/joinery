@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#Version 3.15 - After the load, the backup runs the dump holds as running are settled: none is running on this
+#              machine. The run a chain restore names (--restored-run) is recorded as finished, since its
+#              archive is what was loaded; any other is marked never finished. A restored site listed the
+#              backup that made it as in progress for ever (B19)
 #Version 3.14 - After the load, the key canary says whether the database's sealed values open with this
 #               site's secret_box_key; a dump from a site with another key is said loudly
 #               (RESTORE_SECRET_KEY_MISMATCH), with the remedy, since every secret setting is sealed
@@ -102,8 +106,9 @@ while [[ $# -gt 0 ]]; do
         --key-file=*)         KEY_FILE="${1#*=}"; shift ;;
         --db-user)            DB_USER="$2"; shift 2 ;;
         --db-user=*)          DB_USER="${1#*=}"; shift ;;
+        --restored-run)       RESTORED_RUN="$2"; shift 2 ;;
         --help|-h)
-            info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
+            info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER] [--restored-run CHAIN:SEQ:LEVEL:BYTES:UNIXTIME]"
             info ""
             info "Supported formats: .sql  .sql.gz  .sql.gz.enc"
             info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR RESTORE_SERVER_TOO_OLD RESTORE_ROLE_MISSING"
@@ -571,6 +576,59 @@ else
     fi
 fi
 
+# A backup run records itself as running before it dumps the database, so
+# every dump holds the run that took it as running, and any run that was
+# stopped before it recorded an end. None of them is running on this machine,
+# and nothing here would ever finish them: the site listed the backup that made
+# it as in progress for ever. The run a chain restore names (--restored-run,
+# from its manifest: chain, run, level, bytes, when it was recorded) took the
+# dump: its archive is the one just loaded, so it is recorded as finished,
+# taken on the server that made it. It is the newest row running at or before
+# that time: the dump holds no row newer than its own run, and one machine runs
+# one backup at a time. Every other running row is marked never finished.
+RESTORED_RUN="${RESTORED_RUN:-}"
+settle_running_backups() {
+    local has rc rs rl rb rt kind message settled others
+    has="$(psql -U "$DB_USER" -d "$DB_NAME" -XtAc "SELECT to_regclass('public.bkh_backup_history') IS NOT NULL" 2>/dev/null || true)"
+    [ "$has" = "t" ] || return 0
+    settled=0
+    if [ -n "$RESTORED_RUN" ]; then
+        IFS=: read -r rc rs rl rb rt <<< "$RESTORED_RUN"
+        if [[ "$rc" =~ ^chain-[0-9_]+$ && "$rs" =~ ^[0-9]+$ && "$rl" =~ ^[0-9]+$ && "$rb" =~ ^[0-9]+$ && "$rt" =~ ^[0-9]+$ ]]; then
+            kind="Incremental"; [ "$rl" = "0" ] && kind="Full"
+            message="${kind} run ${rs} of ${rc}, taken while the server that made it ran it. This database was restored from it, so it finished there"
+            settled="$(psql -U "$DB_USER" -d "$DB_NAME" -XtA -v ON_ERROR_STOP=1 -v c="$rc" -v s="$rs" -v b="$rb" -v t="$rt" -v m="$message" <<'SQL' 2>/dev/null || true
+WITH run AS (
+    SELECT bkh_backup_history_id FROM bkh_backup_history
+    WHERE bkh_outcome = 'running' AND bkh_start_time <= (to_timestamp(:'t'::bigint) AT TIME ZONE 'UTC')
+    ORDER BY bkh_start_time DESC LIMIT 1
+), done AS (
+    UPDATE bkh_backup_history SET bkh_outcome = 'success', bkh_chain_id = :'c', bkh_chain_seq = :'s'::int,
+        bkh_bytes = :'b'::bigint, bkh_finish_time = (to_timestamp(:'t'::bigint) AT TIME ZONE 'UTC'),
+        bkh_upload_time = (to_timestamp(:'t'::bigint) AT TIME ZONE 'UTC'), bkh_message = :'m'
+    WHERE bkh_backup_history_id IN (SELECT bkh_backup_history_id FROM run)
+    RETURNING 1
+)
+SELECT count(*) FROM done;
+SQL
+)"
+        fi
+    fi
+    others="$(psql -U "$DB_USER" -d "$DB_NAME" -XtA -v ON_ERROR_STOP=1 <<'SQL' 2>/dev/null || true
+WITH done AS (
+    UPDATE bkh_backup_history SET bkh_outcome = 'failed', bkh_finish_time = (now() AT TIME ZONE 'UTC'),
+        bkh_message = 'Never finished: it was running when the backup this database was restored from was taken, and it did not run on this machine'
+    WHERE bkh_outcome = 'running'
+    RETURNING 1
+)
+SELECT count(*) FROM done;
+SQL
+)"
+    [ "${settled:-0}" -gt 0 ] 2>/dev/null && info "🧾 Recorded the backup this database came from (${RESTORED_RUN%%:*}) as finished."
+    [ "${others:-0}" -gt 0 ] 2>/dev/null && info "🧾 Marked ${others} other backup run(s) the dump held as running as never finished."
+    return 0
+}
+
 # Every secret setting, and every other sealed value, is sealed with the
 # secret_box_key of the site it was written on, and a database dump does not
 # carry it (config/Globalvars_site.php does). Loaded on a site with another
@@ -599,6 +657,7 @@ check_secret_key() {
 info "📥 Loading dump under ON_ERROR_STOP..."
 if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     keep_recovery_key
+    settle_running_backups
     # A dump carries no planner statistics: until ANALYZE, every table reads as
     # never analyzed and the site plans its queries blind (the nightly Database
     # maintenance task would catch it, up to a day later). The restore has

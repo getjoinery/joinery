@@ -22,6 +22,8 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.2 - a restore of a backup another server made opens that backup's key with the pasted key too, and
+ *                asks for the earlier recovery key when the backup was sealed to one (B20)
  * @version 1.1 - an answered request shows that it was answered, not the form again: the page
  *                reloaded before the agent took the answer, and the owner approved a second time
  * @version 1.0 - one panel for every scope; restore and decommission were two copies
@@ -102,6 +104,27 @@ class ApprovalChallengePanel {
 		   . htmlspecialchars($s['key_label']) . '</strong></label>';
 		echo '<p class="text-muted small mb-1">' . htmlspecialchars($s['key_help']) . '</p>';
 		echo '<input type="password" id="' . $id . '-privkey" class="form-control" autocomplete="off" spellcheck="false">';
+
+		// A backup another server made opens only with the recovery key. The
+		// pasted key opens it too, in this browser; one sealed before the key
+		// was changed needs the earlier key, in a box of its own.
+		$box = $pending['key_box'] ?? null;
+		$box_input = null;
+		if ($box !== null) {
+			$current = hash('sha256', (string)base64_decode((string)$pending['public_key'], true));
+			if (!hash_equals($current, $box['recovery_fingerprint'])) {
+				$box_input = $id . '-boxkey';
+				echo '<label for="' . $box_input . '" class="form-label mt-3"><strong>Paste the recovery key this backup '
+				   . 'was sealed to</strong></label>';
+				echo '<p class="text-muted small mb-1">This backup was made before your recovery key was changed, so it opens '
+				   . 'only with the earlier key, fingerprint <code>' . htmlspecialchars(substr($box['recovery_fingerprint'], 0, 16))
+				   . '</code>. It is used in your browser and never sent anywhere.</p>';
+				echo '<input type="password" id="' . $box_input . '" class="form-control" autocomplete="off" spellcheck="false">';
+			} else {
+				echo '<p class="text-muted small mt-1 mb-0">Another server made this backup, so its key opens only with your '
+				   . 'recovery key. Approving opens it too, in your browser.</p>';
+			}
+		}
 		echo '<button type="button" id="' . $id . '-open" class="btn btn-danger btn-sm mt-2">'
 		   . htmlspecialchars($s['approve_button']) . '</button>';
 		echo '<div id="' . $id . '-status" class="small mt-2"></div>';
@@ -111,6 +134,10 @@ class ApprovalChallengePanel {
 		$fw->hiddeninput('action', '', array('value' => $s['approve_action']));
 		$fw->hiddeninput('approval_job_id', '', array('value' => (string)$pending['job_id']));
 		$fw->hiddeninput('approval_answer', '', array('value' => '', 'id' => $id . '-answer'));
+		if ($box !== null) {
+			$fw->hiddeninput('approval_shared', '', array('value' => '', 'id' => $id . '-shared'));
+			$fw->hiddeninput('approval_public_key', '', array('value' => '', 'id' => $id . '-boxpub'));
+		}
 		$fw->end_form();
 
 		// Declining is a first-class answer, not a matter of walking away. The
@@ -140,6 +167,13 @@ class ApprovalChallengePanel {
 			'challenge'  => $pending['challenge'],
 			'publicKey'  => $pending['public_key'],
 			'infoPrefix' => $pending['info'],
+			'keyBox'     => $box === null ? null : array(
+				'ephemeralPublic' => $box['ephemeral_public'],
+				'fingerprint'     => $box['recovery_fingerprint'],
+				'keyInputId'      => $box_input,
+				'sharedId'        => $id . '-shared',
+				'publicId'        => $id . '-boxpub',
+			),
 		), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
 
 		return true;

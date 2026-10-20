@@ -3,6 +3,9 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.12 - forward: the copy's whole certificate chain is checked (SSLProxyVerifyDepth 10); Apache's depth
+#               of 1 refused every forwarded request with a 500 (B17). Clearing removes a copy's backup history
+#               with its vouched record (B20)
 # Version: 1.11 - site_state_wait_mail: a session smtpd was serving when the deferral was reloaded is waited
 #               for, then ended, and mail Postfix already accepted leaves its queue first: a reload changes
 #               no open session, so a message could arrive on a frozen source after its final backup (B4)
@@ -325,7 +328,9 @@ EOF
         # request over http is sent to https first, as the site's own vhost
         # would: a proxied path is never rewritten, and a visitor's secure
         # cookies go only over https. retry=0, so the first request after the
-        # copy has its certificate is proxied, not refused for a minute.
+        # copy has its certificate is proxied, not refused for a minute. The
+        # chain is checked to its root: a site's chain is several certificates
+        # long, and Apache's own depth (1) refuses every one of them.
         local addr="$3" url
         url="${addr}"
         [[ "${addr}" == *:* ]] && url="[${addr}]"
@@ -335,6 +340,7 @@ SSLProxyVerify require
 SSLProxyCheckPeerName on
 SSLProxyCheckPeerExpire on
 SSLProxyCACertificateFile /etc/ssl/certs/ca-certificates.crt
+SSLProxyVerifyDepth 10
 <Location "/">
     ProxyPreserveHost On
     ProxyPass "https://${url}/" retry=0
@@ -646,7 +652,7 @@ site_state_clear() {
     if [[ "${rc}" == "0" ]]; then
         rm -rf "${SS_HELD:?}"
         rm -f "${SS_LOOK_FILE}" "${SS_FORWARD_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/copy_of_key" "${SS_DIR}/vouched" \
-              "${SS_DIR}/copy_import_issued"
+              "${SS_DIR}/copy_import_issued" "${SS_DIR}/history"
         rmdir "${SS_DIR}" 2>/dev/null
     fi
     return "${rc}"

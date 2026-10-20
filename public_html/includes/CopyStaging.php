@@ -18,10 +18,18 @@
  *     ceiling, then checked against the manifest's size and hash. An artifact
  *     already in the workspace that matches is kept.
  *   - No key is written. copy_import wrote chain.key from the export.
+ *   - What the source signed for is recorded in this machine's own upload
+ *     ledger, marked as handed over (BackupLedger::record_handed_over): the
+ *     vouched manifest and every artifact it names, and the newest manifest
+ *     of each of the source's other chains, which its export lists from its
+ *     own ledger (--history). After the switch the site's backups from before
+ *     it restore here under their own names, through the ordinary staging.
  *
  * Failures are BackupStagingException, with the exit status as the code, as
  * BackupStaging's are. utils/copy_stage.php is the script around it.
  *
+ * @version 1.1 - records the vouched manifest, its artifacts and the source's other chains in this
+ *                machine's upload ledger, so they restore after the switch (B20)
  * @version 1.0
  */
 
@@ -38,24 +46,38 @@ class CopyStaging {
 	/** Where a manifest lands before its hash is checked. */
 	const INCOMING_SUFFIX = '.incoming';
 
+	/** The most of the source's other chains one request may list: its export's bound. */
+	const MAX_HISTORY = 1000;
+
+	/** The ledger recorded into: BackupLedger, or a test's subclass pointed somewhere disposable. */
+	public static $ledger = BackupLedger::class;
+
 	/**
 	 * Understand a request: the agent's arguments and the management node's
 	 * configuration.
 	 *
-	 * @param array $args   argv after the script name: --workspace PATH, --vouched SHA (repeated)
+	 * @param array $args   argv after the script name: --workspace PATH, --vouched SHA (repeated),
+	 *                      --profile site|manager (whose backups the source's chains are among; manager when
+	 *                      absent, as a copy's chain always is), --history CHAIN,SHA,BYTES,UNIXTIME (repeated:
+	 *                      the newest manifest of each of the source's chains, as its signed export listed them)
 	 * @param mixed $config the decoded JSON from stdin
-	 * @return array ['work','vouched','chain_id','manifest_url','artifact_urls','seq']
+	 * @return array ['work','vouched','profile','history','chain_id','manifest_url','artifact_urls','seq']
 	 * @throws BackupStagingException code MALFORMED
 	 */
 	public static function parse_request(array $args, $config) {
 		$work = '';
 		$vouched = array();
+		$profile = BackupProfile::MANAGER;
+		$history = array();
 		$args = array_values($args);
 		for ($i = 0; $i < count($args); $i++) {
 			$a = (string)$args[$i];
-			if (($a === '--workspace' || $a === '--vouched') && isset($args[$i + 1])) {
+			if (in_array($a, array('--workspace', '--vouched', '--profile', '--history'), true) && isset($args[$i + 1])) {
 				$v = (string)$args[++$i];
-				if ($a === '--workspace') { $work = $v; } else { $vouched[] = $v; }
+				if ($a === '--workspace') { $work = $v; }
+				elseif ($a === '--vouched') { $vouched[] = $v; }
+				elseif ($a === '--profile') { $profile = $v; }
+				else { $history[] = self::history_line($v); }
 				continue;
 			}
 			throw new BackupStagingException('unrecognised argument: ' . $a, BackupStagingException::MALFORMED);
@@ -64,6 +86,13 @@ class CopyStaging {
 			if (!preg_match('/^[0-9a-f]{64}$/', $v)) {
 				throw new BackupStagingException('a vouched manifest hash is not a hash', BackupStagingException::MALFORMED);
 			}
+		}
+		if (!in_array($profile, array(BackupProfile::SITE, BackupProfile::MANAGER), true)) {
+			throw new BackupStagingException('a profile is site or manager', BackupStagingException::MALFORMED);
+		}
+		if (count($history) > self::MAX_HISTORY) {
+			throw new BackupStagingException('the source\'s history lists more than ' . self::MAX_HISTORY . ' chains',
+				BackupStagingException::MALFORMED);
 		}
 		if (!$vouched) {
 			throw new BackupStagingException('the source vouched for no run, so nothing is downloaded',
@@ -97,6 +126,8 @@ class CopyStaging {
 		return array(
 			'work'          => rtrim($work, '/'),
 			'vouched'       => $vouched,
+			'profile'       => $profile,
+			'history'       => $history,
 			'chain_id'      => $chain_id,
 			'manifest_url'  => (string)$config['manifest_url'],
 			'artifact_urls' => BackupStaging::link_map($config['artifact_urls'] ?? null, 'artifact_urls',
@@ -137,6 +168,7 @@ class CopyStaging {
 
 		$manifest = BackupStaging::read_manifest($work, $req['chain_id']);
 		$plan     = BackupStaging::plan($manifest, $req['seq']);
+		self::record_in_ledger($req, $work . '/' . BackupChain::MANIFEST_NAME, $manifest);
 
 		$fetched = 0;
 		$bytes   = 0;
@@ -183,6 +215,53 @@ class CopyStaging {
 			$bytes += (int)filesize($local);
 		}
 		return array('seq' => (int)$plan['seq'], 'fetched' => $fetched, 'bytes' => $bytes);
+	}
+
+	/**
+	 * Record what the source signed for in this machine's own upload ledger:
+	 * the source's other chains (their newest manifests, as its export listed
+	 * them), this chain's vouched manifest, and every artifact that manifest
+	 * names. Each is a line the source's own ledger holds, or one a manifest it
+	 * signed for fixes, so nothing here takes the management node's word. A
+	 * copy whose ledger cannot be written is refused by name: it would switch
+	 * over unable to restore anything from before the switch.
+	 *
+	 * @param string $manifest_path the vouched manifest, kept in the workspace
+	 * @throws BackupStagingException
+	 */
+	public static function record_in_ledger(array $req, $manifest_path, array $manifest) {
+		$lines = array();
+		foreach ($req['history'] as $h) {
+			$lines[] = array('relname' => $h['chain_id'] . '/' . BackupChain::MANIFEST_NAME, 'sha256' => $h['sha256'],
+				'bytes' => $h['bytes'], 'uploaded_time' => gmdate('Y-m-d H:i:s', $h['uploaded']));
+		}
+		// The vouched manifest last, so it is the current version of its name.
+		// Its upload time is when the chain last grew, as the manifest says.
+		$grew = strtotime((string)($manifest['updated'] ?? $manifest['created'] ?? '')) ?: time();
+		$lines[] = array('relname' => $req['chain_id'] . '/' . BackupChain::MANIFEST_NAME,
+			'sha256' => (string)hash_file('sha256', $manifest_path), 'bytes' => (int)filesize($manifest_path),
+			'uploaded_time' => gmdate('Y-m-d H:i:s', $grew));
+		$ledger = self::$ledger;
+		if (!$ledger::record_handed_over($req['profile'], $lines)
+			|| $ledger::record_manifest_artifacts($req['profile'], $req['chain_id'], $manifest) === false) {
+			throw new BackupStagingException('could not record the source\'s backups in this machine\'s upload ledger ('
+				. $ledger::dir() . '). Without them the site\'s backups from before the switch would not restore here');
+		}
+	}
+
+	/**
+	 * One --history value: CHAIN,SHA256,BYTES,UNIXTIME.
+	 *
+	 * @return array ['chain_id','sha256','bytes','uploaded']
+	 * @throws BackupStagingException code MALFORMED
+	 */
+	private static function history_line($v) {
+		$p = explode(',', $v);
+		if (count($p) !== 4 || !preg_match(BackupStaging::CHAIN_ID_PATTERN, $p[0]) || !preg_match('/^[0-9a-f]{64}$/', $p[1])
+			|| !ctype_digit($p[2]) || !ctype_digit($p[3])) {
+			throw new BackupStagingException('a history line is not CHAIN,SHA256,BYTES,UNIXTIME', BackupStagingException::MALFORMED);
+		}
+		return array('chain_id' => $p[0], 'sha256' => $p[1], 'bytes' => (int)$p[2], 'uploaded' => (int)$p[3]);
 	}
 
 	/** One fetch, through BackupFetch or BackupStaging's test hook. */

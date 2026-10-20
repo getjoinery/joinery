@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.31 - server_to_delete reads the row's newest provision whether or not it was removed: removing a
+ *                 row (Discard, a way back after the take-over) removes its provision, and the server stays
  * @version 1.30 - a way back before the copy took the node asks it no untrust (B13); a switch-over records what still names the old server's address (SiteCopyAddressFacts, D1's
  *                IP-bound list), and once a move by DNS settles sets the copy's reverse DNS on a server made here
  * @version 1.29 - stale_release(): a copy made at an older release than its site's is refused by the Refresh
@@ -1460,12 +1462,22 @@ class SiteCopyRunner {
 		// Only a row never joined falls back to the copy's own provision. A row
 		// with a machine names that machine's provision or its address: after a
 		// switch-over the copy's provision belongs to the live site (B58).
-		$provision = $node ? CustomerCloudProvision::latest_for_node((int)$node->key) : self::provision($copy);
+		// Removing a row (Discard, a way back after the take-over) removes its
+		// provision with it, while the server stays: a removed one names it too.
+		$provision = $node ? self::server_provision((int)$node->key) : self::provision($copy);
 		if ($provision && trim((string)$provision->get('cvp_instance_id')) !== '') {
 			return ucfirst((string)$provision->get('cvp_provider')) . ' instance ' . $provision->get('cvp_instance_id')
 				. ' (' . $provision->get('cvp_instance_ip') . ')';
 		}
 		return $node ? 'the server at ' . $node->get('mgn_host') : '';
+	}
+
+	/** A row's newest provision, removed or not. */
+	private static function server_provision(int $node_id): ?CustomerCloudProvision {
+		foreach (new MultiCustomerCloudProvision(array('node_id' => $node_id), array('cvp_customer_cloud_provision_id' => 'DESC')) as $p) {
+			return $p;
+		}
+		return null;
 	}
 
 	/**
