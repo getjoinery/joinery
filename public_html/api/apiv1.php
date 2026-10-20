@@ -2,7 +2,15 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.28
+ * @version 2.29
+ * @changelog 2.29 - A keyed action request is metered after authentication: a session key
+ *   (a person's own device: a linked desktop, a phone app) on that person's own budget,
+ *   like their browser, any other key on the address as before. Several people's
+ *   devices behind one address are several callers. A session key is metered per person on every
+ *   route, not only on actions. A key request is a public AND a secret key
+ *   header, as ApiAuth reads it; a request with no user (the anonymous principal) is metered by
+ *   address whatever its headers. The address count leaves out per-person traffic
+ *   (RequestLogger::address_rate_limit_state), so a person's devices never fill it.
  * @changelog 2.28 - A collection read answers with at most API_MAX_PAGE (200) rows; numperpage above it
  *   reads as 200.
  * @changelog 2.27 - A record create or update takes its fields from a JSON object body (Content-Type
@@ -478,10 +486,23 @@ $browser_shaped = empty($headers['public_key']) && empty($headers['secret_key'])
 // reaches ApiAuth::authenticate() and its own app_access_auth bucket. (A
 // request with the header for an action that does not exist, or one switched
 // off, is answered before that, unmetered: a stateless refusal, cheap to give.)
-$app_shaped = isset($headers['x_joinery_app_secret'])
-	&& strtolower(explode('/', trim((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'action';
-if (!$browser_shaped && !$app_shaped) {
-	$api_state = RequestLogger::rate_limit_state('api', $api_rate_limit, $api_rate_window);
+$action_route = strtolower(explode('/', trim((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'action';
+$app_shaped = isset($headers['x_joinery_app_secret']) && $action_route;
+// A keyed ACTION request is metered once its key has authenticated (below):
+// a person's own device -- a linked desktop, a phone app -- signs in with a
+// session key and is metered per person, like their browser, so several
+// people's devices behind one address are several callers; any other key
+// stays on the address. Action only, for the reason above. A bad key never
+// gets that far: it fails authentication, which the failed-auth limiter
+// counts by address. A key request is both key headers, the test ApiAuth
+// itself makes: a public key alone authenticates as a browser or a guest,
+// which the branch below meters by address. A keyed request refused before
+// authentication (an unknown action, a wrong method, an action switched off)
+// is answered unmetered, like an app-shaped one: a stateless refusal, cheap
+// to give.
+$key_shaped = $action_route && !empty($headers['public_key']) && !empty($headers['secret_key']);
+if (!$browser_shaped && !$app_shaped && !$key_shaped) {
+	$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
 	if (!$api_state['allowed']) {
 		api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
 	}
@@ -571,9 +592,12 @@ $auth_data = $principal['auth_data'];
 
 // Rate limiting for the browser-session credential, now that it has a name:
 // a signed-in user is metered on their own requests (api_session_rate_limit_*,
-// default 5000/hour), whoever else shares their address; the anonymous
-// browser principal, which has no name, is metered by address like any other
-// keyless caller. Key traffic was metered before authentication.
+// default 5000/hour), whoever else shares their address; a principal with no
+// user (the anonymous browser principal, a guest) is metered by address like
+// any other keyless caller, whatever headers it came with. A session key is
+// metered here per person on every route; any other key on an action request
+// is metered here by address; every other key request was metered by address
+// before authentication.
 if ($api_entry === null || $api_entry->is_app_credential()) {
 	if ($api_user !== null) {
 		$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
@@ -587,11 +611,28 @@ if ($api_entry === null || $api_entry->is_app_credential()) {
 		if (!$session_state['allowed']) {
 			api_rate_limited($session_state, 'Your account', $session_limit, $session_window);
 		}
-	} elseif ($browser_shaped) {
-		$api_state = RequestLogger::rate_limit_state('api', $api_rate_limit, $api_rate_window);
+	} else {
+		$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
 		if (!$api_state['allowed']) {
 			api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
 		}
+	}
+} elseif ($api_entry->is_session()) {
+	// A session key is a person's own device: their budget, shared with their
+	// browser, on every route. Its rows are left out of the address count, so
+	// this is the limit that bounds it (a keyed action request skipped the
+	// address check above; any other route also passed it).
+	$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+	$session_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
+	$session_state = RequestLogger::rate_limit_state('api', $session_limit, $session_window, null, intval($api_user->key));
+	if (!$session_state['allowed']) {
+		api_rate_limited($session_state, 'Your account', $session_limit, $session_window);
+	}
+} elseif ($key_shaped) {
+	// Any other key on an action request skipped the address check above.
+	$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
+	if (!$api_state['allowed']) {
+		api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
 	}
 }
 

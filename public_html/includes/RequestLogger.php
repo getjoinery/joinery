@@ -16,7 +16,10 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - address_rate_limit_state(): an address's count leaves out the rows of
+ *   traffic metered per person (browser sessions, session keys, app credentials), so a
+ *   person's own devices never fill the budget that guards their address against strangers
  * @changelog 1.6 - every row records its network (rql_ip_network); attempt limits count by it
  *   (check_attempt_limit, attempt_limit_state); username_key() is the one key a sign-in's
  *   per-account count uses
@@ -117,6 +120,30 @@ class RequestLogger {
 	 */
 	public static function check_rate_limit($feature, $max_requests, $window_seconds, $success_filter = null) {
 		return self::rate_limit_state($feature, $max_requests, $window_seconds, $success_filter)['allowed'];
+	}
+
+	/**
+	 * Key types whose traffic is metered per person, after authentication
+	 * (apiv1.php): a browser session, a session key (a linked desktop, a
+	 * phone app) and an app credential.
+	 */
+	const PER_PERSON_KEY_TYPES = array('browser', 'session', 'app_password');
+
+	/**
+	 * rate_limit_state() for the address a request came from, counting only
+	 * the traffic an address limit exists to bound: machine keys, keyless
+	 * and guest requests, and every failed or credential-less one (rows with
+	 * no key type). Traffic metered per person is left out, or a household's
+	 * own devices would fill their address's budget and lock each other out
+	 * of every route the address limit guards.
+	 *
+	 * @return array{allowed:bool,count:int,retry_after:int}
+	 */
+	public static function address_rate_limit_state($feature, $max_requests, $window_seconds) {
+		return self::count_state($feature, $max_requests, $window_seconds, null,
+			"rql_ip_address = ? AND (rql_api_key_type IS NULL OR rql_api_key_type NOT IN ('"
+				. implode("', '", self::PER_PERSON_KEY_TYPES) . "'))",
+			isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
 	}
 
 	/**
