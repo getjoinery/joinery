@@ -20,12 +20,15 @@
  *   - every other running row is marked never finished;
  *   - finished rows are left as they are, and a dump with no backup history
  *     table restores as before;
- *   - restore_chain.sh passes the run it restores from the manifest.
+ *   - restore_chain.sh passes the run it restores from the manifest;
+ *   - nothing but the restore reaches the database while it loads: it is
+ *     renamed out of the way and back (B24).
  *
  * Runs the script, from a copy in a throwaway tree, into a scratch database.
  *
  * Run: php tests/backups/restore_settles_running_backups_test.php
  *
+ * @version 1.1 - the database is closed to everything else while it loads (B24)
  * @version 1.0
  */
 
@@ -149,6 +152,60 @@ rsrb_dump($dump, false);
 list($marker, $err) = rsrb_restore($engine, $scratch, $dump, $tmp . '/home', $db_user, $db_pass,
 	array('--restored-run', 'chain-20261019_235211:7:1:123456:' . $recorded));
 check($marker === 'RESTORE_OK', 'a dump with no backup history table restores', $marker . ' ' . mb_substr($err, -300));
+
+section('Nothing but the restore reaches the database while it loads (B24)');
+
+// A page or a scheduled task that wrote mid-load collided with the dump's own
+// rows. While the load runs, the database is not there under its name.
+file_put_contents($dump, "CREATE TABLE marker (id int PRIMARY KEY);\nINSERT INTO marker VALUES (1);\n"
+	. "SELECT pg_sleep(4);\nCREATE TABLE after_pause (id int);\n");
+$cmd = 'bash ' . escapeshellarg($engine) . ' ' . escapeshellarg($scratch) . ' ' . escapeshellarg($dump)
+	. ' --non-interactive --db-user ' . escapeshellarg($db_user);
+$pipes = array();
+$proc = proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes, null,
+	array('PATH' => getenv('PATH'), 'HOME' => $tmp . '/home', 'PGPASSWORD' => $db_pass));
+fclose($pipes[0]);
+$work = $scratch . '__restoring';
+$seen_closed = false; $writer = '';
+for ($i = 0; $i < 60 && !$seen_closed; $i++) {
+	usleep(200000);
+	list(, $names) = rsrb_psql("SELECT string_agg(datname, ',') FROM pg_database WHERE datname IN ('{$scratch}', '{$work}')",
+		$live_db, $db_user, $db_pass);
+	if ($names === $work) {
+		$seen_closed = true;
+		// A writer that asks for the site's database by its name, as the site does.
+		list($wrc, $writer) = rsrb_psql("INSERT INTO marker VALUES (1)", $scratch, $db_user, $db_pass);
+	}
+}
+$stdout = trim(stream_get_contents($pipes[1])); fclose($pipes[1]);
+$stderr = stream_get_contents($pipes[2]); fclose($pipes[2]);
+proc_close($proc);
+check($seen_closed && strpos($writer, 'does not exist') !== false,
+	'mid-load the database is not there under its name, so a writer asking for it writes nothing', $writer);
+list(, $loaded) = rsrb_psql("SELECT (SELECT count(*) FROM marker)::text || ',' || (to_regclass('public.after_pause') IS NOT NULL)::text",
+	$scratch, $db_user, $db_pass);
+list(, $left) = rsrb_psql("SELECT count(*) FROM pg_database WHERE datname = '{$work}'", $live_db, $db_user, $db_pass);
+check($stdout === 'RESTORE_OK' && $loaded === '1,true' && $left === '0',
+	'and once loaded it is back under its own name, whole', $stdout . ' ' . $loaded . ' ' . $left . ' ' . mb_substr($stderr, -300));
+
+file_put_contents($dump, "CREATE TABLE marker (id int);\nTHIS IS NOT SQL;\n");
+list($marker, ) = rsrb_restore($engine, $scratch, $dump, $tmp . '/home', $db_user, $db_pass);
+list(, $names) = rsrb_psql("SELECT string_agg(datname, ',') FROM pg_database WHERE datname IN ('{$scratch}', '{$work}')",
+	$live_db, $db_user, $db_pass);
+check($marker === 'RESTORE_LOAD_FAILED' && $names === $scratch,
+	'a load that fails puts the database back under its own name, as it is', $marker . ' ' . $names);
+
+rsrb_dump($dump);
+rsrb_restore($engine, $scratch, $dump, $tmp . '/home', $db_user, $db_pass);
+rsrb_psql("CREATE DATABASE {$work}", $live_db, $db_user, $db_pass);
+harness_defer(function () use ($work, $live_db, $db_user, $db_pass) {
+	rsrb_psql("DROP DATABASE IF EXISTS {$work}", $live_db, $db_user, $db_pass);
+});
+list($marker, ) = rsrb_restore($engine, $scratch, $dump, $tmp . '/home', $db_user, $db_pass);
+list(, $kept) = rsrb_psql("SELECT to_regclass('public.marker') IS NOT NULL", $scratch, $db_user, $db_pass);
+check($marker === 'RESTORE_DB_BUSY' && $kept === 't',
+	'beside a work database an earlier restore left, which is the site\'s is not guessed: nothing is touched', $marker . ' ' . $kept);
+rsrb_psql("DROP DATABASE IF EXISTS {$work}", $live_db, $db_user, $db_pass);
 
 section('The chain restore names the run it restores');
 

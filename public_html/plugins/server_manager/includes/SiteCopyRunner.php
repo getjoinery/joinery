@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.32 - a kept switch-over keeps the old server Keep named: removing the old row afterwards made the tab
+ *                 name the copy's own server, the one the site now runs on (B22)
  * @version 1.31 - server_to_delete reads the row's newest provision whether or not it was removed: removing a
  *                 row (Discard, a way back after the take-over) removes its provision, and the server stays
  * @version 1.30 - a way back before the copy took the node asks it no untrust (B13); a switch-over records what still names the old server's address (SiteCopyAddressFacts, D1's
@@ -1446,11 +1448,18 @@ class SiteCopyRunner {
 	}
 
 	/**
-	 * What the owner has to delete at the provider after a discard: the
+	 * What the owner has to delete at the provider when a copy ends: the
 	 * provider, instance and address, from the provision when this management
-	 * node created the server, else the address the copy's row recorded.
+	 * node created the server, else the address the copy's row recorded. A
+	 * discarded copy names its own server; a kept switch-over, the old one.
 	 */
 	public static function server_to_delete(SiteCopy $copy): string {
+		// A kept switch-over's old server is the one Keep named, while its row
+		// was still there. The row is removed afterwards, and the copy's own
+		// provision is then the server the site runs on: never that (B22).
+		if ($copy->status() === SiteCopy::STATUS_FINISHED) {
+			return (string)($copy->switch_record()['server_to_delete'] ?? '');
+		}
 		// The provision follows its machine through a swap, so the copy row's
 		// is the server on that row; one never joined has only the copy's own.
 		$node = self::copy_row($copy, false);
@@ -3328,6 +3337,9 @@ class SiteCopyRunner {
 				DataRootEscrowSync::let_go($node);
 				$node->soft_delete();
 			}
+			$switch = $copy->switch_record();
+			$switch['server_to_delete'] = $server;
+			$copy->set_switch_record($switch);
 			$copy->set('scp_status', SiteCopy::STATUS_FINISHED);
 			$copy->save();
 			return $server;

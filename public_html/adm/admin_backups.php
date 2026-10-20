@@ -2,6 +2,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.24 - A recovery key never proven says so, not 'was last proven never' (B21)
  * @version 1.23 - Where the server has a TPM2 chip, the data root's line says what the chip's slot protects and
  *                offers the stricter way: encrypt asking for the key at every boot, or stop the chip opening an
  *                encrypted one (B43)
@@ -225,8 +226,8 @@ if (!empty($milestones['verify_attempt'])) {
 	echo '<div class="text-muted small">Last attempt: '
 	   . htmlspecialchars((string)$milestones['verify_attempt']->get('bkh_verify_message')) . '</div>';
 }
-echo '<div class="text-muted small">Your recovery key was last proven '
-   . ($ceremony ? htmlspecialchars($when($ceremony)) : 'never')
+echo '<div class="text-muted small">Your recovery key '
+   . ($ceremony ? 'was last proven ' . htmlspecialchars($when($ceremony)) : 'has never been proven')
    . ' &mdash; <a href="/admin/admin_recovery_readiness">prove it</a>. The two together are the proof: the '
    . 'verification shows the archives open and read with the key this machine holds; the ceremony shows '
    . 'your own private key opens them.</div>';
