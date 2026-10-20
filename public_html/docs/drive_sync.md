@@ -953,9 +953,15 @@ encrypted again under the same file key — the server stores it without learnin
 either name, and refuses a plaintext one outright. The blob is fetched rather
 than rebuilt from what this device remembers, because another device may have
 changed the mime type, the size or the thumbnail flag since, and rebuilding
-would discard whatever this one did not know about. Moving a file *within* a
-vault is an ordinary `drive_move` on ids: nothing re-encrypts. A vault folder's
-own name is plaintext on the server and renames normally.
+would discard whatever this one did not know about. A fetched blob that names
+something other than the name the rename was decided against was renamed by
+another device since: the rename stands down, and the next pass settles the two
+names as a rename made on both sides. The rename says which blob it was sealed
+from (`from_metadata_sha256`), so a rename or a new version that another device
+lands before it arrives refuses it with `moved_since`. A move alone reseals
+nothing. Moving a file *within* a vault is an ordinary `drive_move` on ids:
+nothing re-encrypts. A vault folder's own name is plaintext on the server and
+renames normally.
 
 **Crossing the boundary is not a move.** The server holds no key, so it cannot
 turn plaintext into ciphertext or back again, and it refuses an in-place

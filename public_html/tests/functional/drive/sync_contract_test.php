@@ -672,6 +672,30 @@ check($moved_since(drive_rename_logic(array('entity_type' => 'folder', 'entity_i
 check(drive_rename_logic(array('entity_type' => 'folder', 'entity_id' => $sub, 'name' => 'Sub2', 'from_name' => 'Sub'))->error === null,
 	'and renamed from the name it has, lands');
 
+// An encrypted file's name is inside its metadata blob, which the server cannot
+// read: it is asked whether the blob it holds is the one the new blob was
+// sealed from.
+$blob_one = base64_encode(random_bytes(40));
+$sealed = File::createFromBytes('sealed-' . $tag, 'enc-sealed', 'application/octet-stream', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $fc,
+	'fil_protection_level' => ProtectionLevel::FORTRESS, 'fil_encrypted_metadata' => $blob_one));
+$made_files[] = $sealed->key;
+$stored = function () use ($sealed) { return (string)DriveHelper::load_file((int)$sealed->key)->get('fil_encrypted_metadata'); };
+$blob_two = base64_encode(random_bytes(40));
+$blob_three = base64_encode(random_bytes(40));
+$r = drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$sealed->key, 'encrypted_metadata' => $blob_two, 'from_metadata_sha256' => hash('sha256', $blob_one)));
+check($r->error === null && $stored() === $blob_two, 'an encrypted rename sealed from the blob it holds lands', json_encode($r->data));
+$r = drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$sealed->key, 'encrypted_metadata' => $blob_three, 'from_metadata_sha256' => hash('sha256', $blob_one)));
+check($moved_since($r), 'one sealed from the blob it held before is refused as moved_since', json_encode($r->data));
+check($stored() === $blob_two, 'and the newer blob stands');
+check(drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$sealed->key, 'encrypted_metadata' => $blob_two, 'from_metadata_sha256' => hash('sha256', $blob_one)))->error === null,
+	'the blob it already holds succeeds, whatever it was sealed from');
+check(drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$sealed->key, 'encrypted_metadata' => $blob_three, 'from_name' => 'anything'))->error === null && $stored() === $blob_three,
+	'a from_name is not read for an encrypted file');
+$r = drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$sealed->key, 'encrypted_metadata' => $blob_one, 'from_metadata_sha256' => 'not-a-hash'));
+check($r->error !== null && ($r->data['reason'] ?? null) === 'invalid_request' && !empty($r->data['standing']) && $stored() === $blob_three,
+	'a from_metadata_sha256 that is not a hash is a bad request, not a race', json_encode($r->data));
+
 section('Range header parsing');
 
 check(File::parse_range_header(null, 1000) === null, 'no Range header means no range');

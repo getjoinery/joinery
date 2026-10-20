@@ -17792,6 +17792,107 @@ fn a_park_decided_before_a_peers_rename_landed_loses_to_it_and_says_so() {
     assert_converged(&world);
 }
 
+/// A peer's rename of a sealed file, sealed by the peer itself and held back
+/// from the server: the request body it would send. The test lands it when it
+/// chooses, as the peer's call arriving.
+fn a_peers_sealed_rename(world: &World, peer: &jd_sim::engine::Device, from: &str, to: &str) -> serde_json::Value {
+    peer.fs.user_rename(from, to);
+    peer.net.set_faults(NetFaults { refuse_before: Some("drive_rename".into()), ..NetFaults::none() });
+    world.pass(peer);
+    peer.net.set_faults(NetFaults::none());
+    let op = peer
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .find(|o| o.params.contains("sealed_name"))
+        .expect("the premise: the peer sealed its rename and holds it");
+    let params: serde_json::Value = serde_json::from_str(&op.params).unwrap();
+    serde_json::json!({
+        "entity_type": "file",
+        "entity_id": op.entity.server_id,
+        "encrypted_metadata": params["sealed_name"],
+    })
+}
+
+/// A sealed file's rename asks the server about the blob it was sealed from
+/// (`from_metadata_sha256`), since the server cannot read the name. A peer's
+/// rename landing between this device reading the blob and its rename
+/// arriving is the newer name: it stands and this device is told. RED without
+/// `from_metadata_sha256`: the stale blob was stored over the peer's.
+#[test]
+fn a_sealed_rename_overtaken_after_it_was_sealed_loses_to_the_peers() {
+    let (world, _private, out) = a_vault_of_two(9_963, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    let theirs = a_peers_sealed_rename(&world, b, "Private/out.txt", "Private/theirs.txt");
+    let server = world.server.clone();
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = fired.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        let ours = name == "drive_rename" && body.get("encrypted_metadata").is_some() && body["encrypted_metadata"] != theirs["encrypted_metadata"];
+        if ours {
+            server.action("drive_rename", &theirs).expect("the peer's rename");
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        ours
+    });
+    a.fs.user_rename("Private/out.txt", "Private/mine.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's rename landed while a's was on its way");
+
+    let view = jd_sim::scenario::owner_view_of_the_server(&world);
+    assert!(view.contains_key("Private/theirs.txt"), "the newer name did not stand: {view:?}");
+    assert!(!view.contains_key("Private/mine.txt"), "the stale rename reached the server: {view:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("Private/theirs.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert!(server_folder_of(&world, out).is_some(), "the file is gone");
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// The same, a step earlier: the peer's rename landed after this device
+/// decided its own and before it read the blob to reseal. Here this device's
+/// rename waits on another (out.txt takes the name stays.txt is leaving), and
+/// the peer's lands as that one does. The blob then names the peer's name, not
+/// the one this rename was decided against, so it stands down and this device
+/// is told. RED without the name check in the reseal: the peer's blob was
+/// resealed under this device's name, its hash was the one the server held,
+/// and the peer's rename was lost unseen.
+#[test]
+fn a_sealed_rename_overtaken_before_it_was_sealed_loses_to_the_peers() {
+    let (world, _private, out) = a_vault_of_two(9_962, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    let theirs = a_peers_sealed_rename(&world, b, "Private/out.txt", "Private/theirs.txt");
+    let server = world.server.clone();
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = fired.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        let first = name == "drive_rename" && body["entity_id"] != serde_json::json!(out);
+        if first {
+            server.action("drive_rename", &theirs).expect("the peer's rename");
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        first
+    });
+    a.fs.user_rename("Private/stays.txt", "Private/kept.txt");
+    a.fs.user_rename("Private/out.txt", "Private/stays.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's rename landed before a sealed its own");
+
+    let view = jd_sim::scenario::owner_view_of_the_server(&world);
+    assert!(view.contains_key("Private/theirs.txt"), "the newer name did not stand: {view:?}");
+    assert!(view.contains_key("Private/kept.txt"), "the other rename did not land: {view:?}");
+    assert!(!view.contains_key("Private/stays.txt"), "the stale rename reached the server: {view:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("Private/theirs.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
 /// A swap whose park landed with its answer lost, its finisher run in the same
 /// round: the finisher asks the server where the file is, finds its own park,
 /// and the swap finishes, with nobody told of a race that did not happen.
@@ -17802,7 +17903,6 @@ fn a_park_decided_before_a_peers_rename_landed_loses_to_it_and_says_so() {
 fn a_park_whose_answer_was_lost_is_finished_as_its_own() {
     let world = World::new(9_964, &["a", "b"]);
     let a = world.device("a");
-    let b = world.device("b");
     a.fs.user_write("Projects/x.txt", b"x, the first of the swap");
     a.fs.user_write("Projects/y.txt", b"y, the second of the swap");
     assert!(world.settle().is_some());
