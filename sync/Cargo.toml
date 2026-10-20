@@ -18,6 +18,8 @@ members = [
 
 [workspace.package]
 edition = "2021"
+# File::try_lock (jd-platform's one-daemon-per-home lock) is in std from 1.89.
+rust-version = "1.89"
 version = "0.1.0"
 license = "UNLICENSED"
 publish = false

@@ -2,6 +2,7 @@
 name = "jd-proto"
 description = "Joinery server API client: session-key auth, action calls, resumable chunk uploads, downloads. Also carries joinery-drive-probe, a protocol-level tool for exercising the server surface directly."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

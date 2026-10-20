@@ -2,6 +2,7 @@
 name = "jd-daemon"
 description = "The Joinery Drive client as a program: the device-link ceremony, the loop that runs the engine, the health model behind the tray, and the local control channel the shells talk to."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

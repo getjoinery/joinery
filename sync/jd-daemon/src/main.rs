@@ -308,9 +308,33 @@ fn stop_a_syncing_daemon() -> bool {
 fn cmd_daemon() -> Result<(), String> {
     let paths = Paths::discover();
     paths.create().map_err(|e| e.to_string())?;
+    // One daemon per home (`jd_platform::instance`), settled before anything
+    // else: a copy that stands down must not count an update attempt or touch
+    // the control endpoint. It stands down with success, so neither launchd
+    // nor systemd starts it again.
+    let home = match jd_platform::instance::take(&paths.state, jd_platform::instance::WAIT) {
+        jd_platform::instance::Taken::Held(guard) => Some(guard),
+        jd_platform::instance::Taken::Unguarded(why) => {
+            eprintln!("joinery-drive: {why}; starting without a check for another copy");
+            None
+        }
+        jd_platform::instance::Taken::AlreadyRunning { pid } => {
+            let who = pid.map(|p| format!(" (process {p})")).unwrap_or_default();
+            eprintln!(
+                "joinery-drive is already running{who} with this state folder ({}); this copy is not starting.",
+                paths.state.display()
+            );
+            return Ok(());
+        }
+    };
     // Before anything that can fail: a new copy that dies on the way up has
     // to have counted the attempt first (`jd_daemon::update::pending`).
     let start = jd_daemon::update::on_start(&paths);
+    if let jd_daemon::update::pending::Start::Restart { daemon } = &start {
+        eprintln!("update: this version did not start; putting the previous one back");
+        drop(home);
+        jd_daemon::update::relaunch(daemon, None, &paths.state);
+    }
 
     // A config that is there but unreadable is refused before anything opens,
     // as it always was: carrying on would point a client that had been syncing
@@ -344,9 +368,12 @@ fn cmd_daemon() -> Result<(), String> {
     // A stale endpoint file sends the tray and the CLI to whatever holds that
     // port next, so it goes with the process.
     server.shutdown();
-    // Stopped for an update: the store is closed, so the files can move.
+    // Stopped for an update: the store is closed, so the files can move. The
+    // home is let go only now, after the endpoint, so the copy that takes it
+    // next finds nothing of this one's left.
     if let Some(restart) = update.take_restart() {
         let paused = shared.snapshot().is_some_and(|s| s.paused);
+        drop(home);
         jd_daemon::update::restart(restart, &paths, paused);
     }
     outcome

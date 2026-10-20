@@ -25,6 +25,7 @@ pub mod console;
 pub mod control;
 pub mod dirs;
 pub mod install;
+pub mod instance;
 pub mod secret;
 
 pub use autostart::{launch_agent_plist, systemd_user_unit, AutostartError};

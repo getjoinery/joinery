@@ -233,13 +233,23 @@ pub enum Watched {
     Started,
     /// The new copy put the old one back itself, and has started it.
     HandledByNewCopy,
+    /// The new copy exited because another daemon holds this home
+    /// (`jd_platform::instance`): it started in the moment this process had
+    /// let go. Nothing is put back; whichever copy holds the home reads the
+    /// marker when it starts. The same verdict covers a new copy that failed
+    /// for its own reasons while another daemon held the home: nothing is put
+    /// back then either, and the marker stays for the next copy that starts,
+    /// which counts the attempt. A daemon from before the lock holds no lock,
+    /// so it is not seen here and can still be doubled until it updates.
+    SomeoneElseIsRunning,
     /// The new copy exited or never came up. The caller puts the old copy
     /// back.
     Failed(String),
 }
 
-/// Wait for a new copy this process started to come up.
-pub fn watch(path: &Path, child: &mut std::process::Child, timeout: Duration) -> Watched {
+/// Wait for a new copy this process started to come up. `state` is the home's
+/// state folder, where a daemon holds its lock.
+pub fn watch(path: &Path, child: &mut std::process::Child, timeout: Duration, state: &Path) -> Watched {
     let deadline = Instant::now() + timeout;
     loop {
         match Pending::load(path) {
@@ -252,6 +262,12 @@ pub fn watch(path: &Path, child: &mut std::process::Child, timeout: Duration) ->
             // for an unrelated reason, which is a start that worked.
             if Pending::load(path).is_none() {
                 return Watched::Started;
+            }
+            // A copy that found the home held stands down at once, before it
+            // reads the marker. Read as a failure, that would put the old
+            // files back under whichever daemon is running.
+            if jd_platform::instance::held_elsewhere(state) {
+                return Watched::SomeoneElseIsRunning;
             }
             return Watched::Failed(format!(
                 "the new version exited ({status}) before it started"
@@ -424,7 +440,7 @@ mod tests {
             .spawn()
             .unwrap();
         assert!(matches!(
-            watch(&marker, &mut quitter, Duration::from_secs(10)),
+            watch(&marker, &mut quitter, Duration::from_secs(10), &dir),
             Watched::Failed(_)
         ));
 
@@ -437,7 +453,7 @@ mod tests {
             .spawn()
             .unwrap();
         assert_eq!(
-            watch(&marker, &mut starter, Duration::from_secs(10)),
+            watch(&marker, &mut starter, Duration::from_secs(10), &dir),
             Watched::Started
         );
         let _ = starter.kill();
@@ -450,9 +466,34 @@ mod tests {
             .spawn()
             .unwrap();
         assert!(matches!(
-            watch(&marker, &mut hung, Duration::from_millis(600)),
+            watch(&marker, &mut hung, Duration::from_millis(600), &dir),
             Watched::Failed(_)
         ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A new copy that exits because another daemon holds the home is not a
+    /// failed update: nothing is put back under the daemon that is running.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_copy_that_found_the_home_held_is_not_a_failed_update() {
+        let dir = temp("held");
+        let marker = dir.join("pending.json");
+        let (mut pending, _live) = layout(&dir);
+        pending.phase = Phase::Swapped;
+        pending.save(&marker).unwrap();
+        let jd_platform::instance::Taken::Held(holder) =
+            jd_platform::instance::take(&dir, Duration::ZERO)
+        else {
+            panic!("a free home was not taken");
+        };
+        let mut stood_down = std::process::Command::new("true").spawn().unwrap();
+        assert_eq!(
+            watch(&marker, &mut stood_down, Duration::from_secs(10), &dir),
+            Watched::SomeoneElseIsRunning
+        );
+        assert!(Pending::load(&marker).is_some(), "the marker is left for the running copy");
+        drop(holder);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1332,7 +1332,9 @@ pub fn install_staged(
     pending.install(marker)
 }
 
-/// Do what the update thread asked for, then end this process.
+/// Do what the update thread asked for, then end this process. The caller has
+/// let go of the home (`jd_platform::instance`) first, so the copy started
+/// here can take it.
 ///
 /// Under the LaunchAgent or the systemd unit, ending with
 /// [`install::RESTART_EXIT_CODE`] is the restart. Otherwise this process
@@ -1367,13 +1369,14 @@ pub fn restart(restart: Restart, paths: &jd_platform::Paths, paused: bool) -> ! 
             (daemon, false)
         }
     };
-    relaunch(&daemon, watched.then_some(marker.as_path()))
+    relaunch(&daemon, watched.then_some(marker.as_path()), &paths.state)
 }
 
 /// Start the daemon at `daemon` again and end this process. With a marker, the
 /// new copy is watched (when nothing else will restart it) and undone if it
-/// does not come up.
-pub fn relaunch(daemon: &Path, marker: Option<&Path>) -> ! {
+/// does not come up. `state` is the home's state folder; this process must not
+/// hold the home's lock, or the new copy stands down.
+pub fn relaunch(daemon: &Path, marker: Option<&Path>, state: &Path) -> ! {
     if install::supervisor().is_some() {
         std::process::exit(install::RESTART_EXIT_CODE);
     }
@@ -1386,8 +1389,10 @@ pub fn relaunch(daemon: &Path, marker: Option<&Path>) -> ! {
     match install::spawn_detached(daemon, &["daemon"]) {
         Ok(mut child) => {
             if let Some(marker) = marker {
+                // Started, put back by the new copy itself, or another daemon
+                // holding the home: in each, nothing is left for this one to do.
                 if let pending::Watched::Failed(why) =
-                    pending::watch(marker, &mut child, pending::WATCH_TIMEOUT)
+                    pending::watch(marker, &mut child, pending::WATCH_TIMEOUT, state)
                 {
                     eprintln!("update: {why}; putting the previous version back");
                     undo(marker, &why);
@@ -1408,16 +1413,12 @@ pub fn relaunch(daemon: &Path, marker: Option<&Path>) -> ! {
     }
 }
 
-/// The start marker's verdict for this process, read before anything else in
-/// `daemon`. A `Restart` never returns.
+/// The start marker's verdict for this process, read in `daemon` once it holds
+/// the home and before anything else. A `Restart` is the caller's to carry
+/// out, with [`relaunch`], after it lets go of the home.
 pub fn on_start(paths: &jd_platform::Paths) -> pending::Start {
     let marker = updates_dir(paths).join("pending.json");
-    let verdict = pending::on_start(&marker, current_version());
-    if let pending::Start::Restart { daemon } = &verdict {
-        eprintln!("update: this version did not start; putting the previous one back");
-        relaunch(daemon, None);
-    }
-    verdict
+    pending::on_start(&marker, current_version())
 }
 
 #[cfg(test)]
