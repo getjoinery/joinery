@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.67 - install_security_updates: the nightly security updates, now (agent 1.87.0)
  * @version 1.66 - site_state_report: what the machine's site state directories hold (agent 1.86.0)
  * @version 1.65 - copy_retry_settle: let go of the old server again after a DNS switch's settle stopped
  * @version 1.64 - recreate_site: replace one site's container on its host with a new one on the host's current
@@ -183,6 +184,7 @@ class NodeDetailActions {
 		'disk_usage'               => 'overview',
 		'listening_sockets'        => 'overview',
 		'site_state_report'        => 'overview',
+		'install_security_updates' => 'overview',
 		'container_inventory'      => 'overview',
 		'spam_learning_status'     => 'overview',
 		'reboot_machine'           => 'overview',
@@ -463,11 +465,14 @@ class NodeDetailActions {
 			// nothing, and the reboot, which the builder refuses where the node
 			// would (a container site, an encrypted data root that would wait
 			// for its recovery key). And site_state_report (agent 1.86.0), a
-			// fourth read that takes nothing.
+			// fourth read that takes nothing, and install_security_updates
+			// (agent 1.87.0), which takes nothing either: the machine's own
+			// policy decides what it installs.
 			case 'listening_sockets':
 			case 'container_inventory':
 			case 'spam_learning_status':
 			case 'site_state_report':
+			case 'install_security_updates':
 			case 'reboot_machine': {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);

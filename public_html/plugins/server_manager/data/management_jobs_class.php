@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.41 - claim budget for install_security_updates (the agent's 60 minutes: the wait for another package
+ *                 run, the list refresh and the updater, each bounded by the script)
  * @version 1.40 - claim budget for recreate_site, one site's container replaced on its host (the agent's 32 minutes:
  *                 every call into the site, the build, two stops and two waits bounded; multi_tenant_host_hardening D9)
  * @version 1.39 - claim budgets for site_install and discard_copy, a copy onto a host's install and removal
@@ -299,6 +301,11 @@ class ManagementJob extends SystemBase {
 		// two stops and two waits for the site to answer. Failing one still
 		// running would free the host for a second replacement mid-swap.
 		'recreate_site'         => 2040,
+		// 60m + slack: install_security_updates.sh waits up to ten minutes
+		// for another package run, then refreshes the lists and runs the
+		// updater, each under its own limit. Failing one still running would
+		// free the node for a second updater behind the first's lock.
+		'install_security_updates' => 3720,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than

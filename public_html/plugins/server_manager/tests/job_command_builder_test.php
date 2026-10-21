@@ -2681,6 +2681,34 @@ section('site_state_report: what the site state directories hold (agent 1.86.0, 
 	check(strpos($threw, 'update this node') !== false, 'building it for that node names the missing word and the fix', $threw);
 }
 
+section('install_security_updates: the nightly security updates, now (agent 1.87.0)');
+
+{
+	$su_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,install_security_updates',
+		'mgn_agent_log_access' => 'off',
+	));
+	$built = JobCommandBuilder::build_install_security_updates($su_node);
+	check($built === array('primitive' => 'install_security_updates', 'params' => array()),
+		'install_security_updates travels as the name and nothing else: the machine\'s own policy decides what it installs',
+		var_export($built, true));
+	check(JobCommandBuilder::transports_for('install_security_updates') === array('primitive'),
+		'its one transport is the primitive');
+	check((ManagementJob::PRIMITIVE_CLAIM_BUDGETS['install_security_updates'] ?? 0) > 3600,
+		'its claim budget is past the agent\'s sixty minutes, so a long updater run is never failed as lost while it works');
+	$su_older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report',
+	));
+	check(!JobCommandBuilder::has_primitive($su_older, 'install_security_updates'), 'a node whose vocabulary lacks it is not offered it');
+	$threw = '';
+	try { JobCommandBuilder::build_install_security_updates($su_older); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'update this node') !== false, 'building it for that node names the missing word and the fix', $threw);
+}
+
 section('reset_failed_unit: clear a failed unit from the same list (specs/disk_headroom_and_unit_diagnosis.md § 9)');
 
 {

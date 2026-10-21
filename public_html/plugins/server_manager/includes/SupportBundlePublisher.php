@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.29 - carries install_security_updates.sh: Install security updates now works on a Docker host
  * @version 1.28 - carries copy_probes.sh, the copy_probes word on a host whose site containers a copy's security
  *                 check probes (specs/site_copy_final_test.md, the rig)
  * @version 1.27 - carries host_runner_lock.sh, which remove_account.sh and install.sh source to hold the host
@@ -201,6 +202,9 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/listening_sockets.sh',
 		'maintenance_scripts/sysadmin_tools/container_inventory.sh',
 		'maintenance_scripts/sysadmin_tools/reboot_machine.sh',
+		// install_security_updates (agent 1.87.0): a Docker host needs its
+		// fixes the day they ship as much as a site does. Sources nothing.
+		'maintenance_scripts/sysadmin_tools/install_security_updates.sh',
 		// restart_unit and restart_container: the repairs of service_health
 		// and container_health. A Docker host runs its site containers and its
 		// own fail2ban and cron; both scripts source nothing.
