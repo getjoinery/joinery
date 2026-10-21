@@ -44,7 +44,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
         <div class="px-4 sm:px-0">';
 		
 		
-		if($options['breadcrumbs']){
+		if(!empty($options['breadcrumbs'])){
 			echo '		
 			<div class="max-w-7xl mx-auto px-4 sm:px-6">
 			  <div class="border-t border-gray-200 py-3">
@@ -114,7 +114,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 		}
 		
 				
-		if($options['subtitle']){
+		if(!empty($options['subtitle'])){
 			$output .= '<p class="mt-4 text-lg text-gray-500">'.$options['subtitle'].'</p>';
 		}
 
@@ -413,7 +413,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 				New Post
 			</a>-->
 		
-		<?php } else { // User is not logged in ?>
+		<?php if(!$menu_data['user_menu']['is_logged_in']){ ?>
           <a href="/login" class="whitespace-nowrap text-base font-medium text-gray-500 hover:text-gray-900">
             Sign in
           </a>
@@ -579,7 +579,8 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 
 
 
-		<?php } //end if noheader and public_header method
+		<?php } //end if noheader
+	}
 
 	public function public_footer($options=array()) {
 		$session = SessionControl::get_instance();

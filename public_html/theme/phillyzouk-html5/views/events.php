@@ -6,7 +6,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 $page_vars = process_logic(events_logic(array_merge($_GET, $_POST)));
 $page = new PublicPage();
 $page->public_header(array(
-    'is_valid_page' => $is_valid_page,
+    'is_valid_page' => $is_valid_page ?? false,
     'title' => $page_vars['events_label']
 ));
 ?>

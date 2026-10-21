@@ -1,7 +1,7 @@
 {
     "name": "xandyliberato-html5",
     "display_name": "Xandy Liberato HTML5",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "status": "stable",
     "audience": [
         "xandyliberato.com"
@@ -9,7 +9,7 @@
     "description": "Zero-dependency HTML5 version of the Xandy Liberato Tailwind theme",
     "author": "Joinery Team",
     "receives_upgrades": true,
-    "included_in_publish": false,
+    "included_in_publish": true,
     "cssFramework": "html5",
     "publicPageBase": "PublicPageBase"
 }
