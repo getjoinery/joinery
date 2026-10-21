@@ -1568,7 +1568,9 @@ key), written to `{backup working directory}/download/` instead of to a bucket.
   warnings are unchanged by one.
 
 Offloaded files with no copy on the server are in the cloud file store only and
-are not in the download; the confirmation says how many. A root-only `config/`
+are not in the download; the confirmation says how many. The names in **Also
+leave out of backups** (`backup_exclude`) are left out of it, as they are of
+every backup (`backup_project.sh --exclude`). A root-only `config/`
 file the web user cannot read is left out by name, as every unprivileged run
 leaves it out (`_backup_root_only_files.sh`); any other unreadable file fails
 the build, with tar's reason.

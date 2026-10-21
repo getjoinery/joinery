@@ -33,6 +33,7 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.35 - a standalone project archive leaves out the backup_exclude names too, as the chain does
  * @version 1.34 - a manager request's objects_missing (what the management node's listing of the same space proved
  *                absent) reaches the plan; the run's epoch is retired when backup storage lost an object under it
  * @version 1.33 - destination_of_plan() is public: held.json records the destination it describes (BackupObjects)
@@ -2157,6 +2158,9 @@ class BackupRunner {
 			. ' --archive - --report ' . escapeshellarg($report);
 		if (!empty($plan['project_dir'])) {
 			$cmd .= ' --project-dir ' . escapeshellarg($plan['project_dir']);
+		}
+		foreach (self::extra_excludes() as $x) {
+			$cmd .= ' --exclude ' . escapeshellarg($x);
 		}
 		if ($exclude_file !== '') {
 			$cmd .= ' --exclude-from ' . escapeshellarg($exclude_file);

@@ -378,6 +378,10 @@ class BackupDownload {
 				. ' --key-file ' . escapeshellarg($key_file)
 				. ' --name ' . escapeshellarg($name)
 				. ' --archive - --report ' . escapeshellarg($report);
+			// What the site's backups leave out (backup_exclude), this leaves out too.
+			foreach (BackupRunner::extra_excludes() as $x) {
+				$cmd .= ' --exclude ' . escapeshellarg($x);
+			}
 		}
 		$proc = @proc_open(array('bash', '-c', $cmd), array(
 			0 => array('file', '/dev/null', 'r'),

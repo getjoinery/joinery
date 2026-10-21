@@ -193,6 +193,34 @@ chk "an unlisted file beside them stays" "$(grep -c "^$P/static_files/uploads/ke
 chk "a same-named file at an unlisted path stays" "$(grep -c "^$P/public_html/photo_x1.jpg$" "$W/x/ex.list")" "1"
 chk "the uploads directories themselves are still archived" "$(grep -c "^$P/static_files/uploads/avatar/$" "$W/x/ex.list")" "1"
 
+# ── --exclude NAME: the site's backup_exclude names, at any depth ───────────
+echo "== --exclude leaves out a name at any depth, in both modes =="
+mkdir -p "$W/site/public_html/deep/sync" "$W/site/sync"
+echo "release tarball" > "$W/site/public_html/joinery-core-1.2.tar.gz"
+echo "a sync tree"     > "$W/site/sync/a.txt"
+echo "a nested one"    > "$W/site/public_html/deep/sync/b.txt"
+echo "kept"            > "$W/site/public_html/deep/kept.txt"
+bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/stream" --project-dir "$W/site" \
+    --name "$PROJ-exn" --archive - --report "$W/stream/report_exn" --exclude sync --exclude 'joinery-core-*.tar.gz' \
+    > "$W/stream/exn.enc" 2>/dev/null; RC=$?
+chk "stream mode with --exclude exits 0" "$RC" "0"
+openssl enc -d -aes-256-cbc -pbkdf2 -pass fd:3 -in "$W/stream/exn.enc" 3< "$W/key" | tar -tz > "$W/x/exn.list"
+P="$PROJ-exn/project_files"
+chk "a matching file is left out" "$(grep -c "joinery-core-1.2.tar.gz$" "$W/x/exn.list")" "0"
+chk "a matching directory at the root is left out" "$(grep -c "^$P/sync/" "$W/x/exn.list")" "0"
+chk "a matching directory deeper down is left out" "$(grep -c "^$P/public_html/deep/sync/" "$W/x/exn.list")" "0"
+chk "its neighbour stays" "$(grep -c "^$P/public_html/deep/kept.txt$" "$W/x/exn.list")" "1"
+bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/x" --project-dir "$W/site" \
+    --name "$PROJ-exn-file" --exclude sync --exclude 'joinery-core-*.tar.gz' > /dev/null 2>&1; RC=$?
+chk "file mode with --exclude exits 0" "$RC" "0"
+openssl enc -d -aes-256-cbc -pbkdf2 -pass fd:3 -in "$W/x/$PROJ-exn-file.tar.gz.enc" 3< "$W/key" | tar -tz > "$W/x/exn_file.list"
+chk "file mode leaves out the same" "$(grep -cE 'joinery-core-1.2.tar.gz$|/sync/' "$W/x/exn_file.list")" "0"
+chk "file mode keeps the neighbour" "$(grep -c '/public_html/deep/kept.txt$' "$W/x/exn_file.list")" "1"
+bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/x" --project-dir "$W/site" \
+    --exclude 'a/b' > /dev/null 2>&1; RC=$?
+chk "a name with a slash is refused" "$RC" "1"
+rm -rf "$W/site/sync" "$W/site/public_html/deep" "$W/site/public_html/joinery-core-1.2.tar.gz" "$W/x/$PROJ-exn-file.tar.gz.enc"
+
 # ── Root-only config/ files: left out by name, said out loud ────────────────
 # A run that cannot read config/admin_credentials.txt (600 root:root on every
 # node) leaves it out and says so; any other unreadable file still fails the
