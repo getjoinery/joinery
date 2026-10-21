@@ -50,7 +50,10 @@ class FileHeadMovedException extends Exception {
  * demotion transfers the head's reference to the new version (no count change),
  * and pruning / permanent delete release it.
  *
- * @version 1.1.0 - save_new_content takes a guard (the head and encrypted
+ * @version 1.2.0 - save_new_metadata: an encrypted rename writes its blob
+ *                  under the same row hold as a version, checked against the
+ *                  blob as stored (B11)
+ * @changelog 1.1.0 - save_new_content takes a guard (the head and encrypted
  *                  metadata the uploader based its edit on): a head that moved
  *                  refuses with FileHeadMovedException, and content the head
  *                  already holds writes no version (B10)
@@ -191,6 +194,43 @@ class FileVersion extends SystemBase {
 
 		self::prune($file, (int)$file->get('fil_usr_user_id'));
 		return true;
+	}
+
+	/**
+	 * Write an encrypted file's new metadata blob: a rename, which seals the new
+	 * name into a blob the server cannot read. $from_sha256 is the hash of the
+	 * blob it was sealed from; a stored blob rewritten since -- by another
+	 * rename, or by a version, which reseals the size and date with the content
+	 * -- refuses (FileHeadMovedException, moved_since), because the new blob
+	 * would put everything it carried from before back. The blob asked for
+	 * already is no conflict. No $from_sha256 is the unconditional write of a
+	 * caller that knows no base.
+	 *
+	 * Read and written under the row hold save_new_content takes, so a version
+	 * cannot land between the check and the write.
+	 */
+	public static function save_new_metadata($file, $new_metadata, $from_sha256 = '') {
+		$from = strtolower((string)$from_sha256);
+		// A caller already in a transaction keeps it: the hold lasts until it
+		// commits, and a refusal is left for it to roll back.
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$own_tx = !$dblink->inTransaction();
+		if ($own_tx) { $dblink->beginTransaction(); }
+		try {
+			self::_lock_file((int)$file->key);
+			$current = self::_encrypted_metadata((int)$file->key);
+			if ($from !== '' && !hash_equals(hash('sha256', $current), $from) && $current !== (string)$new_metadata) {
+				throw new FileHeadMovedException('moved_since', (int)$file->key);
+			}
+			$q = $dblink->prepare('UPDATE fil_files SET fil_encrypted_metadata = ? WHERE fil_file_id = ?');
+			$q->execute(array((string)$new_metadata, (int)$file->key));
+			if ($own_tx) { $dblink->commit(); }
+		} catch (Exception $e) {
+			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
+			throw $e;
+		}
+		$file->set('fil_encrypted_metadata', (string)$new_metadata, false);
+		$file->set('fil_fbb_file_blob_id', self::_head_blob_id((int)$file->key), false);
 	}
 
 	/** A blob's content hash, '' when it has none on record. */

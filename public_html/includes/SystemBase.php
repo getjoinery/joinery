@@ -3075,9 +3075,18 @@ abstract class SystemBase {
 			}
 		}
 
+		// An 'insert_only' column is written when the row is created and moved
+		// afterwards only by its owner's targeted UPDATE. A copy loaded before
+		// that UPDATE would otherwise put the old value back when it is saved for
+		// any other reason.
 		$rowdata = array();
-		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
+		$kept_columns = array();
+		foreach(get_class($this)::$field_specifications as $field => $spec) {
 			if (isset($skip_sealed[$field])) continue;
+			if ($this->key && !empty($spec['insert_only'])) {
+				$kept_columns[] = $field;
+				continue;
+			}
 			$rowdata[$field] = $this->get($field);
 		}
 
@@ -3308,6 +3317,17 @@ abstract class SystemBase {
 				exit;
 			}
 			$this->key = $p_keys[static::$pkey_column];
+			// The columns the save left alone are read back, so this copy holds
+			// the row as stored rather than what it was loaded with.
+			if ($kept_columns) {
+				$kq = $dblink->prepare('SELECT ' . implode(', ', $kept_columns) . ' FROM ' . static::$tablename
+					. ' WHERE ' . static::$pkey_column . ' = ?');
+				$kq->execute(array($this->key));
+				$kept_row = $kq->fetch(PDO::FETCH_ASSOC);
+				foreach ($kept_columns as $kept) {
+					$this->set($kept, $kept_row ? $kept_row[$kept] : NULL, false);
+				}
+			}
 		}
 		else{
 			$seq = static::$tablename . '_' . static::$pkey_column . '_seq';

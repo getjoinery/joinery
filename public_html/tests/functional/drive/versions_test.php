@@ -435,4 +435,86 @@ $stale_copy->permanent_delete();
 check_ledger($old_head, 'the blob the stale copy was pointing at');
 check_ledger((int)$new_head->key, 'the blob that was actually the head');
 
+// ---------------------------------------------------------------------------
+section('a save through a copy loaded before a version keeps that version');
+
+// A rename loads the file, checks the name, and saves it; an upload sets the
+// new version's date on a copy it loaded a moment before. A version landing in
+// between used to be undone by the save, which wrote every column back --
+// the old head blob among them. The edit vanished, and its bytes kept a
+// reference nothing held (B11). The head, and an encrypted file's metadata
+// blob, move only where versions are written.
+$kfile = File::createFromBytes('kept-' . bin2hex(random_bytes(6)), 'kept.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $kfile->key;
+$kfile_id = (int)$kfile->key;
+$k_old = (int)$kfile->get('fil_fbb_file_blob_id');
+
+$renamer = new File($kfile_id, true);
+$k_new = make_blob('kept-new-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content(new File($kfile_id, true), $k_new, $user->key);
+$renamer->set('fil_title', 'kept-renamed.txt');
+check(DriveHelper::save_file_unless_name_taken($renamer), 'the rename through the earlier copy saves');
+check(head_blob($kfile_id) === (int)$k_new->key, 'and the version stays the head', head_blob($kfile_id) . ' vs ' . $k_new->key);
+check((string)(new File($kfile_id, true))->get('fil_title') === 'kept-renamed.txt', 'with the new name');
+check_ledger($k_old, 'the blob the version demoted');
+check_ledger((int)$k_new->key, 'the blob the version installed');
+
+$dater = new File($kfile_id, true);
+$k_next = make_blob('kept-next-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content(new File($kfile_id, true), $k_next, $user->key);
+$dater->set('fil_content_modified_time', gmdate('Y-m-d H:i:s'));
+$dater->save();
+check(head_blob($kfile_id) === (int)$k_next->key, 'a date set on an earlier copy keeps the later version too');
+check_ledger((int)$k_new->key, 'the blob the later version demoted');
+check_ledger((int)$k_next->key, 'the blob the later version installed');
+
+// The copy holds the head as stored once it is saved, so what the save does
+// with the bytes -- here, publishing them -- reaches the head and not the
+// version the head replaced.
+$publisher = new File($kfile_id, true);
+$k_public = make_blob('kept-public-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content(new File($kfile_id, true), $k_public, $user->key);
+$publisher->set('fil_private', false);
+$publisher->save();
+check((int)$publisher->get('fil_fbb_file_blob_id') === (int)$k_public->key, 'the saved copy holds the head as stored');
+check(!(new FileBlob((int)$k_public->key, true))->is_private_bool(), 'the head is published');
+check((new FileBlob((int)$k_next->key, true))->is_private_bool(), 'the version it replaced is not');
+$publisher->set('fil_private', true);
+$publisher->save();
+
+// An encrypted file's name, size and date live in its metadata blob, which a
+// version rewrites with the content.
+$set_sealed = $dblink->prepare('UPDATE fil_files SET fil_encrypted_metadata = ? WHERE fil_file_id = ?');
+$read_sealed = function () use ($dblink, $kfile_id) {
+	$q = $dblink->prepare('SELECT fil_encrypted_metadata FROM fil_files WHERE fil_file_id = ?');
+	$q->execute(array($kfile_id));
+	return (string)$q->fetchColumn();
+};
+$set_sealed->execute(array('sealed-first', $kfile_id));
+$mover = new File($kfile_id, true);
+$late_renamer = new File($kfile_id, true);
+$k_sealed = make_blob('kept-sealed-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content(new File($kfile_id, true), $k_sealed, $user->key,
+	array('base_metadata_sha256' => hash('sha256', 'sealed-first'), 'encrypted_metadata' => 'sealed-with-the-version'));
+$mover->set('fil_content_modified_time', gmdate('Y-m-d H:i:s'));
+$mover->save();
+check($read_sealed() === 'sealed-with-the-version', "an earlier copy's save keeps the version's metadata blob", $read_sealed());
+check(head_blob($kfile_id) === (int)$k_sealed->key, 'and its head');
+
+// An encrypted rename sealed from the blob the version replaced is refused: it
+// would put the name, size and date from before the version back.
+$threw = null;
+try {
+	FileVersion::save_new_metadata($late_renamer, 'sealed-by-a-late-rename', hash('sha256', 'sealed-first'));
+} catch (FileHeadMovedException $e) {
+	$threw = $e;
+}
+check($threw !== null && $threw->reason === 'moved_since', 'a rename sealed before the version is refused moved_since');
+check($read_sealed() === 'sealed-with-the-version', "and the version's blob survives");
+FileVersion::save_new_metadata($renamer, 'sealed-by-a-rename', hash('sha256', 'sealed-with-the-version'));
+check($read_sealed() === 'sealed-by-a-rename', 'one sealed from the blob as it stands is written, through any copy');
+check(head_blob($kfile_id) === (int)$k_sealed->key, 'leaving the head where the version put it');
+$set_sealed->execute(array(null, $kfile_id));
+
 harness_finish();

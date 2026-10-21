@@ -36,7 +36,7 @@
  * nothing. Re-running after a successful repair is a no-op, because repaired
  * records no longer have a NULL blob pointer.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -166,8 +166,17 @@ foreach ($rows as $row) {
 			throw new Exception('blob creation returned nothing');
 		}
 
-		$file->set('fil_fbb_file_blob_id', $blob->key);
-		$file->save();
+		// The head pointer is never written by save() on an existing row; the
+		// row is matched on still having none, so a repair cannot replace bytes
+		// something attached since the query.
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$attach = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ? AND fil_fbb_file_blob_id IS NULL');
+		$attach->execute(array((int)$blob->key, (int)$file->key));
+		if ($attach->rowCount() !== 1) {
+			FileBlob::release($blob->key);
+			throw new Exception('file record gained bytes while this ran');
+		}
+		$file->set('fil_fbb_file_blob_id', (int)$blob->key, false);
 
 		echo "  OK     [{$id}] {$name} -> blob {$blob->key} ({$bytes} bytes, "
 			. ($is_private ? 'private' : 'public') . "){$note}\n";

@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.18.0 - bytes_present(): whether this file's bytes are anywhere to serve; a thumbnail of a
+ * @version 1.19.0 - the head blob and the encrypted metadata blob are insert_only: a save through a copy
+ *                   loaded before a new version leaves the version in place (FileVersion moves them)
+ * @changelog 1.18.0 - bytes_present(): whether this file's bytes are anywhere to serve; a thumbnail of a
  *                   file without them is its type icon, never a broken image
  * @changelog 1.17.0 - plugins declare their own origin tags (plugin.json "fileSources", FileSourceDeclarations);
  *                   source_catalog() merges them over core_source_catalog(). The mailbox, messenger,
@@ -272,8 +274,9 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // path (File::createFromUpload → FileBlob::createFromPath): a File without
 	    // a blob is never created. The storage driver + offload counters that used
 	    // to sit on fil_files now live on the blob and are shared by every file
-	    // that references it.
-	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
+	    // that references it. After the insert it moves only by a targeted
+	    // UPDATE (FileVersion, a copy-on-write split), never by save().
+	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true, 'insert_only'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
 	    // When the file.uploaded signal went out for it (announce_upload()):
 	    // a file is announced once, when it is public.
@@ -318,8 +321,9 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_plain_size_bytes' => array('type'=>'int8', 'is_nullable'=>true),
 	    // Per-file metadata (name, mime, size, chunk size, content id, thumb flag)
 	    // JSON-encoded then encrypted under the file key, produced in the browser.
-	    // Opaque here.
-	    'fil_encrypted_metadata' => array('type'=>'text', 'is_nullable'=>true),
+	    // Opaque here. Rewritten by a new version and by a rename, both in
+	    // FileVersion under the file's row lock, never by save().
+	    'fil_encrypted_metadata' => array('type'=>'text', 'is_nullable'=>true, 'insert_only'=>true),
 	    // The content's own modification time on the client that uploaded it, as
 	    // distinct from fil_create_time (when the server first saw it). Sync
 	    // clients set it so a file copied back down keeps its original timestamp
