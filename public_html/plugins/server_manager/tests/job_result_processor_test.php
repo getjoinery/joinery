@@ -1980,6 +1980,82 @@ section('reset_failed_unit: before and after, and a fresh host report behind an 
 }
 
 
+section('install_security_updates (agent 1.87.0): what was installed, and a host report behind it');
+
+{
+	$su_node = jrp_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,install_security_updates',
+	));
+	$su_envelope = function ($object) {
+		return "=== [Step 1/1] word ===\n" . json_encode(array(
+			'api_version' => '1.0',
+			'data' => array('output' => json_encode($object), 'output_bytes' => 1),
+		));
+	};
+	$su_reports = function () use ($su_node) {
+		$n = 0;
+		foreach (new MultiManagementJob(array('node_id' => (int)$su_node->key, 'job_type' => 'host_report')) as $j) {
+			harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+			$n++;
+		}
+		return $n;
+	};
+	$su_object = function ($extra = array()) {
+		return array_merge(array(
+			'outcome' => 'installed', 'reason' => '', 'apt_update' => 'ok', 'upgrade_exit' => 0,
+			'upgraded' => array(
+				array('package' => 'libnew1:amd64', 'from' => '', 'to' => '1.0-1'),
+				array('package' => 'php8.3-fpm:amd64', 'from' => '8.3.35-1', 'to' => '8.3.36-1'),
+			),
+			'upgraded_count' => 2, 'truncated' => false, 'reboot_required' => true,
+			'services_needing_restart' => array('php8.3-fpm.service'),
+		), $extra);
+	};
+
+	$su_job = jrp_job($su_node, 'install_security_updates', $su_envelope($su_object()));
+	JobResultProcessor::process($su_job);
+	$r = json_decode((string)$su_job->get('mjb_result'), true);
+	check(is_array($r) && $r['read'] === true && $r['outcome'] === 'installed' && $r['upgraded_count'] === 2
+		&& $r['upgraded'][1] === array('package' => 'php8.3-fpm:amd64', 'from' => '8.3.35-1', 'to' => '8.3.36-1')
+		&& $r['upgraded'][0]['from'] === '' && $r['reboot_required'] === true
+		&& $r['services_needing_restart'] === array('php8.3-fpm.service'),
+		'each package with its old and new version, the reboot asked for and the service still on old code are kept', var_export($r, true));
+	check($su_reports() === 1, 'a run that installed something queues one host report, so the Machine card shows the reboot');
+
+	$none = jrp_job($su_node, 'install_security_updates', $su_envelope($su_object(array(
+		'outcome' => 'nothing_to_install', 'upgraded' => array(), 'upgraded_count' => 0, 'reboot_required' => false,
+		'services_needing_restart' => 'unknown'))));
+	JobResultProcessor::process($none);
+	$n = json_decode((string)$none->get('mjb_result'), true);
+	check($n['outcome'] === 'nothing_to_install' && $n['upgraded'] === array() && $n['services_needing_restart'] === null,
+		'nothing to install reads as such, and a service list the node could not read is null, not empty', var_export($n, true));
+	check($su_reports() === 1, 'a run that installed nothing queues no further report');
+
+	$hostile = jrp_job($su_node, 'install_security_updates', $su_envelope($su_object(array(
+		'outcome' => 'pwned', 'apt_update' => '<b>', 'reboot_required' => 'yes', 'upgrade_exit' => '0',
+		'upgraded' => array(array('package' => '<script>x</script>', 'from' => 'a b', 'to' => "1\n2"), 'not a row', array('from' => '1')),
+		'upgraded_count' => -4, 'surprise' => 1,
+	))));
+	JobResultProcessor::process($hostile);
+	$h = json_decode((string)$hostile->get('mjb_result'), true);
+	check(is_array($h) && !isset($h['surprise']) && $h['outcome'] === 'unknown' && $h['apt_update'] === 'unknown'
+		&& $h['reboot_required'] === false && $h['upgrade_exit'] === null,
+		'an outcome or field outside the script\'s words reads as unknown; a reboot not literally true is false', var_export($h, true));
+	check(count($h['upgraded']) === 1 && $h['upgraded'][0] === array('package' => 'scriptxscript', 'from' => 'ab', 'to' => '12')
+		&& $h['upgraded_count'] === 1,
+		'names and versions are reduced to a package\'s characters; a row with no package is dropped; a bad count is the list\'s', var_export($h, true));
+
+	$unread = jrp_job($su_node, 'install_security_updates', "=== [Step 1/1] word ===\nrefused\n");
+	JobResultProcessor::process($unread);
+	check(json_decode((string)$unread->get('mjb_result'), true) === array('read' => false),
+		'a job that came back with no object records read=false');
+	check(in_array('install_security_updates', JobResultProcessor::processable_types(), true),
+		'install_security_updates is a type this processor knows');
+}
+
+
 section('site_census: the node\'s count is kept for comparing, and nothing else changes');
 
 // specs/site_copy.md WP3. The census is what the node printed as root, inside
@@ -2191,5 +2267,72 @@ check(empty($rr['scheduled']) && $rr['refused'] === 'no_escrow' && !JobResultPro
 	'a refused reboot is not scheduled and nothing is awaited', var_export($rr, true));
 check(JobResultProcessor::sanitise_reboot_machine(array('scheduled' => true, 'refused' => 'container'))['scheduled'] === false,
 	'a result that both schedules and refuses reads as refused');
+
+section('site_state_report (agent 1.86.0): the records are kept, and a value only on a plain record');
+
+$ss_entry = function ($name, $extra = array()) {
+	return array_merge(array('name' => $name, 'kind' => 'file', 'bytes' => 12, 'mode' => '0600', 'root_owned' => true,
+		'modified' => '2026-10-21T01:12:15Z'), $extra);
+};
+$ss = JobResultProcessor::sanitise_site_state_report(array(
+	'sites_dir' => '/etc/joinery/sites', 'exists' => true, 'truncated' => false,
+	'reading'   => array('site' => 'src3', 'reason' => 'copy', 'copy_of' => 37),
+	'sites'     => array(array('site' => 'src3', 'entries' => array(
+		$ss_entry('state', array('value' => 'quiet copy')),
+		$ss_entry('copy_of', array('value' => '37')),
+		$ss_entry('look_secret', array('value' => 'a1b2c3d4e5f6')),
+		$ss_entry('forward', array('value' => '<script>alert(1)</script>')),
+		$ss_entry('held', array('kind' => 'dir', 'bytes' => 4096, 'mode' => '0755')),
+		$ss_entry('held/state', array('value' => 'not a top-level record')),
+		$ss_entry("bad\x01name", array('kind' => 'fifo', 'mode' => 'rwx', 'modified' => 'yesterday', 'root_owned' => 'yes')),
+		array('name' => 'vouched', 'error' => 'permission denied'),
+		'not a row',
+	))),
+));
+$ss_rows = array();
+foreach ($ss['sites'][0]['entries'] as $e) { $ss_rows[$e['name']] = $e; }
+check($ss['read'] === true && $ss['exists'] === true && $ss['reading'] === array('site' => 'src3', 'reason' => 'copy', 'copy_of' => 37)
+	&& count($ss['sites'][0]['entries']) === 8,
+	'site_state_report: the reading and eight records kept; a row that is not an object dropped', var_export($ss, true));
+check(($ss_rows['state']['value'] ?? null) === 'quiet copy' && ($ss_rows['copy_of']['value'] ?? null) === '37',
+	'the state line and copy_of keep their values');
+check(!array_key_exists('value', $ss_rows['look_secret']) && ($ss_rows['look_secret']['bytes'] ?? null) === 12,
+	'a value sent on the look secret is dropped; the record is still named and sized');
+check(!array_key_exists('value', $ss_rows['forward']) && !array_key_exists('value', $ss_rows['held/state']),
+	'a value that is not plain text, and one on a nested record, are dropped');
+check(!array_key_exists('bytes', $ss_rows['held']) && $ss_rows['held']['kind'] === 'dir',
+	'a directory carries no size');
+check(isset($ss_rows['badname']) && $ss_rows['badname']['kind'] === 'other' && $ss_rows['badname']['mode'] === ''
+	&& $ss_rows['badname']['modified'] === '' && !array_key_exists('root_owned', $ss_rows['badname']),
+	'a control byte is stripped from a name; an unknown kind, a bad mode, a bad time and a non-boolean owner are not kept',
+	var_export($ss_rows['badname'] ?? null, true));
+check(($ss_rows['vouched']['error'] ?? null) === 'permission denied' && count($ss_rows['vouched']) === 2,
+	'a record the node could not read keeps its name and the reason only');
+
+$ss_big = JobResultProcessor::sanitise_site_state_report(array('exists' => true, 'truncated' => false,
+	'reading' => array('site' => 'x', 'reason' => 'gone', 'copy_of' => -4),
+	'sites' => array_merge(array(array('site' => 'many', 'entries' => array_fill(0, 70, $ss_entry('history')))),
+		array_fill(0, 120, array('site' => 's', 'entries' => array())))));
+check($ss_big['truncated'] === true && count($ss_big['sites']) === 100 && count($ss_big['sites'][0]['entries']) === 64,
+	'past 100 sites or 64 records the result is cut and says so, though the node said it was not');
+check($ss_big['reading']['reason'] === 'unknown' && $ss_big['reading']['copy_of'] === 0,
+	'a reading the word never gives is unknown, and a copy_of that is not a node id is none');
+check(JobResultProcessor::sanitise_site_state_report(null) === array('read' => false)
+	&& JobResultProcessor::sanitise_site_state_report(array('sites' => 'all')) === array('read' => false),
+	'output that is not the report is not read');
+check(!array_key_exists('reading', JobResultProcessor::sanitise_site_state_report(array('exists' => false, 'sites' => array()))),
+	'a machine with no site gives no reading, and none is made up');
+
+// End to end: the Go word answers in the envelope itself, no transcript around it.
+$ss_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x52", 32))));
+$ss_job = jrp_job($ss_node, 'site_state_report', json_encode(array('api_version' => '1.0', 'data' => array(
+	'exists' => true, 'reading' => array('copy_of' => 0, 'reason' => '', 'site' => 'src3'), 'sites' => array(),
+	'sites_dir' => '/etc/joinery/sites', 'truncated' => false))));
+JobResultProcessor::process($ss_job);
+$ss_job->load();
+$ss_r = json_decode((string)$ss_job->get('mjb_result'), true);
+check(($ss_r['read'] ?? null) === true && ($ss_r['reading']['site'] ?? null) === 'src3' && $ss_r['sites'] === array(),
+	'a site_state_report job keeps its report as its result, which the job page renders', var_export($ss_r, true));
+check(in_array('site_state_report', JobResultProcessor::processable_types(), true), 'site_state_report is a type this processor knows');
 
 harness_finish();

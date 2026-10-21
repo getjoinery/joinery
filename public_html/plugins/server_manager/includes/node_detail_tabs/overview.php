@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.77 - Install security updates now (install_security_updates, agent 1.87.0) beside when they last ran
  * @version 1.76 - Site state records (site_state_report, agent 1.86.0) beside Listening ports under Machine
  * @version 1.75 - a site container being replaced says so; a Replace button replaces one on a fresh image now
  *                (recreate_site); a line says when the host last checked for fixes to its sites' OS, what was
@@ -200,7 +201,8 @@
 </form>
 <?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
 	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine',
-	'nodeActionSiteStateReport' => 'site_state_report'] as $form_id => $form_action) { ?>
+	'nodeActionSiteStateReport' => 'site_state_report',
+	'nodeActionInstallSecurityUpdates' => 'install_security_updates'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="<?php echo $form_action; ?>">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -659,7 +661,8 @@
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
-			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report'];
+			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
+			'install_security_updates'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
@@ -1780,7 +1783,19 @@
 					}
 				}
 			}
-			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . '</div>';
+			// The nightly run, asked for now (agent 1.87.0): a fix for a hole
+			// being attacked today need not wait for tomorrow morning.
+			$su_button = '';
+			if (JobCommandBuilder::has_primitive($node, 'install_security_updates')) {
+				$su_ask = 'Install the security updates ' . (string)$node->get('mgn_name') . ' would install at its next nightly run, now?'
+					. ' A service whose package is updated restarts, which takes a few seconds. The machine is not rebooted;'
+					. ' if an update asks for a reboot, this page says so.';
+				$su_button = ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Run the machine\'s automatic security updates now instead of waiting for the nightly run"'
+					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($su_ask), ENT_QUOTES, 'UTF-8')
+					. ', function(){ document.getElementById(\'nodeActionInstallSecurityUpdates\').submit(); })">Install security updates now</button>';
+			}
+			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . $su_button . '</div>';
 			if (is_array($hr['os'])) {
 				$ru = $hr['os']['release_upgrade'];
 				if ($ru['offered'] !== 'unknown') {

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.136 - build_install_security_updates(): the install_security_updates word (agent 1.87.0+), the nightly
+ *                  security updates installed now, so a fix for a hole being attacked need not wait for the morning run
  * @version 1.135 - build_site_state_report(): the site_state_report word (agent 1.86.0+), what every site state
  *                  directory on the machine holds, so a kept copy's leftover records can be seen
  * @version 1.134 - build_copy_probes(): the copy_probes word (agent 1.84.2+), a site's walls proven by acting as it
@@ -3155,6 +3157,25 @@ class JobCommandBuilder {
 
 	public static function build_site_state_report_primitive($node) {
 		return ['primitive' => 'site_state_report', 'params' => []];
+	}
+
+	/**
+	 * Install now the updates the machine's own unattended-upgrades policy
+	 * allows (agent 1.87.0): the packages its nightly run would take, never a
+	 * general upgrade and never a reboot. PRIMITIVE ONLY, no parameters: what
+	 * is installed is the machine's policy, not this plane's choice.
+	 */
+	public static function build_install_security_updates($node) {
+		if (!self::has_primitive($node, 'install_security_updates')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be asked to install its security updates. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['install_security_updates']));
+		}
+		return self::build_install_security_updates_primitive($node);
+	}
+
+	public static function build_install_security_updates_primitive($node) {
+		return ['primitive' => 'install_security_updates', 'params' => []];
 	}
 
 	/**

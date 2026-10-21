@@ -5,6 +5,10 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.20 - install_security_updates results (agent 1.87.0): what was installed, with old and new versions,
+ *                 and any reboot or service restart still owed
+ * @version 1.19 - the site state card reads the processed result (JobResultProcessor 1.96); a reading it does not
+ *                 know is not called live
  * @version 1.18 - site_state_report results (agent 1.86.0): each site state directory's records
  * @version 1.17 - listening_sockets, container_inventory, spam_learning_status and reboot_machine results (agent 1.76.0)
  * @version 1.16 - Mark as failed on a running agent job: fails it as lost (ManagementJob::markLost) and frees the
@@ -493,7 +497,52 @@ if ($result) {
 			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
 			. '</div></div>';
 		$result_data = null;
-	} elseif (is_array($result_data) && $job_type === 'site_state_report' && array_key_exists('sites', $result_data)) {
+	} elseif (is_array($result_data) && $job_type === 'install_security_updates' && !empty($result_data['read'])) {
+		// The nightly security updates, run now (agent 1.87.0): the outcome in
+		// plain words, then each package that changed.
+		$su_outcomes = array(
+			'installed'          => 'security updates installed',
+			'nothing_to_install' => 'nothing to install: the machine already had every update its policy allows',
+			'failed'             => 'the updater reported an error',
+			'busy'               => 'another package run held the lock; try again in a few minutes',
+			'unavailable'        => 'this machine cannot run automatic updates',
+		);
+		$su_outcome = (string)($result_data['outcome'] ?? 'unknown');
+		$su_count = (int)($result_data['upgraded_count'] ?? 0);
+		echo '<div class="card mb-3"><div class="card-header"><strong>Security updates</strong> <small class="text-muted">— '
+			. htmlspecialchars($su_outcomes[$su_outcome] ?? 'outcome unknown')
+			. ($su_count > 0 ? ' (' . $su_count . ' package' . ($su_count === 1 ? '' : 's') . ')' : '')
+			. '</small></div><div class="card-body">';
+		if ((string)($result_data['reason'] ?? '') !== '') {
+			echo '<div class="mb-2">' . htmlspecialchars((string)$result_data['reason']) . '</div>';
+		}
+		if (($result_data['apt_update'] ?? '') === 'failed') {
+			echo '<div class="mb-2 text-warning">The package lists could not be refreshed, so only updates the machine already knew about were considered.</div>';
+		}
+		if (!empty($result_data['reboot_required'])) {
+			echo '<div class="mb-2 text-warning">An update asks for a reboot. It was not rebooted; the Reboot button on the node page does that.</div>';
+		}
+		$su_services = $result_data['services_needing_restart'] ?? null;
+		if (is_array($su_services) && $su_services) {
+			echo '<div class="mb-2 text-warning">Still running replaced code until restarted: '
+				. htmlspecialchars(implode(', ', array_map('strval', $su_services))) . '</div>';
+		}
+		$su_rows = is_array($result_data['upgraded'] ?? null) ? $result_data['upgraded'] : array();
+		if ($su_rows) {
+			echo '<table class="table table-sm mb-0"><thead><tr><th>Package</th><th>Was</th><th>Now</th></tr></thead><tbody>';
+			foreach ($su_rows as $row) {
+				echo '<tr><td>' . htmlspecialchars((string)($row['package'] ?? '')) . '</td><td>'
+					. htmlspecialchars((string)($row['from'] ?? '') !== '' ? (string)$row['from'] : 'new') . '</td><td>'
+					. htmlspecialchars((string)($row['to'] ?? '')) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+			if (!empty($result_data['truncated'])) {
+				echo '<small class="text-muted">The list stops at ' . count($su_rows) . '; ' . $su_count . ' packages changed in all.</small>';
+			}
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'site_state_report' && !empty($result_data['read'])) {
 		// What the machine's site state directories hold (agent 1.86.0): a
 		// table per site, the plain records' values, every other record named
 		// and sized only.
@@ -506,7 +555,7 @@ if ($result) {
 		if (is_array($reading)) {
 			$reason = (string)($reading['reason'] ?? '');
 			$what = $reason === 'copy' ? 'a dormant copy' . (!empty($reading['copy_of']) ? ' of node ' . (int)$reading['copy_of'] : '')
-				: ($reason === 'switchover' ? 'frozen for a switch-over' : 'live');
+				: ($reason === 'switchover' ? 'frozen for a switch-over' : ($reason === '' ? 'live' : 'in a state this page does not know'));
 			echo '<div class="mb-2">The agent reads its site, <strong>' . htmlspecialchars((string)($reading['site'] ?? '')) . '</strong>, as ' . $what . '.'
 				. (!empty($reading['error']) ? ' <span class="text-danger">' . htmlspecialchars((string)$reading['error']) . '</span>' : '') . '</div>';
 		}

@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.97 - process_install_security_updates (agent 1.87.0): what the machine's updater installed, each package
+ *                with its old and new version, and a host_report behind it so the Machine card shows the reboot it asks for
+ * @version 1.96 - a site_state_report result (agent 1.86.0) is kept, each field held to its shape and a value
+ *                kept only on a plain record; without it the job page never showed the report's card
  * @version 1.95 - a data root's recipient_set_by (host_report 1.35) is kept
  * @version 1.94 - a container inventory's security (container_inventory 1.3); the host report's sites (host_report 1.32), and its sites' filter and capabilities
  *                (host_report 1.33, site_security) are kept; a proven recovery key's public half, when a report carries it and it matches the fingerprint, is
@@ -2822,6 +2826,81 @@ HTML;
 		}
 	}
 
+	/** The outcomes install_security_updates.sh names; anything else reads as unknown. */
+	const SECURITY_UPDATES_OUTCOMES = ['installed', 'nothing_to_install', 'failed', 'busy', 'unavailable'];
+	/** Packages and services the script lists at most (its MAX_LIST). */
+	const SECURITY_UPDATES_MAX_LIST = 200;
+
+	/**
+	 * An install_security_updates job's result, held to the script's shape:
+	 * the outcome, each package that changed with its old and new version,
+	 * whether a reboot is asked for, and the services still running replaced
+	 * code. Names and versions keep only the characters a Debian package name
+	 * or version can have. Pure; the processor test drives it.
+	 */
+	public static function sanitise_install_security_updates($d) {
+		if (!is_array($d) || !isset($d['outcome'])) {
+			return ['read' => false];
+		}
+		$word = function ($v) { return substr(preg_replace('/[^A-Za-z0-9._@:+~-]/', '', (string)$v), 0, 128); };
+		$packages = [];
+		$listed = is_array($d['upgraded'] ?? null) ? array_values($d['upgraded']) : [];
+		foreach (array_slice($listed, 0, self::SECURITY_UPDATES_MAX_LIST) as $p) {
+			if (!is_array($p) || $word($p['package'] ?? '') === '') { continue; }
+			$packages[] = ['package' => $word($p['package']), 'from' => $word($p['from'] ?? ''), 'to' => $word($p['to'] ?? '')];
+		}
+		$services = null;
+		if (is_array($d['services_needing_restart'] ?? null)) {
+			$services = [];
+			foreach (array_slice(array_values($d['services_needing_restart']), 0, self::SECURITY_UPDATES_MAX_LIST) as $sv) {
+				if (is_string($sv) && $word($sv) !== '') { $services[] = $word($sv); }
+			}
+		}
+		$outcome = in_array($d['outcome'], self::SECURITY_UPDATES_OUTCOMES, true) ? $d['outcome'] : 'unknown';
+		$count = is_int($d['upgraded_count'] ?? null) && $d['upgraded_count'] >= 0 ? $d['upgraded_count'] : count($packages);
+		return [
+			'read'            => true,
+			'outcome'         => $outcome,
+			'reason'          => substr(preg_replace('/[^\x20-\x7e]/', '', (string)($d['reason'] ?? '')), 0, 300),
+			'apt_update'      => in_array($d['apt_update'] ?? '', ['ok', 'failed', 'skipped'], true) ? $d['apt_update'] : 'unknown',
+			'upgrade_exit'    => is_int($d['upgrade_exit'] ?? null) ? $d['upgrade_exit'] : null,
+			'upgraded'        => $packages,
+			'upgraded_count'  => max($count, count($packages)),
+			'truncated'       => ($d['truncated'] ?? null) === true || count($listed) > self::SECURITY_UPDATES_MAX_LIST,
+			'reboot_required' => ($d['reboot_required'] ?? null) === true,
+			'services_needing_restart' => $services,
+		];
+	}
+
+	/**
+	 * An install_security_updates job's result. A run that installed anything
+	 * is followed by a host_report, because the Machine card that offered the
+	 * button shows the pending reboot and when updates last ran from the last
+	 * one. Not queued when one is already queued or ran in the last minute.
+	 */
+	private static function process_install_security_updates($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$result = self::sanitise_install_security_updates(($text !== '') ? json_decode(trim($text), true) : null);
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if (!empty($result['read']) && $result['upgraded_count'] > 0 && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 60)) {
+					ManagementJob::createFromBuild($node_id, 'host_report',
+						JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The updates are installed; not being able to re-measure is
+				// not a reason to call the run anything else.
+			}
+		}
+	}
+
 	/** One journal line, capped on the plane as the node caps it. */
 	const UNIT_JOURNAL_MAX_LINE = 2000;
 	/**
@@ -3516,6 +3595,81 @@ HTML;
 	 */
 	private static function process_reboot_machine($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_reboot_machine(self::script_json($job))));
+		$job->save();
+	}
+
+	/** Sites and records each a site_state_report lists at most (the word's stateReportMaxSites and stateReportMaxEntries). */
+	const SITE_STATE_MAX_SITES = 100;
+	const SITE_STATE_MAX_ENTRIES = 64;
+
+	/** The records whose first line the word prints; any other record is named and sized only. */
+	const SITE_STATE_VALUE_RECORDS = ['state', 'copy_of', 'forward', 'quiet', 'idblock'];
+
+	/**
+	 * A site_state_report job's result (agent 1.86.0): each site state
+	 * directory's records by name, kind, size, mode, owner and time, a plain
+	 * record's first line, and the agent's reading of its own site. Each field
+	 * is held to the shape the word gives it, and a value is kept only on one
+	 * of the plain records, so a node cannot have the job page print a secret
+	 * record's contents. Pure; the processor test drives it.
+	 */
+	public static function sanitise_site_state_report($d) {
+		if (!is_array($d) || !is_array($d['sites'] ?? null)) {
+			return ['read' => false];
+		}
+		// A name as the word prints it: plain, or quoted with ASCII escapes.
+		$text = function ($v, $max) { return substr(preg_replace('/[^\x20-\x7e]/', '', (string)$v), 0, $max); };
+		$out = [
+			'read'      => true,
+			'sites_dir' => $text($d['sites_dir'] ?? '', 255),
+			'exists'    => ($d['exists'] ?? null) === true,
+			'sites'     => [],
+			'truncated' => ($d['truncated'] ?? null) === true || count($d['sites']) > self::SITE_STATE_MAX_SITES,
+		];
+		if (is_array($d['reading'] ?? null)) {
+			$r = $d['reading'];
+			$out['reading'] = [
+				'site'    => $text($r['site'] ?? '', 128),
+				'reason'  => in_array($r['reason'] ?? '', ['', 'copy', 'switchover'], true) ? $r['reason'] : 'unknown',
+				'copy_of' => is_int($r['copy_of'] ?? null) && $r['copy_of'] > 0 ? $r['copy_of'] : 0,
+			];
+			if (isset($r['error'])) { $out['reading']['error'] = $text($r['error'], 300); }
+		}
+		foreach (array_slice(array_values($d['sites']), 0, self::SITE_STATE_MAX_SITES) as $s) {
+			if (!is_array($s)) { continue; }
+			$entries = [];
+			$listed = is_array($s['entries'] ?? null) ? array_values($s['entries']) : [];
+			if (count($listed) > self::SITE_STATE_MAX_ENTRIES) { $out['truncated'] = true; }
+			foreach (array_slice($listed, 0, self::SITE_STATE_MAX_ENTRIES) as $e) {
+				if (!is_array($e)) { continue; }
+				$name = $text($e['name'] ?? '', 400);
+				if (isset($e['error'])) {
+					$entries[] = ['name' => $name, 'error' => $text($e['error'], 300)];
+					continue;
+				}
+				$kind = in_array($e['kind'] ?? '', ['file', 'dir', 'symlink', 'other'], true) ? $e['kind'] : 'other';
+				$row = [
+					'name'     => $name,
+					'kind'     => $kind,
+					'mode'     => preg_match('/^[0-7]{4}$/', (string)($e['mode'] ?? '')) ? $e['mode'] : '',
+					'modified' => preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', (string)($e['modified'] ?? '')) ? $e['modified'] : '',
+				];
+				if (is_bool($e['root_owned'] ?? null)) { $row['root_owned'] = $e['root_owned']; }
+				if ($kind === 'file' && is_int($e['bytes'] ?? null) && $e['bytes'] >= 0) { $row['bytes'] = $e['bytes']; }
+				if ($kind === 'file' && in_array($name, self::SITE_STATE_VALUE_RECORDS, true)
+						&& is_string($e['value'] ?? null) && preg_match('/^[A-Za-z0-9 ._:-]{0,64}$/', $e['value'])) {
+					$row['value'] = $e['value'];
+				}
+				$entries[] = $row;
+			}
+			$out['sites'][] = ['site' => $text($s['site'] ?? '', 160), 'entries' => $entries];
+		}
+		return $out;
+	}
+
+	/** A site_state_report job's result: the word answers its fields itself (a Go handler, not a script). */
+	private static function process_site_state_report($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_site_state_report(self::extract_api_envelope_data($job->get('mjb_output') ?: ''))));
 		$job->save();
 	}
 
