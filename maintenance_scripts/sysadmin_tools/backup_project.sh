@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.10.0 - the root-only config/ files (_backup_root_only_files.sh, the list backup_files.sh reads)
+#                  are left out, each said out loud, when the run cannot read them and has no sudo: the web
+#                  user's standalone archive failed on config/admin_credentials.txt, 600 root:root on every
+#                  node, and on a publishing box's signing keys
 # Version: 2.9.0 - an upgrade's own trees at the site root (deploy/, upgrades/, upgrade_archives/,
 #                  public_html_*) are left out in both modes, as the chain's data part leaves them
 #                  out: they are the machine's, and no restore takes them (specs/host_restrictions.md D5).
@@ -467,6 +471,23 @@ print_info "Backing up database..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DB_SCRIPT="${SCRIPT_DIR}/backup_database.sh"
 
+# The config/ files readable by root only, on purpose (_backup_root_only_files.sh,
+# shared with backup_files.sh). root_only_unreadable prints each one this account
+# cannot read, one per line, and warns of each on stderr: a run that cannot read
+# them leaves them out and says so. Any other unreadable file still fails it.
+# shellcheck source=_backup_root_only_files.sh
+. "${SCRIPT_DIR}/_backup_root_only_files.sh"
+root_only_unreadable() {
+    local f
+    [ "$(id -u)" -eq 0 ] && return 0
+    for f in "${ROOT_ONLY_FILES[@]}"; do
+        if [ -e "${PROJECT_DIR}/config/${f}" ] && [ ! -r "${PROJECT_DIR}/config/${f}" ]; then
+            print_warning "config/${f} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)" >&2
+            echo "$f"
+        fi
+    done
+}
+
 if [ ! -f "$BACKUP_DB_SCRIPT" ]; then
     print_error "backup_database.sh not found at: $BACKUP_DB_SCRIPT"
     exit 1
@@ -584,6 +605,9 @@ fi
 RSYNC_EXCLUDES=()
 for x in "${TREE_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="${x}/"); done
 for x in "${ROOT_ONLY_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="/${x}/"); done
+if [ -z "$SUDO" ]; then
+    for f in $(root_only_unreadable); do RSYNC_EXCLUDES+=(--exclude="/config/${f}"); done
+fi
 RSYNC_STATUS=0
 $SUDO rsync -a "${RSYNC_EXCLUDES[@]}" \
     "$PROJECT_DIR/" "${TEMP_DIR}/${BACKUP_NAME}/project_files/" || RSYNC_STATUS=$?
@@ -720,17 +744,6 @@ if [ "$STREAM" = true ]; then
     # applies the rename to member names only — a symbolic link's target is
     # left as it is, exactly as the rsync copy left it; h renames hard-link
     # targets too, since they name another member of this same archive.
-    TAR_EXCLUDES=()
-    for x in "${TREE_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="$x"); done
-    TAR_EXCLUDES+=(--anchored)
-    for x in "${ROOT_ONLY_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="./${x}"); done
-    TAR_EXCLUDES+=(--no-anchored)
-    # The offloaded files' local paths, literal and unanchored, matched on the
-    # member name before the rename (`./static_files/uploads/x.jpg`). Last, so
-    # --no-wildcards reaches nothing else.
-    if [ -n "$EXCLUDE_FROM" ]; then
-        TAR_EXCLUDES+=(--no-wildcards --exclude-from="$EXCLUDE_FROM")
-    fi
     SUDO_TAR=""
     if [ "$(id -u)" -ne 0 ]; then
         if command -v sudo >/dev/null 2>&1 && sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
@@ -738,6 +751,20 @@ if [ "$STREAM" = true ]; then
         else
             print_warning "No passwordless sudo — reading as $(whoami); an unreadable file will fail this backup"
         fi
+    fi
+    TAR_EXCLUDES=()
+    for x in "${TREE_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="$x"); done
+    TAR_EXCLUDES+=(--anchored)
+    for x in "${ROOT_ONLY_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="./${x}"); done
+    if [ -z "$SUDO_TAR" ]; then
+        for f in $(root_only_unreadable); do TAR_EXCLUDES+=(--exclude="./config/${f}"); done
+    fi
+    TAR_EXCLUDES+=(--no-anchored)
+    # The offloaded files' local paths, literal and unanchored, matched on the
+    # member name before the rename (`./static_files/uploads/x.jpg`). Last, so
+    # --no-wildcards reaches nothing else.
+    if [ -n "$EXCLUDE_FROM" ]; then
+        TAR_EXCLUDES+=(--no-wildcards --exclude-from="$EXCLUDE_FROM")
     fi
     TAR_CMD=(${SUDO_TAR:+$SUDO_TAR} tar --warning=no-file-changed --warning=no-file-removed "${TAR_EXCLUDES[@]}"
              -czf - -C "$TEMP_DIR" "$BACKUP_NAME"

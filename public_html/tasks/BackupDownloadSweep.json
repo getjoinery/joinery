@@ -1,0 +1,6 @@
+{
+    "name": "Downloaded Backup Cleanup",
+    "description": "Deletes a backup built for download on the Backups page once it is a day old, so a whole-site archive never stays on this server longer than promised.",
+    "activate_on_install": true,
+    "default_frequency": "hourly"
+}

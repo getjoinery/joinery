@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.6.2 - the root-only list is read from _backup_root_only_files.sh, which backup_project.sh
+#                  reads too
 # Version: 1.6.1 - config/admin_credentials.txt joins the root-only files an unprivileged run leaves out,
 #                  and says: _site_init.sh writes it 600 root:root, so a container site's own backup
 #                  (the web user, no sudo in the container) failed on it at every run
@@ -374,18 +376,11 @@ if [ -n "$SNAR" ]; then
     TAR_ARGS+=(--listed-incremental="$SNAR" --no-check-device)
 fi
 
-# Some config/ files are readable by root only, on purpose: the signing keys on a
-# publishing box, because the web user must never be able to sign code
-# (agent_signing_key, specs/agent_local_queue_retirement.md, "G1 — decided") or
-# a release statement (release_statement_key, release_transparency); and the
-# first-login password _site_init.sh leaves for the operator
-# (admin_credentials.txt, 600 root:root, which stays on the node). An
-# unprivileged run, a container site's own backup among them, therefore cannot
-# carry them, and that is not the silent partial backup the doctrine forbids —
-# each is one named file, left out on purpose and said out loud. The root-run
-# manager backup of this same site carries them. Any other unreadable file
-# still fails the run.
-ROOT_ONLY_FILES=(agent_signing_key release_statement_key admin_credentials.txt)
+# Some config/ files are readable by root only, on purpose (the list, and why,
+# is _backup_root_only_files.sh, shared with backup_project.sh). An unprivileged
+# run leaves each out and says so; any other unreadable file still fails it.
+# shellcheck source=_backup_root_only_files.sh
+. "$(dirname "${BASH_SOURCE[0]}")/_backup_root_only_files.sh"
 if [ "$(id -u)" -ne 0 ]; then
     for FILE_NAME in "${ROOT_ONLY_FILES[@]}"; do
         FILE_PATH="${PROJECT_DIR}/config/${FILE_NAME}"
