@@ -4,6 +4,10 @@
 # automatic-update policy allows, and say what changed as ONE JSON object on
 # stdout.
 #
+# Version: 1.1 - unattended-upgrade is told apart from unattended-upgrade-shutdown
+#                by its command line: both have the process name unattended-upgr,
+#                and the shutdown helper runs for as long as the machine is up,
+#                so every run waited its full WAIT_FOR_APT and reported busy
 # Version: 1.0 - the install_security_updates operate word (agent 1.87.0). The
 #                agent runs this file, verified against the release manifest,
 #                with no arguments.
@@ -93,8 +97,12 @@ fi
 
 # Another package run holds apt's locks while it works; unattended-upgrade
 # gives up at once when it cannot take them, so wait for the run to end.
+# unattended-upgrade is found by its command line: its process name, cut to
+# 15 characters, is unattended-upgr, the same as unattended-upgrade-shutdown,
+# the helper Ubuntu keeps waiting for shutdown the whole time the machine is up.
 apt_busy() {
-    pgrep -x 'apt-get|apt|dpkg|unattended-upgr|aptitude' >/dev/null 2>&1
+    pgrep -x 'apt-get|apt|dpkg|aptitude' >/dev/null 2>&1 \
+        || pgrep -f 'unattended-upgrade( |$)' >/dev/null 2>&1
 }
 wait_for_apt() {
     local waited=0
