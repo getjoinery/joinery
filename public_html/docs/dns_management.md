@@ -390,10 +390,11 @@ with a driver here (`DnsRecordMove`, in Server Manager): every unproxied A and
 AAAA record in the zone naming the old server's address is pointed at the new
 server's address of its family, through each driver's ordinary
 `listRecords()` and `updateRecord()`. At the switch's start each such record's
-TTL goes to 60 seconds and its old TTL is kept; once the change has settled the
-old TTLs go back, and going back, from anywhere in the switch-over, puts the
-values and TTLs back. A record a stopped attempt left at 60 seconds keeps its
-original TTL on the next attempt. A record someone
+TTL goes to 60 seconds, or the shortest above that the DNS host allows (Linode
+keeps 120), and its old TTL is kept with the one the host holds, read back;
+once the change has settled the old TTLs go back, and going back, from anywhere
+in the switch-over, puts the values and TTLs back. A record a stopped attempt
+left at its lowered TTL keeps its original TTL on the next attempt. A record someone
 has since pointed elsewhere is left alone and named. As with the proxied move,
 the owner presses for each step with a token typed for that press, nothing is
 kept, and nothing is recorded in `dnr_managed_dns_records`.

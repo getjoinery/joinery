@@ -13,8 +13,10 @@
  *                 family. Refused, naming the record, when the copy has none.
  *   lower_ttl()   at the switch's start, each planned record's TTL goes to
  *                 TTL seconds, so moving it back, or a resolver that asks
- *                 again, waits a minute, not hours. Each record's old TTL is
- *                 kept in the plan.
+ *                 again, waits a minute or two, not hours. Each record's old
+ *                 TTL is kept in the plan, and the TTL the DNS host holds
+ *                 after the write (ttl_held), read back: a host may round it
+ *                 up (Linode keeps 120 for 60).
  *   move()        the records' values to the copy's addresses.
  *   move_back()   the inverse, from a fresh listing, as ProxiedOriginMove.
  *   restore_ttl() each record's old TTL again, once the move has settled
@@ -32,6 +34,8 @@
  *
  * The DNS credential lives for one request, as ProxiedOriginMove's does.
  *
+ * @version 1.2 - lower_ttl reads back the TTL the DNS host holds and records it (ttl_held); a later attempt knows
+ *                a record that host lowered by that value, not by TTL (B12)
  * @version 1.1 - settled: each resolver names the copy and none the old (other addresses do not hold it up), and
  *                MAX_WAIT ends the watch whatever they say; keep_earlier_ttls
  * @version 1.0
@@ -57,6 +61,7 @@ class DnsRecordMove {
 	 * The records to move, checked. Read-only.
 	 *
 	 * @return array{zone:string, records:array<int,array{id:string,type:string,name:string,from:string,to:string,ttl_was:?int}>}
+	 *         (lower_ttl() adds ttl_held to each record)
 	 * @throws DnsRecordMoveException naming what stops the move
 	 */
 	public static function plan(DnsProvider $driver, string $domain, ManagedNode $source, ManagedNode $copy): array {
@@ -140,9 +145,26 @@ class DnsRecordMove {
 		return array('zone' => '', 'records' => $records);
 	}
 
-	/** Each planned record's TTL to TTL seconds. A record already there is left. */
-	public static function lower_ttl(DnsProvider $driver, array $plan): void {
+	/**
+	 * Each planned record's TTL to TTL seconds, a record already there left.
+	 * Returns the plan's records, each with ttl_held: the TTL the DNS host
+	 * holds for it afterwards, read back, which is what visitors' resolvers
+	 * are told and what a later attempt finds (null when the record is gone).
+	 */
+	public static function lower_ttl(DnsProvider $driver, array $plan): array {
 		self::set_ttls($driver, $plan, function (array $rec) { return self::TTL; }, 'from');
+		$live = self::live_by_id($driver, (string)$plan['zone']);
+		$records = (array)$plan['records'];
+		foreach ($records as $i => $rec) {
+			$r = $live[$rec['id']] ?? null;
+			$records[$i]['ttl_held'] = ($r && $r->ttl !== null) ? (int)$r->ttl : null;
+		}
+		return $records;
+	}
+
+	/** The TTL a record is held at while it moves: what the DNS host kept, else what was asked. */
+	public static function held_ttl(array $rec): int {
+		return isset($rec['ttl_held']) && $rec['ttl_held'] !== null ? (int)$rec['ttl_held'] : self::TTL;
 	}
 
 	/** Each planned record's old TTL again, where one was recorded, at the value it holds now ($at: from or to). */
@@ -302,17 +324,24 @@ class DnsRecordMove {
 	 * A fresh plan's records, each keeping the TTL an earlier attempt's plan
 	 * recorded for it when the zone still carries the TTL that attempt
 	 * lowered it to (its TTLs were never put back): the original is not lost.
+	 * The lowered TTL is the one the DNS host held (ttl_held), which a host
+	 * that rounds keeps above TTL.
 	 */
 	public static function keep_earlier_ttls(array $records, array $earlier): array {
 		$was = array();
 		foreach ($earlier as $rec) {
-			if (isset($rec['id']) && ($rec['ttl_was'] ?? null) !== null && (int)$rec['ttl_was'] !== self::TTL) {
-				$was[(string)$rec['id']] = (int)$rec['ttl_was'];
+			if (!isset($rec['id']) || ($rec['ttl_was'] ?? null) === null) {
+				continue;
+			}
+			$held = self::held_ttl($rec);
+			if ((int)$rec['ttl_was'] !== $held) {
+				$was[(string)$rec['id']] = array('was' => (int)$rec['ttl_was'], 'held' => $held);
 			}
 		}
 		foreach ($records as $i => $rec) {
-			if ((int)($rec['ttl_was'] ?? 0) === self::TTL && isset($was[(string)$rec['id']])) {
-				$records[$i]['ttl_was'] = $was[(string)$rec['id']];
+			$e = $was[(string)($rec['id'] ?? '')] ?? null;
+			if ($e && (int)($rec['ttl_was'] ?? 0) === $e['held']) {
+				$records[$i]['ttl_was'] = $e['was'];
 			}
 		}
 		return $records;

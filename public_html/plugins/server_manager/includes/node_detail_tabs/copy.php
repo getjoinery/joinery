@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.26 - a DNS switch's records say the TTL the DNS host holds while they move, which can be longer
+ *                  than the one asked for (B12)
  * @version 1.25 - each way the address can move lists what would still name this server's address after it
  *                (SiteCopyAddressFacts); the switch-over shows the list it started with and the copy's reverse DNS
  * @version 1.24 - a dormant copy made at an older release than its site's says so at once (stale_release)
@@ -788,7 +790,7 @@ $copy_records_list = function () use ($copy_switch, $copy_h, $copy_swap_at, $cop
 				. ($copy_method === SiteCopyRunner::METHOD_PROXIED ? ' (proxied)' : '') . ': ' . $copy_h($r['from'])
 				. ' &rarr; ' . $copy_h($r['to'] !== '' ? $r['to'] : '(the copy has no address of this family)')
 				. (isset($r['ttl_was']) && $r['ttl_was'] !== null ? ' (TTL ' . (int)$r['ttl_was'] . ' s, held at '
-					. DnsRecordMove::TTL . ' s while it moves)' : '') . '</li>';
+					. DnsRecordMove::held_ttl($r) . ' s while it moves)' : '') . '</li>';
 		}
 		echo '</ul>';
 	}
@@ -871,7 +873,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 					array('copy_method' => $method), true);
 			} elseif ($method === SiteCopyRunner::METHOD_DNS) {
 				echo '<p class="small">The site\'s own A and AAAA records change to the copy\'s addresses. Their TTLs go to '
-					. DnsRecordMove::TTL . ' seconds now, before the site is frozen. Until the public resolvers all name the copy and one old '
+					. DnsRecordMove::TTL . ' seconds now, or the shortest above that the DNS host allows, before the site is frozen. Until the public resolvers all name the copy and one old '
 					. 'TTL has passed, ' . ($copy_dead_source ? 'visitors whose resolvers still name the old server fail.'
 						: 'this site forwards every visitor whose resolver still names it to the copy, and the copy believes its '
 							. 'forwarded addresses, so nobody is turned away.') . ' Enter a DNS token for <strong>' . $copy_h($copy_domain)

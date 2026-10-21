@@ -29,6 +29,8 @@
  *    the copy's reverse DNS set once the move settles on a server made here.
  *
  * @version 1.2 - a way back before the copy took the node asks it no untrust (B13)
+ * @version 1.2 - a DNS host that rounds a TTL up: the plan records what it holds, and a later attempt keeps the
+ *                originals (B12)
  * @version 1.1 - the IP-bound list and the reverse DNS at settle
  * @version 1.0
  */
@@ -57,13 +59,15 @@ class ScdFakeDns extends DnsDriverBase {
 	public function createRecord(string $zone, DnsRecord $record): void { throw new Exception('no creates here'); }
 	// $refuse: a record id whose writes the provider refuses.
 	public static $refuse = '';
+	// $min_ttl: the shortest TTL the host keeps; a shorter one is rounded up to it (Linode keeps 120 for 60).
+	public static $min_ttl = 0;
 	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {
 		if ((string)$live->provider_id === self::$refuse) {
 			throw new Exception('the provider refused the write');
 		}
 		self::$writes[] = array('id' => $live->provider_id, 'value' => $desired->value, 'ttl' => $desired->ttl);
 		self::$records[$live->provider_id]['value'] = $desired->value;
-		self::$records[$live->provider_id]['ttl'] = $desired->ttl;
+		self::$records[$live->provider_id]['ttl'] = $desired->ttl === null ? null : max((int)$desired->ttl, self::$min_ttl);
 	}
 	public function deleteRecord(string $zone, DnsRecord $live): void { throw new Exception('no deletes here'); }
 }
@@ -678,5 +682,35 @@ check(strpos($threw, 'Nothing was frozen') !== false && strpos($threw, 'were put
 	&& ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300
 	&& trim((string)$src->get('mgn_install_state')) === '' && $copy->status() === SiteCopy::STATUS_DORMANT,
 	'nothing frozen, and every TTL that reached a minute is back at its original', $threw . ' ' . json_encode(ScdFakeDns::$records));
+
+// ---------------------------------------------------------------------------
+section('A DNS host that rounds a TTL up: the plan says what it holds (B12)');
+
+$retire($src, $cnode);
+list($src, $cnode, $copy) = $pair('h');
+$reset_zone();
+ScdFakeDns::$min_ttl = 120;
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1);
+$copy->load();
+$recs = array();
+foreach ((array)($copy->switch_record()['records'] ?? array()) as $r) {
+	$recs[$r['id']] = $r;
+}
+check(ScdFakeDns::$records['r1']['ttl'] === 120 && ($recs['r1']['ttl_held'] ?? null) === 120 && ($recs['r2']['ttl_held'] ?? null) === 120
+	&& ($recs['r1']['ttl_was'] ?? null) === 3600 && DnsRecordMove::held_ttl($recs['r1']) === 120,
+	'each record carries the TTL the host keeps while it moves, read back, beside its original', json_encode($recs));
+$again = DnsRecordMove::keep_earlier_ttls(array(array('id' => 'r1', 'ttl_was' => 120), array('id' => 'r2', 'ttl_was' => 120)),
+	array_values($recs));
+check($again[0]['ttl_was'] === 3600 && $again[1]['ttl_was'] === 300,
+	'a later attempt that finds them still at the held TTL keeps the originals', json_encode($again));
+$older = DnsRecordMove::keep_earlier_ttls(array(array('id' => 'r1', 'ttl_was' => 120)), array(array('id' => 'r1', 'ttl_was' => 3600)));
+check($older[0]['ttl_was'] === 120,
+	'beside a plan that recorded no held TTL, only the asked one counts as lowered: 120 is the zone\'s', json_encode($older));
+SiteCopyRunner::go_back($copy, $dns());
+$copy->load();
+ScdFakeDns::$min_ttl = 0;
+check(ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300 && ScdFakeDns::$records['r3']['ttl'] === 3600,
+	'going back puts each original back', json_encode(ScdFakeDns::$records));
+$retire($src, $cnode);
 
 harness_finish();
