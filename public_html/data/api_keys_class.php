@@ -40,6 +40,15 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	const TYPE_SESSION = 'session';
 	const TYPE_APP_PASSWORD = 'app_password';
 
+	/**
+	 * The logged key types whose traffic is metered per person, after
+	 * authentication (apiv1.php), rather than against the address it came from:
+	 * a browser session ('browser', what ApiAuth logs for one), a session key (a
+	 * linked desktop, a phone app) and an app credential. Kept here so the
+	 * request log reads the list without naming a kind itself.
+	 */
+	const PER_PERSON_TYPES = array('browser', self::TYPE_SESSION, self::TYPE_APP_PASSWORD);
+
 	/** What an app password looks like when shown: jm-{public}-{secret}. */
 	const APP_PASSWORD_PREFIX = 'jm';
 

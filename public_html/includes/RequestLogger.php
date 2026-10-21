@@ -16,7 +16,9 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.7
+ * @version 1.8
+ * @changelog 1.8 - the per-person key types are read from ApiKey::PER_PERSON_TYPES; this file
+ *   names no credential kind
  * @changelog 1.7 - address_rate_limit_state(): an address's count leaves out the rows of
  *   traffic metered per person (browser sessions, session keys, app credentials), so a
  *   person's own devices never fill the budget that guards their address against strangers
@@ -123,13 +125,6 @@ class RequestLogger {
 	}
 
 	/**
-	 * Key types whose traffic is metered per person, after authentication
-	 * (apiv1.php): a browser session, a session key (a linked desktop, a
-	 * phone app) and an app credential.
-	 */
-	const PER_PERSON_KEY_TYPES = array('browser', 'session', 'app_password');
-
-	/**
 	 * rate_limit_state() for the address a request came from, counting only
 	 * the traffic an address limit exists to bound: machine keys, keyless
 	 * and guest requests, and every failed or credential-less one (rows with
@@ -142,7 +137,7 @@ class RequestLogger {
 	public static function address_rate_limit_state($feature, $max_requests, $window_seconds) {
 		return self::count_state($feature, $max_requests, $window_seconds, null,
 			"rql_ip_address = ? AND (rql_api_key_type IS NULL OR rql_api_key_type NOT IN ('"
-				. implode("', '", self::PER_PERSON_KEY_TYPES) . "'))",
+				. implode("', '", ApiKey::PER_PERSON_TYPES) . "'))",
 			isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
 	}
 
