@@ -422,6 +422,18 @@ lands in the issues panel. The copy is named after what the file is called on
 the server, unless that is the scratch name a peer's swap holds it under for a
 moment (`.jd-swap-...`); then it is named after what the file is called here.
 
+Two saves of one file in the same window meet this way too, whichever reached
+the server first. A new version names the head it was based on — the content
+this device last agreed, and for an encrypted file the metadata blob it was
+sealed from — and the server refuses one whose file has moved past that
+(`head_moved`, or `moved_since` for a rename, `docs/drive.md`). The engine
+does not send a version over a head it has already heard moved; refused, it
+stands the edit down, takes the head the refusal names, and the next round
+plans the conflict. An encrypted version is encrypted afresh on every attempt,
+so each attempt's ciphertext is noted before it is sent: a head the server
+names that is one of them is this device's own save, landed while its answer
+was lost, and becomes the agreement rather than a conflict with itself.
+
 A file or folder moved on both sides is judged half by half against the
 placement both sides last agreed: its folder and its name. A half only one side
 changed takes that side's value, and a half both sides changed to the same

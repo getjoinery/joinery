@@ -1729,15 +1729,15 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
 /// that device's cursor at the moment the trash ran, which the harness does
 /// not keep, so the race fires, and its fire is read by hand.
 ///
-/// Counted, not yet firing: a subject whose file was written again later by
-/// an act that did not see it (`superseded_blind`, the edit-edit shape, where
-/// the loser should be a conflict copy).
+/// Fires too: a subject whose file was written again later by an act that
+/// did not see it (`superseded_blind`, the edit-edit shape), found nowhere but
+/// the server's history: the loser should be a conflict copy (B10).
 ///
 /// Blind, by the hash: a body written twice (a duplicate's copy) is one
 /// subject, judged from its last write, and deleting the copy with sight
-/// excuses the loss of the original. And `superseded_blind` also absorbs a
-/// loss where two files share one custody key (both devices saving
-/// `contested.txt` at once), until it is promoted to firing.
+/// excuses the loss of the original. Two files sharing one custody key (both
+/// devices saving `contested.txt` at once) stand as a file and its conflicted
+/// copy, both live, so neither reaches `superseded_blind`.
 fn assert_no_edit_was_lost_to_an_act_that_never_saw_it(world: &World, custody: &Custody, seed: u64) {
     let verdict = edits_lost_to_acts_that_never_saw_them(world, custody, seed);
     assert!(
@@ -1885,8 +1885,26 @@ fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed
             seen += 1;
             continue;
         }
-        if custody.written.iter().any(|x| x.key == w.key && x.order > w.order && x.hash != w.hash && !x.carried) {
+        // Written over by a later save that never saw it: the edit-edit race,
+        // where the loser must stand beside the winner as a conflicted copy.
+        // Found only in the server's history it is lost to the user, whoever
+        // saved last (B10).
+        if let Some(over) = custody
+            .written
+            .iter()
+            .find(|x| x.key == w.key && x.order > w.order && x.hash != w.hash && !x.carried)
+        {
             blind += 1;
+            lost.push(format!(
+                "{} written at {:?} on {} @{} was saved over blind by {} @{}, no conflict copy kept: server=[{}]",
+                &hash[..8],
+                w.path,
+                world.devices[w.device].name,
+                w.order,
+                world.devices[over.device].name,
+                over.order,
+                standing(hash),
+            ));
             continue;
         }
         // This file's bodies: the body and every body its saves replaced.
@@ -3321,6 +3339,52 @@ fn an_edit_the_trash_took_without_a_users_delete_fires_the_edit_oracle() {
         assert_no_edit_was_lost_to_an_act_that_never_saw_it(&world, &custody, seed)
     }));
     assert!(fired.is_err(), "the edit oracle fires on an edit lost to the trash");
+}
+
+/// A save buried under a later one that never saw it fires the edit oracle on
+/// a server that takes any version (B10's race: pc's save reaches the server
+/// while mac's later, blind one is on its way), and does not where the server
+/// refuses a version over a head that moved: both stand, one as a copy.
+#[test]
+fn a_save_buried_under_a_later_one_that_never_saw_it_fires_the_edit_oracle() {
+    const PEER: &[u8] = b"pc's save, which reached the server first";
+    const MAC: &[u8] = b"mac's later save, made without seeing pc's";
+    for (old_server, fires) in [(true, true), (false, false)] {
+        let seed = 9_947;
+        let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+        world.server.ignores_upload_base(old_server);
+        let mut custody = Custody::default();
+        let mac = world.device("mac");
+        let pc = world.device("pc");
+        mac.fs.user_write("doc.txt", b"the version both agreed");
+        custody.wrote(0, mac, "doc.txt", b"the version both agreed");
+        assert!(world.settle().is_some());
+        let id = world.server.files().into_iter().find(|f| f.name == "doc.txt").unwrap().id;
+        custody.wrote(1, pc, "doc.txt", PEER);
+        mac.fs.user_write("doc.txt", MAC);
+        custody.wrote(0, mac, "doc.txt", MAC);
+        let server = world.server.clone();
+        let done = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let once = done.clone();
+        world.server.while_completing_an_upload(move || {
+            let mut d = once.lock().unwrap();
+            if !*d {
+                *d = true;
+                server.seed_version(id, PEER);
+            }
+        });
+        world.pass(mac);
+        world.server.while_completing_an_upload(|| {});
+        assert!(*done.lock().unwrap(), "construction: nothing landed mid-upload");
+        assert!(world.settle().is_some());
+        let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
+        if fires {
+            assert_eq!(verdict.lost.len(), 1, "an older server buries pc's save: {verdict:?}");
+        } else {
+            assert!(verdict.lost.is_empty(), "both saves stand where bases are read: {verdict:?}");
+        }
+        let _ = pc;
+    }
 }
 
 /// A delete made with the edit in sight wins: mac has pc's edit on its disk

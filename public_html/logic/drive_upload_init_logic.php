@@ -9,6 +9,13 @@
  *     FileVersion) and return the file — no bytes transferred; or
  *   - open a resumable upload: create a FileUpload and return an upload_token
  *     (raw, only its hash stored) plus the chunk size.
+ *
+ * A new version may say what it was based on (`base_sha256`, and for an
+ * encrypted file `base_metadata_sha256`): one whose file has moved past that is
+ * refused here, before a byte is sent (head_moved / moved_since), and again,
+ * authoritatively, where the version is written (FileVersion::save_new_content).
+ *
+ * @version 1.1 - base_sha256 / base_metadata_sha256 guard a new version (B10)
  */
 
 function drive_upload_init_logic(array $input): LogicResult {
@@ -51,6 +58,13 @@ function drive_upload_init_logic(array $input): LogicResult {
 	$mime       = (string)($input['mime_type'] ?? 'application/octet-stream');
 	$folder_id  = (isset($input['folder_id']) && (int)$input['folder_id'] > 0) ? (int)$input['folder_id'] : 0;
 	$file_id    = (isset($input['file_id']) && (int)$input['file_id'] > 0) ? (int)$input['file_id'] : 0;
+	$base          = isset($input['base_sha256']) ? strtolower(trim((string)$input['base_sha256'])) : '';
+	$base_metadata = isset($input['base_metadata_sha256']) ? strtolower(trim((string)$input['base_metadata_sha256'])) : '';
+	foreach (array($base, $base_metadata) as $hash) {
+		if ($hash !== '' && !preg_match('/^[0-9a-f]{64}$/', $hash)) {
+			return LogicResult::error('That is not a SHA-256 hash.', array('reason' => 'invalid_request', 'standing' => true));
+		}
+	}
 
 	if ($name === '' && !$file_id) {
 		return LogicResult::error('A file name is required.', array('reason' => 'invalid_request', 'standing' => true));
@@ -98,6 +112,27 @@ function drive_upload_init_logic(array $input): LogicResult {
 		$owner_id  = (int)$target_file->get('fil_usr_user_id');
 		$encrypted = $target_file->is_encrypted();
 		$sealed    = $target_file->is_sealed();
+		// Asked now so a version based on a head that has moved costs no bytes;
+		// the answer that counts is given where the version is written, under the
+		// file's row lock. A head that already holds this upload's content is its
+		// own landed retry, not a move — which only an upload naming its hash can
+		// be told apart by, so one that names none is left to that answer. Private
+		// files are never synced: their stored hash is the container's, which no
+		// client can name.
+		if (!$sealed && $sha256 !== '') {
+			$moved = null;
+			$head_sha = DriveHelper::sync_meta_for($file_id)['content_sha256'];
+			if ($base !== '' && $head_sha !== null && $head_sha !== $base && $head_sha !== $sha256) {
+				$moved = 'head_moved';
+			} elseif ($base_metadata !== '' && $encrypted
+				&& !hash_equals(hash('sha256', (string)$target_file->get('fil_encrypted_metadata')), $base_metadata)) {
+				$moved = 'moved_since';
+			}
+			if ($moved !== null) {
+				$refusal = new FileHeadMovedException($moved, $file_id);
+				return LogicResult::error($refusal->getMessage(), $refusal->refusal_data());
+			}
+		}
 	} elseif ($folder_id) {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder) {
@@ -186,10 +221,22 @@ function drive_upload_init_logic(array $input): LogicResult {
 						// otherwise the bytes are pinned for good, still counted
 						// against the owner and reachable by nobody.
 						try {
-							FileVersion::save_new_content($target_file, $cand, $user_id);
+							$wrote = FileVersion::save_new_content($target_file, $cand, $user_id, array('base_sha256' => $base));
+						} catch (FileHeadMovedException $moved) {
+							FileBlob::release($cand->key);
+							return LogicResult::error($moved->getMessage(), $moved->refusal_data());
 						} catch (Exception $e) {
 							FileBlob::release($cand->key);
 							throw $e;
+						}
+						if (!$wrote) {
+							// The head already holds these bytes: nothing new to record,
+							// and the reference taken for a version that was never made
+							// goes back.
+							FileBlob::release($cand->key);
+							DriveHelper::forget_sync_meta($target_file->key);
+							$fresh = DriveHelper::load_file($target_file->key);
+							return LogicResult::render(array('ok' => true, 'deduped' => true, 'file' => DriveHelper::file_export($fresh)));
 						}
 						// The date is this upload's, or none: a new version sent
 						// without one (a browser) must not keep the previous
@@ -403,6 +450,8 @@ function drive_upload_init_logic_descriptor(): array {
 			'name'       => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'File name'),
 			'folder_id'  => array('type' => 'int', 'required' => false, 'label' => 'Destination folder id'),
 			'file_id'    => array('type' => 'int', 'required' => false, 'label' => 'Existing file id (upload a new version)'),
+			'base_sha256' => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'For a new version: SHA-256 (hex) of the head content it was based on; a head that moved since refuses (head_moved). Encrypted files name the ciphertext.'),
+			'base_metadata_sha256' => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'For a new version of an encrypted file: SHA-256 (hex) of the metadata blob its new one was sealed from; one rewritten since by a rename refuses (moved_since)'),
 			'size_bytes' => array('type' => 'int', 'required' => true, 'min' => 0, 'label' => 'File size in bytes'),
 			'sha256'     => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'Content SHA-256 (enables dedup)'),
 			'mime_type'  => array('type' => 'string', 'required' => false, 'max_length' => 128, 'label' => 'MIME type'),

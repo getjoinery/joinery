@@ -8117,8 +8117,12 @@ fn telling_the_server_to_trash_a_folder_forgets_what_was_under_it_too() {
 /// nothing but "decryption failed" while it does it.
 ///
 /// Two properties, and the second is what stops the cure being worse than the
-/// disease: the device settles, AND it comes straight back when the file is
-/// fixed. A give-up nothing can lift is just a quieter way to lose a file.
+/// disease: the device settles, AND a save made afterwards is kept. The
+/// server swapped the head silently, so a new version based on the head this
+/// device agreed meets a head that moved and is refused (B10): the save stands
+/// beside the unreadable head as a conflicted copy, on every device, and a
+/// person lifts the give-up by deleting the unreadable head. The repair is kept
+/// in the copy, never lost.
 #[test]
 fn ciphertext_that_will_never_open_is_given_up_on_rather_than_fetched_for_ever() {
     let vault = SimVault::new(9_311);
@@ -8214,9 +8218,10 @@ fn ciphertext_that_will_never_open_is_given_up_on_rather_than_fetched_for_ever()
         "the file should be reported as what it is: {counts:?}"
     );
 
-    // And it lifts by itself. The desktop saves the file again, which is new
-    // content under the same key: the note was taken against bytes that no
-    // longer exist, so nothing has to clear it.
+    // The desktop saves the file again. Its version is based on the head it
+    // agreed, which the server swapped without saying, so the version is
+    // refused and the save is kept beside the unreadable head as a conflicted
+    // copy: nothing lost, both devices told.
     let repaired = b"saved again, and this time the bytes are good";
     world
         .device("desktop")
@@ -8226,14 +8231,25 @@ fn ciphertext_that_will_never_open_is_given_up_on_rather_than_fetched_for_ever()
         world.settle().is_some(),
         "a repaired file should settle like any other"
     );
-    assert_eq!(
-        disk_tree(world.device("laptop"))
-            .get("Private/plan.md")
-            .cloned()
-            .flatten(),
-        Some(jd_sim::sha256_hex(repaired)),
-        "the laptop should pick the file back up once it can be opened"
-    );
+    let repair = jd_sim::sha256_hex(repaired);
+    for name in ["laptop", "desktop"] {
+        let disk = disk_tree(world.device(name));
+        assert_eq!(disk.get("Private/plan.md").cloned().flatten(), None, "{name}: the unreadable head reached the disk: {disk:?}");
+        let copies: Vec<_> = disk
+            .iter()
+            .filter(|(p, h)| p.starts_with("Private/plan (conflicted copy") && h.as_deref() == Some(repair.as_str()))
+            .collect();
+        assert_eq!(copies.len(), 1, "{name}: the repair is not kept in one conflicted copy: {disk:?}");
+        let counts: std::collections::BTreeMap<String, usize> =
+            world.device(name).store.status_counts().unwrap().into_iter().collect();
+        assert_eq!(counts.get("unreadable").copied().unwrap_or(0), 1, "{name}: {counts:?}");
+        assert_eq!(counts.get("pending_download").copied().unwrap_or(0), 0, "{name}: {counts:?}");
+        let told: Vec<_> = world.device(name).store.open_issues().unwrap().into_iter().map(|i| i.kind).collect();
+        assert!(told.iter().any(|k| k == "withdrawn"), "{name} was not told the head will not open: {told:?}");
+    }
+    let desktop_told: Vec<_> = world.device("desktop").store.open_issues().unwrap().into_iter().map(|i| i.kind).collect();
+    assert!(desktop_told.iter().any(|k| k == "reconcile"), "the desktop was not told its save went to a copy: {desktop_told:?}");
+    assert_eq!(world.server.vault_files().len(), 2, "the server holds the unreadable head and the copy");
 }
 
 #[test]
@@ -25569,4 +25585,541 @@ fn a_sealed_files_folder_deleted_while_its_vault_never_holds_still_waits_for_a_s
         world.server.files()
     );
     assert_converged(&world);
+}
+
+/// B10: two devices save one file in the same window, and the peer's save
+/// reaches the server while mac's new version is on its way, after mac's round
+/// read the feed. Both saves must stay live: the head is whichever landed
+/// first, and the other stands beside it as a conflicted copy, told in the
+/// issues panel (docs/drive_sync.md § Conflicts). Neither may survive only as
+/// a superseded version nobody was told about.
+#[test]
+fn a_peers_save_landing_while_a_new_version_is_on_its_way_is_not_overwritten() {
+    const MAC: &[u8] = b"mac's save, sent while the peer's landed";
+    const PEER: &[u8] = b"the peer's save, which reached the server first";
+    let world = World::new(9_958, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("doc.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    let doc = world.server.files().into_iter().find(|f| f.name == "doc.txt").unwrap().id;
+    mac.fs.user_write("doc.txt", MAC);
+    let server = world.server.clone();
+    let done = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let once = done.clone();
+    world.server.while_completing_an_upload(move || {
+        let mut d = once.lock().unwrap();
+        if !*d {
+            *d = true;
+            server.seed_version(doc, PEER);
+        }
+    });
+    world.pass(mac);
+    world.server.while_completing_an_upload(|| {});
+    assert!(*done.lock().unwrap(), "construction: nothing landed mid-upload");
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<String> = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed)
+        .map(|f| f.sha256)
+        .collect();
+    for (who, body) in [("the peer's", PEER), ("mac's", MAC)] {
+        assert!(
+            live.contains(&jd_sim::sha256_hex(body)),
+            "{who} save survives only as a superseded version: {:?}",
+            world.server.tree()
+        );
+    }
+    let copies: Vec<String> = disk_tree(mac).into_keys().filter(|p| p.contains("conflicted copy")).collect();
+    assert_eq!(copies.len(), 1, "one save is set aside as a conflicted copy: {:?}", disk_tree(mac));
+    let told = mac.store.open_issues().unwrap();
+    assert!(
+        told.iter().any(|i| i.detail.contains("conflicted copy")),
+        "the conflict never reached the issues panel: {told:?}"
+    );
+    assert_converged(&world);
+}
+
+/// B10, the half the device could have known about: mac's new version is held
+/// up after it was planned (its first call refused), and in the meantime the
+/// peer's save lands and the feed says so. The queued upload must not send over a head mac has heard
+/// moved: it stands down, and the next round plans the conflict.
+#[test]
+fn a_queued_new_version_does_not_go_out_over_a_head_the_device_has_heard_moved() {
+    const MAC: &[u8] = b"mac's save, queued behind a dead network";
+    const PEER: &[u8] = b"the peer's save, landed while mac's waited";
+    let world = World::new(9_957, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("doc.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    mac.fs.user_write("doc.txt", MAC);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    let queued = mac.store.queued_ops().unwrap();
+    assert!(
+        queued.iter().any(|o| o.kind == "upload_version"),
+        "construction: mac's new version is not left queued: {queued:?}"
+    );
+    pc.fs.user_write("doc.txt", PEER);
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<String> = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed)
+        .map(|f| f.sha256)
+        .collect();
+    for (who, body) in [("the peer's", PEER), ("mac's", MAC)] {
+        assert!(
+            live.contains(&jd_sim::sha256_hex(body)),
+            "{who} save survives only as a superseded version: {:?}",
+            world.server.tree()
+        );
+    }
+    assert_converged(&world);
+}
+
+/// B10 A1: an encrypted file's name lives in its metadata blob, and a new
+/// version rewrites that blob from the name its uploader last agreed. A peer's
+/// rename landing while laptop's new version is on its way (the content base
+/// still holds: the rename touched no content) must survive the upload: the
+/// file ends under the peer's name, with laptop's edit in it or beside it.
+#[test]
+fn a_peers_rename_landing_while_an_encrypted_version_is_on_its_way_survives_it() {
+    const EDIT: &[u8] = b"laptop's edit, sent while the peer renamed it";
+    let vault = SimVault::new(9_956);
+    let mut world = World::new(9_956, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+
+    laptop.fs.user_write("Private/plan.txt", EDIT);
+    let server = world.server.clone();
+    let (secret, public) = (vault.secret_key_pkcs8.clone(), vault.public_key_b64.clone());
+    let done = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let once = done.clone();
+    world.server.while_completing_an_upload(move || {
+        let mut d = once.lock().unwrap();
+        if *d {
+            return;
+        }
+        *d = true;
+        // The peer's rename, sealed as a device seals one: the same key, the
+        // blob it was sealed from named by its hash.
+        let file = server.vault_files().into_iter().next().expect("the vault file");
+        let blob = file.encrypted_metadata.clone().expect("its metadata");
+        let key = jd_crypto::drive::open_wrapped_file_key(file.wrapped_file_key.as_deref().unwrap(), &secret, &public).unwrap();
+        let mut meta = jd_crypto::drive::decrypt_metadata(&blob, &key).unwrap();
+        meta.name = "plan, renamed.txt".into();
+        let renamed = jd_crypto::drive::encrypt_metadata(&meta, &key).unwrap();
+        server
+            .action(
+                "drive_rename",
+                &serde_json::json!({
+                    "entity_type": "file", "entity_id": file.id,
+                    "encrypted_metadata": renamed,
+                    "from_metadata_sha256": jd_sim::sha256_hex(blob.as_bytes()),
+                }),
+            )
+            .expect("the peer's rename lands");
+    });
+    world.pass(laptop);
+    world.server.while_completing_an_upload(|| {});
+    assert!(*done.lock().unwrap(), "construction: nothing landed mid-upload");
+    assert!(world.settle().is_some(), "never settled");
+
+    assert_eq!(sealed_metadata(&world, &vault).name, "plan, renamed.txt", "the upload put the old name back");
+    let desktop = world.device("desktop");
+    assert!(desktop.fs.peek("Private/plan, renamed.txt").is_some(), "{:?}", disk_tree(desktop));
+    let edit = jd_sim::sha256_hex(EDIT);
+    assert!(
+        world.devices.iter().all(|d| disk_tree(d).values().any(|h| h.as_deref() == Some(edit.as_str()))),
+        "laptop's edit is not on every device"
+    );
+    assert_converged(&world);
+}
+
+/// B10, the encrypted retry: a new version lands and its answer is lost. The
+/// retry encrypts afresh, so the head the server now holds is none of the
+/// hashes the retry can derive. It must still be known for this device's own
+/// save: no conflict copy of itself, one version, the edit everywhere.
+#[test]
+fn an_encrypted_version_whose_answer_was_lost_is_not_a_conflict_with_itself() {
+    const EDIT: &[u8] = b"an edit whose version lands and whose answer does not come back";
+    let vault = SimVault::new(9_955);
+    let mut world = World::new(9_955, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+
+    let id = world.server.vault_files().into_iter().next().unwrap().id;
+    let rows = |w: &World| w.server.all_versions().into_iter().filter(|v| v.file_id == id).count();
+    let before = rows(&world);
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Private/plan.txt", EDIT);
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction: the completion answer was not lost");
+    assert_eq!(rows(&world) - before, 1, "the edit was written as more than one version");
+
+    for d in &world.devices {
+        let tree = disk_tree(d);
+        assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save: {tree:?}", d.name);
+        assert_eq!(d.fs.peek("Private/plan.txt").as_deref(), Some(EDIT), "{} does not have the edit", d.name);
+    }
+    assert_eq!(world.server.vault_files().len(), 1, "one file");
+    assert_converged(&world);
+}
+
+/// The same, with a further edit before the device hears anything: its own
+/// landed save becomes the agreement and the further edit goes on top of it,
+/// still with no conflict copy of itself.
+#[test]
+fn a_further_edit_after_a_lost_answer_goes_on_top_of_the_landed_one() {
+    const FIRST: &[u8] = b"the first edit, landed, its answer lost";
+    const SECOND: &[u8] = b"the second edit, made before anything was heard";
+    let vault = SimVault::new(9_954);
+    let mut world = World::new(9_954, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Private/plan.txt", FIRST);
+    world.pass(laptop);
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction: the completion answer was not lost");
+    laptop.net.set_faults(NetFaults::none());
+    laptop.fs.user_write("Private/plan.txt", SECOND);
+    assert!(world.settle().is_some(), "never settled");
+
+    for d in &world.devices {
+        let tree = disk_tree(d);
+        assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save: {tree:?}", d.name);
+        assert_eq!(d.fs.peek("Private/plan.txt").as_deref(), Some(SECOND), "{} does not have the second edit", d.name);
+    }
+    assert_converged(&world);
+}
+
+/// The plaintext retry: a version lands, its answer is lost, and the retry is
+/// the same bytes on a base that has since moved past them. It is a landed
+/// retry, not a conflict, and writes no second version of the same content.
+#[test]
+fn a_plaintext_version_whose_answer_was_lost_writes_no_second_version() {
+    const EDIT: &[u8] = b"a plaintext edit whose answer goes missing";
+    let world = World::new(9_953, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Work/notes.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    let id = world.server.files().into_iter().find(|f| f.name == "notes.txt").unwrap().id;
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Work/notes.txt", EDIT);
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction: the completion answer was not lost");
+
+    let edits = world
+        .server
+        .all_versions()
+        .into_iter()
+        .filter(|v| v.file_id == id && v.sha256 == jd_sim::sha256_hex(EDIT))
+        .count();
+    assert_eq!(edits, 1, "the edit was written as a version more than once");
+    for d in &world.devices {
+        assert!(!disk_tree(d).keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save", d.name);
+    }
+    assert_converged(&world);
+}
+
+/// On a server that does not read version bases, the queued half of B10 is
+/// still closed: the device has heard the head moved and does not send over it.
+/// (The unseen window stays open there until the server checks bases.)
+#[test]
+fn a_queued_new_version_stands_down_on_a_server_that_does_not_read_bases() {
+    const MAC: &[u8] = b"mac's save, queued, on an older server";
+    const PEER: &[u8] = b"the peer's save, landed while mac's waited";
+    let world = World::new(9_952, &["mac", "pc"]);
+    world.server.ignores_upload_base(true);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("doc.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    mac.fs.user_write("doc.txt", MAC);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    pc.fs.user_write("doc.txt", PEER);
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<String> = world.server.files().into_iter().filter(|f| !f.trashed).map(|f| f.sha256).collect();
+    for (who, body) in [("the peer's", PEER), ("mac's", MAC)] {
+        assert!(live.contains(&jd_sim::sha256_hex(body)), "{who} save survives only as a superseded version");
+    }
+    assert_converged(&world);
+}
+
+/// The refusal half of the same: the queued version is sent again before the
+/// device has read the feed, so it learns of its own landed save only from the
+/// server's `head_moved`. That head is an EARLIER save of its own, not these
+/// bytes: it becomes the agreement and the further edit goes on top, rather
+/// than the upload finishing as though the further edit had landed.
+#[test]
+fn a_refused_retry_naming_an_earlier_save_of_its_own_sends_the_further_edit_on_top() {
+    const FIRST: &[u8] = b"the first edit, landed, its answer lost";
+    const SECOND: &[u8] = b"the second edit, sent before the feed was read";
+    let vault = SimVault::new(9_951);
+    let mut world = World::new(9_951, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Private/plan.txt", FIRST);
+    world.pass(laptop);
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction: the completion answer was not lost");
+    laptop.net.set_faults(NetFaults::none());
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"),
+        "construction: the version is not left queued"
+    );
+
+    // The further edit, and the queued version run straight away: no feed.
+    // Past its retry delay first, or the executor leaves it waiting and the
+    // next pass's feed read tells the device instead.
+    laptop.fs.user_write("Private/plan.txt", SECOND);
+    world.clock.advance_secs(20 * 60);
+    let before = world.server.upload_inits();
+    {
+        let now = laptop.now();
+        let e = jd_sim::engine::env(laptop, &now);
+        jd_core::execute::run_queued(&e).expect("run");
+    }
+    assert!(world.server.upload_inits() > before, "construction: the queued version was not sent");
+    assert!(world.settle().is_some(), "never settled");
+
+    for d in &world.devices {
+        let tree = disk_tree(d);
+        assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save: {tree:?}", d.name);
+        assert_eq!(d.fs.peek("Private/plan.txt").as_deref(), Some(SECOND), "{} does not have the second edit", d.name);
+    }
+    assert_converged(&world);
+}
+
+
+fn world_dump(world: &World) -> String {
+    let mut s = String::new();
+    for d in &world.devices {
+        s.push_str(&format!("{}: {:?}\n", d.name, disk_tree(d)));
+    }
+    s.push_str(&format!("server: {:?}\n", world.server.tree()));
+    s
+}
+
+/// B10, plaintext: a version lands, its answer is lost, and a further edit is
+/// made before the device hears anything. Its own landed save becomes the
+/// agreement and the further edit goes on top, with no conflict copy of itself.
+#[test]
+fn a_plain_further_edit_after_a_lost_answer_goes_on_top_of_the_landed_one() {
+    const FIRST: &[u8] = b"the first edit, landed, its answer lost";
+    const SECOND: &[u8] = b"the second edit, made before anything was heard";
+    let world = World::new(9_901, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Work/notes.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Work/notes.txt", FIRST);
+    world.pass(laptop);
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction");
+    laptop.net.set_faults(NetFaults::none());
+    laptop.fs.user_write("Work/notes.txt", SECOND);
+    assert!(world.settle().is_some(), "never settled");
+    let dump = world_dump(&world);
+    for d in &world.devices {
+        let tree = disk_tree(d);
+        assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save:\n{dump}", d.name);
+        assert_eq!(d.fs.peek("Work/notes.txt").as_deref(), Some(SECOND), "{} lacks the second edit\n{dump}", d.name);
+    }
+    assert_converged(&world);
+}
+
+/// The same, the queued version sent again before any feed read: it learns of
+/// its own landed save from `head_moved` alone.
+#[test]
+fn a_plain_refused_retry_naming_an_earlier_save_of_its_own_sends_the_further_edit_on_top() {
+    const FIRST: &[u8] = b"the first edit, landed, its answer lost";
+    const SECOND: &[u8] = b"the second edit, sent before the feed was read";
+    let world = World::new(9_902, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Work/notes.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    laptop.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_complete".into()), ..NetFaults::none() });
+    laptop.fs.user_write("Work/notes.txt", FIRST);
+    world.pass(laptop);
+    assert_eq!(laptop.net.stats().dropped_after, 1, "construction");
+    laptop.net.set_faults(NetFaults::none());
+    assert!(laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"), "construction: not queued");
+    laptop.fs.user_write("Work/notes.txt", SECOND);
+    world.clock.advance_secs(20 * 60);
+    let before = world.server.upload_inits();
+    {
+        let now = laptop.now();
+        let e = jd_sim::engine::env(laptop, &now);
+        jd_core::execute::run_queued(&e).expect("run");
+    }
+    assert!(world.server.upload_inits() > before, "construction: the queued version was not sent");
+    assert!(world.settle().is_some(), "never settled");
+    let dump = world_dump(&world);
+    for d in &world.devices {
+        let tree = disk_tree(d);
+        assert!(!tree.keys().any(|p| p.contains("conflicted copy")), "{} made a copy of its own save:\n{dump}", d.name);
+        assert_eq!(d.fs.peek("Work/notes.txt").as_deref(), Some(SECOND), "{} lacks the second edit\n{dump}", d.name);
+    }
+    assert_converged(&world);
+}
+
+/// Two devices save the same bytes in one window: no conflict copy.
+#[test]
+fn two_devices_saving_the_same_bytes_in_one_window_is_no_conflict() {
+    const SAME: &[u8] = b"both of us typed exactly this";
+    let world = World::new(9_903, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("doc.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    mac.fs.user_write("doc.txt", SAME);
+    pc.fs.user_write("doc.txt", SAME);
+    assert!(world.settle().is_some(), "never settled");
+    let dump = world_dump(&world);
+    for d in &world.devices {
+        assert!(!disk_tree(d).keys().any(|p| p.contains("conflicted copy")), "{} made a copy\n{dump}", d.name);
+    }
+    assert_converged(&world);
+}
+
+
+/// B10 A1, the earlier window: a rename the device has not heard of lands
+/// before its encrypted version reads the name it would seal, not during its
+/// completion. The name the server holds is not the one the device agreed, so
+/// the version stands down for the rename to be applied first.
+#[test]
+fn a_rename_landing_before_an_encrypted_version_reads_its_name_is_not_put_back() {
+    const EDIT: &[u8] = b"laptop's edit, queued, run after a rename it never heard of";
+    let vault = SimVault::new(9_961);
+    let mut world = World::new(9_961, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+
+    laptop.fs.user_write("Private/plan.txt", EDIT);
+    laptop.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(laptop);
+    laptop.net.set_faults(NetFaults::none());
+    assert!(laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"), "construction: not queued");
+
+    let (secret, public) = (vault.secret_key_pkcs8.clone(), vault.public_key_b64.clone());
+    let file = world.server.vault_files().into_iter().next().expect("the vault file");
+    let blob = file.encrypted_metadata.clone().expect("its metadata");
+    let key = jd_crypto::drive::open_wrapped_file_key(file.wrapped_file_key.as_deref().unwrap(), &secret, &public).unwrap();
+    let mut meta = jd_crypto::drive::decrypt_metadata(&blob, &key).unwrap();
+    meta.name = "plan, renamed.txt".into();
+    let renamed = jd_crypto::drive::encrypt_metadata(&meta, &key).unwrap();
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({
+                "entity_type": "file", "entity_id": file.id,
+                "encrypted_metadata": renamed,
+                "from_metadata_sha256": jd_sim::sha256_hex(blob.as_bytes()),
+            }),
+        )
+        .expect("the peer's rename lands");
+    world.clock.advance_secs(20 * 60);
+    let before = world.server.upload_inits();
+    {
+        let now = laptop.now();
+        let e = jd_sim::engine::env(laptop, &now);
+        jd_core::execute::run_queued(&e).expect("run");
+    }
+    let sent = world.server.upload_inits() > before;
+    assert_eq!(sealed_metadata(&world, &vault).name, "plan, renamed.txt", "the upload put the old name back (sent={sent})");
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(sealed_metadata(&world, &vault).name, "plan, renamed.txt", "put back after settle");
+    let edit = jd_sim::sha256_hex(EDIT);
+    assert!(
+        world.devices.iter().all(|d| disk_tree(d).values().any(|h| h.as_deref() == Some(edit.as_str()))),
+        "laptop's edit is not on every device: {}", world_dump(&world)
+    );
+    assert_converged(&world);
+}
+
+
+/// A metadata blob that will not open does not hold the file's new versions
+/// back: it names nothing a rename could have changed for the device to put
+/// back, so the version goes with no name base and its blob replaces it.
+#[test]
+fn a_damaged_metadata_blob_does_not_hold_back_a_files_new_versions() {
+    const EDIT: &[u8] = b"an edit over a file whose metadata will not open";
+    let vault = SimVault::new(9_971);
+    let mut world = World::new(9_971, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/plan.txt", b"the version both agreed");
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Private/plan.txt", EDIT);
+    laptop.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(laptop);
+    laptop.net.set_faults(NetFaults::none());
+    assert!(laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"), "construction: not queued");
+    let file = world.server.vault_files().into_iter().next().expect("the vault file");
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({
+                "entity_type": "file", "entity_id": file.id,
+                "encrypted_metadata": "this is not a metadata blob",
+            }),
+        )
+        .expect("the damaged blob lands");
+    world.clock.advance_secs(20 * 60);
+    let before = world.server.upload_inits();
+    {
+        let now = laptop.now();
+        let e = jd_sim::engine::env(laptop, &now);
+        jd_core::execute::run_queued(&e).expect("run");
+    }
+    assert!(world.server.upload_inits() > before, "the version was held back by the damaged blob");
 }

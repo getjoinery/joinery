@@ -9,8 +9,14 @@
  * file — recomputes usage, records the change, and clears the pending row.
  * Retry-safe via the standard Idempotency-Key machinery.
  *
+ * A new version may say what it was based on (`base_sha256`, and for an
+ * encrypted file `base_metadata_sha256`); one whose file moved past that is
+ * refused (head_moved / moved_since) where the version is written, under the
+ * file's row lock, its staged bytes discarded and its blob reference given back.
+ *
  * @version 1.1 - the response carries `warning` when a photo was saved but its sizes refused
  *                (specs/image_decode_memory.md)
+ * @version 1.2 - base_sha256 / base_metadata_sha256 guard a new version (B10)
  */
 
 function drive_upload_complete_logic(array $input): LogicResult {
@@ -89,6 +95,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 
 	$folder_id = (int)$up->get('fup_fol_folder_id');
 	$file_id   = (int)$up->get('fup_fil_file_id');
+	$base          = isset($input['base_sha256']) ? strtolower(trim((string)$input['base_sha256'])) : '';
+	$base_metadata = isset($input['base_metadata_sha256']) ? strtolower(trim((string)$input['base_metadata_sha256'])) : '';
+	foreach (array($base, $base_metadata) as $hash) {
+		if ($hash !== '' && !preg_match('/^[0-9a-f]{64}$/', $hash)) {
+			return LogicResult::error('That is not a SHA-256 hash.', array('reason' => 'invalid_request', 'standing' => true));
+		}
+	}
 	$mime      = (string)($up->get('fup_mime_type') ?: 'application/octet-stream');
 	$name      = (string)$up->get('fup_display_name');
 	// Settled at init (and refused there for a vault destination), so an upload
@@ -305,24 +318,43 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			// to give it back or the bytes are pinned and unreachable for good.
 			DriveHelper::owner_write_lock($owner_id);
 			$owner_locked = true;
+			// For an encrypted file the head metadata follows the new content,
+			// written with it under the file's row lock so a rename cannot land
+			// between the check of the blob it was sealed from and the write.
+			$guard = array('base_sha256' => $base);
+			if ($encrypted) {
+				$guard['base_metadata_sha256'] = $base_metadata;
+				$guard['encrypted_metadata'] = ($enc_metadata !== null) ? (string)$enc_metadata : '';
+			}
 			try {
-				FileVersion::save_new_content($target_file, $blob, $user_id);
+				$wrote = FileVersion::save_new_content($target_file, $blob, $user_id, $guard);
+			} catch (FileHeadMovedException $moved) {
+				// The bytes were for a base that no longer holds. Nothing keeps
+				// them: the blob's reference goes back and the staged upload goes.
+				FileBlob::release($blob->key);
+				$up->discard();
+				return LogicResult::error($moved->getMessage(), $moved->refusal_data());
 			} catch (Exception $e) {
 				FileBlob::release($blob->key);
 				throw $e;
 			}
-			// For an encrypted file the head metadata (and thumbnail) follow the
-			// new content; the file key and content id are stable across versions
-			// (enforced above: fresh wrapped keys are refused and the uploader
-			// must hold a grant), so every key grant stays valid and prior
-			// versions stay decryptable.
+			if (!$wrote) {
+				// The head already holds these bytes: this upload landed before.
+				// Nothing new happened, so nothing is recorded.
+				FileBlob::release($blob->key);
+				$up->discard();
+				DriveHelper::forget_sync_meta($target_file->key);
+				$fresh = DriveHelper::load_file($target_file->key);
+				$wrapped = $encrypted ? FileKeyGrant::wrapped_key_for($fresh->key, $user_id) : null;
+				return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh, null, null, $wrapped)));
+			}
+			// The thumbnail follows the new content too. The file key and content
+			// id are stable across versions (enforced above: fresh wrapped keys
+			// are refused and the uploader must hold a grant), so every key grant
+			// stays valid and prior versions stay decryptable.
 			if ($encrypted) {
 				$fresh_target = DriveHelper::load_file($target_file->key);
 				if ($fresh_target) {
-					if ($enc_metadata !== null && $enc_metadata !== '') {
-						$fresh_target->set('fil_encrypted_metadata', $enc_metadata);
-						$fresh_target->save();
-					}
 					_drive_store_encrypted_thumbnail($fresh_target, $enc_thumb_b64);
 				}
 			}
@@ -540,6 +572,8 @@ function drive_upload_complete_logic_descriptor(): array {
 		'mutates'          => true,
 		'input'            => array(
 			'upload_token' => array('type' => 'string', 'required' => true, 'max_length' => 64, 'label' => 'Upload token'),
+			'base_sha256' => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'For a new version: SHA-256 (hex) of the head content it was based on; a head that moved since refuses (head_moved). Encrypted files name the ciphertext.'),
+			'base_metadata_sha256' => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'For a new version of an encrypted file: SHA-256 (hex) of the metadata blob its new one was sealed from; one rewritten since by a rename refuses (moved_since)'),
 		),
 	);
 }

@@ -704,6 +704,22 @@ The completion's integrity refusals (bytes missing, the wrong size, a failed
 checksum) say `reason: 'upload_incomplete'`: a client sends the bytes again,
 and never reads a name clash into a refusal that names its reason.
 
+A new version says what it was based on. `drive_upload_init` and
+`drive_upload_complete` take `base_sha256`, the head content the edit started
+from (for an encrypted file, the ciphertext's hash, as `content_sha256` gives
+it), and for an encrypted file `base_metadata_sha256`, the hash of the metadata
+blob the new one was sealed from. A head holding other content refuses with
+`head_moved`, a metadata blob rewritten since by a rename with `moved_since`;
+both carry the head as it stands (`head_sha256`, `head_size`,
+`head_change_id`) and are not standing. Init asks before a byte is sent, when
+the upload names its hash; the answer that counts is given where the version is
+written, under the file's row lock, and a refused completion discards its
+staged bytes. A head already holding the upload's content is no new version:
+the upload landed before, or two devices saved the same bytes, and the call
+succeeds with nothing written. A version that sends no base is not checked: it
+replaces whatever the head holds, as a browser's replace does. A success does
+not say whether the server checked a base.
+
 ### Refusal reasons
 
 Every refusal from the actions a sync client calls (`drive_changes`,
@@ -720,7 +736,8 @@ on the message, which is prose for people.
 | `parent_trashed` | the destination folder is in the trash |
 | `file_trashed` | the file is in the trash |
 | `changed_since` | something in it changed after the client's cursor |
-| `moved_since` | the item stands in another folder, or under another name (for an encrypted file, another metadata blob), than the move or rename was decided against |
+| `moved_since` | the item stands in another folder, or under another name (for an encrypted file, another metadata blob), than the move, rename or new version was decided against |
+| `head_moved` | a new version's file holds other content than the head it was based on (with the head: `head_sha256`, `head_size`, `head_change_id`) |
 | `upload_incomplete` | the upload's bytes are missing, the wrong size or fail their checksum |
 | `quota`, `file_too_large` | the account's storage or per-file limit |
 | `no_room` | the server's disk is short of space |

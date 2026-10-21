@@ -2942,6 +2942,33 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             "the server deleted it while this upload was in flight".into(),
         ));
     }
+    // A new version over a head this device has heard moved past what it
+    // agreed: a peer's save landed while this one was queued (B10). Sent, it
+    // would bury the peer's save under a version nobody was told about. Stood
+    // down, the next round sees both sides changed and keeps both, one as a
+    // conflicted copy. The one exception is a head this device sent itself, an
+    // encrypted version whose answer was lost: that is this device's own
+    // earlier save, so it becomes the agreement and this edit goes on top.
+    let entry = if as_new.is_none()
+        && !op.entity.is_provisional()
+        && crate::reconcile::server_moved_past_agreement(&entry)
+    {
+        let head = entry.remote_content.clone();
+        match head.as_ref().map(|h| own_sent(env, &entry, &h.sha256)).transpose()?.flatten() {
+            Some(plain) => {
+                let landed = adopt_landed(entry, head.expect("matched"), plain);
+                env.store.put_entry(&landed)?;
+                landed
+            }
+            None => {
+                return Ok(OpOutcome::Overtaken(
+                    "the file changed on the server since this edit was decided; deciding again with both".into(),
+                ))
+            }
+        }
+    } else {
+        entry
+    };
     // A never-sent record whose file was set aside since this was planned:
     // its record says the aside now, and this upload was decided for the
     // place it left. It stands down and the next pass decides from where the
@@ -3208,6 +3235,23 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         ));
     }
 
+    // An encrypted version the server already holds, agreed: this device's own
+    // landed save (adopted above) of exactly these bytes. Encrypting them again
+    // would only mint a version of the same file.
+    if entry.is_encrypted
+        && as_new.is_none()
+        && !op.entity.is_provisional()
+        && !crate::reconcile::server_moved_past_agreement(&entry)
+        && entry.synced_content.as_ref().is_some_and(|c| c.sha256 == sha)
+    {
+        let mut agreed = entry.clone();
+        let content = ContentId { sha256: sha.clone(), size: fingerprint.size };
+        agree(&mut agreed, Some(content), Some(fingerprint));
+        env.store.put_entry(&agreed)?;
+        env.store.forget_sent_ciphers(agreed.id.server_id)?;
+        return Ok(OpOutcome::Done);
+    }
+
     // Name and destination folder come from the same decision, because the name
     // was chosen for that folder and means nothing anywhere else. A rescue name
     // is picked to be free among the siblings the file is landing beside; using
@@ -3267,7 +3311,28 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         encrypted_metadata: None,
         wrapped_file_keys: Vec::new(),
         modified_time: modified.clone(),
+        // What this version was based on: the head this device last agreed,
+        // as the server named it (ciphertext, for an encrypted file). Without
+        // it a version replaces whatever the head holds (B10).
+        base_sha256: file_id.and_then(|_| {
+            if entry.is_encrypted {
+                entry.synced_remote_content.as_ref()
+            } else {
+                entry.synced_content.as_ref()
+            }
+            .map(|c| c.sha256.clone())
+        }),
+        base_metadata_sha256: None,
     };
+
+    // A plaintext version is written down before it is sent, as an encrypted
+    // one is below: a version that lands while its answer is lost is then
+    // known for this device's own when its head comes back, and an edit made
+    // since goes on top of it rather than meeting it as a stranger (B10).
+    if let (Some(id), false) = (file_id, entry.is_encrypted) {
+        let plain = ContentId { sha256: sha.clone(), size: fingerprint.size };
+        env.store.note_sent_cipher(id, &sha, &plain, (env.now_ms)() as i64)?;
+    }
 
     // Encrypted uploads send ciphertext from a scratch file rather than the
     // file itself. Everything the server is told changes with it: the name
@@ -3299,6 +3364,14 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 params.modified_time = None;
                 params.encrypted_metadata = Some(packed.metadata);
                 params.wrapped_file_keys = packed.wrapped_file_keys;
+                params.base_metadata_sha256 = packed.base_metadata;
+                // Written down before a byte goes: the only way a version that
+                // lands while its answer is lost is known for this device's own
+                // afterwards, every attempt being encrypted afresh.
+                if let Some(id) = file_id {
+                    let plain = ContentId { sha256: sha.clone(), size: fingerprint.size };
+                    env.store.note_sent_cipher(id, &packed.cipher_sha256, &plain, (env.now_ms)() as i64)?;
+                }
                 ciphertext = Some(packed.bytes);
                 // Carried forward whatever happens next: a re-keyed entry that
                 // forgot its content id could not encrypt its own next version.
@@ -3354,6 +3427,50 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         };
         match sent {
             Ok(out) => break out,
+            // The server holds a head this version was not based on (B10), or
+            // for an encrypted file a name rewritten since. Either it is this
+            // device's own version, landed while its answer was lost -- it
+            // finishes as landed, from the server's description of the file --
+            // or it is somebody else's, and the edit stands down: the next
+            // round sees both sides changed and keeps both, one as a
+            // conflicted copy, told in the issues panel.
+            Err(e) if file_id.is_some() && (e.head_moved() || (entry.is_encrypted && e.moved_since())) => {
+                let own = match e.refused_head() {
+                    Some((head, _)) => own_sent(env, &entry, &head)?.map(|plain| (head, plain)),
+                    None => None,
+                };
+                if let Some((head, plain)) = own {
+                    // These very bytes: this upload landed, its answer lost.
+                    if plain.sha256 == sha && e.head_moved() {
+                        let Some(file) = stat(env, op.entity, false)? else {
+                            return Ok(OpOutcome::Overtaken("the server no longer has it".into()));
+                        };
+                        break jd_proto::UploadOutcome { deduped: false, file };
+                    }
+                    // An earlier save of this device's: it becomes the
+                    // agreement, and the next round sends this edit on top.
+                    let size = e.refused_head_size().unwrap_or(0);
+                    let landed = adopt_landed(entry.clone(), ContentId { sha256: head, size }, plain);
+                    env.store.put_entry(&landed)?;
+                    return Ok(OpOutcome::Overtaken(
+                        "an earlier save of this device's had landed; sending this edit on top of it".into(),
+                    ));
+                }
+                // The head as the server stands, taken as the change feed would
+                // have given it, so the next round plans from it at once rather
+                // than sending this edit again until the feed catches up.
+                if let Some((head, change_id)) = e.refused_head() {
+                    if let Some(mut known) = env.store.get_entry(op.entity)? {
+                        let size = e.refused_head_size().or(known.remote_content.as_ref().map(|c| c.size)).unwrap_or(0);
+                        known.remote_content = Some(ContentId { sha256: head, size });
+                        known.head_change_id = known.head_change_id.max(change_id);
+                        env.store.put_entry(&known)?;
+                    }
+                }
+                return Ok(OpOutcome::Overtaken(
+                    "the file changed on the server since this edit was decided; deciding again with both".into(),
+                ));
+            }
             // Asked to stand down between two chunks. The upload the server
             // opened for this attempt is abandoned with it, as a kill there
             // would abandon it, and the op goes back on the queue (`run_one`):
@@ -3766,7 +3883,32 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         entry.synced_placement = owed_move;
     }
     env.store.put_entry(&entry)?;
+    // Agreed: nothing sent before this can come back as a head to recognize.
+    env.store.forget_sent_ciphers(entry.id.server_id)?;
     Ok(OpOutcome::Done)
+}
+
+/// What `head` holds, when it is a version this device sent itself -- landed,
+/// its answer lost. `None` for anybody else's. For a plaintext file the two are
+/// the same content; for an encrypted one, the plaintext the ciphertext holds.
+fn own_sent(env: &ExecEnv, entry: &Entry, head: &str) -> Result<Option<ContentId>, ExecError> {
+    Ok(env.store.sent_cipher(entry.id.server_id, head)?)
+}
+
+/// Take a landed version of this device's own as the agreement: the server
+/// holds `head`, which is `plain` (the same content, for a plaintext file). The fingerprint is left as it was, so the
+/// next scan still compares the disk against what was agreed.
+fn adopt_landed(mut entry: Entry, head: ContentId, plain: ContentId) -> Entry {
+    let head = match &entry.remote_content {
+        Some(known) if known.sha256 == head.sha256 => known.clone(),
+        _ => head,
+    };
+    entry.remote_content = Some(head.clone());
+    if entry.is_encrypted {
+        entry.synced_remote_content = Some(head);
+    }
+    entry.synced_content = Some(plain);
+    entry
 }
 
 /// Re-encrypt an encrypted file's metadata under a new name.
@@ -3844,6 +3986,9 @@ struct Packed {
     content_id: String,
     metadata: String,
     wrapped_file_keys: Vec<(i64, String)>,
+    /// For a new version: the hash of the metadata blob the server holds now,
+    /// the one the new blob replaces (`base_metadata_sha256`).
+    base_metadata: Option<String>,
 }
 
 /// A writer that hashes what passes through it on the way to another writer.
@@ -3976,6 +4121,35 @@ fn encrypt_for_upload(
         }
     }
 
+    // A new version replaces the file's metadata blob, and the new blob names
+    // the file as this device last agreed. A rename landed since -- this
+    // device not told yet -- would be put back by it, so the blob the server
+    // holds now is read: one naming something else stands this down for the
+    // next round to apply the rename first, and its hash goes with the upload
+    // for the server to ask again where the version is written (B10).
+    let mut base_metadata = None;
+    if !is_new_file {
+        let Some(item) = stat(env, entry.id, false)? else {
+            return Ok(Err(OpOutcome::Overtaken("the server no longer has it".into())));
+        };
+        if let Some(blob) = item.get("encrypted_metadata").and_then(Value::as_str) {
+            match jd_crypto::drive::decrypt_metadata(blob, &file_key) {
+                Ok(held) if held.name != entry.remote.name && held.name != name => {
+                    return Ok(Err(OpOutcome::Overtaken(
+                        "it was renamed on the server since this edit was decided; deciding again with the new name".into(),
+                    )));
+                }
+                Ok(_) => base_metadata = Some(hex(&Sha256::digest(blob.as_bytes()))),
+                // A blob that will not open names nothing a rename could have
+                // changed for this device to put back. Waiting on it would hold
+                // the file's every new version for ever; the version is sent
+                // with no name base and its blob replaces the damaged one, the
+                // content base still checked.
+                Err(_) => {}
+            }
+        }
+    }
+
     let mut meta = jd_crypto::drive::FileMetadata::new(
         name,
         crate::mime::for_name(name),
@@ -4015,6 +4189,7 @@ fn encrypt_for_upload(
         content_id,
         metadata,
         wrapped_file_keys,
+        base_metadata,
     }))
 }
 

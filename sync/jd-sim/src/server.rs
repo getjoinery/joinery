@@ -331,6 +331,10 @@ pub struct MockServer {
     /// before its server has the check, and the only way to see what the
     /// client does on its own (`specs/drive_trash_unchanged_since.md`).
     ignores_unchanged_since: Arc<Mutex<bool>>,
+    /// Answer as a server before version bases: `base_sha256` and
+    /// `base_metadata_sha256` are not read, and a new version replaces whatever
+    /// the head holds. What a client meets on an older server (B10).
+    ignores_upload_base: Arc<Mutex<bool>>,
     /// See [`MockServer::ignores_scope`].
     ignores_scope: Arc<Mutex<bool>>,
     /// See [`MockServer::index_shows_nothing`].
@@ -360,6 +364,28 @@ pub type ServerResult = Result<Value, ApiRefusal>;
 /// reasons). Never the 404 or 400 an HTTP mock reaches for: the platform
 /// sends neither for these, and a client met in the field by a 422 where the
 /// mock had sent it a 404 was tested against a kinder server than it ran on.
+/// A new version refused for a head that moved (`head_moved`) or a metadata
+/// blob rewritten since (`moved_since`), naming the head as it stands, as
+/// `FileHeadMovedException::refusal_data` does.
+fn head_refusal(reason: &'static str, f: &FileRow) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: if reason == "moved_since" {
+            "That file has been renamed since this version was saved.".into()
+        } else {
+            "That file has changed since this version was based on it.".into()
+        },
+        data: json!({
+            "reason": reason,
+            "file_id": f.id,
+            "head_sha256": f.sha256,
+            "head_size": f.size,
+            "head_change_id": f.head_change_id,
+        }),
+    }
+}
+
 fn refused(reason: &'static str, message: impl Into<String>) -> ApiRefusal {
     // A malformed request is refused again as sent: it stands, as the
     // platform's does (`docs/drive.md`, Standing refusals).
@@ -595,6 +621,7 @@ impl MockServer {
             move_arrives: Arc::new(Mutex::new(None)),
             plain_refusals: Arc::new(Mutex::new(false)),
             ignores_unchanged_since: Arc::new(Mutex::new(false)),
+            ignores_upload_base: Arc::new(Mutex::new(false)),
             ignores_scope: Arc::new(Mutex::new(false)),
             index_shows_nothing: Arc::new(Mutex::new(false)),
         }
@@ -753,6 +780,12 @@ impl MockServer {
     /// [`MockServer::ignores_unchanged_since`].
     pub fn ignores_unchanged_since(&self, on: bool) {
         *self.ignores_unchanged_since.lock().unwrap() = on;
+    }
+
+    /// Stop reading a new version's bases. See
+    /// [`MockServer::ignores_upload_base`].
+    pub fn ignores_upload_base(&self, on: bool) {
+        *self.ignores_upload_base.lock().unwrap() = on;
     }
 
     /// Register a user's Drive vault public key.
@@ -2451,6 +2484,7 @@ impl MockServer {
             .to_string();
         let folder = body.get("folder_id").and_then(Value::as_i64);
         let file_id = body.get("file_id").and_then(Value::as_i64);
+        let (base, base_metadata) = self.version_bases(body);
         // Read before anything else, as the platform reads it: an unusable
         // time is refused for any destination rather than dropped, since the
         // client believes it set one.
@@ -2532,7 +2566,32 @@ impl MockServer {
         // nothing to send. The engine has to handle a completed upload that
         // moved no bytes at all, which is a different code path from the one
         // it usually takes and therefore one worth exercising constantly.
+        // A new version based on a head that has moved is refused before a
+        // byte is sent, as the platform asks at init; the answer that counts
+        // is given again where the version is written.
+        if let Some(id) = file_id.filter(|_| !sha.is_empty()) {
+            if let Some(f) = st.files.get(&id) {
+                if base.as_deref().is_some_and(|b| f.sha256 != b && f.sha256 != sha) {
+                    return Err(head_refusal("head_moved", f));
+                }
+                if f.encrypted
+                    && base_metadata.as_deref().is_some_and(|b| {
+                        sha256_hex(f.encrypted_metadata.as_deref().unwrap_or("").as_bytes()) != b
+                    })
+                {
+                    return Err(head_refusal("moved_since", f));
+                }
+            }
+        }
+
         if !encrypted && st.blobs.contains_key(&sha) {
+            if let Some(id) = file_id {
+                if !Self::version_guard(&st, id, base.as_deref(), None, &sha, None)? {
+                    let row = st.files.get(&id).cloned().expect("guarded");
+                    let file = Self::file_export(&mut st, &row, false, 0);
+                    return Ok(json!({ "ok": true, "deduped": true, "file": file }));
+                }
+            }
             let file = Self::commit_content(
                 &mut st, file_id, folder, &name, &sha, size, false, None, None, modified_time,
             )?;
@@ -2739,6 +2798,26 @@ impl MockServer {
             ));
         }
 
+        if let Some(id) = session.file_id {
+            let (base, base_metadata) = self.version_bases(body);
+            let meta = if session.encrypted { base_metadata.as_deref() } else { None };
+            match Self::version_guard(&st, id, base.as_deref(), meta, &session.sha256, enc_metadata.as_deref()) {
+                Ok(true) => {}
+                // The head already holds these bytes: this upload landed
+                // before. Nothing new happened, so nothing is recorded.
+                Ok(false) => {
+                    st.uploads.remove(&token);
+                    let row = st.files.get(&id).cloned().expect("guarded");
+                    let file = Self::file_export(&mut st, &row, false, 0);
+                    return Ok(json!({ "ok": true, "file": file }));
+                }
+                Err(refusal) => {
+                    st.uploads.remove(&token);
+                    return Err(refusal);
+                }
+            }
+        }
+
         st.blobs
             .insert(session.sha256.clone(), session.received.clone());
         // The caller gets back their own grant, which is the one the export
@@ -2849,6 +2928,49 @@ impl MockServer {
             actor,
         });
         change_id
+    }
+
+    /// A new version's bases, as sent: `None` for one not sent, or for every
+    /// one while the server is answering as one before bases (B10).
+    fn version_bases(&self, body: &Value) -> (Option<String>, Option<String>) {
+        if *self.ignores_upload_base.lock().unwrap() {
+            return (None, None);
+        }
+        let read = |k: &str| body.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
+        (read("base_sha256"), read("base_metadata_sha256"))
+    }
+
+    /// The platform's `FileVersion::save_new_content` guard: may a new version
+    /// of `id` be written? `Ok(false)` is a head already holding these bytes
+    /// (a landed retry), written as nothing; a head that moved past `base`, or
+    /// an encrypted file's metadata blob rewritten since `base_metadata`, is
+    /// refused naming the head as it stands.
+    fn version_guard(
+        st: &ServerState,
+        id: i64,
+        base: Option<&str>,
+        base_metadata: Option<&str>,
+        sha: &str,
+        new_metadata: Option<&str>,
+    ) -> Result<bool, ApiRefusal> {
+        let Some(f) = st.files.get(&id) else {
+            return Ok(true);
+        };
+        if let Some(base) = base {
+            if f.sha256 == sha {
+                return Ok(false);
+            }
+            if f.sha256 != base {
+                return Err(head_refusal("head_moved", f));
+            }
+        }
+        if let Some(base) = base_metadata {
+            let current = f.encrypted_metadata.as_deref().unwrap_or("");
+            if sha256_hex(current.as_bytes()) != base && Some(current) != new_metadata {
+                return Err(head_refusal("moved_since", f));
+            }
+        }
+        Ok(true)
     }
 
     /// Land content on a file — new file, or a new version of an existing one.
