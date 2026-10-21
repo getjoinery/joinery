@@ -408,6 +408,62 @@ out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
 chk "not root and no fixture named: the tick leaves the kernel to root" \
     "$(cat "$PROC/kernel/yama/ptrace_scope"):$(printf '%s\n' "$out" | grep -c 'put back to')" "0:0"
 
+echo "== the tick holds the agent running where its switch is on (restart audit H5) =="
+AH="$T/agent_hold"
+mkdir -p "$AH/run/systemd/system" "$AH/etc/systemd/system" "$AH/etc/joinery-agent" "$AH/bin"
+: > "$AH/etc/systemd/system/joinery-agent.service"
+# systemctl stub: is-enabled / is-active answer from files, enable / start write them.
+cat > "$AH/bin/systemctl" <<STUB
+#!/bin/bash
+echo "\$*" >> "$AH/calls"
+case "\$1" in
+    is-enabled) [ -f "$AH/enabled_state" ] ;;
+    is-active)  [ -f "$AH/active_state" ] ;;
+    enable)     touch "$AH/enabled_state" ;;
+    start)      touch "$AH/active_state" ;;
+    *) exit 1 ;;
+esac
+STUB
+chmod +x "$AH/bin/systemctl"
+hold_tick() { rm -f "$AH/calls"; PATH="$AH/bin:$PATH" JOINERY_AGENT_HOLD_ROOT="$AH" bash "$RUNNER" --when-changed --site-root="$T" 2>&1; }
+
+touch "$AH/enabled_state" "$AH/active_state"
+out="$(hold_tick)"
+chk "running and enabled: no start, no enable, nothing said" \
+    "$(grep -c -E '^(start|enable) ' "$AH/calls"):$(printf '%s\n' "$out" | grep -c 'joinery-agent was not')" "0:0"
+
+rm -f "$AH/active_state"
+out="$(hold_tick)"
+chk "stopped by hand with its switch on: started within the tick, and said" \
+    "$( [ -f "$AH/active_state" ] && echo running):$(printf '%s\n' "$out" | grep -c 'joinery-agent was not running though its switch is on; started')" "running:1"
+
+rm -f "$AH/enabled_state"
+out="$(hold_tick)"
+chk "disabled at boot: enabled again, and said" \
+    "$( [ -f "$AH/enabled_state" ] && echo enabled):$(printf '%s\n' "$out" | grep -c 'nothing would start it after a reboot; enabled')" "enabled:1"
+
+rm -f "$AH/active_state" "$AH/enabled_state"
+echo 0 > "$AH/etc/joinery-agent/enabled"
+out="$(hold_tick)"
+chk "switched off by its marker: left stopped and disabled" \
+    "$( [ -f "$AH/active_state" ] && echo running || echo stopped):$(grep -c -E '^(start|enable) ' "$AH/calls" 2>/dev/null || echo 0)" "stopped:0"
+echo 1 > "$AH/etc/joinery-agent/enabled"
+out="$(hold_tick)"
+chk "switched back on by its marker: started" "$( [ -f "$AH/active_state" ] && echo running)" "running"
+
+rm -f "$AH/active_state"
+rm -rf "$AH/run/systemd"
+out="$(hold_tick)"
+chk "no systemd: the keepalive's job, the tick asks nothing" "$( [ -f "$AH/calls" ] && cat "$AH/calls" | wc -l || echo 0)" "0"
+mkdir -p "$AH/run/systemd/system"
+rm -f "$AH/etc/systemd/system/joinery-agent.service"
+out="$(hold_tick)"
+chk "no agent unit: nothing installed here to hold" "$( [ -f "$AH/calls" ] && cat "$AH/calls" | wc -l || echo 0)" "0"
+
+rm -f "$AH/calls"
+out="$(PATH="$AH/bin:$PATH" bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
+chk "not root and no fixture named: the tick leaves the agent to root" "$( [ -f "$AH/calls" ] && echo asked || echo none)" "none"
+
 echo "== a run that waited out the site's removal writes nothing (B3) =="
 # remove_account.sh holds this lock while it takes a site away. A tick that
 # found the site before the removal began waits on it, then must not write the

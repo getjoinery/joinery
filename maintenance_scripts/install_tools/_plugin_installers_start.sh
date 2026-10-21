@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.42 - Every --when-changed tick holds the agent running where its switch is on: an agent
+#           stopped by hand, or a unit disabled and the machine rebooted, is started (and enabled)
+#           within the minute instead of at the daily converge (agent restart audit H5).
 # Version: 2.41 - A run that waited for the lock checks the site is still there before it writes
 #                 anything: remove_account.sh holds the lock for a removal, and the run behind it
 #                 wrote the site's cache back as a stray directory (B3).
@@ -649,6 +652,47 @@ kernel_settings_hold() {
         fi
         echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') ${key} was ${got}; put back to ${want}"
     done < <(kernel_settings_state)
+}
+
+# --- The agent runs wherever its switch is on (agent restart audit H5) --------
+# systemd restarts an agent that exits, and the cron keepalive starts one on a
+# machine without systemd. Neither starts an agent someone stopped
+# (`systemctl stop`), or one whose unit was disabled before a reboot: those
+# stayed down until the daily converge ran install_agent.sh, which also skips
+# when the database cannot be read. On a machine nobody logs into, that is a day
+# with no way in. The agent's off switch is the marker install_agent.sh and the
+# keepalive read (/etc/joinery-agent/enabled): absent is on, present and not 1 is
+# off. A switched-off agent is left alone. One systemctl call a tick when all is
+# well. JOINERY_AGENT_HOLD_ROOT points the paths at a fixture for the gate, with
+# systemctl taken from PATH.
+agent_running_hold() {
+    local root="" marker unit now
+    if [[ "$(id -u)" != "0" ]]; then
+        [[ -n "${JOINERY_AGENT_HOLD_ROOT:-}" ]] || return 0
+        root="${JOINERY_AGENT_HOLD_ROOT%/}"
+    fi
+    [[ -d "${root}/run/systemd/system" ]] || return 0
+    unit="${root}/etc/systemd/system/joinery-agent.service"
+    [[ -f "${unit}" ]] || return 0
+    marker="${root}/etc/joinery-agent/enabled"
+    if [[ -f "${marker}" && "$(cat "${marker}" 2>/dev/null)" != "1" ]]; then
+        return 0
+    fi
+    now="$(date -u '+%Y-%m-%d %H:%M:%S')"
+    if ! systemctl is-enabled --quiet joinery-agent 2>/dev/null; then
+        if systemctl enable --quiet joinery-agent 2>/dev/null; then
+            echo "host converger: ${now} joinery-agent was not enabled, so nothing would start it after a reboot; enabled"
+        else
+            echo "host converger: ${now} joinery-agent is not enabled and could not be enabled" >&2
+        fi
+    fi
+    if ! systemctl is-active --quiet joinery-agent 2>/dev/null; then
+        if systemctl start joinery-agent 2>/dev/null; then
+            echo "host converger: ${now} joinery-agent was not running though its switch is on; started"
+        else
+            echo "host converger: ${now} joinery-agent is not running and could not be started" >&2
+        fi
+    fi
 }
 
 record_last() {
@@ -1301,6 +1345,9 @@ fi
 
 # --- Converge only when something changed (--when-changed) -------------------
 if [[ "${WHEN_CHANGED}" == "1" ]]; then
+    # Before anything else the tick decides: the agent is how this machine is
+    # reached, whatever else this tick does or skips.
+    agent_running_hold
     ACTIVE_PLUGINS_FOR_HASH="$(read_active_plugins 2>/dev/null || echo "db-unreachable")"
     if [[ "${MACHINE}" == "0" ]]; then
         HOST_SWITCHES_FOR_HASH="$(read_host_switches 2>/dev/null || echo "db-unreachable")"

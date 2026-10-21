@@ -3,6 +3,10 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.12 - The keepalive's start guard: before launching, while a self-update is on trial
+#           (.pending) with the previous binary kept (.bak), the new binary must answer --version;
+#           when it cannot, the previous one goes back and the new version is marked rejected. The
+#           systemd unit carries the same guard as ExecStartPre (agent restart audit H2).
 # Version: 2.11 - The busy-agent message says "already current" when the running agent is at or
 #           above the shipped artifact, and "new artifact staged" only when the shipped one is
 #           newer. It said "staged" on every run, including runs with nothing to install.
@@ -336,6 +340,17 @@ if [ -f /etc/joinery-agent/enabled ] && [ "$(cat /etc/joinery-agent/enabled 2>/d
     exit 0
 fi
 if ! pgrep -x joinery-agent >/dev/null 2>&1; then
+    # The start guard. A self-update that installed a binary unable to start at
+    # all would be launched here every minute for ever: the watchdog that puts
+    # the previous binary back lives in the agent's main, which such a binary
+    # never reaches. The systemd unit's ExecStartPre is the same check.
+    b=/usr/local/bin/joinery-agent
+    if [ -f "$b.pending" ] && [ -f "$b.bak" ] && ! timeout 10 "$b" --version >/dev/null 2>&1; then
+        head -n 1 "$b.pending" > "$b.rejected"
+        mv -f "$b.bak" "$b"
+        rm -f "$b.pending"
+        echo "joinery-agent start guard: the new binary does not start; previous binary restored" >> /var/log/joinery-agent.log
+    fi
     set -a
     [ -f /etc/joinery-agent/joinery-agent.env ] && . /etc/joinery-agent/joinery-agent.env
     set +a
