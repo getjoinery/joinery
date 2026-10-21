@@ -223,6 +223,11 @@ pub struct Fleet {
     /// waiting out poll intervals rather than exercising anything.
     #[serde(default = "default_poll_seconds")]
     pub poll_seconds: u64,
+    /// The encrypted lane: the account holds a Drive vault, every device is
+    /// linked through the ceremony and handed its key, and the personas' vault
+    /// twins write into the `Vault` folder (spec § The encrypted lane).
+    #[serde(default)]
+    pub vault: bool,
 }
 
 fn default_storm_seconds() -> u64 {
@@ -386,6 +391,7 @@ mod tests {
             storm_seconds: 2700,
             settle_deadline_seconds: 900,
             poll_seconds: 30,
+            vault: false,
         }
     }
 

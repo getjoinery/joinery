@@ -31,6 +31,24 @@ pub struct Entity {
 pub struct ServerTree {
     pub folders: BTreeMap<i64, Entity>,
     pub files: BTreeMap<i64, Entity>,
+    /// What the index carries for each encrypted file, to open it with.
+    pub sealed: BTreeMap<i64, Sealed>,
+    /// Each opened encrypted file's head ciphertext hash, by file id. Once a
+    /// file is opened (`vault::Opener`), its entity carries its real name and
+    /// its plaintext's hash, like any other file's, and this is where the hash
+    /// of the bytes the server actually holds is kept.
+    pub cipher: BTreeMap<i64, String>,
+    /// Every ciphertext hash the rig has opened to a plaintext one, this settle
+    /// and before: the only way a version history, which names ciphertexts,
+    /// can be read in plaintext terms.
+    pub opened: BTreeMap<String, String>,
+}
+
+/// An encrypted file's name and key, as the index hands them over.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sealed {
+    pub metadata: String,
+    pub wrapped_file_key: String,
 }
 
 impl ServerTree {
@@ -115,6 +133,28 @@ impl ServerTree {
             .filter(|e| e.encrypted)
             .collect()
     }
+
+    /// The hash of every encrypted file's bytes as the server holds them: the
+    /// ones no disk may ever hold.
+    pub fn ciphertexts(&self) -> std::collections::BTreeSet<String> {
+        self.files
+            .iter()
+            .filter(|(_, f)| f.encrypted)
+            .filter_map(|(id, f)| self.cipher.get(id).or(f.sha256.as_ref()).cloned())
+            .collect()
+    }
+
+    /// A content hash from `file`'s version history, in the terms every other
+    /// hash in the oracle is in. A plaintext file's is itself; an encrypted
+    /// file's is the plaintext it was opened to, or `None` when the rig has
+    /// never opened that ciphertext.
+    pub fn plain_content(&self, file: &Entity, sha: &str) -> Option<String> {
+        if file.encrypted {
+            self.opened.get(sha).cloned()
+        } else {
+            Some(sha.to_string())
+        }
+    }
 }
 
 /// Walk `drive_index` to completion.
@@ -139,6 +179,18 @@ pub fn walk(api: &dyn DriveApi) -> Result<ServerTree, ProtoError> {
             .unwrap_or_default()
         {
             if let Some(entity) = entity_from(&item) {
+                if entity.encrypted && !entity.is_folder {
+                    let field = |name: &str| {
+                        item.get(name).and_then(Value::as_str).unwrap_or_default().to_string()
+                    };
+                    tree.sealed.insert(
+                        entity.id,
+                        Sealed {
+                            metadata: field("encrypted_metadata"),
+                            wrapped_file_key: field("wrapped_file_key"),
+                        },
+                    );
+                }
                 if entity.is_folder {
                     tree.folders.insert(entity.id, entity);
                 } else {
@@ -267,6 +319,14 @@ pub fn find_in_version_history(
         };
         search.unidentified += history.unidentified;
         for sha in history.hashes {
+            // A ciphertext the rig never opened says nothing it can read: not
+            // a match and not a miss, so counted apart.
+            let Some(sha) = tree.plain_content(file, &sha) else {
+                if let Some(path) = tree.path_of(file) {
+                    search.sealed_at.insert(path);
+                }
+                continue;
+            };
             if wanted.contains(&sha) {
                 search.found.insert(sha);
             }
@@ -327,6 +387,10 @@ pub struct Search {
     pub unidentified: usize,
     /// Files whose history could not be read at all.
     pub unreadable: usize,
+    /// The paths of encrypted files with a version naming a ciphertext the rig
+    /// never opened: identified, but not in terms the oracle can read (the API
+    /// hands out no old version's bytes).
+    pub sealed_at: std::collections::BTreeSet<String>,
 }
 
 #[cfg(test)]
@@ -545,6 +609,30 @@ mod tests {
         })]);
         let tree = walk(&api).unwrap();
         assert!(tree.live_paths().is_empty());
+    }
+
+    /// An encrypted file's history names ciphertexts. One the rig opened reads
+    /// as its plaintext and can be found; one it never opened is neither found
+    /// nor anonymous: its path is recorded as holding what the rig cannot read.
+    #[test]
+    fn an_encrypted_history_reads_through_what_was_opened_and_names_the_rest() {
+        let mut vault = folder(7, "Vault", None, false);
+        vault["encrypted"] = json!(true);
+        let mut plan = file(1, "enc-c1", Some(7), "cipherhead", false);
+        plan["encrypted"] = json!(true);
+        let api = canned(vec![
+            json!({ "items": [vault, plan], "done": true }),
+            json!({ "versions": [{ "content_sha256": "cipherknown" }, { "content_sha256": "unopened" }] }),
+        ]);
+        let mut tree = walk(&api).unwrap();
+        tree.files.get_mut(&1).unwrap().name = "plan.txt".into();
+        tree.opened.insert("cipherknown".into(), "plainX".into());
+        let wanted: std::collections::BTreeSet<String> =
+            ["plainX".to_string(), "plainY".to_string()].into_iter().collect();
+        let search = find_in_version_history(&api, &tree, &wanted, 10).unwrap();
+        assert_eq!(search.found, ["plainX".to_string()].into_iter().collect());
+        assert_eq!(search.sealed_at, ["Vault/plan.txt".to_string()].into_iter().collect());
+        assert_eq!(search.unidentified, 0, "an identified ciphertext is not anonymous");
     }
 
     #[test]

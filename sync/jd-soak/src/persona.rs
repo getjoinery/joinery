@@ -126,6 +126,17 @@ pub trait Persona: Send {
 /// a campaign silently running seven personas when its config asked for eight
 /// would report a clean run over an adversary that was never there.
 pub fn build(name: &str) -> Option<Box<dyn Persona>> {
+    if let Some(base) = name.strip_prefix(VAULT_PREFIX) {
+        let twin = VAULT_TWINS.iter().find(|t| t[VAULT_PREFIX.len()..] == *base)?;
+        return Some(Box::new(VaultTwin {
+            name: twin,
+            inner: build_plain(base)?,
+        }));
+    }
+    build_plain(name)
+}
+
+fn build_plain(name: &str) -> Option<Box<dyn Persona>> {
     match name {
         "office" => Some(Box::new(Office::new())),
         "editor" => Some(Box::new(Editor::new())),
@@ -149,6 +160,57 @@ pub const PHASE_A_LOCAL: &[&str] = &[
     "messy-human",
     "name-swapper",
 ];
+
+/// A vault twin is a persona of this roster writing the same patterns into the
+/// encrypted folder (spec § The encrypted lane, E3): `vault-office` is
+/// `office` under `Vault/`.
+pub const VAULT_PREFIX: &str = "vault-";
+
+/// Every persona's vault twin, run when the fleet has the encrypted lane.
+pub const VAULT_TWINS: &[&str] = &[
+    "vault-office",
+    "vault-editor",
+    "vault-photoshop",
+    "vault-sqlite-app",
+    "vault-browser",
+    "vault-messy-human",
+    "vault-name-swapper",
+];
+
+/// A persona under its twin's name: the same decisions, its own journal.
+struct VaultTwin {
+    name: &'static str,
+    inner: Box<dyn Persona>,
+}
+
+impl Persona for VaultTwin {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn step(&mut self, rng: &mut Rng) -> Vec<FsOp> {
+        self.inner.step(rng)
+    }
+}
+
+/// Where a persona works, relative to a device's sync root. The one rule the
+/// storm places actors by and the oracle finds their files by.
+///
+/// Shared by every device, so two devices' `office` actors fight over the same
+/// documents; private for `sqlite-app` and `browser`, which as one program
+/// writing one database from two computers would be a corrupt file rather than
+/// a sync bug. A vault twin works in the same place under `Vault/`.
+pub fn workspace(device: &str, persona: &str) -> String {
+    let (above, base) = match persona.strip_prefix(VAULT_PREFIX) {
+        Some(base) => (format!("{}/", crate::vault::VAULT_FOLDER), base),
+        None => (String::new(), persona),
+    };
+    if base == "sqlite-app" || base == "browser" {
+        format!("{above}{device}-{base}")
+    } else {
+        format!("{above}Shared-{base}")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // office — the safe-save dance, with a lock file for company
@@ -822,6 +884,31 @@ mod tests {
             assert_eq!(&built.name(), name);
         }
         assert!(build("not-a-persona").is_none());
+    }
+
+    /// A twin is its persona under another name: the same decisions from the
+    /// same seed, in the same workspace under `Vault/`.
+    #[test]
+    fn every_vault_twin_is_its_persona_in_the_vault() {
+        assert_eq!(VAULT_TWINS.len(), PHASE_A_LOCAL.len());
+        for name in PHASE_A_LOCAL {
+            let twin = format!("{VAULT_PREFIX}{name}");
+            let built = build(&twin).unwrap_or_else(|| panic!("{twin} is not buildable"));
+            assert_eq!(built.name(), twin);
+            assert_eq!(
+                drive(&mut *build(&twin).unwrap(), 40, 9),
+                drive(&mut *build(name).unwrap(), 40, 9),
+                "{twin} does not do what {name} does"
+            );
+            assert_eq!(
+                workspace("device-a", &twin),
+                format!("Vault/{}", workspace("device-a", name))
+            );
+        }
+        assert_eq!(workspace("device-a", "office"), "Shared-office");
+        assert_eq!(workspace("device-b", "sqlite-app"), "device-b-sqlite-app");
+        assert!(build("vault-not-a-persona").is_none());
+        assert!(build("vault-vault-office").is_none());
     }
 
     #[test]

@@ -450,7 +450,10 @@ whether that is a defaulting problem or a wording one.
 
 Also: the stock `api_rate_limit_requests` of 1000/hour is right for a person and
 far too low for a storm. Raised on the soak instance, which is what S1 exists to
-allow. The client's behaviour under it was correct — surfaced blocker, retrying,
+allow. Since 0.8.513 a person's own devices are metered on their person's budget
+(`api_session_rate_limit_requests`, 5,000/hour) rather than the address's, so
+the soak instance raises that one too (500,000): runs 2738–2746 failed every
+settle on 429s before it did. The client's behaviour under it was correct — surfaced blocker, retrying,
 never silent.
 
 ## Four defects in the rig itself, all fixed
@@ -796,6 +799,98 @@ the rig working — but nothing has yet come back clean.
 Also still outstanding: a multi-cycle campaign (leak-watch needs six settles and
 no campaign has passed one), and `sync_soak_gate.sh` run as an actual gate
 rather than by hand.
+
+# The encrypted lane (Phase C, first part — designed 2026-10-21)
+
+**Why now.** Every encrypted upload from a real desktop client failed for two
+and a half months (B4, fixed in 0.8.512: the scratch file was opened write-only
+and read back) and the soak never noticed, because no rig device ever held a
+vault key and no persona ever wrote into an encrypted folder. The lane makes the
+encrypted path one more place the storm runs.
+
+**What it tests.** The desktop client's encrypted sync — sealing on upload,
+opening on download, renames that reseal the name, kills and partitions in the
+middle of each — and that ciphertext never lands on a disk. It does **not** test
+the browser's vault ceremonies (setup, unlock, step-up, approval page); those
+are the PHP vault suites' and the browser walks' (`specs/dev_walk_fixtures.md`).
+
+**The account's vault — E1.** A real account's Drive vault opens through its
+root, and setting one up takes a passkey (the passphrase route is for accounts
+whose passkeys cannot hold a key, and needs one to exist). A passkey from a
+rig means a software WebAuthn authenticator in `jd-soak` that tests the browser,
+not the client. So the rig account holds a **Drive vault only**, the shape the
+PHP suites use (`vault_fixture_client_vault`):
+
+- `jd-soak vault-key FLEET` derives the Drive vault keypair from the account's
+  own password and address (HKDF-SHA256, info `jd-soak drive vault v1`), and
+  prints the **public** half. Any rig process re-derives the same key, so the
+  lane adds no secret to the rig's disk beyond what each device keeps as a real
+  device does.
+- `soak_account_setup.php` takes that public key (`SOAK_DRIVE_VAULT_PUBLIC_KEY`)
+  and records a client-custody `drive` vault for the account. The server never
+  sees the secret half.
+- An account with no passkey and no TOTP holds no second factor, so approving
+  a device asks for no step-up (the approve logic's own rule).
+- The script also accepts the terms for the account: a signed-in browser
+  session is sent to `/terms-accept` until someone has, API calls included, and
+  nobody is at that page.
+
+**Linking — E2.** With `"vault": true` in the fleet file, `jd-soak provision`
+links each device through the real ceremony instead of the password login:
+`jd_daemon::link::begin` (the device's own keypair, offered for the vault), the
+rig approves the code as a browser session would (`auth/login` → `auth/web_session`
+→ the bridge URL's cookies → `drive_device_link_info` and
+`drive_device_link_approve` with `enable_vault` and the Drive key sealed to the
+device's public key, `X-Joinery-Csrf` from the `joinery_api_csrf` cookie), then
+`link::poll` and `link::store_approved` — the client's own code keeps the key,
+and the config's `vault_enabled` is whatever the handoff came to. A device whose
+handoff is not `Enabled` fails provisioning loudly: a vault lane with no key on
+a device is a plaintext campaign reported as an encrypted one.
+
+**The folder and the personas — E3.** Provision makes one encrypted top-level
+folder, `Vault`, through `drive_folder_create {protection_level: "fortress"}`
+(idempotent).
+Each persona has a vault twin, `vault-<name>`, writing the same patterns into
+`Vault/Shared-<name>` (or `Vault/<device>-<name>` for the private ones), with its
+own journal. The twins join the persona rotation when the fleet has the vault
+(the mix stays four, at least one twin a cycle), so every pattern runs
+encrypted over a campaign. The remote actor (`Web`) only ever acts on what it
+made in its own folder, so it never reaches `Vault`; a web user editing an
+encrypted file reseals it in the browser, which is the `vault-user` remote
+persona, the second part of this phase.
+
+**The checker — E4.** One translation step right after the server walk opens
+every encrypted file: `drive_index` carries `encrypted_metadata` and
+`wrapped_file_key`, so the name comes from the metadata and the file key from
+the Drive key. The plaintext hash needs the bytes, so new ciphertexts are
+downloaded (`drive_stat` with urls, batched), decrypted and hashed, and the
+ciphertext→plaintext map is kept in the journal directory across settles. Every
+later check then compares plaintext names and hashes and is unchanged, except:
+
+- *no-ciphertext* holds the **ciphertext** hashes against every disk, and asks
+  a device for an issue about an encrypted file only when that device holds no
+  vault key (its config's `vault_enabled`).
+- Version history lists ciphertext hashes, and the API hands out no old
+  version's bytes and no trashed file's (its link answers 404 until a restore,
+  which the rig will not do to the world it judges). So a history hash maps to
+  a plaintext one only through the map, and a trashed file never seen live has
+  a name and a size but no known content. Everything the no-loss check holds
+  the server to was seen as a head at an earlier settle, so it is in the map.
+  An encrypted live claim found nowhere readable, at a path where such
+  unreadable ciphertext stands (an unopened version of the file there, or a
+  trashed file of that name), is **counted and named as not judged** — the
+  treatment a claim at a dead path gets — and counts toward the
+  no-loss-coverage alarm. Never guessed either way; a plaintext claim, or an
+  encrypted one at any other path, is judged as ever. What fills that gap in
+  practice is a lost update (B10: two devices save one file in the same
+  window, and the earlier arrival survives only as a version).
+- A file the Drive key cannot open fails the settle by name (`vault-open`).
+- *swaps-apart* judges the plaintext workspace only: the vault twin's swaps
+  live in histories that name ciphertexts.
+
+**Rollout.** The rig first (Linux devices keep keys in a file). The Mac lines
+provision over ssh, where the login keychain is usually locked and the client
+refuses to keep a vault key (`NeedsDesktop`); they join when that is solved.
 
 # Docs to update when phases land
 

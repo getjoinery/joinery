@@ -30,8 +30,9 @@ use jd_soak::orchestrate::{self, Campaign};
 use jd_soak::{journal, mailbox, persona, report, server, verify};
 
 const USAGE: &str = "\
-usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
+usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N] [--vault]
        jd-soak provision <fleet.json>
+       jd-soak vault-key <fleet.json>
        jd-soak actor <fleet.json> --device D --persona P [--seconds N] [--seed N]
        jd-soak chaos <fleet.json> --device D --fault kill|freeze|partition|restart
        jd-soak verify <fleet.json>
@@ -46,7 +47,10 @@ usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
 An ordinary account on the soak instance, from JD_SOAK_ACCOUNT (its sign-in
 identifier) and JD_SOAK_PASSWORD. send and fetch use the line's mailbox
 account instead, from JD_REPORT_ACCOUNT and JD_REPORT_PASSWORD. Nothing here
-sends mail.";
+sends mail.
+
+vault-key prints the public half of the account's Drive vault key, the one
+soak_account_setup.php records for a fleet with the encrypted lane on.";
 
 /// Let the group write everything this process creates.
 ///
@@ -80,6 +84,7 @@ fn main() -> ExitCode {
     let outcome = match command {
         "init" => cmd_init(&rest),
         "provision" => cmd_provision(&rest),
+        "vault-key" => cmd_vault_key(&rest),
         "actor" => cmd_actor(&rest),
         "chaos" => cmd_chaos(&rest),
         "verify" => cmd_verify(&rest),
@@ -148,6 +153,7 @@ fn cmd_init(rest: &[String]) -> Result<bool, String> {
         storm_seconds: 45 * 60,
         settle_deadline_seconds: 15 * 60,
         poll_seconds: args.number("poll-seconds").unwrap_or(30),
+        vault: args.has("vault"),
     };
     for device in &fleet.devices {
         std::fs::create_dir_all(&device.root).map_err(|e| e.to_string())?;
@@ -174,16 +180,27 @@ fn cmd_init(rest: &[String]) -> Result<bool, String> {
 /// (spec S2). What this does is exactly what a person does at a keyboard, minus
 /// the keyboard: obtain a credential and write the two files the client reads.
 ///
-/// Phase A uses the **password login** rather than the browser ceremony. Both
-/// mint a real per-device session key through the real API; what only the
-/// ceremony can do is hand the device a vault key sealed to it, and no Phase A
-/// persona touches an encrypted folder. When the encrypted lane turns on
-/// (Phase C) this grows a ceremony path, because that is the point at which the
-/// difference starts to matter.
+/// A plaintext fleet uses the **password login**: it mints a real per-device
+/// session key through the real API, and the one thing the browser ceremony
+/// adds — a vault key sealed to the device — is nothing to a fleet that never
+/// touches an encrypted folder. A fleet with the encrypted lane (`vault`) links
+/// every device through the **ceremony** instead, the client's own code on the
+/// device's side and the rig approving as a browser would
+/// (spec § The encrypted lane, E2).
 fn cmd_provision(rest: &[String]) -> Result<bool, String> {
     let args = Args::parse(rest)?;
     let fleet = load_fleet(&args)?;
     let (email, password) = Fleet::credentials().map_err(|e| e.to_string())?;
+
+    let approving = if fleet.vault {
+        let key = jd_soak::vault::drive_key(&email, &password);
+        let approver = jd_soak::ceremony::BrowserSession::open(&fleet.server, &email, &password)?;
+        let api = api_client(&fleet)?;
+        jd_soak::vault::ensure_vault_folder(&api)?;
+        Some((key, approver))
+    } else {
+        None
+    };
 
     for device in &fleet.devices {
         std::fs::create_dir_all(&device.root).map_err(|e| e.to_string())?;
@@ -195,50 +212,117 @@ fn cmd_provision(rest: &[String]) -> Result<bool, String> {
         std::env::set_var("JOINERY_DRIVE_HOME", &device.home);
         let paths = jd_platform::Paths::discover();
         paths.create().map_err(|e| e.to_string())?;
-
-        let mut client = Client::new(&fleet.server);
-        let data = client
-            .login(&email, &password, &device.name)
-            .map_err(|e| format!("{} could not sign in: {e}", device.name))?;
-        let credentials = client
-            .credentials()
-            .cloned()
-            .ok_or_else(|| format!("{} signed in without a credential", device.name))?;
-
-        // Secrets first, and before anything that could fail. A config written
-        // before the credential was stored leaves a device that believes it is
-        // linked and holds nothing to prove it.
         let secrets = jd_platform::SecretStore::for_installation(&paths);
-        secrets
-            .set(jd_platform::Secret::ApiSecret, &credentials.secret_key)
-            .map_err(|e| format!("{} could not store its credential: {e}", device.name))?;
+
+        let (credentials, device_id, vault_enabled) = match &approving {
+            None => {
+                let mut client = Client::new(&fleet.server);
+                let data = client
+                    .login(&email, &password, &device.name)
+                    .map_err(|e| format!("{} could not sign in: {e}", device.name))?;
+                let credentials = client
+                    .credentials()
+                    .cloned()
+                    .ok_or_else(|| format!("{} signed in without a credential", device.name))?;
+                // Secrets first, and before anything that could fail. A config
+                // written before the credential was stored leaves a device that
+                // believes it is linked and holds nothing to prove it.
+                secrets
+                    .set(jd_platform::Secret::ApiSecret, &credentials.secret_key)
+                    .map_err(|e| format!("{} could not store its credential: {e}", device.name))?;
+                (credentials, data.get("device_id").and_then(|v| v.as_i64()), false)
+            }
+            Some((key, approver)) => {
+                let approved = link_through_the_ceremony(&fleet, device, &secrets, key, approver)?;
+                (approved.credentials, approved.device_id, true)
+            }
+        };
 
         jd_daemon::config::Config {
             base_url: fleet.server.clone(),
             sync_root: device.root.clone(),
             device_name: device.name.clone(),
-            device_id: data.get("device_id").and_then(|v| v.as_i64()),
+            device_id,
             account_id: None,
             public_key: credentials.public_key.clone(),
             poll_seconds: fleet.poll_seconds,
             excluded: Vec::new(),
-            vault_enabled: false,
+            vault_enabled,
             autostart: false,
         }
         .save(&paths.config_file())
         .map_err(|e| e.to_string())?;
 
         println!(
-            "{} linked — root {}, keys {}",
+            "{} linked — root {}, keys {}{}",
             device.name,
             device.root.display(),
-            secrets.describe(secrets.custody())
+            secrets.describe(secrets.custody()),
+            if vault_enabled { ", encrypted folders on" } else { "" }
         );
     }
 
     println!(
         "\nStart each daemon with JOINERY_DRIVE_HOME set to its home and: joinery-drive daemon"
     );
+    Ok(true)
+}
+
+/// Link one device the way `joinery-drive login` does, with the rig at the
+/// approval page. Fails rather than linking a device that came away without
+/// the vault key: a vault lane with a device that cannot open the vault is a
+/// plaintext campaign reported as an encrypted one.
+fn link_through_the_ceremony(
+    fleet: &Fleet,
+    device: &Device,
+    secrets: &jd_platform::SecretStore,
+    key: &jd_soak::vault::DriveKey,
+    approver: &jd_soak::ceremony::BrowserSession,
+) -> Result<jd_daemon::link::Approved, String> {
+    use jd_daemon::link;
+    if !secrets.can_keep(jd_platform::Secret::VaultKey) {
+        return Err(format!(
+            "{} cannot keep a vault key here (this session cannot open the credential store)",
+            device.name
+        ));
+    }
+    let client = Client::new(&fleet.server);
+    let pending = link::begin(&client, &device.name, jd_platform::platform_name(), true)
+        .map_err(|e| format!("{} could not start a link: {e}", device.name))?;
+    jd_soak::ceremony::approve(approver, &pending.link_code, key)
+        .map_err(|e| format!("{}: {e}", device.name))?;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let approved = loop {
+        match link::poll(&client, &pending).map_err(|e| format!("{}: {e}", device.name))? {
+            link::Outcome::Approved(a) => break a,
+            link::Outcome::Pending if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(500))
+            }
+            other => {
+                return Err(format!("{}: the approved link came back {other:?}", device.name))
+            }
+        }
+    };
+    let handoff = link::store_approved(secrets, &pending, &approved)?;
+    if !handoff.enabled() {
+        return Err(format!(
+            "{} was linked without the vault key ({handoff:?})",
+            device.name
+        ));
+    }
+    Ok(approved)
+}
+
+/// `vault-key`: the public half of the account's Drive vault key, for
+/// soak_account_setup.php to record (spec § The encrypted lane, E1).
+fn cmd_vault_key(rest: &[String]) -> Result<bool, String> {
+    let args = Args::parse(rest)?;
+    let fleet = load_fleet(&args)?;
+    if !fleet.vault {
+        return Err("this fleet does not run the encrypted lane (\"vault\": true)".into());
+    }
+    let (email, password) = Fleet::credentials().map_err(|e| e.to_string())?;
+    println!("{}", jd_soak::vault::drive_key(&email, &password).public_key);
     Ok(true)
 }
 
@@ -265,7 +349,7 @@ fn cmd_actor(rest: &[String]) -> Result<bool, String> {
     let seconds = args.number("seconds").unwrap_or(60);
     let seed = args.number("seed").unwrap_or(1);
 
-    let workspace = device.root.join(format!("Shared-{name}"));
+    let workspace = device.root.join(persona::workspace(&device.name, &name));
     let mut actor = jd_soak::Actor::new(&device.name, &workspace, built, seed, &fleet.journal_dir)
         .map_err(|e| e.to_string())?;
     let until = Instant::now() + Duration::from_secs(seconds);
@@ -537,7 +621,7 @@ impl Args {
         // A flag whose value is missing is an error rather than a default. The
         // alternative silently runs a different campaign from the one somebody
         // typed.
-        const SWITCHES: &[&str] = &["stop-on-violation"];
+        const SWITCHES: &[&str] = &["stop-on-violation", "vault"];
         let mut positional = Vec::new();
         let mut flags = std::collections::HashMap::new();
         let mut switches = std::collections::HashSet::new();
@@ -654,6 +738,7 @@ mod tests {
             storm_seconds: 60,
             settle_deadline_seconds: 60,
             poll_seconds: 30,
+            vault: false,
         };
         let err = args(&["--device", "device-z"]).device(&fleet).unwrap_err();
         assert!(err.contains("device-a"), "{err}");
