@@ -153,6 +153,15 @@ class Example extends SystemBase
     //                                string as time input, and the schema
     //                                backfill renders them unquoted.
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
+    // 'insert_only' => true        - save() writes it when the row is created
+    //                                and never afterwards; its owner moves it
+    //                                with a targeted UPDATE. A save of an
+    //                                existing row reads it back, so the copy
+    //                                holds the value as stored. Declare it on a
+    //                                column another writer moves under a lock
+    //                                (File's head blob): a copy loaded before
+    //                                that write would otherwise put the old
+    //                                value back when saved for any reason.
     // 'allowed_values' => array()  - Declared enum: save() refuses any non-NULL
     //                                value outside the set, and the model test
     //                                suite generates only members of the set.

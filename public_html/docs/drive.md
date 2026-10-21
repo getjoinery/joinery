@@ -792,12 +792,15 @@ unseen. Each asks only about the half it changes: a rename elsewhere does not
 refuse a move, and a move elsewhere does not refuse a rename. A move to where
 the item already is, a rename to the name it already has, and a rename to the
 blob it already holds succeed whatever they say. `drive_move` asks again under the owner's write lock where the move
-lands; `drive_rename` asks once, so two requests a few milliseconds apart can
-still both land. `from_name` is read for plaintext names only: an encrypted
-file's title is its opaque placeholder. An encrypted file's rename takes
-`from_metadata_sha256` instead, the SHA-256 (hex) of the metadata blob the new
-one was sealed from; a stored blob that is another, rewritten by a rename or a
-new version since, is refused the same way. A request that says none of these
+lands; `drive_rename` asks once for a plaintext name, so two requests a few
+milliseconds apart can still both land. `from_name` is read for plaintext names
+only: an encrypted file's title is its opaque placeholder. An encrypted file's
+rename takes `from_metadata_sha256` instead, the SHA-256 (hex) of the metadata
+blob the new one was sealed from; a stored blob that is another, rewritten by a
+rename or a new version since, is refused the same way. That one is asked where
+the blob is written, under the file's row lock a new version also takes, so a
+version and a rename cannot both be sealed from the same blob: the second is
+refused. A request that says none of these
 is carried out wherever the item stands, as the Drive pages' own moves and
 renames are.
 
