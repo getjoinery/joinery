@@ -40,16 +40,28 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-# Stubs. id says root; pgrep sees no other package run; dpkg-query lists the
-# packages before, and after once the updater stub has run; the updater stub
-# records its argv and exits with STUB_UU_RC, printing STUB_UU_OUT.
+# Stubs. id says root; pgrep reads a process table, $T/ps, one name<TAB>command
+# line per row, matching -x against the name and -f against the command line as
+# procps does; the table holds what every Ubuntu machine runs, the shutdown
+# helper, whose name is cut to unattended-upgr; dpkg-query lists the packages
+# before, and after once the updater stub has run; the updater stub records its
+# argv and exits with STUB_UU_RC, printing STUB_UU_OUT.
 mkdir -p "$T/bin"
 cat > "$T/bin/id" <<'STUB'
 #!/bin/bash
 echo 0
 STUB
-cat > "$T/bin/pgrep" <<'STUB'
+SHUTDOWN_HELPER=$'unattended-upgr\t/usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal'
+printf '%s\n' "$SHUTDOWN_HELPER" > "$T/ps"
+cat > "$T/bin/pgrep" <<STUB
 #!/bin/bash
+mode=x
+for a in "\$@"; do [ "\$a" = "-f" ] && mode=f; done
+pat="\${@: -1}"
+while IFS=\$'\t' read -r name cmd; do
+    if [ "\$mode" = x ]; then [[ "\$name" =~ ^(\$pat)\$ ]] && exit 0
+    else [[ "\$cmd" =~ \$pat ]] && exit 0; fi
+done < "$T/ps"
 exit 1
 STUB
 cat > "$T/bin/apt-get" <<STUB
@@ -115,6 +127,15 @@ chk "reboot_required is a boolean" "$(jv "$T/out.json" reboot_required | grep -c
 chk "services still on old code are named" "$(jv "$T/out.json" services_needing_restart)" '["php8.3-fpm.service"]'
 chk "the updater ran once, with no arguments" "$(grep -c -x 'unattended-upgrade ' "$T/calls")" "1"
 chk "apt-get ran only update" "$(grep '^apt-get' "$T/calls" | grep -v -c -E '^apt-get -q update$')" "0"
+
+echo "=== The busy check: the shutdown helper is no package run, unattended-upgrade is ==="
+eval "$(sed -n '/^apt_busy() {/,/^}/p' "$SCRIPT")"
+PATH="$T/bin:$PATH" apt_busy; chk "the shutdown helper alone is not busy" "$?" "1"
+printf '%s\n' "$SHUTDOWN_HELPER" $'unattended-upgr\t/usr/bin/python3 /usr/bin/unattended-upgrade' > "$T/ps"
+PATH="$T/bin:$PATH" apt_busy; chk "a running unattended-upgrade is busy" "$?" "0"
+printf '%s\n' "$SHUTDOWN_HELPER" $'dpkg\t/usr/bin/dpkg --configure -a' > "$T/ps"
+PATH="$T/bin:$PATH" apt_busy; chk "a running dpkg is busy" "$?" "0"
+printf '%s\n' "$SHUTDOWN_HELPER" > "$T/ps"
 
 echo "=== Nothing pending is its own outcome ==="
 STUB_UU_NOCHANGE=1 run_script
