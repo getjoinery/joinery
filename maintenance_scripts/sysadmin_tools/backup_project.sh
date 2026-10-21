@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.11.0 - --exclude NAME (repeatable): the site's backup_exclude names, left out as the chain's
+#                  files engine leaves them out; a standalone archive carried them
 # Version: 2.10.0 - the root-only config/ files (_backup_root_only_files.sh, the list backup_files.sh reads)
 #                  are left out, each said out loud, when the run cannot read them and has no sudo: the web
 #                  user's standalone archive failed on config/admin_credentials.txt, 600 root:root on every
@@ -86,6 +88,9 @@
 #   --report FILE     Stream mode: once the stream has been fully produced, the
 #                     TAR_RC and ENC_RC lines are written to FILE. The reader has
 #                     the byte count and the hash from what it read.
+#   --exclude NAME    A name to leave out at any depth (repeatable): the site's
+#                     backup_exclude setting, matched as backup_files.sh matches
+#                     it. A name with a slash is refused.
 #   --exclude-from F  Stream mode: a file of paths relative to the project
 #                     directory, one per line, to leave out of the archive. The
 #                     runner writes the local paths of every offloaded file here;
@@ -163,6 +168,7 @@ show_help() {
     echo "  --name NAME               Archive name without extension"
     echo "  --archive -               Stream the encrypted archive to stdout (requires --report FILE)"
     echo "  --report FILE             Stream mode: TAR_RC and ENC_RC are written here after the stream"
+    echo "  --exclude NAME            Leave out NAME at any depth (repeatable)"
     echo "  --exclude-from FILE       Stream mode: leave out the paths listed in FILE (relative to the project)"
     echo "  --help, -h                Show this help message"
     echo ""
@@ -195,6 +201,7 @@ NAME_OVERRIDE=""
 STREAM=false
 REPORT_FILE=""
 EXCLUDE_FROM=""
+EXTRA_EXCLUDES=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -260,6 +267,15 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 print_error "--report requires a file argument"
+                exit 1
+            fi
+            ;;
+        --exclude)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- && "$2" != */* ]]; then
+                EXTRA_EXCLUDES+=("$2")
+                shift 2
+            else
+                print_error "--exclude requires a name (no slash)"
                 exit 1
             fi
             ;;
@@ -604,6 +620,7 @@ fi
 # Excluded: TREE_EXCLUDES, as directories at any depth
 RSYNC_EXCLUDES=()
 for x in "${TREE_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="${x}/"); done
+for x in ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do RSYNC_EXCLUDES+=(--exclude="${x}"); done
 for x in "${ROOT_ONLY_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="/${x}/"); done
 if [ -z "$SUDO" ]; then
     for f in $(root_only_unreadable); do RSYNC_EXCLUDES+=(--exclude="/config/${f}"); done
@@ -754,6 +771,7 @@ if [ "$STREAM" = true ]; then
     fi
     TAR_EXCLUDES=()
     for x in "${TREE_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="$x"); done
+    for x in ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do TAR_EXCLUDES+=(--exclude="$x"); done
     TAR_EXCLUDES+=(--anchored)
     for x in "${ROOT_ONLY_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="./${x}"); done
     if [ -z "$SUDO_TAR" ]; then
