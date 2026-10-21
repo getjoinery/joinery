@@ -75,13 +75,21 @@ foreach ($actions as $action) {
 	foreach (rr_error_calls($source) as $call) {
 		list($line, $text) = $call;
 		$total++;
-		if (strpos($text, "'reason'") === false && strpos($text, 'DriveHelper::name_taken_data(') === false) {
+		if (strpos($text, "'reason'") === false && strpos($text, 'DriveHelper::name_taken_data(') === false
+			&& strpos($text, '->refusal_data(') === false) {
 			$missing[] = "line $line";
 		}
 	}
 	check(empty($missing), "$action: every refusal names its reason", implode(', ', $missing));
 }
 check($total > 80, 'the scan found the refusals it reads', "$total calls");
+
+// A new version refused for a head that moved answers through its exception's
+// builder, which is read here for the reason it must always carry.
+$fv_source = file_get_contents(PathHelper::getIncludePath('data/file_versions_class.php'));
+$builder_at = strpos($fv_source, 'public function refusal_data(');
+$builder = $builder_at === false ? '' : substr($fv_source, $builder_at, (int)strpos($fv_source, "\n\t}\n", $builder_at) - $builder_at);
+check($builder !== '' && strpos($builder, "'reason'") !== false, 'FileHeadMovedException::refusal_data() names its reason');
 
 section('Every name refusal names its holder');
 

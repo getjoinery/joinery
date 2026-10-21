@@ -303,6 +303,15 @@ impl Store {
                 PRIMARY KEY (vault, sha)
             );
 
+            CREATE TABLE IF NOT EXISTS sent_ciphers (
+                file_id     INTEGER NOT NULL,
+                sha256      TEXT NOT NULL,
+                plain_sha   TEXT NOT NULL,
+                plain_size  INTEGER NOT NULL,
+                at_ms       INTEGER NOT NULL,
+                PRIMARY KEY (file_id, sha256)
+            );
+
             CREATE TABLE IF NOT EXISTS tie_breaks (
                 entity_type TEXT NOT NULL,
                 server_id   INTEGER NOT NULL,
@@ -1708,6 +1717,55 @@ impl Store {
         Ok(())
     }
 
+    /// How many sent ciphertexts are remembered per file. A version is sent
+    /// once per attempt and the list is cleared when one lands, so this bounds
+    /// a long run of attempts that never got an answer.
+    pub const SENT_CIPHERS_KEPT: i64 = 8;
+
+    /// Remember that a new version of `file_id` was sent as `sha256` (its
+    /// ciphertext, for an encrypted file), holding `plain`: written down before
+    /// the send. A version that landed while its answer was lost comes back as
+    /// a head the device must know for its own -- an encrypted attempt is
+    /// encrypted afresh, so the head is none of the hashes it can derive -- and
+    /// what it holds is known only by the plaintext kept beside it
+    /// (`docs/drive_sync.md` § Conflicts).
+    pub fn note_sent_cipher(&self, file_id: i64, sha256: &str, plain: &ContentId, at_ms: i64) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO sent_ciphers (file_id, sha256, plain_sha, plain_size, at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![file_id, sha256, plain.sha256, plain.size as i64, at_ms],
+        )?;
+        self.conn.execute(
+            "DELETE FROM sent_ciphers WHERE file_id = ?1 AND sha256 NOT IN
+               (SELECT sha256 FROM sent_ciphers WHERE file_id = ?1 ORDER BY at_ms DESC, rowid DESC LIMIT ?2)",
+            params![file_id, Self::SENT_CIPHERS_KEPT],
+        )?;
+        Ok(())
+    }
+
+    /// The plaintext of a ciphertext this device sent as a version of
+    /// `file_id`, or `None` for one it never sent.
+    pub fn sent_cipher(&self, file_id: i64, sha256: &str) -> StoreResult<Option<ContentId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT plain_sha, plain_size FROM sent_ciphers WHERE file_id = ?1 AND sha256 = ?2",
+                params![file_id, sha256],
+                |r| {
+                    Ok(ContentId {
+                        sha256: r.get::<_, String>(0)?,
+                        size: r.get::<_, i64>(1)? as u64,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Forget what was sent of `file_id`: a version landed and was agreed.
+    pub fn forget_sent_ciphers(&self, file_id: i64) -> StoreResult<()> {
+        self.conn.execute("DELETE FROM sent_ciphers WHERE file_id = ?1", params![file_id])?;
+        Ok(())
+    }
+
     /// Bytes the walk listed inside a vault's directory on a disk with no file
     /// identities, the moment it listed them.
     pub fn note_vault_listed_bytes(&self, vault: i64, sha: &str) -> StoreResult<()> {
@@ -2451,6 +2509,23 @@ fn path_key(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A long run of unanswered attempts keeps the newest of what it sent:
+    /// the head a later answer names is the latest attempt's, not the first.
+    #[test]
+    fn sent_versions_keep_the_newest_and_forget_at_agreement() {
+        let store = Store::open_in_memory().unwrap();
+        let plain = ContentId { sha256: "p".into(), size: 1 };
+        for n in 0..12 {
+            store.note_sent_cipher(7, &format!("c{n}"), &plain, n).unwrap();
+        }
+        assert!(store.sent_cipher(7, "c11").unwrap().is_some());
+        assert!(store.sent_cipher(7, "c4").unwrap().is_some());
+        assert!(store.sent_cipher(7, "c3").unwrap().is_none(), "the oldest are the ones dropped");
+        assert!(store.sent_cipher(8, "c11").unwrap().is_none(), "kept per file");
+        store.forget_sent_ciphers(7).unwrap();
+        assert!(store.sent_cipher(7, "c11").unwrap().is_none());
+    }
     use super::*;
 
     #[test]

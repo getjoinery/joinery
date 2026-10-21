@@ -3,6 +3,44 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 /**
+ * A new version refused because the file moved past what its uploader based
+ * the edit on (FileVersion::save_new_content's guard). `reason` is the refusal
+ * reason the API answers with: head_moved for content, moved_since for an
+ * encrypted file's metadata (its name). The head is read after the refusal, so
+ * the client can take it as the change feed would have told it.
+ */
+class FileHeadMovedException extends Exception {
+	public $reason;
+	public $file_id;
+
+	public function __construct($reason, $file_id) {
+		parent::__construct($reason === 'moved_since'
+			? 'That file has been renamed since this version was saved.'
+			: 'That file has changed since this version was based on it.');
+		$this->reason = $reason;
+		$this->file_id = (int)$file_id;
+	}
+
+	/** The refusal's data: the reason and the head as it stands now. */
+	public function refusal_data() {
+		require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+		DriveHelper::forget_sync_meta($this->file_id);
+		$meta = DriveHelper::sync_meta_for($this->file_id);
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare('SELECT b.fbb_size_bytes FROM fil_files f JOIN fbb_file_blobs b ON b.fbb_file_blob_id = f.fil_fbb_file_blob_id WHERE f.fil_file_id = ?');
+		$q->execute(array($this->file_id));
+		$size = $q->fetchColumn();
+		return array(
+			'reason'         => $this->reason,
+			'file_id'        => $this->file_id,
+			'head_sha256'    => $meta['content_sha256'],
+			'head_size'      => $size === false ? null : (int)$size,
+			'head_change_id' => (int)$meta['head_change_id'],
+		);
+	}
+}
+
+/**
  * FileVersion — prior content of a Drive file (fvr_file_versions).
  *
  * Each row pins one historical blob for a file. Saving new content demotes the
@@ -12,7 +50,10 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * demotion transfers the head's reference to the new version (no count change),
  * and pruning / permanent delete release it.
  *
- * @version 1.0.0
+ * @version 1.1.0 - save_new_content takes a guard (the head and encrypted
+ *                  metadata the uploader based its edit on): a head that moved
+ *                  refuses with FileHeadMovedException, and content the head
+ *                  already holds writes no version (B10)
  */
 class FileVersion extends SystemBase {
 	public static $prefix = 'fvr';
@@ -60,8 +101,30 @@ class FileVersion extends SystemBase {
 	 * Save new content: demote the file's current head blob to a version and
 	 * repoint the file at $new_blob (already ingested; its refcount already
 	 * counts the new head reference). Then prune to the owner's retained depth.
+	 *
+	 * $guard says what the uploader based its edit on, read under the same row
+	 * hold as the demotion so nothing can land between the check and the write:
+	 *   - 'base_sha256': the head content it last agreed. A head holding other
+	 *     content refuses (FileHeadMovedException, head_moved): two devices
+	 *     saving one file in the same window must meet as a conflict, not end
+	 *     with the earlier arrival surviving only as an unseen version.
+	 *   - 'base_metadata_sha256' (encrypted files): the metadata blob its new one
+	 *     was sealed from. One rewritten since — by a rename — refuses
+	 *     (moved_since), because the new blob carries the name the uploader last
+	 *     agreed and would put it back over the rename.
+	 *   - 'encrypted_metadata': the new blob, written in the same transaction.
+	 * With a base given, content the head already holds is no new version: the
+	 * upload landed before (a retry after a lost answer) or two devices saved
+	 * the same bytes. Nothing is written and false comes back; the caller gives
+	 * back the reference it holds on $new_blob, exactly as on a refusal.
+	 * No guard is the unconditional save of a caller that knows no base.
+	 *
+	 * @return bool whether a version was written
 	 */
-	public static function save_new_content($file, $new_blob, $user_id) {
+	public static function save_new_content($file, $new_blob, $user_id, array $guard = array()) {
+		$base = isset($guard['base_sha256']) ? strtolower((string)$guard['base_sha256']) : '';
+		$base_metadata = isset($guard['base_metadata_sha256']) ? strtolower((string)$guard['base_metadata_sha256']) : '';
+		$new_metadata = isset($guard['encrypted_metadata']) ? (string)$guard['encrypted_metadata'] : '';
 		DbConnector::BeginTransaction();
 		try {
 			// Hold the file row for the whole demotion, and read the head from
@@ -76,6 +139,23 @@ class FileVersion extends SystemBase {
 			self::_lock_file((int)$file->key);
 			$head_blob_id = self::_head_blob_id((int)$file->key);
 			$head_size = self::_blob_size($head_blob_id);
+
+			if ($base !== '') {
+				$head_sha = self::_blob_sha($head_blob_id);
+				if ($head_sha !== '' && $head_sha === self::_blob_sha((int)$new_blob->key)) {
+					DbConnector::Commit();
+					return false;
+				}
+				if ($head_sha !== $base) {
+					throw new FileHeadMovedException('head_moved', (int)$file->key);
+				}
+			}
+			if ($base_metadata !== '') {
+				$current = self::_encrypted_metadata((int)$file->key);
+				if (!hash_equals(hash('sha256', $current), $base_metadata) && $current !== $new_metadata) {
+					throw new FileHeadMovedException('moved_since', (int)$file->key);
+				}
+			}
 
 			$v = new self(NULL);
 			$v->set('fvr_fil_file_id', $file->key);
@@ -97,6 +177,11 @@ class FileVersion extends SystemBase {
 			$q = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
 			$q->execute(array((int)$new_blob->key, (int)$file->key));
 			$file->set('fil_fbb_file_blob_id', (int)$new_blob->key, false);
+			if ($new_metadata !== '') {
+				$q = $dblink->prepare('UPDATE fil_files SET fil_encrypted_metadata = ? WHERE fil_file_id = ?');
+				$q->execute(array($new_metadata, (int)$file->key));
+				$file->set('fil_encrypted_metadata', $new_metadata, false);
+			}
 
 			DbConnector::Commit();
 		} catch (Exception $e) {
@@ -105,6 +190,23 @@ class FileVersion extends SystemBase {
 		}
 
 		self::prune($file, (int)$file->get('fil_usr_user_id'));
+		return true;
+	}
+
+	/** A blob's content hash, '' when it has none on record. */
+	private static function _blob_sha($blob_id) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare('SELECT fbb_sha256 FROM fbb_file_blobs WHERE fbb_file_blob_id = ?');
+		$q->execute(array((int)$blob_id));
+		return strtolower((string)$q->fetchColumn());
+	}
+
+	/** The file's encrypted metadata blob as stored now, read inside the hold. */
+	private static function _encrypted_metadata($file_id) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare('SELECT fil_encrypted_metadata FROM fil_files WHERE fil_file_id = ?');
+		$q->execute(array((int)$file_id));
+		return (string)$q->fetchColumn();
 	}
 
 	/**

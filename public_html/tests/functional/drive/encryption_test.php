@@ -533,6 +533,53 @@ if (!$grp_id) {
 	check(FileKeyGrant::wrapped_key_for($new_id, $owner->key) === $wrapped_up, 'the original key grant is untouched by the new version');
 
 	// -----------------------------------------------------------------------
+	section('API: an encrypted version based on a name renamed since is refused');
+
+	// The new metadata blob carries the name its uploader last agreed, so one
+	// sealed from a blob a rename has replaced would put the old name back
+	// (B10 A1). Asked where the version is written: a rename that lands
+	// between init and completion refuses the completion.
+	DriveHelper::forget_sync_meta($new_id);
+	$head_now = DriveHelper::sync_meta_for($new_id)['content_sha256'];
+	$v5bytes = random_bytes(600);
+	$vinit5 = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
+		'file_id' => $new_id, 'size_bytes' => 600, 'mime_type' => 'application/octet-stream',
+		'sha256' => hash('sha256', $v5bytes),
+		'base_sha256' => $head_now, 'base_metadata_sha256' => hash('sha256', $v2meta),
+	));
+	$vtoken5 = $vinit5['json']['data']['upload_token'] ?? '';
+	check($vtoken5 !== '', 'init accepts a version whose name base still holds', json_encode($vinit5['json']['data'] ?? null));
+	harness_put_chunk('/api/v1/drive_upload/' . $vtoken5, $H, 'bytes 0-599/600', $v5bytes);
+	$renamed_meta = base64_encode(random_bytes(52));
+	$rn = api_request('POST', '/api/v1/action/drive_rename', $H, array(
+		'entity_type' => 'file', 'entity_id' => $new_id,
+		'encrypted_metadata' => $renamed_meta, 'from_metadata_sha256' => hash('sha256', $v2meta),
+	));
+	check($rn['status'] === 200 && empty($rn['json']['error']), 'a rename lands while the version is in flight', json_encode($rn['json']['error'] ?? null));
+	$vc5 = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
+		'upload_token' => $vtoken5, 'encrypted_metadata' => base64_encode(random_bytes(52)),
+		'base_sha256' => $head_now, 'base_metadata_sha256' => hash('sha256', $v2meta),
+	));
+	check(($vc5['json']['data']['reason'] ?? null) === 'moved_since', 'the completion is refused moved_since', json_encode($vc5['json'] ?? null));
+	check((new File($new_id, true))->get('fil_encrypted_metadata') === $renamed_meta, "the rename's metadata is kept");
+	DriveHelper::forget_sync_meta($new_id);
+	check(DriveHelper::sync_meta_for($new_id)['content_sha256'] === $head_now, 'and the head is unchanged');
+	$q5 = $dblink->prepare('SELECT COUNT(*) FROM fbb_file_blobs WHERE fbb_sha256 = ?');
+	$q5->execute(array(hash('sha256', $v5bytes)));
+	check((int)$q5->fetchColumn() === 0, "the refused bytes' blob is given back");
+	check(FileUpload::load_by_token($vtoken5) === null, 'the staged upload is discarded');
+
+	// Asked before a byte is sent, too: init on a name base a rename replaced.
+	$v6bytes = random_bytes(600);
+	$vinit6 = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
+		'file_id' => $new_id, 'size_bytes' => 600, 'mime_type' => 'application/octet-stream',
+		'sha256' => hash('sha256', $v6bytes),
+		'base_sha256' => $head_now, 'base_metadata_sha256' => hash('sha256', $v2meta),
+	));
+	check(($vinit6['json']['data']['reason'] ?? null) === 'moved_since' && empty($vinit6['json']['data']['upload_token']),
+		'init refuses a stale name base moved_since', json_encode($vinit6['json'] ?? null));
+
+	// -----------------------------------------------------------------------
 	section('API: per-file size cap — ciphertext ceiling for vault uploads');
 
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));

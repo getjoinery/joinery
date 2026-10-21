@@ -248,6 +248,40 @@ impl ProtoError {
         }
     }
 
+    /// Whether the server refused a new version because the file's head holds
+    /// other content than the one it was based on (`base_sha256`). Read off the
+    /// marker, as `moved_since` is.
+    pub fn head_moved(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => {
+                data.get("reason").and_then(Value::as_str) == Some("head_moved")
+            }
+            _ => false,
+        }
+    }
+
+    /// The head a `head_moved` or `moved_since` refusal of a new version names:
+    /// its content hash and its content position in the change feed, as the
+    /// server stood when it refused. `None` when the refusal names none.
+    pub fn refused_head(&self) -> Option<(String, i64)> {
+        match self {
+            ProtoError::Api { data, .. } => Some((
+                data.get("head_sha256")?.as_str()?.to_string(),
+                data.get("head_change_id").and_then(Value::as_i64).unwrap_or(0),
+            )),
+            _ => None,
+        }
+    }
+
+    /// The size of the head a `head_moved` or `moved_since` refusal names,
+    /// when it gives one.
+    pub fn refused_head_size(&self) -> Option<u64> {
+        match self {
+            ProtoError::Api { data, .. } => data.get("head_size").and_then(Value::as_u64),
+            _ => None,
+        }
+    }
+
     /// Whether the server refused a trash because something in it changed
     /// after the cursor the client sent (`unchanged_since`). Read off the
     /// marker, as `parent_trashed` is.
@@ -750,6 +784,17 @@ pub struct UploadParams {
     /// encrypted file would tell the server when somebody last worked on it,
     /// and the server refuses one. It rides inside the metadata blob instead.
     pub modified_time: Option<String>,
+    /// For a new VERSION: the head content it was based on — the hash the
+    /// server gave for the head this device last agreed (ciphertext, for an
+    /// encrypted file). A head holding anything else refuses `head_moved`, so
+    /// two saves of one file in one window meet as a conflict rather than the
+    /// later arrival silently burying the earlier (`docs/drive.md`).
+    pub base_sha256: Option<String>,
+    /// For a new version of an encrypted file: the hash of the metadata blob
+    /// the new one was sealed from. The new blob carries the name this device
+    /// last agreed, so one rewritten since by a rename refuses `moved_since`
+    /// rather than putting the old name back.
+    pub base_metadata_sha256: Option<String>,
 }
 
 impl UploadParams {
@@ -777,7 +822,19 @@ impl UploadParams {
         if let Some(modified) = &self.modified_time {
             body["modified_time"] = json!(modified);
         }
+        self.add_bases(&mut body);
         body
+    }
+
+    /// The bases go to both calls: init asks before a byte is sent, and
+    /// completion is where the server's answer counts.
+    fn add_bases(&self, body: &mut Value) {
+        if let Some(base) = &self.base_sha256 {
+            body["base_sha256"] = json!(base);
+        }
+        if let Some(base) = &self.base_metadata_sha256 {
+            body["base_metadata_sha256"] = json!(base);
+        }
     }
 
     /// The `drive_upload_complete` body, carrying whatever encryption payloads
@@ -796,6 +853,7 @@ impl UploadParams {
             }
             body["wrapped_file_keys"] = Value::Object(keys);
         }
+        self.add_bases(&mut body);
         body
     }
 
@@ -812,6 +870,8 @@ impl UploadParams {
             encrypted_metadata: None,
             wrapped_file_keys: Vec::new(),
             modified_time: None,
+            base_sha256: None,
+            base_metadata_sha256: None,
         }
     }
 }
