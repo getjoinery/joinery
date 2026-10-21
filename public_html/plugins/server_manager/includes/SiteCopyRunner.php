@@ -98,6 +98,7 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.33 - a DNS switch records the TTL the DNS host holds for each lowered record (ttl_held, B12)
  * @version 1.32 - a kept switch-over keeps the old server Keep named: removing the old row afterwards made the tab
  *                 name the copy's own server, the one the site now runs on (B22)
  * @version 1.31 - server_to_delete reads the row's newest provision whether or not it was removed: removing a
@@ -2571,7 +2572,7 @@ class SiteCopyRunner {
 				// minute, and so does a move back.
 				$plan = array('zone' => $record['zone'], 'records' => $record['records']);
 				try {
-					DnsRecordMove::lower_ttl($driver, $plan);
+					$record['records'] = DnsRecordMove::lower_ttl($driver, $plan);
 				} catch (Exception $e) {
 					// Some records may have reached a minute: their TTLs go back
 					// now, or, when that fails too, the page names each original.

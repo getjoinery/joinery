@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.18 - site_state_report results (agent 1.86.0): each site state directory's records
  * @version 1.17 - listening_sockets, container_inventory, spam_learning_status and reboot_machine results (agent 1.76.0)
  * @version 1.16 - Mark as failed on a running agent job: fails it as lost (ManagementJob::markLost) and frees the
  *                 node's queue; a result that arrives later still replaces it. No running job was ever stuck
@@ -491,6 +492,58 @@ if ($result) {
 			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
 			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
 			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'site_state_report' && array_key_exists('sites', $result_data)) {
+		// What the machine's site state directories hold (agent 1.86.0): a
+		// table per site, the plain records' values, every other record named
+		// and sized only.
+		$when = function ($t) use ($session) {
+			return $t ? LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), (string)$t), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A') : '';
+		};
+		echo '<div class="card mb-3"><div class="card-header"><strong>Site state records</strong> <small class="text-muted">— '
+			. htmlspecialchars((string)($result_data['sites_dir'] ?? '')) . ' on this machine</small></div><div class="card-body">';
+		$reading = $result_data['reading'] ?? null;
+		if (is_array($reading)) {
+			$reason = (string)($reading['reason'] ?? '');
+			$what = $reason === 'copy' ? 'a dormant copy' . (!empty($reading['copy_of']) ? ' of node ' . (int)$reading['copy_of'] : '')
+				: ($reason === 'switchover' ? 'frozen for a switch-over' : 'live');
+			echo '<div class="mb-2">The agent reads its site, <strong>' . htmlspecialchars((string)($reading['site'] ?? '')) . '</strong>, as ' . $what . '.'
+				. (!empty($reading['error']) ? ' <span class="text-danger">' . htmlspecialchars((string)$reading['error']) . '</span>' : '') . '</div>';
+		}
+		$ss_sites = is_array($result_data['sites']) ? $result_data['sites'] : array();
+		if (empty($result_data['exists'])) {
+			echo '<div class="text-muted">There is no site state directory: no site here has been quiet or a copy.</div>';
+		} elseif (!$ss_sites) {
+			echo '<div class="text-muted">The directory holds no site\'s records.</div>';
+		}
+		foreach ($ss_sites as $ss) {
+			$entries = is_array($ss['entries'] ?? null) ? $ss['entries'] : array();
+			echo '<div class="mt-2"><strong>' . htmlspecialchars((string)($ss['site'] ?? '')) . '</strong>';
+			if (!$entries) {
+				echo ' <span class="text-muted">— an empty directory</span></div>';
+				continue;
+			}
+			echo '</div><table class="table table-sm mb-2"><thead><tr><th>Record</th><th>Kind</th><th>Size</th><th>Mode</th><th>Root\'s</th><th>Changed</th><th>Value</th></tr></thead><tbody>';
+			foreach ($entries as $e) {
+				if (!empty($e['error'])) {
+					echo '<tr><td><code>' . htmlspecialchars((string)($e['name'] ?? '')) . '</code></td><td colspan="6" class="text-danger">' . htmlspecialchars((string)$e['error']) . '</td></tr>';
+					continue;
+				}
+				echo '<tr><td><code>' . htmlspecialchars((string)($e['name'] ?? '')) . '</code></td>'
+					. '<td>' . htmlspecialchars((string)($e['kind'] ?? '')) . '</td>'
+					. '<td>' . (isset($e['bytes']) ? (int)$e['bytes'] . ' B' : '') . '</td>'
+					. '<td>' . htmlspecialchars((string)($e['mode'] ?? '')) . '</td>'
+					. '<td>' . (array_key_exists('root_owned', $e) ? ($e['root_owned'] ? 'yes' : '<span class="text-danger">no</span>') : '') . '</td>'
+					. '<td>' . htmlspecialchars($when($e['modified'] ?? '')) . '</td>'
+					. '<td>' . (isset($e['value']) ? '<code>' . htmlspecialchars((string)$e['value']) . '</code>' : '') . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+		if (!empty($result_data['truncated'])) {
+			echo '<div class="small text-muted">The node cut this short: it lists at most 100 sites and 64 records each.</div>';
+		}
+		echo '<small class="text-muted">Values are shown for the plain records only (the state line, copy_of, forward, and a host\'s quiet record and id block). The look secret, run spec, source key, vouched runs and history are named and sized, never read.</small>';
+		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'listening_sockets' && !empty($result_data['read'])) {
 		// What the machine listens on (agent 1.76.0): a row per listener.

@@ -2655,6 +2655,32 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 		'a size report does not: there is nothing in it to age out');
 }
 
+section('site_state_report: what the site state directories hold (agent 1.86.0, specs/site_copy_final_test.md)');
+
+{
+	$ss_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,site_state_report',
+		'mgn_agent_log_access' => 'off',
+	));
+	$built = JobCommandBuilder::build_site_state_report($ss_node);
+	check($built === array('primitive' => 'site_state_report', 'params' => array()),
+		'site_state_report travels as the name and nothing else, whatever the log switch says: it names records, it reads no log',
+		var_export($built, true));
+	check(JobCommandBuilder::transports_for('site_state_report') === array('primitive'),
+		'its one transport is the primitive');
+	$ss_older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report',
+	));
+	check(!JobCommandBuilder::has_primitive($ss_older, 'site_state_report'), 'a node whose vocabulary lacks it is not offered it');
+	$threw = '';
+	try { JobCommandBuilder::build_site_state_report($ss_older); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'update this node') !== false, 'building it for that node names the missing word and the fix', $threw);
+}
+
 section('reset_failed_unit: clear a failed unit from the same list (specs/disk_headroom_and_unit_diagnosis.md § 9)');
 
 {

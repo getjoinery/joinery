@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.135 - build_site_state_report(): the site_state_report word (agent 1.86.0+), what every site state
+ *                  directory on the machine holds, so a kept copy's leftover records can be seen
  * @version 1.134 - build_copy_probes(): the copy_probes word (agent 1.84.2+), a site's walls proven by acting as it
  * @version 1.133 - a forward's or trust's address is refused in shared, protocol, benchmarking and reserved IPv4
  *                  space too (NOT_PUBLIC_V4)
@@ -3132,6 +3134,27 @@ class JobCommandBuilder {
 
 	public static function build_listening_sockets_primitive($node) {
 		return ['primitive' => 'listening_sockets', 'params' => []];
+	}
+
+	/**
+	 * What every site state directory on the machine holds (agent 1.86.0):
+	 * the quiet state, a copy's records, a host's run specs, by name, size,
+	 * mode and time, with the values of the plain records only (the state
+	 * line, copy_of, forward, a host's quiet record and id block). A kept copy
+	 * whose clearing left a copy_of behind shows here. PRIMITIVE ONLY, no
+	 * parameters: the directory is compiled into the word.
+	 */
+	public static function build_site_state_report($node) {
+		if (!self::has_primitive($node, 'site_state_report')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its site state records. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_state_report']));
+		}
+		return self::build_site_state_report_primitive($node);
+	}
+
+	public static function build_site_state_report_primitive($node) {
+		return ['primitive' => 'site_state_report', 'params' => []];
 	}
 
 	/**

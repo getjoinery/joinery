@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.66 - site_state_report: what the machine's site state directories hold (agent 1.86.0)
  * @version 1.65 - copy_retry_settle: let go of the old server again after a DNS switch's settle stopped
  * @version 1.64 - recreate_site: replace one site's container on its host with a new one on the host's current
  *                base image (specs/multi_tenant_host_hardening.md D9)
@@ -181,6 +182,7 @@ class NodeDetailActions {
 		'unit_journal'             => 'overview',
 		'disk_usage'               => 'overview',
 		'listening_sockets'        => 'overview',
+		'site_state_report'        => 'overview',
 		'container_inventory'      => 'overview',
 		'spam_learning_status'     => 'overview',
 		'reboot_machine'           => 'overview',
@@ -460,10 +462,12 @@ class NodeDetailActions {
 			// The words of the running list (agent 1.76.0): three reads that take
 			// nothing, and the reboot, which the builder refuses where the node
 			// would (a container site, an encrypted data root that would wait
-			// for its recovery key).
+			// for its recovery key). And site_state_report (agent 1.86.0), a
+			// fourth read that takes nothing.
 			case 'listening_sockets':
 			case 'container_inventory':
 			case 'spam_learning_status':
+			case 'site_state_report':
 			case 'reboot_machine': {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.76 - Site state records (site_state_report, agent 1.86.0) beside Listening ports under Machine
  * @version 1.75 - a site container being replaced says so; a Replace button replaces one on a fresh image now
  *                (recreate_site); a line says when the host last checked for fixes to its sites' OS, what was
  *                pending, what its last run replaced and any hold (specs/multi_tenant_host_hardening.md D9)
@@ -198,7 +199,8 @@
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
-	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine'] as $form_id => $form_action) { ?>
+	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine',
+	'nodeActionSiteStateReport' => 'site_state_report'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="<?php echo $form_action; ?>">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -657,7 +659,7 @@
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
-			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status'];
+			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
@@ -1536,6 +1538,10 @@
 			if (JobCommandBuilder::has_primitive($node, 'listening_sockets')) {
 				$mb_buttons[] = '<button type="submit" form="nodeActionListeningSockets" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 					. ' title="The addresses and ports the machine listens on, with the program and unit holding each">Listening ports</button>';
+			}
+			if (JobCommandBuilder::has_primitive($node, 'site_state_report')) {
+				$mb_buttons[] = '<button type="submit" form="nodeActionSiteStateReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="What the machine records about its sites being quiet or copies: each record\'s name, size and time">Site state records</button>';
 			}
 			if (JobCommandBuilder::has_primitive($node, 'container_inventory') && is_array($hr['containers'] ?? null)) {
 				$mb_buttons[] = '<button type="submit" form="nodeActionContainerInventory" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'

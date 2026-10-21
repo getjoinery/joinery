@@ -250,7 +250,11 @@ layer" run. The encryption column says what the copy must end with.
   - Mail sent to the source during the freeze is deferred (4xx) and arrives on the
     copy after the switch.
   - Relay pickup resumes on the copy and has stopped on the source.
-  - Outbound mail from the copy is signed with the carried DKIM key and verifies.
+  - Outbound mail from the copy leaves through our sending key (owner, 2026-10-20: no
+    machine on the test plane sends on port 25), is DKIM-signed by the provider and
+    verifies, and the copy's own address appears nowhere in the delivered headers. A
+    relay-fronted site's mail can leave only through a provider's API, so the DKIM key
+    the copy carries for its own Postfix is not on this path.
   - In C3, the preflight's list of what names the old address includes the SPF
     `ip4:` the seed zone carries.
 - **C2, Discard:** a dormant copy is discarded before the run's real copy. Its server
