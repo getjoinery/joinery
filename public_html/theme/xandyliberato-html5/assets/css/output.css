@@ -4233,3 +4233,43 @@ select {
     padding-top: 3.5rem;
   }
 }
+/* Utilities the theme's views use that the compiled set above lacks
+   (Tailwind v3 values). */
+.font-serif {
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+.h-80 {
+  height: 20rem;
+}
+
+.h-auto {
+  height: auto;
+}
+
+.ml-9 {
+  margin-left: 2.25rem;
+}
+
+.text-blue-400 {
+  --tw-text-opacity: 1;
+  color: rgb(96 165 250 / var(--tw-text-opacity));
+}
+
+.text-blue-500 {
+  --tw-text-opacity: 1;
+  color: rgb(59 130 246 / var(--tw-text-opacity));
+}
+
+@media (min-width: 640px) {
+  .sm\:gap-y-12 {
+    row-gap: 3rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\:py-24 {
+    padding-top: 6rem;
+    padding-bottom: 6rem;
+  }
+}
