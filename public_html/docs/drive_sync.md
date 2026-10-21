@@ -2279,7 +2279,9 @@ happened rather than as data loss.
    that were the rig complaining about its own actors typing quickly.
 4. **Ciphertext never materializes.** No sync root holds bytes only the server
    was meant to see, and every encrypted entity a device cannot open is
-   *visible* as such rather than silently absent. With no encrypted entities in
+   *visible* as such rather than silently absent. A device that holds the vault
+   key (its config's `vault_enabled`) opens and syncs encrypted files instead,
+   and is judged by the other assertions like any file. With no encrypted entities in
    play this passes as **vacuous** and says so — a week-long campaign reporting
    six green assertions with its encrypted lane switched off would otherwise look
    identical to one that tested it.
@@ -2324,6 +2326,26 @@ jd-soak verify /soak/fleet.json     # one settle, six assertions, no storm
 
 `verify` exits non-zero when an invariant is broken, so it stands alone as a
 gate.
+
+### The encrypted lane
+
+A fleet made with `jd-soak init … --vault` (`"vault": true` in the fleet file)
+syncs an encrypted folder as well. The account holds a Drive vault whose key
+the rig derives from the account's own password: `jd-soak vault-key` prints the
+public half, which `soak_account_setup.php` records (`SOAK_DRIVE_VAULT_PUBLIC_KEY`)
+and `soak_reset.sh` passes on for such a fleet. `provision` then links every
+device through the link ceremony, approving it as a browser session would and
+handing it the key sealed to the device, and makes an encrypted top-level
+`Vault` folder. Each persona has a vault twin, `vault-<name>`, writing the same
+patterns under `Vault/`, and at least one runs every cycle.
+
+The verifier opens every encrypted file the server holds with the same key, so
+names and contents are compared as plaintext; what each ciphertext opened to is
+kept in the journal directory as `vault-contents.json`. The API hands out no old
+version's bytes and no trashed file's, so an encrypted claim whose content could
+only be in one of those, at its own path, is counted and named as not judged,
+and counts toward the coverage alarm. `vault-open` fails the settle for any
+encrypted file the key cannot open.
 
 ### Why the devices are host processes
 

@@ -27,6 +27,7 @@
 //! `jd-sim` scenario. The soak box finds bugs; the simulator then owns them.
 
 pub mod actor;
+pub mod ceremony;
 pub mod chaos;
 pub mod control;
 pub mod fleet;
@@ -39,6 +40,7 @@ pub mod report;
 pub mod rng;
 pub mod server;
 pub mod tree;
+pub mod vault;
 pub mod verify;
 #[cfg(windows)]
 pub mod win;

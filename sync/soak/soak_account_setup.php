@@ -11,6 +11,8 @@
  *   - an ordinary member account for the rig to sign in as
  *   - a subscription tier group, and the tier that hangs off it
  *   - the membership joining the two
+ *   - with SOAK_DRIVE_VAULT_PUBLIC_KEY set, the account's Drive vault: the
+ *     encrypted lane's (specs/drive_sync_soak.md § The encrypted lane, E1)
  *
  * The tier is the part that matters. drive_upload_init refuses every upload
  * when drive_storage_bytes or drive_max_file_bytes is 0, and both default to 0
@@ -26,6 +28,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
 require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 $account  = getenv('SOAK_ACCOUNT');
 $password = getenv('SOAK_PASSWORD');
@@ -70,6 +73,16 @@ $user->set('usr_password', User::GeneratePassword($password));
 $user->email_verify_user(TRUE, TRUE);
 $user->load();
 echo "  activated: " . ($user->get('usr_is_activated') ? 'yes' : 'no') . "\n";
+
+// A signed-in browser session is sent to /terms-accept until the person has
+// accepted the terms, API calls included. The encrypted lane approves its
+// devices as a browser session, and nobody is at that page to tick the box.
+if (empty($user->get('usr_terms_accepted_time'))) {
+	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+	$user->save();
+	$user->load();
+}
+echo "  terms accepted: " . ($user->get('usr_terms_accepted_time') ? 'yes' : 'no') . "\n";
 
 // ---------------------------------------------------------------------------
 // The tier, and the group it hangs off
@@ -141,6 +154,41 @@ if ($q->fetchColumn()) {
 	$ins = $dblink->prepare("INSERT INTO grm_group_members (grm_grp_group_id, grm_foreign_key_id) VALUES (?, ?)");
 	$ins->execute(array($group_id, $user_id));
 	echo "joined the tier group\n";
+}
+
+// ---------------------------------------------------------------------------
+// The Drive vault, for the encrypted lane
+// ---------------------------------------------------------------------------
+
+// Only the public half: the rig derives the keypair from the account's own
+// password (jd-soak vault-key) and the secret half never leaves it. A Drive
+// vault and nothing above it, the shape the vault suites use: a real account's
+// opens through a root, and a root needs a passkey. With no passkey and no TOTP
+// the account holds no second factor, so approving a device asks for no
+// step-up, which is what lets the rig approve its own devices.
+$vault_public_key = trim((string)getenv('SOAK_DRIVE_VAULT_PUBLIC_KEY'));
+if ($vault_public_key !== '') {
+	$q = $dblink->prepare("SELECT uev_user_encryption_vault_id FROM uev_user_encryption_vaults WHERE uev_usr_user_id = ? AND uev_scope = 'drive'");
+	$q->execute(array($user_id));
+	$vault_id = (int)$q->fetchColumn();
+	if ($vault_id) {
+		$vault = new UserEncryptionVault($vault_id, TRUE);
+		if ((string)$vault->get('uev_public_key') !== $vault_public_key) {
+			fwrite(STDERR, "FAIL: the account already has a Drive vault under another key\n");
+			exit(1);
+		}
+		echo "Drive vault already exists ($vault_id)\n";
+	} else {
+		$vault = new UserEncryptionVault(NULL);
+		$vault->set('uev_usr_user_id', $user_id);
+		$vault->set('uev_scope', 'drive');
+		$vault->set('uev_custody', 'client');
+		$vault->set('uev_public_key', $vault_public_key);
+		$vault->set('uev_salt', base64_encode(random_bytes(16)));
+		$vault->set('uev_key_generation', 1);
+		$vault->save();
+		echo "created Drive vault (" . (int)$vault->key . ")\n";
+	}
 }
 
 // ---------------------------------------------------------------------------

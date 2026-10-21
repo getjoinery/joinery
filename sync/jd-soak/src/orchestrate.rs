@@ -159,7 +159,7 @@ pub fn run(
         }
 
         // ---- storm --------------------------------------------------------
-        let mix = persona_mix(campaign.seed, cycle);
+        let mix = persona_mix(campaign.seed, cycle, fleet.vault);
         let seq = conductor.next_seq();
         conductor.write(&Record::Segment {
             seq,
@@ -279,15 +279,7 @@ fn storm(
                     .wrapping_add(cycle.wrapping_mul(31))
                     .wrapping_add(hash_name(&device.name))
                     .wrapping_add(hash_name(name));
-                // Shared, so two devices' `office` actors fight over the same
-                // documents, and private, so `sqlite-app` is not two programs
-                // writing one database — which is a corrupt file rather than a
-                // sync bug.
-                let workspace = if name == "sqlite-app" || name == "browser" {
-                    device.root.join(format!("{}-{}", device.name, name))
-                } else {
-                    device.root.join(format!("Shared-{name}"))
-                };
+                let workspace = device.root.join(persona::workspace(&device.name, name));
                 let quiet = &quiet;
                 scope.spawn(move || {
                     let mut actor = match Actor::new(
@@ -423,9 +415,17 @@ pub fn trim_to_segment(fault: crate::chaos::Fault, remaining: Duration) -> crate
 /// Rotated rather than all-at-once: fourteen actors per device on a small box
 /// spend their time in the scheduler, and a mix that changes is also a mix that
 /// eventually produces combinations a fixed roster never would.
-pub fn persona_mix(seed: u64, cycle: u64) -> Vec<String> {
+///
+/// With the encrypted lane (`vault`) the vault twins are in the pool too, and
+/// at least one runs every cycle, so every settle judges the encrypted path.
+/// The mix stays four: the lane trades plaintext coverage for encrypted, not
+/// the box's headroom for both.
+pub fn persona_mix(seed: u64, cycle: u64, vault: bool) -> Vec<String> {
     let mut rng = crate::rng::Rng::new(seed.wrapping_add(cycle.wrapping_mul(2_654_435_761)));
     let mut pool: Vec<&str> = PHASE_A_LOCAL.to_vec();
+    if vault {
+        pool.extend_from_slice(persona::VAULT_TWINS);
+    }
     let mut chosen = Vec::new();
     // Four is enough to have several kinds of storm running against each other
     // and few enough to leave the box able to run the daemon.
@@ -436,11 +436,23 @@ pub fn persona_mix(seed: u64, cycle: u64) -> Vec<String> {
         let i = rng.below(pool.len());
         chosen.push(pool.remove(i).to_string());
     }
-    // `messy-human` every cycle: it is the one that breaks move detection, which
-    // is the most expensive thing to get wrong.
-    if !chosen.iter().any(|c| c == "messy-human") {
+    // `messy-human` every cycle, in either folder: it is the one that breaks
+    // move detection, which is the most expensive thing to get wrong.
+    let messy = |c: &String| c == "messy-human" || c == "vault-messy-human";
+    if !chosen.iter().any(messy) {
         chosen.pop();
         chosen.push("messy-human".into());
+    }
+    if vault && !chosen.iter().any(|c| c.starts_with(persona::VAULT_PREFIX)) {
+        // In the place of a pick that is not the messy human.
+        if let Some(i) = chosen.iter().position(|c| !messy(c)) {
+            let twins: Vec<&str> = persona::VAULT_TWINS
+                .iter()
+                .copied()
+                .filter(|t| !chosen.iter().any(|c| c == t))
+                .collect();
+            chosen[i] = twins[rng.below(twins.len())].to_string();
+        }
     }
     chosen.sort();
     chosen
@@ -751,6 +763,7 @@ mod tests {
             storm_seconds: 1,
             settle_deadline_seconds: 1,
             poll_seconds: 30,
+            vault: false,
         }
     }
 
@@ -781,7 +794,7 @@ mod tests {
         // A fixed roster is a fixed set of interactions, and the combinations a
         // rotating mix eventually produces are the ones nobody thought to write
         // down.
-        let mixes: Vec<Vec<String>> = (1..12).map(|c| persona_mix(7, c)).collect();
+        let mixes: Vec<Vec<String>> = (1..12).map(|c| persona_mix(7, c, false)).collect();
         let distinct: std::collections::BTreeSet<Vec<String>> = mixes.iter().cloned().collect();
         assert!(distinct.len() > 3, "the mix barely changed: {distinct:?}");
     }
@@ -791,7 +804,7 @@ mod tests {
         // messy-human is the most expensive thing to get wrong, so it is never
         // rotated out.
         for cycle in 1..40 {
-            let mix = persona_mix(11, cycle);
+            let mix = persona_mix(11, cycle, false);
             assert!(
                 mix.iter().any(|p| p == "messy-human"),
                 "cycle {cycle} left out messy-human: {mix:?}"
@@ -799,10 +812,36 @@ mod tests {
         }
     }
 
+    /// With the encrypted lane, every cycle writes into the vault and the
+    /// messy human still runs; without it, nothing does.
+    #[test]
+    fn a_vault_fleet_runs_a_vault_twin_every_cycle_and_a_plain_one_never_does() {
+        // Many seeds, because the guarantee only has work to do when the draw
+        // picked no twin, which one seed's cycles may never do.
+        let mut twins_seen = std::collections::BTreeSet::new();
+        for (seed, cycle) in (1..41).flat_map(|seed| (1..60).map(move |cycle| (seed, cycle))) {
+            let mix = persona_mix(seed, cycle, true);
+            assert!(mix.len() <= 4, "{mix:?}");
+            assert!(
+                mix.iter().any(|p| p.starts_with(persona::VAULT_PREFIX)),
+                "seed {seed} cycle {cycle} wrote nothing encrypted: {mix:?}"
+            );
+            assert!(
+                mix.iter().any(|p| p == "messy-human" || p == "vault-messy-human"),
+                "seed {seed} cycle {cycle} left out messy-human: {mix:?}"
+            );
+            twins_seen.extend(mix.into_iter().filter(|p| p.starts_with(persona::VAULT_PREFIX)));
+            assert!(!persona_mix(seed, cycle, false)
+                .iter()
+                .any(|p| p.starts_with(persona::VAULT_PREFIX)));
+        }
+        assert!(twins_seen.len() > 4, "the twins barely rotate: {twins_seen:?}");
+    }
+
     #[test]
     fn every_persona_in_a_mix_is_one_that_can_actually_be_built() {
         for cycle in 1..40 {
-            for name in persona_mix(13, cycle) {
+            for name in persona_mix(13, cycle, true) {
                 assert!(persona::build(&name).is_some(), "{name} is not buildable");
             }
         }
@@ -811,7 +850,7 @@ mod tests {
     #[test]
     fn a_mix_is_small_enough_to_leave_the_box_able_to_run_the_daemon() {
         for cycle in 1..40 {
-            let mix = persona_mix(17, cycle);
+            let mix = persona_mix(17, cycle, true);
             assert!(
                 mix.len() <= 4,
                 "{} personas per device is too many",

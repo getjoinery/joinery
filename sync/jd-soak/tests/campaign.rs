@@ -184,6 +184,7 @@ impl Rig {
             storm_seconds: 1,
             settle_deadline_seconds: 1,
             poll_seconds: 5,
+            vault: false,
         };
         std::fs::create_dir_all(&fleet.journal_dir).unwrap();
         std::fs::create_dir_all(&fleet.bundle_dir).unwrap();

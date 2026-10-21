@@ -22,6 +22,12 @@ jd-platform = { path = "../jd-platform" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# The encrypted lane: the rig account's Drive vault key is derived from its
+# password (src/vault.rs). The version jd-crypto already uses.
+hkdf = "0.12"
+# The encrypted lane: approving a device link as a browser session
+# (src/ceremony.rs). The version jd-proto already uses.
+ureq = { version = "2", features = ["json"] }
 thiserror = "1"
 # Reading each device's state store after a settle, read-only, for the store
 # consistency check. The same version jd-core writes it with.

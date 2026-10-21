@@ -93,11 +93,13 @@ pub struct Verification {
 }
 
 /// The live claims the no-loss check had, and how many of them it could not
-/// judge because they named a path nothing is at.
+/// judge: because they named a path nothing is at, or because their content
+/// could only be in ciphertext the rig cannot read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Coverage {
     pub claims: usize,
     pub at_dead_paths: usize,
+    pub sealed: usize,
 }
 
 /// Everything a settle found missing, untruncated.
@@ -540,11 +542,7 @@ pub fn unaccounted(records: &[Record], recoverable: &Recoverable) -> BTreeSet<St
 /// below into a switch that quietly disables half the oracle.
 fn standing_key(claim: &journal::Committed, personality: &Personality) -> String {
     let device = claim.actor.split('/').next().unwrap_or_default();
-    let workspace = if claim.persona == "sqlite-app" || claim.persona == "browser" {
-        format!("{device}-{}", claim.persona)
-    } else {
-        format!("Shared-{}", claim.persona)
-    };
+    let workspace = crate::persona::workspace(device, &claim.persona);
     tree::key_for(&format!("{workspace}/{}", claim.path), personality)
 }
 
@@ -573,11 +571,31 @@ pub fn check_no_loss(
     standing: &BTreeSet<String>,
     personality: &Personality,
 ) -> (Verdict, Losses, Coverage) {
+    check_no_loss_sealed(records, recoverable, previously_on_server, standing, personality, &BTreeSet::new())
+}
+
+/// `check_no_loss`, on a server holding contents the rig cannot read at the
+/// paths in `sealed_at` (keyed as `tree::key_for`): versions of encrypted files
+/// whose ciphertext it never opened, and trashed encrypted files it never saw
+/// live (the API hands out neither's bytes). An encrypted claim found nowhere
+/// else, at one of those paths, may be in that ciphertext, so it is counted
+/// and named as not judged rather than reported lost or passed — the same
+/// treatment as a claim at a dead path. A plaintext claim, or an encrypted one
+/// anywhere else, is judged as ever.
+pub fn check_no_loss_sealed(
+    records: &[Record],
+    recoverable: &Recoverable,
+    previously_on_server: &BTreeSet<String>,
+    standing: &BTreeSet<String>,
+    personality: &Personality,
+    sealed_at: &BTreeSet<String>,
+) -> (Verdict, Losses, Coverage) {
     // Keyed as the volume compares names: two spellings it holds as one name
     // are one file, and a write under either replaces the other's claim.
     let latest = journal::last_committed_on(records, personality);
     let mut lost_live: Vec<String> = Vec::new();
     let mut at_dead_paths: Vec<String> = Vec::new();
+    let mut sealed: Vec<String> = Vec::new();
     for claim in latest.values() {
         let path = &claim.path;
         if recoverable.find(&claim.sha256).is_some() {
@@ -613,6 +631,15 @@ pub fn check_no_loss(
             at_dead_paths.push(path.clone());
             continue;
         }
+        if claim.persona.starts_with(crate::persona::VAULT_PREFIX)
+            && sealed_at.contains(&standing_key(claim, personality))
+        {
+            sealed.push(format!("{}/{path}", crate::persona::workspace(
+                claim.actor.split('/').next().unwrap_or_default(),
+                &claim.persona,
+            )));
+            continue;
+        }
         lost_live.push(format!(
             "{path} (last written by {} at {}, sha {})",
             claim.actor,
@@ -644,7 +671,7 @@ pub fn check_no_loss(
     // Never silent. A claim this oracle could not follow is a hole in it, and a
     // run that stops saying how many there were is a run that has stopped
     // knowing how much "no-loss green" is worth.
-    let stale = if at_dead_paths.is_empty() {
+    let mut stale = if at_dead_paths.is_empty() {
         String::new()
     } else {
         format!(
@@ -658,6 +685,14 @@ pub fn check_no_loss(
                 .join(", ")
         )
     };
+    if !sealed.is_empty() {
+        stale.push_str(&format!(
+            "; {} encrypted claim(s) were not judged, their content being findable only in \
+             encrypted versions or trashed files at their path that the rig cannot read: {}",
+            sealed.len(),
+            sealed.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
 
     if lost_live.is_empty() && lost_history.is_empty() {
         // The historical half is vacuous on a campaign's first settle: there is
@@ -679,12 +714,12 @@ pub fn check_no_loss(
                 format!("{} live paths findable; {history}{}", latest.len(), stale),
             ),
             Losses::default(),
-            Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len() },
+            Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len(), sealed: sealed.len() },
         );
     }
 
     let mut detail = Vec::new();
-    if !at_dead_paths.is_empty() {
+    if !stale.is_empty() {
         detail.push(stale.trim_start_matches("; ").to_string());
     }
     if !lost_live.is_empty() {
@@ -717,7 +752,7 @@ pub fn check_no_loss(
             live: lost_live,
             history: lost_history,
         },
-        Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len() },
+        Coverage { claims: latest.len(), at_dead_paths: at_dead_paths.len(), sealed: sealed.len() },
     )
 }
 
@@ -733,13 +768,20 @@ pub const DEAD_PATH_ALARM_MIN: usize = 10;
 /// claim is a run whose "no-loss green" says almost nothing, and that is a
 /// finding, not a footnote.
 pub fn check_no_loss_coverage(coverage: Coverage) -> Verdict {
-    let detail = format!(
+    let unjudged = coverage.at_dead_paths + coverage.sealed;
+    let mut detail = format!(
         "judged {} of {} live claim(s); {} named a path nothing is at",
-        coverage.claims - coverage.at_dead_paths,
+        coverage.claims - unjudged,
         coverage.claims,
         coverage.at_dead_paths
     );
-    if coverage.at_dead_paths > DEAD_PATH_ALARM_MIN && coverage.at_dead_paths * 5 > coverage.claims {
+    if coverage.sealed > 0 {
+        detail.push_str(&format!(
+            "; {} encrypted claim(s) could only be in ciphertext the rig cannot read",
+            coverage.sealed
+        ));
+    }
+    if unjudged > DEAD_PATH_ALARM_MIN && unjudged * 5 > coverage.claims {
         Verdict::fail("no-loss-coverage", format!("{detail}: the no-loss verdict cannot vouch for this run"))
     } else {
         Verdict::pass("no-loss-coverage", detail)
@@ -769,6 +811,15 @@ pub fn swap_pairs(records: &[Record]) -> Vec<(String, String, String)> {
         let Record::ActorCommit { seq, actor, op, sha256, .. } = record else {
             continue;
         };
+        // The vault twin's swaps are left out: its files' histories name
+        // ciphertexts, which this check cannot read.
+        if actor
+            .split('/')
+            .nth(1)
+            .is_some_and(|p| p.starts_with(crate::persona::VAULT_PREFIX))
+        {
+            continue;
+        }
         let Some(sha) = sha256.as_ref().filter(|_| op == "swap") else {
             open.remove(actor);
             continue;
@@ -1432,10 +1483,15 @@ pub fn check_clashes(
 /// When there are no encrypted entities at all, this **says so** rather than
 /// passing silently. A vacuous pass reported as a pass is how a campaign runs
 /// for a week with its encrypted lane switched off and nobody notices.
+///
+/// A device that holds the vault key is not asked to surface anything: it opens
+/// encrypted files and syncs them, which convergence and the audit judge. One
+/// that does not hold it must say what it cannot open.
 pub fn check_no_ciphertext(
     server_tree: &ServerTree,
     trees: &BTreeMap<String, LocalTree>,
     statuses: &BTreeMap<String, Option<Status>>,
+    holding_the_key: &BTreeSet<String>,
 ) -> Verdict {
     let encrypted = server_tree.encrypted();
     if encrypted.is_empty() {
@@ -1446,7 +1502,7 @@ pub fn check_no_ciphertext(
     }
 
     let mut problems = Vec::new();
-    let ciphertexts: BTreeSet<String> = encrypted.iter().filter_map(|e| e.sha256.clone()).collect();
+    let ciphertexts = server_tree.ciphertexts();
     for (device, local) in trees {
         for sha in &ciphertexts {
             if local.holds(sha) {
@@ -1463,6 +1519,9 @@ pub fn check_no_ciphertext(
     // there is something there they cannot read.
     for (device, status) in statuses {
         let Some(status) = status else { continue };
+        if holding_the_key.contains(device) {
+            continue;
+        }
         let surfaced = status.waiting_for_keys
             + status
                 .issues
@@ -1478,16 +1537,69 @@ pub fn check_no_ciphertext(
     }
 
     if problems.is_empty() {
+        let without_key = statuses.keys().filter(|d| !holding_the_key.contains(*d)).count();
         Verdict::pass(
             "no-ciphertext",
             format!(
-                "{} encrypted entities, none materialized, all surfaced",
-                encrypted.len()
+                "{} encrypted entities, none materialized; {}",
+                encrypted.len(),
+                if without_key == 0 {
+                    "every device holds the vault key".to_string()
+                } else {
+                    format!("surfaced on the {without_key} device(s) without the key")
+                }
             ),
         )
     } else {
         Verdict::fail("no-ciphertext", problems.join("; "))
     }
+}
+
+/// The devices whose link handed them the vault key, by their own configs.
+pub fn holding_the_vault_key(fleet: &Fleet) -> BTreeSet<String> {
+    fleet
+        .devices
+        .iter()
+        .filter(|d| {
+            jd_daemon::config::Config::load(&d.config_file()).is_ok_and(|c| c.vault_enabled)
+        })
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// Open every encrypted file the walk found, for a fleet with the encrypted
+/// lane; `None` for one without. A file the Drive key cannot open fails the
+/// settle by name: it is either a file the rig did not write or one the client
+/// sealed wrong, and both are findings.
+///
+/// Also returns where the trashed encrypted files stood that were never seen
+/// live, whose content therefore cannot be read (`vault::Opened::unread_trashed`).
+fn open_encrypted(fleet: &Fleet, api: &dyn DriveApi, tree: &mut ServerTree) -> (Option<Verdict>, Vec<String>) {
+    let mut opener = match crate::vault::Opener::for_fleet(fleet) {
+        Ok(Some(o)) => o,
+        Ok(None) => return (None, Vec::new()),
+        Err(e) => return (Some(Verdict::fail("vault-open", format!("cannot open anything: {e}"))), Vec::new()),
+    };
+    let crate::vault::Opened { failures, unread_trashed } = opener.open(api, tree);
+    let count = tree.files.values().filter(|f| f.encrypted).count();
+    let unread = if unread_trashed.is_empty() {
+        String::new()
+    } else {
+        format!("; {} trashed one(s) never seen live, their content unread", unread_trashed.len())
+    };
+    let verdict = if failures.is_empty() {
+        Verdict::pass("vault-open", format!("{count} encrypted file(s) opened{unread}"))
+    } else {
+        Verdict::fail(
+            "vault-open",
+            format!(
+                "{} of {count} encrypted file(s) did not open: {}{unread}",
+                failures.len(),
+                failures.iter().take(10).cloned().collect::<Vec<_>>().join("; ")
+            ),
+        )
+    };
+    (Some(verdict), unread_trashed)
 }
 
 // ---------------------------------------------------------------------------
@@ -1883,7 +1995,7 @@ pub fn settle(
 
     let mut verdicts = vec![convergence];
 
-    let server_tree = match server::walk(api) {
+    let mut server_tree = match server::walk(api) {
         Ok(t) => t,
         Err(e) => {
             // Without the server there is no audit and no oracle. That is a
@@ -1907,6 +2019,15 @@ pub fn settle(
             };
         }
     };
+
+    // Before anything compares names or hashes: an encrypted file's are
+    // ciphertext until it is opened (spec § The encrypted lane, E4).
+    let (opened, unread_trashed) = open_encrypted(fleet, api, &mut server_tree);
+    if let Some(verdict) = opened {
+        verdicts.push(verdict);
+    }
+    let mut sealed_at: BTreeSet<String> =
+        unread_trashed.iter().map(|p| tree::key_for(p, personality)).collect();
 
     verdicts.push(audit_trees(
         fleet,
@@ -1932,6 +2053,7 @@ pub fn settle(
     if !missing.is_empty() {
         match server::find_in_version_history(api, &server_tree, &missing, VERSION_LOOKUP_BUDGET) {
             Ok(search) => {
+                sealed_at.extend(search.sealed_at.iter().map(|p| tree::key_for(p, personality)));
                 let (found, asked) = (search.found, search.asked);
                 // A version the server lists but will not identify is not a
                 // version that does not hold the content. Told apart here
@@ -1972,12 +2094,13 @@ pub fn settle(
             )),
         }
     }
-    let (mut no_loss, losses, coverage) = check_no_loss(
+    let (mut no_loss, losses, coverage) = check_no_loss_sealed(
         records,
         &recoverable,
         previously_on_server,
         &standing_paths(&trees),
         personality,
+        &sealed_at,
     );
     if let Some(why) = blind {
         // Only when it would otherwise announce losses. A settle that found
@@ -2002,7 +2125,7 @@ pub fn settle(
     verdicts.push(no_loss);
     verdicts.push(check_no_loss_coverage(coverage));
 
-    verdicts.push(check_no_ciphertext(&server_tree, &trees, &statuses));
+    verdicts.push(check_no_ciphertext(&server_tree, &trees, &statuses, &holding_the_vault_key(fleet)));
 
     // 7 and 8 read what the walks above already hold, plus one history call
     // per file in the swap workspace -- a handful, the persona keeps three.
@@ -2349,6 +2472,58 @@ mod tests {
         );
     }
 
+    /// An encrypted claim found nowhere the rig can read is not judged when the
+    /// server holds ciphertext the rig could not open — counted and named, as
+    /// a claim at a dead path is — and judged as ever when it holds none. A
+    /// plaintext claim is never excused by it.
+    #[test]
+    fn an_encrypted_claim_only_unreadable_ciphertext_could_hold_is_counted_not_judged() {
+        let vault_commit = |path: &str, sha: &str| match commit(path, sha, "write") {
+            Record::ActorCommit { seq, op, path, sha256, size, mtime_ms, parent_inode, parent_birth_ns, replaces_sha256, ts_ms, .. } => {
+                Record::ActorCommit {
+                    seq, op, path, sha256, size, mtime_ms, parent_inode, parent_birth_ns, replaces_sha256, ts_ms,
+                    actor: "device-b/vault-photoshop".into(),
+                    persona: "vault-photoshop".into(),
+                }
+            }
+            other => other,
+        };
+        let records = vec![vault_commit("shot-009.psd", "b61a1f")];
+        let at_it: BTreeSet<String> =
+            [tree::key_for("Vault/Shared-photoshop/shot-009.psd", &Personality::linux())].into_iter().collect();
+        let held = recoverable(&["ff840b"], &["ff840b"], &[]);
+
+        let (verdict, losses, coverage) =
+            check_no_loss_sealed(&records, &held, &BTreeSet::new(), &at_it, &Personality::linux(), &at_it);
+        assert!(verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.contains("1 encrypted claim(s) were not judged"), "{}", verdict.detail);
+        assert!(verdict.detail.contains("Vault/Shared-photoshop/shot-009.psd"), "{}", verdict.detail);
+        assert!(losses.live.is_empty());
+        assert_eq!(coverage.sealed, 1);
+        assert!(check_no_loss_coverage(coverage).detail.contains("1 encrypted claim(s) could only be in ciphertext"));
+
+        let (judged, losses, _) =
+            check_no_loss_sealed(&records, &held, &BTreeSet::new(), &at_it, &Personality::linux(), &BTreeSet::new());
+        assert!(!judged.ok, "with nothing unreadable the claim is judged: {}", judged.detail);
+        assert_eq!(losses.live.len(), 1);
+        let elsewhere: BTreeSet<String> =
+            [tree::key_for("Vault/Shared-photoshop/shot-001.psd", &Personality::linux())].into_iter().collect();
+        let (judged, _, _) =
+            check_no_loss_sealed(&records, &held, &BTreeSet::new(), &at_it, &Personality::linux(), &elsewhere);
+        assert!(!judged.ok, "ciphertext at another path excused it: {}", judged.detail);
+
+        let plain = vec![commit("a.txt", "lost", "write")];
+        let (plain_verdict, _, _) = check_no_loss_sealed(
+            &plain,
+            &recoverable(&[], &[], &[]),
+            &BTreeSet::new(),
+            &standing(&["a.txt"]),
+            &Personality::linux(),
+            &standing(&["a.txt"]),
+        );
+        assert!(!plain_verdict.ok, "a plaintext claim was excused: {}", plain_verdict.detail);
+    }
+
     #[test]
     fn a_content_the_server_took_may_not_then_disappear_from_it() {
         // The stronger half, and it turns entirely on whether the server ever
@@ -2592,7 +2767,7 @@ mod tests {
         // A campaign running for a week with its encrypted lane switched off,
         // reporting six green assertions, is the failure this wording prevents.
         let verdict =
-            check_no_ciphertext(&ServerTree::default(), &BTreeMap::new(), &BTreeMap::new());
+            check_no_ciphertext(&ServerTree::default(), &BTreeMap::new(), &BTreeMap::new(), &BTreeSet::new());
         assert!(verdict.ok);
         assert!(verdict.detail.contains("vacuous"), "{}", verdict.detail);
     }
@@ -2626,7 +2801,7 @@ mod tests {
         );
         trees.insert("device-a".to_string(), local);
 
-        let verdict = check_no_ciphertext(&server_tree, &trees, &BTreeMap::new());
+        let verdict = check_no_ciphertext(&server_tree, &trees, &BTreeMap::new(), &BTreeSet::new());
         assert!(!verdict.ok);
         assert!(verdict.detail.contains("ciphertext"), "{}", verdict.detail);
     }
@@ -2654,13 +2829,58 @@ mod tests {
             "device-a".to_string(),
             Some(status("green", json!({"synced": 5}), json!([]))),
         );
-        let verdict = check_no_ciphertext(&server_tree, &BTreeMap::new(), &statuses);
+        let verdict = check_no_ciphertext(&server_tree, &BTreeMap::new(), &statuses, &BTreeSet::new());
         assert!(!verdict.ok);
         assert!(
             verdict.detail.contains("surfaces nothing"),
             "{}",
             verdict.detail
         );
+        // A device that holds the key syncs the file instead, and is not asked
+        // to say it cannot open it.
+        let holding = BTreeSet::from(["device-a".to_string()]);
+        let verdict = check_no_ciphertext(&server_tree, &BTreeMap::new(), &statuses, &holding);
+        assert!(verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.contains("every device holds the vault key"), "{}", verdict.detail);
+    }
+
+    /// Once a file is opened its entity carries the plaintext's hash, and the
+    /// check holds every disk to the ciphertext's, kept beside it.
+    #[test]
+    fn an_opened_files_ciphertext_on_a_disk_is_still_a_violation() {
+        let mut server_tree = ServerTree::default();
+        server_tree.files.insert(
+            1,
+            Entity {
+                id: 1,
+                is_folder: false,
+                name: "plan.txt".into(),
+                parent_id: None,
+                deleted: false,
+                encrypted: true,
+                sha256: Some("plainhash".into()),
+                size: 10,
+            },
+        );
+        server_tree.cipher.insert(1, "cipherhash".into());
+        let disk = |sha: &str| {
+            let mut local = LocalTree::default();
+            local.entries.insert(
+                "Vault/plan.txt".into(),
+                crate::tree::Local {
+                    path: "Vault/plan.txt".into(),
+                    is_dir: false,
+                    sha256: Some(sha.into()),
+                    size: 10,
+                },
+            );
+            BTreeMap::from([("device-a".to_string(), local)])
+        };
+        let holding = BTreeSet::from(["device-a".to_string()]);
+        let leaked = check_no_ciphertext(&server_tree, &disk("cipherhash"), &BTreeMap::new(), &holding);
+        assert!(!leaked.ok, "{}", leaked.detail);
+        let opened = check_no_ciphertext(&server_tree, &disk("plainhash"), &BTreeMap::new(), &holding);
+        assert!(opened.ok, "{}", opened.detail);
     }
 
     fn sample_of(device: &str, rss: u64, fds: u64, spool: u64) -> Sample {
@@ -2884,6 +3104,13 @@ mod tests {
             placed(9, "device-a/name-swapper", "swap", "slot-3.dat", Some("w"), Some(5)),
         ];
         assert_eq!(swap_pairs(&records), vec![("x".to_string(), "z".to_string(), "device-a".to_string())]);
+        // The vault twin's swaps are not judged: their histories name
+        // ciphertexts, so a pair of them could only ever look unmixed.
+        let vault = vec![
+            placed(7, "device-a/vault-name-swapper", "swap", "slot-1.dat", Some("x"), Some(5)),
+            placed(8, "device-a/vault-name-swapper", "swap", "slot-2.dat", Some("z"), Some(5)),
+        ];
+        assert!(swap_pairs(&vault).is_empty(), "{:?}", swap_pairs(&vault));
         assert!(check_swap_histories(&BTreeMap::new(), &[], 0, &Default::default(), &Default::default()).detail.starts_with("vacuous"));
     }
 
@@ -3307,11 +3534,20 @@ mod tests {
 
     #[test]
     fn a_no_loss_check_that_could_not_judge_a_fifth_of_its_claims_says_so() {
-        let narrowed = check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 13 });
+        let narrowed = check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 13, sealed: 0 });
         assert!(!narrowed.ok, "{}", narrowed.detail);
         assert!(narrowed.detail.contains("judged 47 of 60"), "{}", narrowed.detail);
-        assert!(check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 11 }).ok);
-        assert!(check_no_loss_coverage(Coverage { claims: 20, at_dead_paths: 9 }).ok, "a handful is not an alarm");
+        assert!(check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 11, sealed: 0 }).ok);
+        assert!(check_no_loss_coverage(Coverage { claims: 20, at_dead_paths: 9, sealed: 0 }).ok, "a handful is not an alarm");
+        // Encrypted claims the rig could not read narrow the verdict just as
+        // much, alone or added to the dead paths.
+        let sealed = check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 0, sealed: 13 });
+        assert!(!sealed.ok, "{}", sealed.detail);
+        assert!(sealed.detail.contains("judged 47 of 60"), "{}", sealed.detail);
+        assert!(sealed.detail.contains("13 encrypted claim(s)"), "{}", sealed.detail);
+        let mixed = check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 7, sealed: 6 });
+        assert!(!mixed.ok, "each under the line, together over it: {}", mixed.detail);
+        assert!(check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 5, sealed: 5 }).ok);
     }
 
     fn store(tag: &str, rows: &[(&str, i64, Option<i64>, &str, Option<i64>, Option<&str>, Option<i64>, i64)]) -> std::path::PathBuf {

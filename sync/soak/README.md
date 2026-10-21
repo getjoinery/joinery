@@ -62,7 +62,11 @@ systemctl start jd-soak
 ```
 
 The soak account is an ordinary account on the soak instance. It needs Drive
-enabled and nothing else. Give it its own account, not yours: the rig will
+enabled and nothing else, unless the fleet runs the encrypted lane (`"vault":
+true`, from `jd-soak init --vault`): then `soak_reset.sh` also gives it a Drive
+vault from `jd-soak vault-key`, and `provision` links each device through the
+link ceremony instead of the password login (docs/drive_sync.md § The encrypted
+lane). Give it its own account, not yours: the rig will
 create, rename, trash and restore tens of thousands of files under it.
 
 ## Watching it

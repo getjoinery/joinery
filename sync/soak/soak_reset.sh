@@ -100,11 +100,20 @@ chmod 600 "$ENV_FILE"
 export JD_SOAK_ACCOUNT="$new_account"
 echo "   rig account is now soak-rig-${next}"
 
+# A fleet with the encrypted lane ("vault": true) gives the account a Drive
+# vault: the public half of a key the rig derives from the account's password,
+# so the secret half never leaves this box (spec § The encrypted lane, E1).
+vault_key=
+if grep -q '"vault": *true' "$FLEET"; then
+	vault_key=$(jd-soak vault-key "$FLEET")
+fi
+
 echo "== creating the account, tier and membership on the server"
 docker cp /root/soak_account_setup.php "$CONTAINER:/tmp/soak_account_setup.php" >/dev/null
 docker exec \
 	-e SOAK_ACCOUNT="$JD_SOAK_ACCOUNT" \
 	-e SOAK_PASSWORD="$JD_SOAK_PASSWORD" \
+	-e SOAK_DRIVE_VAULT_PUBLIC_KEY="$vault_key" \
 	"$CONTAINER" php /tmp/soak_account_setup.php
 
 echo "== provisioning devices"
