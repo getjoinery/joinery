@@ -193,6 +193,33 @@ chk "an unlisted file beside them stays" "$(grep -c "^$P/static_files/uploads/ke
 chk "a same-named file at an unlisted path stays" "$(grep -c "^$P/public_html/photo_x1.jpg$" "$W/x/ex.list")" "1"
 chk "the uploads directories themselves are still archived" "$(grep -c "^$P/static_files/uploads/avatar/$" "$W/x/ex.list")" "1"
 
+# ── Root-only config/ files: left out by name, said out loud ────────────────
+# A run that cannot read config/admin_credentials.txt (600 root:root on every
+# node) leaves it out and says so; any other unreadable file still fails the
+# run. Only meaningful for an account that is not root and has no sudo, which
+# is the web user's own backup.
+if [ "$(id -u)" -ne 0 ] && ! sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:space:]]*[A-Z]+:)*[[:space:]]*ALL([[:space:]]|$)'; then
+    echo "== A root-only config/ file is left out; any other unreadable file fails the run =="
+    echo "first-login password" > "$W/site/config/admin_credentials.txt"; chmod 000 "$W/site/config/admin_credentials.txt"
+    bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/stream" --project-dir "$W/site" \
+        --name "$PROJ-ro" --archive - --report "$W/stream/report_ro" > "$W/stream/ro.enc" 2>"$W/stream/ro.err"; RC=$?
+    chk "stream mode exits 0 with a root-only file it cannot read" "$RC" "0"
+    chk "the report says tar 0" "$(grep -c '^TAR_RC=0$' "$W/stream/report_ro")" "1"
+    chk "it says the file was left out" "$(grep -c 'config/admin_credentials.txt is root-only' "$W/stream/ro.err")" "1"
+    openssl enc -d -aes-256-cbc -pbkdf2 -pass fd:3 -in "$W/stream/ro.enc" 3< "$W/key" | tar -tz > "$W/x/ro.list"
+    chk "the file is not in the archive" "$(grep -c "/config/admin_credentials.txt$" "$W/x/ro.list")" "0"
+    chk "the rest of config/ is" "$(grep -c "/config/Globalvars_site.php$" "$W/x/ro.list")" "1"
+    bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/x" --project-dir "$W/site" \
+        --name "$PROJ-ro-file" > /dev/null 2>"$W/x/ro_file.err"; RC=$?
+    chk "file mode leaves it out too" "$RC" "0"
+
+    echo "someone's token" > "$W/site/config/some_token"; chmod 000 "$W/site/config/some_token"
+    bash "$BACKUP" "$PROJ" --non-interactive --key-file "$W/key" --output-dir "$W/stream" --project-dir "$W/site" \
+        --name "$PROJ-ro2" --archive - --report "$W/stream/report_ro2" > /dev/null 2>"$W/stream/ro2.err"
+    chk "an unreadable file not on the list still fails the run" "$(grep -c '^TAR_RC=2$' "$W/stream/report_ro2")" "1"
+    chmod 600 "$W/site/config/admin_credentials.txt" "$W/site/config/some_token"
+fi
+
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"
 [ $failed -eq 0 ]

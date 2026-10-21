@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.25 - download / download_offer: a whole-site backup built here to download (BackupDownload);
+ *                ?download=backup sends it, after a fresh second factor
  * @version 1.24 - an approval passes on what the browser worked out for a backup's key box (approval_shared,
  *                approval_public_key)
  * @version 1.23 - data_root_encrypt takes tpm2 'off' from its second form (the key at every boot, never the TPM2
@@ -77,6 +79,23 @@ function admin_backups_logic($input = array()) {
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
+	// The backup built for download, sent as a file. The whole site in one
+	// file asks for a fresh second factor, as building it did; the ceremony
+	// returns here, and the button is pressed again.
+	if ((string)($input['download'] ?? '') === 'backup') {
+		$stepup = $session->require_recent_second_factor('/admin/admin_backups#download');
+		if ($stepup !== null) {
+			return $stepup;
+		}
+		try {
+			BackupDownload::send();
+		} catch (BackupDownloadException $e) {
+			$session->save_message(new DisplayMessage($e->getMessage(), 'Error', '/admin\/admin_backups/',
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect('/admin/admin_backups#download');
+		}
+	}
+
 	$action = (string)($input['action'] ?? '');
 
 	if ($action !== '') {
@@ -142,7 +161,29 @@ function admin_backups_logic($input = array()) {
 		'objects_source' => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
 		// Offloaded files and backup storage: held, waiting, still to copy, same account.
 		'objects_status' => BackupObjectsStatus::compute(),
+		// A whole-site backup built here to download: its state, and what the
+		// button's confirmation says before one is built.
+		'download'       => BackupDownload::state(),
+		'download_offer' => _admin_backups_download_offer(),
 	));
+}
+
+/**
+ * What the Download a backup confirmation says: the archive's expected size,
+ * free disk, the refusal when the disk cannot hold it, and how many offloaded
+ * files have no copy here to put in it. Null without a proven recovery key:
+ * nothing could seal the archive.
+ */
+function _admin_backups_download_offer() {
+	if (!BackupRecoveryKey::is_ready()) {
+		return null;
+	}
+	return array(
+		'estimate'   => BackupDownload::estimate(),
+		'free'       => BackupDownload::free_bytes(),
+		'refusal'    => BackupDownload::disk_refusal(),
+		'cloud_only' => BackupDownload::cloud_only_count(),
+	);
 }
 
 /** Handle a POST. Returns a redirect URL, or null to fall through to render. */

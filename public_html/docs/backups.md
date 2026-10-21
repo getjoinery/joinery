@@ -1533,6 +1533,50 @@ The archive's age is on the approval screen as an age, above the key box, becaus
 it is the one fact no automatic check can substitute for — a replayed archive is
 genuine, signed and openable, and only its date is wrong.
 
+## Downloading a backup
+
+A superadmin can take a whole-site backup away in the browser: **Download a
+backup** in the Backups page's Status box. It needs no backup storage, no
+management node and no agent, so it is offered on every site with a proven
+recovery key, managed or not — the copy a person can always get.
+
+It is the standalone archive a full backup uploads (`backup_project.sh` in
+stream mode, sealed with a fresh data key to the recovery key and the site
+key), written to `{backup working directory}/download/` instead of to a bucket.
+`includes/BackupDownload.php` owns it:
+
+- **Building.** The `backup_download_start` API action checks the recovery key
+  and the disk — the archive lands here, so the need is the newest full
+  backup's size, by the pre-flight rule a backup run uses — and starts
+  `utils/build_backup_download.php` in the background. The build takes the
+  machine-wide backup lock, so it never archives the tree while a backup run
+  does; it fails, saying so, when one is running. `state.json` in the directory
+  is the record the page reads: building, ready or failed, with the reason.
+- **The file.** One tar, `{project}-{stamp}.joinery-backup.tar`, holding a
+  `README.txt` (what it is and the commands that open it), the envelope
+  (`{archive}.keys.json`) and the archive, under one directory. It is written
+  as it is sent, so nothing is copied, and its length is known before the first
+  byte. `?download=backup` on the page sends it.
+- **Its day.** It is deleted a day after it is built: by any read of its state
+  after that, and by the hourly `BackupDownloadSweep` task. **Delete it now**
+  removes it sooner; building another replaces it. One download exists at a
+  time.
+- **A second factor.** Building and downloading each ask for a fresh
+  second-factor confirmation (`requires_stepup`), as other administration does.
+- **Not a backup run.** No history row, no chain, nothing that counts as offsite
+  — the site cannot know whether the file was kept — so the Status box's
+  warnings are unchanged by one.
+
+Offloaded files with no copy on the server are in the cloud file store only and
+are not in the download; the confirmation says how many. A root-only `config/`
+file the web user cannot read is left out by name, as every unprivileged run
+leaves it out (`_backup_root_only_files.sh`); any other unreadable file fails
+the build, with tar's reason.
+
+The file restores like any standalone archive: open the envelope with the
+recovery key, then `restore_project.sh` (§ Restoring), or with no Joinery at all
+(§ Opening a backup with no Joinery anywhere).
+
 ## Verifying backups
 
 A backup that has never been opened is a hope. Backup storage listing proves a backup

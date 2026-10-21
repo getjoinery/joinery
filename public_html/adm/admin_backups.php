@@ -2,6 +2,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.25 - Download a backup: a whole-site backup sealed to the recovery key, built here in the background
+ *                and downloaded as one file, on every site with a proven recovery key, managed or not
  * @version 1.24 - A recovery key never proven says so, not 'was last proven never' (B21)
  * @version 1.23 - Where the server has a TPM2 chip, the data root's line says what the chip's slot protects and
  *                offers the stricter way: encrypt asking for the key at every boot, or stop the chip opening an
@@ -71,6 +73,8 @@ $approvals    = $page_vars['approvals'];
 $inventory      = $page_vars['inventory'];
 $objects_source = $page_vars['objects_source'];
 $objects_status = $page_vars['objects_status'];
+$download       = $page_vars['download'];
+$download_offer = $page_vars['download_offer'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -427,6 +431,101 @@ if ($plan) {
 		   . 'that can create a database; both are checked before anything is downloaded. Nothing on the live '
 		   . 'site is touched either way. Each verification downloads the whole set once.</p>';
 	}
+}
+
+// A backup to download: the one copy that needs neither backup storage nor a
+// management node nor an agent, so it is offered on every site here, managed
+// or not. Built in the background (BackupDownload), then downloaded from this
+// box while it lasts.
+echo '<div id="download" class="mt-3">';
+if ($download && $download['status'] === 'building') {
+	echo '<p class="mb-1"><strong>Building a backup to download</strong>, started '
+	   . htmlspecialchars($when(gmdate('Y-m-d H:i:s', (int)$download['started']))) . '. '
+	   . 'A Download button appears here when it is ready; this page checks every 30 seconds.</p>';
+	echo '<script>setTimeout(function () { window.location.reload(); }, 30000);</script>';
+} elseif ($download && $download['status'] === 'ready') {
+	echo '<p class="mb-1"><strong>A backup is ready to download:</strong> '
+	   . htmlspecialchars(BackupDownload::download_name($download)) . ', '
+	   . htmlspecialchars(BackupRunner::human((int)$download['download_bytes'])) . ', built '
+	   . htmlspecialchars($when(gmdate('Y-m-d H:i:s', (int)$download['finished']))) . '. '
+	   . 'It is deleted from this server ' . htmlspecialchars($when(gmdate('Y-m-d H:i:s', (int)$download['expires']))) . '.</p>';
+	echo '<a class="btn btn-sm btn-primary mt-1" href="/admin/admin_backups?download=backup">Download</a> ';
+	echo '<button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="btn_download_delete">Delete it now</button>';
+} elseif ($download && $download['status'] === 'failed') {
+	echo '<div class="alert alert-warning mb-2">The backup to download was not built: '
+	   . htmlspecialchars((string)($download['message'] ?? '')) . '</div>';
+}
+if (!$download || $download['status'] !== 'building') {
+	if ($download_offer === null) {
+		echo '<p class="text-muted small mb-0">Download a backup is offered once the recovery key is set up and proven: '
+		   . 'the file is sealed to it.</p>';
+	} elseif ($download_offer['refusal'] !== '') {
+		echo '<p class="text-muted small mb-0">Download a backup is not available: '
+		   . htmlspecialchars($download_offer['refusal']) . ' The backup is built on this server before it is downloaded.</p>';
+	} else {
+		$size_words = (int)$download_offer['estimate'] > 0
+			? 'About ' . BackupRunner::human((int)$download_offer['estimate']) . ', judging by the last full backup'
+			: 'Its size is not known until it is built';
+		if ($download_offer['free'] !== null) {
+			$size_words .= ' (' . BackupRunner::human((int)$download_offer['free']) . ' free on this server)';
+		}
+		$confirm = 'Build a full backup of this site to download? It holds the site\'s files, database and web server '
+			. 'configuration, sealed to your recovery key: only your recovery private key opens it. ' . $size_words . '. '
+			. ((int)$download_offer['cloud_only'] > 0
+				? number_format((int)$download_offer['cloud_only']) . ' offloaded file' . ((int)$download_offer['cloud_only'] === 1 ? ' is' : 's are')
+				  . ' only in the cloud file store and not in it. '
+				: '')
+			. 'It is built on this server first, which can take a while for a large site. A Download button appears here '
+			. 'when it is ready, and the file is deleted from this server a day after it is built.'
+			. ($download && $download['status'] === 'ready' ? ' The backup ready now is deleted first.' : '');
+		echo '<button type="button" class="btn btn-sm btn-outline-primary mt-1" id="btn_download_start" data-confirm="'
+		   . htmlspecialchars($confirm) . '">'
+		   . ($download && $download['status'] === 'ready' ? 'Build a new backup to download' : 'Download a backup') . '</button>';
+		echo '<p class="text-muted small mt-1 mb-0">A full copy of this site in one file, for keeping somewhere of your own. '
+		   . 'It never goes to backup storage and does not count as a backup taken.</p>';
+	}
+}
+echo '</div>';
+if ($download_offer !== null || ($download && $download['status'] === 'ready')) {
+	echo '<script defer src="/assets/js/passkeys.js?v=' . (@filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1') . '"></script>';
+	?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+	function fail(e) {
+		JoineryModal.alert((e && e.message) || 'That did not work.');
+	}
+	var start = document.getElementById('btn_download_start');
+	if (start) {
+		start.addEventListener('click', function () {
+			JoineryModal.confirm(start.getAttribute('data-confirm'), function () {
+				start.disabled = true;
+				var call = function () { return joineryApi.post('backup_download_start', {}); };
+				var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call, '/admin/admin_backups#download') : call();
+				run.then(function () { window.location.reload(); })
+					.catch(function (e) {
+						start.disabled = false;
+						if (e && e.data && e.data.requires_stepup) {
+							window.location = '/verify-stepup?return=' + encodeURIComponent('/admin/admin_backups#download');
+							return;
+						}
+						fail(e);
+					});
+			}, { confirmLabel: 'Build the backup', confirmStyle: 'primary' });
+		});
+	}
+	var del = document.getElementById('btn_download_delete');
+	if (del) {
+		del.addEventListener('click', function () {
+			JoineryModal.confirm('Delete the backup built for download from this server?', function () {
+				joineryApi.post('backup_download_delete', {})
+					.then(function () { window.location.reload(); })
+					.catch(fail);
+			}, { confirmLabel: 'Delete it' });
+		});
+	}
+});
+</script>
+	<?php
 }
 $page->end_box();
 
