@@ -1412,6 +1412,26 @@ for the common case). Passkey-as-step-up and passkey-as-vault-unlock remain
 available on every account regardless of vault status — only passwordless
 sign-in is withdrawn.
 
+## Exports
+
+A member's downloads of their own data follow the level the data is kept at,
+and none of them leaves sealed content readable on disk: each file is built in
+the request that sends it.
+
+- **Standard:** the server builds the file at any time.
+- **Private (server custody):** the server builds it only inside the owner's
+  window. With the window shut the download is refused, never answered with
+  placeholders or an empty file: `calendar_export` answers an error carrying
+  `locked: true` and the calendar page runs the unlock and asks again
+  ([Calendar](calendar.md)); `mailbox/contacts_export` refuses a sealed contacts
+  store, which the contacts page shows locked with its own Unlock; a Private
+  Drive folder's zip answers `423` and the Drive page unlocks and follows. The
+  Drive zip resolves every sealed file's key when it starts, inside the window,
+  and holds them only for that request ([Drive](drive.md) § Downloading a folder).
+- **Fortress (client custody):** the browser builds it. A Fortress Drive folder
+  is decrypted and zipped in the tab; the server sends only ciphertext and
+  refuses to zip it itself.
+
 ## Tests
 
 The vault test estate lives in `tests/vault/` (crypto refusals, the unlock

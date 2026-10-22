@@ -454,6 +454,74 @@ Encrypted files rename via their re-encrypted metadata (`drive_rename` with
 in the URL fragment and are single-file only (encrypted folders can't use them).
 See [Drive Encryption](drive_encryption.md).
 
+## Downloading a folder
+
+**Download as zip** on a folder's menu gives the member the folder, everything
+under it, as one zip: each folder a directory entry (an empty one included),
+each live file under its Drive name, trashed files and trashed folders left
+out. Anyone who can list the folder can download it — the owner, or a member
+with a viewer or editor grant reaching it — and it asks no second factor,
+because every file in it can already be downloaded one by one.
+
+**Where it is built follows the tree's level.**
+
+- **Standard and Private:** the server, at `/drive/zip/{folder_id}`
+  (`includes/drive_zip_route.php`), streams the zip as it builds it. The zip is
+  never written to disk, the download starts at once, and its length is not known
+  in advance. A file offloaded to cloud storage is fetched to the server's temp
+  space first, one at a time as a single download is (the storage driver has no
+  streaming read), and removed once it is in the zip; for a Private file that
+  copy is the sealed container. `DriveZip::plan()` resolves everything that can fail before the first
+  byte (read access, the owner's unlock window, every sealed file's key), so a
+  refusal is a status code: `404` for no such live folder or none of the
+  caller's, `409` for a Fortress folder, `423` for a Private one with the window
+  shut. A Private file is decrypted one chunk at a time on its way into the zip
+  (`DriveSealedStream`); its keys are resolved inside the window when the
+  download starts and held only by that request, which releases the session so
+  the member's other pages and the vault heartbeat do not wait on it. The page
+  sends a `HEAD` first, runs the shared unlock on `423`, then follows with the
+  download.
+- **Fortress:** the browser. The page walks the tree with `drive_list`, fetches
+  each file's ciphertext by its signed link, decrypts it with the member's own
+  file key (`drive-crypto.js`) and zips it in the tab (`assets/js/zip-writer.js`);
+  the server never sees a key or a plaintext byte, and `/drive/zip` answers a
+  Fortress folder with `409`. Where the browser can write straight to a file
+  (`showSaveFilePicker`, Chrome and Edge) the zip goes to disk as it is built.
+  Elsewhere the tab holds it, one part of about 500 MB at a time
+  (`JoineryZip.PART_BYTES`), each part a whole zip that extracts into the same
+  tree. The whole tree is listed and named first, so a folder bigger than one
+  part is named in parts from the start (`{folder}-part-01.zip`, …) and a
+  smaller one is `{folder}.zip`. A browser saves a file for a page only from a
+  click, so each finished part waits for the member to press **Save** before the
+  next is built. A signed link that runs out during a long zip is replaced by
+  listing its folder again.
+
+**Names.** A name that would not extract where it says — a slash, a backslash,
+a control character, `.` or `..` — has those characters replaced with `_`.
+Two siblings whose names differ only in case get ` (2)` on the second, before
+its extension, because a Mac or Windows disk would otherwise write one over the
+other; folders claim their names before files. A file whose bytes cannot be read
+(or, in the browser, one the member holds no key for) is left out, and a
+`Files not included.txt` note in the top folder names it; the note takes the
+next free name if a real file there already has that one.
+
+**The zip writer** is the platform's own, one in PHP (`includes/ZipStreamWriter.php`)
+and one in JavaScript (`assets/js/zip-writer.js`), because PHP's `ZipArchive`
+writes only a finished file on disk. They lay out the format only: compression
+is PHP's zlib and the browser's `CompressionStream('deflate-raw')`, already
+compressed formats (photos, video, audio, PDFs, Office files, archives) are
+stored as they are, names are UTF-8, times are UTC with an extended timestamp
+field, and ZIP64 takes over past 4 GiB or 65,535 entries. The server writer
+streams each file with a data descriptor after it; the browser has each file
+whole and writes its sizes up front.
+
+Tests: `tests/functional/drive/folder_zip_test.php` (a tree round trip, names,
+missing bytes, the route's statuses for owner, grantee, stranger, signed out,
+Fortress and locked Private, and a Private folder in the window),
+`tests/unit/zip_stream_writer_test.php` and `tests/unit/zip_writer_js_test.php`
+(each writer through every reader at hand, classic and ZIP64, and the two
+agreeing on names).
+
 ## Upload protocol (resumable, sequential chunks)
 
 Uploads never overwrite bytes directly — they flow through the one blob-ingestion
