@@ -98,6 +98,7 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.36 - a settled move by DNS names the copy's IPv6 in reverse DNS too, from the AAAA it moved (B33)
  * @version 1.35 - a copy onto a new server takes its plan from those its region sells, and refuses one it does not
  *                 sell before anything is made (B31)
  * @version 1.34 - a manual switch's way back names the records the owner points back (manual_records_back), and
@@ -2823,8 +2824,10 @@ class SiteCopyRunner {
 	 * the take-over the site's row is the copy's server. A container's
 	 * address is its host's, and so is its reverse DNS. When the public
 	 * resolvers agree, this machine's own resolver is not asked again (it may
-	 * hold the old answer a little longer); the provider checks the name
-	 * itself. Never throws: what happened is a line for the Copy tab.
+	 * hold the old answer a little longer): the addresses they agree on are
+	 * the moved records' new ones, the AAAA's among them, so the copy's IPv6
+	 * is named when the site has one; the provider checks the name itself.
+	 * Never throws: what happened is a line for the Copy tab.
 	 */
 	private static function settle_reverse_dns(SiteCopy $copy, bool $resolvers_agree): string {
 		try {
@@ -2835,9 +2838,19 @@ class SiteCopyRunner {
 			if (!SiteCopyAddressFacts::made_here($node)) {
 				return '';
 			}
+			$domain = self::site_domain($node);
+			$named = null;
+			if ($resolvers_agree) {
+				$named = array();
+				foreach ((array)($copy->switch_record()['records'] ?? array()) as $rec) {
+					if (strtolower((string)($rec['name'] ?? '')) === strtolower($domain) && in_array($rec['type'] ?? '', array('A', 'AAAA'), true)) {
+						$named[] = (string)$rec['to'];
+					}
+				}
+			}
 			$p = NodeReverseDns::provisionForNode($node);
 			$driver = IpSwapMove::$driver_for ? (IpSwapMove::$driver_for)($p) : null;
-			$r = NodeReverseDns::setQuietly($node, self::site_domain($node), $driver, $resolvers_agree);
+			$r = NodeReverseDns::setQuietly($node, $domain, $driver, $named);
 			return $r['ok'] ? 'Reverse DNS: ' . $r['message'] . '.' : 'Reverse DNS was not set: ' . $r['message'];
 		} catch (Exception $e) {
 			return 'Reverse DNS was not set: ' . $e->getMessage();

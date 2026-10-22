@@ -352,8 +352,13 @@ net/ipv4/icmp_echo_ignore_all=0
 net/ipv4/conf/all/log_martians=0
 net/ipv4/conf/default/log_martians=0
 UFW
+# What a machine has before this run: Ubuntu's own links file (it sets
+# fs.protected_fifos = 1), and the settings file under its earlier name.
+mkdir -p "$RK/usr/lib/sysctl.d"
+printf 'fs.protected_fifos = 1\nfs.protected_hardlinks = 1\nfs.protected_regular = 2\nfs.protected_symlinks = 1\n' > "$RK/usr/lib/sysctl.d/99-protect-links.conf"
+printf '# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.\nfs.protected_fifos = 2\n' > "$RK/etc/sysctl.d/90-joinery-kernel.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"; rc=$?
-MP="$RK/etc/modprobe.d/joinery-rare-modules.conf"; SC="$RK/etc/sysctl.d/90-joinery-kernel.conf"
+MP="$RK/etc/modprobe.d/joinery-rare-modules.conf"; SC="$RK/etc/sysctl.d/99-zz-joinery-kernel.conf"
 KM="$RK/etc/modprobe.d/blacklist-rare-network.conf"
 chk "exit 0" "$rc" "0"
 chk "what a site's web user made a shared host load is never loaded: sctp, can, can_raw" \
@@ -370,6 +375,21 @@ chk "links and files in shared directories refused to another user" \
     "$(grep -cxE 'fs.protected_symlinks = 1|fs.protected_hardlinks = 1|fs.protected_regular = 2|fs.protected_fifos = 2' "$SC")" "4"
 chk "inotify instances for every site's www-data together (D4)" "$(grep -cx 'fs.inotify.max_user_instances = 2048' "$SC")" "1"
 chk "kernel.modules_disabled is never set: Docker loads modules when a site's network is made" "$(grep -c 'modules_disabled' "$SC")" "0"
+# At boot systemd-sysctl applies every sysctl.d file in the order of its name,
+# the last to name a key winning: no file sorting after ours may overrule one.
+last_setter() {
+    local d
+    for d in etc/sysctl.d run/sysctl.d usr/lib/sysctl.d lib/sysctl.d; do
+        [ -d "$RK/$d" ] && grep -lE "^[[:space:]]*$1[[:space:]]*=" "$RK/$d"/*.conf 2>/dev/null
+    done | awk -F/ '{print $NF}' | sort | tail -1
+}
+overruled=0
+while IFS= read -r line; do
+    [ "$(last_setter "${line%% = *}")" = "$(basename "$SC")" ] || overruled=$((overruled + 1))
+done < <(grep -v '^#' "$SC")
+chk "boot applies every kernel setting from our file last: Ubuntu's 99-protect-links.conf overrules none (B34)" "$overruled" "0"
+chk "the file under its earlier name is gone, and the run says so" \
+    "$([ -e "$RK/etc/sysctl.d/90-joinery-kernel.conf" ] && echo kept || echo gone)|$(grep -c 'removed .*90-joinery-kernel.conf' <<< "$out")" "gone|1"
 SN="$RK/etc/sysctl.d/99-security.conf"
 chk "the network settings are written on every machine: spoofing, redirects, source routes, SYN cookies" \
     "$(grep -cxE 'net.ipv4.conf.all.rp_filter = 1|net.ipv4.conf.all.accept_redirects = 0|net.ipv6.conf.all.accept_redirects = 0|net.ipv4.conf.all.send_redirects = 0|net.ipv4.conf.all.accept_source_route = 0|net.ipv4.tcp_syncookies = 1' "$SN")" "6"
@@ -450,7 +470,7 @@ chk "kmod's file written over by an earlier run is back as kmod shipped it" "$(m
 before="$(tree_sum "$RK")"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
 chk "a second run changes no file and says nothing of them" \
-    "$(tree_sum "$RK")|$(grep -c 'rare-modules\|blacklist-rare-network\|90-joinery-kernel\|99-security' <<< "$out")" "$before|0"
+    "$(tree_sum "$RK")|$(grep -c 'rare-modules\|blacklist-rare-network\|joinery-kernel\|99-security' <<< "$out")" "$before|0"
 # An operator's own line in kmod's file, beside install.sh's: the file is theirs.
 { kmod_text; echo "install dccp /bin/true"; echo "alias net-pf-4 off"; } > "$KM"; cp "$KM" "$T/km.operator"
 JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1

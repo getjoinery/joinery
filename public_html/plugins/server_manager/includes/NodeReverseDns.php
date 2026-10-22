@@ -9,9 +9,11 @@
  * bring-your-own-cloud instance lives on the customer's account and is
  * reached through their grant.
  *
- * The forward A record must already resolve to the node's IP — providers
- * (Linode included) validate this and reject the update otherwise, so it is
- * checked here first to give a actionable error instead of a provider 400.
+ * Both of the node's addresses are named: its IPv4, whose A record must
+ * already resolve to it, and its IPv6 when the name's AAAA resolves to that.
+ * Providers (Linode included) validate the forward record and reject the
+ * update otherwise, so it is checked here first to give an actionable error
+ * instead of a provider 400.
  *
  * Grant note: Linode access tokens are short-lived with no refresh token, so
  * a stale grant surfaces as NodeReverseDnsException with reconnect=true — the
@@ -25,6 +27,9 @@
  * their own Cloud Manager. That is said plainly, with no reconnect: there is
  * no grant to reconnect.
  *
+ * @version 1.6 - the node's IPv6 is named too, when the name's AAAA gives it (it was left with no PTR while
+ *               the site's AAAA pointed at it); a caller that has seen the public resolvers passes the
+ *               addresses they gave, not a yes, so each address is checked against its own record
  * @version 1.5 - the forward check is skipped by a caller that has seen the public resolvers agree (a settled
  *               site copy move by DNS), not only by tests
  * @version 1.4 - the driver is the provision's provider's (ComputeDriverRegistry), any provider with a driver
@@ -89,10 +94,10 @@ class NodeReverseDns {
 	 *
 	 * @return array {ok: bool, message: string, reconnect: bool}
 	 */
-	public static function setQuietly($node, $hostname, $driver = null, $skip_forward_check = false) {
+	public static function setQuietly($node, $hostname, $driver = null, ?array $named = null) {
 		try {
-			$r = self::set($node, $hostname, $driver, $skip_forward_check);
-			return array('ok' => true, 'message' => $r['ip'] . ' now answers ' . $r['rdns'], 'reconnect' => false);
+			$r = self::set($node, $hostname, $driver, $named);
+			return array('ok' => true, 'message' => self::summary($r), 'reconnect' => false);
 		} catch (NodeReverseDnsException $e) {
 			return array('ok' => false, 'message' => $e->getMessage(), 'reconnect' => $e->reconnect);
 		} catch (Exception $e) {
@@ -101,18 +106,23 @@ class NodeReverseDns {
 	}
 
 	/**
-	 * Set the PTR for the node's provisioned IP to $hostname.
+	 * Set the PTR of the node's provisioned addresses to $hostname: its IPv4,
+	 * and its IPv6 when the name's AAAA gives that address. A name with only
+	 * an A record leaves the IPv6 as it was, and the result says so: a
+	 * provider takes only a name that resolves to the address. The IPv4 is
+	 * the one that must take; a provider refusing only the IPv6 is reported,
+	 * not thrown.
 	 *
 	 * @param ManagedNode $node
-	 * @param string $hostname   FQDN the IP should reverse-resolve to.
+	 * @param string $hostname   FQDN the addresses should reverse-resolve to.
 	 * @param CloudComputeProvider|null $driver  Injectable for tests.
-	 * @param bool $skip_forward_check           True when the caller has seen the public resolvers name the
-	 *                                           address already (a settled site copy move), so this machine's
-	 *                                           own resolver, which may lag, is not asked; the provider checks.
-	 * @return array {ip, rdns}
+	 * @param array|null $named  The addresses the caller has seen the public resolvers give the name (a
+	 *                           settled site copy move), so this machine's own resolver, which may lag, is
+	 *                           not asked; the provider checks. Null asks this machine's resolver.
+	 * @return array {ip: the IPv4, rdns, set: every address set, not_set: address => why it was not}
 	 * @throws NodeReverseDnsException with an operator-actionable message.
 	 */
-	public static function set($node, $hostname, $driver = null, $skip_forward_check = false) {
+	public static function set($node, $hostname, $driver = null, ?array $named = null) {
 		$hostname = strtolower(trim((string)$hostname));
 		if (!preg_match('/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/', $hostname)) {
 			throw new NodeReverseDnsException('Enter a fully-qualified hostname, e.g. mail.example.com.');
@@ -129,28 +139,41 @@ class NodeReverseDns {
 		}
 
 		$ip = (string)$provision->get('cvp_instance_ip');
+		$ip6 = (string)$provision->get('cvp_instance_ipv6');
 
 		// The provider rejects rDNS values whose forward record does not point
 		// at the address; check first so the error names the real fix.
-		if (!$skip_forward_check) {
+		if ($named === null) {
+			$named = array();
 			try {
-				$a_records = DnsResolver::getA($hostname);
+				$named = (array)DnsResolver::getA($hostname);
 			} catch (Exception $e) {
-				$a_records = array();
 			}
-			if (!in_array($ip, $a_records, true)) {
-				$found = count($a_records) ? implode(', ', $a_records) : 'none';
-				throw new NodeReverseDnsException(
-					"Create the A record first: {$hostname} must resolve to {$ip} before the provider will accept it as reverse DNS (currently resolves to: {$found}).");
+			if ($ip6 !== '') {
+				try {
+					$named = array_merge($named, (array)DnsResolver::getAaaa($hostname));
+				} catch (Exception $e) {
+				}
 			}
+		}
+		if (!self::names($named, $ip)) {
+			$a_records = array_values(array_filter($named, function ($a) { return strpos((string)$a, ':') === false; }));
+			$found = count($a_records) ? implode(', ', $a_records) : 'none';
+			throw new NodeReverseDnsException(
+				"Create the A record first: {$hostname} must resolve to {$ip} before the provider will accept it as reverse DNS (currently resolves to: {$found}).");
+		}
+		$not_set = array();
+		if ($ip6 !== '' && !self::names($named, $ip6)) {
+			$not_set[$ip6] = "{$hostname} has no AAAA record giving it";
 		}
 
 		if ($driver === null) {
 			$driver = self::driverForProvision($provision);
 		}
 
+		$instance_id = (string)$provision->get('cvp_instance_id');
 		try {
-			return $driver->setReverseDns((string)$provision->get('cvp_instance_id'), $ip, $hostname);
+			$r = $driver->setReverseDns($instance_id, $ip, $hostname);
 		} catch (CloudComputeException $e) {
 			if ((int)$e->getCode() === 401 && $provision->is_operator_hosted()) {
 				$account = HeldCloudAccounts::provision_account($provision);
@@ -164,6 +187,44 @@ class NodeReverseDns {
 			}
 			throw new NodeReverseDnsException('Provider rejected the update: ' . $e->getMessage());
 		}
+		$set = array($ip);
+		if ($ip6 !== '' && !isset($not_set[$ip6])) {
+			try {
+				$driver->setReverseDns($instance_id, $ip6, $hostname);
+				$set[] = $ip6;
+			} catch (CloudComputeException $e) {
+				$not_set[$ip6] = 'the provider refused it: ' . $e->getMessage();
+			}
+		}
+		return array('ip' => (string)($r['ip'] ?? $ip), 'rdns' => (string)($r['rdns'] ?? $hostname),
+			'set' => $set, 'not_set' => $not_set);
+	}
+
+	/**
+	 * One sentence for what set() did: the addresses that answer the name
+	 * now, then any it left as they were and why.
+	 */
+	public static function summary(array $r): string {
+		$set = (array)($r['set'] ?? array($r['ip'] ?? ''));
+		$out = implode(' and ', $set) . (count($set) > 1 ? ' now answer ' : ' now answers ') . ($r['rdns'] ?? '');
+		foreach ((array)($r['not_set'] ?? array()) as $address => $why) {
+			$out .= '; ' . $address . ' keeps its reverse DNS: ' . $why;
+		}
+		return $out;
+	}
+
+	/** Is $address among $named, compared as addresses (an IPv6 has many spellings)? */
+	private static function names(array $named, string $address): bool {
+		$want = @inet_pton($address);
+		if ($want === false) {
+			return false;
+		}
+		foreach ($named as $a) {
+			if (@inet_pton((string)$a) === $want) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

@@ -30,6 +30,7 @@
  *  - a manual switch's way back: the records the owner points back, named
  *    before going back and, after, while DNS still names the copy.
  *
+ * @version 1.4 - reverse DNS at settle names the copy's IPv6 too, each address checked against its own record (C5's B33)
  * @version 1.3 - a manual switch's way back names the records to point back (C4's B28)
  * @version 1.2 - a way back before the copy took the node asks it no untrust (B13)
  * @version 1.2 - a DNS host that rounds a TTL up: the plan records what it holds, and a later attempt keeps the
@@ -98,7 +99,12 @@ class ScdFakeCloud implements CloudComputeProvider {
 	public function bootInstance(string $instance_id): void { $this->status = 'running'; }
 	public function getTransfer(): array { return array(); }
 	public $rdns = array();
+	// $refuse_rdns: addresses the provider answers an error for.
+	public $refuse_rdns = array();
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
+		if (in_array($ip, $this->refuse_rdns, true)) {
+			throw new CloudComputeException('the provider answered 422');
+		}
 		$this->rdns[] = array($instance_id, $ip, $hostname);
 		return array('ip' => $ip, 'rdns' => $hostname);
 	}
@@ -428,8 +434,33 @@ $sw = $copy->switch_record();
 check(in_array('trust_forwarder:untrust@source', $ops, true) && $cloud->shutdowns === 1 && $copy->status() === SiteCopy::STATUS_SWITCHED
 	&& ($sw['watch']['state'] ?? '') === 'settled' && !empty($sw['source_off']),
 	'the copy stops believing the old server, and the old server is powered off', json_encode(array($ops, $cloud->shutdowns, $copy->status(), $sw['watch'] ?? null)));
-check($cloud->rdns === array(array('7200a', $T4, $domain)) && strpos((string)($sw['rdns_note'] ?? ''), $T4 . ' now answers ' . $domain) !== false,
-	'once settled, the copy\'s server (made here) answers the site\'s name in reverse DNS', json_encode(array($cloud->rdns, $sw['rdns_note'] ?? null)));
+check($cloud->rdns === array(array('7200a', $T4, $domain), array('7200a', $T6, $domain))
+	&& strpos((string)($sw['rdns_note'] ?? ''), $T4 . ' and ' . $T6 . ' now answer ' . $domain) !== false,
+	'once settled, the copy\'s server (made here) answers the site\'s name in reverse DNS, at its IPv4 and at the IPv6 its AAAA moved to (B33)',
+	json_encode(array($cloud->rdns, $sw['rdns_note'] ?? null)));
+
+// ---------------------------------------------------------------------------
+section('Reverse DNS names each address its own record gives');
+
+$rdns_node = new ManagedNode((int)$copy->get('scp_source_node_id'), TRUE);
+$cloud->rdns = array();
+$r = NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4));
+check($cloud->rdns === array(array('7200a', $T4, $domain)) && isset($r['not_set'][$T6])
+	&& strpos(NodeReverseDns::summary($r), $T6 . ' keeps its reverse DNS: ' . $domain . ' has no AAAA record giving it') !== false,
+	'a name with only an A record: the IPv4 is named, the IPv6 is left and the result says why', json_encode(array($cloud->rdns, $r)));
+$cloud->rdns = array();
+$r = NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4, '2001:0db8:0072:0000:0000:0000:0000:0001'));
+check(count($cloud->rdns) === 2 && $r['set'] === array($T4, $T6), 'an AAAA spelled another way is the same address', json_encode($r));
+$cloud->rdns = array();
+$cloud->refuse_rdns = array($T6);
+$r = NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4, $T6));
+$cloud->refuse_rdns = array();
+check($r['set'] === array($T4) && strpos((string)($r['not_set'][$T6] ?? ''), 'the provider refused it') !== false,
+	'the provider refusing only the IPv6: the IPv4 is still named, and the refusal is reported, not thrown', json_encode($r));
+$threw = '';
+try { NodeReverseDns::set($rdns_node, $domain, $cloud, array($S4, $T6)); } catch (NodeReverseDnsException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'Create the A record first') !== false && strpos($threw, $S4) !== false,
+	'a name whose A still gives another address: refused, naming what it resolves to', $threw);
 
 // ---------------------------------------------------------------------------
 section('Keep puts the TTLs back');

@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.28 - The kernel settings file is 99-zz-joinery-kernel.conf, applied after every file the
+#                distribution ships: as 90-joinery-kernel.conf, Ubuntu's 99-protect-links.conf set
+#                fs.protected_fifos back to 1 at every boot (site_copy_final_test C5, B34)
 # Version: 1.27 - Every machine installs the hourly security check (security_check.sh install:
 #                joinery-security-check.timer), which records the security fixes it is waiting for
 #                (fleet_security_patching.md WP1, Q3).
@@ -1092,7 +1095,13 @@ else
 fi
 MODPROBE_CONF="${FS_ROOT}/etc/modprobe.d/joinery-rare-modules.conf"
 KMOD_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
-KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
+# Named to sort after every sysctl.d file the distribution ships: at boot
+# systemd-sysctl applies /etc, /run and /usr/lib's files in the order of their
+# names, the last to name a key winning, and Ubuntu's 99-protect-links.conf sets
+# fs.protected_fifos = 1. Under its earlier name, 90-joinery-kernel.conf, every
+# boot loosened it until the next run applied the file again.
+KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/99-zz-joinery-kernel.conf"
+KERNEL_SYSCTL_CONF_EARLIER="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
 NETWORK_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/99-security.conf"
 # blacklist-rare-network.conf as kmod ships it on Ubuntu 24.04 and 26.04. It is
 # written back only when its checksum is the one dpkg recorded for this kmod.
@@ -1210,6 +1219,10 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
         FAILED=1
     else
         write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
+        if [[ -f "${KERNEL_SYSCTL_CONF_EARLIER}" ]]; then
+            rm -f "${KERNEL_SYSCTL_CONF_EARLIER}"
+            say "removed ${KERNEL_SYSCTL_CONF_EARLIER}: its settings are in ${KERNEL_SYSCTL_CONF}, which boot applies last"
+        fi
         write_sysctl_file "${NETWORK_SYSCTL_CONF}" "No spoofed source, redirect or source route accepted; SYN floods met with cookies." "${NETWORK_SETTINGS[@]}"
         align_ufw_sysctl
         # Each value read back from the running kernel.

@@ -15,8 +15,9 @@
  *     from the copy fails SPF until the record names the copy instead. The
  *     owner changes it, at the DNS host.
  *   - reverse DNS: on a server this management node made, it sets the copy's
- *     reverse DNS once the public resolvers name the copy (a provider takes
- *     only a name that resolves to the address); on any other, the owner
+ *     reverse DNS, its IPv4 and (where the site has an AAAA) its IPv6, once
+ *     the public resolvers name the copy (a provider takes only a name that
+ *     resolves to the address); on any other, the owner
  *     does, at its provider. A container's address is its host's, and so is
  *     its reverse DNS. Through a proxy the site's name resolves to the proxy,
  *     so no reverse DNS can name it.
@@ -28,6 +29,7 @@
  * Read-only and credential-free; never throws. A resolver that cannot be
  * asked lists no SPF entry, and the list says so.
  *
+ * @version 1.1 - reverse DNS names both of the copy's addresses (B33)
  * @version 1.0
  */
 class SiteCopyAddressFacts {
@@ -73,11 +75,11 @@ class SiteCopyAddressFacts {
 		} elseif ($on_host) {
 			$facts[] = 'Reverse DNS: the copy answers at its host\'s address, whose reverse DNS is the host\'s.';
 		} elseif ($copy && self::made_here($copy)) {
-			$facts[] = "Reverse DNS: this management node sets the copy's address to answer {$domain} once the public "
-				. 'resolvers name the copy.';
+			$facts[] = "Reverse DNS: this management node sets the copy's addresses to answer {$domain} once the public "
+				. 'resolvers name the copy: its IPv4, and its IPv6 where the site has an AAAA record.';
 		} else {
-			$facts[] = "Reverse DNS: set the copy's address to answer {$domain} at its provider, once the public resolvers "
-				. 'name the copy.';
+			$facts[] = "Reverse DNS: set the copy's addresses to answer {$domain} at its provider, once the public resolvers "
+				. 'name the copy: its IPv4, and its IPv6 where the site has an AAAA record.';
 		}
 		$facts[] = 'Anything else that lets the old server in by its address (' . implode(', ', $old) . '), such as an '
 			. 'allow-list at a registrar or a mail or API provider, or a firewall in front of another service, keeps naming '

@@ -554,7 +554,7 @@ check((string)$t->get('htr_state') === HostedTrial::STATE_TRANSFERRED && !$t->ge
 section('Reverse DNS is the customer\'s now');
 
 $said = '';
-try { NodeReverseDns::set($n, 'mail.xfer-a-' . $suffix . '.example.com', null, true); } catch (NodeReverseDnsException $e) { $said = $e->getMessage(); }
+try { NodeReverseDns::set($n, 'mail.xfer-a-' . $suffix . '.example.com', null, null); } catch (NodeReverseDnsException $e) { $said = $e->getMessage(); }
 check($said === NodeReverseDns::TRANSFERRED_MESSAGE && strpos($said, 'reconnect') === false,
 	'a moved site is told to use its own Cloud Manager, with no reconnect', $said);
 

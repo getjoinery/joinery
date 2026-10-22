@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.10 - reverse DNS is handed the addresses the name gives, not a yes (NodeReverseDns 1.6)
  * @version 1.9 - the account list is HeldCloudAccounts::targets(); scopes from OperatorCloudAccount::SCOPES (cloud_accounts_list)
  * @version 1.8 - teardown names every node this run's provisions made as a fixture, so a provisioner that
  *                failed before the test could rename its node leaves nothing nameless
@@ -979,7 +980,7 @@ class CustomerCloudProvisioningTest {
 		check($found && (int)$found->key === (int)$provision->key, 'provisionForNode finds the birth provision');
 
 		$fake = new RdnsFakeDriver();
-		$result = NodeReverseDns::set($node, 'Mail.Example.com', $fake, true);
+		$result = NodeReverseDns::set($node, 'Mail.Example.com', $fake, array('203.0.113.80'));
 		check($fake->calls === 1
 			&& $fake->last_instance === '424242'
 			&& $fake->last_ip === '203.0.113.80'
@@ -991,7 +992,7 @@ class CustomerCloudProvisioningTest {
 		// node IP is refused with the create-the-A-record instruction, and the
 		// driver is never reached.
 		try {
-			NodeReverseDns::set($node, 'rdns-missing.example.invalid', $fake, false);
+			NodeReverseDns::set($node, 'rdns-missing.example.invalid', $fake, null);
 			check(false, 'missing forward A record refused before the provider call');
 		} catch (NodeReverseDnsException $e) {
 			check(strpos($e->getMessage(), 'Create the A record first') !== false && $fake->calls === 1,
@@ -1004,7 +1005,7 @@ class CustomerCloudProvisioningTest {
 		check(is_array($quiet_fail) && $quiet_fail['ok'] === false
 			&& strpos($quiet_fail['message'], 'no cloud-provision record') !== false,
 			'setQuietly swallows failure into ok=false');
-		$quiet_ok = NodeReverseDns::setQuietly($node, 'rdns.example.com', $fake, true);
+		$quiet_ok = NodeReverseDns::setQuietly($node, 'rdns.example.com', $fake, array('203.0.113.80'));
 		check($quiet_ok['ok'] === true && $fake->calls === 2 && $fake->last_hostname === 'rdns.example.com',
 			'setQuietly success reaches the provider');
 
@@ -1037,7 +1038,7 @@ class CustomerCloudProvisioningTest {
 
 		// The pipeline needs to tell a dead grant from "not yet": the cloud-born
 		// node above is bring-your-own with no account link.
-		$quiet_dead = NodeReverseDns::setQuietly($node, 'rdns.example.com', null, true);
+		$quiet_dead = NodeReverseDns::setQuietly($node, 'rdns.example.com', null, array('203.0.113.80'));
 		check($quiet_dead['ok'] === false && $quiet_dead['reconnect'] === true,
 			'setQuietly reports a dead customer grant as reconnect');
 		check($quiet_fail['reconnect'] === false, 'and a node with no provision is not a reconnect');
