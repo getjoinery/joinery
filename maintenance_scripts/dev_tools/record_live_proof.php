@@ -14,6 +14,7 @@
  * ran on: the agent source's committed version unless --agent-version names the build
  * the run used. Run it after the live run, on the files that ran.
  *
+ * @version 1.1 - the row is written by AgentLiveProofs::record(), which the live test also uses
  * @version 1.0
  */
 
@@ -47,38 +48,15 @@ if ($word === 'list' || $word === '') {
 	exit(0);
 }
 
-$words = AgentLiveProofs::words($src);
-if (!isset($words[$word])) {
-	fwrite(STDERR, "ERROR: the agent source at {$src} registers no word '{$word}'\n");
-	exit(2);
-}
 if (trim($opts['where'] ?? '') === '' || trim($opts['what'] ?? '') === '') {
 	fwrite(STDERR, "ERROR: say --where (the test server, and the job if the agent ran it) and --what (what ran, and what it did)\n");
 	exit(2);
 }
-$script = $words[$word]['script'];
-$row = array(
-	'word'          => $word,
-	'agent_version' => $opts['agent-version'] ?? (string)(AgentDistPublisher::readCommittedVersion($src) ?? ''),
-	'script'        => $script,
-	'script_sha256' => $script !== '' && is_file($site_root . '/' . $script) ? hash_file('sha256', $site_root . '/' . $script) : '',
-	'where'         => trim($opts['where']),
-	'what'          => trim($opts['what']),
-	'date'          => gmdate('Y-m-d'),
-);
-$path = AgentLiveProofs::record_path();
-$d = is_file($path) ? json_decode((string)file_get_contents($path), true) : null;
-if (!is_array($d)) {
-	$d = array('_about' => 'Agent words run once on a real machine before release (specs/fleet_security_patching.md WP7). '
-		. 'Added with maintenance_scripts/dev_tools/record_live_proof.php; the publish page warns about a changed word with no row here.', 'proofs' => array());
+try {
+	$row = AgentLiveProofs::record($word, $opts['agent-version'] ?? (string)(AgentDistPublisher::readCommittedVersion($src) ?? ''),
+		$opts['where'], $opts['what']);
+} catch (Exception $e) {
+	fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+	exit(2);
 }
-$kept = array();
-foreach ((array)($d['proofs'] ?? array()) as $p) {
-	// One row per word, agent version and script: a later run replaces it.
-	if (($p['word'] ?? '') === $row['word'] && ($p['agent_version'] ?? '') === $row['agent_version'] && ($p['script_sha256'] ?? '') === $row['script_sha256']) { continue; }
-	$kept[] = $p;
-}
-$kept[] = $row;
-$d['proofs'] = $kept;
-file_put_contents($path, json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-echo "Recorded: {$word} on agent {$row['agent_version']}" . ($script !== '' ? ", {$script} at " . substr($row['script_sha256'], 0, 12) : '') . "\n";
+echo "Recorded: {$word} on agent {$row['agent_version']}" . ($row['script'] !== '' ? ", {$row['script']} at " . substr($row['script_sha256'], 0, 12) : '') . "\n";

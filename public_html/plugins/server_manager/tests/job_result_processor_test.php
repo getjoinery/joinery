@@ -374,6 +374,31 @@ check(($stored['php']['packages'] ?? null) == array(array('name' => 'php8.5-fpm'
 check($stored['php']['fpm'][1]['binary'] === '' && $stored['php']['fpm'][1]['running_current'] === null,
 	'a path that is not a path is dropped, and a running_current that is not true or false is null (unknown), never true');
 
+// The packages a package run left half done (agent 1.90.0, fleet_security_patching B17).
+$dpkg_job = jrp_job($node, 'check_status', "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'joinery_version' => '2.14.3', 'disk_usage_percent' => 30,
+	'dpkg_unfinished' => array('count' => 31, 'packages' => array(
+		array('name' => 'php8.5-fpm', 'state' => 'unpacked'), array('name' => 'libc-bin', 'state' => 'triggers-pending'),
+		array('name' => 'odd', 'state' => 'on fire'), array('name' => '$(rm)', 'state' => 'unpacked'), 'junk')),
+	))));
+JobResultProcessor::process($dpkg_job);
+$node->load();
+$stored = $node->get('mgn_last_status_data');
+if (is_string($stored)) { $stored = json_decode($stored, true); }
+check(($stored['dpkg_unfinished'] ?? null) == array('count' => 31, 'packages' => array(
+		array('name' => 'php8.5-fpm', 'state' => 'unpacked'), array('name' => 'libc-bin', 'state' => 'triggers-pending'), array('name' => 'odd', 'state' => 'unknown')),
+		'in_progress' => null, 'since' => null),
+	'dpkg_unfinished is stored: the count, and each package with its state; a state not dpkg\'s reads unknown, a name not a package name is dropped',
+	var_export($stored['dpkg_unfinished'] ?? null, true));
+check(JobResultProcessor::status_dpkg_unfinished(array('count' => '3', 'packages' => array())) === null
+		&& JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array())) === array('count' => 0, 'packages' => array(), 'in_progress' => null, 'since' => null)
+		&& JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array(array('name' => 'a', 'state' => 'unpacked'))))['count'] === 1,
+	'a count that is not a number is not believed; zero is clean; the count is never fewer than the packages named');
+$held = JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array(), 'in_progress' => true, 'since' => 1761000000));
+$odd = JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array(), 'in_progress' => 'yes', 'since' => -4));
+check($held['in_progress'] === true && $held['since'] === 1761000000 && $odd['in_progress'] === null && $odd['since'] === null,
+	'a run holding its lock is kept with when it started; an in_progress not true or false, or a start not a time, is unknown');
+
 // ---------------------------------------------------------------------------
 section('host_report: root_ssh keeps fingerprints, and carries only well-formed bare keys (WP15)');
 $wp15_fp = 'SHA256:' . str_repeat('A', 43);

@@ -44,7 +44,7 @@ running anything:
  * name: cloud_offload_engine
  * tier: safe            # safe | db | test-db | live
  * env: dev-only         # any | prod-verify | dev-only
- * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl, chrome]
+ * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl, chrome, test-cloud, agent-source]
  * covers: []            # optional repo-relative globs the suite reaches WITHOUT loading
  * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
  * parallel: true        # optional, safe tier only: runs beside other suites
@@ -525,7 +525,7 @@ deletes. A suite that wants either pass over its nodes calls it with them.
 
 A gate that stubs a system tool (`pgrep`, `systemctl`, `apt-get`, `docker`) answers as a stock Ubuntu machine would, never as an empty one. A stubbed process table holds what every machine runs: `systemd`, `cron`, the agent, and on Ubuntu `unattended-upgrade-shutdown --wait-for-signal`, whose process name is cut to `unattended-upgr`, the same as `unattended-upgrade`'s. A stub of an engine refuses what the real one refuses: Docker takes one capability per `--cap-add`, where Podman also takes a comma list. A stub that answers "nothing is running" or takes every argument proves only that the script agrees with the stub.
 
-That is not enough for a script the agent runs as root. An agent word that is new or changed runs once on a real test server before the release ships it (`php maintenance_scripts/dev_tools/test_server.php create`, Ubuntu as the fleet runs it). The run is recorded in `plugins/server_manager/agent_live_proofs.json` with `php maintenance_scripts/dev_tools/record_live_proof.php WORD --where=... --what=...`, which notes the agent version and the script's hash it ran with. `record_live_proof.php list` says which changed words lack one. The publish page lists those words and publishes them only when the box saying so is ticked (`AgentLiveProofs`).
+That is not enough for a script the agent runs as root. An agent word that is new or changed runs once on a real test server before the release ships it (`php maintenance_scripts/dev_tools/test_server.php create`, Ubuntu as the fleet runs it). The live-tier test `plugins/server_manager/tests/agent_live_proofs_live_test.php` does the run: it builds the agent being prepared with a key made for the run, makes a test server, installs and joins the agent, runs each changed word a bare machine can prove (or those `LIVE_PROOF_WORDS` names), and records each that passes in `plugins/server_manager/agent_live_proofs.json`, noting the agent version and the script's hash it ran with; then it removes the server, its node and the key. A word that needs a site, or the publishing box, is recorded by hand after its run with `php maintenance_scripts/dev_tools/record_live_proof.php WORD --where=... --what=...`. `record_live_proof.php list` says which changed words lack one. The publish page lists those words and publishes them only when the box saying so is ticked (`AgentLiveProofs`).
 
 ### A test never changes the real repository
 

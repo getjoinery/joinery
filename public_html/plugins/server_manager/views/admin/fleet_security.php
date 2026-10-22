@@ -8,12 +8,15 @@
  * code still serves, the security fixes waiting, when updates last ran, and a
  * reboot owed (FleetSecurityView). Red rows first.
  *
- * Install security updates everywhere (WP5): every node's own updates, one
- * machine or site container at a time, machines first and each container
- * after its host, stopping at the first whose updater failed
+ * Install security updates everywhere (WP5): each machine's own updates, one
+ * at a time; then each container host replaces its site containers on a fresh
+ * base (its Refresh now, Q7); a site container whose host does not replace
+ * them installs its own after its host. It stops at the first failure
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.1 - a container host's step replaces its site containers and names them (Q7); the key says the kernel
+ *                is amber, and a package run left half done (B17)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -37,7 +40,7 @@ if ($_POST) {
 	if ($action === 'start_run') {
 		try {
 			$r = FleetSecurityRunner::start($session->get_user_id());
-			$flash('Installing security updates on ' . count($r->steps()) . ' machine(s) and site container(s), one at a time.', 'ok');
+			$flash('Installing security updates in ' . count($r->steps()) . ' step(s), one at a time.', 'ok');
 		} catch (FleetSecurityRunException $e) {
 			$flash($e->getMessage(), 'error');
 		}
@@ -91,8 +94,9 @@ $page->begin_box(array());
 ?>
 <p>Every machine and site container, and whether it is patched. A machine looks for the security fixes it is waiting for
 every hour; a site container's operating system is its host's base image, whose fixes the host looks for. <strong>Red</strong>:
-old code is still serving, or a critical fix waits (PHP, Apache, OpenSSL, PostgreSQL, the kernel). <strong>Amber</strong>:
-other fixes wait for the next run, a kernel fix waits for the night and then a reboot, a reboot is owed for over a day, or no check has passed in two hours.</p>
+old code is still serving, or a critical fix waits (PHP, Apache, OpenSSL, PostgreSQL). <strong>Amber</strong>:
+other fixes wait for the next run, a kernel fix waits for the night and then a reboot, a reboot is owed for over a day, no check has passed in two hours,
+or a package run was left half done.</p>
 
 <p>
 	<span class="badge bg-danger"><?php echo (int)$counts['red']; ?> red</span>
@@ -118,7 +122,9 @@ if ($latest) {
 		$badge = array('pending' => 'secondary', 'running' => 'info', 'done' => 'success', 'failed' => 'danger', 'skipped' => 'warning')[$v] ?? 'secondary';
 		$note = (string)($s['reason'] ?? '');
 		if (!empty($s['reboot_required'])) { $note = trim($note . ($note !== '' ? '; ' : '') . 'a reboot is owed'); }
-		echo '<tr><td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$s['node_id'] . '">' . $h($s['name']) . '</a></td>'
+		$covers = (($s['word'] ?? '') === FleetSecurityRunner::REFRESH_WORD)
+			? '<br><small class="text-muted">replaces its site containers: ' . $h(implode(', ', (array)($s['covers'] ?? array()))) . '</small>' : '';
+		echo '<tr><td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$s['node_id'] . '">' . $h($s['name']) . '</a>' . $covers . '</td>'
 			. '<td><span class="badge bg-' . $badge . '">' . $h($v) . '</span>'
 			. (!empty($s['job_id']) ? ' <a class="small" href="/admin/server_manager/job_detail?job_id=' . (int)$s['job_id'] . '">job</a>' : '') . '</td>'
 			. '<td>' . $h(str_replace('_', ' ', (string)($s['outcome'] ?? ''))) . '</td>'
@@ -139,7 +145,8 @@ if (!$latest || !$latest->is_running()) {
 	$plan = FleetSecurityRunner::plan();
 	$ask = 'Install the security updates each machine and site container would take at its next nightly run, now, one at a time ('
 		. count($plan['nodes']) . ' in all)? A service whose package is updated restarts for a few seconds, and PHP is reloaded without dropping a request.'
-		. ' Nothing is rebooted. The run stops at the first node whose updater fails.';
+		. ' A container host replaces its site containers on a fresh base, each site down about 12 seconds.'
+		. ' Nothing is rebooted. The run stops at the first failure.';
 	echo '<form id="fleetSecurityStart" method="post" action="' . $self_url . '" class="mb-3">' . SmAdminCsrf::field()
 		. '<input type="hidden" name="action" value="start_run">'
 		. '<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm(' . $h(json_encode($ask))

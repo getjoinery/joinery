@@ -5,6 +5,11 @@
  * Used by provisioning tasks to poll orders and queue welcome emails.
  * Auth: public_key / secret_key request headers.
  *
+ * A call that fails returns null, and last_error says why: the cURL error,
+ * or the HTTP status with the API's own error, so a caller can name the
+ * failure instead of guessing at credentials.
+ *
+ * @version 1.2 - last_error (B21)
  * @version 1.1
  */
 class GetJoineryApiClient {
@@ -12,6 +17,9 @@ class GetJoineryApiClient {
 	private $base_url;
 	private $public_key;
 	private $secret_key;
+
+	/** Why the last call returned null, or '' after one that worked. */
+	public $last_error = '';
 
 	public function __construct($base_url, $public_key, $secret_key) {
 		$this->base_url   = rtrim($base_url, '/');
@@ -63,9 +71,21 @@ class GetJoineryApiClient {
 		$errno  = curl_errno($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-		if ($errno || $status < 200 || $status >= 300) return null;
-		$decoded = json_decode($body, true);
-		if (!is_array($decoded) || !array_key_exists('data', $decoded)) return null;
+		$this->last_error = '';
+		if ($errno) {
+			$this->last_error = 'no answer from ' . parse_url($url, PHP_URL_HOST) . ': ' . curl_error($ch);
+			return null;
+		}
+		$decoded = json_decode((string)$body, true);
+		if ($status < 200 || $status >= 300) {
+			$said = (is_array($decoded) && is_string($decoded['error'] ?? null)) ? ': ' . mb_substr($decoded['error'], 0, 300) : '';
+			$this->last_error = 'HTTP ' . $status . $said;
+			return null;
+		}
+		if (!is_array($decoded) || !array_key_exists('data', $decoded)) {
+			$this->last_error = 'HTTP ' . $status . ' with no API answer in it';
+			return null;
+		}
 		return $decoded['data'];
 	}
 }

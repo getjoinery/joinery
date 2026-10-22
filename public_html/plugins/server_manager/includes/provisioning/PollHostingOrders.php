@@ -12,6 +12,7 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
+ * @version 1.6 - a failed fetch of the domain answers says why (GetJoineryApiClient::last_error, B21)
  * @version 1.5 - a hosted order's provision is born with its data root encrypted where data_root_encryption_offered
  *               is on (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.4 - a provisioned node is given its storage space on the target Where new backups go names, once saved
@@ -54,7 +55,7 @@ class PollHostingOrders {
 		]);
 
 		if (!is_array($requirements)) {
-			return ['status' => 'error', 'message' => 'Failed to fetch OrderItemRequirements from getjoinery — check API credentials.'];
+			return ['status' => 'error', 'message' => 'Failed to fetch OrderItemRequirements from getjoinery: ' . ($client->last_error !== '' ? $client->last_error : 'no answer') . '.'];
 		}
 
 		// Build set of already-handled order_item_ids (any job status, not deleted)

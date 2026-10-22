@@ -15,17 +15,24 @@
  * The verdict, most serious first:
  *   red    old code is serving (a php-fpm on a replaced binary, or a service
  *          needrestart names), or a critical fix waits (PHP, Apache, OpenSSL,
- *          PostgreSQL: one a machine installs at once, Q2)
+ *          PostgreSQL: one a machine installs at once, Q2), or one was left
+ *          half done
  *   amber  other fixes wait (they go in with the next run: the night's, or an
  *          at-once install's), a kernel fix waits (the night installs it, a
- *          person chooses the reboot), a reboot is owed over a day, or the
- *          check has not passed for two hours
+ *          person chooses the reboot), a reboot is owed over a day, the
+ *          check has not passed for two hours, or a package run was left half
+ *          done (its own status check: what dpkg --audit lists, which the next
+ *          install finishes). Packages half done under a run that holds its
+ *          lock are its work in hand, not left half done, for two hours; past
+ *          that the run is taken as stuck.
  *   grey   nothing reported to judge by
  *   green  none of these
  *
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.3 - a package run left half done is amber, red where a critical package is among them, from the node's
+ *                own status check (agent 1.90.0, B17); not while a run holds its lock, for two hours (reviewer2)
  * @version 1.2 - a node whose agent moved away is not listed: it is patched from where it is managed now
  * @version 1.1 - a kernel fix is amber, not red: nothing installs it before the night, and its reboot is a
  *                person's (reviewer2 G3); other fixes wait for the next run, which a critical fix brings forward
@@ -45,6 +52,13 @@ class FleetSecurityView {
 	/** A reboot owed longer than this is amber. */
 	const REBOOT_GRACE_SECONDS = 86400;
 
+	/**
+	 * A package run holding its lock longer than this is taken as stuck (a
+	 * question no one answers, a hang), and what it left half done is shown:
+	 * past install_security_updates' own hour, and a night's unattended run.
+	 */
+	const RUN_STUCK_SECONDS = 7200;
+
 	const ORDER = array('red' => 0, 'amber' => 1, 'grey' => 2, 'green' => 3);
 
 	public static function is_critical_package(string $name): bool {
@@ -53,8 +67,8 @@ class FleetSecurityView {
 
 	/**
 	 * Every live node as the rows need it: name, whether it is a site
-	 * container and on which host, its host report and its PHP, each read
-	 * through the processor's own sanitisers.
+	 * container and on which host, its host report, its PHP and the packages
+	 * a run left half done, each read through the processor's own sanitisers.
 	 */
 	public static function snapshots(): array {
 		$out = array();
@@ -89,6 +103,7 @@ class FleetSecurityView {
 				'host_id'     => $host_id,
 				'host_report' => is_array($hr) ? JobResultProcessor::sanitise_host_report($hr) : null,
 				'php'         => (is_array($sd) && is_array($sd['php'] ?? null)) ? JobResultProcessor::status_php($sd['php']) : null,
+				'unfinished'  => is_array($sd) ? JobResultProcessor::status_dpkg_unfinished($sd['dpkg_unfinished'] ?? null) : null,
 			);
 		}
 		return $out;
@@ -236,6 +251,36 @@ class FleetSecurityView {
 		}
 		if ($row['kernel']) {
 			$amber[] = 'a kernel fix waits for the night, then a reboot';
+		}
+		// A package run that died part way leaves packages half done, and
+		// nothing else says so until the next install finishes them. One
+		// still holding its lock is at work on them, until it is taken as
+		// stuck. A critical package among them is a critical fix that did not
+		// land, which the pending list cannot show (apt counts it as unpacked
+		// already); the kernel stays amber, as its pending fix does.
+		$unfinished = $s['unfinished'] ?? null;
+		if (is_array($unfinished) && $unfinished['count'] > 0) {
+			// A holder whose start /proc would not give is almost always one
+			// that ended between the two reads (reviewer2): silent, as under
+			// two hours, and the next hourly check settles it.
+			$running_for = ($unfinished['in_progress'] === true) ? ($unfinished['since'] !== null ? $now - $unfinished['since'] : 0) : null;
+			if ($running_for === null || $running_for > self::RUN_STUCK_SECONDS) {
+				$names = array();
+				$critical = false;
+				foreach ($unfinished['packages'] as $i => $p) {
+					if ($i < 4) { $names[] = $p['name'] . ' ' . $p['state']; }
+					if (self::is_critical_package($p['name']) && !preg_match('/^linux-(image|modules)/', $p['name'])) { $critical = true; }
+				}
+				$more = $unfinished['count'] - count($names);
+				$what = '(' . implode(', ', $names) . ($more > 0 ? ', and ' . $more . ' more' : '') . ')';
+				if ($unfinished['in_progress'] === true) {
+					$why = 'a package run has held its lock for over ' . (int)floor($running_for / 3600) . ' hours'
+						. ' with packages half done ' . $what . ': it may be stuck';
+				} else {
+					$why = ($critical ? 'a critical fix was' : 'a package run was') . ' left half done ' . $what . ': Install security updates now finishes it';
+				}
+				if ($critical) { $red[] = $why; } else { $amber[] = $why; }
+			}
 		}
 		$others = ($row['pending'] ?? 0) - count($row['critical']) - count($row['kernel']);
 		if ($row['pending'] !== null && $others > 0) {

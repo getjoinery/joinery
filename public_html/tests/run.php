@@ -289,6 +289,17 @@ function harness_unmet_needs(array $needs) {
 						$cache[$need] = false;
 					}
 					break;
+				case 'test-cloud':
+					// A test cloud account to make throwaway servers in, as
+					// test_server.php finds it, and sshpass to reach them
+					// with their root passwords.
+					$cache[$need] = class_exists('TestCloudCleanup') && TestCloudCleanup::accounts() !== array()
+						&& trim((string)shell_exec('command -v sshpass 2>/dev/null')) !== '';
+					break;
+				case 'agent-source':
+					// The agent's Go source, which lives outside the repository.
+					$cache[$need] = class_exists('AgentDistPublisher') && is_dir(AgentDistPublisher::sourcePath() . '/primitives');
+					break;
 				default:
 					$cache[$need] = true; // unrecognized need → assume met (never skip blindly)
 			}

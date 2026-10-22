@@ -1,11 +1,15 @@
 # Fleet Security Patching
 
-**Status:** Draft, 2026-10-21. Written after the PHP2Shell patch day by oldmigration at the
-owner's request ("write all of these up in a spec and we'll start working through it").
-Q1–Q6 are decided (2026-10-21). Q1 and Q4 went to their own specs. WP1–WP6 and WP7's warning
-were released in 0.8.519 (2026-10-22). WP8–WP10, B8 and WP3's lost-.deb fix were released in 0.8.520 (2026-10-22); its live check found
-B18, B19 and B20, fixed and not yet released (see "0.8.520 live check").
-Open: Q7, and Q8 before WP7's automated live test can be built. See "Progress" below.
+**Status:** Implemented, 2026-10-22. Written after the PHP2Shell patch day by oldmigration at
+the owner's request ("write all of these up in a spec and we'll start working through it").
+Q1–Q8 are decided; Q1 and Q4 went to their own specs. WP1–WP6 and WP7's warning were released
+in 0.8.519, WP8–WP10, B8 and WP3's lost-.deb fix in 0.8.520 (both 2026-10-22). B17–B23, Q7 and
+WP7's automated live test are built; B18–B20 were committed (52a25c692), the rest are prepared
+together. Verified: each package's gate; the 0.8.520 live check (see "0.8.520 live check"); WP7's
+live test passed on real throwaway servers (13/13), proving check_status with B17's report,
+agent_report, host_report and install_security_updates on agent 1.90.0. Not built: WP6's
+optional Ubuntu notices feed. The live checks still owed after the release are in the live
+verification queue (memory: project_live_verification_queue.md, "Fleet security patching").
 
 ## The owner's goal in plain terms
 
@@ -195,12 +199,16 @@ owner's local `~/work-tool` repository.
   theme's own compiled CSS (where it ships one).
 - **Test DNS:** the test-cloud reaper (`TestCloudCleanup`) removes the `joinerytest.com` records
   pointing at what it deletes. `maintenance_scripts/dev_tools/test_server.php` 1.1 already does
-  this for manual deletes and adds `dns-list` / `dns-delete --stale` (uncommitted).
+  this for manual deletes and adds `dns-list` / `dns-delete`. 1.2 (B23, 2026-10-22) drops
+  `dns-delete --stale`: it removed every record no server on this test account held, which
+  includes live servers this management node cannot see (copy-final's Hetzner src6, managed
+  from another plane).
 
 ## Open questions
 
-- **Q7 — On a container host, should "Install security updates everywhere" replace the
-  containers instead of patching each one in place?**
+- **Q7 — Decided 2026-10-22: replace** (owner: "q7 replace them"). On a container host,
+  should "Install security updates everywhere" replace the containers instead of patching each
+  one in place?
   - In place (as built): each container installs its fixes and reloads PHP. Nothing goes down,
     but the fix lasts only until the container is next replaced, and that night's refresh
     replaces it anyway.
@@ -208,7 +216,8 @@ owner's local `~/work-tool` repository.
     12 s. The fix lasts, and it is what Q2 already does for a critical fix.
   - **Recommend replace,** as Q2 does. Its catch is the 12 s per site in the daytime.
 
-- **Q8 — How does WP7's live test put the release being prepared on its test server?**
+- **Q8 — Decided 2026-10-22: the throwaway key** (owner: "throwaway key on q8"). How does
+  WP7's live test put the release being prepared on its test server?
   The test can make the server, join it to dev's plane, run each changed word as a plane job,
   check the result and clean up, all from existing code. The hard part is the install. Dev is
   the publishing box: its `agent_dist` is what the last release shipped, and the changed-word
@@ -279,14 +288,35 @@ reviewed WP4 (A–E, F1–F4, all taken).
       Ubuntu's image ships `20auto-upgrades` switched on, and only its own
       `docker-disable-periodic-update` keeps cron's `apt-compat` from refreshing lists and
       upgrading in every container at 06:25. Checked in wp4b: the job has never run there.
-    - **B17, not built: a package run left half done is invisible.** dpkg leaves packages
-      "unpacked" or "half-installed" when a run dies, as on 10-21. Nothing reports it until the
-      next `install_security_updates` run repairs it, and inside a container no hourly check
-      runs at all. Plan: the agent's `check_status` already reads dpkg's status file for `php`.
-      It reports the packages a run left half done (wanted, in any state but installed,
-      not-installed and config-files), and the fleet page shows the node amber with
-      "Install security updates finishes it". It is an agent change, so it waits for the agent
-      work in progress (1.89.0, the hung-agent fix) to land.
+    - **B17, built (agent 1.90.0), not released: a package run left half done is invisible.**
+      dpkg leaves packages "unpacked" or "half-installed" when a run dies, as on 10-21. Nothing
+      reported it until the next `install_security_updates` run repaired it, and inside a
+      container no hourly check runs at all.
+      - Agent: `check_status` reads dpkg's status file (no command) and reports
+        `dpkg_unfinished` `{count, packages}`, the first 20 by name and state.
+      - Half done is what `dpkg --audit` lists, the same test `install_security_updates.sh`
+        repairs by: flag `reinstreq`, or state unpacked, half-configured, half-installed,
+        triggers-awaiting or triggers-pending. The plan said wanted packages only; a removal
+        that dies part way is as unfinished, and dpkg --audit lists it too.
+      - Plane: `JobResultProcessor` 1.102 `status_dpkg_unfinished`; `FleetSecurityView` 1.3
+        shows the node amber, "a package run was left half done (names): Install security
+        updates now finishes it", on a machine or a container. A clean package database
+        alone does not make a node green.
+      - reviewer2's review (a: the set agreed; d–f read clean), two taken:
+        - (b) A run under way leaves the same states, so the agent says whether apt or dpkg
+          holds its lock (`F_GETLK` on lock-frontend and lock, which takes nothing) and when
+          the holder started. The page says nothing of a run holding its lock for up to two
+          hours, or whose holder's start /proc would not give (it ended between the reads,
+          reviewer2's nit); past two hours it says the run may be stuck.
+        - (c) A critical package among them (the pending list's pattern, not the kernel) is
+          red: a critical fix that did not land, which the pending list cannot show (apt
+          counts an unpacked package as already at the new version).
+      - Tests: agent `TestDpkgUnfinished*` (3) and `TestDpkgRunHeldSeesAnotherProcessHoldingTheLock`
+        (a second process holds the lock), go test ./... green; fleet_security 65/65,
+        job_result_processor 414/414.
+      - Live check after release: a 1.90.0 node's stored status carries `dpkg_unfinished`
+        with count 0; on a test box, kill an apt run part way and see the row turn amber,
+        then Install security updates now clear it.
 - **WP4.**
   - Housekeeping 1.26 installs the timer on Docker hosts.
   - `recreate_site.sh` 1.5 records a run spec for a site Docker made before run specs
@@ -312,7 +342,35 @@ reviewed WP4 (A–E, F1–F4, all taken).
   - A container whose host is replacing its containers is left out, or skipped while its
     install is open. The install would die with the old container and halt the run an hour
     later as a lost job (reviewer2 c).
-  - **Open, Q7:** see "Open question" below.
+  - **Q7, built, not released:** `FleetSecurityRunner` 1.3. A container host whose nightly
+    refresh is on, and whose agent has `refresh_site_containers`, replaces its site containers
+    once, as its Refresh now, after every machine's own install. Its containers are not steps of
+    their own; the step names them.
+    - The word only starts `site_refresh.sh`'s run under systemd, so the step waits for a host
+      report whose `ran_at` is after the job started (two minutes' clock slack) and whose run
+      has ended, asking for a host report every five minutes.
+    - A run already under way when asked began before this one and may predate the fix, so it
+      is waited out and the host asked again five minutes on.
+    - `replaced`, `nothing_due` and `incomplete` pass, noting a site passed over or held, and a
+      fix the new base still waits for. A failed check, `base_failed` and `held` halt the run,
+      as does a run not seen to end within its own bounds (an hour for the base, 45 minutes a
+      site, ten for asking).
+    - reviewer2's review: clean, with (a) taken. `site_refresh.sh` records its outcome only at
+      its end, so a run killed part way leaves last night's in the report. A host report taken
+      ten minutes after the asking that shows none under way and none since halts the step at
+      once: the replacement ended without recording what it did, or never began, and the host's
+      `joinery-site-refresh` journal says why. Before, it waited out the bound (hours) and
+      blamed the agent. (d) a check for a host that did not start one.
+    - A container whose host does not replace its containers is still patched in place, after
+      its host.
+    - The page names the containers each host step covers (`fleet_security` 1.1; its key also
+      lost "the kernel" from red, stale since WP6's G3). `FleetSecurityRun` 1.1 documents the
+      step's new fields. Tests: fleet_security 68/68 (the plan, asking, already under way, not
+      started, waiting on the report, done, ended unrecorded, the time bound, and each run
+      outcome).
+    - Live check after release: on a test container host with the refresh timer on and two
+      sites, Install security updates everywhere shows the host's install, then one step
+      replacing both sites, done with 2 changed (or nothing due).
 
 - **WP6.**
   - Review fixes (reviewer2):
@@ -348,8 +406,63 @@ reviewed WP4 (A–E, F1–F4, all taken).
   - Proofs live in `plugins/server_manager/agent_live_proofs.json`, added with
     `maintenance_scripts/dev_tools/record_live_proof.php`. The publish page lists unproven
     words and refuses until "Publish these without a live run" is ticked (Q5).
-  - **Not built:** the automated live-tier test that makes the server and runs each word
-    through an agent. Proofs are recorded by hand until it exists.
+  - **The automated live test, built (Q8: a throwaway key) and run live, PASS 13/13:**
+    `plugins/server_manager/tests/agent_live_proofs_live_test.php` with `AgentLiveProofRun`.
+    - Build: `AgentDistPublisher` and `SupportBundlePublisher` in a scratch site whose only
+      release key is one made for the run (no statement or log keys, so the agent checks the
+      signature alone). Proven alone: both binaries and the bundle built in 12 s, the manifest's
+      baked keys are the run's key only, and the scratch site and key are deleted after.
+    - Server: `test_server.php create`. Install over SSH (sshpass, the root password file):
+      `install_agent.sh --siteless`, `joinery-agent bundle install`, `joinery-agent join`.
+      The join is approved here as the fingerprint the machine printed (`adoptJoin`).
+    - The node is marked `mgn_agent_test_build` (ManagedNode 1.62). The plane offers it none of
+      its own agents or bundles (`AgentChannelEndpoint` 1.54, `OWN_BUILD_KINDS`, answered as a
+      plane with none), which the run's agent would refuse, each refusal an incident. Test
+      agent_test_build_hold 8/8 over real signed requests.
+    - `TestCloudCleanup` 1.4: such a node holds no server, and is removed with it, so a run
+      killed part way leaves nothing (test_cloud_cleanup 33/33).
+    - Words: the changed, unproven ones (or `LIVE_PROOF_WORDS`) that `RECIPES` can prove on a
+      bare machine: check_status, agent_report, host_report, install_security_updates. Judged:
+      completed with an answer to read; install_security_updates by `FleetSecurityRunner`'s
+      verdict. A passing word is recorded with the build's version (`AgentLiveProofs::record()`,
+      1.1, which `record_live_proof.php` 1.1 now uses). A word that needs a site
+      (apply_update, upgrade_preflight) or the publishing box (publish_upgrade) is named, to be
+      proven by hand.
+    - Runner needs `test-cloud` and `agent-source` (tests/run.php). The test's timeout is the
+      runner's cap, 30 minutes; install_security_updates may take 20 of them.
+    - First run (2026-10-22 16:19): built, then the server was refused. The test Linode
+      account was at its active-services limit (15 servers, most tagged keep by other
+      sessions' rigs). The run's error now names the provider's refusal, and a stopped run is
+      a failed check, not a crash. `SupportBundlePublisher` 1.31: an unlink of no leftover
+      partial bundle no longer leaves a warning the harness named as the crash's cause.
+    - Second run (2026-10-22, after the sessions freed nine servers): PASS 13/13 on
+      wp7-proof-ea53b3 (Linode 108907305). Built 1.90.0 from 5c3f2c1 and uncommitted changes,
+      trusting only the run's key; installed, joined, adopted as a test build; check_status
+      (answering with B17's dpkg_unfinished), agent_report, host_report and
+      install_security_updates (installed, 45 packages) each passed through the agent; it
+      refused no update and no bundle; the node, server, DNS and key were removed. Four
+      proofs recorded at 1.90.0. Through the runner with nothing named, it made no server
+      and named the three changed words a bare machine cannot prove: apply_update and
+      upgrade_preflight (need a site), publish_upgrade (the publishing box).
+    - `test_server.php` 1.2: a create the provider refuses leaves no root password file (two
+      were left in /dev/shm by the refused creates), and the file is 0600 from its first
+      byte.
+    - reviewer2's review (traced the db suites; read the rest), three taken in
+      `AgentLiveProofRun` 1.1:
+      - (a) the fingerprint is read over an SSH session that checks no host identity, so
+        adopt() also requires the join to have come from the server's own IPv4 or IPv6, as
+        this plane saw it arrive (`ajr_source_ip`, compared as addresses; never the addresses
+        the machine reports, which are its own word), under the run's label; whoever else
+        answered there is not adopted. Run 2's join came from the server's own IPv6. Test
+        agent_test_build_hold 12/12 (three refusals, one a join reporting the server's
+        address from elsewhere).
+      - (b) build() starts from no scratch site, so a run killed before its teardown never
+        hands its key to the next run; the next run also removes a killed run's root password
+        file from /dev/shm (`forget_dead_runs`, past two hours).
+      - (c) teardown() removes the run's join requests, approved or still pending.
+      - Confirmed: nothing but this run sets `mgn_agent_test_build` (no node-written column, no
+        form, no REST); the scratch site's key never leaves it; `remove_permanently` runs only
+        for a flagged node on a server the provider confirmed deleted.
 
 - **WP8.** `/admin/server_manager/machines` (`MachineInventory`) lists three kinds of machine:
   - **Managed machines,** in any install state (a dormant copy and a retired source are paid
@@ -440,6 +553,21 @@ reviewed WP4 (A–E, F1–F4, all taken).
   SSH, it names no mail service and no fallback, so it sends nothing. In all: 7 pass, 3 fail
   (galactictribune, getjoinery-developers, joinerydemo), each a site that cannot send mail
   today, for the owner to set up.
+- **B21 (fixed, not released), seen on getjoinery's Provisioning page:** "API not responding"
+  for a key minted at 13:15 and never used. The probe asked the store API for one row with
+  `limit`, which the API has never had; it refuses an unknown filter with a 400, so every
+  site's probe failed whatever its key, and the request never reached the key. It asks with
+  `numperpage`, and the card says why a probe fails (`GetJoineryApiClient` 1.2 `last_error`,
+  `ProvisioningSetup` 1.10, `provisioning_setup` 2.5, `PollHostingOrders` 1.6). New test
+  provisioning_api_probe 5/5 over real requests to dev's own API; provisioning_setup 68/68.
+- **B22 (fixed, not released), seen on dev's fleet row and its host converger:** 534 failed root
+  requests, nearly all `remove_plugin` for the sandbox test's scratch plugins. The test removes
+  its plugin directory itself, so root found nothing there and refused, and every converge
+  that ran one ended `request-failed`. A directory already gone is done (`PluginRemoval` 1.1
+  `already_gone()`, `root_request.php` 1.7), which a retried request needed anyway. Test
+  root_request 111/111. Dev's "it does not look for security fixes yet" is by design:
+  `security_check.sh` refuses a root timer over a tree that is not root's alone, and dev's is
+  user1's.
 - **Still to check:** containers drop docker-clean at their next replacement on docker-prod.
 
 Bugs the box proof found and fixed:

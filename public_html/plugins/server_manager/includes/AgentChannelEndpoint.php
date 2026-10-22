@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.54 - a node running a live-proof test build (mgn_agent_test_build) is offered none of this plane's agents
+ *                 or bundles: it trusts only its run's throwaway key (fleet_security_patching WP7, Q8)
  * @version 1.53 - leave records the goodbye on the node (mgn_agent_left_time) and, after a move this plane asked
  *                 for, the management node it went to (mgn_agent_left_to); approveJoin clears both
  * @version 1.52 - a job is addressed to the node id its claim was signed as, which a moved machine still holds
@@ -287,6 +289,9 @@ class AgentChannelEndpoint {
 	 * names one of these and nothing else, so nothing it sends is ever resolved
 	 * as a path on this plane.
 	 */
+	/** The plane's own agent and bundle, which a node running a live-proof test build is not offered. */
+	const OWN_BUILD_KINDS = ['agent_manifest', 'agent_statement', 'agent_binary', 'bundle_manifest', 'bundle_body'];
+
 	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body',
 		'release_manifest', 'release_file', 'release_archive'];
 
@@ -2298,6 +2303,19 @@ class AgentChannelEndpoint {
 		}
 
 		$dist_dir = PathHelper::getIncludePath('agent_dist');
+
+		// A live-proof test build trusts only its run's throwaway key: this
+		// plane's agent and bundle would each be refused, and each refusal
+		// raised as an incident. It is offered none, as a plane with none
+		// answers (WP7, Q8).
+		if ($node->get('mgn_agent_test_build') && in_array($kind, self::OWN_BUILD_KINDS, true)) {
+			switch ($kind) {
+				case 'agent_manifest':  api_success(['manifest' => ''], '', 200);
+				case 'agent_statement': api_success(['statement' => ''], '', 200);
+				case 'bundle_manifest': api_success(['available' => false], '', 200);
+				default: api_error('This node runs a live-proof test build; this plane offers it no agent or bundle.', 'ActionError', 404);
+			}
+		}
 
 		switch ($kind) {
 			case 'release_manifest':

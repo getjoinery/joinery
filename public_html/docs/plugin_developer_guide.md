@@ -1224,7 +1224,7 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 6. Runs `uninstall.php` hook if present. Tables are still available here for external teardown (e.g., revoking cached external state).
 7. Drops plugin tables and orphan sequences
 8. Marks the `plg_plugins` row `uninstalled` (`plg_uninstalled_time` set, `plg_active` cleared). The row stays as the record.
-9. Queues a `remove_plugin` root request (`RootRequest`) and records its id on the row (`plg_metadata._remove_request_id`). The tree belongs to root, so the files are root's to remove: the host timer carries the request out on its next tick, minutes not releases. Returns the request id ('' when the directory was already gone).
+9. Queues a `remove_plugin` root request (`RootRequest`) and records its id on the row (`plg_metadata._remove_request_id`). The tree belongs to root, so the files are root's to remove: the host timer carries the request out on its next tick, minutes not releases; a directory already gone by then is done, not refused. Returns the request id ('' when the directory was already gone).
 
 Root does not trust the request (the queue is web-writable). Before deleting, `PluginRemoval::refusal()` checks that the name is a plugin name, that `plugins/<name>` is a real directory directly under `plugins/`, that the manifest does not say `is_system`, and that the row reads `uninstalled` and not active; any check failing leaves the directory and records why in the request's transcript. `PluginRemoval::remove()` never follows a symlink inside the plugin.
 

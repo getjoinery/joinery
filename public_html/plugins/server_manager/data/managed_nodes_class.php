@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.62 - mgn_agent_test_build: the node runs a live-proof test build, trusting only its run's throwaway key,
+ *                and is offered none of this plane's agents or bundles (fleet_security_patching WP7, Q8)
  * @version 1.61 - mgn_agent_left_time / mgn_agent_left_to and agent_moved_away(): the node's agent said goodbye,
  *                and to which management node it moved; nothing here reaches the machine after that
  * @version 1.60 - mgn_backup_recovery_public_key: a proven recovery key's public half (specs/site_copy_final_test.md E1)
@@ -379,6 +381,14 @@ class ManagedNode extends SystemBase {
 		// row from reading as a dead agent afterwards. A new pairing clears them.
 		'mgn_agent_left_time'          => array('type'=>'timestamp(6)'),
 		'mgn_agent_left_to'            => array('type'=>'varchar(255)'),
+
+		// A throwaway test server running a live-proof build of the agent
+		// (AgentLiveProofRun, fleet_security_patching WP7): built from the
+		// source being prepared with a key made for the run, it trusts only
+		// that key. The plane offers it none of its own agents or bundles,
+		// which it would refuse, each refusal an incident, and the test
+		// cloud's cleanup removes it with its server.
+		'mgn_agent_test_build'         => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
 		// Liveness, centrally visible. The agent's own heartbeat row lives in
 		// each site's OWN database and stays there; a poll against this plane

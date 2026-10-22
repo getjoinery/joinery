@@ -10,7 +10,7 @@
  *   php test_server.php delete <label|id>
  *   php test_server.php dns <name> <ipv4> [<ipv6>]
  *   php test_server.php dns-list
- *   php test_server.php dns-delete <name> | --stale
+ *   php test_server.php dns-delete <name>
  *
  * Every command works on the one operator cloud account this management node
  * flags as test, and only after the provider confirms that account's company
@@ -27,11 +27,17 @@
  * `dns` points <name>.joinerytest.com at an address (A, and AAAA when given),
  * replacing any record of that name and type. The zone lives on the test
  * account. `dns-list` shows the zone's A and AAAA records and marks each one
- * STALE whose address no test server holds; `dns-delete` removes a name's
- * records, or with --stale every stale one. `delete` removes the records
- * pointing at the server it deletes: a record left on a released address
- * names whoever the provider gives that address to next.
+ * whose address no server on this test account holds; such a record may
+ * still be a live server's that this management node cannot see (another
+ * account's, or one managed from another plane), so nothing removes them in
+ * bulk. `dns-delete` removes one name's records. `delete` removes the records
+ * pointing at the server it deletes, as the nightly cleanup does: a record
+ * left on a released address names whoever the provider gives that address
+ * to next.
  *
+ * @version 1.2 - a create the provider refuses leaves no password file, and the file is 0600 from its first byte;
+ *                dns-delete takes a name only: --stale removed the records of live servers this management node
+ *                cannot see, such as a Hetzner test server managed from another plane (B23)
  * @version 1.1 - dns-list, dns-delete; delete takes the server's DNS records with it
  * @version 1.0
  */
@@ -125,16 +131,26 @@ function ts_create(array $opts): void {
 	}
 	$password = 'Aa1!' . bin2hex(random_bytes(20));
 	$file = TEST_SERVER_PASSWORD_DIR . '/test_server_' . $label;
-	if (file_put_contents($file, $password) === false || !chmod($file, 0600)) {
+	// 0600 from its first byte: written under a closed umask, not chmod'ed after.
+	$was = umask(0077);
+	$wrote = file_put_contents($file, $password);
+	umask($was);
+	if ($wrote === false || !chmod($file, 0600)) {
 		ts_fail("could not write the password file {$file}.");
 	}
-	$instance = $driver->createInstance(array(
-		'label'     => $label,
-		'region'    => (string)($opts['region'] ?? LinodeComputeDriver::DEFAULT_REGION),
-		'type'      => (string)($opts['type'] ?? LinodeComputeDriver::DEFAULT_TYPE),
-		'image'     => (string)($opts['image'] ?? LinodeComputeDriver::DEFAULT_IMAGE),
-		'root_pass' => $password,
-	));
+	try {
+		$instance = $driver->createInstance(array(
+			'label'     => $label,
+			'region'    => (string)($opts['region'] ?? LinodeComputeDriver::DEFAULT_REGION),
+			'type'      => (string)($opts['type'] ?? LinodeComputeDriver::DEFAULT_TYPE),
+			'image'     => (string)($opts['image'] ?? LinodeComputeDriver::DEFAULT_IMAGE),
+			'root_pass' => $password,
+		));
+	} catch (Throwable $e) {
+		// No server: no password to keep.
+		@unlink($file);
+		ts_fail('the server was not made: ' . $e->getMessage());
+	}
 	if (!empty($opts['keep'])) {
 		ts_http($account)->request('PUT', 'linode/instances/' . rawurlencode((string)$instance['id']),
 			array('json' => array('tags' => array('keep'))));
@@ -226,23 +242,21 @@ function ts_dns_list(): void {
 	foreach (ts_address_records($http, ts_zone($http)) as $r) {
 		$target = strtolower((string)$r['target']);
 		printf("%-5s %-40s %-40s %s\n", $r['type'], $r['name'] === '' ? '@' : $r['name'], $r['target'],
-			isset($live[$target]) ? $live[$target] : 'STALE: no test server holds this address');
+			isset($live[$target]) ? $live[$target] : 'no server on this test account holds this address');
 	}
 }
 
 function ts_dns_delete(array $opts): void {
 	$name = (string)($opts['positional'][0] ?? '');
-	if ($name === '' && empty($opts['stale'])) {
-		ts_fail('dns-delete needs a record name, or --stale for every record no test server holds.');
+	if ($name === '') {
+		ts_fail('dns-delete needs a record name. A record no server on this account holds may still be a live server elsewhere, so none are removed in bulk.');
 	}
 	$account = ts_account();
-	$live = empty($opts['stale']) ? array() : ts_live_addresses($account->driver());
 	$http = ts_http($account);
 	$zone_id = ts_zone($http);
 	$removed = 0;
 	foreach (ts_address_records($http, $zone_id) as $r) {
-		$stale = !empty($opts['stale']) && !isset($live[strtolower((string)$r['target'])]);
-		if (($name !== '' && $r['name'] === $name) || ($name === '' && $stale)) {
+		if ($r['name'] === $name) {
 			ts_drop_record($http, $zone_id, $r);
 			$removed++;
 		}
@@ -295,6 +309,6 @@ switch ($args[1] ?? '') {
 	case 'dns-list':   ts_dns_list(); break;
 	case 'dns-delete': ts_dns_delete($opts); break;
 	default:
-		fwrite(STDERR, "Usage: php test_server.php create <label> [--region=] [--type=] [--image=] [--keep] | list | delete <label|id> | dns <name> <ipv4> [<ipv6>] | dns-list | dns-delete <name>|--stale\n");
+		fwrite(STDERR, "Usage: php test_server.php create <label> [--region=] [--type=] [--image=] [--keep] | list | delete <label|id> | dns <name> <ipv4> [<ipv6>] | dns-list | dns-delete <name>\n");
 		exit(2);
 }

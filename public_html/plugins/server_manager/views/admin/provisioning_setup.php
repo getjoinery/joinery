@@ -15,6 +15,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.5 - API not responding says why (the HTTP status and the API's own error, or the connection's) (B21)
  * @version 2.4 - The Cleanup tab lists the address records a run removed with its servers (fleet_security_patching WP10)
  * @version 2.3 - Add an account asks its provider, and a Hetzner project's name (specs/site_copy_anything_to_anything.md D2)
  * @version 2.2 - Remove names the encrypted servers it drops to Tier 1 (B77 N1)
@@ -138,6 +139,7 @@ if ($tab === 'setup'):
 			<?= smps_badge($api['configured'], 'Configured', 'Not configured') ?>
 			<?php if ($api['configured']): ?>
 				&nbsp; <?= smps_badge($api['probe_ok'], 'API responding', 'API not responding', 'danger') ?>
+				<?php if (!$api['probe_ok']): ?><div class="small text-danger mt-1"><?= htmlspecialchars($api['probe_problem']) ?></div><?php endif; ?>
 			<?php endif; ?>
 		</td>
 	</tr>

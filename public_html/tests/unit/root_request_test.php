@@ -132,6 +132,9 @@ $refusal_at = strpos($remove_case, 'PluginRemoval::refusal($name, $plugins_dir, 
 $remove_at  = strpos($remove_case, 'PluginRemoval::remove($name, $plugins_dir)');
 check($refusal_at !== false && $remove_at !== false && $refusal_at < $remove_at,
 	'the dispatcher asks PluginRemoval::refusal() before PluginRemoval::remove()');
+$gone_at = strpos($remove_case, 'PluginRemoval::already_gone($name, $plugins_dir)');
+check($gone_at !== false && $gone_at < $refusal_at,
+	'a directory already gone is answered first, as done: a retried request, or files a test removed itself (B22)');
 check(strpos($remove_case, "PathHelper::getAbsolutePath('plugins')") !== false,
 	'and removes under the real plugins directory, never a path the request named');
 check(strpos($remove_case, 'Plugin::get_by_plugin_name($name)') !== false,
@@ -162,6 +165,10 @@ check(PluginRemoval::refusal('../etc', $plugins_dir, $uninstalled) !== '',
 check(PluginRemoval::refusal('', $plugins_dir, $uninstalled) !== '', 'an empty name is refused');
 check(PluginRemoval::refusal('-rf', $plugins_dir, $uninstalled) !== '', 'a name that does not start with a letter is refused');
 check(PluginRemoval::refusal('nosuch', $plugins_dir, $uninstalled) !== '', 'a name with no directory is refused');
+check(PluginRemoval::already_gone('nosuch', $plugins_dir) && !PluginRemoval::already_gone('goodplug', $plugins_dir)
+		&& !PluginRemoval::already_gone('linked', $plugins_dir) && !PluginRemoval::already_gone('../etc', $plugins_dir)
+		&& !PluginRemoval::already_gone('', $plugins_dir),
+	'already gone: only a plugin name with nothing at its path (not a directory, not a link, not a path)');
 check(strpos(PluginRemoval::refusal('linked', $plugins_dir, $uninstalled), 'symlink') !== false,
 	'a symlink under plugins/ is refused, so nothing outside plugins/ is ever removed');
 check(strpos(PluginRemoval::refusal('sysplug', $plugins_dir, $uninstalled), 'is_system') !== false,

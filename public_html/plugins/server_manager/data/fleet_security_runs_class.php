@@ -3,16 +3,20 @@
  * FleetSecurityRun - the fleet's security updates installed, one machine or
  * site container at a time (specs/fleet_security_patching.md WP5).
  *
- * Not a node word: each step is the node's own install_security_updates. It
- * runs for minutes per node, so it is a tracked record: it survives a reload,
- * shows where it is, and can be stopped between nodes. FleetSecurityRunner
- * moves it; this class only holds it.
+ * Not a node word: each step is a node's own install_security_updates, or a
+ * container host's refresh_site_containers, which replaces its site
+ * containers (Q7). It runs for minutes per node, so it is a tracked record: it
+ * survives a reload, shows where it is, and can be stopped between nodes.
+ * FleetSecurityRunner moves it; this class only holds it.
  *
- * fsr_steps is the ordered list, one entry per node:
- *   {node_id, name, job_id, verdict, outcome, reason, changed, reloaded,
- *    still_on_old_code, reboot_required}
- * verdict is one of pending | running | done | failed | skipped.
+ * fsr_steps is the ordered list, one entry per step:
+ *   {node_id, name, word, covers, job_id, verdict, outcome, reason, changed,
+ *    reloaded, still_on_old_code, reboot_required}
+ * verdict is one of pending | running | done | failed | skipped. A host's
+ * replacement names its site containers in covers, and carries
+ * first_asked_at, ask_again_at and replacing_since while it waits.
  *
+ * @version 1.1 - a step names its word, and a host's replacement its site containers (Q7)
  * @version 1.0
  */
 
