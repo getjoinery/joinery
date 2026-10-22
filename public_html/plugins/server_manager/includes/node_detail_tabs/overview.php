@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.81 - the Reverse DNS panel shows what the node's IPv6 answers as well as its IPv4 (B33)
  * @version 1.80 - a node whose agent moved away is not offered Connect agent or Reverse DNS: the machine is
  *                managed elsewhere
  * @version 1.79 - the security fixes a machine waits for and what still runs replaced code (host_report 1.37), and a PHP
@@ -2568,11 +2569,15 @@
 	$rdns_provision = $node->agent_moved_away() !== null ? null : NodeReverseDns::provisionForNode($node);
 	if ($rdns_provision) {
 		$rdns_ip = (string)$rdns_provision->get('cvp_instance_ip');
-		try {
-			$rdns_ptrs = DnsResolver::getPtr($rdns_ip);
-			$rdns_current = count($rdns_ptrs) ? implode(', ', $rdns_ptrs) : '';
-		} catch (Exception $e) {
-			$rdns_current = '';
+		$rdns_ip6 = (string)$rdns_provision->get('cvp_instance_ipv6');
+		// What each of the node's addresses answers now.
+		$rdns_current = array();
+		foreach (array_filter(array($rdns_ip, $rdns_ip6), 'strlen') as $rdns_address) {
+			try {
+				$rdns_current[$rdns_address] = implode(', ', DnsResolver::getPtr($rdns_address));
+			} catch (Exception $e) {
+				$rdns_current[$rdns_address] = '';
+			}
 		}
 		$rdns_suggest = '';
 		if ($node->get('mgn_site_url')) {
@@ -2584,13 +2589,16 @@
 
 		$pageoptions = ['title' => 'Reverse DNS'];
 		$page->begin_box($pageoptions);
-		echo '<div class="mb-2"><span class="text-muted small">' . htmlspecialchars($rdns_ip) . ' currently answers: </span>';
-		echo '<code>' . htmlspecialchars($rdns_current ?: 'no PTR record') . '</code></div>';
+		foreach ($rdns_current as $rdns_address => $rdns_names) {
+			echo '<div class="mb-2"><span class="text-muted small">' . htmlspecialchars($rdns_address) . ' currently answers: </span>';
+			echo '<code>' . htmlspecialchars($rdns_names ?: 'no PTR record') . '</code></div>';
+		}
 		if ($rdns_provision->is_transferred()) {
 			echo '<p class="text-muted small mb-0">' . htmlspecialchars(NodeReverseDns::TRANSFERRED_MESSAGE) . '</p>';
 			$page->end_box();
 		} else {
-			echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.</p>';
+			echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.'
+				. ($rdns_ip6 !== '' ? ' ' . htmlspecialchars($rdns_ip6) . ' is named too when the hostname\'s AAAA record points at it.' : '') . '</p>';
 
 			$fw_rdns = $page->getFormWriter('rdns_form', [
 				'action' => $base_url . '&tab=overview',

@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.71 - set_reverse_dns says every address it named, and any it left with why (NodeReverseDns::summary, B33)
  * @version 1.70 - set_reverse_dns is refused for a node whose agent moved away (ManagedNode::agent_moved_away())
  * @version 1.69 - publish_upgrade's Apply and publish button queues the apply with the publish to follow it
  *                (ApplyAndPublish); the plain publish goes through ApplyAndPublish::queuePublish()
@@ -968,7 +969,7 @@ class NodeDetailActions {
 					// Messages are plain text: the display loop escapes them, so
 					// pre-escaping double-encodes and embedded HTML renders literally.
 					$session->save_message(new DisplayMessage(
-						'Reverse DNS set: ' . $result['ip'] . ' now answers ' . $result['rdns'] . '. Resolver caches may take a few minutes to catch up.',
+						'Reverse DNS set: ' . NodeReverseDns::summary($result) . '. Resolver caches may take a few minutes to catch up.',
 						'Saved', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 					));
 				} catch (NodeReverseDnsException $e) {
