@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.10 - Apply and publish beside Publish, while the node is behind: the apply, then the publish of the
+ *                 version it reaches (ApplyAndPublish); Auto-notes then drafts through that version
+ * @version 1.9 - Publish Release on this site's own node offers the Auto-notes button
  * @version 1.8 - this management node's own row is compared with the version its upgrade source offers, not with itself
  * @version 1.7 - Publish Release on this management node itself is not offered while its repositories have uncommitted work
  * @version 1.6 - Publish Release on This Node offers Deploy to all managed nodes, as the Upgrades page does
@@ -155,8 +158,19 @@
 		$pub_form->numberinput('version_major', 'Major', ['required' => true, 'value' => $pub_major, 'min' => 0]);
 		$pub_form->numberinput('version_minor', 'Minor', ['required' => true, 'value' => $pub_minor, 'min' => 0]);
 		$pub_form->numberinput('version_patch', 'Patch', ['required' => true, 'value' => $pub_patch, 'min' => 0]);
+		// Apply and publish is offered while the node is behind the version
+		// shown above: it applies that, then publishes what the node reaches.
+		$apply_target = ($up_to_date === false && preg_match('/^\d+\.\d+\.\d+$/', $compare_version)) ? $compare_version : '';
+		if ($apply_target !== '') {
+			$pub_form->hiddeninput('apply_target', '', ['value' => $apply_target]);
+		}
 		$pub_form->textarea('release_notes', 'Release notes', ['required' => true, 'rows' => 3,
 			'placeholder' => 'What this release carries...']);
+		// A draft describes this site's own release, so only its own node gets
+		// one; ahead of Apply and publish it covers the version that brings in.
+		if ($node->is_self()) {
+			echo ReleaseNotesDrafter::buttonHtml('#publish_on_node_form textarea[name="release_notes"]', $apply_target);
+		}
 		// Only the management node that serves the fleet's release can roll it out.
 		if ($node->is_self()) {
 			$deploy_plan = StagedRolloutRunner::deploy_all_plan();
@@ -174,6 +188,14 @@
 			]);
 		}
 		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
+		if ($apply_target !== '') {
+			echo ' ';
+			$pub_form->submitbutton('btn_apply_and_publish', 'Apply and publish', ['class' => 'btn btn-outline-primary']);
+			echo '<p class="text-muted small mt-2 mb-0">Apply and publish applies ' . htmlspecialchars($apply_target)
+				. ' to this node, then publishes the version the node reaches with these notes; the version boxes are not used. '
+				. 'The publish starts within a minute of the apply finishing, and only if the apply succeeded '
+				. '(its checks passed and nothing was rolled back).</p>';
+		}
 		$pub_form->end_form();
 		$page->end_box();
 		}

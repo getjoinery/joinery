@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.22 - an apply that Apply and publish follows with a publish says where that publish stands
  * @version 1.20 - install_security_updates results (agent 1.87.0): what was installed, with old and new versions,
  *                 and any reboot or service restart still owed
  * @version 1.19 - the site state card reads the processed result (JobResultProcessor 1.96); a reading it does not
@@ -131,6 +132,10 @@ if ($job->get('mjb_job_type') === 'publish_upgrade') {
 	}
 }
 
+// An apply that Apply and publish is to follow with a publish. The task
+// starts the publish; this page only says where it stands.
+$then_publish = ApplyAndPublish::followUp($job);
+
 // Load node name
 $node_name = 'Local';
 $node_id = $job->get('mjb_mgn_managed_node_id');
@@ -229,6 +234,32 @@ $status_class = match($job->get('mjb_status')) {
 		<?php if ($job->get('mjb_error_message')): ?>
 			<div class="alert alert-danger mt-2">
 				<strong>Error:</strong> <?php echo nl2br(htmlspecialchars($job->get('mjb_error_message'))); ?>
+			</div>
+		<?php endif; ?>
+
+		<?php if ($then_publish !== null): ?>
+			<?php
+			$tp_status  = (string)$job->get('mjb_status');
+			$tp_outcome = (string)($then_publish['outcome'] ?? '');
+			?>
+			<div class="jy-callout <?php echo $tp_outcome === 'refused' || in_array($tp_status, ['failed', 'cancelled'], true) ? 'jy-callout-warning' : 'jy-callout-info'; ?> mt-2">
+				<strong>Then publish:</strong>
+				<?php if ($tp_outcome === 'started'): ?>
+					<?php $tp_job = (int)($then_publish['publish_job_id'] ?? 0); ?>
+					publishing <?php echo htmlspecialchars((string)($then_publish['version'] ?? '')); ?>
+					(<a href="/admin/server_manager/job_detail?job_id=<?php echo $tp_job; ?>">job #<?php echo $tp_job; ?></a>).
+				<?php elseif ($tp_outcome === 'refused'): ?>
+					not published — <?php echo htmlspecialchars((string)($then_publish['reason'] ?? '')); ?>.
+				<?php elseif (in_array($tp_status, ['failed', 'cancelled'], true)): ?>
+					nothing will be published, because this apply did not complete.
+				<?php elseif ($tp_status === 'completed'): ?>
+					the apply has finished; its publish starts within a minute if the apply succeeded. This page reloads until it does.
+					<script>setTimeout(function () { window.location.reload(); }, 15000);</script>
+				<?php else: ?>
+					once this apply brings the node to <?php echo htmlspecialchars((string)($then_publish['target'] ?? '')); ?>
+					or later and succeeds, that version is published with these notes<?php echo !empty($then_publish['deploy_all']) ? ' and deployed to all managed nodes' : ''; ?>.
+				<?php endif; ?>
+				<br><small><?php echo nl2br(htmlspecialchars((string)($then_publish['release_notes'] ?? ''))); ?></small>
 			</div>
 		<?php endif; ?>
 
@@ -956,6 +987,10 @@ if ($commands_data && isset($commands_data['steps'])) {
 					<?php if ($deploy_all !== null): ?>
 					// The page says what became of the deploy, and loading it starts the rollout.
 					if (data.status === 'completed') { window.location.reload(); return; }
+					<?php endif; ?>
+					<?php if ($then_publish !== null): ?>
+					// The page says what became of the publish that follows.
+					window.location.reload(); return;
 					<?php endif; ?>
 					if (data.error_message) {
 						var errDiv = document.createElement('div');

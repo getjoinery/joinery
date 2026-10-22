@@ -15,12 +15,17 @@
  *   own to read. It summarizes the release notes of every upstream release it
  *   is carrying: from its upgrade source (utils/upgrade?serve-release-notes),
  *   the releases after the newest one it last published, through the version
- *   it runs.
+ *   it runs — or, for Apply and publish, through the newer version its
+ *   upgrade source offers, which the apply brings in.
  *
  * The model comes from joinery_ai's resolver (purpose release_notes, the
  * site's selection policy), under joinery_ai's monthly token ceiling. Without
  * joinery_ai active, available() is false and the form offers no button.
  *
+ * @version 1.2 - a republishing site's draft may run through a newer version than it runs ($through): the one
+ *                Apply and publish brings in
+ * @version 1.1 - buttonHtml(): the one Auto-notes button, on the Upgrades page and on the node page's
+ *                Publish Release form for this site's own node
  * @version 1.0
  */
 
@@ -41,18 +46,73 @@ class ReleaseNotesDrafter {
 	}
 
 	/**
+	 * The Auto-notes button and its script, for a form that publishes this
+	 * site's own release; $textarea selects the notes box it fills. $through
+	 * names the newer upstream version a republishing site's draft runs to,
+	 * when the form will apply it before publishing. Empty when no draft can
+	 * be written here.
+	 */
+	public static function buttonHtml(string $textarea, string $through = ''): string {
+		if (!self::available()) {
+			return '';
+		}
+		$may_mint = DeploymentHelper::mayMintReleaseVersion();
+		if ($may_mint) {
+			$through = '';
+		}
+		$from = $may_mint
+			? 'the commits since the last release'
+			: ($through !== ''
+				? 'the release notes of the upstream releases through ' . $through . ', the version Apply and publish brings in'
+				: 'the release notes of the upstream releases this one carries');
+		ob_start();
+		?>
+		<div class="mb-3">
+			<button type="button" class="btn btn-sm btn-outline-secondary" id="auto_notes_btn">Auto-notes</button>
+			<small class="text-muted" id="auto_notes_status">Drafts short notes for a general audience from <?php echo htmlspecialchars($from); ?>. Replaces what is in the box.</small>
+		</div>
+		<script>
+		(function () {
+			var btn = document.getElementById('auto_notes_btn');
+			var status = document.getElementById('auto_notes_status');
+			var box = document.querySelector(<?php echo json_encode($textarea, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);
+			btn.addEventListener('click', function () {
+				btn.disabled = true;
+				status.textContent = 'Writing a draft…';
+				window.joineryApi.post('server_manager/release_notes_draft', <?php echo json_encode($through !== '' ? array('through' => $through) : new stdClass(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>).then(function (data) {
+					if (data && data.ok) {
+						box.value = data.notes;
+						status.textContent = 'Drafted from ' + data.source + ' by ' + data.model + '. Read it over before publishing.';
+					} else {
+						status.textContent = (data && data.message) || 'No draft came back.';
+					}
+				}).catch(function (err) {
+					status.textContent = 'The draft failed: ' + err.message;
+				}).then(function () {
+					btn.disabled = false;
+				});
+			});
+		})();
+		</script>
+		<?php
+		return ob_get_clean();
+	}
+
+	/**
 	 * Write the draft. $provider and $material stand in for the model and
 	 * for what is summarized, in tests: fn(array $params): array, the
 	 * canonical response; and an array shaped as commitsMaterial() returns.
+	 * $through: on a republishing site, the version the draft runs to when it
+	 * is newer than the one running (empty: the running one).
 	 *
 	 * @return array{notes:string, source:string, model:string}
 	 * @throws ReleaseNotesDrafterException when there is nothing to summarize or the model fails
 	 */
-	public static function draft($provider = null, ?array $material = null): array {
+	public static function draft($provider = null, ?array $material = null, string $through = ''): array {
 		if ($provider === null && !self::available()) {
 			throw new ReleaseNotesDrafterException('Auto-notes needs the Joinery AI plugin, which is not active here.');
 		}
-		$material = $material ?? (DeploymentHelper::mayMintReleaseVersion() ? self::commitsMaterial() : self::upstreamMaterial());
+		$material = $material ?? (DeploymentHelper::mayMintReleaseVersion() ? self::commitsMaterial() : self::upstreamMaterial($through));
 
 		$model_label = 'test model';
 		if ($provider === null) {
@@ -152,17 +212,25 @@ class ReleaseNotesDrafter {
 		return $out;
 	}
 
-	/** The upstream release notes this site is carrying and has not yet republished. */
-	private static function upstreamMaterial(): array {
+	/**
+	 * The upstream release notes this site will carry and has not yet
+	 * republished: through the version it runs, or through $through when the
+	 * release is applied first.
+	 */
+	private static function upstreamMaterial(string $through = ''): array {
 		$running = DeploymentHelper::runningVersion();
 		if (!preg_match('/^\d+\.\d+\.\d+$/', $running)) {
 			throw new ReleaseNotesDrafterException('This site does not know which version it is running.');
 		}
-		// The newest release this site published before the one it runs now.
+		if ($through !== '' && (!preg_match('/^\d+\.\d+\.\d+$/', $through) || version_compare($through, $running, '<'))) {
+			throw new ReleaseNotesDrafterException('Notes can be drafted through ' . $running . ' or a newer version, not ' . $through . '.');
+		}
+		$target = $through !== '' ? $through : $running;
+		// The newest release this site published before that one.
 		$after = '';
 		foreach (new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 50) as $u) {
 			$v = UpgradeRetention::versionString($u);
-			if (version_compare($v, $running, '<') && ($after === '' || version_compare($v, $after, '>'))) {
+			if (version_compare($v, $target, '<') && ($after === '' || version_compare($v, $after, '>'))) {
 				$after = $v;
 			}
 		}
@@ -173,7 +241,7 @@ class ReleaseNotesDrafter {
 		$curl = curl_init();
 		curl_setopt_array($curl, array(
 			CURLOPT_URL => $source . '/utils/upgrade?' . http_build_query(array(
-				'serve-release-notes' => 1, 'through' => $running, 'after' => $after)),
+				'serve-release-notes' => 1, 'through' => $target, 'after' => $after)),
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_FOLLOWLOCATION => true,
 			CURLOPT_TIMEOUT => 15,
@@ -201,7 +269,7 @@ class ReleaseNotesDrafter {
 			$items[] = $v . ":\n" . mb_substr($notes, 0, self::ITEM_CHARS);
 		}
 		if (!$items) {
-			throw new ReleaseNotesDrafterException('The upgrade source has no release notes for ' . ($after !== '' ? 'the releases after ' . $after . ' through ' : '') . $running . '.');
+			throw new ReleaseNotesDrafterException('The upgrade source has no release notes for ' . ($after !== '' ? 'the releases after ' . $after . ' through ' : '') . $target . '.');
 		}
 		$range = count($versions) === 1 ? $versions[0] : $versions[0] . ' to ' . end($versions);
 		return array(
