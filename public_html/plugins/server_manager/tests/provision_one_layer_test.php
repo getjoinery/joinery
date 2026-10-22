@@ -33,6 +33,7 @@
  *
  * Run: php plugins/server_manager/tests/provision_one_layer_test.php
  *
+ * @version 1.2 - the adopted servers are in a real account of ours, whose provider adoption records (B40)
  * @version 1.1 - a copy's layer is decided by SiteCopyRunner::copy_encryption(), never ticked, and a copy into its
  *               owner's account with a proven site key is born sealed to it (specs/site_copy_final_test.md E1)
  * @version 1.0
@@ -450,6 +451,16 @@ class PolAdoptionAccount implements CloudMachineTransfer {
 }
 $adopter = make_user('pol' . $suffix, 10);
 $no_dns = function ($name) { return array(); };
+// The account the server is in: adoption records its provider.
+$pol_oca = new OperatorCloudAccount(NULL);
+$pol_oca->set('oca_provider', 'linode');
+$pol_oca->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+$pol_oca->set('oca_account_name', 'HarnessTest pol ' . $suffix);
+$pol_oca->set('oca_is_test', true);
+$pol_oca->store_credential('harness-pol-token');
+$pol_oca->save();
+$pol_oca->load();
+harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $pol_oca->key);
 foreach (array('enabled' => 'enabled', 'absent' => 'unknown') as $case => $expect) {
 	$v4 = '192.0.2.' . random_int(100, 250);
 	$an = new ManagedNode(NULL);
@@ -468,7 +479,7 @@ foreach (array('enabled' => 'enabled', 'absent' => 'unknown') as $case => $expec
 		$server['disk_encryption'] = 'enabled';
 	}
 	try {
-		$adopted = CloudServerAdoption::adopt($an, (int)$adopter->key, '', array('oca:999999' => new PolAdoptionAccount(array($server))), $no_dns);
+		$adopted = CloudServerAdoption::adopt($an, (int)$adopter->key, '', array('oca:' . (int)$pol_oca->key => new PolAdoptionAccount(array($server))), $no_dns);
 		harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $adopted->key);
 		check($adopted->get('cvp_provider_disk_encryption') === $expect && !$adopted->get('cvp_data_root_encrypted'),
 			'listed ' . ($case === 'enabled' ? 'with the layer on: recorded enabled' : 'with no answer: recorded unknown')

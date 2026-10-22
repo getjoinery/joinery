@@ -16,6 +16,8 @@
  * is never one somebody bought, so it is never billed, put on a trial or
  * handed to a customer.
  *
+ * @version 1.4 - the record names the provider of the account the server was found in, not Linode always: a
+ *               Hetzner server adopted as Linode sent its IP swap and reverse DNS to the wrong driver (B40)
  * @version 1.3 - the record carries the provider's disk encryption as its listing reported it, else unknown
  *                (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.2 - every account of ours is searched, and the record names the one the server is in (cloud_accounts_list)
@@ -151,6 +153,13 @@ class CloudServerAdoption {
 		}
 
 		$account = $match['account'];
+		// The server is the provider's whose account it was found in: an IP
+		// swap and reverse DNS reach it through that provider's driver.
+		$provider = HeldCloudAccounts::provider_of_key($account);
+		if (!ComputeDriverRegistry::known($provider)) {
+			throw new CloudServerAdoptionException('The server was found on account "' . $account
+				. '", whose provider this management node has no driver for. Nothing was adopted.');
+		}
 		$provision = new CustomerCloudProvision(NULL);
 		if (preg_match('/^oca:(\d+)$/', $account, $m)) {
 			$provision->set('cvp_hosting_mode', 'operator');
@@ -168,8 +177,7 @@ class CloudServerAdoption {
 		$provision->set('cvp_domain', mb_substr($domain, 0, 255));
 		$provision->set('cvp_slug', mb_substr((string)$node->get('mgn_slug'), 0, 50));
 		$provision->set('cvp_status', 'done');
-		// The plane holds Linode accounts only (MachineTransferWatch::accounts).
-		$provision->set('cvp_provider', 'linode');
+		$provision->set('cvp_provider', $provider);
 		$provision->set('cvp_instance_id', $instance_id);
 		$provision->set('cvp_instance_ip', $ipv4);
 		$provision->set('cvp_instance_ipv6', $ipv6 !== '' ? $ipv6 : null);
