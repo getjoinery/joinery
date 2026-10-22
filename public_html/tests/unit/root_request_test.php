@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_plugin_installers_start.sh, maintenance_scripts/install_tools/_config_secrets.sh, maintenance_scripts/install_tools/_tree_trust.sh, public_html/utils/root_request.php, public_html/utils/install_extension.php, public_html/adm/logic/admin_help_edit_logic.php]
  */
 /**
  * Root requests: the web side asks, root decides what the asking means.

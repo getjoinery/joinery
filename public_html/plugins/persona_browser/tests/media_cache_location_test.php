@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [public_html/plugins/persona_browser/provisioning/relocate_media_cache.sh, public_html/plugins/persona_browser/plugin.json, public_html/plugins/persona_browser/tasks/FetchFeedTask.php, public_html/plugins/persona_browser/views/profile/media.php]
  */
 /**
  * The feed images this plugin downloads are data, and they live outside the code.

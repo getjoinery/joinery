@@ -5,6 +5,7 @@
  * env: any
  * needs: []
  * timeout: 120
+ * covers: [maintenance_scripts/sysadmin_tools/_memory_plan.sh]
  */
 
 /**

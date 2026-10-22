@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/provision_relay.sh, public_html/plugins/mailbox/provisioning/relay-sealer/**, public_html/plugins/mailbox/provisioning/bin/**, public_html/plugins/mailbox/includes/relay_section.php, public_html/plugins/mailbox/includes/relay_admin.php]
  */
 /**
  * Upgrading a relay nobody can log in to.

@@ -4,10 +4,15 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [maintenance_scripts/sysadmin_tools/**, maintenance_scripts/install_tools/**, public_html/includes/cloudflare_ip_ranges.txt, public_html/plugins/mailbox/provisioning/**, public_html/plugins/mail_apps/provisioning/**]
  */
 /**
  * The artifact channel and the vocabulary report
  * (specs/agent_machine_posture_and_relay_converge.md §3, §4, §8-R2).
+ *
+ * It also reads the agent source, which lives outside the repository
+ * (AgentDistPublisher::sourcePath()). covers cannot name it, so a change there
+ * does not select this test under --changed.
  *
  * Two mechanisms land together here because they answer the same question from
  * two ends: what can this machine actually do, and where does it get the code

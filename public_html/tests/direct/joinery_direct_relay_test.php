@@ -4,6 +4,7 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/relay-sealer/direct_*.go, public_html/plugins/mailbox/includes/RelayMapExporter.php, public_html/plugins/mailbox/includes/RelaySpoolConsumer.php]
  */
 
 /**

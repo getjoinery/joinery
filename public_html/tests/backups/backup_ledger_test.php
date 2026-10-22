@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/sysadmin_tools/restore_project.sh]
  */
 /**
  * The upload ledger, and the two attacks it exists for.
@@ -304,8 +305,10 @@ clearstatcache();
 
 // The two sides have to agree on the rule, or a download succeeds and the
 // restore it was for refuses. Asserted against the agent's own source.
-$ledger_go = '/home/user1/joinery-agent/primitives/ledger.go';
-$go_src = is_file($ledger_go) ? (string)file_get_contents($ledger_go) : '';
+// The agent source lives outside the repository, where the publisher's
+// setting says; a box without the server manager has none.
+$ledger_go = class_exists('AgentDistPublisher') ? AgentDistPublisher::sourcePath() . '/primitives/ledger.go' : '';
+$go_src = ($ledger_go !== '' && is_file($ledger_go)) ? (string)file_get_contents($ledger_go) : '';
 check($go_src === '' || strpos($go_src, '0o022') !== false,
 	'the agent tests the same bits (group or other write), so the two sides cannot disagree',
 	$go_src === '' ? 'agent source not present on this machine' : '');

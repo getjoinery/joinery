@@ -4,6 +4,7 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [public_html/plugins/mailbox/plugin.json, public_html/plugins/mailbox/provisioning/install_email.sh, public_html/plugins/mailbox/provisioning/provision_dkim.sh, public_html/plugins/mailbox/provisioning/provision_relay_main.sh]
  */
 /**
  * Local mail listener decommission (specs/mailbox_listener_decommission.md):

@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/utils/upgrade.php]
  */
 /**
  * An upgrade removes the maintenance_scripts/ files a release stopped shipping,
