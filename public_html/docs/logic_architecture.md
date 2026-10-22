@@ -348,6 +348,8 @@ try {
 
 Do not call `beginTransaction()` by hand where the helper fits. A function that does (one that must own its transaction, say, and refuse to join a caller's) catches `Throwable` or closes the transaction in a `finally`; `tests/unit/db_transaction_test.php` fails on one that does neither.
 
+A transaction still open when the process ends, or when an uncaught error is about to be recorded, is rolled back by `DbConnector::end_abandoned_transaction()` and logged as `TRANSACTION_LEFT_OPEN at ...` with the request or command. That line in the error log means the code that opened it has a way out that neither commits nor rolls back.
+
 ### Missing/Invalid Parameter Pattern
 
 ```php

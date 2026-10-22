@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.4 - the shutdown recorder rolls back a transaction the dying task left open before it
+ *   writes the row, so the error status is not lost with that transaction
  * @version 2.3 - a 'retry' result records its status and message but not a run, so the task is
  *   due again on the next tick (it could not run yet: a prerequisite is starting)
  * @version 2.2 - every line is stamped when it is written and the Result line
@@ -73,6 +75,7 @@ register_shutdown_function(function () use (&$current_task_id) {
 		$message = $error['message'] . ' in ' . $error['file'] . ':' . $error['line'];
 	}
 	try {
+		DbConnector::end_abandoned_transaction('a scheduled task that ended the process');
 		$dying = new ScheduledTask($current_task_id, true);
 		if ($dying->key) {
 			$dying->set('sct_last_run_time', 'now()');

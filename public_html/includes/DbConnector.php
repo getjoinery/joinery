@@ -1,5 +1,7 @@
 <?php
 /**
+ * @version 1.5 - end_abandoned_transaction(): a transaction still open when the process ends, or
+ *                when an uncaught error is about to be recorded, is logged and rolled back
  * @version 1.4 - transaction(): run work in one transaction that rolls back on any throw, Error
  *                included, and joins a transaction its caller already opened
  * @version 1.3 - fetch_query_row(): the row an executed statement returned, for UPDATE ... RETURNING
@@ -25,6 +27,7 @@ class DbConnector {
 	private function __construct() {
 		$this->test_mode = false;
 		$this->dblink = self::connect('');
+		register_shutdown_function([self::class, 'end_abandoned_transaction'], 'the end of the process');
 	}
 
 	/**
@@ -180,6 +183,46 @@ class DbConnector {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Roll back a transaction nothing is going to finish, and log that it happened.
+	 *
+	 * Nothing carries a transaction past an uncaught error or the end of the
+	 * process, so one still open there was leaked by the code that opened it.
+	 * Its writes are lost either way, but anything written after it (the error
+	 * row the error page links to, a dying task's status) would join it and be
+	 * lost too. Runs at shutdown, and first thing wherever something is about
+	 * to be recorded about a failure. $where names that place in the
+	 * TRANSACTION_LEFT_OPEN line. Never connects just to look; returns whether
+	 * a transaction was open.
+	 */
+	public static function end_abandoned_transaction($where) {
+		if (!self::$instance instanceof self) {
+			return false;
+		}
+		if (isset($_SERVER['REQUEST_URI'])) {
+			$request = ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . $_SERVER['REQUEST_URI'];
+		} else {
+			$request = implode(' ', array_slice($_SERVER['argv'] ?? [], 0, 2));
+		}
+		$ended = false;
+		foreach ([self::$instance->dblink, self::$instance->dblink_test] as $link) {
+			if (!$link) {
+				continue;
+			}
+			try {
+				if (!$link->inTransaction()) {
+					continue;
+				}
+				$link->rollBack();
+				$ended = true;
+				error_log('TRANSACTION_LEFT_OPEN at ' . $where . ' (' . $request . '): rolled back');
+			} catch (Throwable $e) {
+				error_log('TRANSACTION_LEFT_OPEN at ' . $where . ' (' . $request . '): the rollback failed: ' . $e->getMessage());
+			}
+		}
+		return $ended;
 	}
 
 	public function get_db_link() {

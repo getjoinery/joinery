@@ -295,6 +295,11 @@ class ErrorManager {
     
     public function handleException(\Throwable $exception): void {
         try {
+            // A transaction the failing code left open would swallow the error
+            // row saved below; end it first. Not loaded means never connected.
+            if (class_exists('DbConnector', false)) {
+                DbConnector::end_abandoned_transaction('an uncaught ' . get_class($exception));
+            }
             $context = $this->buildContext($exception);
 
             // Log first: the saved row is the error reference, and the

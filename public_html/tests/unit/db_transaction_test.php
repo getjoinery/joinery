@@ -14,7 +14,11 @@
  * it and is lost when the connection closes, so a TypeError caught somewhere
  * higher up used to throw away writes nobody saw fail.
  *
- * The second half reads every production file: a transaction opened by hand
+ * A transaction still open when the process ends, or when an uncaught error
+ * is about to be recorded, is rolled back and logged as TRANSACTION_LEFT_OPEN,
+ * so the error row saved after it is kept.
+ *
+ * The last part reads every production file: a transaction opened by hand
  * is guarded by a try that catches Throwable or closes it in a finally.
  *
  * Run: php tests/unit/db_transaction_test.php
@@ -86,6 +90,66 @@ check($threw(function () { (new QueuedEmail(NULL))->send(false); }, 'QueuedEmail
 	'a queued email refuses to send inside a caller\'s transaction');
 check($db->inTransaction(), 'and leaves the caller\'s transaction alone');
 $db->rollBack();
+
+// ---------------------------------------------------------------- left open
+
+section('A transaction left open');
+
+$log = tempnam(sys_get_temp_dir(), 'b15log');
+$was_log = ini_set('error_log', $log);
+check(!DbConnector::end_abandoned_transaction('the probe') && file_get_contents($log) === '',
+	'with none open, nothing is ended or logged');
+$db->beginTransaction();
+$write('g');
+check(DbConnector::end_abandoned_transaction('the probe'), 'one open is ended');
+check(!$db->inTransaction() && $rows() === array('a', 'd'), 'by a rollback', implode(',', $rows()));
+check(strpos(file_get_contents($log), 'TRANSACTION_LEFT_OPEN at the probe') !== false,
+	'and the error log says so', trim(file_get_contents($log)));
+ini_set('error_log', $was_log === false ? '' : $was_log);
+@unlink($log);
+
+/**
+ * Run a child PHP process that opens a transaction on the test database and
+ * leaves it open: 'exit' ends the process, 'throw' throws past the error
+ * handler. Returns what the child wrote to its error log.
+ */
+function b15_leaving_child($how, $marker) {
+	$root = realpath(__DIR__ . '/../..');
+	$script = tempnam(sys_get_temp_dir(), 'b15child');
+	$log = tempnam(sys_get_temp_dir(), 'b15childlog');
+	file_put_contents($script, '<?php
+ini_set("error_log", ' . var_export($log, true) . ');
+require_once ' . var_export($root . '/includes/PathHelper.php', true) . ';
+require_once(PathHelper::getIncludePath("includes/Globalvars.php"));
+DbConnector::get_instance()->set_test_mode();
+$link = DbConnector::get_instance()->get_db_link();
+$link->beginTransaction();
+$link->query("SELECT 1");
+if (' . var_export($how, true) . ' === "throw") {
+	ErrorManager::getInstance()->register();
+	throw new RuntimeException(' . var_export($marker, true) . ');
+}
+exit(0);
+');
+	exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' >/dev/null 2>&1');
+	$said = (string)file_get_contents($log);
+	@unlink($script);
+	@unlink($log);
+	return $said;
+}
+
+$said = b15_leaving_child('exit', '');
+check(strpos($said, 'TRANSACTION_LEFT_OPEN at the end of the process') !== false,
+	'a process that ends with one open logs it', trim($said));
+
+$marker = 'b15 abandoned probe ' . bin2hex(random_bytes(4));
+$said = b15_leaving_child('throw', $marker);
+check(strpos($said, 'TRANSACTION_LEFT_OPEN at an uncaught RuntimeException') !== false,
+	'an uncaught error inside one ends it first', trim($said));
+$kept = $db->prepare('SELECT count(*) FROM err_general_errors WHERE err_message = ?');
+$kept->execute(array($marker));
+check((int)$kept->fetchColumn() === 1, 'so the error row saved after it is kept');
+$db->prepare('DELETE FROM err_general_errors WHERE err_message = ?')->execute(array($marker));
 
 // ---------------------------------------------------------------- every hand-opened transaction
 
