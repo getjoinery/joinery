@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.14 - CloudInstanceTypes takes a region: the plans and the default plan are those it sells (B31)
  * @version 1.13 - CloudSwapWhileStopped: a swap that needs both servers off
  * @version 1.12 - CloudInstanceTypes: a provider's plans and its default region and plan; CloudTokenScopes: what a
  *                credential may do, for a provider whose tokens carry scopes. A driver is chosen by its account's
@@ -462,15 +463,21 @@ interface CloudInstanceTypes {
 	 *   memory_mb  int
 	 *   disk_mb    int
 	 *
+	 * With a region, only the plans it sells new servers on: a provider can
+	 * withdraw a plan from one region and still sell it in another.
+	 *
 	 * @throws CloudComputeException
 	 */
-	public function instanceTypes(): array;
+	public function instanceTypes(string $region = ''): array;
 
 	/** The region a form offers first. */
 	public function defaultRegion(): string;
 
-	/** The plan a form offers first: the provider's smallest a site runs on. */
-	public function defaultInstanceType(): string;
+	/**
+	 * The plan a form offers first at $region (the default region when ''):
+	 * the provider's smallest a site runs on there.
+	 */
+	public function defaultInstanceType(string $region = ''): string;
 
 	/** The Ubuntu image a Joinery server is installed on, by the provider's id. */
 	public function defaultImage(): string;

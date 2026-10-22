@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.35 - a copy onto a new server takes its plan from those its region sells, and refuses one it does not
+ *                 sell before anything is made (B31)
  * @version 1.34 - a manual switch's way back names the records the owner points back (manual_records_back), and
  *                 the note stays while DNS still names the copy (went_back_notes, C4's B28)
  * @version 1.33 - a DNS switch records the TTL the DNS host holds for each lowered record (ttl_held, B12)
@@ -642,17 +644,19 @@ class SiteCopyRunner {
 
 	/**
 	 * The copy's server is the source's size: the source's own plan when this
-	 * management node created its server, otherwise the smallest plan with at
-	 * least the memory the source's machine reports and the disk this copy
-	 * needs (a container reports its whole shared server's memory).
+	 * management node created its server and the copy's region still sells
+	 * it, otherwise the smallest plan with at least the memory the source's
+	 * machine reports and the disk this copy needs (a container reports its
+	 * whole shared server's memory).
 	 *
-	 * @param callable $types returns the provider's plans, [id, memory_mb, disk_mb], smallest first
+	 * @param callable $types returns the plans the copy's region sells, [id, memory_mb, disk_mb], smallest first
 	 * @param string $provider the copy's provider
 	 * @throws SiteCopyException when the source's size is not known
 	 */
 	public static function same_size_type(ManagedNode $source, string $from, callable $types, string $provider): string {
+		$plans = $types();
 		$own = self::source_instance_type($source, $provider);
-		if ($own !== '') {
+		if ($own !== '' && in_array($own, array_column($plans, 'id'), true)) {
 			return $own;
 		}
 		$memory = self::source_memory_bytes($source);
@@ -661,7 +665,7 @@ class SiteCopyRunner {
 				. 'Run a status check on it, then try again.');
 		}
 		$disk = self::disk_needed(self::newest_chain($source, null)) + self::OS_DISK;
-		foreach ($types() as $t) {
+		foreach ($plans as $t) {
 			if ($t['memory_mb'] * 1048576 >= $memory && $t['disk_mb'] * 1048576 >= $disk) {
 				return $t['id'];
 			}
@@ -764,19 +768,35 @@ class SiteCopyRunner {
 			$provision->set('cvp_cca_customer_cloud_account_id', (int)$target['cca']->key);
 			$provision->set('cvp_usr_user_id', $target['owner_id']);
 		}
+		// The plans the region sells, or null where they cannot be read here
+		// (the create then has the last word). A plan it does not sell is
+		// refused now: at the create, the copy would already be made.
+		$provider = (string)$target['provider'];
+		$provider_label = ComputeDriverRegistry::label($provider);
+		$plans = null;
+		try {
+			$plan_driver = OperatorCloudAccount::driver_for((string)$target['token'], $provider);
+			if ($plan_driver instanceof CloudInstanceTypes) {
+				$plans = $plan_driver->instanceTypes($region);
+			}
+		} catch (CloudComputeException $e) {
+			$plans = null;
+		}
+		if ($plans === array()) {
+			throw new SiteCopyException($provider_label . ' sells no plan in ' . $region . ': choose another region.');
+		}
 		if ($type === '') {
-			$token = $target['token'];
-			$provider = (string)$target['provider'];
-			$type = self::same_size_type($source, $from, function () use ($token, $provider) {
-				$driver = OperatorCloudAccount::driver_for($token, $provider);
-				if (!($driver instanceof CloudInstanceTypes)) {
-					throw new SiteCopyException(ComputeDriverRegistry::label($provider) . ' does not list its plans here: choose the new server\'s type.');
-				}
-				return $driver->instanceTypes();
-			}, $provider);
+			if ($plans === null) {
+				throw new SiteCopyException($provider_label . ' does not list its plans here: choose the new server\'s type.');
+			}
+			$type = self::same_size_type($source, $from, function () use ($plans) { return $plans; }, $provider);
 		}
 		if (!preg_match('/^[a-z0-9-]{2,60}$/', $type)) {
 			throw new SiteCopyException('Choose the new server\'s type.');
+		}
+		if ($plans !== null && !in_array($type, array_column($plans, 'id'), true)) {
+			throw new SiteCopyException($provider_label . ' does not sell plan ' . $type . ' in ' . $region . '. Plans sold there: '
+				. implode(', ', array_column($plans, 'id')) . '.');
 		}
 		$provision->set('cvp_origin', 'admin');
 		$provision->set('cvp_domain', self::site_domain($source));

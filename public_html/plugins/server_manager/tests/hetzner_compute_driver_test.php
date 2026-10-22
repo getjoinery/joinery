@@ -24,6 +24,8 @@
  *  - the account: added under the name typed, checked without losing it, its
  *    key replaced only by a token that reaches the same servers.
  *
+ * @version 1.3 - root's password by runcmd from its hash, the plaintext nowhere in the user data (B32)
+ * @version 1.2 - plans by location: one withdrawn from a location is not sold there, though its price list names it (B31)
  * @version 1.1 - the swap refuses a running server and waits on each address action
  * @version 1.0
  */
@@ -75,12 +77,21 @@ $handler = function (RequestInterface $req, array $opts) use (&$api, $server) {
 	}
 	if ($m === 'GET' && $path === '/v1/server_types') {
 		$price = function ($loc, $p) { return array('location' => $loc, 'price_monthly' => array('gross' => $p)); };
+		$sold = function ($loc) { return array('name' => $loc, 'available' => true, 'recommended' => false, 'deprecation' => null); };
+		// Withdrawn from a location, the plan's price list still names it.
+		$gone = function ($loc) { return array('name' => $loc, 'available' => false, 'recommended' => false,
+			'deprecation' => array('announced' => '2025-10-16T06:00:00Z', 'unavailable_after' => '2025-12-31T23:59:59Z')); };
 		return $json(array('server_types' => array(
-			array('name' => 'cx32', 'memory' => 8, 'disk' => 80, 'architecture' => 'x86', 'deprecation' => null, 'prices' => array($price('fsn1', '7.50'))),
-			array('name' => 'cx22', 'memory' => 4, 'disk' => 40, 'architecture' => 'x86', 'deprecation' => null, 'prices' => array($price('fsn1', '4.50'))),
-			array('name' => 'cax11', 'memory' => 4, 'disk' => 40, 'architecture' => 'arm', 'deprecation' => null, 'prices' => array($price('fsn1', '3.90'))),
+			array('name' => 'cx32', 'memory' => 8, 'disk' => 80, 'architecture' => 'x86', 'deprecation' => null, 'prices' => array($price('fsn1', '7.50')),
+				'locations' => array($sold('fsn1'))),
+			array('name' => 'cx22', 'memory' => 4, 'disk' => 40, 'architecture' => 'x86', 'deprecation' => null, 'prices' => array($price('fsn1', '4.50')),
+				'locations' => array($sold('fsn1'))),
+			array('name' => 'cpx11', 'memory' => 2, 'disk' => 40, 'architecture' => 'x86', 'deprecation' => null,
+				'prices' => array($price('fsn1', '3.50'), $price('ash', '9.00')), 'locations' => array($gone('fsn1'), $sold('ash'))),
+			array('name' => 'cax11', 'memory' => 4, 'disk' => 40, 'architecture' => 'arm', 'deprecation' => null, 'prices' => array($price('fsn1', '3.90')),
+				'locations' => array($sold('fsn1'))),
 			array('name' => 'cx11', 'memory' => 2, 'disk' => 20, 'architecture' => 'x86', 'deprecation' => array('announced' => '2024-06-06'),
-				'prices' => array($price('fsn1', '3.00'))),
+				'prices' => array($price('fsn1', '3.00')), 'locations' => array($sold('fsn1'))),
 		)));
 	}
 	if ($m === 'GET' && $path === '/v1/locations') {
@@ -166,9 +177,14 @@ $post = $last('POST', '/v1/servers');
 check($post[2]['name'] === 'copy-of-site.example.org-12' && $post[2]['server_type'] === 'cx22' && $post[2]['location'] === 'fsn1'
 	&& $post[2]['image'] === 'ubuntu-26.04' && !isset($post[2]['ssh_keys']) && $post[2]['public_net']['enable_ipv6'] === true,
 	'created with a name Hetzner takes, no key, both families', json_encode($post[2]));
-check(strpos($post[2]['user_data'], '#cloud-config') === 0 && strpos($post[2]['user_data'], json_encode('Aa1!secret"quote')) !== false
-	&& strpos($post[2]['user_data'], 'PermitRootLogin yes') !== false && $post[3] === 'Bearer hz-token',
-	'its root password is the one sealed before the create, set by first-boot user data, quoted safely');
+$ud = (string)$post[2]['user_data'];
+preg_match('/^runcmd:\n  - \[usermod, -p, ("[^"\n]+"), root\]\n  - \[systemctl, restart, ssh\]\n$/m', $ud, $ud_m);
+$ud_hash = isset($ud_m[1]) ? (string)json_decode($ud_m[1]) : '';
+check(strpos($ud, '#cloud-config') === 0 && strpos($ud_hash, '$6$') === 0 && hash_equals($ud_hash, crypt('Aa1!secret"quote', $ud_hash))
+	&& strpos($ud, 'PermitRootLogin yes') !== false && $post[3] === 'Bearer hz-token',
+	'its root password is the one sealed before the create, set by runcmd from its hash, after cloud-init\'s password module (B32)', $ud);
+check(strpos($ud, 'Aa1!secret') === false && strpos($ud, "chpasswd:\n  expire: false\n") !== false && strpos($ud, 'users:') === false,
+	'the user data, which Hetzner serves to any process on the server, holds no plaintext; the vendor\'s expiry is turned off', $ud);
 check($made['id'] === '1003' && $made['ip'] === '203.0.113.30' && $made['ipv6'] === '2a01:4f8:c17:1003::1' && $made['disk_encryption'] === 'disabled',
 	'the server in the platform\'s shape: its address, its IPv6 the ::1 of its /64, no provider layer', json_encode($made));
 $threw = '';
@@ -189,10 +205,15 @@ check($ptr[2] === array('ip' => '198.51.100.10', 'dns_ptr' => 'site.example.org'
 section('Plans and locations');
 
 $types = $driver->instanceTypes();
-check(array_column($types, 'id') === array('cx22', 'cx32') && $types[0]['memory_mb'] === 4096 && $types[0]['disk_mb'] === 40960,
-	'x86 plans still sold, smallest first', json_encode($types));
+check(array_column($types, 'id') === array('cpx11', 'cx22', 'cx32') && $types[1]['memory_mb'] === 4096 && $types[1]['disk_mb'] === 40960,
+	'x86 plans still sold somewhere, smallest first', json_encode($types));
+check(array_column($driver->instanceTypes('fsn1'), 'id') === array('cx22', 'cx32'),
+	'at a location, a plan withdrawn from it is not offered, though its price list still names it (B31)', json_encode($driver->instanceTypes('fsn1')));
+check(array_column($driver->instanceTypes('ash'), 'id') === array('cpx11') && $driver->instanceTypes('nbg1') === array(),
+	'a location offers only the plans its own entry says it sells');
 check($driver->defaultInstanceType() === 'cx22' && $driver->defaultRegion() === 'fsn1' && $driver->defaultImage() === 'ubuntu-26.04',
-	'the default plan is the cheapest x86 one sold at the default location');
+	'the default plan is the cheapest x86 one sold at the default location, not a cheaper one withdrawn from it');
+check($driver->defaultInstanceType('ash') === 'cpx11', 'at another location, the cheapest it sells');
 $regions = $driver->regions();
 check(isset($regions['fsn1'], $regions['ash']) && $regions['fsn1']['site_type'] === 'core' && $regions['fsn1']['disk_encryption'] === false,
 	'locations are its regions, none with a provider layer to turn off');

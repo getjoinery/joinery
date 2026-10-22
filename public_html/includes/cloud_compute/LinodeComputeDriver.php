@@ -6,6 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.20 - instanceTypes and defaultInstanceType take a region, which changes nothing here (B31)
  * @version 1.19 - CloudInstanceTypes (its plans; us-east, g6-nanode-1 and Ubuntu 26.04 as the defaults) and CloudTokenScopes
  *                (specs/site_copy_anything_to_anything.md D2)
  * @version 1.18 - CloudKeyExpiry: the key's own expiry from profile/tokens, matched by its first 16 characters,
@@ -672,9 +673,10 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 
 	/**
 	 * The shared-CPU plans (Nanode and Standard), smallest first, each as
-	 * [id, memory_mb, disk_mb].
+	 * [id, memory_mb, disk_mb]. Every core region sells them, so a region
+	 * changes nothing.
 	 */
-	public function instanceTypes(): array {
+	public function instanceTypes(string $region = ''): array {
 		$out = array();
 		foreach ((array)($this->request('GET', 'linode/types?page_size=500')['data'] ?? array()) as $t) {
 			if (!in_array($t['class'] ?? '', array('nanode', 'standard'), true)) {
@@ -690,7 +692,7 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 		return self::DEFAULT_REGION;
 	}
 
-	public function defaultInstanceType(): string {
+	public function defaultInstanceType(string $region = ''): string {
 		return self::DEFAULT_TYPE;
 	}
 

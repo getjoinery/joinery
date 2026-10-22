@@ -23,6 +23,11 @@
  *     taken up.
  *   - Its activity log is the server's actions, by Hetzner's own command names.
  *
+ * @version 1.3 - root's password is set by runcmd from its hash: Hetzner's vendor data set root's password after
+ *               this user data's, so no install could log in (B32); the plaintext is no longer in the user data
+ * @version 1.2 - plans are those a location sells now, by its own entry in each plan's list of locations, not its
+ *               price list, which keeps naming a location a plan was withdrawn from or is sold out in (B31); the
+ *               fallback plan is cpx22
  * @version 1.1 - the swap waits on each Hetzner action and refuses unless both servers are off
  * @version 1.0
  */
@@ -53,8 +58,8 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 	/** Where and from what a form starts. */
 	const DEFAULT_REGION = 'fsn1';
 	const DEFAULT_IMAGE = 'ubuntu-26.04';
-	/** The plan a form starts at when the list cannot be read. */
-	const FALLBACK_TYPE = 'cx22';
+	/** The plan a form starts at when the list cannot be read: a current one the default location sells. */
+	const FALLBACK_TYPE = 'cpx22';
 
 	/** @var Client */
 	private $http;
@@ -156,13 +161,13 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 
 	// ── CloudInstanceTypes ───────────────────────────────────────────────────
 
-	/** The x86 types still sold, smallest first. */
-	public function instanceTypes(): array {
+	/**
+	 * The x86 plans still sold, smallest first; with a location, only those
+	 * it sells new servers in.
+	 */
+	public function instanceTypes(string $region = ''): array {
 		$out = array();
-		foreach ((array)($this->request('GET', 'server_types?per_page=50')['server_types'] ?? array()) as $t) {
-			if (!empty($t['deprecated']) || !empty($t['deprecation']) || (string)($t['architecture'] ?? 'x86') !== 'x86') {
-				continue;
-			}
+		foreach ($this->soldTypes($region) as $t) {
 			$out[] = array('id' => (string)$t['name'], 'memory_mb' => (int)round((float)($t['memory'] ?? 0) * 1024),
 				'disk_mb' => (int)((float)($t['disk'] ?? 0) * 1024));
 		}
@@ -174,16 +179,14 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 		return self::DEFAULT_REGION;
 	}
 
-	/** The cheapest x86 type sold at the default location. */
-	public function defaultInstanceType(): string {
+	/** The cheapest x86 plan sold at $region (the default location when ''). */
+	public function defaultInstanceType(string $region = ''): string {
+		$region = $region !== '' ? $region : self::DEFAULT_REGION;
 		try {
 			$best = null;
-			foreach ((array)($this->request('GET', 'server_types?per_page=50')['server_types'] ?? array()) as $t) {
-				if (!empty($t['deprecated']) || !empty($t['deprecation']) || (string)($t['architecture'] ?? 'x86') !== 'x86') {
-					continue;
-				}
+			foreach ($this->soldTypes($region) as $t) {
 				foreach ((array)($t['prices'] ?? array()) as $p) {
-					if ((string)($p['location'] ?? '') === self::DEFAULT_REGION) {
+					if ((string)($p['location'] ?? '') === $region) {
 						$monthly = (float)($p['price_monthly']['gross'] ?? 0);
 						if ($best === null || $monthly < $best[1]) {
 							$best = array((string)$t['name'], $monthly);
@@ -195,6 +198,36 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 		} catch (CloudComputeException $e) {
 			return self::FALLBACK_TYPE;
 		}
+	}
+
+	/**
+	 * The x86 plans not being withdrawn, as the API lists them; with a
+	 * location, only those whose entry for it in the plan's own list of
+	 * locations says it is available there now and not being withdrawn.
+	 * Hetzner says unavailable for a plan withdrawn from a location (cpx11 in
+	 * fsn1, from 2026) and for one sold out there. A plan's price list is not
+	 * the answer: it keeps naming a location the plan cannot be had in.
+	 */
+	private function soldTypes(string $region): array {
+		$out = array();
+		foreach ((array)($this->request('GET', 'server_types?per_page=50')['server_types'] ?? array()) as $t) {
+			if (!empty($t['deprecated']) || !empty($t['deprecation']) || (string)($t['architecture'] ?? 'x86') !== 'x86') {
+				continue;
+			}
+			if ($region !== '') {
+				$sold = false;
+				foreach ((array)($t['locations'] ?? array()) as $l) {
+					if ((string)($l['name'] ?? '') === $region) {
+						$sold = !empty($l['available']) && empty($l['deprecation']);
+					}
+				}
+				if (!$sold) {
+					continue;
+				}
+			}
+			$out[] = $t;
+		}
+		return $out;
 	}
 
 	public function defaultImage(): string {
@@ -423,11 +456,24 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 	 * First-boot user data that sets root's password and lets root log in by
 	 * it over SSH, as a Linode image does: the install logs in by the password
 	 * the provisioning sealed before the create, and erases it at the join.
+	 *
+	 * Hetzner's own vendor data also sets root's password (a random one, in
+	 * chpasswd's list form) and expires it, and cloud-init merges it with
+	 * this: its password module applies the vendor's list after this data's
+	 * users, so the vendor's would win. The password is therefore set by
+	 * runcmd, which runs after every password module, and chpasswd's expire is
+	 * turned off here, which this data's value decides. Only its SHA-512 crypt
+	 * hash is in the user data: Hetzner's metadata service hands user data to
+	 * any process on the server.
 	 */
 	private static function passwordUserData(string $password): string {
-		return "#cloud-config\nssh_pwauth: true\ndisable_root: false\nchpasswd:\n  expire: false\n  users:\n    - name: root\n      password: "
-			. json_encode($password) . "\n      type: text\nwrite_files:\n  - path: /etc/ssh/sshd_config.d/10-joinery-install.conf\n"
-			. "    content: |\n      PermitRootLogin yes\nruncmd:\n  - [systemctl, restart, ssh]\n";
+		$salt = substr(strtr(base64_encode(random_bytes(12)), '+', '.'), 0, 16);
+		$hash = crypt($password, '$6$' . $salt . '$');
+		$quoted = json_encode($hash, JSON_UNESCAPED_SLASHES);
+		return "#cloud-config\nssh_pwauth: true\ndisable_root: false\nchpasswd:\n  expire: false\n"
+			. "write_files:\n  - path: /etc/ssh/sshd_config.d/10-joinery-install.conf\n"
+			. "    content: |\n      PermitRootLogin yes\nruncmd:\n  - [usermod, -p, " . $quoted . ", root]\n"
+			. "  - [systemctl, restart, ssh]\n";
 	}
 
 	/** Every server in the project. */
