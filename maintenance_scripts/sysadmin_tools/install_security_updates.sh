@@ -4,6 +4,13 @@
 # automatic-update policy allows, and say what changed as ONE JSON object on
 # stdout.
 #
+# Version: 1.2 - After the updater, every php-fpm master still running a binary an update replaced
+#                (/proc/PID/exe "(deleted)") is reloaded with USR2, which re-executes it with no
+#                request dropped: a site container has no systemd, so nothing restarted its php-fpm on
+#                2026-10-21 and all six kept serving the unpatched PHP. reloaded and still_on_old_code
+#                say what was done and what is left. A package run left half done (dpkg --audit) is
+#                finished first with apt-get -f install, which names no package (repaired): two of
+#                those six were left so (fleet_security_patching.md WP3).
 # Version: 1.1 - unattended-upgrade is told apart from unattended-upgrade-shutdown
 #                by its command line: both have the process name unattended-upgr,
 #                and the shutdown helper runs for as long as the machine is up,
@@ -29,6 +36,11 @@
 #     (reboot_required); rebooting is reboot_machine's, a choice a person makes.
 #   - It waits up to WAIT_FOR_APT seconds for another package run (the nightly
 #     one, an install) to finish, and reports busy if it never does.
+#   - A package run left half done is finished first with apt-get -f install,
+#     which names no package (repaired: true).
+#   - Afterwards, every php-fpm master still running a binary an update
+#     replaced is reloaded (USR2: it re-executes, no request dropped);
+#     reloaded and still_on_old_code name the binaries.
 #   - Every key is ALWAYS present; the exit code is 0 whenever the object was
 #     printed. outcome is one of: installed, nothing_to_install, failed, busy,
 #     unavailable.
@@ -48,6 +60,9 @@ WAIT_FOR_APT=600        # seconds to wait for another package run to finish
 UPDATE_TIMEOUT=300      # apt-get update
 UPGRADE_TIMEOUT=1800    # unattended-upgrade; on TERM it stops after the package in hand
 MAX_LIST=200            # packages / services listed
+REPAIR_TIMEOUT=900      # finishing a half-done package run
+RELOAD_WAIT=20          # seconds for a reloaded php-fpm to re-execute
+PROC="${INSTALL_SECURITY_UPDATES_PROC:-/proc}"   # tests only: a stand-in /proc
 
 if (( $# > 0 )); then
     printf 'install_security_updates: takes no arguments\n' >&2
@@ -68,6 +83,9 @@ UPGRADED_JSON="[]"
 UPGRADED_COUNT=0
 TRUNCATED=false
 SERVICES_JSON='"unknown"'
+REPAIRED=false
+RELOADED_JSON="[]"
+OLD_CODE_JSON="[]"
 
 emit() {
     [[ -e /var/run/reboot-required ]] && REBOOT_REQUIRED=true
@@ -80,7 +98,10 @@ emit() {
     printf '"upgraded_count":%d,' "$UPGRADED_COUNT"
     printf '"truncated":%s,' "$TRUNCATED"
     printf '"reboot_required":%s,' "$REBOOT_REQUIRED"
-    printf '"services_needing_restart":%s' "$SERVICES_JSON"
+    printf '"services_needing_restart":%s,' "$SERVICES_JSON"
+    printf '"repaired":%s,' "$REPAIRED"
+    printf '"reloaded":%s,' "$RELOADED_JSON"
+    printf '"still_on_old_code":%s' "$OLD_CODE_JSON"
     printf '}\n'
     exit 0
 }
@@ -120,6 +141,16 @@ installed() {
 
 if ! wait_for_apt; then
     OUTCOME="busy"; REASON="another package run did not finish within ten minutes"; emit
+fi
+
+# A package run left half done (a package unpacked and not configured, or
+# one whose download went missing mid-run): the updater refuses to work on a
+# broken package state, so it is finished first. -f names no package.
+if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
+    if timeout "$REPAIR_TIMEOUT" apt-get -q -y -f -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install >/dev/null 2>&1 \
+            && [[ -z "$(dpkg --audit 2>/dev/null)" ]]; then
+        REPAIRED=true
+    fi
 fi
 
 BEFORE="$(installed)"
@@ -175,6 +206,40 @@ if command -v needrestart >/dev/null 2>&1; then
     done < <(timeout 120 needrestart -b -r l 2>/dev/null | grep '^NEEDRESTART-SVC: ')
     SERVICES_JSON="[$(IFS=,; printf '%s' "${svcs[*]:-}")]"
 fi
+
+# Every php-fpm master still running a binary an update replaced. Where
+# systemd runs php-fpm the package's own scripts restarted it; in a site
+# container nothing does. USR2 makes the master re-execute its binary (the new
+# one) and replace its workers as they finish: no request is dropped.
+fpm_old_masters() {  # one "PID BINARY" a line
+    local p cmd exe
+    for p in "$PROC"/[0-9]*; do
+        [[ -r "$p/cmdline" ]] || continue
+        cmd="$(tr '\0' ' ' 2>/dev/null < "$p/cmdline")"
+        [[ "$cmd" == "php-fpm: master process"* ]] || continue
+        exe="$(readlink "$p/exe" 2>/dev/null)" || continue
+        [[ "$exe" == *" (deleted)" ]] || continue
+        exe="${exe% (deleted)}"
+        printf '%s %s\n' "${p##*/}" "${exe##*/}"
+    done
+}
+json_list() {  # NAMES...: a JSON list of safe strings
+    local out="" sep="" n
+    for n in "$@"; do out+="${sep}$(json_safe "$n")"; sep=","; done
+    printf '[%s]' "$out"
+}
+reloaded=()
+while read -r pid bin; do
+    [[ -n "$pid" ]] || continue
+    kill -USR2 "$pid" 2>/dev/null && reloaded+=("$bin")
+done < <(fpm_old_masters)
+if (( ${#reloaded[@]} > 0 )); then
+    waited=0
+    while [[ -n "$(fpm_old_masters)" ]] && (( waited < RELOAD_WAIT )); do sleep 1; waited=$(( waited + 1 )); done
+fi
+mapfile -t left < <(fpm_old_masters | cut -d' ' -f2-)
+RELOADED_JSON="$(json_list "${reloaded[@]}")"
+OLD_CODE_JSON="$(json_list "${left[@]}")"
 
 if (( rc == 124 )); then
     OUTCOME="failed"; REASON="the update run took longer than thirty minutes and was stopped"

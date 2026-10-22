@@ -6,6 +6,8 @@
  * Shows job output with live polling for running jobs.
  *
  * @version 1.22 - an apply that Apply and publish follows with a publish says where that publish stands
+ * @version 1.21 - an install_security_updates result says what it reloaded, what still serves old code, and a
+ *                half-done package run finished first (install_security_updates.sh 1.2; fleet_security_patching WP3)
  * @version 1.20 - install_security_updates results (agent 1.87.0): what was installed, with old and new versions,
  *                 and any reboot or service restart still owed
  * @version 1.19 - the site state card reads the processed result (JobResultProcessor 1.96); a reading it does not
@@ -552,6 +554,20 @@ if ($result) {
 		}
 		if (!empty($result_data['reboot_required'])) {
 			echo '<div class="mb-2 text-warning">An update asks for a reboot. It was not rebooted; the Reboot button on the node page does that.</div>';
+		}
+		if (!empty($result_data['repaired'])) {
+			echo '<div class="mb-2">A package run left half done was finished first.</div>';
+		}
+		// The php-fpm binaries reloaded after the run, and any still on old code
+		// (install_security_updates.sh 1.2): what decides whether the fix is live.
+		$su_reloaded = $result_data['reloaded'] ?? null;
+		if (is_array($su_reloaded) && $su_reloaded) {
+			echo '<div class="mb-2">Reloaded so the new code serves: ' . htmlspecialchars(implode(', ', array_map('strval', $su_reloaded))) . '</div>';
+		}
+		$su_old = $result_data['still_on_old_code'] ?? null;
+		if (is_array($su_old) && $su_old) {
+			echo '<div class="mb-2 text-danger">Still serving the old code: ' . htmlspecialchars(implode(', ', array_map('strval', $su_old)))
+				. '. It did not reload; restart the site, or its container, to put the fix in place.</div>';
 		}
 		$su_services = $result_data['services_needing_restart'] ?? null;
 		if (is_array($su_services) && $su_services) {

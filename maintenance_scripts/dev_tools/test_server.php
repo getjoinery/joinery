@@ -9,6 +9,8 @@
  *   php test_server.php list
  *   php test_server.php delete <label|id>
  *   php test_server.php dns <name> <ipv4> [<ipv6>]
+ *   php test_server.php dns-list
+ *   php test_server.php dns-delete <name> | --stale
  *
  * Every command works on the one operator cloud account this management node
  * flags as test, and only after the provider confirms that account's company
@@ -24,8 +26,13 @@
  *
  * `dns` points <name>.joinerytest.com at an address (A, and AAAA when given),
  * replacing any record of that name and type. The zone lives on the test
- * account.
+ * account. `dns-list` shows the zone's A and AAAA records and marks each one
+ * STALE whose address no test server holds; `dns-delete` removes a name's
+ * records, or with --stale every stale one. `delete` removes the records
+ * pointing at the server it deletes: a record left on a released address
+ * names whoever the provider gives that address to next.
  *
+ * @version 1.1 - dns-list, dns-delete; delete takes the server's DNS records with it
  * @version 1.0
  */
 
@@ -156,7 +163,8 @@ function ts_delete(array $opts): void {
 	if ($which === '') {
 		ts_fail('delete needs a label or id.');
 	}
-	$driver = ts_account()->driver();
+	$account = ts_account();
+	$driver = $account->driver();
 	$row = ts_find($driver, $which);
 	$driver->deleteInstance((string)$row['id']);
 	$file = TEST_SERVER_PASSWORD_DIR . '/test_server_' . ($row['label'] ?? '');
@@ -164,6 +172,82 @@ function ts_delete(array $opts): void {
 		unlink($file);
 	}
 	echo "deleted {$row['id']} ({$row['label']})\n";
+	// A record left pointing at the address names whoever is given it next.
+	$addresses = array_filter(array_merge((array)($row['ipv4_public'] ?? array()), array((string)($row['ipv6'] ?? ''))));
+	$http = ts_http($account);
+	$zone_id = ts_zone($http);
+	foreach (ts_address_records($http, $zone_id) as $record) {
+		if (in_array(strtolower((string)$record['target']), array_map('strtolower', $addresses), true)) {
+			ts_drop_record($http, $zone_id, $record);
+		}
+	}
+}
+
+/** The test account's DNS zone id, or a refusal. */
+function ts_zone(GuzzleHttp\Client $http): int {
+	foreach ((array)(ts_json($http->request('GET', 'domains?page_size=500'))['data'] ?? array()) as $zone) {
+		if (($zone['domain'] ?? '') === TEST_SERVER_DNS_DOMAIN) {
+			return (int)$zone['id'];
+		}
+	}
+	ts_fail('the test account holds no ' . TEST_SERVER_DNS_DOMAIN . ' zone.');
+}
+
+/** The zone's A and AAAA records. */
+function ts_address_records(GuzzleHttp\Client $http, int $zone_id): array {
+	$out = array();
+	foreach ((array)(ts_json($http->request('GET', "domains/{$zone_id}/records?page_size=500"))['data'] ?? array()) as $record) {
+		if (in_array((string)($record['type'] ?? ''), array('A', 'AAAA'), true)) {
+			$out[] = $record;
+		}
+	}
+	return $out;
+}
+
+/** Every address a server on the test account holds now. */
+function ts_live_addresses(CloudComputeProvider $driver): array {
+	$live = array();
+	foreach ($driver->listInstances() as $row) {
+		foreach ((array)($row['ipv4_public'] ?? array()) as $ip) { $live[strtolower($ip)] = $row['label'] ?? ''; }
+		if (!empty($row['ipv6'])) { $live[strtolower((string)$row['ipv6'])] = $row['label'] ?? ''; }
+	}
+	return $live;
+}
+
+function ts_drop_record(GuzzleHttp\Client $http, int $zone_id, array $record): void {
+	$http->request('DELETE', "domains/{$zone_id}/records/{$record['id']}");
+	echo "removed {$record['type']} {$record['name']}." . TEST_SERVER_DNS_DOMAIN . " -> {$record['target']}\n";
+}
+
+function ts_dns_list(): void {
+	$account = ts_account();
+	$live = ts_live_addresses($account->driver());
+	$http = ts_http($account);
+	foreach (ts_address_records($http, ts_zone($http)) as $r) {
+		$target = strtolower((string)$r['target']);
+		printf("%-5s %-40s %-40s %s\n", $r['type'], $r['name'] === '' ? '@' : $r['name'], $r['target'],
+			isset($live[$target]) ? $live[$target] : 'STALE: no test server holds this address');
+	}
+}
+
+function ts_dns_delete(array $opts): void {
+	$name = (string)($opts['positional'][0] ?? '');
+	if ($name === '' && empty($opts['stale'])) {
+		ts_fail('dns-delete needs a record name, or --stale for every record no test server holds.');
+	}
+	$account = ts_account();
+	$live = empty($opts['stale']) ? array() : ts_live_addresses($account->driver());
+	$http = ts_http($account);
+	$zone_id = ts_zone($http);
+	$removed = 0;
+	foreach (ts_address_records($http, $zone_id) as $r) {
+		$stale = !empty($opts['stale']) && !isset($live[strtolower((string)$r['target'])]);
+		if (($name !== '' && $r['name'] === $name) || ($name === '' && $stale)) {
+			ts_drop_record($http, $zone_id, $r);
+			$removed++;
+		}
+	}
+	echo "{$removed} record(s) removed\n";
 }
 
 function ts_dns(array $opts): void {
@@ -186,16 +270,8 @@ function ts_dns(array $opts): void {
 	$account = ts_account();
 	$account->driver();
 	$http = ts_http($account);
-	$zone_id = null;
-	foreach ((array)(ts_json($http->request('GET', 'domains?page_size=500'))['data'] ?? array()) as $zone) {
-		if (($zone['domain'] ?? '') === TEST_SERVER_DNS_DOMAIN) {
-			$zone_id = (int)$zone['id'];
-		}
-	}
-	if (!$zone_id) {
-		ts_fail('the test account holds no ' . TEST_SERVER_DNS_DOMAIN . ' zone.');
-	}
-	foreach ((array)(ts_json($http->request('GET', "domains/{$zone_id}/records?page_size=500"))['data'] ?? array()) as $record) {
+	$zone_id = ts_zone($http);
+	foreach (ts_address_records($http, $zone_id) as $record) {
 		$type = (string)($record['type'] ?? '');
 		if (($record['name'] ?? '') === $name && isset($want[$type])) {
 			$http->request('PUT', "domains/{$zone_id}/records/{$record['id']}", array('json' => array('target' => $want[$type], 'ttl_sec' => 300)));
@@ -216,7 +292,9 @@ switch ($args[1] ?? '') {
 	case 'list':   ts_list(); break;
 	case 'delete': ts_delete($opts); break;
 	case 'dns':    ts_dns($opts); break;
+	case 'dns-list':   ts_dns_list(); break;
+	case 'dns-delete': ts_dns_delete($opts); break;
 	default:
-		fwrite(STDERR, "Usage: php test_server.php create <label> [--region=] [--type=] [--image=] [--keep] | list | delete <label|id> | dns <name> <ipv4> [<ipv6>]\n");
+		fwrite(STDERR, "Usage: php test_server.php create <label> [--region=] [--type=] [--image=] [--keep] | list | delete <label|id> | dns <name> <ipv4> [<ipv6>] | dns-list | dns-delete <name>|--stale\n");
 		exit(2);
 }

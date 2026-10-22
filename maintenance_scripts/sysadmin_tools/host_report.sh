@@ -8,6 +8,12 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.37 - security_pending: the security fixes this machine is waiting for, from its hourly check
+#                (security_check.sh), each with when it was first seen, and the check's at-once install
+#                (WP6, Q2); services_needing_restart: what still runs code an upgrade replaced
+#                (needrestart, else /proc/*/exe "(deleted)") (fleet_security_patching.md WP1).
+# Version: 1.36 - site_refresh.running: the nightly replacement's service is running now (a night's run, or
+#                Refresh now's: site_refresh.sh start; fleet_security_patching.md WP4).
 # Version: 1.35 - data_root_encryption.recipient_set_by: who named the recovery key the break-glass copy is sealed to
 #               (site, operator or install), so a management node can mark its own key given at install as its own
 # Version: 1.34 - kernel_warning counts a WARN() by its "WARNING: CPU:" line, not a boot notice about a CPU's
@@ -207,6 +213,7 @@ CMD_TIMEOUT=10          # seconds per external command
 MAX_LIST=20             # failed units, jails
 MAX_SITES=100           # site containers, and the sites in outbound_limits
 MAX_NAME=64             # characters kept of any unit or jail name
+MAX_PACKAGES=200        # security fixes waiting
 
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WEB_ROOT="$SITE_ROOT/public_html"
@@ -1307,6 +1314,71 @@ emit_hardening() {
     printf '{"state":"%s","pinned":%d,"unread":%d,"drift":[%s]}' "$([[ $n -eq 0 ]] && echo ok || echo drift)" "$pinned" "$unread" "$drift"
 }
 
+# The security fixes this machine is waiting for, from its hourly check
+# (security_check.sh, specs/fleet_security_patching.md WP1): "none" where it
+# has never run. Every value is read again here, as the refresh's state is.
+json_version() { local drop='[^A-Za-z0-9.+:~-]' s; s="${1//$drop/}"; printf '"%s"' "${s:0:128}"; }
+emit_security_pending() {
+    local dir f k v item sep="" list="" name inst cand crit first n=0
+    dir="${HOST_REPORT_SECURITY_CHECK_DIR:-/var/lib/joinery/security-check}"  # tests only: another folder
+    f="${dir}/state"
+    [[ -f "$f" && ! -L "$f" ]] || { printf '"none"'; return; }
+    local -A st=()
+    while IFS='=' read -r k v; do
+        [[ "$k" =~ ^[a-z_]{1,30}$ ]] && st[$k]="$v"
+    done < <(head -n 40 "$f" 2>/dev/null)
+    printf '{'
+    for k in installed_at checked_at checked_ok_at check check_error lists_at lists_error at_once_at at_once_outcome at_once_refresh_at; do
+        printf '"%s":%s,' "$k" "$(json_text "${st[$k]:-}")"
+    done
+    for k in pending critical; do
+        printf '"%s":%s,' "$k" "$(json_num_or_unknown "${st[$k]:-}")"
+    done
+    for item in ${st[packages]:-}; do
+        (( n < MAX_PACKAGES )) || break
+        IFS='|' read -r name inst cand crit first <<< "$item"
+        [[ -n "$name" ]] || continue
+        n=$((n+1))
+        list+="${sep}{\"package\":$(json_version "$name"),\"installed\":$(json_version "$inst"),\"candidate\":$(json_version "$cand"),\"critical\":$([[ "$crit" == 1 ]] && echo true || echo false),\"first_seen\":$(json_text "${first:-}")}"
+        sep=","
+    done
+    printf '"packages":[%s],' "$list"
+    if [[ "$(run systemctl show -p UnitFileState --value joinery-security-check.timer)" == enabled ]]; then printf '"scheduled":true}'; else printf '"scheduled":false}'; fi
+}
+
+# The services still running code an upgrade replaced on disk (WP1): needrestart's
+# own list where it is installed (it also sees a replaced library), else every
+# process of this machine's own whose binary /proc names "(deleted)" (a
+# container's processes, in another mount namespace, are their own report's).
+# {"source":"needrestart"|"proc","services":[...]}, or "unknown".
+emit_services_needing_restart() {
+    local out line sep="" list="" n=0 p exe self_ns
+    if command -v needrestart > /dev/null 2>&1; then
+        out="$(run needrestart -b -r l)" || { printf '"unknown"'; return; }
+        while IFS= read -r line; do
+            [[ "$line" == NEEDRESTART-SVC:* ]] || continue
+            (( n < MAX_LIST )) || break
+            n=$((n+1)); list+="${sep}$(json_str "${line#NEEDRESTART-SVC: }")"; sep=","
+        done <<< "$out"
+        printf '{"source":"needrestart","services":[%s]}' "$list"
+        return
+    fi
+    self_ns="$(readlink /proc/self/ns/mnt 2>/dev/null)"
+    [[ -n "$self_ns" ]] || { printf '"unknown"'; return; }
+    local -A seen=()
+    for p in /proc/[0-9]*; do
+        exe="$(readlink "$p/exe" 2>/dev/null)" || continue
+        [[ "$exe" == *" (deleted)" ]] || continue
+        [[ "$(readlink "$p/ns/mnt" 2>/dev/null)" == "$self_ns" ]] || continue
+        exe="${exe% (deleted)}"
+        [[ -z "${seen[$exe]:-}" ]] || continue
+        seen[$exe]=1
+        (( n < MAX_LIST )) || break
+        n=$((n+1)); list+="${sep}$(json_path "$exe")"; sep=","
+    done
+    printf '{"source":"proc","services":[%s]}' "$list"
+}
+
 # The nightly replacement of this host's site containers (site_refresh.sh,
 # specs/multi_tenant_host_hardening.md D9), from its state file: "none" where it
 # has never run. Every value is read again here as text or a number; the file
@@ -1365,7 +1437,10 @@ emit_site_refresh() {
         sep=","
     done
     printf '"holds":[%s],' "$list"
-    if [[ "$(run systemctl show -p UnitFileState --value joinery-site-refresh.timer)" == enabled ]]; then printf '"scheduled":true}'; else printf '"scheduled":false}'; fi
+    if [[ "$(run systemctl show -p UnitFileState --value joinery-site-refresh.timer)" == enabled ]]; then printf '"scheduled":true,'; else printf '"scheduled":false,'; fi
+    # A run under way now, the night's or one asked for (site_refresh.sh start):
+    # the oneshot service is activating for as long as it runs.
+    if [[ "$(run systemctl show -p ActiveState --value joinery-site-refresh.service)" == activating ]]; then printf '"running":true}'; else printf '"running":false}'; fi
 }
 
 # Which engine this host's sites run on, for the management node to choose a
@@ -1577,6 +1652,8 @@ printf '"containers":%s,' "$(emit_containers)"
 printf '"sites":%s,' "$(emit_sites)"
 printf '"site_security":%s,' "$(emit_site_security)"
 printf '"site_refresh":%s,' "$(emit_site_refresh)"
+printf '"security_pending":%s,' "$(emit_security_pending)"
+printf '"services_needing_restart":%s,' "$(emit_services_needing_restart)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"
 printf '"generated_at":%s' "$(date -u +%s)"

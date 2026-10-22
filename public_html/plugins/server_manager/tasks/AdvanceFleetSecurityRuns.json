@@ -1,0 +1,7 @@
+{
+  "name": "Advance Fleet Security Runs",
+  "description": "Moves an Install security updates everywhere run along: queues the next machine's or site container's install_security_updates when the one before it has finished, and stops at the first whose updater failed. A run takes minutes per node; this tick is what carries it between them.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

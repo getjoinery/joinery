@@ -71,9 +71,23 @@ case "$1" in
     d="$S/containers/$c"; [ -d "$d" ] || exit 1
     case "$f" in
       "") echo "{}" ;;
+      # Docker's health: unhealthy for an image that fails, none for one
+      # built before the health check.
+      *State.Health*) id="$(cat "$d/image")"
+        if [ -f "$S/fail_all" ] || [ -f "$S/images/$id/fail" ]; then echo unhealthy
+        elif [ -f "$S/images/$id/nohealth" ]; then echo none; else echo healthy; fi ;;
+      # The container's start command's second word: the joinery start, or a
+      # site made before it (cmd1).
+      *Config.Cmd*) cat "$d/cmd1" 2>/dev/null || echo /usr/local/sbin/joinery-site-start ;;
+      # What run_spec_adopt reads of a container Docker made before run specs.
+      *HostConfig.Privileged*) cat "$d/hostconfig" 2>/dev/null || echo "false|bridge||0|0|0||0|0|0|0||unless-stopped|${c}|" ;;
+      *PortBindings*) cat "$d/ports" 2>/dev/null ;;
+      *.Mounts*) cat "$d/mounts" 2>/dev/null ;;
+      *NetworkSettings.Networks*) echo "bridge " ;;
       *State.Running*) [ "$(cat "$d/state")" = running ] && echo true || echo false ;;
       *State.Status*) cat "$d/state" ;;
-      *Config.Env*) cat "$d/env" ;;
+      # As a real engine call may: stdin read, where a test asks for it.
+      *Config.Env*) [ -f "$S/inspect_reads_stdin" ] && timeout 1 cat > /dev/null 2>&1; cat "$d/env" ;;
       *joinery.seccomp*) cat "$d/seccomp" 2>/dev/null ;;
       *.Image*) cat "$d/image" ;;
       *) echo "" ;;
@@ -89,6 +103,7 @@ case "$1" in
           *.Id*) echo "$id" ;;
           *joinery.base_id*) cat "$S/images/$id/label" 2>/dev/null ;;
           *joinery.install_sh_hash*) cat "$S/images/$id/hash" 2>/dev/null ;;
+          *Healthcheck*) [ -f "$S/images/$id/nohc" ] || echo CMD-SHELL ;;
           *Created*) echo "2026-10-14 10:00:00 +0000 UTC" ;;
         esac ;;
       prune) echo pruned >> "$S/pruned" ;;
@@ -114,6 +129,9 @@ case "$1" in
     [ -n "$label" ] && echo "$label" > "$S/images/$id/label"
     [ -n "$hash" ] && echo "$hash" > "$S/images/$id/hash"
     [ -f "$S/next_build_fails" ] && { touch "$S/images/$id/fail"; rm -f "$S/next_build_fails"; }
+    [ -f "$S/build_nohc" ] && [ -z "$file" ] && touch "$S/images/$id/nohc"
+    # A fresh base takes every fix that was pending.
+    case "$file" in *Dockerfile.base) [ -f "$S/build_keeps_apt" ] || : > "$S/apt" ;; esac
     [ -z "$file" ] && { (cd "$ctx" && find . -type f | LC_ALL=C sort | tr '\n' ' ') > "$S/context_listing"
         cp "$ctx/maintenance_scripts/install_tools/_site_start.sh" "$S/context_start" 2>/dev/null; }
     for t in "${tags[@]}"; do echo "$id" > "$(tagf "$t")"; done
@@ -125,6 +143,7 @@ case "$1" in
         [ -f "$S/arm_fail_all" ] && touch "$S/fail_all"
         [ -f "$JOINERY_SITE_STATE_ROOT/etc/joinery/sites/${@: -1}/replacing" ] && echo marked >> "$S/mark_at_stop" ;;
   rm) if [ "$3" = "--storage" ]; then grep -v "^$4 " "$S/external" > "$S/external.n"; mv "$S/external.n" "$S/external"; exit 0; fi
+      [ -f "$S/rm_fails" ] && exit 1
       rm -rf "$S/containers/${@: -1}" ;;
   start) d="$S/containers/$2"; [ -d "$d" ] && echo running > "$d/state" ;;
   run)
@@ -175,7 +194,10 @@ STUB
 cat > "$T/bin/systemctl" <<'STUB'
 #!/bin/bash
 echo "$*" >> "$STUB/systemctl"
-case "$1" in is-enabled|is-active) [ -f "$STUB/timer_on" ] ;; enable) touch "$STUB/timer_on" ;; disable) rm -f "$STUB/timer_on" ;; esac
+case "$1" in is-enabled|is-active) [ -f "$STUB/timer_on" ] ;; enable) touch "$STUB/timer_on" ;; disable) rm -f "$STUB/timer_on" ;;
+  show) [ -f "$STUB/service_running" ] && echo activating || echo inactive ;;
+  start) if [ -f "$STUB/start_fails" ]; then exit 1; fi
+         if [ -s "$STUB/start_fails_left" ]; then n="$(cat "$STUB/start_fails_left")"; echo $((n - 1)) > "$STUB/start_fails_left"; if [ "$n" -gt 0 ]; then exit 1; fi; fi ;; esac
 STUB
 chmod 755 "$T/bin/curl" "$T/bin/systemctl"
 export PATH="$T/bin:$PATH"
@@ -417,7 +439,8 @@ chk "  and the run says what it replaced" "$(st replaced | sed 's/:[0-9.]*//g')|
 : > "$STUB/calls"
 chk "a second night with nothing pending does nothing" "$(srun run)|$(st run)|$(nothing_stopped)|$(grep -m1 -c '^build' "$STUB/calls")" "0|nothing_due|0|0"
 echo 'Inst curl [1] (2 Ubuntu:26.04/resolute-security [amd64])' > "$STUB/apt"; : > "$STUB/calls"
-chk "a security fix: the base is built fresh, then every site replaced" "$(srun run)|$(st run)|$(st base_due)" "0|replaced|fix"
+chk "a security fix: the base is built fresh, then every site replaced" "$(srun run)|$(st run)|$(grep -c 'building the base fresh (fix: 1' "$T/rout")" "0|replaced|1"
+chk "  the new base is checked in turn: the state says what it waits for (a fresh build took the fix)" "$(st base_due)|$(st pending_security)" "no|0"
 NB="$(tagid joinery-base:${BASE_VERSION})"
 chk "  the base built with a fresh pull and no cache, before any site stopped" \
     "$(grep -c -- 'build -q --format docker --no-cache --hooks-dir /usr/share/containers/oci/hooks.d --hooks-dir /etc/containers/oci/hooks.d --pull=always --memory 2g -f .*Dockerfile.base' "$STUB/calls")|$(awk '/Dockerfile.base/ && !b { b = NR } /^stop/ && !s { s = NR } END { print (b < s) ? "first" : "after" }' "$STUB/calls")" "1|first"
@@ -479,7 +502,8 @@ reset
 echo 'Inst libfoo-security-dev [1] (2 Ubuntu:26.04/resolute-updates [amd64])' > "$STUB/apt"
 chk "a package named for security, from -updates, is no fix" "$(srun check)|$(st pending_security)|$(st base_due)" "0|0|no"
 chk "the check container holds only apt's file capabilities, gains none, and counts a full upgrade" \
-    "$(grep -c -- '--cap-drop=ALL --cap-add=CHOWN,DAC_OVERRIDE,FOWNER --security-opt=no-new-privileges' "$STUB/check_args")|$(grep -c 'full-upgrade' "$STUB/check_args")" "1|1"
+    "$(grep -c -- '--cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges' "$STUB/check_args")|$(grep -c 'full-upgrade' "$STUB/check_args")" "1|1"
+chk "  each capability its own flag: Docker refuses a comma list (box proof, exit 125)" "$(grep -c -- '--cap-add=[A-Z_]*,' "$STUB/check_args")" "0"
 touch "$STUB/check_fail"; : > "$STUB/calls"
 chk "a check that fails still replaces the sites already due on the current base, and builds nothing" \
     "$(srun run)|$(st check)|$(cat "$STUB/images/$(cimg sb)/label")|$(grep -c -- 'Dockerfile.base' "$STUB/calls")" "0|failed|$BASE|0"
@@ -533,6 +557,94 @@ done
 chmod g+w "$TR/maintenance_scripts/sysadmin_tools/recreate_site.sh"; : > "$STUB/systemctl"; touch "$STUB/timer_on"
 chk "a tree another account can write: refused (the timer runs it as root), and a timer already on is stopped" \
     "$(bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install 2>&1 | grep -c "not root's alone")|$(grep -c 'disable --now joinery-site-refresh.timer' "$STUB/systemctl")" "1|1"
+
+echo "=== Docker: a site made before run specs (fleet_security_patching WP4, B10) ==="
+# docker-prod's six: no run spec, an image with no health check and no base id,
+# Docker's own record the only account of how each is run.
+export JOINERY_SITE_ENGINE_KIND=docker
+ln -sf "$T/bin/podman" "$T/bin/docker"
+dreset() {
+    reset
+    rm -f "$R/etc/joinery/sites/sa/run_spec" "$STUB/images/$OLD_A/label"; touch "$STUB/images/$OLD_A/nohealth"
+    echo "-c" > "$STUB/containers/sa/cmd1"
+    printf '127.0.0.1|8080|80/tcp\n127.0.0.1|9080|5432/tcp\n' > "$STUB/containers/sa/ports"
+    for v in code scripts postgres config agent; do printf 'volume|sa_%s|/x/%s|true|/srv/sa_%s\n' "$v" "$v" "$v"; done > "$STUB/containers/sa/mounts"
+    mkdir -p "$STUB/containers/tool"; echo "$OLD_B" > "$STUB/containers/tool/image"; echo running > "$STUB/containers/tool/state"
+    printf 'SITENAME=sb\n' > "$STUB/containers/tool/env"
+}
+dreset
+: > "$STUB/apt"; touch "$STUB/inspect_reads_stdin"
+chk "check: a site with no run spec is counted and due; a container whose SITENAME is not its name is not a site" \
+    "$(srun check)|$(st sites)|$(st sites_due)" "0|2|2"
+rm "$STUB/inspect_reads_stdin"; : > "$STUB/calls"
+chk "  the check wrote no run spec" "$(ls "$R/etc/joinery/sites/sa/")" ""
+chk "the run: both sites replaced on the base, no base built" "$(srun run)|$(st run)|$(st sites_due)|$(grep -c -- 'Dockerfile.base' "$STUB/calls")" "0|replaced|0|0"
+chk "  sa's run spec was recorded from its container first, saying so" \
+    "$(grep -c "sa: recreate_site: recorded sa's run spec from its container" "$T/rout")|$(grep -cE '^(publish=127.0.0.1:8080:80|publish=127.0.0.1:9080:5432|volume=sa_code:/x/code|restart=unless-stopped|hostname=sa)$' "$R/etc/joinery/sites/sa/run_spec")" "1|5"
+chk "  sa runs a new image on the base; the one with no health check was judged by its answer" \
+    "$(cat "$STUB/images/$(cimg sa)/label")|$(tagid joinery-sa:previous)" "$BASE|$OLD_A"
+chk "  sa's old start (a shell TERM does not end): its restart policy off, PostgreSQL stopped cleanly inside, then Apache, before the stop" \
+    "$(grep -nE '^(update --restart=no sa|exec sa service postgresql stop|exec sa apache2ctl -k stop|stop -t 60 sa)$' "$STUB/calls" | cut -d: -f2 | tr '\n' ',')" \
+    "update --restart=no sa,exec sa service postgresql stop,exec sa apache2ctl -k stop,stop -t 60 sa,"
+chk "  sb, on the joinery start, is stopped as it always was" "$(grep -c '^exec sb service\|^exec sb apache2ctl' "$STUB/calls")|$(grep -c '^stop -t 60 sb$' "$STUB/calls")" "0|1"
+chk "  the container that is no site was never stopped, removed or run" "$(cimg tool)|$(grep -cE '^(stop|rm|run -d) .*tool$' "$STUB/calls")" "$OLD_B|0"
+dreset
+touch "$STUB/next_build_fails"
+chk "a new image that does not come up: rolled back onto the image with no health check, which answers" \
+    "$(rec sa)|$(outcome)|$(cimg sa)|$(cat "$STUB/containers/sa/state")" "3|rolled_back|$OLD_A|running"
+dreset
+printf 'volume|sa_code|/x/code|true|/srv/sa_code\nbind||/data|true|/srv/data\n' > "$STUB/containers/sa/mounts"; : > "$STUB/calls"
+chk "a container with what a spec cannot carry (a bind mount): refused by name, nothing built or stopped, no spec" \
+    "$(rec sa)|$(grep -m1 -c "could not be recorded as one: .*a bind mount at /data" "$T/out")|$(grep -c '^build' "$STUB/calls")|$(nothing_stopped)|$(ls "$R/etc/joinery/sites/sa/" | grep -c run_spec)" "1|1|0|0|0"
+dreset
+sed -i 's/^SITENAME=sa/SITENAME=other/' "$STUB/containers/sa/env"
+chk "a container with no run spec that is not the site's own: refused before a spec is recorded" \
+    "$(rec sa)|$(grep -m1 -c "is not that site's own" "$T/out")|$(ls "$R/etc/joinery/sites/sa/" | grep -c run_spec)" "1|1|0"
+chk "  and the nightly run does not count it" "$(srun check)|$(st sites)" "0|1"
+dreset
+touch "$STUB/rm_fails"; : > "$STUB/calls"
+chk "an old-start container that cannot be removed: refused, started again with its restart policy back, the new image dropped (reviewer2)" \
+    "$(rec sa)|$(outcome)|$(grep -E '^(update .*sa|exec sa (service|apache2ctl) .*|stop .*sa|rm -f sa|start sa)$' "$STUB/calls" | tr '\n' ',')|$(cimg sa)|$(cat "$STUB/containers/sa/state")|$(ls "$STUB/tags" | grep -c ':next')" \
+    "1|refused|update --restart=no sa,exec sa service postgresql stop,exec sa apache2ctl -k stop,stop -t 60 sa,rm -f sa,start sa,update --restart=unless-stopped sa,|$OLD_A|running|0"
+: > "$STUB/calls"
+chk "  one on the joinery start: started again, and its policy never touched" \
+    "$(rec sb)|$(grep -cE '^start sb$' "$STUB/calls")|$(grep -c '^update' "$STUB/calls")" "1|1|0"
+rm -f "$STUB/rm_fails"
+dreset
+rm "$STUB/tags/joinery-base:${BASE_VERSION}"; : > "$STUB/calls"
+chk "no base yet (docker-prod before its first run): refused before a run spec is recorded (reviewer2 F1)" \
+    "$(rec sa)|$(grep -m1 -c "no joinery-base:${BASE_VERSION}" "$T/out")|$(ls "$R/etc/joinery/sites/sa/" | grep -c run_spec)" "1|1|0"
+dreset
+touch "$STUB/build_nohc"; : > "$STUB/calls"
+chk "an image built with no health check (the template lost it): refused, nothing stopped, the image dropped (reviewer2 B)" \
+    "$(rec sb)|$(grep -m1 -c 'carries no health check' "$T/out")|$(nothing_stopped)|$(ls "$STUB/tags" | grep -c ':next')" "1|1|0|0"
+rm "$STUB/build_nohc"
+dreset
+rm -rf "$STUB/containers/sa" "$STUB/containers/sb"
+echo 'Inst curl [1] (2 Ubuntu:26.04/resolute-security [amd64])' > "$STUB/apt"; : > "$STUB/calls"
+chk "a Docker host with no site: a fix pending builds no base" \
+    "$(srun run)|$(grep -c -- 'Dockerfile.base' "$STUB/calls")|$(grep -c 'no site container runs on this host' "$T/rout")|$(st run)" "0|0|1|nothing_due"
+export JOINERY_SITE_ENGINE_KIND=podman
+dreset
+chk "on the site engine a container with no run spec is no site, and is refused" "$(srun check)|$(st sites)|$(rec sa)|$(grep -m1 -c 'has no run spec' "$T/out")" "0|1|1|1"
+export JOINERY_SITE_ENGINE_KIND=docker
+
+echo "=== site_refresh start: the nightly run, now (Refresh now) ==="
+export SITE_REFRESH_SYSTEMCTL_PAUSE=0
+rm -rf "$R/etc/systemd"; : > "$STUB/systemctl"; rm -f "$STUB/timer_on" "$STUB/service_running"
+chk "not installed: refused" "$(srun start)|$(grep -c 'not installed on this host' "$T/rout")" "1|1"
+mkdir -p "$R/etc/systemd/system"; : > "$R/etc/systemd/system/joinery-site-refresh.service"
+chk "the timer off (a tree not root's alone stops it): refused, nothing started" "$(srun start)|$(grep -c 'timer is off' "$T/rout")|$(grep -c '^start' "$STUB/systemctl")" "1|1|0"
+touch "$STUB/timer_on"
+chk "installed and on: the service is started, without waiting for it" "$(srun start)|$(grep -c '^start --no-block joinery-site-refresh.service$' "$STUB/systemctl")" "0|1"
+touch "$STUB/service_running"; : > "$STUB/systemctl"
+chk "a run under way: says so, and starts no second" "$(srun start)|$(grep -c 'already under way' "$T/rout")|$(grep -c '^start' "$STUB/systemctl")" "0|1|0"
+rm -f "$STUB/service_running"; touch "$STUB/start_fails"; : > "$STUB/systemctl"
+chk "systemd refuses the start: tried three times, then an error" "$(SITE_REFRESH_SYSTEMCTL_PAUSE=0 srun start)|$(grep -c 'could not be started' "$T/rout")|$(grep -c '^start' "$STUB/systemctl")" "1|1|3"
+rm -f "$STUB/start_fails"; echo 1 > "$STUB/start_fails_left"; : > "$STUB/systemctl"
+chk "  one refusal (D-Bus restarting under an update), then started on the second try" "$(SITE_REFRESH_SYSTEMCTL_PAUSE=0 srun start)|$(grep -c '^start' "$STUB/systemctl")" "0|2"
+rm -f "$STUB/start_fails" "$STUB/timer_on"
+export JOINERY_SITE_ENGINE_KIND=podman
 
 echo "=== The base and the template ==="
 chk "Dockerfile.base stops PostgreSQL before its build step ends (B8)" \

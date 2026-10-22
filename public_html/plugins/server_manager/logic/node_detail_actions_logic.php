@@ -21,6 +21,8 @@
  *
  * @version 1.69 - publish_upgrade's Apply and publish button queues the apply with the publish to follow it
  *                (ApplyAndPublish); the plain publish goes through ApplyAndPublish::queuePublish()
+ * @version 1.68 - refresh_site_containers: a container host's nightly replacement of its site containers, now
+ *                (agent 1.88.0; fleet_security_patching WP4)
  * @version 1.67 - install_security_updates: the nightly security updates, now (agent 1.87.0)
  * @version 1.66 - site_state_report: what the machine's site state directories hold (agent 1.86.0)
  * @version 1.65 - copy_retry_settle: let go of the old server again after a DNS switch's settle stopped
@@ -187,6 +189,7 @@ class NodeDetailActions {
 		'listening_sockets'        => 'overview',
 		'site_state_report'        => 'overview',
 		'install_security_updates' => 'overview',
+		'refresh_site_containers'  => 'overview',
 		'container_inventory'      => 'overview',
 		'spam_learning_status'     => 'overview',
 		'reboot_machine'           => 'overview',
@@ -469,12 +472,14 @@ class NodeDetailActions {
 			// for its recovery key). And site_state_report (agent 1.86.0), a
 			// fourth read that takes nothing, and install_security_updates
 			// (agent 1.87.0), which takes nothing either: the machine's own
-			// policy decides what it installs.
+			// policy decides what it installs. refresh_site_containers (agent
+			// 1.88.0) takes nothing: the host decides which sites are due.
 			case 'listening_sockets':
 			case 'container_inventory':
 			case 'spam_learning_status':
 			case 'site_state_report':
 			case 'install_security_updates':
+			case 'refresh_site_containers':
 			case 'reboot_machine': {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);

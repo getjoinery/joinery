@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -661,7 +661,7 @@ eval "$(sed -n -e '/^safe_name() {/,/^}/p' -e '/^json_str() /p' -e '/^json_num_o
     -e '/^json_text() {/,/^}/p' -e '/^emit_site_refresh() {/,/^}/p' "$SCRIPT")"
 MAX_NAME=64; CMD_TIMEOUT=5
 mkdir -p "$T/sr/bin" "$T/sr/state"
-printf '#!/bin/bash\n[ "$1 $2 $3" = "show -p UnitFileState" ] && echo "${GATE_TIMER:-disabled}"\nexit 0\n' > "$T/sr/bin/systemctl"; chmod 755 "$T/sr/bin/systemctl"
+printf '#!/bin/bash\n[ "$1 $2 $3" = "show -p UnitFileState" ] && echo "${GATE_TIMER:-disabled}"\n[ "$1 $2 $3" = "show -p ActiveState" ] && echo "${GATE_SERVICE:-inactive}"\nexit 0\n' > "$T/sr/bin/systemctl"; chmod 755 "$T/sr/bin/systemctl"
 sr() { PATH="$T/sr/bin:$PATH" HOST_REPORT_SITE_REFRESH_DIR="$1" emit_site_refresh; }
 srv() { sr "$1" > "$T/sr.json"; jv "$T/sr.json" "$2" "${3:-value}"; }
 chk "never run (no state): none" "$(sr "$T/sr/nothing")" '"none"'
@@ -691,7 +691,7 @@ printf 'outcome=rolled_back\nreason=not "healthy" \\ in 180 s","x":"y\nat=2026-1
 printf 'outcome=down\n' > "$T/sr/state/held/Bad;Name"
 ln -s /etc/passwd "$T/sr/state/held/linked"
 chk "a state: one JSON object, every key in order" "$(srv "$T/sr/state" "" keys)" \
-    "installed_at,checked_at,checked_ok_at,check,check_error,base_version,base_id,base_built_at,base_due,ran_at,run,run_error,pending,pending_security,sites,sites_due,security_packages,replaced,passed_over,holds,scheduled"
+    "installed_at,checked_at,checked_ok_at,check,check_error,base_version,base_id,base_built_at,base_due,ran_at,run,run_error,pending,pending_security,sites,sites_due,security_packages,replaced,passed_over,holds,scheduled,running"
 chk "counts are numbers, the pending packages names only (a hostile one reduced to a name)" \
     "$(srv "$T/sr/state" pending)/$(srv "$T/sr/state" pending_security)/$(srv "$T/sr/state" security_packages)" '10/9/["apache2","curl","BadName","openssh-client"]'
 chk "each replaced site with its seconds down; one not a figure is null" "$(srv "$T/sr/state" replaced)" '[{"site":"sa","down_seconds":10.4},{"site":"sb","down_seconds":null}]'
@@ -701,10 +701,50 @@ chk "the holds come from held/ itself: one per site file; a name that is not a s
 chk "a hold: a reason with quotes and a backslash stays text and cannot add a key" \
     "$(srv "$T/sr/state" holds.0 keys)|$(srv "$T/sr/state" holds.0.reason)" "site,outcome,reason,at,base|not healthy  in 180 s,x:y"
 chk "the timer: scheduled only when systemd says enabled" "$(srv "$T/sr/state" scheduled)/$(GATE_TIMER=enabled srv "$T/sr/state" scheduled)" "false/true"
+chk "a run under way only while its service is activating (a oneshot's whole run)" \
+    "$(srv "$T/sr/state" running)/$(GATE_SERVICE=activating srv "$T/sr/state" running)/$(GATE_SERVICE=failed srv "$T/sr/state" running)" "false/true/false"
 rm -f "$T/sr/state/held/wd5"
 chk "a hold lifted (its file removed, the state not yet rewritten) is gone at once" "$(srv "$T/sr/state" holds)" "[]"
 ln -s "$T/sr/state/state" "$T/sr/nothing/state" 2>/dev/null || { mkdir -p "$T/sr/nothing"; ln -s "$T/sr/state/state" "$T/sr/nothing/state"; }
 chk "a state file that is a link is not read: none" "$(sr "$T/sr/nothing")" '"none"'
+
+echo "=== The security fixes waiting, and what runs replaced code (host_report 1.37) ==="
+eval "$(sed -n -e '/^json_version() /p' -e '/^json_path() /p' -e '/^emit_security_pending() {/,/^}/p' -e '/^emit_services_needing_restart() {/,/^}/p' "$SCRIPT")"
+MAX_PACKAGES=200; MAX_LIST=20
+mkdir -p "$T/sc/state" "$T/sc/bin"
+printf '#!/bin/bash\n[ "$1 $2 $3" = "show -p UnitFileState" ] && echo "${GATE_TIMER:-disabled}"\nexit 0\n' > "$T/sc/bin/systemctl"; chmod 755 "$T/sc/bin/systemctl"
+sp() { PATH="$T/sc/bin:$PATH" HOST_REPORT_SECURITY_CHECK_DIR="$1" emit_security_pending; }
+spv() { sp "$1" > "$T/sp.json"; jv "$T/sp.json" "$2" "${3:-value}"; }
+chk "never run (no state): none" "$(sp "$T/sc/nothing")" '"none"'
+cat > "$T/sc/state/state" <<'STATE'
+installed_at=2026-10-22T00:00:00Z
+checked_at=2026-10-22T13:50:00Z
+checked_ok_at=2026-10-22T13:50:00Z
+check=ok
+check_error=
+lists_at=2026-10-22T13:49:00Z
+lists_error=
+pending=3
+critical=2
+packages=php8.3-fpm|8.3.6-0ubuntu0.24.04.12|8.3.6-0ubuntu0.24.04.13|1|2026-10-22T12:50:00Z php8.4-cli|8.4.11-1+ubuntu24.04.1+deb.sury.org+1|1:8.4.12~rc1|1|2026-10-22T13:50:00Z curl"<b>|none|8.5.0|0
+at_once_at=2026-10-22T13:50:30Z
+at_once_outcome=installed
+STATE
+chk "a state: one JSON object, every key in order" "$(spv "$T/sc/state" "" keys)" \
+    "installed_at,checked_at,checked_ok_at,check,check_error,lists_at,lists_error,at_once_at,at_once_outcome,at_once_refresh_at,pending,critical,packages,scheduled"
+chk "counts are numbers; each package with its versions (an epoch, a tilde and a plus kept) and whether it is critical" \
+    "$(spv "$T/sc/state" pending)/$(spv "$T/sc/state" critical)/$(spv "$T/sc/state" packages.1)" \
+    '3/2/{"package":"php8.4-cli","installed":"8.4.11-1+ubuntu24.04.1+deb.sury.org+1","candidate":"1:8.4.12~rc1","critical":true,"first_seen":"2026-10-22T13:50:00Z"}'
+chk "the at-once install: when, and its outcome" "$(spv "$T/sc/state" at_once_at)|$(spv "$T/sc/state" at_once_outcome)|$(spv "$T/sc/state" packages.2.first_seen)" "2026-10-22T13:50:30Z|installed|"
+chk "a hostile name is reduced to a name; a package new to the machine is installed none" \
+    "$(spv "$T/sc/state" packages.2.package)|$(spv "$T/sc/state" packages.2.installed)|$(spv "$T/sc/state" packages.2.critical)" "curlb|none|false"
+chk "the timer: scheduled only when systemd says enabled" "$(spv "$T/sc/state" scheduled)/$(GATE_TIMER=enabled spv "$T/sc/state" scheduled)" "false/true"
+ln -s "$T/sc/state/state" "$T/sc/link" 2>/dev/null; mkdir -p "$T/sc/linked"; ln -s "$T/sc/state/state" "$T/sc/linked/state"
+chk "a state file that is a link is not read: none" "$(sp "$T/sc/linked")" '"none"'
+printf '#!/bin/bash\nprintf "NEEDRESTART-VER: 3.6\\nNEEDRESTART-KCUR: 6.8.0\\nNEEDRESTART-SVC: php8.3-fpm.service\\nNEEDRESTART-SVC: apache2.service\\n"\n' > "$T/sc/bin/needrestart"; chmod 755 "$T/sc/bin/needrestart"
+PATH="$T/sc/bin:$PATH" emit_services_needing_restart > "$T/nr.json"
+chk "needrestart installed: its services, in its list-only batch mode" "$(jv "$T/nr.json" source)|$(jv "$T/nr.json" services)" 'needrestart|["php8.3-fpm.service","apache2.service"]'
+chk "  asked in list-only batch mode, so it never restarts anything" "$(grep -c 'needrestart -b -r l' "$SCRIPT")" "1"
 
 echo "=== The data root's own script, and the boot id (host_report 1.23) ==="
 eval "$(sed -n -e '/^script_version() {/,/^}/p' -e '/^emit_data_root_script() {/,/^}/p' -e '/^emit_boot_id() {/,/^}/p' "$SCRIPT")"

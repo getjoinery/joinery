@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.30 - carries security_check.sh, the hourly look for security fixes, which host housekeeping installs on
+ *                 a Docker host too (fleet_security_patching WP1)
  * @version 1.29 - carries install_security_updates.sh: Install security updates now works on a Docker host
  * @version 1.28 - carries copy_probes.sh, the copy_probes word on a host whose site containers a copy's security
  *                 check probes (specs/site_copy_final_test.md, the rig)
@@ -205,6 +207,10 @@ class SupportBundlePublisher {
 		// install_security_updates (agent 1.87.0): a Docker host needs its
 		// fixes the day they ship as much as a site does. Sources nothing.
 		'maintenance_scripts/sysadmin_tools/install_security_updates.sh',
+		// The hourly look for security fixes (fleet_security_patching WP1):
+		// host_housekeeping.sh installs its timer on every machine, a Docker
+		// host included; it runs site_refresh.sh check there (listed below).
+		'maintenance_scripts/sysadmin_tools/security_check.sh',
 		// restart_unit and restart_container: the repairs of service_health
 		// and container_health. A Docker host runs its site containers and its
 		// own fail2ban and cron; both scripts source nothing.
@@ -224,7 +230,7 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.source',
 		// The site containers replaced when Ubuntu ships a fix
 		// (specs/multi_tenant_host_hardening.md D9): site_refresh.sh, run by
-		// the timer host_housekeeping.sh installs on an engine host, builds the
+		// the timer host_housekeeping.sh installs on a container host, builds the
 		// base from install.sh and Dockerfile.base; recreate_site.sh, run by
 		// it and by the recreate_site word, builds a site's image from
 		// Dockerfile.template, the start command and the vhost template. Both

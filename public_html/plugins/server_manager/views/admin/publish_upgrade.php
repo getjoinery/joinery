@@ -11,6 +11,8 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.15 - the changed agent words with no recorded run on a real machine are listed, and a publish of them
+ *                needs the Publish these without a live run box (AgentLiveProofs; fleet_security_patching WP7, Q5)
  * @version 1.14 - the Auto-notes button comes from ReleaseNotesDrafter::buttonHtml(), shared with the node page
  * @version 1.13 - Auto-notes: a button drafts the release notes with joinery_ai (ReleaseNotesDrafter)
  * @version 1.12 - the form is not offered while the core or agent repository has uncommitted work, with the files named;
@@ -165,6 +167,11 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 			}
 			if (($blocked = AgentDistPublisher::uncommittedAdvice()['lines'])) {
 				throw new Exception('Commit and push first. ' . implode(' ', $blocked));
+			}
+			// A changed agent word that has never run on a real machine ships only
+			// when the publisher says so (fleet_security_patching WP7, Q5).
+			if (AgentLiveProofs::publish_warnings() && empty($_POST['live_proof_ack'])) {
+				throw new Exception('This release changes agent words that have not run on a real machine. Tick the box that says you are publishing them anyway, or record their live run first.');
 			}
 			$built = JobCommandBuilder::build_publish_upgrade($self, $params);
 		} catch (Exception $e) {
@@ -537,6 +544,23 @@ $formwriter->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
 	'checked'  => false,
 	'helptext' => $deploy_help,
 ]);
+// The changed agent words with no recorded run on a real machine (WP7, Q5): a
+// root process the fleet runs on this plane's say-so, shipped untried only
+// when the publisher says so.
+$unproven = AgentLiveProofs::publish_warnings();
+if ($unproven) {
+	echo '<div class="jy-callout jy-callout-warning"><strong>Agent words that have not run on a real machine.</strong> '
+		. 'Each runs as root on the fleet. A gate stubs what a machine runs, and install_security_updates once passed its gate and waited ten minutes on every real machine. '
+		. 'Run each on a test server, then record it with <code>php maintenance_scripts/dev_tools/record_live_proof.php WORD --where=... --what=...</code>.<ul class="mb-0">';
+	foreach ($unproven as $word => $why) {
+		echo '<li><code>' . htmlspecialchars($word) . '</code>: ' . htmlspecialchars($why) . '</li>';
+	}
+	echo '</ul></div>';
+	$formwriter->checkboxinput('live_proof_ack', 'Publish these without a live run', [
+		'checked'  => false,
+		'helptext' => 'The publish is refused unless this is ticked while the list above is not empty.',
+	]);
+}
 $formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
 $formwriter->end_form();
 }
