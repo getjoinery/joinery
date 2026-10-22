@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.95",
+  "version": "1.30.96",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -43,6 +43,12 @@
           "slug": "server-manager-incidents",
           "title": "Incidents",
           "url": "/admin/server_manager/incidents",
+          "order": 2
+        },
+        {
+          "slug": "server-manager-fleet-security",
+          "title": "Fleet Security",
+          "url": "/admin/server_manager/fleet_security",
           "order": 2
         },
         {

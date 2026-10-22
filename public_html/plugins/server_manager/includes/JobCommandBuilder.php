@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.137 - build_refresh_site_containers(): the refresh_site_containers word (agent 1.88.0+), a container
+ *                  host's nightly replacement of its site containers started now (fleet_security_patching WP4)
  * @version 1.136 - build_install_security_updates(): the install_security_updates word (agent 1.87.0+), the nightly
  *                  security updates installed now, so a fix for a hole being attacked need not wait for the morning run
  * @version 1.135 - build_site_state_report(): the site_state_report word (agent 1.86.0+), what every site state
@@ -3176,6 +3178,26 @@ class JobCommandBuilder {
 
 	public static function build_install_security_updates_primitive($node) {
 		return ['primitive' => 'install_security_updates', 'params' => []];
+	}
+
+	/**
+	 * Start a container host's nightly replacement of its site containers now
+	 * (agent 1.88.0): the base checked, built fresh when Ubuntu has a fix for
+	 * it, then each due site replaced one at a time. PRIMITIVE ONLY, no
+	 * parameters: which sites are due is the host's own reading. The job ends
+	 * once the run has started; the host report says what it did.
+	 */
+	public static function build_refresh_site_containers($node) {
+		if (!self::has_primitive($node, 'refresh_site_containers')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be asked to refresh its site containers. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['refresh_site_containers']));
+		}
+		return self::build_refresh_site_containers_primitive($node);
+	}
+
+	public static function build_refresh_site_containers_primitive($node) {
+		return ['primitive' => 'refresh_site_containers', 'params' => []];
 	}
 
 	/**

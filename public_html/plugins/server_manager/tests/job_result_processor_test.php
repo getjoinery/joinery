@@ -355,6 +355,25 @@ check($node->get('mgn_joinery_version') === '2.14.3',
 	'a failed poll leaves the previously known version in place',
 	var_export($node->get('mgn_joinery_version'), true));
 
+// The PHP a node runs, and whether old code still serves (agent 1.88.0, fleet_security_patching WP1).
+$php_job = jrp_job($node, 'check_status', "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'joinery_version' => '2.14.3', 'disk_usage_percent' => 30,
+	'php' => array(
+		'packages' => array(array('name' => 'php8.5-fpm', 'version' => '8.5.4-0ubuntu1.3'), array('name' => '<b>', 'version' => '1'), 'junk'),
+		'fpm' => array(array('binary' => '/usr/sbin/php-fpm8.5', 'running_current' => false, 'started_at' => 1761000500, 'oldest_worker_started_at' => 1761000600),
+			array('binary' => '/usr/sbin/php-fpm8.3;rm', 'running_current' => 'yes')),
+	)))));
+JobResultProcessor::process($php_job);
+$node->load();
+$stored = $node->get('mgn_last_status_data');
+if (is_string($stored)) { $stored = json_decode($stored, true); }
+check(($stored['php']['packages'] ?? null) == array(array('name' => 'php8.5-fpm', 'version' => '8.5.4-0ubuntu1.3', 'installed_at' => 'unknown'))
+		&& $stored['php']['fpm'][0] == array('binary' => '/usr/sbin/php-fpm8.5', 'running_current' => false, 'started_at' => 1761000500, 'oldest_worker_started_at' => 1761000600)
+		&& $stored['php']['fpm'][0]['running_current'] === false,
+	'php is stored: each package with its version, each php-fpm with whether it runs the installed binary', var_export($stored['php'] ?? null, true));
+check($stored['php']['fpm'][1]['binary'] === '' && $stored['php']['fpm'][1]['running_current'] === null,
+	'a path that is not a path is dropped, and a running_current that is not true or false is null (unknown), never true');
+
 // ---------------------------------------------------------------------------
 section('host_report: root_ssh keeps fingerprints, and carries only well-formed bare keys (WP15)');
 $wp15_fp = 'SHA256:' . str_repeat('A', 43);
@@ -450,12 +469,12 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 32 && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
+check(!isset($capped['surprise']) && count($capped) === 34 && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
 	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
 	&& array_key_exists('hardening', $capped) && array_key_exists('site_refresh', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening, site_refresh, sites among them)', var_export(array_keys($capped), true));
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening, site_refresh, security_pending, services_needing_restart, sites among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -627,6 +646,30 @@ check(is_array($sr) && $sr['pending_security'] === 9 && $sr['base_due'] === 'fix
 		&& $sr['holds'][0]['site'] === 'sb' && $sr['holds'][0]['outcome'] === 'rolled_back' && $sr['scheduled'] === true && $sr['checked_ok_at'] === '2026-10-17T01:40:00Z',
 	'site_refresh keeps its check, its run, each site replaced and passed over, the hold and the timer', json_encode($sr));
 check($srf($sr) === $sr, 'site_refresh reads back the same from a stored report');
+// The security fixes waiting and what runs replaced code (host_report 1.37, fleet_security_patching WP1).
+$spf = function ($r) { return JobResultProcessor::sanitise_host_report(array('security_pending' => $r))['security_pending']; };
+$sp_in = array('installed_at' => '2026-10-22T00:00:00Z', 'checked_at' => '2026-10-22T13:50:00Z', 'checked_ok_at' => '2026-10-22T13:50:00Z',
+	'check' => 'ok', 'check_error' => '', 'lists_at' => '2026-10-22T13:49:00Z', 'lists_error' => '', 'pending' => 2, 'critical' => 1,
+	'packages' => array(array('package' => 'php8.3-fpm', 'installed' => '8.3.6-0ubuntu0.24.04.12', 'candidate' => '1:8.3.6~rc1+x', 'critical' => true),
+		array('package' => 'curl', 'installed' => 'none', 'candidate' => '8.5.0', 'critical' => false)),
+	'scheduled' => true);
+$sp = $spf($sp_in);
+check(is_array($sp) && $sp['pending'] === 2 && $sp['critical'] === 1 && $sp['packages'][0]['candidate'] === '1:8.3.6~rc1+x' && $sp['packages'][0]['critical'] === true
+		&& $sp['scheduled'] === true && $spf($sp) === $sp,
+	'security_pending keeps its counts, each package with its versions (an epoch, a tilde, a plus) and whether critical; reads back the same', json_encode($sp));
+$spb = $spf(array_merge($sp_in, array('check' => 'maybe', 'checked_at' => 'now', 'packages' => array(array('package' => 'a b'), array('package' => 'x', 'critical' => 'yes')))));
+check($spb['check'] === '' && $spb['checked_at'] === '' && count($spb['packages']) === 1 && $spb['packages'][0]['critical'] === false,
+	'security_pending: a word off its list or a time not its shape is empty; a name not a package\'s is dropped; critical only when literally true', json_encode($spb));
+check($spf('none') === 'none' && $spf(7) === 'unknown' && JobResultProcessor::sanitise_host_report(array())['security_pending'] === null,
+	'security_pending: none where it never ran, unknown for anything not its shape, null from an older node');
+$nr = JobResultProcessor::sanitise_host_report(array('services_needing_restart' => array('source' => 'needrestart', 'services' => array('php8.3-fpm.service', 'a b;c', 7))))['services_needing_restart'];
+check($nr === array('source' => 'needrestart', 'services' => array('php8.3-fpm.service')), 'services_needing_restart keeps its source and the names that are names', json_encode($nr));
+check(JobResultProcessor::sanitise_host_report(array('services_needing_restart' => 'unknown'))['services_needing_restart'] === 'unknown'
+		&& JobResultProcessor::sanitise_host_report(array())['services_needing_restart'] === null,
+	'services_needing_restart: unknown when the node could not tell, null from an older node');
+check($sr['running'] === false && $srf(array_merge($sr_in, array('running' => true)))['running'] === true
+		&& $srf(array_merge($sr_in, array('running' => 'yes')))['running'] === false,
+	'site_refresh.running (host_report 1.36): true only when the report says literally true; absent is false');
 $bad = $srf(array_merge($sr_in, array('checked_at' => 'yesterday', 'base_due' => 'always', 'run' => 'rm -rf', 'base_id' => 'zz',
 	'security_packages' => array('curl', '-o evil', array('x')), 'replaced' => array(array('site' => '../x', 'down_seconds' => 1), array('site' => 'sa', 'down_seconds' => 'fast')),
 	'passed_over' => array(array('site' => 'sb', 'why' => 'tired'), array('site' => 'sc', 'why' => 'timed_out')),
@@ -2047,12 +2090,64 @@ section('install_security_updates (agent 1.87.0): what was installed, and a host
 		&& $h['upgraded_count'] === 1,
 		'names and versions are reduced to a package\'s characters; a row with no package is dropped; a bad count is the list\'s', var_export($h, true));
 
+	$rl = jrp_job($su_node, 'install_security_updates', $su_envelope($su_object(array(
+		'repaired' => true, 'reloaded' => array('php-fpm8.5', '<x>'), 'still_on_old_code' => array('php-fpm8.3')))));
+	JobResultProcessor::process($rl);
+	$rlr = json_decode((string)$rl->get('mjb_result'), true);
+	check($rlr['repaired'] === true && $rlr['reloaded'] === array('php-fpm8.5', 'x') && $rlr['still_on_old_code'] === array('php-fpm8.3'),
+		'1.2: a half-done run finished, the php-fpm reloaded and the one still on old code are kept', var_export($rlr, true));
+	check($r['reloaded'] === null && $r['still_on_old_code'] === null && $r['repaired'] === false,
+		'an older script\'s result (no such keys): reloaded and still_on_old_code null (not reported), repaired false');
+
 	$unread = jrp_job($su_node, 'install_security_updates', "=== [Step 1/1] word ===\nrefused\n");
 	JobResultProcessor::process($unread);
 	check(json_decode((string)$unread->get('mjb_result'), true) === array('read' => false),
 		'a job that came back with no object records read=false');
 	check(in_array('install_security_updates', JobResultProcessor::processable_types(), true),
 		'install_security_updates is a type this processor knows');
+}
+
+section('refresh_site_containers (agent 1.88.0): the run started, and a host report behind it');
+
+{
+	$rf_node = jrp_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,refresh_site_containers',
+	));
+	$rf_envelope = function ($line) {
+		return "=== [Step 1/1] word ===\n" . json_encode(array(
+			'api_version' => '1.0',
+			'data' => array('output' => $line . "\n", 'output_bytes' => strlen($line) + 1),
+		));
+	};
+	$rf_reports = function () use ($rf_node) {
+		$n = 0;
+		foreach (new MultiManagementJob(array('node_id' => (int)$rf_node->key, 'job_type' => 'host_report')) as $j) {
+			harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+			$n++;
+		}
+		return $n;
+	};
+	$rf_job = jrp_job($rf_node, 'refresh_site_containers', $rf_envelope('site_refresh: a run has started; the host report shows what it did when it ends'));
+	JobResultProcessor::process($rf_job);
+	$r = json_decode((string)$rf_job->get('mjb_result'), true);
+	check(is_array($r) && $r['read'] === true && $r['started'] === true && strpos($r['said'], 'a run has started') !== false,
+		'a run started reads as started, with the host\'s line', var_export($r, true));
+	check($rf_reports() === 1, 'a run started queues one host report, so the node page shows it under way');
+	$again = jrp_job($rf_node, 'refresh_site_containers', $rf_envelope('site_refresh: a run is already under way'));
+	JobResultProcessor::process($again);
+	check(json_decode((string)$again->get('mjb_result'), true)['started'] === true && $rf_reports() === 1,
+		'a run already under way counts as started, and a report queued a moment ago is not queued again');
+	$hostile = jrp_job($rf_node, 'refresh_site_containers', $rf_envelope('<script>x</script> "q"'));
+	JobResultProcessor::process($hostile);
+	$h = json_decode((string)$hostile->get('mjb_result'), true);
+	check($h['started'] === false && $h['said'] === 'scriptx/script q', 'any other line is not started, and is reduced to text', var_export($h, true));
+	$unread = jrp_job($rf_node, 'refresh_site_containers', "=== [Step 1/1] word ===\nrefused\n");
+	JobResultProcessor::process($unread);
+	check(json_decode((string)$unread->get('mjb_result'), true)['read'] === false, 'a job that came back with no output records read=false');
+	check(in_array('refresh_site_containers', JobResultProcessor::processable_types(), true),
+		'refresh_site_containers is a type this processor knows');
 }
 
 

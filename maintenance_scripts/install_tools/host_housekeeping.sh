@@ -4,6 +4,12 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.27 - Every machine installs the hourly security check (security_check.sh install:
+#                joinery-security-check.timer), which records the security fixes it is waiting for
+#                (fleet_security_patching.md WP1, Q3).
+# Version: 1.26 - The nightly replacement of site containers is installed on a Docker host too, not only on
+#                one with the site container engine: docker-prod's six sites were never patched
+#                (fleet_security_patching.md WP4, B10).
 # Version: 1.25 - The pinned kernel and network settings are written into UFW's own sysctl file too, which
 #                set log_martians back to 0 at every firewall start (every boot) until the next converger run
 # Version: 1.24 - Every run drops any forwarder past its end (trust_forwarder.sh expire), so a trust a
@@ -999,18 +1005,35 @@ fi
 
 # --- 10c. Site containers are replaced when Ubuntu ships a fix -------------
 # A site container's OS is its image's, and nothing inside it installs a fix.
-# On a host with the site container engine a nightly timer asks a throwaway
-# container of the base whether Ubuntu has a security fix for it, builds the
-# base fresh when it has, and replaces each site's container one at a time
-# (site_refresh.sh). Every run writes the timer where it differs; a tree that is
-# not root's alone is refused, since the timer runs it as root.
+# On a container host (the site container engine, or Docker) a nightly timer
+# asks a throwaway container of the base whether Ubuntu has a security fix for
+# it, builds the base fresh when it has, and replaces each site's container one
+# at a time (site_refresh.sh). Every run writes the timer where it differs; a
+# tree that is not root's alone is refused, since the timer runs it as root.
 SRF="${SCRIPT_DIR}/site_refresh.sh"
 if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SRF}" ]] \
-        && [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]]; then
+        && { [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]] || command -v docker > /dev/null 2>&1; }; then
     if SRF_OUT="$(bash "${SRF}" install 2>&1)"; then
         printf '%s\n' "${SRF_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
     else
         warn "the nightly replacement of site containers: $(printf '%s' "${SRF_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    fi
+fi
+
+# --- 10d. Security fixes are looked for every hour ---------------------------
+# Every machine (a server, a container host) records each hour which security
+# fixes it is waiting for, with the package lists refreshed first: an hourly
+# timer (security_check.sh), whose state the host report carries. The lists
+# apt keeps are otherwise fetched twice a day, so a fix Ubuntu ships in the
+# afternoon was not known of until the next morning. Written where it
+# differs; a tree that is not root's alone is refused, as for 10c.
+SCK="${SCRIPT_DIR}/../sysadmin_tools/security_check.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
+    if SCK_OUT="$(bash "${SCK}" install 2>&1)"; then
+        printf '%s\n' "${SCK_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
+    else
+        warn "the hourly security check: $(printf '%s' "${SCK_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
     fi
 fi

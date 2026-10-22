@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.10 - plane:site_refresh: a host running site containers with no nightly timer on (fleet_security_patching WP4)
  * @version 1.9 - plane:site_refresh: a site left down by a container replacement (critical), one rolled back, a
  *                base that did not build, or an engine host with no passing check for two days (multi_tenant_host_hardening D9)
  * @version 1.8 - plane:site_code_unverified: a site whose only failure is wrong_release is a warning to upgrade;
@@ -79,7 +80,8 @@ foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped'
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
 	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified',
-	'plane:cloud_account_key', 'plane:kernel_warning', 'plane:kernel_settings', 'plane:site_refresh') as $want) {
+	'plane:cloud_account_key', 'plane:kernel_warning', 'plane:kernel_settings', 'plane:site_refresh',
+	'plane:security_fix_pending', 'plane:old_code_serving') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
@@ -214,6 +216,92 @@ $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(ar
 check($srs->evaluate($node, $now) === null, 'Never ran (not an engine host): nothing');
 $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
 check($srs->evaluate($node, $now) === null, 'A report from before the field: nothing');
+// A host that runs site containers and no timer (docker-prod before WP4, B10).
+$two_sites = array(array('name' => 'phillyzouk', 'state' => 'running'), array('name' => 'scrolldaddy', 'state' => 'running'));
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('site_refresh' => 'none', 'containers' => $two_sites))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && strpos($v['title'], 'nightly timer is not on') !== false
+	&& $v['detail']['Sites'] === 'phillyzouk, scrolldaddy',
+	'Site containers and no check ever run: a warning naming them (docker-prod before WP4)', json_encode($v));
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('site_refresh' => array_merge(
+	JobResultProcessor::sanitise_host_report(array('site_refresh' => array('scheduled' => false)))['site_refresh']), 'containers' => $two_sites))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && strpos($v['title'], 'nightly timer is not on') !== false, 'Site containers and the timer switched off: the same warning', json_encode($v));
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('containers' => $two_sites))));
+check($srs->evaluate($node, $now) === null, 'A report from before the field, with containers: nothing (it does not say)');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('site_refresh' => 'none', 'containers' => 'none'))));
+check($srs->evaluate($node, $now) === null, 'No timer and no site containers (a bare-metal machine): nothing');
+
+// ---------------------------------------------------------------------------
+section('A security fix waiting past its time (WP6)');
+
+$sfp = new IncidentSourceSecurityFixPending();
+$now = strtotime('2026-10-22T14:00:00Z');
+$sp = function (array $packages, array $over = array()) {
+	return JobResultProcessor::sanitise_host_report(array('security_pending' => array_merge(array(
+		'installed_at' => '2026-10-20T00:00:00Z', 'checked_at' => '2026-10-22T13:50:00Z', 'checked_ok_at' => '2026-10-22T13:50:00Z',
+		'check' => 'ok', 'check_error' => '', 'lists_at' => '2026-10-22T13:49:00Z', 'lists_error' => '',
+		'at_once_at' => '2026-10-22T13:20:00Z', 'at_once_outcome' => 'failed', 'at_once_refresh_at' => '',
+		'pending' => count($packages), 'critical' => 0, 'packages' => $packages, 'scheduled' => true), $over)));
+};
+$pkg = function ($name, $critical, $first) { return array('package' => $name, 'installed' => '1', 'candidate' => '2', 'critical' => $critical, 'first_seen' => $first); };
+$set(array('mgn_last_host_report' => $sp(array($pkg('php8.3-fpm', true, '2026-10-22T13:30:00Z'), $pkg('curl', false, '2026-10-22T02:00:00Z')))));
+check($sfp->evaluate($node, $now) === null, 'a critical fix seen half an hour ago and another fix twelve hours ago: nothing yet');
+$set(array('mgn_last_host_report' => $sp(array($pkg('php8.3-fpm', true, '2026-10-22T12:30:00Z')))));
+$v = $sfp->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['detail']['Waiting'], 'php8.3-fpm 2 (waiting since 2026-10-22T12:30:00Z)') === 0
+	&& strpos($v['detail']['What'], 'installed at once at 2026-10-22T13:20:00Z: failed') !== false,
+	'a critical fix waiting an hour and a half: critical, with the at-once install\'s outcome', json_encode($v));
+$set(array('mgn_last_host_report' => $sp(array($pkg('linux-image-6.8.0-90-generic', true, '2026-10-22T11:00:00Z')))));
+check($sfp->evaluate($node, $now) === null, 'the kernel, waiting three hours: nothing (the night installs it; nothing acts sooner)');
+$set(array('mgn_last_host_report' => $sp(array($pkg('linux-image-6.8.0-90-generic', true, '2026-10-19T00:00:00Z')))));
+$v = $sfp->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && strpos($v['detail']['Waiting'], 'linux-image') === 0,
+	'the kernel package still waiting after days: the nightly run failed (a full /boot), a warning (reviewer2 G3)', json_encode($v));
+$set(array('mgn_last_host_report' => $sp(array($pkg('curl', false, '2026-10-21T08:00:00Z')))));
+$v = $sfp->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && strpos($v['title'], 'waited over a day') !== false, 'any fix waiting thirty hours: a warning', json_encode($v));
+$set(array('mgn_last_host_report' => $sp(array(), array('checked_ok_at' => '2026-10-22T09:00:00Z', 'check' => 'failed', 'check_error' => 'the simulated upgrade failed'))));
+$v = $sfp->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && strpos($v['detail']['What'], 'the simulated upgrade failed') !== false,
+	'no check passed in five hours: a warning with the last failure', json_encode($v));
+$set(array('mgn_last_host_report' => $sp(array(), array('checked_ok_at' => '2026-10-22T09:00:00Z', 'scheduled' => false))));
+check($sfp->evaluate($node, $now) === null, 'an old check where the hourly check is off: nothing here');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('security_pending' => 'none'))));
+check($sfp->evaluate($node, $now) === null, 'no check ever ran (a node not on this release yet): nothing');
+
+// ---------------------------------------------------------------------------
+section('Old code still serving (WP6)');
+
+$ocs = new IncidentSourceOldCodeServing();
+$php = function ($current, $installed_at) {
+	return array('php' => array('packages' => array(array('name' => 'php8.5-fpm', 'version' => '8.5.4-0ubuntu1.5', 'installed_at' => $installed_at)),
+		'fpm' => array(array('binary' => '/usr/sbin/php-fpm8.5', 'running_current' => $current, 'started_at' => 1761000000))));
+};
+$set(array('mgn_last_host_report' => null, 'mgn_last_status_data' => $php(false, $now - 3600)));
+$v = $ocs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'php-fpm8.5') !== false,
+	'a php-fpm on a binary replaced an hour ago: critical', json_encode($v));
+$set(array('mgn_last_status_data' => $php(false, $now - 120)));
+check($ocs->evaluate($node, $now) === null, 'replaced two minutes ago (an install still reloading it): nothing yet');
+$set(array('mgn_last_status_data' => $php(true, $now - 3600)));
+check($ocs->evaluate($node, $now) === null, 'on the installed binary: nothing');
+$set(array('mgn_last_status_data' => null, 'mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array(
+	'unattended_upgrades_last_run' => $now - 7200,
+	'services_needing_restart' => array('source' => 'needrestart', 'services' => array('dbus.service', 'apache2.service'))))));
+$v = $ocs->evaluate($node, $now);
+check($v !== null && $v['detail']['What'] === 'apache2.service', 'needrestart naming Apache: critical; dbus (no site serves it) is not named', json_encode($v));
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array(
+	'unattended_upgrades_last_run' => $now - 60,
+	'services_needing_restart' => array('source' => 'needrestart', 'services' => array('apache2.service'))))));
+check($ocs->evaluate($node, $now) === null, 'the automatic updates ran a minute ago: their own restarts still under way, nothing yet');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array(
+	'unattended_upgrades_last_run' => $now - 7200,
+	'services_needing_restart' => array('source' => 'proc', 'services' => array('/usr/sbin/php-fpm8.5', '/usr/lib/postgresql/17/bin/postgres', '/usr/sbin/cron'))))));
+$v = $ocs->evaluate($node, $now);
+check($v !== null && $v['detail']['What'] === '/usr/sbin/php-fpm8.5; /usr/lib/postgresql/17/bin/postgres',
+	'a machine without needrestart names binaries: PHP-FPM and PostgreSQL match, cron does not (reviewer2 d)', json_encode($v));
+$set(array('mgn_last_host_report' => null, 'mgn_last_status_data' => null));
 
 // ---------------------------------------------------------------------------
 section('Mail apps gateway');

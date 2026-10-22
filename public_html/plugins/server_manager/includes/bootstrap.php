@@ -13,6 +13,9 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.22 - plane:security_fix_pending (a critical fix waiting over an hour, any fix over a day, no check in
+ *                three hours) and plane:old_code_serving (php-fpm or a site service on replaced code)
+ *                (fleet_security_patching WP6)
  * @version 1.21 - plane:two_layers (a machine under our encryption and its provider's both, management nodes aside;
  *                 specs/site_copy_final_test.md E4)
  * @version 1.20 - plane:site_refresh: a host's nightly replacement of its site containers left a site down, was
@@ -51,7 +54,8 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceReleaseLogEntry', 'IncidentSourceReleaseLogTailBlind', 'IncidentSourceCustomerBackups',
 	'IncidentSourceDataRootLocked', 'IncidentSourceMailGateway', 'IncidentSourceSiteCodeUnverified',
 	'IncidentSourceCloudAccountKey', 'IncidentSourceDataRootStopped', 'IncidentSourceKernelWarning',
-	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers') as $incident_source) {
+	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers',
+	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // Incident analysis spends model tokens through joinery_ai; they count toward

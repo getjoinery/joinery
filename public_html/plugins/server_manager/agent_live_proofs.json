@@ -1,0 +1,4 @@
+{
+    "_about": "Agent words run once on a real machine before release (specs/fleet_security_patching.md WP7). Added with maintenance_scripts/dev_tools/record_live_proof.php; the publish page warns about a changed word with no row here.",
+    "proofs": []
+}

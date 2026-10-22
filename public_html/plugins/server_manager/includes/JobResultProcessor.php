@@ -5,6 +5,16 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.101 - security_pending carries each package's first_seen and the at-once install (WP6, Q2);
+ *                  check_status's php packages carry installed_at
+ * @version 1.100 - an install_security_updates result keeps repaired, reloaded and still_on_old_code
+ *                  (install_security_updates.sh 1.2; fleet_security_patching WP3)
+ * @version 1.99 - check_status's php (agent 1.88.0): the PHP packages and whether each php-fpm runs the binary
+ *                 installed; a host report's security_pending and services_needing_restart (host_report 1.37;
+ *                 fleet_security_patching WP1)
+ * @version 1.98 - process_refresh_site_containers (agent 1.88.0): whether the host's nightly replacement of its
+ *                 site containers started, and a host_report queued so the node page shows the run under way;
+ *                 a host report's site_refresh.running (host_report 1.36; fleet_security_patching WP4)
  * @version 1.97 - process_install_security_updates (agent 1.87.0): what the machine's updater installed, each package
  *                with its old and new version, and a host_report behind it so the Machine card shows the reboot it asks for
  * @version 1.96 - a site_state_report result (agent 1.86.0) is kept, each field held to its shape and a value
@@ -540,6 +550,10 @@ class JobResultProcessor {
 		// shape, as the dashboard reads it (specs/release_key_rotation.md R6).
 		if (array_key_exists('release_trust', $result)) {
 			$result['release_trust'] = self::status_release_trust($result['release_trust']);
+		}
+		// The PHP it runs, and whether old code still serves (agent 1.88.0).
+		if (array_key_exists('php', $result)) {
+			$result['php'] = self::status_php($result['php']);
 		}
 		$version     = $result['joinery_version'] ?? null;
 		$is_api_path = ($api_data !== null);
@@ -2856,6 +2870,17 @@ HTML;
 				if (is_string($sv) && $word($sv) !== '') { $services[] = $word($sv); }
 			}
 		}
+		// The php-fpm binaries reloaded after the run, and those still on old
+		// code (install_security_updates.sh 1.2): absent from an older script,
+		// kept null, which the page reads as not reported.
+		$names = function ($v) use ($word) {
+			if (!is_array($v)) { return null; }
+			$out = [];
+			foreach (array_slice(array_values($v), 0, 8) as $n) {
+				if (is_string($n) && $word($n) !== '') { $out[] = $word($n); }
+			}
+			return $out;
+		};
 		$outcome = in_array($d['outcome'], self::SECURITY_UPDATES_OUTCOMES, true) ? $d['outcome'] : 'unknown';
 		$count = is_int($d['upgraded_count'] ?? null) && $d['upgraded_count'] >= 0 ? $d['upgraded_count'] : count($packages);
 		return [
@@ -2869,6 +2894,9 @@ HTML;
 			'truncated'       => ($d['truncated'] ?? null) === true || count($listed) > self::SECURITY_UPDATES_MAX_LIST,
 			'reboot_required' => ($d['reboot_required'] ?? null) === true,
 			'services_needing_restart' => $services,
+			'repaired'          => ($d['repaired'] ?? null) === true,
+			'reloaded'          => $names($d['reloaded'] ?? null),
+			'still_on_old_code' => $names($d['still_on_old_code'] ?? null),
 		];
 	}
 
@@ -2897,6 +2925,36 @@ HTML;
 			} catch (Exception $e) {
 				// The updates are installed; not being able to re-measure is
 				// not a reason to call the run anything else.
+			}
+		}
+	}
+
+	/**
+	 * A refresh_site_containers job's result: whether the host started its
+	 * nightly replacement of its site containers (site_refresh.sh start), and
+	 * its one line. The run itself goes on under systemd; what it replaced is
+	 * in the host report. A run started, or one already under way, is followed
+	 * by a host_report, so the node page shows it running now.
+	 */
+	private static function process_refresh_site_containers($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$line = substr(preg_replace("#[^A-Za-z0-9 ,.:;/()_'=+@-]#", '', str_replace(array("\r", "\n"), ' ', trim($text))), 0, 300);
+		$started = (strpos($line, 'a run has started') !== false || strpos($line, 'already under way') !== false);
+		$job->set('mjb_result', json_encode(array('read' => $text !== '', 'started' => $started, 'said' => $line)));
+		$job->save();
+
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if ($started && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 60)) {
+					ManagementJob::createFromBuild($node_id, 'host_report',
+						JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The run has started; the next scheduled report shows it.
 			}
 		}
 	}
@@ -4077,6 +4135,10 @@ HTML;
 			'site_security'                => array_key_exists('site_security', $in) ? self::host_report_site_security($in['site_security']) : null,
 			// The nightly replacement of the host's site containers (host_report 1.31); null from an older node.
 			'site_refresh'                 => (array_key_exists('site_refresh', $in) && $in['site_refresh'] !== null) ? self::host_report_site_refresh($in['site_refresh']) : null,
+			// The security fixes the machine waits for, from its hourly check, and what still runs code an
+			// upgrade replaced (host_report 1.37); null from an older node.
+			'security_pending'             => (array_key_exists('security_pending', $in) && $in['security_pending'] !== null) ? self::host_report_security_pending($in['security_pending']) : null,
+			'services_needing_restart'     => (array_key_exists('services_needing_restart', $in) && $in['services_needing_restart'] !== null) ? self::host_report_services_needing_restart($in['services_needing_restart']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
 			// The mail apps gateway (host_report 1.20): none where it is not installed.
@@ -4660,7 +4722,99 @@ HTML;
 			'sites_due'         => self::host_report_count($in['sites_due'] ?? null),
 			'holds'             => $holds,
 			'scheduled'         => ($in['scheduled'] ?? false) === true,
+			'running'           => ($in['running'] ?? false) === true,
 		);
+	}
+
+	/** A package's name or version as Debian allows it, else empty. */
+	private static function package_word($v) {
+		return (is_string($v) && preg_match('/^[A-Za-z0-9.+:~-]{1,128}$/', $v)) ? $v : '';
+	}
+
+	/**
+	 * The security fixes a machine waits for, from its hourly check
+	 * (security_check.sh, host_report 1.37; fleet_security_patching WP1):
+	 * "none" where no check has run, "unknown" for anything not its shape.
+	 */
+	public static function host_report_security_pending($in) {
+		if ($in === 'none') { return 'none'; }
+		if (!is_array($in)) { return 'unknown'; }
+		$time = function ($v) {
+			return (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $v)) ? $v : '';
+		};
+		$text = function ($v) {
+			return is_string($v) ? substr(preg_replace("#[^A-Za-z0-9 ,.:;/()_'=+@-]#", '', $v), 0, 300) : '';
+		};
+		$packages = array();
+		foreach (array_slice(is_array($in['packages'] ?? null) ? $in['packages'] : array(), 0, 200) as $p) {
+			if (!is_array($p) || self::package_word($p['package'] ?? null) === '') { continue; }
+			$packages[] = array(
+				'package'    => self::package_word($p['package']),
+				'installed'  => self::package_word($p['installed'] ?? null),
+				'candidate'  => self::package_word($p['candidate'] ?? null),
+				'critical'   => ($p['critical'] ?? false) === true,
+				'first_seen' => $time($p['first_seen'] ?? null),
+			);
+		}
+		return array(
+			'installed_at'  => $time($in['installed_at'] ?? null),
+			'checked_at'    => $time($in['checked_at'] ?? null),
+			'checked_ok_at' => $time($in['checked_ok_at'] ?? null),
+			'check'         => (is_string($in['check'] ?? null) && in_array($in['check'], array('ok', 'failed'), true)) ? $in['check'] : '',
+			'check_error'   => $text($in['check_error'] ?? null),
+			'lists_at'      => $time($in['lists_at'] ?? null),
+			'lists_error'   => $text($in['lists_error'] ?? null),
+			// The at-once install of a critical fix (Q2), and a container host's
+			// replacement started for one: when, and the install's outcome.
+			'at_once_at'         => $time($in['at_once_at'] ?? null),
+			'at_once_outcome'    => (is_string($in['at_once_outcome'] ?? null) && preg_match('/^[a-z_]{1,32}$/', $in['at_once_outcome'])) ? $in['at_once_outcome'] : '',
+			'at_once_refresh_at' => $time($in['at_once_refresh_at'] ?? null),
+			'pending'       => self::host_report_count($in['pending'] ?? null),
+			'critical'      => self::host_report_count($in['critical'] ?? null),
+			'packages'      => $packages,
+			'scheduled'     => ($in['scheduled'] ?? false) === true,
+		);
+	}
+
+	/**
+	 * What still runs code an upgrade replaced on disk (host_report 1.37):
+	 * needrestart's services, or the binaries /proc names "(deleted)".
+	 */
+	public static function host_report_services_needing_restart($in) {
+		if (!is_array($in)) { return 'unknown'; }
+		$source = (is_string($in['source'] ?? null) && in_array($in['source'], array('needrestart', 'proc'), true)) ? $in['source'] : 'unknown';
+		$services = array();
+		foreach (array_slice(is_array($in['services'] ?? null) ? $in['services'] : array(), 0, self::HOST_REPORT_MAX_LIST) as $v) {
+			if (is_string($v) && preg_match('#^[A-Za-z0-9._@:/-]{1,200}$#', $v)) { $services[] = $v; }
+		}
+		return array('source' => $source, 'services' => $services);
+	}
+
+	/**
+	 * check_status's php (agent 1.88.0; fleet_security_patching WP1): the PHP
+	 * packages installed and each php-fpm master, whether it runs the binary
+	 * installed. running_current is null where the node could not tell.
+	 */
+	public static function status_php($in) {
+		if (!is_array($in)) { return null; }
+		$packages = array();
+		foreach (array_slice(is_array($in['packages'] ?? null) ? $in['packages'] : array(), 0, 20) as $p) {
+			if (!is_array($p) || self::package_word($p['name'] ?? null) === '') { continue; }
+			$packages[] = array('name' => self::package_word($p['name']), 'version' => self::package_word($p['version'] ?? null),
+				'installed_at' => self::host_report_count($p['installed_at'] ?? null));
+		}
+		$fpm = array();
+		foreach (array_slice(is_array($in['fpm'] ?? null) ? $in['fpm'] : array(), 0, 8) as $m) {
+			if (!is_array($m)) { continue; }
+			$current = $m['running_current'] ?? null;
+			$fpm[] = array(
+				'binary'                   => (is_string($m['binary'] ?? null) && preg_match('#^[A-Za-z0-9._/-]{1,200}$#', $m['binary'])) ? $m['binary'] : '',
+				'running_current'          => is_bool($current) ? $current : null,
+				'started_at'               => self::host_report_count($m['started_at'] ?? null),
+				'oldest_worker_started_at' => self::host_report_count($m['oldest_worker_started_at'] ?? null),
+			);
+		}
+		return array('packages' => $packages, 'fpm' => $fpm);
 	}
 
 	/**

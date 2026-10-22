@@ -2,8 +2,16 @@
 #
 # site_refresh.sh - replace this host's site containers when Ubuntu ships a
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
-# D9, B7).
+# D9, B7), on a site container engine host and on a Docker host alike.
 #
+# Version: 1.3 - Docker hosts too (fleet_security_patching.md WP4, B10): host housekeeping installs the
+#                timer wherever Docker runs sites, and a site Docker made before run specs is counted
+#                and replaced (recreate_site.sh 1.5 records its run spec first); a Docker host with no
+#                site builds no base. start runs the nightly service now, for the host agent's
+#                refresh_site_containers word (Refresh now on the host's node page). The check container's
+#                three capabilities are three flags: Docker refuses a comma list, which Podman takes
+#                (box proof: every Docker check failed, exit 125, so no fix was ever found there). A fresh
+#                base is checked in turn, so the state names what the new base waits for, not the old.
 # Version: 1.2 - A site is due as well when its container was made under another system call filter
 #                than the host's (joinery.seccomp, _site_run_spec.sh 1.17); the log names why each is
 #                replaced (multi_tenant_host_hardening WP3).
@@ -24,13 +32,15 @@
 # the official ubuntu image switches apt's daily run off. Everything a site
 # keeps is on volumes, so it is patched by replacing its container on a freshly
 # built image (recreate_site.sh). This decides when, nightly, from a systemd
-# timer host housekeeping installs on a site container engine host.
+# timer host housekeeping installs on every container host.
 #
 #   site_refresh.sh check          ask a throwaway container of the base what apt would install;
 #                                  record it; change nothing else
 #   site_refresh.sh run            check; on a security fix (or a base this tree would build
 #                                  differently) build the base fresh; then replace every due
 #                                  site, one at a time
+#   site_refresh.sh start          start the nightly service now and return (Refresh now); its
+#                                  outcome is in the state file, as a night's is
 #   site_refresh.sh status         the last check and run (the state file), and the holds
 #   site_refresh.sh clear [SITE]   lift the holds failed replacements placed, or one site's
 #   site_refresh.sh install        write and enable the timer (root, this tree root's own)
@@ -83,8 +93,8 @@ now()  { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # Text a state line can hold: one line, the characters a reason is made of.
 clean() { printf '%s' "$1" | tr '\n\t' '  ' | tr -cd "A-Za-z0-9 ,.:;/()_'=+@-" | cut -c1-300; }
 
-case "$CMD" in check|run|status|clear|install) ;; *)
-    echo "usage: site_refresh.sh check|run|status|clear [SITE]|install" >&2; exit 2 ;;
+case "$CMD" in check|run|start|status|clear|install) ;; *)
+    echo "usage: site_refresh.sh check|run|start|status|clear [SITE]|install" >&2; exit 2 ;;
 esac
 [ "$(id -u)" -eq 0 ] || [ -n "$TROOT" ] || die "run as root on the container host"
 
@@ -94,6 +104,26 @@ if [ "$CMD" = status ]; then
         [ -f "$f" ] || continue
         echo "--- held: $(basename "$f")"; cat "$f"
     done
+    exit 0
+fi
+# --- start: the nightly run, now ---------------------------------------------
+# The service the timer starts, so the run keeps its own bounds, lock and log,
+# and the caller (the host agent) does not wait for it. Only where the timer is
+# on: install turns it off for a tree that is not root's alone.
+if [ "$CMD" = start ]; then
+    # D-Bus restarts for a few seconds when an update replaces it (the hourly
+    # check's at-once install can), and a systemctl call in that window fails:
+    # each is tried three times, two seconds apart (reviewer2).
+    sctl() { local i; for i in 1 2 3; do systemctl "$@" && return 0; [ "$i" -lt 3 ] && sleep "${SITE_REFRESH_SYSTEMCTL_PAUSE:-2}"; done; return 1; }
+    [ -f "${UNIT_DIR}/joinery-site-refresh.service" ] \
+        || die "the nightly replacement is not installed on this host; host housekeeping installs it on a container host"
+    sctl is-enabled --quiet joinery-site-refresh.timer 2> /dev/null \
+        || die "the nightly replacement's timer is off on this host (site_refresh.sh install says why), or systemd did not answer in three tries; nothing was started"
+    if [ "$(sctl show -p ActiveState --value joinery-site-refresh.service 2> /dev/null)" = activating ]; then
+        say "a run is already under way"; exit 0
+    fi
+    sctl start --no-block joinery-site-refresh.service || die "the run could not be started: systemd refused it three times"
+    say "a run has started; the host report shows what it did when it ends"
     exit 0
 fi
 if [ "$CMD" = clear ]; then
@@ -262,7 +292,7 @@ do_check() {
         return 0
     fi
     out="$(timeout --kill-after=10 "$CHECK_TIMEOUT" "$ENGINE" run --rm --memory 512m --pids-limit 512 \
-        --cap-drop=ALL --cap-add=CHOWN,DAC_OVERRIDE,FOWNER --security-opt=no-new-privileges --entrypoint bash "$BASE_REF" -c \
+        --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --entrypoint bash "$BASE_REF" -c \
         'A="-o APT::Sandbox::User=root"; apt-get $A update -qq > /dev/null 2>&1 || { echo "UPDATE_FAILED"; exit 0; }; apt-get $A -s -q full-upgrade 2> /dev/null | grep "^Inst " || true' 2>&1 < /dev/null)"
     rc=$?
     if [ "$rc" -ne 0 ] || grep -q '^UPDATE_FAILED' <<< "$out"; then
@@ -291,12 +321,19 @@ do_check() {
     return 0
 }
 
-# The sites on this host: running containers with a run spec. Prints one name a line.
+# The sites on this host: running containers with a run spec, and on Docker a
+# site made before run specs (its SITENAME is its name), whose replacement
+# records one. Prints one name a line.
 host_sites() {
     local c
     while IFS= read -r c; do
         [[ "$c" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || continue
-        run_spec_exists "$c" || continue
+        if ! run_spec_exists "$c"; then
+            site_engine_is_podman && continue
+            # Stdin is /dev/null: it is this loop's list of containers.
+            site_engine inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2> /dev/null < /dev/null \
+                | grep -qx "SITENAME=${c}" || continue
+        fi
         printf '%s\n' "$c"
     done < <(site_engine ps --format '{{.Names}}' 2>/dev/null | sort)
 }
@@ -345,6 +382,10 @@ mkdir -p "${STATE_DIR}/logs" && chmod 700 "${STATE_DIR}/logs" || die "${STATE_DI
 # current base need no check, and are replaced.
 if ! do_check; then
     say "the check failed: ${S[check_error]}; replacing only the sites due on the current base"
+elif [ "${S[base_due]}" != "no" ] && ! site_engine_is_podman && [ -z "$(host_sites)" ]; then
+    # A Docker host with no site: nothing would run on a new base, and the
+    # next site installed builds what it needs.
+    say "no site container runs on this host; the base is not built (${S[base_due]})"
 elif [ "${S[base_due]}" != "no" ]; then
     graph="$(if site_engine_is_podman; then site_engine info --format '{{.Store.GraphRoot}}'; else site_engine info -f '{{.DockerRootDir}}'; fi 2>/dev/null)"
     free="$(df -B1 --output=avail "${graph:-/}" 2>/dev/null | tail -1 | tr -d ' ')"
@@ -371,6 +412,10 @@ elif [ "${S[base_due]}" != "no" ]; then
     fi
     read_base
     say "built ${BASE_REF} (${S[base_id]})"
+    # The new base is checked in turn, so the state says what it waits for,
+    # not what the old one did: a fixed fleet read as still waiting
+    # (se1, 2026-10-22: 15 PHP fixes shown after they were built in).
+    do_check || say "the new base could not be checked: ${S[check_error]}"
 fi
 [ -n "${BASE_ID_FULL:-}" ] || read_base
 

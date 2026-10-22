@@ -6,6 +6,17 @@
 # environment and its signed release manifest
 # (specs/multi_tenant_host_hardening.md D9).
 #
+# Version: 1.5 - A site Docker made before run specs (docker-prod's six) is no longer refused for having
+#                none: once it is known to be the site's own, its container's arguments are recorded as
+#                its run spec (run_spec_adopt, the step install.sh site takes), so the nightly
+#                replacement reaches it. On Docker a container whose image predates the health check
+#                (Docker says none) is judged by its answer alone, before the swap and on a rollback
+#                onto that image. Such a container's first process is a shell that a stop's TERM does
+#                not end (box proof: Docker waited 60 s and killed it, PostgreSQL with it): its
+#                PostgreSQL is stopped cleanly from inside first, then its Apache, so it ends on its
+#                own, with its restart policy taken off first (else Docker starts it again at once). The base is checked before a run spec is recorded (reviewer2 F1), and on Docker an
+#                image built now must carry a health check, so "none" is only ever an old image's
+#                (reviewer2 B) (fleet_security_patching.md WP4, B10).
 # Version: 1.4 - reviewer2 round 3: a builder working container is matched with its suffix too (buildah
 #                names a second one -working-container-1); a site left down with no container keeps its
 #                mark and environment file, so the next run (the Replace button) puts it back; a site
@@ -39,9 +50,12 @@
 # The order is build first: the new image is made while the site serves, and
 # the site is down only for stop, remove and run. What is checked before
 # anything stops, each a refusal that leaves the site exactly as it was: a run
-# spec (the container is made from it and from nothing else); not quiet, not
-# held, not being rebased; running, healthy and answering, and this site's own
-# (a site that fails now could not be judged after the swap); every volume its
+# spec (the container is made from it and from nothing else; a site Docker made
+# before run specs has its container's arguments recorded as one first, as
+# install.sh site does, and is refused when they hold what a spec cannot carry);
+# not quiet, not held, not being rebased; running, healthy and answering, and
+# this site's own (a site that fails now could not be judged after the swap; an
+# image built before the health check is judged by its answer); every volume its
 # spec mounts present and its code volume populated; a base image here whose
 # PostgreSQL opens the site's database; nothing busy inside (an upgrade, a
 # backup, a restore, a scheduled task: a short one is waited out for up to two
@@ -192,7 +206,16 @@ bounded() {
 }
 
 # --- what is checked before anything stops ----------------------------------
-run_spec_exists "$SITE" || refuse "${SITE} has no run spec on this host ($(run_spec_path "$SITE")); a container is only ever made from one. Rebuild it once with install.sh site"
+# A container Docker made before run specs has its arguments only in Docker's
+# record of it, and is adopted below, once it is known to be the site's own. On
+# the site engine every site was born from its spec.
+ADOPT=0
+if ! run_spec_exists "$SITE"; then
+    if site_engine_is_podman || ! site_engine inspect "$SITE" > /dev/null 2>&1; then
+        refuse "${SITE} has no run spec on this host ($(run_spec_path "$SITE")); a container is only ever made from one. Rebuild it once with install.sh site"
+    fi
+    ADOPT=1
+fi
 run_spec_quiet_refusal "$SITE" 2> /dev/null && refuse "${SITE} is quiet on this host (a dormant copy or a frozen source keeps its own state in its container)"
 [ -e "${SITE_ETC}/held" ] && refuse "${SITE} is held stopped (hold_container); start it first"
 case "$(grep '^stage=' "${TROOT}/root/rebase/${SITE}/state" 2>/dev/null | tail -1 | cut -d= -f2-)" in
@@ -227,6 +250,18 @@ fi
     || refuse "the container ${SITE} is not that site's own (its SITENAME is not ${SITE})"
 DOMAIN="$(sed -n 's/^DOMAIN_NAME=//p' <<< "$CONTAINER_ENV" | head -1)"
 [ -n "$DOMAIN" ] || refuse "the container ${SITE} names no DOMAIN_NAME"
+# The step install.sh site takes before it rebuilds such a site: its container's
+# arguments are written as its run spec, and anything a spec cannot carry is
+# refused by name, never dropped (run_spec_adopt).
+if [ "$ADOPT" -eq 1 ]; then
+    # The base first: a site adopted and then refused for want of one would
+    # have had a run spec written by a run that says nothing was changed
+    # (reviewer2 F1).
+    base_image_id > /dev/null || refuse "there is no joinery-base:${BASE_IMAGE_VERSION} on this host (install.sh build-base makes it)"
+    ADOPT_ERR="$(run_spec_adopt "$SITE" 2>&1 > /dev/null)" \
+        || refuse "${SITE} has no run spec, and its container could not be recorded as one: ${ADOPT_ERR#run spec: }"
+    say "recorded ${SITE}'s run spec from its container, which Docker made before run specs"
+fi
 
 while IFS= read -r v; do
     v="${v%%:*}"
@@ -261,7 +296,13 @@ healthy() {
     if site_engine_is_podman; then
         in_site 30 healthcheck run "$SITE" > /dev/null 2>&1 || return 1
     else
-        [ "$(site_engine inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$SITE" 2>/dev/null)" = "healthy" ] || return 1
+        # none: an image built before the health check (a site Docker made
+        # then, and its previous image on a rollback) has no check of its own,
+        # and its answer is its health. Every image built now has one.
+        case "$(site_engine inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$SITE" 2>/dev/null)" in
+            healthy|none) ;;
+            *) return 1 ;;
+        esac
     fi
 }
 down_seconds() {
@@ -284,6 +325,23 @@ wait_up() {
 remove_container() {
     local grace="${1:-60}"
     site_engine inspect "$SITE" > /dev/null 2>&1 || return 0
+    # A container made before the joinery start command (docker-prod's, from
+    # 2026-09) runs a shell as its first process, which a stop's TERM does not
+    # end: the stop waited out its grace and killed everything, PostgreSQL
+    # mid-write included. Its database is stopped from inside first, cleanly,
+    # then its web server, the shell's last command, so the shell ends; its
+    # restart policy is taken off first, or Docker would start it again the
+    # moment it ended (box proof: it did, and the stop then killed that one).
+    # A container that then cannot be removed keeps restart=no: the swap's
+    # caller starts it again and puts the policy back; the interrupted restore
+    # and the rollback leave it down and held, which no policy would change.
+    if ! site_engine_is_podman \
+            && [ "$(site_engine inspect -f '{{index .Config.Cmd 1}}' "$SITE" 2>/dev/null)" != "/usr/local/sbin/joinery-site-start" ] \
+            && [ "$(site_engine inspect -f '{{.State.Running}}' "$SITE" 2>/dev/null)" = "true" ]; then
+        $TMO 60 "$ENGINE" update --restart=no "$SITE" > /dev/null 2>&1 && RESTART_OFF=1
+        in_site 90 exec "$SITE" service postgresql stop > /dev/null 2>&1 < /dev/null
+        in_site 30 exec "$SITE" apache2ctl -k stop > /dev/null 2>&1 < /dev/null
+    fi
     $TMO $(( grace + 60 )) "$ENGINE" stop -t "$grace" "$SITE" > /dev/null 2>&1
     $TMO 60 "$ENGINE" rm -f "$SITE" > /dev/null 2>&1
     ! site_engine inspect "$SITE" > /dev/null 2>&1
@@ -506,6 +564,14 @@ fi
 QUIET_MODE=1
 LABEL="$(site_engine image inspect -f '{{index .Config.Labels "joinery.base_id"}}' "joinery-${SITE}:next" 2>/dev/null)"
 [ "$LABEL" = "$NEW_BASE" ] || { site_engine rmi "joinery-${SITE}:next" > /dev/null 2>&1; refuse "the image built for ${SITE} does not carry the base it was built on (label '${LABEL:0:16}', base ${NEW_BASE:0:12}): the base changed during the build"; }
+# On Docker a container whose image has no health check reads "none", which
+# healthy() takes from an image built before the check: an image built now
+# must carry one, so a new container can never pass on its answer alone.
+if ! site_engine_is_podman; then
+    HC="$(site_engine image inspect -f '{{if .Config.Healthcheck}}{{index .Config.Healthcheck.Test 0}}{{end}}' "joinery-${SITE}:next" 2>/dev/null)"
+    case "$HC" in ""|NONE) site_engine rmi "joinery-${SITE}:next" > /dev/null 2>&1
+        refuse "the image built for ${SITE} carries no health check: Dockerfile.template lost its HEALTHCHECK" ;; esac
+fi
 NEW_IMAGE="$(site_engine image inspect -f '{{.Id}}' "joinery-${SITE}:next" 2>/dev/null)"; NEW_IMAGE="${NEW_IMAGE#sha256:}"
 
 drop_next() { site_engine rmi "joinery-${SITE}:next" > /dev/null 2>&1; }
@@ -529,8 +595,10 @@ t_stop="$(date -u +%s.%N)"
 if ! remove_container; then
     REASON="the old container could not be removed"
     OUTCOME="refused"
-    # Still there: started again as it was.
+    # Still there: started again as it was, with its restart policy back
+    # (remove_container takes it off an old-start container).
     site_engine start "$SITE" > /dev/null 2>&1 8>&-
+    [ "${RESTART_OFF:-0}" -eq 1 ] && site_engine update --restart="$(run_spec_get "$SITE" restart)" "$SITE" > /dev/null 2>&1
     echo "recreate_site: ${REASON}; it was started again on its own image" >&2
     site_engine rmi "joinery-${SITE}:next" > /dev/null 2>&1
     result; exit 1

@@ -9,6 +9,12 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.79 - the security fixes a machine waits for and what still runs replaced code (host_report 1.37), and a PHP
+ *                card: the packages and whether each php-fpm runs the installed binary (check_status, agent 1.88.0)
+ *                (fleet_security_patching WP1), with Install security updates now on a site container (WP3)
+ * @version 1.78 - Refresh now (refresh_site_containers, agent 1.88.0) beside the site containers' OS line: the nightly
+ *                replacement started now; the line says when a run is under way, and on a host running site
+ *                containers that has never checked, says so (fleet_security_patching WP4)
  * @version 1.77 - Install security updates now (install_security_updates, agent 1.87.0) beside when they last ran
  * @version 1.76 - Site state records (site_state_report, agent 1.86.0) beside Listening ports under Machine
  * @version 1.75 - a site container being replaced says so; a Replace button replaces one on a fresh image now
@@ -202,7 +208,8 @@
 <?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
 	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine',
 	'nodeActionSiteStateReport' => 'site_state_report',
-	'nodeActionInstallSecurityUpdates' => 'install_security_updates'] as $form_id => $form_action) { ?>
+	'nodeActionInstallSecurityUpdates' => 'install_security_updates',
+	'nodeActionRefreshSiteContainers' => 'refresh_site_containers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="<?php echo $form_action; ?>">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -1647,6 +1654,27 @@
 			// The nightly replacement of the host's site containers (host_report 1.31): when it last
 			// checked Ubuntu for fixes to their OS, what its last run did, and a hold (plane:site_refresh).
 			$sr = $hr['site_refresh'] ?? null;
+			$sr_sites = is_array($hr['containers'] ?? null) && $hr['containers'];
+			// The run, asked for now (agent 1.88.0): on the day a fix for a hole
+			// being attacked ships, the sites need not wait for the night.
+			$sr_button = '';
+			$sr_need = '';
+			if ($sr_sites && is_array($sr) && $sr['scheduled'] && !$sr['running']) {
+				if (JobCommandBuilder::has_primitive($node, 'refresh_site_containers')) {
+					$sr_ask = 'Replace ' . (string)$node->get('mgn_name') . '\'s site containers now where Ubuntu has shipped a fix?'
+						. ' The host checks its base, builds it fresh when a fix is pending, then replaces each site not on it,'
+						. ' one at a time; each is down for about ten to twenty seconds. A site that does not come up is put back on its previous image.';
+					$sr_button = ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' title="Run the nightly replacement of this host\'s site containers now"'
+						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($sr_ask), ENT_QUOTES, 'UTF-8')
+						. ', function(){ document.getElementById(\'nodeActionRefreshSiteContainers\').submit(); })">Refresh now</button>';
+				} else {
+					$sr_need = AgentVocabulary::needs_newer_agent_html($node, ['refresh_site_containers']);
+				}
+			}
+			if ($sr === 'none' && $sr_sites) {
+				echo '<div class="mt-1 text-danger small">Site containers\' OS: never checked on this host. Its nightly timer was never installed, so nothing replaces its site containers when Ubuntu ships a fix.</div>';
+			}
 			if (is_array($sr)) {
 				$sr_bits = array();
 				if ($sr['checked_at'] !== '') {
@@ -1668,7 +1696,8 @@
 				}
 				if (is_int($sr['sites_due']) && $sr['sites_due'] > 0) { $sr_bits[] = $sr['sites_due'] . ' of ' . (is_int($sr['sites']) ? $sr['sites'] : '?') . ' sites due'; }
 				if (!$sr['scheduled']) { $sr_bits[] = 'the nightly timer is off'; }
-				echo '<div class="mt-1 text-muted small">Site containers\' OS: ' . $hr_str(implode('; ', $sr_bits)) . '</div>';
+				if ($sr['running']) { $sr_bits[] = 'a run is under way now'; }
+				echo '<div class="mt-1 text-muted small">Site containers\' OS: ' . $hr_str(implode('; ', $sr_bits)) . $sr_button . '</div>' . $sr_need;
 				foreach ($sr['holds'] as $h) {
 					echo '<div class="mt-1 text-danger small">Held: ' . $hr_str($h['site'] . ($h['outcome'] === 'down' ? ' was left down' : '\'s replacement was rolled back')
 						. ($h['at'] !== '' ? ' at ' . $h['at'] : '') . ($h['reason'] !== '' ? ': ' . $h['reason'] : '')
@@ -1796,6 +1825,35 @@
 					. ', function(){ document.getElementById(\'nodeActionInstallSecurityUpdates\').submit(); })">Install security updates now</button>';
 			}
 			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . $su_button . '</div>';
+			// The security fixes it waits for, from its hourly check, and what still runs code an update
+			// replaced (host_report 1.37; fleet_security_patching WP1).
+			$sp = $hr['security_pending'] ?? null;
+			if ($sp === 'none') {
+				echo '<div class="small text-muted">Security fixes waiting: not checked yet (the hourly check is installed by this release\'s host housekeeping)</div>';
+			} elseif (is_array($sp)) {
+				$sp_when = ($sp['checked_at'] !== '') ? $hr_when(strtotime($sp['checked_at'])) : 'not yet';
+				if ($sp['check'] === 'failed') {
+					echo '<div class="small text-warning">Security fixes waiting: the check ' . $hr_str($sp_when) . ' failed (' . $hr_str($sp['check_error']) . ')</div>';
+				} elseif ($sp['check'] === 'ok') {
+					$sp_critical = array();
+					foreach ($sp['packages'] as $p) {
+						if ($p['critical']) { $sp_critical[] = $p['package'] . ' ' . $p['candidate']; }
+					}
+					$sp_n = is_int($sp['pending']) ? $sp['pending'] : 0;
+					$sp_class = $sp_critical ? 'text-danger' : ($sp_n > 0 ? 'text-warning' : 'text-muted');
+					echo '<div class="small ' . $sp_class . '">Security fixes waiting: ' . (int)$sp_n
+						. ($sp_critical ? ' (' . count($sp_critical) . ' critical: ' . $hr_str(implode(', ', array_slice($sp_critical, 0, 6)) . (count($sp_critical) > 6 ? ', ...' : '')) . ')' : '')
+						. ', checked ' . $hr_str($sp_when)
+						. ($sp['at_once_at'] !== '' ? '; a critical fix last installed at once ' . $hr_str($hr_when(strtotime($sp['at_once_at'])))
+							. ($sp['at_once_outcome'] !== '' ? ' (' . $hr_str(str_replace('_', ' ', $sp['at_once_outcome'])) . ')' : '') : '')
+						. ($sp['lists_error'] !== '' ? '; ' . $hr_str($sp['lists_error']) : '')
+						. (!$sp['scheduled'] ? '; the hourly check is off' : '') . '</div>';
+				}
+			}
+			$snr = $hr['services_needing_restart'] ?? null;
+			if (is_array($snr) && $snr['services']) {
+				echo '<div class="small text-danger">Still running code an update replaced: ' . $hr_str(implode(', ', $snr['services'])) . '</div>';
+			}
 			if (is_array($hr['os'])) {
 				$ru = $hr['os']['release_upgrade'];
 				if ($ru['offered'] !== 'unknown') {
@@ -1942,6 +2000,44 @@
 			}
 			echo '</div></div>';
 		}
+		}
+
+		// The PHP the node runs, and whether old code still serves (check_status's php, agent 1.88.0;
+		// fleet_security_patching WP1): a php-fpm whose binary an update replaced keeps serving the old
+		// code until it is reloaded.
+		$php_sd = (is_array($status_data) && is_array($status_data['php'] ?? null)) ? JobResultProcessor::status_php($status_data['php']) : null;
+		if ($php_sd) {
+			echo '<div><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">PHP</div>';
+			$php_parts = array();
+			foreach ($php_sd['packages'] as $p) {
+				$php_parts[] = htmlspecialchars($p['name']) . ' <span class="text-muted">' . htmlspecialchars($p['version']) . '</span>';
+			}
+			echo '<div class="small mt-1">' . ($php_parts ? implode(' · ', $php_parts) : '<span class="text-muted">No PHP package reported</span>') . '</div>';
+			foreach ($php_sd['fpm'] as $m) {
+				$php_bin = htmlspecialchars($m['binary'] !== '' ? $m['binary'] : 'php-fpm');
+				if ($m['running_current'] === false) {
+					echo '<div class="mt-1"><span class="badge bg-danger">Old code serving</span> <span class="small">' . $php_bin
+						. ' was replaced by an update after it started' . (is_int($m['started_at']) ? ' (' . $hr_str($hr_when($m['started_at'])) . ')' : '')
+						. ' and has not been reloaded</span></div>';
+				} elseif ($m['running_current'] === true) {
+					echo '<div class="small text-muted mt-1">' . $php_bin . ' runs the installed binary</div>';
+				} else {
+					echo '<div class="small text-muted mt-1">' . $php_bin . ': whether it runs the installed binary could not be read</div>';
+				}
+			}
+			// A site container has no Machine card: its updates are offered here (WP3). What it
+			// installs lasts until its host replaces the container on a fresh base.
+			if ($is_container_site && JobCommandBuilder::has_primitive($node, 'install_security_updates')) {
+				$csu_ask = 'Install the security updates this site\'s container is waiting for, now?'
+					. ' PHP is reloaded afterwards without dropping a request. What is installed lasts until the host'
+					. ' replaces the container on a fresh base, which it does on its own the night a fix ships.';
+				echo '<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Run the container\'s automatic security updates now"'
+					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($csu_ask), ENT_QUOTES, 'UTF-8')
+					. ', function(){ document.getElementById(\'nodeActionInstallSecurityUpdates\').submit(); })">Install security updates now</button></div>';
+			}
+			echo '</div></div>';
 		}
 
 		echo '</div>'; // end .row

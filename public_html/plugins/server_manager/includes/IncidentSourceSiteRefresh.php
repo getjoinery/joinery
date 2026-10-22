@@ -14,11 +14,16 @@
  *     and waits; the host goes on with its other sites, and stops at a second
  *     site rolled back on the same base (warning);
  *   - a base image that could not be built, so pending fixes wait (warning);
+ *   - a host that runs site containers with no nightly timer on (never
+ *     installed, or switched off): nothing replaces them when a fix ships
+ *     (warning);
  *   - no check has passed for two days on a host whose timer is on: fixes are
  *     no longer being looked for (warning).
  *
  * Clears when a report shows none of these.
  *
+ * @version 1.1 - a host running site containers with no nightly timer on raises too: docker-prod's six were never
+ *                patched because its timer was never installed, and nothing said so (fleet_security_patching WP4, B10)
  * @version 1.0
  */
 class IncidentSourceSiteRefresh implements IncidentSource {
@@ -47,10 +52,32 @@ class IncidentSourceSiteRefresh implements IncidentSource {
 
 	const LOOK = 'on the host, as root: bash /opt/joinery-agent/tree/maintenance_scripts/install_tools/site_refresh.sh status; journalctl -u joinery-site-refresh; the logs in /var/lib/joinery/site-refresh/logs and /var/log/joinery/recreate';
 
+	/**
+	 * The site containers the host's last report lists, by name; empty where
+	 * it lists none, or could not read them.
+	 */
+	public static function site_containers(ManagedNode $node): array {
+		$report = $node->get('mgn_last_host_report');
+		if (is_string($report)) {
+			$report = json_decode($report, true);
+		}
+		if (!is_array($report)) {
+			return array();
+		}
+		$containers = JobResultProcessor::sanitise_host_report($report)['containers'] ?? null;
+		$names = array();
+		foreach (is_array($containers) ? $containers : array() as $c) {
+			$names[] = $c['name'];
+		}
+		return $names;
+	}
+
 	public function evaluate(ManagedNode $node, ?int $now = null): ?array {
 		$r = self::reading($node);
 		if ($r === null) {
-			return null;
+			// "none": no check has ever run here. A report from before the
+			// field says nothing either way.
+			return $this->not_scheduled($node, self::reading_is_none($node));
 		}
 		$now = $now ?? time();
 		// Holds on the base the host runs now: an older one's was lifted by
@@ -104,24 +131,56 @@ class IncidentSourceSiteRefresh implements IncidentSource {
 				),
 			);
 		}
-		if ($r['scheduled']) {
-			$since = $r['checked_ok_at'] !== '' ? $r['checked_ok_at'] : $r['installed_at'];
-			$t = $since !== '' ? strtotime($since) : false;
-			if ($t !== false && $now - $t > self::STALE_SECONDS) {
-				return array(
-					'title'    => 'No check for fixes to the site containers\' OS has passed since ' . $since,
-					'severity' => IncidentRecord::SEVERITY_WARNING,
-					'detail'   => array(
-						'What' => $r['check'] === 'failed' && $r['check_error'] !== ''
-							? 'The last check failed: ' . $r['check_error']
-							: 'The nightly timer has not run a check that passed.',
-						'Why'  => 'Fixes Ubuntu ships for the sites\' PHP, Apache, PostgreSQL and libraries are only installed by replacing their containers, which waits on the check.',
-						'Look' => self::LOOK,
-					),
-				);
-			}
+		if (!$r['scheduled']) {
+			return $this->not_scheduled($node, true);
+		}
+		$since = $r['checked_ok_at'] !== '' ? $r['checked_ok_at'] : $r['installed_at'];
+		$t = $since !== '' ? strtotime($since) : false;
+		if ($t !== false && $now - $t > self::STALE_SECONDS) {
+			return array(
+				'title'    => 'No check for fixes to the site containers\' OS has passed since ' . $since,
+				'severity' => IncidentRecord::SEVERITY_WARNING,
+				'detail'   => array(
+					'What' => $r['check'] === 'failed' && $r['check_error'] !== ''
+						? 'The last check failed: ' . $r['check_error']
+						: 'The nightly timer has not run a check that passed.',
+					'Why'  => 'Fixes Ubuntu ships for the sites\' PHP, Apache, PostgreSQL and libraries are only installed by replacing their containers, which waits on the check.',
+					'Look' => self::LOOK,
+				),
+			);
 		}
 		return null;
+	}
+
+	/** True where the host's last report says site_refresh "none": never run there. */
+	private static function reading_is_none(ManagedNode $node): bool {
+		$report = $node->get('mgn_last_host_report');
+		if (is_string($report)) {
+			$report = json_decode($report, true);
+		}
+		return is_array($report) && (JobResultProcessor::sanitise_host_report($report)['site_refresh'] ?? null) === 'none';
+	}
+
+	/**
+	 * A host running site containers whose nightly timer is not on: a warning
+	 * naming them, or nothing where it runs none ($applies false: a report
+	 * that does not say).
+	 */
+	private function not_scheduled(ManagedNode $node, bool $applies): ?array {
+		$sites = $applies ? self::site_containers($node) : array();
+		if (!$sites) {
+			return null;
+		}
+		return array(
+			'title'    => 'This host\'s site containers are not replaced when Ubuntu ships a fix: its nightly timer is not on',
+			'severity' => IncidentRecord::SEVERITY_WARNING,
+			'detail'   => array(
+				'Sites' => implode(', ', $sites),
+				'Why'   => 'A site container\'s PHP, Apache, PostgreSQL and libraries are its image\'s, and are only patched by replacing the container, which the nightly timer does.',
+				'Then'  => 'Host housekeeping installs the timer on every container host each minute; on the host, as root, site_refresh.sh install says why it is not on (a tree not root\'s alone stops it).',
+				'Look'  => self::LOOK,
+			),
+		);
 	}
 
 	public function cleared_text(ManagedNode $node): string {

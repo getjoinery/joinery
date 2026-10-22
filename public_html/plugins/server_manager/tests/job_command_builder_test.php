@@ -2709,6 +2709,30 @@ section('install_security_updates: the nightly security updates, now (agent 1.87
 	check(strpos($threw, 'update this node') !== false, 'building it for that node names the missing word and the fix', $threw);
 }
 
+section('refresh_site_containers: a container host\'s nightly replacement, now (agent 1.88.0)');
+
+{
+	$rf_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1e", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,refresh_site_containers',
+		'mgn_agent_log_access' => 'off',
+	));
+	$built = JobCommandBuilder::build_refresh_site_containers($rf_node);
+	check($built === array('primitive' => 'refresh_site_containers', 'params' => array()),
+		'refresh_site_containers travels as the name and nothing else: the host decides which sites are due', var_export($built, true));
+	check(JobCommandBuilder::transports_for('refresh_site_containers') === array('primitive'), 'its one transport is the primitive');
+	$rf_older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1f", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,recreate_site',
+	));
+	check(!JobCommandBuilder::has_primitive($rf_older, 'refresh_site_containers'), 'a host whose vocabulary lacks it is not offered it');
+	$threw = '';
+	try { JobCommandBuilder::build_refresh_site_containers($rf_older); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'update this node') !== false, 'building it for that host names the missing word and the fix', $threw);
+}
+
 section('reset_failed_unit: clear a failed unit from the same list (specs/disk_headroom_and_unit_diagnosis.md § 9)');
 
 {

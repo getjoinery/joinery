@@ -521,6 +521,12 @@ pass (`RunNodeUptimeChecks::watched_nodes()`) leave it alone, so no superadmin
 is told about a suite's node and no job is queued for one that the suite then
 deletes. A suite that wants either pass over its nodes calls it with them.
 
+### A stand-in models what a real machine runs
+
+A gate that stubs a system tool (`pgrep`, `systemctl`, `apt-get`, `docker`) answers as a stock Ubuntu machine would, never as an empty one. A stubbed process table holds what every machine runs: `systemd`, `cron`, the agent, and on Ubuntu `unattended-upgrade-shutdown --wait-for-signal`, whose process name is cut to `unattended-upgr`, the same as `unattended-upgrade`'s. A stub of an engine refuses what the real one refuses: Docker takes one capability per `--cap-add`, where Podman also takes a comma list. A stub that answers "nothing is running" or takes every argument proves only that the script agrees with the stub.
+
+That is not enough for a script the agent runs as root. An agent word that is new or changed runs once on a real test server before the release ships it (`php maintenance_scripts/dev_tools/test_server.php create`, Ubuntu as the fleet runs it). The run is recorded in `plugins/server_manager/agent_live_proofs.json` with `php maintenance_scripts/dev_tools/record_live_proof.php WORD --where=... --what=...`, which notes the agent version and the script's hash it ran with. `record_live_proof.php list` says which changed words lack one. The publish page lists those words and publishes them only when the box saying so is ticked (`AgentLiveProofs`).
+
 ### A test never changes the real repository
 
 A suite that exercises git makes its own throwaway repositories under the

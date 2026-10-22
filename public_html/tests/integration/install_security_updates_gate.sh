@@ -67,6 +67,7 @@ STUB
 cat > "$T/bin/apt-get" <<STUB
 #!/bin/bash
 echo "apt-get \$*" >> "$T/calls"
+case "\$*" in *" -f "*install*) [ -z "\${STUB_REPAIR_FAILS:-}" ] && rm -f "$T/broken"; exit 0 ;; esac
 exit \${STUB_UPDATE_RC:-0}
 STUB
 cat > "$T/bin/unattended-upgrade" <<STUB
@@ -89,6 +90,13 @@ fi
 printf 'ii \tcurl:amd64\t8.5.0-2\n'
 printf 'rc \tgone:amd64\t1.0\n'
 STUB
+cat > "$T/bin/dpkg" <<STUB
+#!/bin/bash
+# dpkg --audit: a half-done run while $T/broken exists; apt-get -f install
+# (the stub below) finishes it unless STUB_REPAIR_FAILS.
+[ "\$1" = "--audit" ] && [ -f "$T/broken" ] && echo "The following packages are only half configured: php8.3-common"
+exit 0
+STUB
 cat > "$T/bin/needrestart" <<'STUB'
 #!/bin/bash
 echo "NEEDRESTART-VER: 3.6"
@@ -96,9 +104,10 @@ echo "NEEDRESTART-SVC: php8.3-fpm.service"
 STUB
 chmod +x "$T/bin/"*
 
+mkdir -p "$T/proc"
 run_script() {
     rm -f "$T/calls" "$T/upgraded"
-    PATH="$T/bin:$PATH" bash "$SCRIPT" "$@" > "$T/out.json" 2> "$T/err"
+    PATH="$T/bin:$PATH" INSTALL_SECURITY_UPDATES_PROC="$T/proc" bash "$SCRIPT" "$@" > "$T/out.json" 2> "$T/err"
 }
 
 echo "=== Arguments are refused, and nothing runs ==="
@@ -115,7 +124,7 @@ run_script; rc=$?
 chk "exit 0" "$rc" "0"
 chk "nothing on stderr" "$(wc -c < "$T/err")" "0"
 chk "every key present, in order" "$(jv "$T/out.json" "" keys)" \
-    "outcome,reason,apt_update,upgrade_exit,upgraded,upgraded_count,truncated,reboot_required,services_needing_restart"
+    "outcome,reason,apt_update,upgrade_exit,upgraded,upgraded_count,truncated,reboot_required,services_needing_restart,repaired,reloaded,still_on_old_code"
 chk "outcome installed" "$(jv "$T/out.json" outcome)" "installed"
 chk "lists refreshed" "$(jv "$T/out.json" apt_update)" "ok"
 chk "three packages changed (two upgraded, one new)" "$(jv "$T/out.json" upgraded_count)" "3"
@@ -127,6 +136,36 @@ chk "reboot_required is a boolean" "$(jv "$T/out.json" reboot_required | grep -c
 chk "services still on old code are named" "$(jv "$T/out.json" services_needing_restart)" '["php8.3-fpm.service"]'
 chk "the updater ran once, with no arguments" "$(grep -c -x 'unattended-upgrade ' "$T/calls")" "1"
 chk "apt-get ran only update" "$(grep '^apt-get' "$T/calls" | grep -v -c -E '^apt-get -q update$')" "0"
+
+chk "nothing half done: no repair, nothing reloaded" "$(jv "$T/out.json" repaired)|$(jv "$T/out.json" reloaded)|$(jv "$T/out.json" still_on_old_code)|$(grep -c -- ' -f ' "$T/calls")" "false|[]|[]|0"
+
+echo "=== A run left half done is finished first, naming no package ==="
+touch "$T/broken"; run_script
+chk "repaired, before the updater ran" "$(jv "$T/out.json" repaired)|$(grep -n -e '-f -o' -e '^unattended' "$T/calls" | cut -d: -f1 | tr '\n' ' ')" "true|1 3 "
+chk "  the repair is apt-get -f install with options only" "$(grep -c -x 'apt-get -q -y -f -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install' "$T/calls")" "1"
+touch "$T/broken"; STUB_REPAIR_FAILS=1 run_script
+chk "a repair that leaves it half done: repaired false, the updater still runs" "$(jv "$T/out.json" repaired)|$(grep -c '^unattended-upgrade' "$T/calls")" "false|1"
+rm -f "$T/broken"
+
+echo "=== A php-fpm on a replaced binary is reloaded (WP3) ==="
+# Two masters on a replaced binary: one a real process that, as php-fpm does on
+# USR2, re-executes (here: its stand-in exe stops saying deleted); one whose
+# PID is gone, so it cannot be signalled. And a worker, and a current master.
+mkdir -p "$T/proc/999999"
+printf 'php-fpm: master process (/etc/php/8.3/fpm/php-fpm.conf)\0' > "$T/proc/999999/cmdline"
+ln -s "/usr/sbin/php-fpm8.3 (deleted)" "$T/proc/999999/exe"
+bash -c 'trap "ln -sfn /usr/sbin/php-fpm8.5 $1/\$\$/exe" USR2; for i in $(seq 1 600); do sleep 0.1; done' _ "$T/proc" &
+MPID=$!
+mkdir -p "$T/proc/$MPID"
+printf 'php-fpm: master process (/etc/php/8.5/fpm/php-fpm.conf)\0' > "$T/proc/$MPID/cmdline"
+ln -sfn "/usr/sbin/php-fpm8.5 (deleted)" "$T/proc/$MPID/exe"
+mkdir -p "$T/proc/12345"; printf 'php-fpm: pool www\0' > "$T/proc/12345/cmdline"; ln -s "/usr/sbin/php-fpm8.5 (deleted)" "$T/proc/12345/exe"
+mkdir -p "$T/proc/23456"; printf 'php-fpm: master process (/etc/php/8.4/fpm/php-fpm.conf)\0' > "$T/proc/23456/cmdline"; ln -s "/usr/sbin/php-fpm8.4" "$T/proc/23456/exe"
+run_script
+chk "the master that re-executed is reloaded, and is current after" "$(jv "$T/out.json" reloaded)" '["php-fpm8.5"]'
+chk "  one that could not be signalled is still on old code; a worker and a current master are not touched" "$(jv "$T/out.json" still_on_old_code)" '["php-fpm8.3"]'
+kill "$MPID" 2>/dev/null; wait "$MPID" 2>/dev/null
+rm -rf "$T/proc"; mkdir -p "$T/proc"
 
 echo "=== The busy check: the shutdown helper is no package run, unattended-upgrade is ==="
 eval "$(sed -n '/^apt_busy() {/,/^}/p' "$SCRIPT")"
@@ -166,7 +205,8 @@ printf '#!/bin/bash\necho 0\n' > "$T/bin/id"
 echo "=== Static pins ==="
 CODE="$(grep -v -E '^\s*#' "$SCRIPT")"
 chk "never a general apt upgrade" "$(printf '%s\n' "$CODE" | grep -c -E 'apt(-get)? +(-[a-z]+ +)*(dist-|full-)?upgrade')" "0"
-chk "never installs or removes by name" "$(printf '%s\n' "$CODE" | grep -c -E 'apt(-get)? +(-[a-z]+ +)*(install|remove|purge)')" "0"
+chk "never installs or removes by name (the repair, apt-get -f install, names none)" \
+    "$(printf '%s\n' "$CODE" | grep -E 'apt(-get)? +(-[a-z]+ +)*(install|remove|purge)|apt-get .* install' | grep -v -c -E 'apt-get -q -y -f( -o [A-Za-z:=-]+)* install >/dev/null')" "0"
 chk "never reboots" "$(printf '%s\n' "$CODE" | grep -c -E '(^|[;&|(][[:space:]]*|^[[:space:]]+)(reboot|shutdown|poweroff)([[:space:]]|$)|systemctl +(reboot|poweroff|kexec)')" "0"
 chk "needrestart only lists" "$(printf '%s\n' "$CODE" | grep 'needrestart -' | grep -c -v -- '-r l')" "0"
 chk "exit 0 is how the object ends" "$(printf '%s\n' "$CODE" | grep -A2 'printf .}\\n.' | grep -c 'exit 0')" "1"
