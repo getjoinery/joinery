@@ -3,6 +3,9 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.13 - The keepalive restarts a hung agent: one running for more than three minutes whose
+#           /run/joinery-agent/alive has not been written for three minutes is aborted and started
+#           again (agent 1.89.0's liveness watch; agent restart audit H1)
 # Version: 2.12 - The keepalive's start guard: before launching, while a self-update is on trial
 #           (.pending) with the previous binary kept (.bak), the new binary must answer --version;
 #           when it cannot, the previous one goes back and the new version is marked rejected. The
@@ -338,6 +341,27 @@ write_supervise_script() {
 # working agents at upgrade.
 if [ -f /etc/joinery-agent/enabled ] && [ "$(cat /etc/joinery-agent/enabled 2>/dev/null)" != "1" ]; then
     exit 0
+fi
+# The liveness watch (agent restart audit H1). A running agent writes the time
+# to /run/joinery-agent/alive every half minute for as long as it is alive, and
+# stops when it is hung: its poll loop stuck, or a word running far past its own
+# deadline (the agent's liveness.go). systemd hosts get the same signal as
+# sd_notify. An agent whose file has gone stale is aborted - Go writes its
+# stacks to the log - and started again below. Never one that has only just
+# started, and never where there is no file: an agent too old to write one.
+a=/run/joinery-agent/alive
+pid="$(pgrep -xo joinery-agent 2>/dev/null)"
+if [ -n "$pid" ] && [ -f "$a" ]; then
+    up="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+    age=$(( $(date +%s) - $(stat -c %Y "$a" 2>/dev/null || date +%s) ))
+    if [ "${up:-0}" -gt 180 ] && [ "$age" -gt 180 ]; then
+        echo "$(date -u '+%Y-%m-%d %H:%M:%S') joinery-agent keepalive: pid $pid has not said it is alive for ${age}s; restarting it" >> /var/log/joinery-agent.log
+        kill -ABRT "$pid" 2>/dev/null
+        i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+        kill -KILL "$pid" 2>/dev/null
+        sleep 1
+    fi
 fi
 if ! pgrep -x joinery-agent >/dev/null 2>&1; then
     # The start guard. A self-update that installed a binary unable to start at
