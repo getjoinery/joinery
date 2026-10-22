@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.9 - The 10-22 logrotate file is an earlier rendering too: its host_converger.log block had
+#                no su line, so logrotate, as root in the site's group-writable logs directory, refused
+#                it and exited 1 every night.
 # Version: 1.8 - The logrotate file rotates Apache's access.log too. Every logrotate file the platform
 #                wrote before (four versions since 03-28) is an earlier rendering and is rewritten, so
 #                every existing site gets it; an owner's edit is still never touched.
@@ -116,8 +119,10 @@ OTHER_ROTATION="$(grep -lF "${SITE_ROOT}/logs/" "$(dirname "${LOGROTATE}")"/* 2>
 # site, compared by directives (comments and blank lines aside). Nobody chose
 # those files, so they are not an owner's edit, and each is worse than the
 # template: the ones run as group user1 fail every night on a machine with no
-# user1 group, and none of them rotates access.log, which then grows without
-# end. A version is added here whenever the template's directives change.
+# user1 group, the first four do not rotate access.log, which then grows
+# without end, and none runs host_converger.log's block under su, which
+# logrotate refuses in the site's logs directory. A version is added here
+# whenever the template's directives change.
 directives() { grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$@"; }
 rendered() { sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}"; }
 earlier_renderings() {
@@ -215,6 +220,57 @@ earlier_renderings() {
     notifempty
     copytruncate
     size 20M
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+{{SITE_ROOT}}/logs/host_converger.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
+----
+# from 2026-10-22
+{{SITE_ROOT}}/logs/error.log {
+    su www-data www-data
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/access.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0660 www-data www-data
+    size 50M
+    sharedscripts
+    postrotate
+        if pgrep -f ^/usr/sbin/apache2 > /dev/null; then
+            apache2ctl graceful > /dev/null 2>&1 || true
+        fi
+    endscript
 }
 {{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
     su www-data www-data
