@@ -865,6 +865,17 @@
 
 			$plugin_manager = PluginManager::getInstance();
 			$plugin_sync_result = $plugin_manager->sync();
+			// A plugin migration this pass ran belongs in the structured result
+			// beside the core ones; a deferred one did nothing yet.
+			foreach (($plugin_sync_result['migrations_run'] ?? []) as $pm) {
+				if ($pm['outcome'] !== 'deferred') {
+					update_database_fact('migrations', [
+						'version' => $pm['plugin'] . '/' . $pm['id'],
+						'outcome' => $pm['outcome'],
+						'rows'    => null,
+					]);
+				}
+			}
 			$plugin_parts = [];
 			if (!empty($plugin_sync_result['added'])) {
 				$plugin_parts[] = count($plugin_sync_result['added']) . " added";

@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.15 - sync() reports each plugin migration it ran with its outcome (migrations_run: applied, failed or deferred), and words a deferred or failed one as such instead of 'applied'
  * @version 1.14 - sync() takes every plugin that is not active out of the menus (pruneInactivePluginMenus): the slugs it recorded and the slugs its manifest declares
  * @version 1.13 - uninstall() deletes the app credentials of the purposes the plugin declares (appAccess)
  * @version 1.12 - RESERVED_NAMES (adds 'core'), shared with the sandboxed manifest; liveManifest() reads a sandboxed plugin's manifest.json; install() over an active sandboxed plugin reconciles what it owns with its new manifest
@@ -438,6 +439,24 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
         return $deleted;
+    }
+
+    /**
+     * What became of one migration a runner reported, and the line that says
+     * so: deferred (nothing recorded, the next pass runs it), failed (an error,
+     * or an up function that returned false), or applied.
+     *
+     * @return array [outcome, message]
+     */
+    private static function migrationOutcome($plugin_name, array $m) {
+        $id = (string)($m['id'] ?? '');
+        if (!empty($m['deferred'])) {
+            return array('deferred', "$plugin_name: deferred $id to the next pass");
+        }
+        if (empty($m['success'])) {
+            return array('failed', "$plugin_name: $id failed - " . ($m['error'] ?? 'its up function returned false'));
+        }
+        return array('applied', "$plugin_name: applied $id");
     }
 
     private function runPhpMigrations($plugin_name, $file) {
@@ -1536,7 +1555,8 @@ class PluginManager extends AbstractExtensionManager {
      * Overrides the base sync() so that every caller (upgrade.php, postInstall,
      * marketplace, admin UI) automatically gets the full behaviour.
      *
-     * @return array Sync result with keys: added, updated, total, table_messages, migration_messages
+     * @return array Sync result with keys: added, updated, total, table_messages, migration_messages,
+     *               migrations_run (each plugin migration run: plugin, id, outcome applied|failed|deferred)
      */
     /**
      * Fail the sync when two active participants (core or an active plugin) declare
@@ -1665,6 +1685,7 @@ class PluginManager extends AbstractExtensionManager {
         $active_plugins->load();
         $table_messages = [];
         $migration_messages = [];
+        $migrations_run = [];
         foreach ($active_plugins as $plugin) {
             $plugin_name = $plugin->get('plg_name');
 
@@ -1726,18 +1747,18 @@ class PluginManager extends AbstractExtensionManager {
             try {
                 $migration_results = $this->runPendingMigrations($plugin_name);
                 foreach ($migration_results as $m) {
-                    if (!empty($m['error'])) {
-                        $migration_messages[] = "$plugin_name: " . $m['error'];
-                    } elseif (!empty($m['id'])) {
-                        $migration_messages[] = "$plugin_name: applied " . $m['id'];
-                    }
+                    list($outcome, $message) = self::migrationOutcome($plugin_name, $m);
+                    $migration_messages[] = $message;
+                    $migrations_run[] = ['plugin' => $plugin_name, 'id' => (string)($m['id'] ?? ''), 'outcome' => $outcome];
                 }
             } catch (Exception $e) {
                 $migration_messages[] = "$plugin_name: migration error - " . $e->getMessage();
+                $migrations_run[] = ['plugin' => $plugin_name, 'id' => '', 'outcome' => 'failed'];
             }
         }
         $result['table_messages'] = $table_messages;
         $result['migration_messages'] = $migration_messages;
+        $result['migrations_run'] = $migrations_run;
 
         // Register deletion rules for ALL active plugins
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));

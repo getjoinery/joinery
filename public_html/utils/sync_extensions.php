@@ -20,6 +20,7 @@
 	 *   SYNC_RESULT: {"themes": {...}, "plugins": {...}}
 	 * Exit code 0 on success, 1 on failure.
 	 *
+	 * @version 1.3.0 - plugins.migrations_run: each plugin migration run, and each errored install retried, with its outcome
 	 * @version 1.2.0 - an errored plugin whose install was retried is named in plugins.migration_messages
 	 * @version 1.1.0 - plugins.versions: each plugin the sync added or updated, with the version it
 	 *                  had before and has after, for the structured apply result
@@ -95,6 +96,14 @@
 					array_values($plugin_result['migration_messages'] ?? []),
 					array_map(
 						function ($name, $outcome) { return "$name: errored install retried - " . $outcome; },
+						array_keys($plugin_result['retried_install'] ?? []),
+						array_values($plugin_result['retried_install'] ?? [])
+					)
+				),
+				'migrations_run' => array_merge(
+					array_values($plugin_result['migrations_run'] ?? []),
+					array_map(
+						function ($name, $outcome) { return ['plugin' => $name, 'id' => 'install (retried)', 'outcome' => $outcome === 'installed' ? 'applied' : 'failed']; },
 						array_keys($plugin_result['retried_install'] ?? []),
 						array_values($plugin_result['retried_install'] ?? [])
 					)

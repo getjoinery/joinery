@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.27 - the plugin migrations the post-swap sync ran enter the structured apply result with
+	 *                their own outcome (sync_extensions 1.3.0 migrations_run); a deferred one is left out
 	 * @version 1.26 - a declared extension a package run is upgrading (dpkg reads it "unpacked" for a moment),
 	 *                or one held, is present, not missing (fleet_security_patching WP3, the lost .deb)
 	 * @version 1.25 - serve-release-notes: the notes of every release in a version range, for a republishing
@@ -2223,10 +2225,12 @@
 						if (count($GLOBALS['APPLY_RESULT']['schema_changes']) >= 300) { break; }
 						$GLOBALS['APPLY_RESULT']['schema_changes'][] = 'plugin: ' . mb_substr(strip_tags((string)$tm), 0, 200);
 					}
-					foreach ((array)($sync_result['plugins']['migration_messages'] ?? array()) as $mm) {
+					foreach ((array)($sync_result['plugins']['migrations_run'] ?? array()) as $pm) {
 						if (count($GLOBALS['APPLY_RESULT']['migrations']) >= 200) { break; }
+						if (!is_array($pm) || ($pm['outcome'] ?? '') === 'deferred') { continue; }
 						$GLOBALS['APPLY_RESULT']['migrations'][] = array(
-							'version' => 'plugin: ' . mb_substr(strip_tags((string)$mm), 0, 120), 'outcome' => 'applied', 'rows' => null);
+							'version' => mb_substr(strip_tags((string)($pm['plugin'] ?? '') . '/' . (string)($pm['id'] ?? '')), 0, 120),
+							'outcome' => ($pm['outcome'] ?? '') === 'applied' ? 'applied' : 'failed', 'rows' => null);
 					}
 				}
 				if ($sync_return === 0 && is_array($sync_result)) {
