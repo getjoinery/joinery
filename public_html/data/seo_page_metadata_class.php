@@ -161,7 +161,9 @@ class SeoPageMetadata extends SystemBase {
 			        VALUES (?, now())
 			        ON CONFLICT (spm_path) WHERE spm_delete_time IS NULL DO NOTHING";
 			$q = $dblink->prepare($sql);
-			$q->execute(array($canonical));
+			// Observation: a page that exists is recorded on the view that
+			// found it, so the SEO pages list knows it. The server's own write.
+			SystemBase::server_initiated_write(function () use ($q, $canonical) { $q->execute(array($canonical)); });
 			self::$per_request_lookup_cache[$canonical] = null;
 			return true;
 		} catch (\Throwable $e) {

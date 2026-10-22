@@ -1809,3 +1809,14 @@
 	$migration['migration_file'] = 'group_members_duplicate_ids.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// A subscription cancelled at the period end ends at the period end: the
+	// Stripe sync recorded when the cancel was asked for instead, so the buyer
+	// lost it from their page while still billed (B91). The store's table is
+	// guarded in the file; no test SQL can name a plugin table.
+	$migration = array();
+	$migration['database_version'] = '221';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'subscription_end_for_period_end_cancels.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

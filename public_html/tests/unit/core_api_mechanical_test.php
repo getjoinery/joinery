@@ -243,6 +243,7 @@ section('Only the server may write during a page view');
 // otherwise have done. A user clicking something is none of those.
 $permitted = array(
 	'data/api_keys_class.php'                                 => 'API key last-used tracking, on read requests',
+	'data/seo_page_metadata_class.php'                        => 'a page that exists recorded on its first view (lazy_auto_create), so the SEO pages list knows it',
 	'data/backup_targets_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
 	'data/problem_reports_class.php'                          => 'an automatic problem report started or counted, on whatever request recorded an unexpected error',

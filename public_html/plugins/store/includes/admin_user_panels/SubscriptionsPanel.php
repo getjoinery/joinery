@@ -122,8 +122,9 @@ class SubscriptionsPanel implements AdminUserPanel {
 								</a> - <?php echo htmlspecialchars($subscription->subscription_price_label()); ?>
 							</div>
 							<div class="fs-11 text-600 mt-1">
-								Canceled: <?php echo $subscription->get_local('odi_subscription_cancelled_time'); ?>
-								<?php if ($subscription->get('odi_subscription_period_end')): ?>
+								<?php // The cancelled time is when it ends: a period-end cancel's is still to come. ?>
+								<?php echo strtotime($subscription->get('odi_subscription_cancelled_time') . ' UTC') > time() ? 'Ends' : 'Canceled'; ?>: <?php echo $subscription->get_local('odi_subscription_cancelled_time'); ?>
+								<?php if ($subscription->get('odi_subscription_period_end') && $subscription->get('odi_subscription_period_end') !== $subscription->get('odi_subscription_cancelled_time')): ?>
 									<br>Last day: <?php echo $subscription->get_local('odi_subscription_period_end'); ?>
 								<?php endif; ?>
 							</div>
