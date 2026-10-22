@@ -515,6 +515,68 @@ check($read_sealed() === 'sealed-with-the-version', "and the version's blob surv
 FileVersion::save_new_metadata($renamer, 'sealed-by-a-rename', hash('sha256', 'sealed-with-the-version'));
 check($read_sealed() === 'sealed-by-a-rename', 'one sealed from the blob as it stands is written, through any copy');
 check(head_blob($kfile_id) === (int)$k_sealed->key, 'leaving the head where the version put it');
+
+// ---------------------------------------------------------------------------
+section('a metadata write inside a caller transaction leaves it to the caller');
+
+// A caller that opened a transaction keeps it: the write neither commits the
+// caller's other work nor ends the transaction on a refusal.
+$dblink->beginTransaction();
+$dblink->prepare('UPDATE fil_files SET fil_title = ? WHERE fil_file_id = ?')->execute(array('in-the-caller.txt', $kfile_id));
+$threw = null;
+try {
+	FileVersion::save_new_metadata(new File($kfile_id, true), 'sealed-in-a-transaction', hash('sha256', 'sealed-first'));
+} catch (FileHeadMovedException $e) {
+	$threw = $e;
+}
+check($threw !== null && $threw->reason === 'moved_since', 'a stale base is refused inside the transaction too');
+$still_open = $dblink->inTransaction();
+check($still_open, 'and the caller transaction is still open after the refusal');
+if ($still_open) {
+	FileVersion::save_new_metadata(new File($kfile_id, true), 'sealed-in-a-transaction', hash('sha256', 'sealed-by-a-rename'));
+	check($dblink->inTransaction(), 'a write that lands leaves it open as well');
+	if ($dblink->inTransaction()) { $dblink->rollBack(); }
+}
+check($read_sealed() === 'sealed-by-a-rename', "the caller's rollback takes the write back with it", $read_sealed());
+check((string)(new File($kfile_id, true))->get('fil_title') === 'kept-renamed.txt', "and the caller's own work");
+
+// ---------------------------------------------------------------------------
+section('a PHP error part way through a write leaves no transaction open');
+
+// Each write opens its transaction and must close it on any failure, not only
+// a thrown Exception: an Error left behind keeps the row held, and whatever
+// the request writes next joins a transaction nothing will commit.
+$end_dangling = function () use ($dblink) {
+	$open = $dblink->inTransaction();
+	if ($open) { $dblink->rollBack(); }
+	return $open;
+};
+$no_setter = new stdClass();  // a copy that cannot be written to: set() is an Error
+$no_setter->key = $kfile_id;
+
+$k_err = make_blob('kept-error-' . bin2hex(random_bytes(20)));
+$versions_before = version_count($kfile_id);
+$threw = null;
+try { FileVersion::save_new_content($no_setter, $k_err, $user->key); } catch (Throwable $e) { $threw = $e; }
+check($threw instanceof Error, 'construction: the version write meets an Error', $threw ? get_class($threw) : 'nothing');
+check(!$end_dangling(), 'a version write that meets an Error leaves no transaction open');
+check(head_blob($kfile_id) === (int)$k_sealed->key && version_count($kfile_id) === $versions_before, 'and writes nothing');
+FileBlob::release((int)$k_err->key);
+
+$threw = null;
+try { FileVersion::save_new_metadata(new File($kfile_id, true), new stdClass(), hash('sha256', 'stale')); } catch (Throwable $e) { $threw = $e; }
+check($threw instanceof Error, 'construction: the metadata write meets an Error', $threw ? get_class($threw) : 'nothing');
+check(!$end_dangling(), 'a metadata write that meets an Error leaves no transaction open');
+check($read_sealed() === 'sealed-by-a-rename', 'and writes nothing');
+
+$restorable = null;
+foreach (new MultiFileVersion(array('file_id' => $kfile_id)) as $v) { $restorable = $v; break; }
+check($restorable !== null, 'construction: the file has a version to restore');
+$threw = null;
+try { FileVersion::restore_version($no_setter, $restorable, $user->key); } catch (Throwable $e) { $threw = $e; }
+check($threw instanceof Error, 'construction: the restore meets an Error', $threw ? get_class($threw) : 'nothing');
+check(!$end_dangling(), 'a restore that meets an Error leaves no transaction open');
+check(head_blob($kfile_id) === (int)$k_sealed->key && version_count($kfile_id) === $versions_before, 'and writes nothing');
 $set_sealed->execute(array(null, $kfile_id));
 
 harness_finish();

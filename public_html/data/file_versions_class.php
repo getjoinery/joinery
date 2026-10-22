@@ -50,7 +50,9 @@ class FileHeadMovedException extends Exception {
  * demotion transfers the head's reference to the new version (no count change),
  * and pruning / permanent delete release it.
  *
- * @version 1.2.0 - save_new_metadata: an encrypted rename writes its blob
+ * @version 1.2.1 - a write that meets a PHP Error part way through rolls its
+ *                  transaction back as it does on an Exception (B14)
+ * @changelog 1.2.0 - save_new_metadata: an encrypted rename writes its blob
  *                  under the same row hold as a version, checked against the
  *                  blob as stored (B11)
  * @changelog 1.1.0 - save_new_content takes a guard (the head and encrypted
@@ -187,7 +189,7 @@ class FileVersion extends SystemBase {
 			}
 
 			DbConnector::Commit();
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			DbConnector::Rollback();
 			throw $e;
 		}
@@ -225,7 +227,7 @@ class FileVersion extends SystemBase {
 			$q = $dblink->prepare('UPDATE fil_files SET fil_encrypted_metadata = ? WHERE fil_file_id = ?');
 			$q->execute(array((string)$new_metadata, (int)$file->key));
 			if ($own_tx) { $dblink->commit(); }
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
 			throw $e;
 		}
@@ -309,7 +311,7 @@ class FileVersion extends SystemBase {
 			self::_delete_row((int)$version->key);
 
 			DbConnector::Commit();
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			DbConnector::Rollback();
 			throw $e;
 		}
