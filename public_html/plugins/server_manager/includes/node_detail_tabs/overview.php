@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.82 - the Cloud server panel shows the daily watch's match on any provider's account, Hetzner's too (B40)
  * @version 1.81 - the Reverse DNS panel shows what the node's IPv6 answers as well as its IPv4 (B33)
  * @version 1.80 - a node whose agent moved away is not offered Connect agent or Reverse DNS: the machine is
  *                managed elsewhere
@@ -2622,7 +2623,7 @@
 		$adopt_seen = null;
 		if ((int)$node->get('mgn_mtr_machine_transfer_id')) {
 			$adopt_seen = new MachineTransfer((int)$node->get('mgn_mtr_machine_transfer_id'), TRUE);
-			if (!$adopt_seen->key || (string)$adopt_seen->get('mtr_provider') !== 'linode') {
+			if (!$adopt_seen->key) {
 				$adopt_seen = null;
 			}
 		}

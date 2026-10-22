@@ -588,6 +588,7 @@ Adoption writes an admin-origin provision in install mode `adopted`, status `don
 
 - the instance id, its IPv4 and IPv6, and its region;
 - hosting mode `operator` with the account of ours it was found in, or `customer` with the connected account;
+- that account's provider (`cvp_provider`), whose driver the IP swap and reverse DNS then use. An account whose provider has no driver here adopts nothing;
 - the link to the node.
 
 Nothing is installed and nothing on the server changes. An adopted server is never one somebody bought, so it is never billed, trialled or handed to a customer. Removing the node removes its provision with it.
