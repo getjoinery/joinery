@@ -23,12 +23,16 @@
  * the release's new schema), and a stand-in site whose config points at the
  * test database and whose vendor/ is this site's. Checked: the new table and column are added; nothing that is not
  * additive happens (a type, a unique constraint, a migration); nothing lent is
- * left behind; the run raises no PHP warning (a model file that loads Composer
+ * left behind, and the release's own config/ (the core archive ships
+ * default_Globalvars_site.php there, which made 0.8.523 refuse to run) is set
+ * aside for the run and put back, and recovered after a run killed mid-way; the run raises no PHP warning (a model file that loads Composer
  * packages finds them); a second run adds nothing; a staged update_database that does
  * not know the flag is never run (it would run in full, migrations and all).
  *
  * Run: php tests/run.php test-db --filter=schema_ahead
  *
+ * @version 1.1 - the staging area holds the release's own config/, as a real
+ *   archive's does
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -62,6 +66,9 @@ try {
 	symlink(PathHelper::getSiteRoot() . '/vendor', $site . '/vendor');
 	exec('cp -a ' . escapeshellarg(PathHelper::getRootDir()) . ' ' . escapeshellarg($stage . '/public_html') . ' 2>&1', $out, $rc);
 	check($rc === 0, 'the tree is copied as the staged public_html', implode("\n", $out));
+	// As the core archive has it: config/ with the template install.sh seeds a site from.
+	mkdir($stage . '/config');
+	file_put_contents($stage . '/config/default_Globalvars_site.php', "<?php // the release's template\n");
 	file_put_contents($stage . '/public_html/data/zz_schema_ahead_probe_class.php', '<?php
 class ZzSchemaAheadProbe extends SystemBase {
 	public static $prefix = "zsp";
@@ -114,8 +121,10 @@ $this->settings["dbpassword"] = $this->settings["dbpassword_test"];
 	check((int)$db->query('SELECT count(*) FROM zz_schema_ahead_probe')->fetchColumn() === 1, 'the row already there is still there');
 	check(strpos($transcript, 'PHP Warning') === false && strpos($transcript, 'PHP Fatal') === false,
 		'the staged run raises no PHP warning', $transcript);
-	check(!file_exists($stage . '/config') && !is_link($stage . '/config') && !is_link($stage . '/vendor'),
+	check(!is_link($stage . '/config') && !is_link($stage . '/vendor') && !file_exists($stage . '/vendor'),
 		'the lent config and vendor are taken back');
+	check(is_file($stage . '/config/default_Globalvars_site.php') && !file_exists($stage . '/.config.staged'),
+		'the release\'s own config/ is back where it was, and nothing is left aside');
 
 	section('A second run adds nothing');
 	$r = DeploymentHelper::schemaAhead($stage, $site);
@@ -126,11 +135,19 @@ $this->settings["dbpassword"] = $this->settings["dbpassword_test"];
 	$r = DeploymentHelper::schemaAhead($stage, $site);
 	check(!$r['ran'] && !is_file($stage . '/public_html/utils/RAN'),
 		'a staged update_database without --schema-ahead is not run', json_encode($r));
-	mkdir($stage . '/config');
 	file_put_contents($stage . '/public_html/utils/update_database.php', "<?php // '--schema-ahead'\nfile_put_contents(__DIR__ . '/RAN', 'yes');\n");
+	mkdir($stage . '/.config.staged');
 	$r = DeploymentHelper::schemaAhead($stage, $site);
-	check(!$r['ran'] && is_dir($stage . '/config') && !is_link($stage . '/config'),
-		'a config directory already in the staging area is refused and left alone', json_encode($r));
+	check(!$r['ran'] && is_file($stage . '/config/default_Globalvars_site.php') && is_dir($stage . '/.config.staged'),
+		'with the aside name already taken, nothing runs and both are left alone', json_encode($r));
+	rmdir($stage . '/.config.staged');
+
+	section('A run killed while the release\'s config/ was aside');
+	rename($stage . '/config', $stage . '/.config.staged');
+	symlink($conf, $stage . '/config');
+	$r = DeploymentHelper::schemaAhead($stage, $site);
+	check($r['ran'] && is_file($stage . '/config/default_Globalvars_site.php') && !file_exists($stage . '/.config.staged'),
+		'the next run puts it back before anything else', json_encode($r));
 } finally {
 	$cleanup();
 }
@@ -138,7 +155,12 @@ $this->settings["dbpassword"] = $this->settings["dbpassword_test"];
 section('upgrade.php adds the schema before the swap, and stages a tree the pool can read');
 $up = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 $ahead = strpos($up, 'DeploymentHelper::schemaAhead($stage_location');
-$swap = strpos($up, '// Move CONTENTS of stage → live');
+// The swap: DeploymentHelper::swapLiveTree() where the release has it, the
+// two find-mv moves before it.
+$swap = strpos($up, 'DeploymentHelper::swapLiveTree($live_directory');
+if ($swap === false) {
+	$swap = strpos($up, '// Move CONTENTS of stage → live');
+}
 check($ahead !== false && $swap !== false && $ahead < $swap, 'schemaAhead runs before the staged tree is moved in');
 check(strpos($up, 'chmod -R 770 $stage_location') === false, 'the staged tree is no longer made 770, which the PHP pool cannot read');
 $modes = strpos($up, "-type f ! -name '*.sh' -exec chmod 644");
