@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/utils/update_database.php, public_html/includes/PluginManager.php]
  */
 /**
  * update_database adds plugin tables and columns BEFORE it runs migrations.
@@ -16,8 +17,17 @@
  * data classes — tables created, columns added, nothing else — placed before
  * the migrations step. This test reads the pipeline and the pass to pin both.
  *
+ * update_database.php has two passes that make tables: the full run
+ * (update_database()) and the additive one upgrade.php runs from the staged
+ * tree before the swap (update_database_schema_ahead()). Each is read on its
+ * own, from its own function body: an order taken from the first occurrence
+ * anywhere in the file compares one pass's step with the other's.
+ *
  * Run: php tests/run.php safe --filter=plugin_tables_before_migrations
  *
+ * @version 1.1 - the order is checked inside each pass's own function, and the schema-ahead pass is held to
+ *                core tables before plugin tables with no migration or full sync; covers names the two files it
+ *                reads as text, so an edit to either runs it
  * @version 1.0
  */
 
@@ -28,15 +38,41 @@ require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
 section('The pipeline order');
 $src = file_get_contents(PathHelper::getIncludePath('utils/update_database.php'));
-$core_tables_at = strpos($src, '$database_updater->runCoreTablesOnly()');
-$plugin_pass_at = strpos($src, 'PluginManager::getInstance()->syncTables()');
-$migrations_at  = strpos($src, '"-----MIGRATIONS-----<br>\n"');
-$full_sync_at   = strpos($src, '$plugin_manager->sync()');
+// One function's body: from its signature to the next top-level function, or
+// to the end of the file's function definitions.
+$body_of = function ($signature) use ($src) {
+	$start = strpos($src, $signature);
+	if ($start === false) {
+		return '';
+	}
+	$next = strpos($src, "\n\tfunction ", $start + strlen($signature));
+	$end = strpos($src, '// Run the database update if not included', $start);
+	$stop = ($next !== false && ($end === false || $next < $end)) ? $next : $end;
+	return substr($src, $start, ($stop === false ? strlen($src) : $stop) - $start);
+};
+$full = $body_of('function update_database($verbose');
+$core_tables_at = strpos($full, '->runCoreTablesOnly()');
+$plugin_pass_at = strpos($full, 'PluginManager::getInstance()->syncTables()');
+$migrations_at  = strpos($full, '"-----MIGRATIONS-----<br>\n"');
+$full_sync_at   = strpos($full, '$plugin_manager->sync()');
 check($core_tables_at !== false && $plugin_pass_at !== false && $migrations_at !== false && $full_sync_at !== false,
-	'all four steps are present in update_database.php');
+	'all four steps are present in update_database()');
 check($core_tables_at < $plugin_pass_at, 'core tables are created before the plugin table pass (plugin tables may reference core ones)');
 check($plugin_pass_at < $migrations_at, 'the plugin table pass runs BEFORE migrations');
 check($migrations_at < $full_sync_at, 'the full plugin sync still runs after migrations');
+
+section('The schema-ahead pass: the same order, and nothing but tables and columns');
+$ahead = $body_of('function update_database_schema_ahead(');
+$ahead_core = strpos($ahead, '->runCoreTablesOnly()');
+$ahead_plugins = strpos($ahead, 'PluginManager::getInstance()->syncTables()');
+check($ahead !== '' && $ahead_core !== false && $ahead_plugins !== false && $ahead_core < $ahead_plugins,
+	'it creates core tables before the plugin table pass');
+foreach (array('-----MIGRATIONS-----', '->sync()', 'runPendingMigrations', 'fixPrimaryKeys', 'manageUniqueConstraints',
+               'manageIndexes', 'manageForeignKeys', 'processAdvancedColumnOperations') as $not_here) {
+	check(strpos($ahead, $not_here) === false, "it does not do {$not_here}");
+}
+check(strpos($ahead, 'new DatabaseUpdater(false, false, false)') !== false,
+	'its updater is neither upgrade nor cleanup: nothing changes type and nothing is dropped');
 
 section('The pass is additive only');
 check(method_exists('PluginManager', 'syncTables'), 'PluginManager::syncTables() exists');
