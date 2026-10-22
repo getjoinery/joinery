@@ -26,8 +26,11 @@
  *    and their TTLs back, and the copy stops believing the old server;
  *  - what still names the old server's address (SiteCopyAddressFacts): the
  *    SPF entries covering it, listed before the switch and kept by it, and
- *    the copy's reverse DNS set once the move settles on a server made here.
+ *    the copy's reverse DNS set once the move settles on a server made here;
+ *  - a manual switch's way back: the records the owner points back, named
+ *    before going back and, after, while DNS still names the copy.
  *
+ * @version 1.3 - a manual switch's way back names the records to point back (C4's B28)
  * @version 1.2 - a way back before the copy took the node asks it no untrust (B13)
  * @version 1.2 - a DNS host that rounds a TTL up: the plan records what it holds, and a later attempt keeps the
  *                originals (B12)
@@ -37,6 +40,7 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
+require_once(__DIR__ . '/../../../tests/lib/dns_fixtures.php');
 harness_boot();
 
 /** A DNS host: one zone, records in memory, every write logged. */
@@ -712,5 +716,33 @@ ScdFakeDns::$min_ttl = 0;
 check(ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300 && ScdFakeDns::$records['r3']['ttl'] === 3600,
 	'going back puts each original back', json_encode(ScdFakeDns::$records));
 $retire($src, $cnode);
+
+section('A manual switch\'s way back names the records to point back (B28)');
+$man = array('method' => SiteCopyRunner::METHOD_MANUAL, 'records' => array(
+	array('id' => '', 'type' => 'A', 'name' => 'site.example.org', 'from' => '192.0.2.10', 'to' => '198.51.100.20', 'ttl_was' => null),
+	array('id' => '', 'type' => 'AAAA', 'name' => 'site.example.org', 'from' => '2001:db8::10', 'to' => '2001:db8::20', 'ttl_was' => null),
+));
+$lines = SiteCopyRunner::manual_records_back($man);
+check($lines === array('site.example.org A from 198.51.100.20 to 192.0.2.10', 'site.example.org AAAA from 2001:db8::20 to 2001:db8::10'),
+	'before going back, each record is named with the copy\'s address and the site\'s own', json_encode($lines));
+check(SiteCopyRunner::manual_records_back(array('method' => SiteCopyRunner::METHOD_DNS) + $man) === array(),
+	'a switch by DNS records names none: going back changes them itself');
+$zone = array('site.example.org|' . DNS_A => array(array('ip' => '198.51.100.20')),
+	'site.example.org|' . DNS_AAAA => array(array('ipv6' => '2001:0db8:0:0:0:0:0:10')));
+DnsResolver::setBackend(new FakeDnsBackend($zone));
+harness_defer(function () { DnsResolver::clearBackend(); });
+$went = $man + array('address_at' => 'source', 'moved_back_time' => '2026-10-21 13:30:00');
+$notes = implode(' ', SiteCopyRunner::went_back_notes($went));
+check(strpos($notes, 'site.example.org A from 198.51.100.20 to 192.0.2.10') !== false && strpos($notes, 'AAAA') === false,
+	'after going back, the note names the record DNS still points at the copy, and not one already pointed back', $notes);
+check(strpos(implode(' ', SiteCopyRunner::went_back_notes($man + array('address_at' => 'copy', 'moved_back_time' => '2026-10-21 13:30:00'))),
+	'DNS still names the copy') === false, 'moved to the copy again, it says nothing about pointing back');
+$zone['site.example.org|' . DNS_A] = array(array('ip' => '192.0.2.10'));
+DnsResolver::setBackend(new FakeDnsBackend($zone));
+check(SiteCopyRunner::went_back_notes($went) === array(), 'once the owner has pointed both back, the note is gone');
+$zone['site.example.org|' . DNS_A] = false;
+DnsResolver::setBackend(new FakeDnsBackend($zone));
+check(SiteCopyRunner::went_back_notes($went) === array(), 'a lookup that fails names nothing either way');
+DnsResolver::clearBackend();
 
 harness_finish();

@@ -35,14 +35,14 @@ Joinery uses a custom **JoineryValidation** library - pure JavaScript with no jQ
 
 ### Library File
 - Location: `/assets/js/joinery-validate.js`
-- Version: 1.1.1
+- Version: 1.2.6
 - Dependencies: None (standalone)
 
 ### Built-in Validators
 
 | Validator | Purpose | Notes |
 |-----------|---------|-------|
-| `required` | Field must have a value | Triggers on blur/change |
+| `required` | Field must have a value | Checked on submit, on change, and on blur once the field has been typed in or holds a value: an empty field nobody has typed in says nothing as it loses focus, so its error line never moves a button being clicked |
 | `email` | Valid email format | Uses standard email regex |
 | `url` | Valid URL format | Uses URL parsing |
 | `number` | Numeric value only | Accepts integers and decimals |
