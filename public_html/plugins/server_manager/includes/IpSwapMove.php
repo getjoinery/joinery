@@ -36,6 +36,8 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.9 - the plan refuses a server on Linode Interfaces, whose address Linode will not swap
+ *                (fleet_security_patching B8)
  * @version 1.8 - the plan says whether the copy is powered off for the swap too (both_off, CloudSwapWhileStopped)
  * @version 1.7 - any provider whose driver swaps addresses (CloudAddressSwap), both servers at the same one; the plan
  *                names the provider; powering a machine on or off needs only its driver, so a dead source at any
@@ -229,6 +231,14 @@ class IpSwapMove {
 			if (count($r['ipv4_public']) !== 1) {
 				$why[] = "The {$whose} server has " . count($r['ipv4_public']) . ' public IPv4 addresses ('
 					. implode(', ', $r['ipv4_public']) . '); a swap moves one, so each server must have exactly one.';
+			}
+			// Linode refuses to swap an address a Linode-generation interface
+			// holds, and a machine is upgraded to that generation one way only
+			// (2026-10-21, xandyliberato.com: the swap failed mid-move; B8).
+			if (($r['interface_generation'] ?? '') === 'linode') {
+				$why[] = "The {$whose} server uses Linode Interfaces, and Linode will not swap an address an interface holds. "
+					. 'Make it again with configuration-profile interfaces (servers this management node makes have them), '
+					. 'or switch by DNS or by the proxy instead.';
 			}
 			if ($r['network_helper'] === null) {
 				$why[] = "Whether Network Helper is on for the {$whose} server could not be read.";

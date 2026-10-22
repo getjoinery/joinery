@@ -181,6 +181,48 @@ $result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($result['status'] === 'success' && $test->deleted_instances === array('old') && $test->deleted_volumes === array('vold'),
 	'the run deletes exactly those: ' . $result['message']);
 check(strpos($result['message'], 'Held') !== false, 'the run\'s report lists the held servers');
+
+// A deleted server's address records in the test zone go with it (fleet_security_patching WP10).
+class FakeTestDns {
+	public $records = array();
+	public $deleted = array();
+	public $fail = false;
+	public $fail_on = '';
+	public function zoneFor(string $domain): ?string { return $domain === 'joinerytest.com' ? 'joinerytest.com' : null; }
+	public function listRecords(string $zone): array {
+		if ($this->fail) { throw new DnsProviderException('Linode said no'); }
+		return $this->records;
+	}
+	public function deleteRecord(string $zone, DnsRecord $r): void {
+		if ($r->name === $this->fail_on) { throw new DnsProviderException('Linode refused this one'); }
+		$this->deleted[] = $r->type . ' ' . $r->name . ' ' . $r->value;
+	}
+}
+$rec = function ($type, $name, $value) { $r = new DnsRecord($type, $name, $value); $r->provider_id = 'x'; return $r; };
+$fake_dns = new FakeTestDns();
+$fake_dns->records = array($rec('A', 'old.joinerytest.com', '192.0.2.50'), $rec('A', 'young.joinerytest.com', '192.0.2.51'),
+	$rec('TXT', 'old.joinerytest.com', '192.0.2.50'), $rec('A', 'alias.joinerytest.com', '192.0.2.50'));
+$test = $fresh_account();
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now, $fake_dns);
+check($fake_dns->deleted === array('A old.joinerytest.com 192.0.2.50', 'A alias.joinerytest.com 192.0.2.50')
+		&& strpos($result['message'], 'and their address records (A old.joinerytest.com, A alias.joinerytest.com)') !== false,
+	'every A record naming the deleted server\'s address goes, under any name; the young server\'s, and other types, stay', json_encode($fake_dns->deleted));
+$fake_dns = new FakeTestDns();
+$fake_dns->fail = true;
+$test = $fresh_account();
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now, $fake_dns);
+check($test->deleted_instances === array('old') && $result['status'] === 'error' && strpos($result['message'], 'the joinerytest.com records: Linode said no') !== false,
+	'records that cannot be read: the servers still go, and the run says so', $result['message']);
+$fake_dns = new FakeTestDns();
+$fake_dns->records = array($rec('A', 'old.joinerytest.com', '192.0.2.50'), $rec('A', 'alias.joinerytest.com', '192.0.2.50'));
+$fake_dns->fail_on = 'old.joinerytest.com';
+$result = TestCloudCleanup::run(array('test' => $test = $fresh_account()), $no_dns, $now, $fake_dns);
+check($fake_dns->deleted === array('A alias.joinerytest.com 192.0.2.50') && strpos($result['message'], 'record A old.joinerytest.com: Linode refused this one') !== false,
+	'one record refused: the rest still go, and the refused one is named', $result['message']);
+$result = TestCloudCleanup::run(array('hetzner test' => $test = $fresh_account()), $no_dns, $now, false);
+check($test->deleted_instances === array('old') && $result['status'] === 'error'
+		&& strpos($result['message'], 'their joinerytest.com records were left: no Linode test account holding that zone is held here') !== false,
+	'servers deleted with no account here holding the zone: the run says their records were left', $result['message']);
 $states = TestCloudCleanup::state();
 $state = $states[0] ?? array();
 check(($state['outcome'] ?? '') === 'ran' && count($state['deleted_instances']) === 1 && count($state['held']) === 2,

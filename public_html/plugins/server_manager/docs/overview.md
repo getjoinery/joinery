@@ -190,6 +190,8 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
 | `/admin/server_manager/incidents` | **Incidents** -- every condition on every node that needs, or needed, a person; triage several at once (see *Incidents* below) |
 | `/admin/server_manager/incident?id=N` | **Incident** -- one incident: its state, its timeline, its evidence, triage and notes |
+| `/admin/server_manager/fleet_security` | **Fleet Security** -- every machine and site container and whether it is patched, red first; **Install security updates everywhere** (see *Fleet security* below) |
+| `/admin/server_manager/machines` | **Machines** -- every machine we pay for: managed, servers in our cloud accounts no node runs on, and machines written down by hand (see *Machines* below) |
 | `/admin/server_manager/node_detail?mgn_managed_node_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
 | `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
 | `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (any provider in `StorageProvider`), and Where new backups go |
@@ -589,6 +591,39 @@ Adoption writes an admin-origin provision in install mode `adopted`, status `don
 Nothing is installed and nothing on the server changes. An adopted server is never one somebody bought, so it is never billed, trialled or handed to a customer. Removing the node removes its provision with it.
 
 A later join from the adopted server's address is checked with the provider like any join from a server this management node created.
+
+## Fleet security
+
+`/admin/server_manager/fleet_security` shows every machine and site container and whether it is patched (`FleetSecurityView`), red rows first:
+
+- A machine's row comes from its host report: its operating system, the security fixes its hourly check found waiting (`security_pending`), what still runs replaced code (`services_needing_restart`), when automatic updates last ran, and a reboot owed.
+- A site container's row comes from its own status check (its PHP, and whether its php-fpm runs the binary installed) and from its host's report. Its operating system is its host's base image, so the fixes it waits for are the ones the host's base check found (`site_refresh`).
+- **Red:** old code is serving, or a critical fix waits (PHP, Apache, OpenSSL, PostgreSQL).
+- **Amber:** other fixes wait for the next run, a kernel fix waits for the night and then a person's reboot, a reboot has been owed over a day, or no check has passed in two hours.
+- **Grey:** nothing has been reported to judge by.
+
+**Install security updates everywhere** (`FleetSecurityRunner`, a tracked `FleetSecurityRun` in `fsr_fleet_security_runs`, moved by the `AdvanceFleetSecurityRuns` task and by loading the page):
+
+- Each machine, then each site container after its host, runs its own `install_security_updates`, one at a time.
+- A node whose updater failed stops the run, naming it. One with nothing to install, or with another package run in the way, is recorded and passed.
+- A site container whose host is replacing its containers is left out, or skipped while its install is open: its new container carries the fix.
+- A node switched off, or whose agent lacks the word, is left out by name.
+- Stop takes effect between nodes.
+
+## Machines
+
+`/admin/server_manager/machines` lists every machine we pay for (`MachineInventory`), from three sources:
+
+- **Managed:** each node that is not a site in a container, in whatever install state (a dormant copy and a retired source are machines we pay for, and the row names the state), with its operating system from its own host report.
+- **Not managed:** each server in our own cloud accounts this management node holds a key for that no node runs on (`MachineInventory::lists_account()`: not the test account, whose servers are thrown away nightly, and not a customer's Connect grant). A server is matched to a node by its addresses, as the transfer watch matches them. It shows its IPv4, or its IPv6 where it has none, and the release a note on it says it runs, or else the release of the image it was made from.
+- **Written down:** each machine written down by hand (`FleetHandMachine`, `fhm_fleet_hand_machines`, at `/admin/server_manager/machine_edit`). That is a machine in an account no key here reads, or a note on a listed server that is not managed on purpose: what it is for, whose it is, what it serves, its release and a retire-by date. Saving it confirms it as true now, and **Confirm** does that alone.
+
+The verdicts:
+
+- **Red:** an Ubuntu release past standard support (`MachineInventory::UBUNTU_SUPPORT_ENDS`, which holds the first day of the earliest end Canonical's pages give), or a retire-by date passed.
+- **Amber:** a server no node manages and nothing written down explains; a machine written down and not confirmed for 90 days; a written-down machine that serves nothing written and has no retire-by date; a retired source, kept for the way back; or a node whose install failed.
+
+An account that cannot be read is named at the top, since its servers are missing until it can be.
 
 ## Staged rollout
 
@@ -1065,7 +1100,9 @@ A management node that holds a cloud account flagged test (see *Cloud accounts*)
 
 A server or volume whose creation time cannot be read is left alone.
 
-The Cleanup tab of the Provisioning page shows the task's state, each test account with the scopes a run needs that it lacks (`linodes:read_write`, `volumes:read_write`, `account:read_only`), and the last run per account: what it deleted, held and kept, or why it refused. **Preview the next run** asks the provider what a run would do now on each test account and deletes nothing. A failed delete, or volumes that cannot be listed, is reported in the run's message without stopping the rest.
+A deleted server's address records go with it: every A and AAAA record in the test zones (`TestCloudCleanup::DNS_ZONES`, joinerytest.com) that names one of its addresses, under any name, whichever test account the server was in. The zone lives in a Linode test account, and that account's own token removes the records (`TestCloudCleanup::zone_holder()`, `LinodeDnsDriver`, which needs `domains:read_write`). A record left on a released address would name whoever the provider gives that address to next. Records that cannot be read, a record the provider refuses, or no held account holding the zone are each reported as a failure of that run; the servers still go.
+
+The Cleanup tab of the Provisioning page shows the task's state, each test account with the scopes a run needs that it lacks (`linodes:read_write`, `volumes:read_write`, `account:read_only`, `domains:read_write`), and the last run per account: what it deleted, held and kept, or why it refused. **Preview the next run** asks the provider what a run would do now on each test account and deletes nothing. A failed delete, or volumes that cannot be listed, is reported in the run's message without stopping the rest.
 
 ### What stays manual
 

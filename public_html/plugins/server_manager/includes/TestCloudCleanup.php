@@ -16,6 +16,14 @@
  * the address of a live managed node here (it is listed as held, so the
  * operator tags it or removes the node first).
  *
+ * A deleted server's address records go with it: every A and AAAA record in
+ * the test zones (DNS_ZONES) naming one of its addresses, whichever test
+ * account the server was in. The zones live in a Linode test account, whose
+ * own token removes them; with no such account held here, the run says the
+ * records were left. A record left on a released address names whoever the
+ * provider gives that address to next (fleet_security_patching WP10).
+ *
+ * @version 1.3 - a deleted server's A and AAAA records in the test zones are removed with it
  * @version 1.2 - every test account of ours, each behind its own safety catch; the state is one entry per account
  *                (cloud_accounts_list)
  * @version 1.1 - the company name Linode accepts: Joinery Test disposable (it refuses parentheses)
@@ -31,12 +39,15 @@ class TestCloudCleanup {
 	const TASK_CLASS = 'DeleteOldTestServers';
 	const STATE_SETTING = 'server_manager_test_cloud_cleanup';
 	const MAX_AGE_SETTING = 'server_manager_test_cloud_max_age_hours';
+	/** The test account's own DNS zones, whose address records follow its servers. */
+	const DNS_ZONES = array('joinerytest.com');
 	const DEFAULT_MAX_AGE_HOURS = 24;
 	/** The token scopes a run needs, as scope => what it is for. */
 	const SCOPES = array(
 		'linodes:read_write' => 'deleting servers',
 		'volumes:read_write' => 'deleting volumes',
 		'account:read_only'  => 'reading the account\'s company name, the safety catch',
+		'domains:read_write' => 'removing a deleted server\'s address records',
 	);
 
 	/** The accounts of ours flagged test that can be used now. */
@@ -147,13 +158,14 @@ class TestCloudCleanup {
 	 * own. Records one outcome per account for the setup page and the
 	 * incident. Returns the scheduled task's {status, message}.
 	 */
-	public static function run(?array $accounts = null, ?callable $resolve = null, ?int $now = null): array {
+	public static function run(?array $accounts = null, ?callable $resolve = null, ?int $now = null, $dns = null): array {
 		$now = $now ?? time();
 		if ($accounts === null) {
 			$accounts = array();
 			foreach (self::accounts() as $account) {
 				$accounts[$account->label()] = $account->driver();
 			}
+			$dns = self::zone_holder(self::accounts());
 		}
 		if (!$accounts) {
 			self::save_state(array());
@@ -164,7 +176,7 @@ class TestCloudCleanup {
 		$messages = array();
 		$status = 'success';
 		foreach ($accounts as $name => $driver) {
-			list($state, $result) = self::run_one((string)$name, $driver, $nodes, $now);
+			list($state, $result) = self::run_one((string)$name, $driver, $nodes, $now, $dns);
 			$states[] = $state;
 			$messages[] = $name . ': ' . $result['message'];
 			if ($result['status'] === 'error') {
@@ -175,8 +187,30 @@ class TestCloudCleanup {
 		return array('status' => $status, 'message' => implode(' ', $messages));
 	}
 
-	/** One account's run: [its state, its {status, message}]. */
-	private static function run_one(string $name, $driver, array $nodes, int $now): array {
+	/**
+	 * The DNS of the test account that holds the test zones: a Linode test
+	 * account's own token (Linode's Domains), the same account behind the same
+	 * safety catch. False when no held account holds them.
+	 */
+	public static function zone_holder(array $accounts) {
+		foreach ($accounts as $account) {
+			if ($account->provider() !== 'linode') { continue; }
+			try {
+				$dns = new LinodeDnsDriver(array('access_token' => $account->token()));
+				if ($dns->zoneFor(self::DNS_ZONES[0]) !== null) { return $dns; }
+			} catch (Exception $e) {
+				continue;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * One account's run: [its state, its {status, message}]. $dns is the zone
+	 * holder's DNS (zone_holder), false when none is held, or null to leave
+	 * records alone (a test of the rest).
+	 */
+	private static function run_one(string $name, $driver, array $nodes, int $now, $dns = null): array {
 		$base = array('name' => $name, 'time' => gmdate('Y-m-d H:i:s', $now));
 		try {
 			$plan = self::plan($driver, $nodes, $now, self::max_age_hours());
@@ -195,12 +229,41 @@ class TestCloudCleanup {
 		if ($plan['volume_error'] !== '') {
 			$failures[] = 'volumes could not be listed: ' . $plan['volume_error'];
 		}
+		$released = array();
 		foreach ($plan['instances'] as $i) {
 			try {
 				$driver->deleteInstance($i['id']);
 				$deleted['instances'][] = $i['label'] . ' (' . $i['id'] . ')';
+				foreach ($i['addresses'] as $a) {
+					if (($b = IpAddress::binary($a)) !== null) { $released[$b] = true; }
+				}
 			} catch (CloudComputeException $e) {
 				$failures[] = 'server ' . $i['label'] . ': ' . $e->getMessage();
+			}
+		}
+		$deleted['records'] = array();
+		if ($released && $dns === false) {
+			$failures[] = 'their ' . implode(', ', self::DNS_ZONES) . ' records were left: no Linode test account holding that zone is held here';
+		} elseif ($released && $dns !== null) {
+			foreach (self::DNS_ZONES as $domain) {
+				try {
+					$zone = $dns->zoneFor($domain);
+					$records = $zone === null ? array() : $dns->listRecords($zone);
+				} catch (Exception $e) {
+					$failures[] = 'the ' . $domain . ' records: ' . $e->getMessage();
+					continue;
+				}
+				foreach ($records as $record) {
+					if (!in_array($record->type, array('A', 'AAAA'), true)) { continue; }
+					$b = IpAddress::binary((string)$record->value);
+					if ($b === null || !isset($released[$b])) { continue; }
+					try {
+						$dns->deleteRecord($zone, $record);
+						$deleted['records'][] = $record->type . ' ' . $record->name;
+					} catch (Exception $e) {
+						$failures[] = 'record ' . $record->type . ' ' . $record->name . ': ' . $e->getMessage();
+					}
+				}
 			}
 		}
 		foreach ($plan['volumes'] as $v) {
@@ -215,13 +278,14 @@ class TestCloudCleanup {
 			return $h['label'] . ' (' . implode(', ', $h['addresses']) . '; node #' . implode(', #', $h['node_ids']) . ')';
 		}, $plan['held']);
 		$state = $base + array('outcome' => 'ran', 'account' => $plan['account'],
-			'deleted_instances' => $deleted['instances'], 'deleted_volumes' => $deleted['volumes'],
+			'deleted_instances' => $deleted['instances'], 'deleted_volumes' => $deleted['volumes'], 'deleted_records' => $deleted['records'],
 			'held' => $held, 'kept' => $plan['kept'], 'failures' => $failures);
 
 		$message = 'Deleted ' . count($deleted['instances']) . ' server(s)'
 			. ($deleted['instances'] ? ' (' . implode(', ', $deleted['instances']) . ')' : '')
 			. ' and ' . count($deleted['volumes']) . ' volume(s)'
-			. ($deleted['volumes'] ? ' (' . implode(', ', $deleted['volumes']) . ')' : '') . '.';
+			. ($deleted['volumes'] ? ' (' . implode(', ', $deleted['volumes']) . ')' : '')
+			. ($deleted['records'] ? ', and their address records (' . implode(', ', $deleted['records']) . ')' : '') . '.';
 		if ($held) {
 			$message .= ' Held, at a managed node\'s address: ' . implode('; ', $held) . '. Tag each keep, or remove its node.';
 		}

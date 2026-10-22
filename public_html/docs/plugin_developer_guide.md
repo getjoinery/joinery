@@ -1674,6 +1674,8 @@ A provisioner declared `"fleet_report": true` also reaches the management node t
 
 Declare it only on a check that is cheap enough to run hourly and whose failure means the site needs someone's attention; the reason is shown to the fleet operator as written.
 
+The report also carries one check of core's own, under the plugin name `core`: `outbound_mail` (`PluginProvisioning::outboundMailCheck()`). It passes when a mail service is set (`email_service`) and that provider's `validateConfiguration()` finds its settings complete. A site that cannot send mail fails its node's health like a failing plugin check, since nothing it sends would leave it.
+
 ## Parsing Outside Bytes
 
 A plugin that opens a stranger's bytes with a C parser — `ZipArchive`, `DOMDocument`/`loadHTML`, `simplexml_load_string`, `gzdecode`, `PharData` — does not do it in the request. It writes a class implementing `SandboxParserInterface` and hands the bytes to `DocumentText::parseWith()` (or `parseWithMany()` for a batch), which runs that class in the extraction subprocess under the parser jail: as the `joinery-jail` user, with no network, no forking, no config, no database and no key. The class may rely on core `includes/` classes (`DocumentText::xmlDoc()` is the one XML door) and its own file, nothing else. `tests/security/parser_surfaces_test.php` fails on a file that names a parser and is neither a sandbox parser nor on its list with a reason. See [Document Text](document_text.md#sandbox-parsers).

@@ -135,7 +135,8 @@ chk "an unchanged package is not listed" "$(grep -c 'curl' "$T/out.json")" "0"
 chk "reboot_required is a boolean" "$(jv "$T/out.json" reboot_required | grep -c -x -E 'true|false')" "1"
 chk "services still on old code are named" "$(jv "$T/out.json" services_needing_restart)" '["php8.3-fpm.service"]'
 chk "the updater ran once, with no arguments" "$(grep -c -x 'unattended-upgrade ' "$T/calls")" "1"
-chk "apt-get ran only update" "$(grep '^apt-get' "$T/calls" | grep -v -c -E '^apt-get -q update$')" "0"
+chk "apt-get ran update, then clean once the install changed something, and nothing else" \
+    "$(grep '^apt-get' "$T/calls" | tr '\n' '|')" "apt-get -q update|apt-get -q -o DPkg::Lock::Timeout=0 clean|"
 
 chk "nothing half done: no repair, nothing reloaded" "$(jv "$T/out.json" repaired)|$(jv "$T/out.json" reloaded)|$(jv "$T/out.json" still_on_old_code)|$(grep -c -- ' -f ' "$T/calls")" "false|[]|[]|0"
 
@@ -179,6 +180,7 @@ printf '%s\n' "$SHUTDOWN_HELPER" > "$T/ps"
 echo "=== Nothing pending is its own outcome ==="
 STUB_UU_NOCHANGE=1 run_script
 chk "nothing_to_install" "$(jv "$T/out.json" outcome)/$(jv "$T/out.json" upgraded_count)/$(jv "$T/out.json" upgraded)" "nothing_to_install/0/[]"
+chk "  and nothing to clear" "$(grep -c ' clean$' "$T/calls")" "0"
 
 echo "=== A failed updater is reported, not hidden ==="
 STUB_UU_RC=1 STUB_UU_OUT="E: something broke" run_script; rc=$?

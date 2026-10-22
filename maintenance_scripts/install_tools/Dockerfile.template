@@ -1,4 +1,10 @@
 # Joinery Docker Template
+# VERSION 6.4 - The finished image drops Ubuntu's docker-clean apt rule. It deletes every downloaded
+#               package after ANY apt-get update, with no lock, so an update run while another apt run
+#               was unpacking took that run's packages from under dpkg (fleet_security_patching WP3,
+#               the lost .deb). The build steps above keep it, so the image is as small as before.
+#               And apt's daily job stays off by our own setting, not only Ubuntu's image's: a site
+#               container is patched by replacement and by install_security_updates, never on its own.
 # VERSION 6.3 - The PHP extensions can come from a build argument, JOINERY_DECLARED_APT, when the context
 #               carries no code to ask (recreate_site.sh, specs/multi_tenant_host_hardening.md D9): the
 #               running site's own list_dependencies.php answers inside its container, and the build
@@ -293,6 +299,20 @@ RUN printf '%s\n' \
       > /etc/apache2/mods-available/remoteip.conf && \
     a2enmod remoteip && \
     sed -i 's/%h /%a /' /etc/apache2/apache2.conf
+
+# A running site's apt behaves as on any Ubuntu server: an apt-get update never
+# deletes what another apt run downloaded. Ubuntu's image deletes every .deb
+# after any update or dpkg run (docker-clean), with no lock, which is right for
+# a build step and wrong beside a security install unpacking. A run that wants
+# its downloads gone runs apt-get clean, which waits for apt's lock.
+# apt's daily job (cron's apt-compat, with no systemd here) stays off: the
+# image's unattended-upgrades package switches it on in 20auto-upgrades, and
+# only Ubuntu's docker-disable-periodic-update turns it off. A site container
+# is patched by replacement (site_refresh.sh) and by install_security_updates,
+# which reloads PHP after; a daily run of its own would do neither.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    printf '%s\n' '// A Joinery site container runs no apt job of its own (Dockerfile.template).' \
+      'APT::Periodic::Enable "0";' > /etc/apt/apt.conf.d/99joinery-no-periodic
 
 # Expose ports
 EXPOSE 80 5432

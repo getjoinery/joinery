@@ -5,6 +5,9 @@
 # extra.joinery-system-packages plus plugin requires.packages), resolved by
 # utils/list_dependencies.php.
 #
+# VERSION: 1.4 - a declared package a package run is upgrading (dpkg reads it "unpacked" for a moment),
+#                or one held, is present: reading it as missing ran apt-get update mid-upgrade
+#                (fleet_security_patching WP3, the lost .deb); the downloads are cleared after installing
 # VERSION: 1.3 - apt waits up to five minutes for the package lock instead of failing at once
 #                (APT_LOCK_WAIT): an upgrade's install lost to the converger's own apt-get, or
 #                to unattended-upgrades, and the package stayed missing. A failed warning names
@@ -67,16 +70,22 @@ if [ -z "$SPECS" ]; then
     exit 0
 fi
 
-# Is the package installed, as opposed to merely known to dpkg?
+# Is the package present, as opposed to merely known to dpkg?
 #
 # `dpkg -s` exits 0 for a package that apt removed but did not purge — it stays
 # in the database as "deinstall ok config-files" with its files gone. Treating
 # that as present is how a node gets stuck: the extension is never reinstalled,
 # composer validation then fails on the missing ext-*, and the deployment rolls
 # back on every attempt while the one step that could fix it declines to act.
+#
+# A package dpkg wants installed (or held) is present unless it is absent: one a
+# package run is upgrading reads "unpacked" or "half-configured" for a moment,
+# and reading that as missing ran apt-get update in the middle of the upgrade
+# (fleet_security_patching WP3, the lost .deb).
 pkg_installed() {
     [ -n "${1:-}" ] || return 1
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null \
+        | grep -Eq '^(install|hold) [a-z]+ (installed|unpacked|half-configured|half-installed|triggers-awaited|triggers-pending)$'
 }
 
 # Work out what is missing before touching apt, so the common case (everything
@@ -116,5 +125,8 @@ for spec in $MISSING; do
         say "WARNING - could not install ${primary} (or ${fallback}): $(printf '%s\n' "$out" | grep -v '^\s*$' | tail -1); the host converger tries again every minute"
     fi
 done
+# The downloads are spent; nothing else clears them in a site container, whose
+# image runs no daily apt job (Dockerfile.template).
+apt-get -q clean >/dev/null 2>&1 || true
 
 exit 0

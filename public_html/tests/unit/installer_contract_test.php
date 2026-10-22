@@ -1463,6 +1463,21 @@ check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
 // that state was permanently stuck: the extension was never reinstalled,
 // ComposerValidator then failed on the missing ext-*, and every upgrade rolled
 // back. Observed on a live 24.04 box 2026-08-06.
+//
+// And "missing" means absent, not "not finished": a package a package run is
+// upgrading reads "unpacked" or "half-configured" for a moment. Reading that as
+// missing ran apt-get update mid-upgrade, and in a site container Ubuntu's
+// docker-clean rule then deleted the upgrade's downloaded packages
+// (fleet_security_patching WP3, the lost .deb, 2026-10-21). All three places
+// test the one pattern: wanted (install or hold), in any state but
+// not-installed and config-files.
+$present_pattern = '^(install|hold) [a-z]+ (installed|unpacked|half-configured|half-installed|triggers-awaited|triggers-pending)$';
+$present = function (string $status) use ($present_pattern): bool { return (bool)preg_match('/' . $present_pattern . '/', $status); };
+check($present('install ok installed') && $present('install ok unpacked') && $present('install ok half-configured')
+		&& $present('install reinstreq half-installed') && $present('hold ok installed') && $present('install ok triggers-pending'),
+	'present: installed, mid-upgrade (unpacked, half-configured, half-installed, triggers), or held');
+check(!$present('deinstall ok config-files') && !$present('unknown ok not-installed') && !$present('install ok not-installed') && !$present(''),
+	'missing: removed with its config left, never installed, or nothing at all');
 $upgrade_php  = PathHelper::getIncludePath('utils/upgrade.php');
 $plugin_start = $site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
 foreach ([
@@ -1476,8 +1491,8 @@ foreach ([
     $code = preg_replace('/^\s*(#|\/\/).*$/m', '', $src);
     check(strpos($code, 'dpkg -s') === false,
         "{$label} does not treat a known package name as installed");
-    check(strpos($code, 'install ok installed') !== false,
-        "{$label} tests the dpkg Status field instead");
+    check(strpos($code, '${Status}') !== false && strpos($code, $present_pattern) !== false,
+        "{$label} tests the dpkg Status field instead, with the one presence pattern");
 }
 
 

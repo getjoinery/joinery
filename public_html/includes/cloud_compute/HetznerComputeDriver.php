@@ -23,6 +23,8 @@
  *     taken up.
  *   - Its activity log is the server's actions, by Hetzner's own command names.
  *
+ * @version 1.4 - listInstances carries each server's image name, for the list of every machine we pay for
+ *               (fleet_security_patching WP8)
  * @version 1.3 - root's password is set by runcmd from its hash: Hetzner's vendor data set root's password after
  *               this user data's, so no install could log in (B32); the plaintext is no longer in the user data
  * @version 1.2 - plans are those a location sells now, by its own entry in each plan's list of locations, not its
@@ -424,6 +426,7 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 			$out[] = array('id' => $n['id'], 'status' => $n['status'], 'label' => $n['label'], 'region' => $n['region'],
 				'ipv4_public' => $v4 !== '' ? array($v4) : array(), 'ipv6' => $n['ipv6'], 'disk_encryption' => $n['disk_encryption'],
 				'created' => gmdate('Y-m-d H:i:s', strtotime((string)($s['created'] ?? '')) ?: 0),
+				'image' => (string)($s['image']['name'] ?? ''),
 				'tags' => array_values(array_map('strval', array_keys((array)($s['labels'] ?? array())))));
 		}
 		return $out;
