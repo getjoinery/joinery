@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.72 - the settings form saves mgn_rollout_first (Test releases here first) on a node that hosts a site
  * @version 1.71 - set_reverse_dns says every address it named, and any it left with why (NodeReverseDns::summary, B33)
  * @version 1.70 - set_reverse_dns is refused for a node whose agent moved away (ManagedNode::agent_moved_away())
  * @version 1.69 - publish_upgrade's Apply and publish button queues the apply with the publish to follow it
@@ -1395,6 +1396,11 @@ class NodeDetailActions {
 		];
 		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled'];
+		// Offered only on a node that hosts a site; a form without it leaves it as it is.
+		if ($node->hosts_site()) {
+			$editable_fields[] = 'mgn_rollout_first';
+			$bool_fields[] = 'mgn_rollout_first';
+		}
 		foreach ($editable_fields as $field) {
 			if (in_array($field, $bool_fields, true)) {
 				$node->set($field, !empty($_POST[$field]));

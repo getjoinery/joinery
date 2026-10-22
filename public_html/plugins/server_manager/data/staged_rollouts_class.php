@@ -1,7 +1,7 @@
 <?php
 /**
- * StagedRollout - one release applied across an ordered list of nodes, one
- * node at a time, stopping at the first node whose apply does not prove good.
+ * StagedRollout - one release applied across nodes in stages, stopping at the
+ * first node whose apply does not prove good.
  *
  * specs/agent_recipes_and_vocabulary.md, "staged_rollout {release, order}"
  * (tier 2, on the plane). Not a node word: each step is the node's own
@@ -10,11 +10,17 @@
  * StagedRolloutRunner moves it; this class only holds it.
  *
  * srl_steps is the ordered list, one entry per node:
- *   {node_id, name, job_id, verdict, reason}
- * verdict is one of pending | running | passed | failed | skipped. A rollout
- * with pages to check (srl_probe_pages) adds probes_before and probes_after,
- * each the page_probe job ids of one round.
+ *   {node_id, name, stage, machine, job_id, verdict, reason}
+ * verdict is one of pending | running | passed | failed | skipped. stage is
+ * the step's stage (0 first); the steps of one stage run at once, one per
+ * machine (FleetBackupPolicy::machine_key), and srl_position is the stage
+ * under way. A step recorded before stages existed is a stage of its own. A
+ * rollout with pages to check (srl_probe_pages) adds probes_before and
+ * probes_after, each the page_probe job ids of one round. srl_halt_reason set
+ * while the rollout is still running means a step failed and the rollout is
+ * waiting for the applies already under way.
  *
+ * @version 1.2 - stages: srl_steps carries stage and machine, and srl_position is the stage under way
  * @version 1.1 - srl_probe_pages: the pages each node renders before and after its apply, [{page, viewer}]
  * @version 1.0
  */

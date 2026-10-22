@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.65 - mgn_rollout_first: Deploy to all managed nodes tests a release on the nodes marked so first
  * @version 1.64 - adopt_reported_container() places a container node named before placement existed, with no live
  *                placement, on the record for its address (fleet_security_patching B26)
  * @version 1.63 - hiding a container site keeps its server on record on its Docker host's node (an adopted record is
@@ -304,6 +305,11 @@ class ManagedNode extends SystemBase {
 		// Whether this node's incidents notify anyone (sends_alerts()): 'on', 'off', or empty for
 		// by where it is hosted, which is off for a box in our test cloud account.
 		'mgn_alerts'              => array('type'=>'varchar(8)'),
+		// Deploy to all managed nodes applies a release here first, and the rest
+		// of the fleet only once every node marked so has taken it well
+		// (StagedRolloutRunner::deploy_all_plan). Mark sites you would least
+		// mind breaking.
+		'mgn_rollout_first'       => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// When the host verified this site's container gone (Permanently Delete Site).
 		'mgn_site_removed_time'   => array('type'=>'timestamp(6)'),
 		// Whether the node detail Console tab may run an ad-hoc command here.

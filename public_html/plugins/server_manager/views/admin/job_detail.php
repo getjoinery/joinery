@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.24 - a deploy-all publish not yet done describes its rollout's two stages (StagedRolloutRunner::deploy_all_description)
  * @version 1.23 - that publish reads 'published' once its job completes, and warns when it failed
  * @version 1.22 - an apply that Apply and publish follows with a publish says where that publish stands
  * @version 1.21 - an install_security_updates result says what it reloaded, what still serves old code, and a
@@ -297,11 +298,8 @@ $status_class = match($job->get('mjb_status')) {
 					<?php
 					$da_plan  = StagedRolloutRunner::deploy_all_plan();
 					$da_left  = $da_plan['left_out'];
-					$da_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $da_plan['nodes']);
+					echo htmlspecialchars(StagedRolloutRunner::deploy_all_description($da_plan, false));
 					?>
-					once this publish completes, the release is rolled out to
-					<?php echo $da_names ? htmlspecialchars(implode(', ', $da_names)) : 'no node (none can take a rollout right now)'; ?>,
-					one node at a time, stopping at the first node whose upgrade fails.
 				<?php endif; ?>
 				<?php foreach ($da_left as $lo): ?>
 					<br><small>Left out: <?php echo htmlspecialchars((string)($lo['name'] ?? '')); ?> — <?php echo htmlspecialchars((string)($lo['reason'] ?? '')); ?></small>

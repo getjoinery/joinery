@@ -13,9 +13,13 @@
  * nothing rolled back; halting at the first miss and naming the node and why;
  * stoppable between nodes; and refusing, up front, a node that cannot take an
  * apply at all. And "Deploy to all managed nodes": a completed publish that
- * asked for it starts one rollout over every eligible node, management nodes
- * last, and writes what became of it onto the publish job.
+ * asked for it starts one rollout over every eligible node, in two stages (the
+ * nodes marked Test releases here first, then the rest at once, one per
+ * machine, management nodes last), and writes what became of it onto the
+ * publish job.
  *
+ * @version 1.6 - stages: a stage's nodes at once, one per machine; the next stage only when all passed; a miss halts
+ *                once the applies under way are judged; deploy to all managed nodes tests on the marked nodes first
  * @version 1.5 - the page_probe gate: the pages parsed, the verdict's rules, and a rollout that checks pages before and after
  * @version 1.4 - a node past the rollout's release passes the gate; one short of it, or reporting none, halts
  * @version 1.3 - the readiness check (upgrade_preflight) before a node's apply: passes, fails by name, is skipped for an agent without it
@@ -452,6 +456,95 @@ foreach (array(SiteCopy::STATUS_HALTED => null, SiteCopy::STATUS_SWITCHED => 'he
 }
 $held_copy->set('scp_status', SiteCopy::STATUS_DISCARDED);
 $held_copy->save();
+
+// ---------------------------------------------------------------------------
+section('Stages: the test sites first, then the rest at once, one per machine');
+
+$host = new ManagedHost(NULL);
+$host->set('mgh_slug', 'srl-host-' . bin2hex(random_bytes(3)));
+$host->set('mgh_name', 'HarnessTest SRL host');
+$host->set('mgh_host', '192.0.2.51');
+$host->set('mgh_provisioning_enabled', false);
+$host->prepare();
+$host->save();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host->key);
+$t1 = $mk('test1');
+$t2 = $mk('test2');
+$r1 = $mk('rest1');
+$r2 = $mk('rest2');
+$r3 = $mk('rest3');
+foreach (array($t1, $t2) as $n) { $n->set('mgn_rollout_first', true); $n->save(); }
+// r1 and r2 are containers on one Docker host; r3 is a machine of its own.
+foreach (array($r1, $r2) as $n) { $n->set('mgn_mgh_managed_host_id', $host->key); $n->save(); }
+
+$plan = StagedRolloutRunner::deploy_all_plan(array($mgr, $r1, $t2, $r2, $t1, $r3));
+$ids = function (array $nodes) { return array_map(function ($n) { return (int)$n->key; }, $nodes); };
+check($ids($plan['first']) === array((int)$t2->key, (int)$t1->key)
+	&& $ids($plan['rest']) === array((int)$r1->key, (int)$r2->key, (int)$r3->key, (int)$mgr->key),
+	'the plan takes the nodes marked Test releases here first, then the rest, management nodes last', json_encode(array($ids($plan['first']), $ids($plan['rest']))));
+$said = StagedRolloutRunner::deploy_all_description($plan);
+check(strpos($said, $t2->get('mgn_name') . ', ' . $t1->get('mgn_name') . ' first, at once') !== false
+	&& strpos($said, 'one at a time on each machine') !== false && strpos($said, 'Left out') === false,
+	'and the pages say so', $said);
+$unmarked = StagedRolloutRunner::deploy_all_plan(array($r1, $r3, $mgr));
+check($ids($unmarked['first']) === array((int)$r1->key) && $ids($unmarked['rest']) === array((int)$r3->key, (int)$mgr->key),
+	'with no node marked, the first site is the test site: a release never goes everywhere untried', json_encode($ids($unmarked['first'])));
+
+$prior = StagedRollout::running();
+if ($prior) { StagedRolloutRunner::stop($prior, null); }
+$sr = StagedRolloutRunner::start_stages(array($ids($plan['first']), array((int)$r1->key, (int)$r2->key, (int)$r3->key)), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $sr->key);
+$step_of = function (StagedRollout $r, $node) {
+	foreach ($r->steps() as $st) { if ((int)$st['node_id'] === (int)$node->key) { return $st; } }
+	return null;
+};
+$job_of = function (StagedRollout $r, $node) use ($step_of) {
+	$st = $step_of($r, $node);
+	$j = new ManagementJob((int)$st['job_id'], TRUE);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+	return $j;
+};
+check(!empty($step_of($sr, $t1)['job_id']) && !empty($step_of($sr, $t2)['job_id']) && empty($step_of($sr, $r1)['job_id']),
+	'both test sites are applied at once, and nothing else yet', json_encode($sr->steps()));
+check($step_of($sr, $r1)['machine'] === $step_of($sr, $r2)['machine'] && $step_of($sr, $r1)['machine'] !== $step_of($sr, $r3)['machine'],
+	'two containers on one host are one machine; a server of its own is another');
+
+$finish($job_of($sr, $t1), 'completed', srl_apply(array('version_after' => $release)));
+StagedRolloutRunner::advance($sr); $sr->load();
+check((int)$sr->get('srl_position') === 0 && $step_of($sr, $t1)['verdict'] === 'passed' && empty($step_of($sr, $r1)['job_id']),
+	'one test site done is not enough: the rest wait for both');
+$finish($job_of($sr, $t2), 'completed', srl_apply(array('version_after' => $release)));
+StagedRolloutRunner::advance($sr); $sr->load();
+check((int)$sr->get('srl_position') === 1, 'both test sites done: the next stage is under way');
+StagedRolloutRunner::advance($sr); $sr->load();
+check(!empty($step_of($sr, $r1)['job_id']) && !empty($step_of($sr, $r3)['job_id']) && empty($step_of($sr, $r2)['job_id'])
+	&& $step_of($sr, $r2)['verdict'] === 'pending',
+	'the rest go at once, but one at a time on each machine: the second container waits for the first', json_encode($sr->steps()));
+
+$finish($job_of($sr, $r1), 'completed', srl_apply(array('version_after' => $release)));
+StagedRolloutRunner::advance($sr); $sr->load();
+check($step_of($sr, $r1)['verdict'] === 'passed' && !empty($step_of($sr, $r2)['job_id']),
+	'the first container done, the second starts in the same tick', json_encode($sr->steps()));
+
+$finish($job_of($sr, $r2), 'completed', srl_apply(array('version_after' => $release,
+	'rolled_back' => array('rolled_back' => true, 'step' => 'deploy_tier', 'schema_ahead_of_code' => false))));
+StagedRolloutRunner::advance($sr); $sr->load();
+check($sr->is_running() && $step_of($sr, $r2)['verdict'] === 'failed' && $step_of($sr, $r3)['verdict'] === 'running'
+	&& strpos((string)$sr->get('srl_halt_reason'), (string)$r2->get('mgn_name')) === 0,
+	'a miss while another apply is under way: the rollout says why and waits for that apply', (string)$sr->get('srl_halt_reason'));
+$finish($job_of($sr, $r3), 'completed', srl_apply(array('version_after' => $release)));
+StagedRolloutRunner::advance($sr); $sr->load();
+check((string)$sr->get('srl_status') === StagedRollout::STATUS_HALTED && $step_of($sr, $r3)['verdict'] === 'passed'
+	&& strpos((string)$sr->get('srl_halt_reason'), 'rolled back at deploy_tier') !== false,
+	'which is judged, and then the rollout ends halted at the first miss', json_encode($sr->steps()));
+
+$ns = StagedRolloutRunner::start_stages(array(array((int)$r1->key), array((int)$r2->key, (int)$r3->key)), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $ns->key);
+$finish($job_of($ns, $r1), 'completed', srl_apply(array('version_after' => $release, 'outcome' => 'failed')));
+StagedRolloutRunner::advance($ns); $ns->load();
+check((string)$ns->get('srl_status') === StagedRollout::STATUS_HALTED && $step_of($ns, $r2)['verdict'] === 'skipped'
+	&& $step_of($ns, $r3)['verdict'] === 'skipped' && empty($step_of($ns, $r3)['job_id']),
+	'a test site that fails stops the rollout before the rest are touched', json_encode($ns->steps()));
 
 
 harness_finish();
