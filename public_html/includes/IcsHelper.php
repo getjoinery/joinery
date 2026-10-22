@@ -4,6 +4,7 @@
  *
  * Generates .ics files for single event downloads and multi-event calendar feeds.
  *
+ * @version 1.3 - foldLines() never folds inside a UTF-8 character; the vCard writer folds with it too.
  * @version 1.2 - buildVevent() is the one VEVENT writer and uid() the one UID rule; generateVevent()
  *                maps an Event onto them, and the Bookings invite does the same. foldLines() is public.
  * @version 1.1 - the calendar name reads site_name, the declared setting. It
@@ -286,8 +287,12 @@ class IcsHelper {
 	}
 
 	/**
-	 * Fold lines longer than 75 octets per RFC 5545 §3.1.
-	 * Lines are folded with CRLF followed by a single space.
+	 * Fold lines longer than 75 octets per RFC 5545 §3.1 (the same rule as vCard,
+	 * RFC 2425 §5.8.1). Lines are folded with CRLF followed by a single space.
+	 *
+	 * A fold never lands inside a UTF-8 character: a line that would start on a
+	 * continuation byte (10xxxxxx) is cut a byte or three earlier instead, so every
+	 * physical line is valid UTF-8 on its own.
 	 *
 	 * @param string $ics_string Raw iCal string
 	 * @return string Folded iCal string
@@ -297,25 +302,20 @@ class IcsHelper {
 		$folded = [];
 
 		foreach ($lines as $line) {
-			if (strlen($line) <= 75) {
-				$folded[] = $line;
-				continue;
-			}
-
-			// Fold at 75 octets
-			$remaining = $line;
-			$first = true;
-			while (strlen($remaining) > 0) {
-				if ($first) {
-					$folded[] = substr($remaining, 0, 75);
-					$remaining = substr($remaining, 75);
-					$first = false;
-				} else {
-					// Continuation lines start with a space, so 74 chars of content
-					$folded[] = ' ' . substr($remaining, 0, 74);
-					$remaining = substr($remaining, 74);
+			$prefix = '';
+			$room = 75;
+			while (strlen($line) > $room) {
+				$cut = $room;
+				while ($cut > $room - 3 && (ord($line[$cut]) & 0xC0) === 0x80) {
+					$cut--;
 				}
+				$folded[] = $prefix . substr($line, 0, $cut);
+				$line = substr($line, $cut);
+				// A continuation line starts with a space, so 74 octets of content.
+				$prefix = ' ';
+				$room = 74;
 			}
+			$folded[] = $prefix . $line;
 		}
 
 		return implode("\r\n", $folded);

@@ -4186,7 +4186,8 @@ session-cached, collapsible, and hidden below a width breakpoint.
 mailboxes the member holds a grant for, plus the one named in `?mailbox=` when they may open
 it (an all-access reader arriving from that mailbox's pane manages their own contacts for it,
 as the pane shows). It offers **Add a contact** (name and email, `mailbox/contacts_import`
-with `name`), **Import** (.vcf / .csv), and the list, sorted by name, each row with a pencil
+with `name`), **Import** (.vcf / .csv), **Download vCard** and **Download CSV**
+(`mailbox/contacts_export`, beside the list's heading), and the list, sorted by name, each row with a pencil
 that opens an edit dialog: **Save** (`mailbox/contact_save`) and **Delete**
 (`mailbox/contact_delete`, after a confirm). `?edit=ID` opens that contact's dialog on
 arrival, which is what the pane's pencil beside a contact links to. Every change reloads the
@@ -4198,6 +4199,46 @@ the way a hand add does — joining a contact that already holds that address �
 name, and deletes the old row. A sealed store with the vault window shut lists nothing and
 the page offers Unlock (`JoineryVaultLock.unlock()`), then reloads. Linked from the mail
 page's gear menu and from Email settings.
+
+### Contact files: import and export
+
+Contacts come in and go out as the same two formats, and a downloaded file imports back as
+it was (the `contacts` test proves both): exactly for the vCard, and up to spacing for the
+CSV, whose First and Last Name rejoin with one space. A contact is a name and an address, so
+that is all either format carries; everything else in an imported file is left out.
+
+- **vCard 3.0** (`MailboxContacts::toVcard()`): one card per contact with `FN` (the name as
+  stored), `N` (the same name cut at its last space into family and given) and
+  `EMAIL;TYPE=INTERNET`. A contact with no name carries its address as `FN`, which vCard
+  requires, and reads back as no name. Lines fold at 75 octets, never inside a UTF-8
+  character (`IcsHelper::foldLines()`). Reading unfolds first, unescapes `\, \; \\ \n`,
+  accepts a byte order mark, a group prefix (Apple writes `item1.EMAIL` for an address with a
+  custom label) and a quoted parameter value holding a colon. vCard 2.1's `QUOTED-PRINTABLE`
+  values are decoded, soft line breaks included, and a value in another `CHARSET` is converted
+  to UTF-8; one that is still not UTF-8 (desktop Outlook writes raw Windows-1252 with no
+  `CHARSET`) is read as Windows-1252. An `FN` that is one of the card's addresses is no name,
+  and a card with no `FN` takes its name from `N`.
+- **Google Contacts CSV** (`MailboxContacts::toGoogleCsv()`): a UTF-8 byte order mark, then
+  `First Name`, `Last Name`, `E-mail 1 - Value` — the columns of Google's own export, cut at
+  the last space as for `N`. Every cell goes through `CsvWriter`, so a name that starts with
+  `= + - @`, a tab or a carriage return opens in a spreadsheet as text, not as a formula: a
+  display name can come from a stranger's mail; a cell whose own apostrophes stand before one
+  of those gains one more. Reading goes through `CsvReader`, which parses whole records (a
+  quoted line break in Google's Notes column stays in its row), reads a UTF-16 file by its
+  byte order mark and a file that is not UTF-8 as Windows-1252 (desktop Excel and Outlook),
+  and takes one defusing apostrophe off again. The name is the `Name`, `Display Name` or `Full Name` column, or else
+  `First`, `Middle` and `Last Name` joined (`Given`, `Additional`, `Family Name` in Google's
+  older export; `First`, `Middle`, `Last` in Yahoo's); the address is every `E-mail N - Value`
+  column (Outlook's `E-mail Address`, `E-mail 2 Address`; Yahoo's `Email`), split on ` ::: `.
+
+An import's `imported` and `skipped` count what was stored: a card or row with no valid
+address is skipped, and so is one whose write fails, which never stops the rows after it. A
+sealed store with the vault window shut refuses the file, as it refuses an export.
+
+`mailbox/contacts_export` returns the file in its response (`filename`, `content_type`,
+`content`) and the page saves it as a download, so nothing is written on the server. It
+reads every contact the caller keeps for the mailbox (`listForMailbox()` with no limit), and
+a sealed store with the window shut is refused rather than exported empty.
 
 ### The message timeline
 
@@ -4276,7 +4317,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
-| `contacts` / `contact_delete` / `contacts_import` / `contact_save` | List (decrypted, ranked) / delete / import-or-add / change the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox; `contacts_import` takes an optional `name` apart from the address; `contact_save` takes `contact_id`, `address`, `name` |
+| `contacts` / `contact_delete` / `contacts_import` / `contact_save` / `contacts_export` | List (decrypted, ranked) / delete / import-or-add / change / download the caller's contacts for ONE mailbox — `contacts`, `contacts_import` and `contacts_export` require `alias_id`, since a contact belongs to a mailbox; `contacts_import` takes an optional `name` apart from the address; `contact_save` takes `contact_id`, `address`, `name`; `contacts_export` takes `format` (`vcard` or `csv`) and returns `{filename, content_type, content}` |
 | `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, list everyone else on the message with theirs, plus (admins only) the counterparty's member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with a `_logic_descriptor()` opt-in that

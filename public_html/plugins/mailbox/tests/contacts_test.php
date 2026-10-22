@@ -31,15 +31,27 @@
  *    joining a contact that already holds it; owner-scoped; a bad address is refused.
  *  - A hand add can carry its name apart from the address, taken as typed.
  *  - Delete is owner-scoped.
+ *  - Export: the vCard and Google CSV import back exactly, awkward names included; a
+ *    formula name opens as text; a long line folds on a character boundary.
+ *  - Import from other programs: a multi-line Google note keeps its row (B2), current
+ *    Google First/Middle/Last columns, an Apple grouped, folded, escaped vCard, a quoted
+ *    vCard parameter holding a colon, a card named by its address, a vCard 2.1 card
+ *    with only N, a byte order mark and quoted-printable names, raw Windows-1252
+ *    files, Outlook's E-mail Address columns, and Yahoo's First / Last.
+ *  - A sealed store exports only in an open window, and is locked, not empty, outside
+ *    one; an import into it then says locked rather than counting what never landed.
+ *  - A row whose write fails is skipped and counted so; the rows after it still land.
  *
+ * @version 2.3 - export round trip and sealed export; CSV and vCard import fixes
  * @version 2.2 - updateContact(); manualAdd() with a separate name
  * @version 2.1 - sealing follows the domain's posture, not vault possession alone
  * @version 2.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
-harness_boot();
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
+$has_session = vault_ensure_session(); // before any output: the sealed export opens a window
+harness_boot();
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -367,5 +379,206 @@ $other = make_user('ContactOther', 5);
 check($svc->deleteContact((int)$other->key, $del_deletion_rule_id) === false, 'a non-owner cannot delete a contact');
 check($svc->deleteContact($iuid, $del_deletion_rule_id) === true, 'the owner can delete their contact');
 check(intval($db->query("SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = $del_deletion_rule_id")->fetchColumn()) === 0, 'the contact row is gone');
+
+// ── Export round trip ────────────────────────────────────────────────────────
+// What a member downloads must import back as it was, here or anywhere else
+// (specs/export_mail_contacts_calendar_drive.md, WP2). The names are the awkward
+// ones: quotes and angle brackets, vCard's own separators, a backslash, a
+// formula, wide characters long enough to fold, and no name at all.
+section('Export round trip (vCard + Google CSV)');
+
+// The sealed section above opened sealed content, which leaves this process
+// refusing any long plaintext write (SealedEgressGuard). Each add, export and
+// import here is a request of its own on a Standard mailbox, which starts cold.
+SealedEgressGuard::reset();
+
+$xu = (int)make_user('ContactExport', 5)->key;
+$originals = array(
+	'frank@export.example' => 'Frank "The Tank" <O\'Neil>',
+	'jo@export.example'    => 'Smith, Jo; Jr. \\ back',
+	'evil@export.example'  => '=HYPERLINK("http://evil.example")',
+	'bare@export.example'  => '',
+	'zoe@export.example'   => 'Zoë 漢字 ' . str_repeat('Longname ', 8) . 'End',
+	'mary@export.example'  => 'Mary Ann Smith',
+	'apos@export.example'  => "'=1+1 is text",
+);
+foreach ($originals as $addr => $name) {
+	$svc->manualAdd($xu, $addr, $work_alias, $name);
+}
+$held = $svc->listForMailbox($xu, $work_alias, null)['contacts'];
+check(count($held) === count($originals), 'all the contacts to export are held', (string)count($held));
+
+$as_map = function (array $contacts) {
+	$map = array();
+	foreach ($contacts as $c) {
+		$map[$c['address']] = $c['name'];
+	}
+	ksort($map);
+	return $map;
+};
+$want = $originals;
+ksort($want);
+
+$vcf = MailboxContacts::toVcard($held);
+check(substr_count($vcf, "BEGIN:VCARD\r\n") === count($originals) && substr_count($vcf, "VERSION:3.0\r\n") === count($originals),
+	'one vCard 3.0 card per contact');
+check(array_filter(explode("\r\n", $vcf), function ($l) { return strlen($l) > 75 || !mb_check_encoding($l, 'UTF-8'); }) === array(),
+	'every vCard line is 75 octets or under and valid UTF-8 (long lines fold)');
+check(strpos($vcf, "N:Smith;Mary Ann;;;\r\n") !== false, 'N carries the name cut at its last space');
+check(strpos($vcf, "FN:bare@export.example\r\n") !== false, 'a contact with no name carries its address as FN, which vCard requires');
+check(strpos($vcf, 'FN:Smith\\, Jo\\; Jr. \\\\ back') !== false, 'commas, semicolons and backslashes are escaped');
+
+$vu = (int)make_user('ContactExportVcf', 5)->key;
+$back = $svc->import($vu, $vcf, 'contacts.vcf', $work_alias);
+check($back['imported'] === count($originals) && $back['skipped'] === 0, 'the vCard imports every contact', json_encode($back));
+check($as_map($svc->listForMailbox($vu, $work_alias, null)['contacts']) === $want,
+	'and they come back exactly: same addresses, same names, no name stays no name',
+	json_encode($as_map($svc->listForMailbox($vu, $work_alias, null)['contacts']), JSON_UNESCAPED_UNICODE));
+
+$csv = MailboxContacts::toGoogleCsv($held);
+check(strncmp($csv, CsvWriter::BOM . "First Name,Last Name,E-mail 1 - Value\r\n", 3 + 39) === 0,
+	'the CSV starts with a byte order mark and Google\'s own column names');
+check(strpos($csv, "\"'=HYPERLINK(\"\"http://evil.example\"\")\"") !== false,
+	'a name that would run as a formula opens as text');
+
+$cu = (int)make_user('ContactExportCsv', 5)->key;
+$back = $svc->import($cu, $csv, 'contacts.csv', $work_alias);
+check($back['imported'] === count($originals) && $back['skipped'] === 0, 'the CSV imports every contact', json_encode($back));
+check($as_map($svc->listForMailbox($cu, $work_alias, null)['contacts']) === $want,
+	'and they come back exactly, the formula name included',
+	json_encode($as_map($svc->listForMailbox($cu, $work_alias, null)['contacts']), JSON_UNESCAPED_UNICODE));
+
+// ── Files from other programs ────────────────────────────────────────────────
+section('Import: Google (B2, current columns), Apple, vCard 2.1, Outlook and Yahoo files');
+
+$gu = (int)make_user('ContactGoogle', 5)->key;
+$google_now = "First Name,Middle Name,Last Name,Notes,E-mail 1 - Label,E-mail 1 - Value\r\n"
+	. "Hana,,Ito,\"met at the fair\r\nlikes tea, not coffee\",* Home,hana@google.example\r\n"
+	. "Ivo,Q,Petrov,,* Work,ivo@google.example\r\n";
+$res = $svc->import($gu, $google_now, 'contacts.csv', $work_alias);
+check($res['imported'] === 2 && $res['skipped'] === 0, 'a line break inside a quoted note does not split its row', json_encode($res));
+check($as_map($svc->listForMailbox($gu, $work_alias, null)['contacts']) === array(
+	'hana@google.example' => 'Hana Ito',
+	'ivo@google.example'  => 'Ivo Q Petrov',
+), 'First, Middle and Last Name are joined into the name');
+
+$au = (int)make_user('ContactApple', 5)->key;
+$apple = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Doe;Jane;;;\r\nFN:Doe\\, Jane Ellen-Marie Whitfield-Montgomery of the Very Long Na\r\n me\r\n"
+	. "item1.EMAIL;type=INTERNET;type=pref:Jane@Apple.example\r\nitem1.X-ABLabel:_\$!<Other>!\$_\r\nEND:VCARD\r\n";
+$res = $svc->import($au, $apple, 'jane.vcf', $work_alias);
+check($res['imported'] === 1, 'an address Apple writes under a group prefix (item1.EMAIL) is read', json_encode($res));
+check($as_map($svc->listForMailbox($au, $work_alias, null)['contacts']) === array(
+	'jane@apple.example' => 'Doe, Jane Ellen-Marie Whitfield-Montgomery of the Very Long Name',
+), 'a folded, escaped FN is unfolded and unescaped');
+
+$ku = (int)make_user('ContactVcardOdd', 5)->key;
+$odd = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ann Quoted\r\nEMAIL;X-LABEL=\"home:main\";TYPE=INTERNET:ann@quoted.example\r\nEND:VCARD\r\n"
+	. "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:one@nameless.example\r\nN:;;;;\r\nEMAIL:one@nameless.example\r\nEMAIL:two@nameless.example\r\nEND:VCARD\r\n"
+	. "BEGIN:VCARD\r\nVERSION:2.1\r\nN:Kowalski;Jan;Maria;Dr.;\r\nEMAIL;INTERNET:jan@v21.example\r\nEND:VCARD\r\n";
+$res = $svc->import($ku, $odd, 'odd.vcf', $work_alias);
+check($res['imported'] === 4 && $res['skipped'] === 0, 'every address is read, one behind a quoted parameter holding a colon', json_encode($res));
+check($as_map($svc->listForMailbox($ku, $work_alias, null)['contacts']) === array(
+	'ann@quoted.example'   => 'Ann Quoted',
+	'jan@v21.example'      => 'Dr. Jan Maria Kowalski',
+	'one@nameless.example' => '',
+	'two@nameless.example' => '',
+), 'a card named by one of its addresses has no name for any of them; a card with only N is named from it',
+	json_encode($as_map($svc->listForMailbox($ku, $work_alias, null)['contacts'])));
+
+$ou = (int)make_user('ContactOutlook', 5)->key;
+$outlook = "First Name,Middle Name,Last Name,E-mail Address,E-mail Type,E-mail Display Name,E-mail 2 Address\r\n"
+	. "Jo,,Ray,jo@outlook.example,SMTP,Jo Ray (jo@outlook.example),jo.ray@outlook.example\r\n";
+$res = $svc->import($ou, $outlook, 'outlook.csv', $work_alias);
+check($res['imported'] === 2 && $res['skipped'] === 0, 'Outlook\'s E-mail Address columns are read, its Type and Display Name columns are not', json_encode($res));
+check($as_map($svc->listForMailbox($ou, $work_alias, null)['contacts']) === array(
+	'jo.ray@outlook.example' => 'Jo Ray',
+	'jo@outlook.example'     => 'Jo Ray',
+), 'both addresses carry the joined name');
+
+$pu = (int)make_user('ContactOldPhone', 5)->key;
+$old_phone = CsvWriter::BOM
+	. "BEGIN:VCARD\r\nVERSION:2.1\r\nN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:Z=C3=B6e;Ren=\r\n=C3=A9;;;\r\nEMAIL;INTERNET:rene@qp.example\r\nEND:VCARD\r\n"
+	. "BEGIN:VCARD\r\nVERSION:2.1\r\nFN;CHARSET=ISO-8859-1;ENCODING=QUOTED-PRINTABLE:Jos=E9 Garc=EDa\r\nEMAIL:jose@qp.example\r\nEND:VCARD\r\n";
+$res = $svc->import($pu, $old_phone, 'phone.vcf', $work_alias);
+check($res['imported'] === 2 && $res['skipped'] === 0, 'a byte order mark before the first card is not a card', json_encode($res));
+check($as_map($svc->listForMailbox($pu, $work_alias, null)['contacts']) === array(
+	'jose@qp.example' => 'José García',
+	'rene@qp.example' => 'René Zöe',
+), 'quoted-printable names are decoded, across a soft line break and from their CHARSET',
+	json_encode($as_map($svc->listForMailbox($pu, $work_alias, null)['contacts']), JSON_UNESCAPED_UNICODE));
+
+// Desktop Outlook saves raw Windows-1252 with no CHARSET, which the database refuses
+// as it stands: it is read as Windows-1252 instead, as is an unknown CHARSET and
+// a value that claims UTF-8 but is not.
+$wu = (int)make_user('ContactWin1252', 5)->key;
+$win = "BEGIN:VCARD\r\nVERSION:2.1\r\nN:Garc\xEDa;Jos\xE9\r\nFN:Jos\xE9 Garc\xEDa\r\nEMAIL;INTERNET:jose@win.example\r\nEND:VCARD\r\n"
+	. "BEGIN:VCARD\r\nVERSION:2.1\r\nFN;CHARSET=X-NO-SUCH-CHARSET:Ren\xE9\r\nEMAIL:rene@win.example\r\nEND:VCARD\r\n"
+	. "BEGIN:VCARD\r\nVERSION:2.1\r\nFN;CHARSET=UTF-8:Ama\xE9l\r\nEMAIL:amael@win.example\r\nEND:VCARD\r\n";
+$res = $svc->import($wu, $win, 'outlook.vcf', $work_alias);
+$res_csv = $svc->import($wu, "First Name,Last Name,E-mail Address\r\nZo\xEB,Caf\xE9,zoe@win.example\r\n", 'outlook.csv', $work_alias);
+check($res['imported'] === 3 && $res_csv['imported'] === 1, 'raw 8-bit vCard and CSV files import', json_encode(array($res, $res_csv)));
+check($as_map($svc->listForMailbox($wu, $work_alias, null)['contacts']) === array(
+	'amael@win.example' => 'Amaél',
+	'jose@win.example' => 'José García',
+	'rene@win.example' => 'René',
+	'zoe@win.example'  => 'Zoë Café',
+), 'with their names read as Windows-1252', json_encode($as_map($svc->listForMailbox($wu, $work_alias, null)['contacts']), JSON_UNESCAPED_UNICODE));
+
+$yu = (int)make_user('ContactYahoo', 5)->key;
+$res = $svc->import($yu, "First,Middle,Last,Nickname,Email\r\nYuki,,Tanaka,,yuki@yahoo.example\r\n", 'yahoo.csv', $work_alias);
+check($res['imported'] === 1 && $as_map($svc->listForMailbox($yu, $work_alias, null)['contacts']) === array('yuki@yahoo.example' => 'Yuki Tanaka'),
+	'Yahoo\'s First / Last columns give the name', json_encode($res));
+
+// ── Export from a sealed store ───────────────────────────────────────────────
+// A sealed store reads only in an open window. With it shut the list is locked,
+// which contacts_export refuses rather than handing over an empty file.
+section('Export from a sealed store');
+if (!($has_session && vault_apcu_usable())) {
+	harness_skip('sealed export', 'needs a session and APCu on this CLI (the export reads in a window)');
+} else {
+	// A request of its own, which starts cold (see the export round trip above).
+	SealedEgressGuard::reset();
+	$sx = (int)make_user('ContactExportSealed', 5)->key;
+	$skp = vault_fixture_server_vault($sx);
+	harness_defer(function () use ($sx) {
+		VaultUnlock::lockAll($sx);
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('DELETE FROM imc_mailbox_contacts WHERE imc_usr_user_id = ?')->execute(array($sx));
+		$db->prepare('DELETE FROM mck_mailbox_contact_index_keys WHERE mck_usr_user_id = ?')->execute(array($sx));
+	});
+
+	$shut = $svc->listForMailbox($sx, $sealed_alias, null);
+	check(!empty($shut['locked']) && $shut['contacts'] === array(), 'with the window shut the list is locked, not empty');
+
+	vault_fixture_open_window($sx, $skp['secret']);
+	check($svc->manualAdd($sx, 'hana@sealed.example', $sealed_alias, 'Hana "Sealed" Ito') === true, 'an in-window add on the sealed mailbox succeeds');
+	$hrow = $db->query("SELECT imc_address, imc_content_sealed FROM imc_mailbox_contacts WHERE imc_usr_user_id = $sx")->fetch(PDO::FETCH_ASSOC);
+	check($hrow && $hrow['imc_content_sealed'] !== 'f' && $hrow['imc_content_sealed'] !== false && $hrow['imc_address'] !== 'hana@sealed.example',
+		'and is stored sealed');
+	$open = $svc->listForMailbox($sx, $sealed_alias, null);
+	check(empty($open['locked'])
+		&& MailboxContacts::toVcard($open['contacts']) === MailboxContacts::toVcard(array(array('address' => 'hana@sealed.example', 'name' => 'Hana "Sealed" Ito'))),
+		'with the window open the export holds the opened contact', json_encode($open, JSON_UNESCAPED_UNICODE));
+
+	VaultUnlock::close($sx);
+	check(!empty($svc->listForMailbox($sx, $sealed_alias, null)['locked']), 'and once the window shuts, it is locked again');
+	$res = $svc->import($sx, "BEGIN:VCARD\r\nFN:Ivo\r\nEMAIL:ivo@sealed.example\r\nEND:VCARD\r\n", 'c.vcf', $sealed_alias);
+	check(!empty($res['locked']) && $res['imported'] === 0, 'an import into it now stores nothing and says locked, not imported', json_encode($res));
+}
+
+// ── Import counts what landed ────────────────────────────────────────────────
+// One row whose write is refused must not take the rows after it down, and the
+// counts must say what was stored. The egress guard is a real refusal: a process
+// that has opened sealed content refuses a long plaintext write.
+section('Import: a failed row is skipped, the rest land');
+$fu = (int)make_user('ContactRowFail', 5)->key;
+SealedEgressGuard::reset();
+SealedEgressGuard::markHot('contacts_test');
+$res = $svc->import($fu, "Name,E-mail 1 - Value\r\nAnn,ann@rows.example\r\n"
+	. 'Long ' . str_repeat('Name ', 15) . ",long@rows.example\r\nBo,bo@rows.example\r\n", 'rows.csv', $work_alias);
+SealedEgressGuard::reset();
+check($res['imported'] === 2 && $res['skipped'] === 1, 'the refused row is counted skipped, not imported', json_encode($res));
+check($as_map($svc->listForMailbox($fu, $work_alias, null)['contacts']) === array('ann@rows.example' => 'Ann', 'bo@rows.example' => 'Bo'),
+	'and the row after it still landed');
 
 harness_finish();

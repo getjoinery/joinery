@@ -1,5 +1,6 @@
 /*
  * The Contacts page (/profile/mailbox/contacts). jy-ui kit tokens, vanilla CSS.
+ * @version 1.1 - the list heading's download buttons
  * @version 1.0
  */
 
@@ -46,6 +47,17 @@
 /* Section headings at panel scale, not page scale. */
 .jy-ui.mbx-cp .jy-panel > h2 { margin: 0 0 .75rem; font-size: 1.25rem; }
 .jy-ui.mbx-cp .mbx-cp-subhead { margin: 1.5rem 0 .25rem; font-size: 1rem; }
+/* The list's heading, with its download buttons beside it. */
+.mbx-cp-list-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: .5rem;
+	margin: 0 0 .75rem;
+}
+.jy-ui.mbx-cp .mbx-cp-list-head > h2 { margin: 0; font-size: 1.25rem; }
+.mbx-cp-export { display: flex; flex-wrap: wrap; gap: .4rem; }
 .mbx-cp-note { margin: .5rem 0 0; font-size: .875rem; color: var(--jy-color-text-muted, #667085); }
 .mbx-cp-note[hidden] { display: none; }
 

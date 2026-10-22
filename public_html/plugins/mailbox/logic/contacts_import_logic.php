@@ -9,8 +9,10 @@
  *   - an `address` param ("Name <email>" or bare) → a single manual add; an optional
  *     `name` param names it apart from the address, taken as typed.
  * Both upsert through the same contact-store path (source 'import' / 'manual'). A file
- * import returns {imported, skipped}; a manual add returns {added: bool}.
+ * import returns {imported, skipped}, counting what was stored; into a sealed store with
+ * the vault window closed it is refused. A manual add returns {added: bool}.
  *
+ * @version 1.3.0 - the counts are what was stored; a locked sealed store refuses the file
  * @version 1.2.0 - optional name, apart from the address
  * @version 1.1.2 - a valid address that fails to save says so, instead of calling the address invalid
  */
@@ -75,6 +77,9 @@ function contacts_import_logic(array $input): LogicResult {
 	} catch (Throwable $e) {
 		error_log('mailbox/contacts_import: ' . $e->getMessage());
 		return LogicResult::error('The contacts could not be imported.');
+	}
+	if (!empty($result['locked'])) {
+		return LogicResult::error('Your contacts for this mailbox are sealed to your vault. Unlock it and try again.');
 	}
 	return LogicResult::render($result);
 }

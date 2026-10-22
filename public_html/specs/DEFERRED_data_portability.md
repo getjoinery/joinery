@@ -114,11 +114,10 @@ It fails if a table is neither covered by a section nor named in an exclusion li
 
 **Design:**
 
-- **New core `CsvWriter`.**
-  - Streams RFC 4180 UTF-8 with a BOM, so Excel reads UTF-8 correctly.
-  - Applies D3 and the formula rule.
-  - Walks a `Multi*` collection in batches of 500. Nothing is written to a temporary file.
-- **New core `CsvReader`.** Parses whole records, so a quoted newline doesn't break a row. Used by WP4.
+- **Core `CsvWriter`** (built with the export spec's WP2): RFC 4180 records, the formula rule, and a BOM so Excel reads UTF-8 correctly. This package adds:
+  - D3.
+  - Streaming a `Multi*` collection in batches of 500. Nothing is written to a temporary file.
+- **Core `CsvReader`** (built with the export spec's WP2). Parses whole records, so a quoted newline doesn't break a row. Used by WP4.
 - **Each page in scope:**
   - Move its criteria-building into one function that both the list and the export call, so the export holds exactly the rows the admin filtered to, without paging.
   - Declare its export columns as human-readable headers and values. Times are UTC ISO 8601.

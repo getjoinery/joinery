@@ -1,6 +1,6 @@
 # Export Mail, Contacts, Calendar and Drive
 
-**Status:** Draft, 2026-10-22. Nothing is built. No questions are open.
+**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`. WP3, WP4 and WP1 are not built. No questions are open.
 
 Everything else from the first draft (member data download, closing an account, admin list exports, member import, backup download and restore from a file) is in `DEFERRED_data_portability.md`.
 
@@ -91,6 +91,8 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 
 ### WP2. Contacts export
 
+**Built and reviewed 2026-10-22.** The `contacts` and `csv` tests cover the round trip, the formula rule, a sealed store's export, and B2-B15.
+
 **What the member gets.** On `/profile/mailbox/contacts`, **Export** as vCard 3.0 (`.vcf`) or Google CSV.
 
 - A contact is a name and an email (`imc_display_name`, `imc_address`), which is all that is stored.
@@ -98,6 +100,14 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 - The CSV applies the formula rule (P5).
 
 **Fixes B2.** `MailboxContacts::parseCsv()` reads whole records, so a quoted newline (common in Google's "Notes" column) no longer breaks a row. Without this the CSV round trip (P2) fails.
+
+**How it was built:**
+
+- **Core CSV helpers.** `CsvWriter` applies the formula rule (P5) and `CsvReader` parses whole records and takes the defusing apostrophe off again. Both are the ones `DEFERRED_data_portability.md` WP3 and WP4 name, so those packages reuse them.
+- **The file reaches the browser in the API response.** `mailbox/contacts_export` returns `{filename, content_type, content}` and the page saves it as a download. The list is small, so nothing is queued or written on the server.
+- **The CSV uses Google's current columns:** First Name, Last Name, E-mail 1 - Value. The stored name is cut at its last space, and the importer joins the two back with one space, so the CSV round trip is exact up to spacing (a run of spaces comes back as one). The vCard round trip is exact.
+- **P5 covers the address cell too.** An address starting with `-`, `+` or `=` (legal, and rare) is written with an apostrophe. This importer takes it off; Google Contacts may keep it. Leaving addresses undefused would let a crafted address run as a formula in a spreadsheet.
+- **vCard** writes FN (the name exactly), N, and EMAIL. A contact with no name carries its address as FN, which vCard requires; the importer reads that back as no name.
 
 ### WP3. Personal calendar export
 
@@ -139,6 +149,25 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 - **B1.** "Download .eml" refuses most messages. A lean record has no original, and the header-plus-plain-body reconstruction must not be served as .eml (`message_export.php`, `mailbox_resolve_original`). **Fixed by WP1:** a full rebuild.
 - **B2.** `MailboxContacts::parseCsv()` splits lines before parsing, so a quoted newline in a Google CSV breaks the row. **Fixed by WP2.**
 
+Found while building WP2, all fixed with it:
+
+- **B3.** `IcsHelper::foldLines()` could fold in the middle of a UTF-8 character, leaving lines that are not valid UTF-8 on their own. Event `.ics` files with accented or non-Latin text were affected too.
+- **B4.** An imported name holding a quote or an angle bracket was dropped with its contact. The parsers glued the name and address into `Name <address>` and parsed that again. They now hand the two over separately.
+- **B5.** A Google Contacts CSV exported since 2023 imported with no names. It has First Name and Last Name columns and no Name column.
+- **B6.** The vCard reader did not unfold long lines or unescape `\,` and `\;`, and missed Apple's grouped `item1.EMAIL` addresses.
+
+Found in review of WP2, all fixed with it:
+
+- **B7.** A vCard address whose parameters held a quoted colon (`EMAIL;X-LABEL="home:main":...`) was dropped as skipped.
+- **B8.** A nameless vCard with two addresses (FN is the first address) gave the second contact the first address as its name. A vCard 2.1 card with N but no FN imported with no name.
+- **B9.** An Outlook CSV imported its E-mail Type and E-mail Display Name columns as addresses: one contact came in with two junk rows skipped. Its E-mail Address columns are now read and nothing beside them.
+- **B10.** A name starting with an apostrophe and a formula character (`'=x`) lost the apostrophe on a CSV round trip. `CsvWriter` now adds one more apostrophe, and `CsvReader` takes exactly one off.
+- **B11.** A vCard file starting with a byte order mark reported one skipped card that was not there.
+- **B12.** vCard 2.1 names written as quoted-printable (old phones and Outlook, for every non-ASCII name) imported garbled, as `Ren=C3=A9`. They are now decoded, soft line breaks and `CHARSET` included.
+- **B13.** A Yahoo CSV (First, Middle, Last, Email) imported with no names.
+- **B14.** A vCard or CSV in raw Windows-1252, which is what desktop Outlook saves, could not be stored: the database refuses bytes that are not UTF-8. The same happened with a vCard `CHARSET` PHP does not know, or a value that claims UTF-8 and is not. Text that is still not UTF-8 is now read as Windows-1252, which maps every byte. A UTF-16 CSV, which imported nothing, is read by its byte order mark.
+- **B15.** An import's counts were what it meant to store, not what it stored. One row whose write failed dropped every row after it while the import still reported them as imported. An import into a sealed store with the vault window shut reported every row imported and stored none. Each row now succeeds or fails on its own, the counts are what was stored, and the locked import is refused like the locked export.
+
 ## Decided
 
 - **Q1 (owner, 2026-10-21 and 2026-10-22).** This spec covers email, contacts, calendar and Drive. Everything else from the first draft is in `DEFERRED_data_portability.md`. Posts and pages, and exports for boards and mail filters, are not in either spec.
@@ -154,6 +183,7 @@ None.
 **New:**
 
 - includes/ZipStreamWriter.php, assets/js/zip-writer.js
+- includes/CsvWriter.php, includes/CsvReader.php (built with WP2), plugins/mailbox/logic/contacts_export_logic.php (built)
 - plugins/mailbox/includes/MessageRebuild.php (moved from mail_apps)
 - plugins/mailbox/tasks/RunMailExports.php
 - plugins/mailbox/assets/mailbox_mime_build.js (the browser message builder for Fortress export)
@@ -164,6 +194,7 @@ None.
 - the mailbox reader menu and the admin mailbox page (**Download this mailbox**)
 - plugins/mailbox/includes/MailboxContacts.php (export; whole-record CSV parsing)
 - plugins/mailbox/views/profile/contacts.php
+- plugins/mailbox/logic/contacts_import_logic.php (B15: true counts, a locked store refused; built)
 - plugins/mail_apps (calls `MessageRebuild`)
 - includes/IcsHelper.php, includes/calendar/IcsImporter.php (inverse rule)
 - views/profile/calendar.php, logic/calendar_logic.php

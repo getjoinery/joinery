@@ -1,8 +1,9 @@
 /**
- * The Contacts page (/profile/mailbox/contacts): add, import, edit, delete, and
- * the unlock for a sealed store. Every change is one mailbox API action —
- * contacts_import, contact_save, contact_delete — and then the page reloads on
- * the same mailbox, so the server-rendered list is always what is stored.
+ * The Contacts page (/profile/mailbox/contacts): add, import, download, edit,
+ * delete, and the unlock for a sealed store. Every change is one mailbox API
+ * action — contacts_import, contact_save, contact_delete — and then the page
+ * reloads on the same mailbox, so the server-rendered list is always what is
+ * stored. Download is contacts_export, saved as a file in place.
  *
  * Page contract: window.MAILBOX_CONTACTS = {alias_id, edit_id}; the forms
  * #contact-add-form, #contact-import-form and #contact-edit-form (in the
@@ -10,7 +11,7 @@
  * data-contact-id / data-name / data-address; edit_id opens that contact's
  * dialog on arrival (the mail page's pencil).
  *
- * Vanilla JS. @version 1.0
+ * Vanilla JS. @version 1.1 - Download vCard / Download CSV ([data-contacts-export])
  */
 (function () {
 	'use strict';
@@ -84,6 +85,32 @@
 				});
 			});
 		}
+
+		// Download: the file comes back in the API response and is handed to the
+		// browser as a blob, so nothing is written on the server.
+		document.querySelectorAll('[data-contacts-export]').forEach(function (btn) {
+			btn.addEventListener('click', function () {
+				btn.disabled = true;
+				note('[data-contacts-export-note]', '');
+				window.joineryApi.post('mailbox/contacts_export', {
+					alias_id: String(cfg.alias_id),
+					format: btn.getAttribute('data-contacts-export'),
+				}).then(function (d) {
+					btn.disabled = false;
+					var url = URL.createObjectURL(new Blob([d.content], { type: d.content_type }));
+					var a = document.createElement('a');
+					a.href = url;
+					a.download = d.filename;
+					document.body.appendChild(a);
+					a.click();
+					a.remove();
+					setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+				}, function (e) {
+					btn.disabled = false;
+					note('[data-contacts-export-note]', (e && e.message) || 'The contacts could not be downloaded.');
+				});
+			});
+		});
 
 		var dialog = document.querySelector('[data-contacts-dialog]');
 		var edit = document.getElementById('contact-edit-form');

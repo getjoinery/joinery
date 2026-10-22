@@ -35,6 +35,15 @@
  * sealed to their vault (MailboxContactIndexKey) and opened in-window like any row DEK, so
  * a vault rotation moves its wrapping and every hash survives.
  *
+ * @version 2.8 - export: toVcard() and toGoogleCsv(), which import() reads back as written. The CSV is read
+ *   as whole records (a quoted line break no longer splits a row) and takes First/Last Name; the vCard is
+ *   unfolded and unescaped first; the parsers hand names over apart from addresses, so a name holding
+ *   quotes or angle brackets survives; listForMailbox() can read every row. vCard import reads a quoted
+ *   parameter holding a colon, a byte order mark, 2.1's quoted-printable values and CHARSET, and takes N
+ *   when FN is missing or is one of the card's addresses; CSV import reads Outlook's E-mail Address
+ *   columns and no other e-mail column beside them, and Yahoo's First / Middle / Last. Text that is
+ *   not UTF-8 is read as Windows-1252. import() counts what was stored: one failed row no longer drops
+ *   the rows after it, and a sealed store with the window shut returns locked
  * @version 2.7 - updateContact(): change a contact's name or address; manualAdd() takes the name
  *   apart from the address
  * @version 2.6 - every add writes imc_sender_fingerprint, the spam filter's contact signal
@@ -182,8 +191,13 @@ class MailboxContacts {
 	/**
 	 * Upsert a batch of addresses for a user ON ONE MAILBOX (best-effort; never throws
 	 * into the caller). Each existing contact has its use_count and last_used bumped; a
-	 * new one is inserted (sealed when the user holds a vault). $tokens are raw
-	 * "Name <email>" / bare-address strings.
+	 * new one is inserted (sealed when the user holds a vault). Each entry is
+	 * [address, name]: the address raw ("Name <email>" or bare), and a name that, when
+	 * not empty, is kept as given instead of the one parsed out of the address.
+	 *
+	 * Returns how many entries landed (an entry whose address repeats an earlier one
+	 * lands with it), or null when the mailbox seals and the vault window is closed, so
+	 * nothing could. A row whose write fails is logged and skipped; the rest still land.
 	 *
 	 * PRIVATE ON PURPOSE. The public writers are manualAdd() and import(), both of which
 	 * are a user deciding to keep an address. Exposing this again is how mail traffic
@@ -193,11 +207,11 @@ class MailboxContacts {
 	 * an unscoped row would be invisible to every mailbox-scoped read, so writing one
 	 * only grows the table.
 	 *
-	 * @param string[] $tokens
+	 * @param array<int, array{0:string, 1:string}> $entries
 	 */
-	private function upsertBatch(int $user_id, array $tokens, string $source, int $alias_id): void {
-		if ($user_id <= 0 || $alias_id <= 0 || !count($tokens)) {
-			return;
+	private function upsertBatch(int $user_id, array $entries, string $source, int $alias_id): ?int {
+		if ($user_id <= 0 || $alias_id <= 0 || !count($entries)) {
+			return 0;
 		}
 		try {
 			$vault = $this->sealingVault($user_id, $alias_id);
@@ -205,26 +219,35 @@ class MailboxContacts {
 			// read for dedup, so there is nowhere to put the address. The caller
 			// surfaces this as a failed add rather than silently dropping it.
 			$keys = $this->indexKey($user_id, $vault);
-			if ($keys === false) {
-				return;
-			}
-
-			$seen = array();
-			foreach ($tokens as $raw) {
-				$parsed = self::parseAddress((string)$raw);
-				if ($parsed === null) {
-					continue;
-				}
-				list($addr, $name) = $parsed;
-				if (isset($seen[$addr])) {
-					continue; // one bump per address per batch
-				}
-				$seen[$addr] = true;
-				$this->upsertOne($user_id, $addr, $name, $source, $vault, $keys['index_key'], $alias_id);
-			}
 		} catch (\Throwable $e) {
 			error_log('MailboxContacts::upsertBatch failed for user ' . $user_id . ': ' . $e->getMessage());
+			return 0;
 		}
+		if ($keys === false) {
+			return null;
+		}
+
+		$landed = 0;
+		$seen = array(); // address => did it land
+		foreach ($entries as $entry) {
+			$parsed = self::parseAddress((string)$entry[0]);
+			if ($parsed === null) {
+				continue;
+			}
+			$addr = $parsed[0];
+			$name = trim((string)$entry[1]) !== '' ? trim((string)$entry[1]) : $parsed[1];
+			if (!isset($seen[$addr])) { // one bump per address per batch
+				try {
+					$this->upsertOne($user_id, $addr, $name, $source, $vault, $keys['index_key'], $alias_id);
+					$seen[$addr] = true;
+				} catch (\Throwable $e) {
+					error_log('MailboxContacts::upsertBatch: one contact failed for user ' . $user_id . ': ' . $e->getMessage());
+					$seen[$addr] = false;
+				}
+			}
+			$landed += $seen[$addr] ? 1 : 0;
+		}
+		return $landed;
 	}
 
 	private function upsertOne(int $user_id, string $addr, string $name, string $source, ?UserEncryptionVault $vault, ?string $index_key, int $alias_id): void {
@@ -354,8 +377,9 @@ class MailboxContacts {
 	 * before the user's index key existed can sit beside its re-add — keep the most-used),
 	 * ranked use_count desc then recency. Returns ['contacts'=>[{id,address,name,use_count,source}], 'locked'=>bool].
 	 * A vault holder with a closed window returns ['locked'=>true] and no contacts.
+	 * $limit caps the rows read (MAX_LIST, for the pickers); an export passes null for all.
 	 */
-	public function listForMailbox(int $user_id, int $alias_id): array {
+	public function listForMailbox(int $user_id, int $alias_id, ?int $limit = self::MAX_LIST): array {
 		if ($user_id <= 0 || $alias_id <= 0) {
 			return array('contacts' => array());
 		}
@@ -367,7 +391,8 @@ class MailboxContacts {
 		$db = $this->db();
 		$stmt = $db->prepare('SELECT * FROM imc_mailbox_contacts
 			WHERE imc_usr_user_id = ? AND imc_iea_inbound_email_alias_id = ?
-			ORDER BY imc_use_count DESC, imc_last_used_time DESC LIMIT ' . self::MAX_LIST);
+			ORDER BY imc_use_count DESC, imc_last_used_time DESC'
+			. ($limit === null ? '' : ' LIMIT ' . intval($limit)));
 		$stmt->execute(array($user_id, $alias_id));
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -463,31 +488,33 @@ class MailboxContacts {
 	/**
 	 * Import contacts from a vCard (.vcf) or Google-contacts CSV export. Parses name +
 	 * email(s) (everything else discarded) and stores them (source='import'). Returns
-	 * ['imported'=>int, 'skipped'=>int]. A minimal, forgiving parser; a row/card with no
-	 * valid email is skipped.
+	 * ['imported'=>int, 'skipped'=>int], counting what was stored: a row/card with no
+	 * valid email is skipped, and so is one whose write failed. A sealed store with the
+	 * vault window closed stores nothing and returns 'locked'=>true. Reads back what
+	 * toVcard() and toGoogleCsv() write.
 	 */
 	public function import(int $user_id, string $content, string $filename, int $alias_id): array {
 		$content = (string)$content;
 		$is_vcard = (stripos($filename, '.vcf') !== false) || (stripos($content, 'BEGIN:VCARD') !== false);
-		// Each parser returns ['tokens'=>[...], 'empty'=>int] — 'empty' counts cards/rows
-		// that carried content but no email at all (skipped, per the spec).
+		// Each parser returns ['entries'=>[[address, name], ...], 'empty'=>int] — 'empty'
+		// counts cards/rows that carried content but no email at all (skipped, per the spec).
 		$parsed = $is_vcard ? $this->parseVcard($content) : $this->parseCsv($content);
 
-		$imported = 0;
 		$skipped = intval($parsed['empty']);
 		$batch = array();
-		foreach ($parsed['tokens'] as $t) {
-			if (self::parseAddress($t) === null) {
+		foreach ($parsed['entries'] as $entry) {
+			if (self::parseAddress($entry[0]) === null) {
 				$skipped++;
 				continue;
 			}
-			$batch[] = $t;
-			$imported++;
+			$batch[] = $entry;
 		}
-		if (count($batch)) {
-			$this->upsertBatch($user_id, $batch, MailboxContact::SOURCE_IMPORT, $alias_id);
+		$imported = count($batch) ? $this->upsertBatch($user_id, $batch, MailboxContact::SOURCE_IMPORT, $alias_id) : 0;
+		if ($imported === null) {
+			return array('imported' => 0, 'skipped' => $skipped, 'locked' => true);
 		}
-		return array('imported' => $imported, 'skipped' => $skipped);
+		// A row whose write failed is skipped: the counts say what was stored.
+		return array('imported' => $imported, 'skipped' => $skipped + count($batch) - $imported);
 	}
 
 	/**
@@ -505,7 +532,7 @@ class MailboxContacts {
 		// typed, whatever characters it holds, rather than parsed out of the
 		// "Name <email>" form.
 		$name = $name === null ? $parsed[1] : trim($name);
-		$this->upsertBatch($user_id, array($parsed[0]), MailboxContact::SOURCE_MANUAL, $alias_id);
+		$this->upsertBatch($user_id, array(array($parsed[0], '')), MailboxContact::SOURCE_MANUAL, $alias_id);
 		// An address already held as an import keeps its row; the add re-stamps it manual
 		// and fills a display name the import never carried.
 		return $this->markSaved($user_id, $parsed[0], $name, $alias_id);
@@ -554,7 +581,7 @@ class MailboxContacts {
 			return 'saved';
 		}
 
-		$this->upsertBatch($user_id, array($parsed[0]), MailboxContact::SOURCE_MANUAL, $alias_id);
+		$this->upsertBatch($user_id, array(array($parsed[0], '')), MailboxContact::SOURCE_MANUAL, $alias_id);
 		$new = $this->findRow($user_id, $parsed[0], $keys['index_key'], $alias_id);
 		if ($new === null) {
 			// The window closed between the read and the write.
@@ -626,63 +653,216 @@ class MailboxContacts {
 		$stmt->execute(array($name, $id));
 	}
 
+	// ── export ───────────────────────────────────────────────────────────────
+
 	/**
-	 * Extract "Name <email>" tokens from a vCard (FN + EMAIL per card).
-	 * @return array{tokens: string[], empty: int}
+	 * A vCard 3.0 file of these contacts (listForMailbox() entries): one card per
+	 * contact, with FN as the display name exactly and N as the same name cut at its
+	 * last space. A contact with no name carries its address as FN, which vCard
+	 * requires; parseVcard() reads that back as no name.
+	 */
+	public static function toVcard(array $contacts): string {
+		$out = '';
+		foreach ($contacts as $c) {
+			$name = trim((string)$c['name']);
+			list($given, $family) = self::splitName($name);
+			$card = "BEGIN:VCARD\r\n"
+				. "VERSION:3.0\r\n"
+				. 'FN:' . self::vcardEscape($name !== '' ? $name : (string)$c['address']) . "\r\n"
+				. 'N:' . self::vcardEscape($family) . ';' . self::vcardEscape($given) . ";;;\r\n"
+				. 'EMAIL;TYPE=INTERNET:' . $c['address'] . "\r\n"
+				. "END:VCARD\r\n";
+			$out .= IcsHelper::foldLines($card);
+		}
+		return $out;
+	}
+
+	/**
+	 * A Google Contacts CSV of these contacts (listForMailbox() entries), in the
+	 * columns Google's own export uses. The name is cut at its last space into First
+	 * Name and Last Name; parseCsv() joins the two back with one space, so a name
+	 * reads back exactly up to its spacing (a run of spaces, or a line break at the
+	 * cut, comes back as one space; the vCard keeps a name exactly). Cells are
+	 * defused against formulas (CsvWriter), since a display name can come from a
+	 * stranger's mail.
+	 */
+	public static function toGoogleCsv(array $contacts): string {
+		$out = CsvWriter::BOM . CsvWriter::line(array('First Name', 'Last Name', 'E-mail 1 - Value'));
+		foreach ($contacts as $c) {
+			list($given, $family) = self::splitName((string)$c['name']);
+			$out .= CsvWriter::line(array($given, $family, $c['address']));
+		}
+		return $out;
+	}
+
+	/** [given, family]: a display name cut at its last space, so the two joined by a space give it back. */
+	private static function splitName(string $name): array {
+		$name = trim($name);
+		$at = strrpos($name, ' ');
+		if ($at === false) {
+			return array($name, '');
+		}
+		return array(rtrim(substr($name, 0, $at)), substr($name, $at + 1));
+	}
+
+	/** vCard 3.0 text value escaping (RFC 2426 §4). */
+	private static function vcardEscape(string $text): string {
+		return str_replace(array('\\', ';', ',', "\r\n", "\n", "\r"), array('\\\\', '\\;', '\\,', '\\n', '\\n', '\\n'), $text);
+	}
+
+	private static function vcardUnescape(string $text): string {
+		return preg_replace_callback('/\\\\(.)/s', function ($m) {
+			return ($m[1] === 'n' || $m[1] === 'N') ? "\n" : $m[1];
+		}, $text);
+	}
+
+	// ── import parsers ───────────────────────────────────────────────────────
+
+	/** A vCard structured value (N's family;given;...) split at its unescaped semicolons, unescaped. */
+	private static function vcardFields(string $value): array {
+		$fields = array('');
+		$last = 0;
+		for ($i = 0, $n = strlen($value); $i < $n; $i++) {
+			if ($value[$i] === '\\' && $i + 1 < $n) {
+				$fields[$last] .= $value[$i] . $value[++$i];
+			} elseif ($value[$i] === ';') {
+				$fields[++$last] = '';
+			} else {
+				$fields[$last] .= $value[$i];
+			}
+		}
+		return array_map(function ($f) { return trim(self::vcardUnescape($f)); }, $fields);
+	}
+
+	/**
+	 * A property value as UTF-8 text, decoded as its parameters say (vCard 2.1): a
+	 * QUOTED-PRINTABLE value is decoded, and one in another CHARSET that is not
+	 * already valid UTF-8 is converted from it, or from Windows-1252 when it names
+	 * none (or one PHP does not know).
+	 */
+	private static function vcardValue(string $params, string $value): string {
+		if (stripos($params, 'QUOTED-PRINTABLE') !== false) {
+			$value = quoted_printable_decode($value);
+		}
+		// A value that claims UTF-8 and is not goes straight to the fallback below.
+		if (!mb_check_encoding($value, 'UTF-8') && preg_match('/;CHARSET="?([\w.:-]+)/i', $params, $cs)
+				&& strcasecmp($cs[1], 'UTF-8') !== 0) {
+			try {
+				$value = mb_convert_encoding($value, 'UTF-8', $cs[1]);
+			} catch (\ValueError $e) {
+				// a charset PHP does not know: the fallback below reads it
+			}
+		}
+		if (!mb_check_encoding($value, 'UTF-8')) {
+			// Still not UTF-8: raw 8-bit text with no CHARSET, as desktop Outlook saves a
+			// contact. Windows-1252 maps every byte, so the result is always valid UTF-8,
+			// which the database insists on.
+			$value = mb_convert_encoding($value, 'UTF-8', 'Windows-1252');
+		}
+		return $value;
+	}
+
+	/**
+	 * Extract [address, name] entries from a vCard (FN + EMAIL per card).
+	 *
+	 * Lines are unfolded first (a long line continues after a line break and a
+	 * space or tab; a vCard 2.1 quoted-printable value continues after a trailing
+	 * '='), and a property may carry a group prefix: Apple writes item1.EMAIL for an
+	 * address with a custom label. A quoted parameter value may hold a colon. A
+	 * card with no FN (vCard 2.1 allows that) takes its name from N.
+	 *
+	 * @return array{entries: array<int, array{0:string, 1:string}>, empty: int}
 	 */
 	private function parseVcard(string $content): array {
+		if (strncmp($content, CsvWriter::BOM, 3) === 0) {
+			$content = substr($content, 3);
+		}
+		$content = str_replace(array("\r\n", "\r"), "\n", $content);
+		$content = preg_replace_callback('/^([^:\n]*QUOTED-PRINTABLE[^:\n]*:)((?:[^\n]*=\n)*[^\n]*)$/im', function ($m) {
+			return $m[1] . str_replace("=\n", '', $m[2]);
+		}, $content);
+		$content = preg_replace('/\n[ \t]/', '', $content);
+		// group prefix, property name, parameters (a quoted value may hold a colon), value
+		$prop = '/^(?:[\w-]+\.)?%s((?:;(?:[^:"\n]|"[^"\n]*")*)?):(.*)$/im';
 		$out = array();
 		$empty = 0;
 		foreach (preg_split('/BEGIN:VCARD/i', $content) as $card) {
 			if (trim($card) === '') {
 				continue;
 			}
-			$name = '';
-			if (preg_match('/^FN(?:;[^:]*)?:(.+)$/im', $card, $m)) {
-				$name = trim($m[1]);
-			}
-			if (preg_match_all('/^EMAIL(?:;[^:]*)?:(.+)$/im', $card, $em)) {
-				foreach ($em[1] as $addr) {
-					$addr = trim($addr);
-					$out[] = ($name !== '' ? $name . ' <' . $addr . '>' : $addr);
+			$addrs = array();
+			if (preg_match_all(sprintf($prop, 'EMAIL'), $card, $em, PREG_SET_ORDER)) {
+				foreach ($em as $e) {
+					$addr = trim(self::vcardValue($e[1], $e[2]));
+					if ($addr !== '') {
+						$addrs[] = $addr;
+					}
 				}
-			} else {
+			}
+			if (!$addrs) {
 				$empty++; // a real card with no email address
+				continue;
+			}
+			$name = '';
+			if (preg_match(sprintf($prop, 'FN'), $card, $m)) {
+				$name = trim(self::vcardUnescape(self::vcardValue($m[1], $m[2])));
+			}
+			// FN is required, so a card for a bare address names it by an address: no name.
+			foreach ($addrs as $addr) {
+				if (strcasecmp($name, $addr) === 0) {
+					$name = '';
+				}
+			}
+			if ($name === '' && preg_match(sprintf($prop, 'N'), $card, $m)) {
+				// family;given;additional;prefix;suffix, read in the order people write them
+				$n = self::vcardFields(self::vcardValue($m[1], $m[2])) + array('', '', '', '', '');
+				$name = implode(' ', array_filter(array($n[3], $n[1], $n[2], $n[0], $n[4]), 'strlen'));
+			}
+			foreach ($addrs as $addr) {
+				$out[] = array($addr, $name);
 			}
 		}
-		return array('tokens' => $out, 'empty' => $empty);
+		return array('entries' => $out, 'empty' => $empty);
 	}
 
 	/**
-	 * Extract "Name <email>" tokens from a Google-contacts CSV export.
+	 * Extract [address, name] entries from a Google-contacts CSV export.
 	 *
-	 * Parsed with an empty escape character. Google Contacts emits RFC 4180,
-	 * where a backslash is an ordinary character; PHP's default treats it as an
-	 * escape, so a backslash in a name or notes field swallows the quote after
-	 * it and shifts every remaining column on that row.
+	 * Read as whole records (CsvReader), so a quoted field holding a line break —
+	 * the Notes column, routinely — stays inside its row.
 	 *
-	 * Known limitation, unrelated to the escape: the split below is done before
-	 * any field is parsed, so a quoted field containing a newline — the Notes
-	 * column, routinely — still breaks row alignment.
+	 * The name is the Name / Display Name / Full Name column (Google's export before
+	 * 2023), or else First, Middle and Last Name joined (Google's export since, and
+	 * Outlook's); Given / Additional / Family Name are Google's older spellings of
+	 * those, and First / Middle / Last Yahoo's.
 	 *
-	 * @return array{tokens: string[], empty: int}
+	 * @return array{entries: array<int, array{0:string, 1:string}>, empty: int}
 	 */
 	private function parseCsv(string $content): array {
-		$lines = preg_split('/\r\n|\r|\n/', $content);
-		if (!count($lines)) {
-			return array();
+		$records = CsvReader::records($content);
+		if (!count($records)) {
+			return array('entries' => array(), 'empty' => 0);
 		}
-		$header = str_getcsv(array_shift($lines), ',', '"', '');
-		$name_cols = array();
+		$header = array_shift($records);
+		$full_cols = array();
+		$part_cols = array(array(), array(), array()); // first, middle, last
 		$email_cols = array();
 		foreach ($header as $i => $col) {
 			$c = strtolower(trim($col));
-			if ($c === 'name' || strpos($c, 'display name') !== false || $c === 'full name' || strpos($c, 'given name') !== false) {
-				$name_cols[] = $i;
+			if (in_array($c, array('name', 'display name', 'full name'), true)) {
+				$full_cols[] = $i;
+			} elseif (in_array($c, array('first name', 'given name', 'first'), true)) {
+				$part_cols[0][] = $i;
+			} elseif (in_array($c, array('middle name', 'additional name', 'middle'), true)) {
+				$part_cols[1][] = $i;
+			} elseif (in_array($c, array('last name', 'family name', 'last'), true)) {
+				$part_cols[2][] = $i;
 			}
 			if (strpos($c, 'e-mail') !== false || strpos($c, 'email') !== false) {
-				// Google CSV uses "E-mail 1 - Value" etc. — take only the value columns.
-				if (strpos($c, 'value') !== false || preg_match('/e-?mail(\s*\d+)?$/', $c)) {
+				// The address columns only: Google's "E-mail 1 - Value", Outlook's "E-mail Address"
+				// and "E-mail 2 Address", Thunderbird's "Primary Email" — never a Label, Type or
+				// Display Name column beside them.
+				if (strpos($c, 'value') !== false || preg_match('/e-?mail(\s*\d+)?(\s+address)?$/', $c)) {
 					$email_cols[] = $i;
 				}
 			}
@@ -697,14 +877,21 @@ class MailboxContacts {
 		}
 		$out = array();
 		$empty = 0;
-		foreach ($lines as $line) {
-			if (trim($line) === '') {
+		foreach ($records as $cells) {
+			if (trim(implode('', $cells)) === '') {
 				continue;
 			}
-			$cells = str_getcsv($line, ',', '"', '');
-			$name = '';
-			foreach ($name_cols as $ci) {
-				if (isset($cells[$ci]) && trim($cells[$ci]) !== '') { $name = trim($cells[$ci]); break; }
+			$pick = function (array $cols) use ($cells) {
+				foreach ($cols as $ci) {
+					if (isset($cells[$ci]) && trim($cells[$ci]) !== '') {
+						return trim($cells[$ci]);
+					}
+				}
+				return '';
+			};
+			$name = $pick($full_cols);
+			if ($name === '') {
+				$name = implode(' ', array_filter(array_map($pick, $part_cols), 'strlen'));
 			}
 			$before = count($out);
 			foreach ($email_cols as $ci) {
@@ -717,14 +904,14 @@ class MailboxContacts {
 					if ($addr === '') {
 						continue;
 					}
-					$out[] = ($name !== '' ? $name . ' <' . $addr . '>' : $addr);
+					$out[] = array($addr, $name);
 				}
 			}
 			if (count($out) === $before) {
 				$empty++; // a data row with no email
 			}
 		}
-		return array('tokens' => $out, 'empty' => $empty);
+		return array('entries' => $out, 'empty' => $empty);
 	}
 }
 ?>
