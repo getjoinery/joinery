@@ -5,6 +5,8 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.18 - the Stored Backups Delete and Delete all buttons work: their scripts are attribute-escaped (the
+ *                 json_encoded message's double quotes ended the onclick attribute, so a click did nothing)
  * @version 2.17 - the form is the Backups page's: one key per target, since nodes write through the backup
  *                 broker and are handed none (specs/storage_targets.md WP5)
  * @version 2.16 - Delete all is refused for the folder an owner's new backups go to
@@ -561,8 +563,10 @@ if ($target !== null) {
 						echo '<input type="hidden" name="key" value="' . htmlspecialchars($obj['key']) . '">';
 						echo SmAdminCsrf::field();
 						$obj_msg = 'Delete backup file ' . $fname . '? This cannot be undone.';
-						echo '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('
-							. json_encode($obj_msg) . ', function(){ document.getElementById(' . json_encode($oid) . ').submit(); })">Delete</button>';
+						// The script is attribute-escaped: json_encode's double quotes
+						// would otherwise end the onclick attribute and the button do nothing.
+						$obj_js = 'JoineryModal.confirm(' . json_encode($obj_msg) . ', function(){ document.getElementById(' . json_encode($oid) . ').submit(); })';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger" onclick="' . htmlspecialchars($obj_js, ENT_QUOTES) . '">Delete</button>';
 						echo '</form>';
 						echo '</td></tr>';
 					}
@@ -580,8 +584,9 @@ if ($target !== null) {
 						echo SmAdminCsrf::field();
 						$pfx_msg = 'Delete all ' . $g['count'] . ' backup object' . ($g['count'] === 1 ? '' : 's')
 							. ' for this site? This cannot be undone.';
-						echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="JoineryModal.confirmTyped('
-							. json_encode($pfx_msg) . ', ' . json_encode($slug) . ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })">Delete all</button>';
+						$pfx_js = 'JoineryModal.confirmTyped(' . json_encode($pfx_msg) . ', ' . json_encode($slug)
+							. ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="' . htmlspecialchars($pfx_js, ENT_QUOTES) . '">Delete all</button>';
 						echo '</form>';
 					}
 

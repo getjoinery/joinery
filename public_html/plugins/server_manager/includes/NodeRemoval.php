@@ -27,6 +27,8 @@
  *
  * The platform never deletes an instance itself.
  *
+ * @version 1.4 - the backups refusal names each target and folder holding them and the page where Delete all is, and
+ *               says to hide the node first: Delete all is offered only once new backups stop going there
  * @version 1.3 - the provider is asked with the driver of the machine's own account's provider
  * @version 1.2 - a container site whose host has no node here (never paired, or removed for good) goes once the
  *                person confirms its host machine deleted by its address; it could only be hidden (B76)
@@ -290,6 +292,24 @@ class NodeRemoval {
 	 * Guard 1: '' when the node's backup storage holds nothing. Fails safe: a
 	 * space that cannot be listed refuses.
 	 */
+	/**
+	 * The refusal for a node whose backups are still stored, from
+	 * StorageSpace::owner_object_count(): where each lot is and the page whose
+	 * Stored Backups panel deletes them. That panel offers Delete all only for
+	 * a folder new backups no longer go to, and hiding the node is what stops
+	 * them, so a node still shown is told to hide first.
+	 */
+	public static function backups_message(array $bk, bool $hidden): string {
+		$where = array();
+		foreach ($bk['where'] ?? array() as $w) {
+			$where[] = $w['count'] . ' in folder ' . $w['folder'] . ' on "' . $w['target'] . '" (/admin/server_manager/targets?bkt_backup_target_id='
+				. (int)$w['target_id'] . ', Stored Backups, Delete all for ' . $w['folder'] . ')';
+		}
+		$first = $hidden ? '' : 'Hide it from the dashboard first, which stops new backups going there; then delete them. ';
+		return 'This site still has ' . $bk['count'] . ' offsite backup file' . ($bk['count'] === 1 ? '' : 's')
+			. ($where ? ': ' . implode('; ', $where) : '') . '. ' . $first . 'Remove it once they are gone.';
+	}
+
 	public static function backups_refusal(ManagedNode $node): string {
 		try {
 			$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
@@ -297,8 +317,7 @@ class NodeRemoval {
 			return 'Could not check for its backups (' . $e->getMessage() . '). Resolve that before removing it.';
 		}
 		if ($bk['count'] > 0) {
-			return 'This site still has ' . $bk['count'] . ' offsite backup' . ($bk['count'] === 1 ? '' : 's')
-				. '. Delete them from the backup target\'s Stored Backups panel before removing it.';
+			return self::backups_message($bk, (bool)$node->get('mgn_delete_time'));
 		}
 		if (!empty($bk['unchecked'])) {
 			return 'Its backups could not be checked on: ' . implode(', ', $bk['unchecked'])

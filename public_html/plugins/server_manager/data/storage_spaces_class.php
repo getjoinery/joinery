@@ -389,16 +389,22 @@ class StorageSpace extends SystemBase {
 	 * How many objects an owner's live spaces hold, listed from each space's
 	 * target: what removing the owner for good would leave unclaimed. A space
 	 * that cannot be listed is named in 'unchecked', so a caller that must
-	 * not guess can refuse.
+	 * not guess can refuse. 'where' says, per space holding any, which target
+	 * and folder they are in, so a refusal can say where to delete them.
 	 *
-	 * @return array{count: int, unchecked: string[]}
+	 * @return array{count: int, unchecked: string[], where: array<int, array{target_id: int, target: string, folder: string, count: int}>}
 	 */
 	public static function owner_object_count(string $kind, int $owner_id): array {
-		$out = array('count' => 0, 'unchecked' => array());
+		$out = array('count' => 0, 'unchecked' => array(), 'where' => array());
 		foreach (self::of_owner($kind, $owner_id) as $space) {
 			try {
 				list($target, $creds, $bucket) = $space->reach();
-				$out['count'] += count(S3Signer::list($creds, $bucket, $space->base()));
+				$n = count(S3Signer::list($creds, $bucket, $space->base()));
+				$out['count'] += $n;
+				if ($n > 0) {
+					$out['where'][] = array('target_id' => (int)$target->key, 'target' => (string)$target->get('bkt_name'),
+						'folder' => $space->folder(), 'count' => $n);
+				}
 			} catch (\Throwable $e) {
 				$out['unchecked'][] = $space->describe();
 			}

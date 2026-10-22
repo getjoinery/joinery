@@ -516,7 +516,10 @@ document.addEventListener('DOMContentLoaded', function () {
 	function build(resumed) {
 		start.disabled = true;
 		var call = function () { return joineryApi.post('backup_download_start', {}); };
-		var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call, '/admin/admin_backups#download') : call();
+		// No return URL: without a usable passkey withStepUp hands the refusal
+		// back, so the trip to /verify-stepup below is the one that remembers
+		// the build. Given a return URL it would leave for the page itself.
+		var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call) : call();
 		run.then(function () { window.location.reload(); })
 			.catch(function (e) {
 				start.disabled = false;
