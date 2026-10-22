@@ -21,6 +21,12 @@
  * covers a change when its agent version is the source's (for a Go change)
  * and its script hash is the script's now (for a script change).
  *
+ * A proof is recorded by record(): by hand (maintenance_scripts/dev_tools/
+ * record_live_proof.php) or by the live-tier test that makes a throwaway
+ * server and runs each changed word through an agent built for the run
+ * (AgentLiveProofRun, agent_live_proofs_live_test).
+ *
+ * @version 1.1 - record(): one place a proof is written, for the script and the live test
  * @version 1.0
  */
 class AgentLiveProofs {
@@ -157,6 +163,50 @@ class AgentLiveProofs {
 	 * a live run. Empty when nothing changed, every change is proven, or there
 	 * is no agent source here to read.
 	 */
+	/**
+	 * Record that a word ran once on a real machine: its script as it is now
+	 * (its sha256), the agent version it ran on, where and what. One row per
+	 * word, agent version and script; a later run replaces it.
+	 *
+	 * @return array the row written
+	 */
+	public static function record(string $word, string $agent_version, string $where, string $what, ?string $path = null): array {
+		$src = AgentDistPublisher::sourcePath();
+		$site_root = dirname(PathHelper::getRootDir());
+		$words = self::words($src);
+		if (!isset($words[$word])) {
+			throw new Exception("the agent source at {$src} registers no word '{$word}'");
+		}
+		$script = $words[$word]['script'];
+		$row = array(
+			'word'          => $word,
+			'agent_version' => $agent_version,
+			'script'        => $script,
+			'script_sha256' => $script !== '' && is_file($site_root . '/' . $script) ? hash_file('sha256', $site_root . '/' . $script) : '',
+			'where'         => trim($where),
+			'what'          => trim($what),
+			'date'          => gmdate('Y-m-d'),
+		);
+		$path = $path ?? self::record_path();
+		$d = is_file($path) ? json_decode((string)file_get_contents($path), true) : null;
+		if (!is_array($d)) {
+			$d = array('_about' => 'Agent words run once on a real machine before release (specs/fleet_security_patching.md WP7). '
+				. 'Added with maintenance_scripts/dev_tools/record_live_proof.php or the live test agent_live_proofs_live; '
+				. 'the publish page warns about a changed word with no row here.', 'proofs' => array());
+		}
+		$kept = array();
+		foreach ((array)($d['proofs'] ?? array()) as $p) {
+			if (($p['word'] ?? '') === $row['word'] && ($p['agent_version'] ?? '') === $row['agent_version'] && ($p['script_sha256'] ?? '') === $row['script_sha256']) { continue; }
+			$kept[] = $p;
+		}
+		$kept[] = $row;
+		$d['proofs'] = $kept;
+		if (file_put_contents($path, json_encode($d, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+			throw new Exception('the proof could not be written to ' . $path);
+		}
+		return $row;
+	}
+
 	public static function publish_warnings(): array {
 		$src = AgentDistPublisher::sourcePath();
 		if (!is_dir($src . '/primitives')) {

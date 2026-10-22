@@ -24,6 +24,7 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.7 - remove_plugin: a directory already gone is done, not refused, as a retried request is (B22)
  * @version 1.6 - data_root_encrypt passes --no-tpm2 when the request says tpm2 'off', and data_root_tpm2_off takes
  *                the TPM2 chip's slot away (B43). Only the stricter way is read from a request: the queue is the
  *                web user's to write, so letting the chip open the data root again is root's own command.
@@ -310,9 +311,15 @@ switch ($kind) {
 		// checks in PluginRemoval::refusal() pass: a plugin name, a real
 		// directory directly under plugins/, a manifest that does not say
 		// is_system, and a row that says uninstalled and not active. Any of
-		// them failing leaves the directory and says why (exit 1).
+		// them failing leaves the directory and says why (exit 1). A directory
+		// already gone is done: a retried request, or files removed first by
+		// whoever made them (a test's scratch plugin).
 		$name = (string)($args['name'] ?? '');
 		$plugins_dir = PathHelper::getAbsolutePath('plugins');
+		if (PluginRemoval::already_gone($name, $plugins_dir)) {
+			echo "plugins/$name is already gone\n";
+			exit(0);
+		}
 		$row = null;
 		if ($name !== '' && Plugin::is_valid_plugin_name($name)) {
 			$row = Plugin::get_by_plugin_name($name);

@@ -254,6 +254,27 @@ TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($test->deleted_instances === array('old', 'young', 'edge'), 'the age limit comes from the setting');
 Setting::put(TestCloudCleanup::MAX_AGE_SETTING, '24');
 
+// A live-proof test build's node holds no server, and goes with it (fleet_security_patching WP7):
+// a run killed part way would otherwise leave both for good.
+$proof = new ManagedNode(NULL);
+$proof->set('mgn_name', 'HarnessTest cleanup proof ' . $suffix);
+$proof->set('mgn_slug', 'harnesstest-cleanup-proof-' . $suffix);
+$proof->set('mgn_host', '192.0.2.56');
+$proof->set('mgn_ssh_user', 'root');
+$proof->set('mgn_agent_test_build', true);
+$proof->save();
+$proof->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $proof->key);
+$test = $fresh_account();
+$test->instances[] = $server('proof', 30, '192.0.2.56');
+$test->instances[] = $server('proofyoung', 2, '192.0.2.57');
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
+$gone = new ManagedNode((int)$proof->key);
+check($test->deleted_instances === array('old', 'proof') && $gone->load() === false
+		&& strpos($result['message'], 'the live-proof test build nodes on them (HarnessTest cleanup proof') !== false,
+	'a live-proof node holds no server: its server goes at its age, and the node is removed with it', $result['message']);
+check(strpos($result['message'], 'srv-node4') !== false, 'an ordinary node still holds its server', $result['message']);
+
 // ---------------------------------------------------------------------------
 section('Failures');
 

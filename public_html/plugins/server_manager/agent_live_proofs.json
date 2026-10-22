@@ -1,4 +1,41 @@
 {
     "_about": "Agent words run once on a real machine before release (specs/fleet_security_patching.md WP7). Added with maintenance_scripts/dev_tools/record_live_proof.php; the publish page warns about a changed word with no row here.",
-    "proofs": []
+    "proofs": [
+        {
+            "word": "check_status",
+            "agent_version": "1.90.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "test server wp7-proof-342943 (Linode 108908362), Ubuntu, agent built for the run from 5c3f2c1a1cc4 and uncommitted changes",
+            "what": "job 164067 through the agent: answered with dpkg_unfinished, load_15m, load_1m, load_5m, memory_free_mb, memory_total_mb, memory_used_mb, release_trust, ssl_certificate_count, swap_total_mb, swap_used_mb, uptime (agent_live_proofs_live)",
+            "date": "2026-10-22"
+        },
+        {
+            "word": "agent_report",
+            "agent_version": "1.90.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "test server wp7-proof-342943 (Linode 108908362), Ubuntu, agent built for the run from 5c3f2c1a1cc4 and uncommitted changes",
+            "what": "job 164069 through the agent: answered with alive_age_seconds, keepalive_restarts, restarted_by, starts_at_boot, supervised, systemd_restarts (agent_live_proofs_live)",
+            "date": "2026-10-22"
+        },
+        {
+            "word": "host_report",
+            "agent_version": "1.90.0",
+            "script": "maintenance_scripts/sysadmin_tools/host_report.sh",
+            "script_sha256": "b6c46bfb170bde68a5250813dd5b848d8b5429e583a0a4b70eb72f962e86e3e6",
+            "where": "test server wp7-proof-342943 (Linode 108908362), Ubuntu, agent built for the run from 5c3f2c1a1cc4 and uncommitted changes",
+            "what": "job 164070 through the agent: answered with output, output_bytes (agent_live_proofs_live)",
+            "date": "2026-10-22"
+        },
+        {
+            "word": "install_security_updates",
+            "agent_version": "1.90.0",
+            "script": "maintenance_scripts/sysadmin_tools/install_security_updates.sh",
+            "script_sha256": "0a7a94e4e9f2892d89f0139c84f5806ab1d2ab97894a157e35d0386b23e8b7f9",
+            "where": "test server wp7-proof-342943 (Linode 108908362), Ubuntu, agent built for the run from 5c3f2c1a1cc4 and uncommitted changes",
+            "what": "job 164071 through the agent: outcome installed, 45 packages changed (agent_live_proofs_live)",
+            "date": "2026-10-22"
+        }
+    ]
 }

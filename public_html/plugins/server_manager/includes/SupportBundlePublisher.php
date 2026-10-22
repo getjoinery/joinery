@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.31 - a leftover partial bundle is removed only when there is one (an unlink of none left a
+ *                warning that a test's crash report named as its cause)
  * @version 1.30 - carries security_check.sh, the hourly look for security fixes, which host housekeeping installs on
  *                 a Docker host too (fleet_security_patching WP1)
  * @version 1.29 - carries install_security_updates.sh: Install security updates now works on a Docker host
@@ -406,7 +408,9 @@ class SupportBundlePublisher {
 			// Built into a temporary name and moved, so a failed tar never
 			// replaces a working bundle with a truncated one.
 			$temp_tar = $tarball . '.new';
-			@unlink($temp_tar);
+			if (file_exists($temp_tar)) {
+				unlink($temp_tar);
+			}
 			// One tree, one byte string: sorted members, epoch mtimes, no owner,
 			// normalised modes, and gzip without a name or timestamp. The bundle
 			// is hashed into the core manifest and named in the release

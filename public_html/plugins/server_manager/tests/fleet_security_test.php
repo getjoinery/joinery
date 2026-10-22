@@ -12,8 +12,8 @@
  *
  * FleetSecurityView: each machine and site container's row and verdict, from
  * arrays (red for old code serving or a critical fix waiting; amber for other
- * fixes, a reboot owed over a day, a stale or missing check; grey for nothing
- * reported). FleetSecurityRunner: the plan's order and what it leaves out, a
+ * fixes, a reboot owed over a day, a stale or missing check, a package run
+ * left half done; grey for nothing reported). FleetSecurityRunner: the plan's order and what it leaves out, a
  * run queued one node at a time, passing a node with nothing to install or a
  * package run in the way, halting at a failed updater, and stop.
  *
@@ -96,6 +96,37 @@ check($row['verdict'] === 'amber' && $row['pending'] === null && in_array('it do
 $row = FleetSecurityView::row(array('id' => 9, 'name' => 'silent', 'container' => '', 'host_id' => null, 'host_report' => null, 'php' => null), null, $NOW);
 check($row['verdict'] === 'grey' && $row['reasons'] === array('nothing reported yet'), 'nothing reported: grey', json_encode($row));
 
+// A package run left half done (B17): amber, from the node's own status check, on a machine or a container.
+$half = JobResultProcessor::status_dpkg_unfinished(array('count' => 7, 'packages' => array(
+	array('name' => 'php8.5-fpm', 'state' => 'unpacked'), array('name' => 'php8.5-cli', 'state' => 'unpacked'),
+	array('name' => 'libssl3t64', 'state' => 'half-configured'), array('name' => 'libc-bin', 'state' => 'triggers-pending'),
+	array('name' => 'man-db', 'state' => 'triggers-awaiting'))));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'halfdone', $clean_hr, $php_current), array('unfinished' => $half)), null, $NOW);
+check($row['verdict'] === 'red' && $row['reasons'] === array('a critical fix was left half done (php8.5-fpm unpacked, php8.5-cli unpacked, libssl3t64 half-configured, libc-bin triggers-pending, and 3 more): Install security updates now finishes it'),
+	'a machine with critical packages left half done: red (a critical fix that did not land), naming four and counting the rest', json_encode($row));
+$plain = function (array $extra = array()) {
+	return JobResultProcessor::status_dpkg_unfinished(array_merge(array('count' => 2, 'packages' => array(
+		array('name' => 'libc-bin', 'state' => 'triggers-pending'), array('name' => 'linux-image-6.8.0-90-generic', 'state' => 'unpacked'))), $extra));
+};
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'halfdone plain', $clean_hr, $php_current), array('unfinished' => $plain())), null, $NOW);
+check($row['verdict'] === 'amber' && $row['reasons'] === array('a package run was left half done (libc-bin triggers-pending, linux-image-6.8.0-90-generic unpacked): Install security updates now finishes it'),
+	'no critical package among them (the kernel stays amber, as its pending fix does): amber', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'run under way', $clean_hr, $php_current), array('unfinished' => JobResultProcessor::status_dpkg_unfinished(
+	array('count' => 7, 'packages' => array(array('name' => 'php8.5-fpm', 'state' => 'unpacked')), 'in_progress' => true, 'since' => $NOW - 600)))), null, $NOW);
+check($row['verdict'] === 'green' && $row['reasons'] === array(), 'a run holding its lock ten minutes: its work in hand, not left half done (no false amber)', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'run stuck', $clean_hr, $php_current), array('unfinished' => $plain(array('in_progress' => true, 'since' => $NOW - 3 * 3600)))), null, $NOW);
+check($row['verdict'] === 'amber' && $row['reasons'] === array('a package run has held its lock for over 3 hours with packages half done (libc-bin triggers-pending, linux-image-6.8.0-90-generic unpacked): it may be stuck'),
+	'a run holding its lock three hours: taken as stuck, and said so', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'holder ended', $clean_hr, $php_current), array('unfinished' => $plain(array('in_progress' => true)))), null, $NOW);
+check($row['verdict'] === 'green', 'a run holding its lock whose start /proc would not give (it ended between the reads): silent, as under two hours', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'held, unread', $clean_hr, $php_current), array('unfinished' => $plain(array('in_progress' => false)))), null, $NOW);
+check($row['verdict'] === 'amber' && strpos($row['reasons'][0], 'a package run was left half done') === 0, 'no run holding the lock: left half done', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_machine(10, 'clean dpkg', $clean_hr, $php_current), array('unfinished' => JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array())))), null, $NOW);
+check($row['verdict'] === 'green' && $row['reasons'] === array(), 'nothing half done: no reason added', json_encode($row));
+$row = FleetSecurityView::row(array('id' => 11, 'name' => 'only dpkg', 'container' => '', 'host_id' => null, 'host_report' => null, 'php' => null,
+	'unfinished' => JobResultProcessor::status_dpkg_unfinished(array('count' => 0, 'packages' => array()))), null, $NOW);
+check($row['verdict'] === 'grey', 'a clean package database alone does not make a node green: it says nothing of fixes', json_encode($row));
+
 // A container host and its sites: a site's fixes are its host's base's.
 $sr = array('installed_at' => '2026-10-10T01:00:00Z', 'checked_at' => '2026-10-22T13:40:00Z', 'checked_ok_at' => '2026-10-22T13:40:00Z',
 	'check' => 'ok', 'check_error' => '', 'base_version' => '2.2', 'base_id' => '88bf90ef691d', 'base_built_at' => '2026-10-21T01:42:00Z',
@@ -118,6 +149,10 @@ check($row['verdict'] === 'amber' && in_array('its host is not known here', $row
 $row = FleetSecurityView::row($site, fs_machine(20, 'dockerhost', $clean_hr), $NOW);
 check($row['verdict'] === 'amber' && in_array('its host does not replace its containers when a fix ships', $row['reasons'], true),
 	'a site container whose host has no nightly replacement: amber', json_encode($row));
+$row = FleetSecurityView::row(array_merge(fs_container(24, 'site d', 'sd', 20, $php_current), array('unfinished' => JobResultProcessor::status_dpkg_unfinished(array('count' => 1,
+	'packages' => array(array('name' => 'php8.5-common', 'state' => 'half-installed')))))), fs_machine(20, 'dockerhost', array_merge($clean_hr, array('site_refresh' => array_merge($sr, array('pending_security' => 0, 'security_packages' => array()))))), $NOW);
+check($row['verdict'] === 'red' && $row['reasons'] === array('a critical fix was left half done (php8.5-common half-installed): Install security updates now finishes it'),
+	'a site container left half done: from its own check, though its host has nothing to say (no hourly check runs in a container)', json_encode($row));
 
 $rows = FleetSecurityView::rows(array(
 	fs_machine(1, 'b clean', $clean_hr, $php_current), fs_machine(2, 'a old', $clean_hr, $php_old),
@@ -174,7 +209,8 @@ function fs_run_cleanup() {
 	foreach (new MultiFleetSecurityRun(array()) as $r) {
 		harness_register_row('fsr_fleet_security_runs', 'fsr_fleet_security_run_id', $r->key);
 	}
-	foreach (new MultiManagementJob(array('job_type' => 'install_security_updates')) as $j) {
+	foreach (array_merge(iterator_to_array(new MultiManagementJob(array('job_type' => 'install_security_updates'))),
+			iterator_to_array(new MultiManagementJob(array('job_type' => 'refresh_site_containers')))) as $j) {
 		$params = $j->get('mjb_parameters');
 		if (is_string($params)) { $params = json_decode($params, true); }
 		if (is_array($params) && isset($params['fleet_security_run_id'])) {
@@ -304,6 +340,172 @@ $s5 = $run5->steps();
 check($s5[1]['verdict'] === 'skipped' && strpos($s5[1]['reason'], 'its container is being replaced') === 0
 		&& (string)$run5->get('fsr_status') === FleetSecurityRun::STATUS_COMPLETED,
 	'its container replaced while its install was open: passed as skipped, not waited out for an hour', json_encode($s5));
+
+// Q7: a container host that replaces its site containers does so once, as its Refresh now,
+// in place of an install inside each container.
+$qh = fs_node(array('mgn_name' => 'HarnessTest FS q host', 'mgn_agent_primitives' => 'check_status,host_report,install_security_updates,refresh_site_containers'));
+$qgroup = new ManagedHost(NULL);
+$qgroup->set('mgh_slug', 'harnessfs-' . bin2hex(random_bytes(3)));
+$qgroup->set('mgh_name', 'HarnessTest FS q group');
+$qgroup->set('mgh_host', '192.0.2.33');
+$qgroup->set('mgh_mgn_managed_node_id', (int)$qh->key);
+$qgroup->save();
+$qgroup->load();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $qgroup->key);
+$qa = fs_node(array('mgn_name' => 'HarnessTest FS q site a', 'mgn_container_name' => 'fsqa', 'mgn_mgh_managed_host_id' => (int)$qgroup->key));
+$qb = fs_node(array('mgn_name' => 'HarnessTest FS q site b', 'mgn_container_name' => 'fsqb', 'mgn_mgh_managed_host_id' => (int)$qgroup->key,
+	'mgn_agent_primitives' => 'check_status,host_report'));
+$q_report = function (array $sr) use ($qh) {
+	$qh->set('mgn_last_host_report', array('site_refresh' => array_merge(array('scheduled' => true, 'running' => false, 'check' => 'ok',
+		'ran_at' => '2026-10-21T01:40:00Z', 'run' => 'nothing_due', 'replaced' => array(), 'passed_over' => array(), 'holds' => array(),
+		'security_packages' => array(), 'pending_security' => 0), $sr)));
+	$qh->save();
+};
+$q_finish = function (ManagementJob $job, $line) {
+	$job->set('mjb_status', 'completed');
+	$job->set('mjb_started_time', gmdate('Y-m-d H:i:s'));
+	$job->set('mjb_output', "=== [Step 1/1] refresh_site_containers ===\n" . json_encode(array('api_version' => '1.0',
+		'data' => array('output' => $line . "\n", 'output_bytes' => strlen($line) + 1))));
+	$job->save();
+};
+$q_cleanup = function () use ($qh) {
+	fs_run_cleanup();
+	foreach (new MultiManagementJob(array('node_id' => (int)$qh->key)) as $j) {
+		harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+	}
+};
+$q_report(array());
+$plan = FleetSecurityRunner::plan(array($qb, $qh, $qa));
+check(array_map(function ($p) { return array((string)$p['node']->get('mgn_name'), $p['word'], $p['covers']); }, $plan['steps']) === array(
+		array('HarnessTest FS q host', 'install_security_updates', array()),
+		array('HarnessTest FS q host', 'refresh_site_containers', array('HarnessTest FS q site a', 'HarnessTest FS q site b')))
+		&& count($plan['nodes']) === 3 && $plan['left_out'] === array(),
+	'the plan: the host\'s own install, then one replacement of its site containers naming both; a container\'s own agent need not have the word',
+	json_encode(array_map(function ($p) { return array($p['node']->get('mgn_name'), $p['word'], $p['covers']); }, $plan['steps'])));
+$q_report(array('scheduled' => false));
+$plan = FleetSecurityRunner::plan(array($qh, $qa, $qb));
+check(array_column($plan['steps'], 'word') === array('install_security_updates', 'install_security_updates')
+		&& strpos(array_column($plan['left_out'], 'reason', 'name')['HarnessTest FS q site b'] ?? '', 'install_security_updates') !== false,
+	'a host whose nightly refresh is off: its containers install in place, and one whose agent lacks the word is left out', json_encode($plan['left_out']));
+$q_report(array());
+
+$run6 = FleetSecurityRunner::start(null, array($qh, $qa, $qb));
+$q_cleanup();
+fs_finish(new ManagementJob((int)$run6->steps()[0]['job_id'], TRUE), fs_object('nothing_to_install'));
+FleetSecurityRunner::advance($run6);
+$s6 = $run6->steps();
+$rj = new ManagementJob((int)$s6[1]['job_id'], TRUE);
+check($s6[1]['verdict'] === 'running' && (string)$rj->get('mjb_job_type') === 'refresh_site_containers' && (int)$rj->get('mjb_mgn_managed_node_id') === (int)$qh->key
+		&& $s6[1]['first_asked_at'] !== '',
+	'after the host\'s install, its Refresh now is asked for', json_encode($s6[1]));
+
+$q_cleanup();
+$q_finish($rj, 'site_refresh: a run is already under way');
+FleetSecurityRunner::advance($run6);
+$s6 = $run6->steps();
+check($s6[1]['verdict'] === 'running' && $s6[1]['job_id'] === null && $s6[1]['ask_again_at'] > time() && strpos($s6[1]['reason'], 'asked again') !== false,
+	'a run already under way began before this one: the host is asked again later, not believed', json_encode($s6[1]));
+FleetSecurityRunner::advance($run6);
+check($run6->steps()[1]['job_id'] === null, '  and not before then');
+$s6[1]['ask_again_at'] = time() - 1;
+$run6->set_steps($s6);
+$run6->save();
+FleetSecurityRunner::advance($run6);
+$s6 = $run6->steps();
+check(!empty($s6[1]['job_id']) && !isset($s6[1]['ask_again_at']), '  then it is asked again', json_encode($s6[1]));
+
+$q_cleanup();
+$q_finish(new ManagementJob((int)$s6[1]['job_id'], TRUE), 'site_refresh: a run has started; the host report shows what it did when it ends');
+FleetSecurityRunner::advance($run6);
+$q_cleanup();
+$s6 = $run6->steps();
+$reports = 0;
+foreach (new MultiManagementJob(array('node_id' => (int)$qh->key, 'job_type' => 'host_report')) as $j) { $reports++; }
+check($s6[1]['verdict'] === 'running' && $s6[1]['replacing_since'] !== '' && $reports === 1,
+	'started: the step waits on the host\'s report, and one report is asked for (not one per tick)', json_encode($s6[1]) . ' reports ' . $reports);
+$q_report(array('running' => true));
+FleetSecurityRunner::advance($run6);
+check($run6->steps()[1]['verdict'] === 'running', 'the report still shows the last night\'s run, then this one under way: the step waits');
+$q_report(array('ran_at' => gmdate('Y-m-d\TH:i:s\Z', time() + 5), 'running' => true));
+FleetSecurityRunner::advance($run6);
+check($run6->steps()[1]['verdict'] === 'running', '  a run begun after the asking but not ended: it waits');
+$q_report(array('ran_at' => gmdate('Y-m-d\TH:i:s\Z', time() + 5), 'run' => 'replaced',
+	'replaced' => array(array('site' => 'fsqa', 'down_seconds' => 11.8), array('site' => 'fsqb', 'down_seconds' => 12.4))));
+FleetSecurityRunner::advance($run6);
+$run6->load();
+$s6 = $run6->steps();
+check($s6[1]['verdict'] === 'done' && $s6[1]['outcome'] === 'replaced' && $s6[1]['changed'] === 2 && $s6[1]['reason'] === ''
+		&& (string)$run6->get('fsr_status') === FleetSecurityRun::STATUS_COMPLETED,
+	'its run ended having replaced both: done, two changed, and the run completed', json_encode($s6[1]));
+
+// The host did not start one (reviewer2 d), and one that ended without recording anything (reviewer2 a).
+$q_report(array());
+$run8 = FleetSecurityRunner::start(null, array($qa, $qb));
+$q_cleanup();
+$q_finish(new ManagementJob((int)$run8->steps()[0]['job_id'], TRUE), 'site_refresh: the timer is not installed');
+FleetSecurityRunner::advance($run8);
+$run8->load();
+check((string)$run8->get('fsr_status') === FleetSecurityRun::STATUS_HALTED
+		&& $run8->steps()[0]['reason'] === 'its host did not start replacing its site containers: site_refresh: the timer is not installed',
+	'a host that did not start a replacement halts the run, with its line', json_encode($run8->steps()[0]));
+$run9 = FleetSecurityRunner::start(null, array($qa, $qb));
+$q_cleanup();
+$q_finish(new ManagementJob((int)$run9->steps()[0]['job_id'], TRUE), 'site_refresh: a run has started; the host report shows what it did when it ends');
+FleetSecurityRunner::advance($run9);
+$q_cleanup();
+$ended = function ($generated_after) use ($qh) {
+	$qh->set('mgn_last_host_report', array('generated_at' => time() + $generated_after, 'site_refresh' => array('scheduled' => true, 'running' => false,
+		'check' => 'ok', 'ran_at' => '2026-10-21T01:40:00Z', 'run' => 'nothing_due', 'replaced' => array(), 'passed_over' => array(), 'holds' => array(),
+		'security_packages' => array(), 'pending_security' => 0)));
+	$qh->save();
+};
+$ended(120);
+FleetSecurityRunner::advance($run9);
+check($run9->steps()[0]['verdict'] === 'running', 'a report two minutes on with none under way and last night\'s run: not yet judged (the start may still be landing)');
+$q_cleanup();
+$ended(FleetSecurityRunner::REFRESH_ENDED_GRACE_SECONDS + 60);
+FleetSecurityRunner::advance($run9);
+$run9->load();
+check((string)$run9->get('fsr_status') === FleetSecurityRun::STATUS_HALTED
+		&& strpos($run9->steps()[0]['reason'], 'its host\'s replacement ended without recording what it did, or never began') === 0
+		&& strpos($run9->steps()[0]['reason'], 'journalctl -u joinery-site-refresh') !== false,
+	'a report past the grace still showing none under way and none since: halted at once, saying the run ended unrecorded, not blaming the agent hours later',
+	json_encode($run9->steps()[0]));
+$q_cleanup();
+
+// Its run took longer than its own bounds.
+$q_report(array());
+$run7 = FleetSecurityRunner::start(null, array($qa, $qb));
+$q_cleanup();
+$s7 = $run7->steps();
+check(count($s7) === 1 && $s7[0]['word'] === 'refresh_site_containers', 'a run of only the containers is the one replacement', json_encode($s7));
+$s7[0]['first_asked_at'] = gmdate('Y-m-d H:i:s', time() - FleetSecurityRunner::refresh_wait_seconds(2) - 60);
+$run7->set_steps($s7);
+$run7->save();
+FleetSecurityRunner::advance($run7);
+$run7->load();
+check((string)$run7->get('fsr_status') === FleetSecurityRun::STATUS_HALTED && strpos($run7->steps()[0]['reason'], 'its site containers have not been replaced in') === 0,
+	'a replacement not seen to end within its run\'s own bounds halts the run', json_encode($run7->steps()[0]));
+
+// What a host's ended run means.
+$sr_of = function (array $sr) {
+	return JobResultProcessor::host_report_site_refresh(array_merge(array('scheduled' => true, 'running' => false, 'check' => 'ok',
+		'ran_at' => '2026-10-22T14:00:00Z', 'run' => 'replaced', 'replaced' => array(), 'passed_over' => array(), 'holds' => array(),
+		'security_packages' => array(), 'pending_security' => 0), $sr));
+};
+$v = FleetSecurityRunner::refresh_verdict($sr_of(array('run' => 'nothing_due')));
+check($v['verdict'] === 'done' && $v['fields']['outcome'] === 'nothing_due' && $v['fields']['changed'] === 0 && $v['reason'] === '', 'nothing due: done', json_encode($v));
+$v = FleetSecurityRunner::refresh_verdict($sr_of(array('run' => 'incomplete', 'replaced' => array(array('site' => 'fsqa', 'down_seconds' => 12)),
+	'passed_over' => array(array('site' => 'fsqb', 'why' => 'timed_out')), 'pending_security' => 1)));
+check($v['verdict'] === 'done' && $v['reason'] === 'fsqb passed over (timed out); its base still waits for 1 security fix',
+	'incomplete: done, naming the site passed over and the fix the new base still waits for', json_encode($v));
+$v = FleetSecurityRunner::refresh_verdict($sr_of(array('run' => 'held', 'holds' => array(array('site' => 'fsqa', 'outcome' => 'down', 'reason' => 'no answer', 'at' => '', 'base' => '')))));
+check($v['verdict'] === 'failed' && $v['reason'] === 'its host stopped replacing its site containers: fsqa held (left down: no answer)', 'held: halts, naming the site', json_encode($v));
+$v = FleetSecurityRunner::refresh_verdict($sr_of(array('run' => 'base_failed', 'run_error' => 'the base did not build: E: x')));
+check($v['verdict'] === 'failed' && $v['reason'] === 'its host could not build a fresh base: the base did not build: E: x', 'a base that did not build: halts', json_encode($v));
+$v = FleetSecurityRunner::refresh_verdict($sr_of(array('check' => 'failed', 'check_error' => 'a mirror is down')));
+check($v['verdict'] === 'failed' && $v['reason'] === 'its host could not check its base for fixes: a mirror is down',
+	'a check for fixes that failed: halts (whether a fix waits is not known)', json_encode($v));
 
 // Nothing to run.
 $threw = '';

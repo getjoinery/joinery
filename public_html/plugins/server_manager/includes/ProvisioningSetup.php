@@ -15,6 +15,8 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.10 - the API probe asks for one row with numperpage, a parameter the API has, and says why it failed
+ *                 (probeApiProblem); it sent limit, which the API refuses as an unknown filter (B21)
  * @version 1.9 - the API secret counts as configured only when it opens (a dead sealed value is not set)
  * @version 1.8 - the hosted tier creates servers in the default cloud account of the list (OperatorCloudAccount);
  *                the operator token, its scopes record and their readers are gone (cloud_accounts_list); status()
@@ -353,15 +355,27 @@ class ProvisioningSetup {
 	 * well-formed envelope (an empty result set counts as success).
 	 */
 	public static function probeApi(): bool {
+		return self::probeApiProblem() === '';
+	}
+
+	/** Why the store API connection does not answer, or '' when it does. */
+	public static function probeApiProblem(): string {
 		$url = self::readSetting('server_manager_getjoinery_api_url');
 		$pub = self::readSetting('server_manager_getjoinery_api_public_key');
 		$sec = self::readApiSecret();
 		if ($url === '' || $pub === '' || $sec === '') {
-			return false;
+			return 'not configured';
 		}
-		$client = new GetJoineryApiClient($url, $pub, $sec);
-		$result = $client->get('OrderItemRequirements', array('limit' => 1));
-		return is_array($result);
+		return self::probeClientProblem(new GetJoineryApiClient($url, $pub, $sec));
+	}
+
+	/**
+	 * Ask a client for one row of what the order poll reads, with the API's
+	 * own paging parameter: '' when it answers, else why not.
+	 */
+	public static function probeClientProblem(GetJoineryApiClient $client): string {
+		$result = $client->get('OrderItemRequirements', array('numperpage' => 1));
+		return is_array($result) ? '' : ($client->last_error !== '' ? $client->last_error : 'no answer');
 	}
 
 	/** Load an undeleted Question by id, or null when missing/deleted. */
@@ -579,6 +593,7 @@ class ProvisioningSetup {
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 		$linode = OAuth2ProviderRegistry::get('linode');
 		$oauth_configured = $linode !== null && $linode::isConfigured();
+		$probe_problem = $api_configured ? self::probeApiProblem() : 'not configured';
 
 		return array(
 			'api' => array(
@@ -587,7 +602,8 @@ class ProvisioningSetup {
 				'is_self' => $api_url === '' || $api_url === self::selfApiUrl(),
 				'service_user_email' => $service_user !== null ? (string)$service_user->get('usr_email') : '',
 				'service_user_exists' => $service_user !== null,
-				'probe_ok' => $api_configured ? self::probeApi() : false,
+				'probe_ok' => $probe_problem === '',
+				'probe_problem' => $probe_problem,
 			),
 			'question' => array(
 				'id' => $qid,

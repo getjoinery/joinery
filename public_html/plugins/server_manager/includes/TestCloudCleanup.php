@@ -23,6 +23,8 @@
  * records were left. A record left on a released address names whoever the
  * provider gives that address to next (fleet_security_patching WP10).
  *
+ * @version 1.4 - a live-proof test build's node (mgn_agent_test_build) holds no server: its server goes at its age
+ *                like any other, and the node is removed with it, so a run killed part way leaves nothing (WP7)
  * @version 1.3 - a deleted server's A and AAAA records in the test zones are removed with it
  * @version 1.2 - every test account of ours, each behind its own safety catch; the state is one entry per account
  *                (cloud_accounts_list)
@@ -172,11 +174,21 @@ class TestCloudCleanup {
 			return array('status' => 'skipped', 'message' => 'No cloud account of ours here is the test account.');
 		}
 		$nodes = MachineTransferWatch::node_addresses($resolve ?? array('MachineTransferWatch', 'resolve'));
+		// A live-proof test build's node is its test's own (WP7): it holds no
+		// server, which goes at its age like any other, and goes with it. A
+		// run killed part way would otherwise leave both for good.
+		$test_builds = array();
+		foreach (new MultiManagedNode(array('mgn_agent_test_build' => true, 'deleted' => false)) as $n) {
+			if (isset($nodes[(int)$n->key])) {
+				$test_builds[(int)$n->key] = array('node' => $n, 'addresses' => $nodes[(int)$n->key]);
+			}
+		}
+		$nodes = array_diff_key($nodes, $test_builds);
 		$states = array();
 		$messages = array();
 		$status = 'success';
 		foreach ($accounts as $name => $driver) {
-			list($state, $result) = self::run_one((string)$name, $driver, $nodes, $now, $dns);
+			list($state, $result) = self::run_one((string)$name, $driver, $nodes, $now, $dns, $test_builds);
 			$states[] = $state;
 			$messages[] = $name . ': ' . $result['message'];
 			if ($result['status'] === 'error') {
@@ -208,9 +220,11 @@ class TestCloudCleanup {
 	/**
 	 * One account's run: [its state, its {status, message}]. $dns is the zone
 	 * holder's DNS (zone_holder), false when none is held, or null to leave
-	 * records alone (a test of the rest).
+	 * records alone (a test of the rest). $test_builds are the live-proof
+	 * test builds' nodes, [id => {node, addresses}]: one on a server deleted
+	 * here is removed too.
 	 */
-	private static function run_one(string $name, $driver, array $nodes, int $now, $dns = null): array {
+	private static function run_one(string $name, $driver, array $nodes, int $now, $dns = null, array $test_builds = array()): array {
 		$base = array('name' => $name, 'time' => gmdate('Y-m-d H:i:s', $now));
 		try {
 			$plan = self::plan($driver, $nodes, $now, self::max_age_hours());
@@ -230,6 +244,7 @@ class TestCloudCleanup {
 			$failures[] = 'volumes could not be listed: ' . $plan['volume_error'];
 		}
 		$released = array();
+		$deleted['nodes'] = array();
 		foreach ($plan['instances'] as $i) {
 			try {
 				$driver->deleteInstance($i['id']);
@@ -239,6 +254,17 @@ class TestCloudCleanup {
 				}
 			} catch (CloudComputeException $e) {
 				$failures[] = 'server ' . $i['label'] . ': ' . $e->getMessage();
+				continue;
+			}
+			$on = MachineTransferWatch::nodes_on(array('ipv4_public' => $i['addresses']),
+				array_map(function ($t) { return $t['addresses']; }, $test_builds));
+			foreach (array_keys($on) as $node_id) {
+				try {
+					$test_builds[$node_id]['node']->remove_permanently();
+					$deleted['nodes'][] = (string)$test_builds[$node_id]['node']->get('mgn_name') . ' (#' . $node_id . ')';
+				} catch (Exception $e) {
+					$failures[] = 'test build node #' . $node_id . ': ' . $e->getMessage();
+				}
 			}
 		}
 		$deleted['records'] = array();
@@ -279,13 +305,15 @@ class TestCloudCleanup {
 		}, $plan['held']);
 		$state = $base + array('outcome' => 'ran', 'account' => $plan['account'],
 			'deleted_instances' => $deleted['instances'], 'deleted_volumes' => $deleted['volumes'], 'deleted_records' => $deleted['records'],
+			'deleted_nodes' => $deleted['nodes'],
 			'held' => $held, 'kept' => $plan['kept'], 'failures' => $failures);
 
 		$message = 'Deleted ' . count($deleted['instances']) . ' server(s)'
 			. ($deleted['instances'] ? ' (' . implode(', ', $deleted['instances']) . ')' : '')
 			. ' and ' . count($deleted['volumes']) . ' volume(s)'
 			. ($deleted['volumes'] ? ' (' . implode(', ', $deleted['volumes']) . ')' : '')
-			. ($deleted['records'] ? ', and their address records (' . implode(', ', $deleted['records']) . ')' : '') . '.';
+			. ($deleted['records'] ? ', and their address records (' . implode(', ', $deleted['records']) . ')' : '')
+			. ($deleted['nodes'] ? ', and the live-proof test build nodes on them (' . implode(', ', $deleted['nodes']) . ')' : '') . '.';
 		if ($held) {
 			$message .= ' Held, at a managed node\'s address: ' . implode('; ', $held) . '. Tag each keep, or remove its node.';
 		}

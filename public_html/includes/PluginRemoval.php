@@ -16,9 +16,27 @@
  * Every check takes the plugins directory as an argument so the whole thing
  * is exercised against a scratch tree in tests/unit/root_request_test.php.
  *
+ * A request for a directory that is already gone has nothing left to do, and
+ * is done, not refused: a plugin's files removed by someone else first (a
+ * test removing its own scratch plugin) are as removed as root would leave
+ * them.
+ *
+ * @version 1.1 - already_gone(): a removal whose directory is already gone is done (B22: 534 test requests failed)
  * @version 1.0 - specs/post_release_fleet_defects.md B1
  */
 class PluginRemoval {
+
+	/**
+	 * Whether plugins/<name> is already gone: a plugin name, and nothing at
+	 * all at that path, not even a link. Then a removal is done.
+	 */
+	public static function already_gone(string $name, string $plugins_dir): bool {
+		if ($name === '' || !Plugin::is_valid_plugin_name($name) || preg_match('/^[a-zA-Z]/', $name) !== 1) {
+			return false;
+		}
+		$path = rtrim($plugins_dir, '/') . '/' . $name;
+		return !is_link($path) && !file_exists($path);
+	}
 
 	/**
 	 * Why root must not remove plugins/<name>, or '' when it may.

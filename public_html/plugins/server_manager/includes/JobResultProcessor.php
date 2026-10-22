@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.102 - check_status's dpkg_unfinished (agent 1.90.0): the packages a package run left half done
+ *                  (fleet_security_patching B17)
  * @version 1.101 - security_pending carries each package's first_seen and the at-once install (WP6, Q2);
  *                  check_status's php packages carry installed_at
  * @version 1.100 - an install_security_updates result keeps repaired, reloaded and still_on_old_code
@@ -554,6 +556,10 @@ class JobResultProcessor {
 		// The PHP it runs, and whether old code still serves (agent 1.88.0).
 		if (array_key_exists('php', $result)) {
 			$result['php'] = self::status_php($result['php']);
+		}
+		// The packages a package run left half done (agent 1.90.0, B17).
+		if (array_key_exists('dpkg_unfinished', $result)) {
+			$result['dpkg_unfinished'] = self::status_dpkg_unfinished($result['dpkg_unfinished']);
 		}
 		$version     = $result['joinery_version'] ?? null;
 		$is_api_path = ($api_data !== null);
@@ -4815,6 +4821,31 @@ HTML;
 			);
 		}
 		return array('packages' => $packages, 'fpm' => $fpm);
+	}
+
+	/** The states dpkg --audit lists, and reinstreq, as check_status names them. */
+	const DPKG_UNFINISHED_STATES = array('unpacked', 'half-configured', 'half-installed', 'triggers-awaiting', 'triggers-pending', 'reinstreq');
+
+	/**
+	 * check_status's dpkg_unfinished (agent 1.90.0; fleet_security_patching
+	 * B17): how many packages are half done, and the first 20 by name with
+	 * dpkg's state; whether a package run holds apt's or dpkg's lock now
+	 * (in_progress, null where the node could not tell), and when its holder
+	 * started (since, null where unknown). null for anything not its shape.
+	 */
+	public static function status_dpkg_unfinished($in) {
+		if (!is_array($in) || !is_int($in['count'] ?? null) || $in['count'] < 0) { return null; }
+		$packages = array();
+		foreach (array_slice(is_array($in['packages'] ?? null) ? $in['packages'] : array(), 0, 20) as $p) {
+			if (!is_array($p) || self::package_word($p['name'] ?? null) === '') { continue; }
+			$state = $p['state'] ?? null;
+			$packages[] = array('name' => $p['name'], 'state' => in_array($state, self::DPKG_UNFINISHED_STATES, true) ? $state : 'unknown');
+		}
+		$in_progress = $in['in_progress'] ?? null;
+		$since = $in['since'] ?? null;
+		return array('count' => max($in['count'], count($packages)), 'packages' => $packages,
+			'in_progress' => is_bool($in_progress) ? $in_progress : null,
+			'since' => (is_int($since) && $since > 0) ? $since : null);
 	}
 
 	/**

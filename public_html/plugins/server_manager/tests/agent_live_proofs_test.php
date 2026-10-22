@@ -102,5 +102,22 @@ check(AgentLiveProofs::proofs($T . '/absent.json') === array(), 'no record: no p
 $real = json_decode((string)file_get_contents(AgentLiveProofs::record_path()), true);
 check(is_array($real) && is_array($real['proofs'] ?? null), 'the plugin\'s own record reads as one');
 
+// record(): the one writer, for record_live_proof.php and the live test.
+if (is_dir(AgentDistPublisher::sourcePath() . '/primitives')) {
+	$out = $T . '/written.json';
+	$row = AgentLiveProofs::record('host_report', '9.9.1', 'a test server', 'job 1', $out);
+	AgentLiveProofs::record('host_report', '9.9.1', 'another test server', 'job 2', $out);
+	AgentLiveProofs::record('host_report', '9.9.2', 'a test server', 'job 3', $out);
+	$rows = AgentLiveProofs::proofs($out);
+	check($row['word'] === 'host_report' && $row['agent_version'] === '9.9.1' && $row['date'] === gmdate('Y-m-d') && $row['script'] !== ''
+			&& preg_match('/^[0-9a-f]{64}$/', $row['script_sha256']) === 1,
+		'a row names the word, the agent version, its script and the script\'s hash now', json_encode($row));
+	check(count($rows) === 2 && $rows[0]['agent_version'] === '9.9.1' && $rows[0]['what'] === 'job 2' && $rows[1]['agent_version'] === '9.9.2',
+		'one row per word, version and script: a later run of the same replaces it, another version is its own', json_encode($rows));
+	$threw = '';
+	try { AgentLiveProofs::record('no_such_word', '9.9.1', 'x', 'y', $out); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, "registers no word 'no_such_word'") !== false, 'a word the agent source does not register is refused', $threw);
+}
+
 exec('rm -rf ' . escapeshellarg($T));
 harness_finish();
