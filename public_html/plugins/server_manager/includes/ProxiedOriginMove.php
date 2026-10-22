@@ -31,6 +31,8 @@
  * owner's own records, changed on their press with a token they gave for it,
  * so nothing is recorded in the platform's DNS ownership table.
  *
+ * @version 1.4 - a container site's machine addresses include its Docker host's, so a DNS move finds the AAAA naming
+ *                the host's IPv6 (only the A moved, and IPv6 visitors stayed on the old host: C7's B47)
  * @version 1.3 - prove() can ask the copy's own address under the site's name ($at), for a switch whose records
  *                have not moved yet (specs/site_copy_anything_to_anything.md D1)
  * @version 1.2 - a container site moves only its own names (the domain and www.): its server's address is
@@ -80,12 +82,19 @@ class ProxiedOriginMove {
 	/**
 	 * Every public address this management node knows for a node's machine:
 	 * its host, the provision that created it, and the addresses its agent
-	 * reported when it joined with the key the row holds now.
+	 * reported when it joined with the key the row holds now. A site in a
+	 * container runs on its Docker host's machine, so the host's node's
+	 * addresses are its too: the container's own records seldom carry the
+	 * host's IPv6 (its agent joins over IPv4; only the host was adopted).
 	 *
 	 * @return array{4: string[], 6: string[]}
 	 */
-	public static function machine_addresses(ManagedNode $node): array {
+	public static function machine_addresses(ManagedNode $node, bool $with_host = true): array {
 		$candidates = array((string)$node->get('mgn_host'));
+		if ($with_host && trim((string)$node->get('mgn_container_name')) !== '' && ($host = NodeRemoval::host_server($node)) !== null) {
+			$h = self::machine_addresses($host, false);
+			$candidates = array_merge($candidates, $h[4], $h[6]);
+		}
 		$key = trim((string)$node->get('mgn_agent_public_key'));
 		foreach (new MultiCustomerCloudProvision(array('node_id' => (int)$node->key, 'deleted' => false)) as $p) {
 			$candidates[] = (string)$p->get('cvp_instance_ip');

@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.10 - a container source's host stages its certificate around the export (C7's B49)
  * @version 1.9 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.8 - a copy onto a new server takes a plan its region sells: an own plan withdrawn there is not carried,
  *               and one it does not sell is refused before anything is made (B31)
@@ -739,4 +740,53 @@ SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;
 JobCommandBuilder::set_shelf_listing_for_tests(null);
 DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
+// ---------------------------------------------------------------------------
+section('A container source\'s host stages its certificate for the export (C7\'s B49)');
+
+// The site's certificate is on its host, which ends its TLS: the export, made
+// inside the container, carries only what the host stages there for it.
+$cs_host = $mk_node('cshost', array('mgn_host' => '192.0.2.81', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
+	'mgn_agent_version' => '1.90.0', 'mgn_agent_primitives' => 'site_quiet_host,hold_container,check_status'));
+$cs_mgh = new ManagedHost(NULL);
+foreach (array('mgh_name' => 'HarnessTest SCP cs ' . $cs_host->key, 'mgh_slug' => 'harness-scp-cs-' . $cs_host->key, 'mgh_host' => '192.0.2.81',
+		'mgh_mgn_managed_node_id' => (int)$cs_host->key) as $k => $v) {
+	$cs_mgh->set($k, $v);
+}
+$cs_mgh->save();
+$cs_mgh->load();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $cs_mgh->key);
+$cs_src = $mk_node('cssrc', array_merge($source_cols, array('mgn_host' => '192.0.2.81', 'mgn_container_name' => 'csite',
+	'mgn_mgh_managed_host_id' => (int)$cs_mgh->key, 'mgn_web_root' => '/var/www/html/csite/public_html',
+	'mgn_site_url' => 'https://csite.example.org', 'mgn_agent_public_key' => base64_encode(random_bytes(32)))));
+$run_steps = new ReflectionMethod('SiteCopyRunner', 'run_steps');
+$run_steps->setAccessible(true);
+$label = function (array $steps) {
+	return array_map(function ($s) { return $s['op'] . (($s['arg'] ?? '') !== '' ? ':' . $s['arg'] : '') . '/' . $s['on']; }, $steps);
+};
+$cs_ops = $label($run_steps->invoke(null, $cs_src));
+$at = array_search('copy_export/source', $cs_ops, true);
+check($at !== false && ($cs_ops[$at - 1] ?? '') === 'site_certificate_stage:stage/site_host'
+	&& ($cs_ops[$at + 1] ?? '') === 'site_certificate_stage:clear/site_host',
+	'a container source\'s run: its host stages the certificate just before the export and clears it just after', json_encode($cs_ops));
+check(!in_array('site_certificate_stage:stage/site_host', $label($run_steps->invoke(null, $src)), true),
+	'a site on its own server stages nothing: its export reads its own certificate');
+
+$threw = '';
+try { JobCommandBuilder::build_site_certificate_stage($cs_host, 'csite', 'stage', 'csite.example.org'); } catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'cannot hand a site its certificate') !== false, 'a host agent without the word is told so, not sent it', $threw);
+$preflight = new ReflectionMethod('SiteCopyRunner', 'host_word_refusals');
+$preflight->setAccessible(true);
+$why = implode(' | ', $preflight->invoke(null, new SiteCopy(NULL), $cs_src));
+check(strpos($why, 'site_certificate_stage') !== false || strpos($why, 'newer agent') !== false,
+	'and the preflight refuses a running container\'s copy until its host can carry the certificate', $why);
+$cs_host->set('mgn_agent_version', '1.91.0');
+$cs_host->set('mgn_agent_primitives', 'site_certificate_stage,site_quiet_host,hold_container,check_status');
+$cs_host->save();
+check(JobCommandBuilder::build_site_certificate_stage($cs_host, 'csite', 'stage', 'CSite.Example.org')
+		=== array('primitive' => 'site_certificate_stage', 'params' => array('action' => 'stage', 'name' => 'csite', 'domain' => 'csite.example.org'))
+	&& JobCommandBuilder::build_site_certificate_stage($cs_host, 'csite', 'clear')
+		=== array('primitive' => 'site_certificate_stage', 'params' => array('action' => 'clear', 'name' => 'csite')),
+	'stage names the container and the domain it is served at; clear names the container alone');
+check($preflight->invoke(null, new SiteCopy(NULL), $cs_src) === array(), 'with the word, nothing in the way');
+
 harness_finish();

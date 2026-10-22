@@ -30,6 +30,7 @@
  *  - a manual switch's way back: the records the owner points back, named
  *    before going back and, after, while DNS still names the copy.
  *
+ * @version 1.6 - a container site's DNS move takes the AAAA naming its host's IPv6 (C7's B47)
  * @version 1.5 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.4 - reverse DNS at settle names the copy's IPv6 too, each address checked against its own record (C5's B33)
  * @version 1.3 - a manual switch's way back names the records to point back (C4's B28)
@@ -338,6 +339,37 @@ check(count($plan['records']) === 3 && $by[$domain . ' A']['to'] === $T4 && $by[
 	&& $by[$domain . ' AAAA']['to'] === $T6 && !isset($by['other.example.org A']),
 	'every A and AAAA naming the site\'s server, with the copy\'s address of its family and its old TTL; others untouched', json_encode($plan));
 check(ScdFakeDns::$writes === array(), 'planning writes nothing');
+
+// A site in a container: its own row knows only the IPv4 its agent joined over;
+// the IPv6 is on its Docker host's record (C7's B47, where only the A moved).
+$dhost = $mk_node('dockhost', array('mgn_host' => $S4));
+$dhp = new CustomerCloudProvision(NULL);
+foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => $S4, 'cvp_slug' => 'harnessscd-dh-' . $tag,
+		'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal', 'cvp_install_mode' => 'adopted', 'cvp_provider' => 'linode',
+		'cvp_hosting_mode' => 'operator', 'cvp_instance_id' => '7300', 'cvp_instance_ip' => $S4, 'cvp_instance_ipv6' => $S6,
+		'cvp_region' => 'us-east', 'cvp_mgn_managed_node_id' => (int)$dhost->key) as $k => $v) {
+	$dhp->set($k, $v);
+}
+$dhp->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $dhp->key);
+$dmgh = new ManagedHost(NULL);
+foreach (array('mgh_name' => 'HarnessTest SCD dock ' . $tag, 'mgh_slug' => 'harnessscd-dock-' . $tag, 'mgh_host' => $S4,
+		'mgh_mgn_managed_node_id' => (int)$dhost->key) as $k => $v) {
+	$dmgh->set($k, $v);
+}
+$dmgh->save();
+$dmgh->load();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $dmgh->key);
+$dsite = $mk_node('docksite', array('mgn_host' => $S4, 'mgn_container_name' => 'scddock', 'mgn_mgh_managed_host_id' => (int)$dmgh->key,
+	'mgn_site_url' => 'https://' . $domain, 'mgn_web_root' => '/var/www/html/scddock/public_html'));
+$reset_zone();
+$dplan = DnsRecordMove::plan($dns(), $domain, $dsite, $cnode);
+$dby = array();
+foreach ($dplan['records'] as $r) {
+	$dby[$r['name'] . ' ' . $r['type']] = $r;
+}
+check(isset($dby[$domain . ' AAAA']) && $dby[$domain . ' AAAA']['to'] === $T6 && isset($dby[$domain . ' A']) && !isset($dby['other.example.org A']),
+	'a container site moves the AAAA naming its host\'s IPv6 with its A, though its own row knows only the IPv4', json_encode($dplan['records']));
 
 // ---------------------------------------------------------------------------
 section('What still names the old server\'s address');

@@ -80,7 +80,7 @@ $base = array('mgn_site_url' => 'https://scm.example.org', 'mgn_agent_public_key
 
 // The sources. A container's host has an agent with the words that freeze it and hold it.
 $hnode = $mk_node('hostagent', array('mgn_host' => '192.0.2.150', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
-	'mgn_agent_version' => JobCommandBuilder::FORWARD_MIN_AGENT_VERSION, 'mgn_agent_primitives' => 'host_report,site_quiet_host,hold_container'));
+	'mgn_agent_version' => JobCommandBuilder::FORWARD_MIN_AGENT_VERSION, 'mgn_agent_primitives' => 'host_report,site_certificate_stage,site_quiet_host,hold_container'));
 $mh = new ManagedHost(NULL);
 foreach (array('mgh_slug' => 'harnessscm-h-' . $tag, 'mgh_name' => 'HarnessTest SCM host', 'mgh_host' => '192.0.2.150',
 		'mgh_mgn_managed_node_id' => (int)$hnode->key) as $k => $v) {

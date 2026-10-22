@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.138 - build_site_certificate_stage(): a container site's certificate staged inside it for its copy's export
+ *                 (agent 1.91.0+, the site_certificate_stage word), and cleared after
  * @version 1.137 - build_refresh_site_containers(): the refresh_site_containers word (agent 1.88.0+), a container
  *                  host's nightly replacement of its site containers started now (fleet_security_patching WP4)
  * @version 1.136 - build_install_security_updates(): the install_security_updates word (agent 1.87.0+), the nightly
@@ -2211,6 +2213,42 @@ class JobCommandBuilder {
 				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_quiet_host']));
 		}
 		return self::build_site_quiet_host_primitive($name, $action, $reason);
+	}
+
+	/**
+	 * A container site's own certificate, staged inside its container for its
+	 * copy's export, or taken back out (specs/site_copy_anything_to_anything.md
+	 * D4). The certificate lives on the host, which ends TLS for the site; the
+	 * export, made inside the container, carries what is staged there, sealed
+	 * to the copy. The host stages only a lineage naming the domain it serves
+	 * that container at, and never its ACME account. Addressed to the HOST's own
+	 * agent.
+	 */
+	public static function build_site_certificate_stage($host_node, $name, $action, $domain = '') {
+		if (!self::has_primitive($host_node, 'site_certificate_stage')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot hand a site its certificate for a copy. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_certificate_stage']));
+		}
+		return self::build_site_certificate_stage_primitive($name, $action, $domain);
+	}
+
+	public static function build_site_certificate_stage_primitive($name, $action, $domain = '') {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site container's name.");
+		}
+		if ($action === 'clear') {
+			return ['primitive' => 'site_certificate_stage', 'params' => ['action' => 'clear', 'name' => $name]];
+		}
+		if ($action !== 'stage') {
+			throw new Exception("site_certificate_stage: unknown action '{$action}'.");
+		}
+		$domain = strtolower(trim((string)$domain));
+		if (!preg_match('/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
+			throw new Exception("'{$domain}' is not a domain a certificate is staged for.");
+		}
+		return ['primitive' => 'site_certificate_stage', 'params' => ['action' => 'stage', 'name' => $name, 'domain' => $domain]];
 	}
 
 	/**
