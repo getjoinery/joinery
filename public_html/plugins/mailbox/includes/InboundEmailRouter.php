@@ -1104,7 +1104,7 @@ class InboundEmailRouter {
 		if ($sealed_raw === '') {
 			// Pending flag with no blob is an inconsistent row; clear the flag so
 			// it stops being retried forever, but surface nothing to parse. Targeted
-			// UPDATE — a full save() would clobber any sealed columns.
+			// UPDATE: save() reads every column for its checks, sealed ones included.
 			InboundEmailMessage::updateColumns(intval($msg->key), array('iem_pending_parse' => false));
 			return false;
 		}
@@ -1191,8 +1191,9 @@ class InboundEmailRouter {
 		$decision = $this->spamDecision($alias, $auth, $content_spam, $parsed, $bodies);
 
 		// Clear the pending state, discard the sealed raw blob, and record the spam
-		// verdict/score — all via a TARGETED update so the sealed content columns
-		// just written behind the model's back are never clobbered by a full save().
+		// verdict/score — all via a TARGETED update: the sealed content columns
+		// were just written behind the model's back, and save() reads every column
+		// for its checks, sealed ones included.
 		InboundEmailMessage::updateColumns(intval($msg->key), array(
 			'iem_pending_parse'      => false,
 			'iem_relay_sealed_raw'   => null,

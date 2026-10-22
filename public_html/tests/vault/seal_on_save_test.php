@@ -222,6 +222,18 @@ $after_touch = sos_raw((int)$optout->key);
 check((string)$after_touch['imc_address'] === (string)$sealed_raw['imc_address'],
 	'and a later save() leaves the sealed columns exactly as the sealing path left them');
 
+// A sealed column this model does not seal is skipped by save() and kept in
+// the copy as the caller set it, through any number of saves.
+$kept_copy = new SealOnSaveOptOutProbe((int)$optout->key, TRUE);
+$kept_copy->set('imc_display_name', 'Manual Kept');
+$kept_copy->save();
+$kept_copy->set('imc_use_count', 4);
+$kept_copy->save();
+check($kept_copy->get('imc_display_name') === 'Manual Kept',
+	'a skipped sealed column keeps its plaintext in the copy across two saves');
+check((string)sos_raw((int)$optout->key)['imc_display_name'] === (string)$sealed_raw['imc_display_name'],
+	'and is never written');
+
 // ---------------------------------------------------------------------------
 section('A FIRST-TIME seal of an existing row seals the whole row, not the dirty subset');
 // ---------------------------------------------------------------------------
@@ -245,6 +257,20 @@ check(strpos((string)$raw_flip['imc_address'], 'v1.aead.') === 0,
 $flip_back = new SealOnSavePolicyProbe((int)$latecomer->key, TRUE);
 check($flip_back->get('imc_address') === 'later@example.com', 'the lifted column reads back');
 check($flip_back->get('imc_display_name') === 'Later Sealed', 'and so does the edited one');
+$flip_threw = '';
+try {
+	$flip_address = $flip->get('imc_address');
+} catch (Throwable $e) {
+	$flip_threw = get_class($e) . ': ' . $e->getMessage();
+}
+check($flip_threw === '' && ($flip_address === null || $flip_address === 'later@example.com'),
+	'the instance that sealed the row reads it without throwing', $flip_threw);
+$flip_left = array();
+foreach (array('imc_address', 'imc_display_name') as $flip_col) {
+	$v = (function ($c) { return $this->data->$c ?? null; })->call($flip, $flip_col);
+	if (is_string($v) && strpos($v, 'v1.aead.') !== 0) { $flip_left[] = $flip_col; }
+}
+check(!$flip_left, 'and holds no plaintext in a column the row now has as ciphertext', implode(', ', $flip_left));
 
 // ---------------------------------------------------------------------------
 section('A STALE instance never tramples a row sealed behind its back');

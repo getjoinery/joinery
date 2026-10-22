@@ -79,7 +79,7 @@ class ChatConversationLevel implements ProtectionLevelScope {
 		}
 		AiConversation::updateColumns((int)$this->conversation->key, $cols);
 		foreach ($cols as $col => $value) {
-			$this->conversation->set($col, $value);
+			$this->conversation->set_as_stored($col, $value);
 		}
 	}
 

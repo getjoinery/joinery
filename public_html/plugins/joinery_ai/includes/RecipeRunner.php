@@ -698,9 +698,8 @@ class RecipeRunner {
             (new EmailSender())->send(EmailMessage::create($to, $subject, $body), true, null,
                 $run->rowIsSealed() ? EmailSender::EGRESS_CONTENT_FREE : '');
 
-            // Record last-sent time. A targeted UPDATE rather than $recipe->save():
-            // the recipe object here came from the runner and a full-row save
-            // would write back every column it happens to be holding.
+            // Record last-sent time: one column, written directly, since the
+            // recipe object here belongs to the runner.
             $db = DbConnector::get_instance()->get_db_link();
             $q = $db->prepare(
                 'UPDATE rcp_recipes SET rcp_last_failure_email_time = ? WHERE rcp_recipe_id = ?'

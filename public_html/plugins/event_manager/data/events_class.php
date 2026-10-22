@@ -546,9 +546,15 @@ function get_leader() {
 		}
 
 		// Derive UTC from local + timezone. Local is the source of truth; UTC is the
-		// derived cache. Only runs when local is set so that code that writes UTC
-		// directly (e.g. materialize_instance) is not disturbed.
-		if ($this->get('evt_start_time_local') && $this->get('evt_timezone')) {
+		// derived cache. Each runs on a new row or when this save sets its own
+		// local time or the timezone: an update writes only the columns it set,
+		// so a UTC derived from an unchanged, possibly stale, local copy would
+		// disagree with the local time stored. Code that writes UTC directly
+		// (e.g. materialize_instance) is not disturbed either.
+		$changed = $this->changed_columns();
+		$derive_start = !$this->key || array_intersect(array('evt_start_time_local', 'evt_timezone'), $changed);
+		$derive_end = !$this->key || array_intersect(array('evt_end_time_local', 'evt_timezone'), $changed);
+		if ($derive_start && $this->get('evt_start_time_local') && $this->get('evt_timezone')) {
 			$this->set('evt_start_time', LibraryFunctions::convert_time(
 				$this->get('evt_start_time_local'),
 				$this->get('evt_timezone'),
@@ -556,7 +562,7 @@ function get_leader() {
 				'Y-m-d H:i:s'
 			));
 		}
-		if ($this->get('evt_end_time_local') && $this->get('evt_timezone')) {
+		if ($derive_end && $this->get('evt_end_time_local') && $this->get('evt_timezone')) {
 			$this->set('evt_end_time', LibraryFunctions::convert_time(
 				$this->get('evt_end_time_local'),
 				$this->get('evt_timezone'),

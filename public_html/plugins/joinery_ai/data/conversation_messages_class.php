@@ -194,8 +194,9 @@ class AiConversationMessage extends SystemBase {
      * over what a running turn has since recorded.
      */
     public function soft_delete() {
-        self::updateColumns((int)$this->key, ['aim_delete_time' => gmdate('Y-m-d H:i:s')]);
-        $this->set('aim_delete_time', gmdate('Y-m-d H:i:s'));
+        $now = gmdate('Y-m-d H:i:s');
+        self::updateColumns((int)$this->key, ['aim_delete_time' => $now]);
+        $this->set_as_stored('aim_delete_time', $now);
         return true;
     }
 

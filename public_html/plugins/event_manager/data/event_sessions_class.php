@@ -202,17 +202,25 @@ public static function GetBySessionNumber($event_id, $session_number){
 	}
 
 	function save($debug=false) {
-		// Derive UTC from local + the parent event's timezone (local is source of truth).
-		// Only runs when local is set so that direct UTC writes are not disturbed.
-		if ($this->get('evs_start_time_local') && $this->get('evs_evt_event_id')) {
+		// Derive UTC from local + the parent event's timezone (local is source of
+		// truth). Each runs on a new row or when this save sets its own local time
+		// or the event: an update writes only the columns it set, so a UTC derived
+		// from an unchanged, possibly stale, local copy would disagree with the
+		// local time stored. Direct UTC writes are not disturbed either.
+		$changed = $this->changed_columns();
+		$derive_start = !$this->key || array_intersect(array('evs_start_time_local', 'evs_evt_event_id'), $changed);
+		$derive_end = !$this->key || array_intersect(array('evs_end_time_local', 'evs_evt_event_id'), $changed);
+		if (($derive_start || $derive_end) && $this->get('evs_evt_event_id')) {
 			require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 			$event = new Event($this->get('evs_evt_event_id'), TRUE);
 			$tz = $event->get('evt_timezone');
 			if ($tz) {
-				$this->set('evs_start_time', LibraryFunctions::convert_time(
-					$this->get('evs_start_time_local'), $tz, 'UTC', 'Y-m-d H:i:s'
-				));
-				if ($this->get('evs_end_time_local')) {
+				if ($derive_start && $this->get('evs_start_time_local')) {
+					$this->set('evs_start_time', LibraryFunctions::convert_time(
+						$this->get('evs_start_time_local'), $tz, 'UTC', 'Y-m-d H:i:s'
+					));
+				}
+				if ($derive_end && $this->get('evs_end_time_local')) {
 					$this->set('evs_end_time', LibraryFunctions::convert_time(
 						$this->get('evs_end_time_local'), $tz, 'UTC', 'Y-m-d H:i:s'
 					));

@@ -368,7 +368,7 @@ class SessionControl{
 		// Only the token list is written: a full save() would validate every
 		// field, and an unrelated bad one (no timezone) would fail the sign-in.
 		User::updateColumns((int)$user->key, array('usr_remember_tokens' => json_encode($tokens)));
-		$user->set('usr_remember_tokens', json_encode($tokens));
+		$user->set_as_stored('usr_remember_tokens', json_encode($tokens));
 
 		$this->set_secure_cookie('tt', $raw_token, $expires);
 	}
@@ -1273,10 +1273,9 @@ class SessionControl{
 			error_log('end_other_sessions: user ' . $user->key . ': ' . $e->getMessage());
 			return;
 		}
-		// The object the caller holds says the same, so a later save of it
-		// cannot put the forgotten devices back.
-		$user->set('usr_remember_tokens', $kept_json);
-		$user->set('usr_session_generation', $generation);
+		// The object the caller holds says the same.
+		$user->set_as_stored('usr_remember_tokens', $kept_json);
+		$user->set_as_stored('usr_session_generation', $generation);
 		if ($here) {
 			$_SESSION['session_generation'] = $generation;
 		}

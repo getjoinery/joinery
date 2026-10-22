@@ -437,11 +437,11 @@ class Boards {
 	/**
 	 * Lock a row for the rest of the transaction and re-read it.
 	 *
-	 * SystemBase::save() writes every column from the in-memory copy, and the
-	 * copy was loaded when the request began. Without this, two people changing
-	 * the same card a moment apart each write back the columns they never meant
-	 * to touch — a drag silently undone by a tick of "done". Call it first thing
-	 * inside the transaction that changes the row.
+	 * The copy was loaded when the request began, and a change decided from it
+	 * (a position worked out from the old order) is only right if nothing moved
+	 * the row since. Holding the row and re-reading it makes a second change a
+	 * moment later work from the first one's result. Call it first thing inside
+	 * the transaction that changes the row.
 	 */
 	public static function lockAndReload(SystemBase $model): void {
 		$class = get_class($model);

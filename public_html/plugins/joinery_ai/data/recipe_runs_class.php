@@ -134,7 +134,7 @@ class RecipeRun extends SystemBase {
      */
     public function sealToOwner(UserEncryptionVault $vault): void {
         $this->content_dek = static::sealColumns(intval($this->key), $vault, array());
-        $this->data->rcr_content_sealed = true;
+        $this->set_as_stored('rcr_content_sealed', true);
     }
 
     /**
@@ -221,9 +221,12 @@ class RecipeRun extends SystemBase {
      * correct on a sealed run instead of quietly losing its content.
      */
     public function saveContent() {
+        // Only what the caller set: after a save the copy holds the row's
+        // ciphertext, which must not be sealed again as though it were content.
         $content = array();
+        $changed = $this->changed_columns();
         foreach (static::$sealed_fields as $col) {
-            if (property_exists($this->data, $col) && $this->data->$col !== null) {
+            if (in_array($col, $changed, true) && $this->data->$col !== null) {
                 $content[$col] = $this->data->$col;
             }
         }
@@ -234,8 +237,7 @@ class RecipeRun extends SystemBase {
         return $result;
     }
 
-    // Targeted UPDATE of exactly these columns — SystemBase::updateColumns(),
-    // never a full-row save().
+    // Targeted UPDATE of exactly these columns — SystemBase::updateColumns().
 
     /**
      * The tool-call trace as an array, whatever the storage shape. Returns []

@@ -88,7 +88,7 @@ class DriveFolderLevel implements ProtectionLevelScope {
 			if ($own && $db->inTransaction()) $db->rollBack();
 			throw $e;
 		}
-		$this->folder->set('fol_protection_level', $target);
+		$this->folder->set_as_stored('fol_protection_level', $target);
 		FileChange::record(FileChange::KIND_LEVEL_CHANGED, DriveHelper::ENTITY_FOLDER, (int)$this->folder->key,
 			$this->owner_id, $this->owner_id);
 		// A member who lost a grant matches nothing in the feed once the grant row

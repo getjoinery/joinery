@@ -1112,6 +1112,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			&& $this->get('usr_password') !== NULL
 			&& $this->get('usr_password') !== $this->loaded_password_hash);
 
+		// Only what this save set counts as a change: the copy is read back
+		// after the save, so a field another save changed since this copy was
+		// loaded is not this save's change.
+		$set_by_caller = $this->changed_columns();
+
 		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -1129,7 +1134,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		if ($this->loaded_profile !== NULL) {
 			$changed = array();
 			foreach (self::PROFILE_FIELDS as $field) {
-				if ((string)$this->get('usr_' . $field) !== $this->loaded_profile[$field]) {
+				if (in_array('usr_' . $field, $set_by_caller, true)
+						&& (string)$this->get('usr_' . $field) !== $this->loaded_profile[$field]) {
 					$changed[] = $field;
 				}
 			}
@@ -1167,7 +1173,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				$q->bindParam(':usr_authhash', $authhash, PDO::PARAM_STR);
 				$q->bindParam(':usr_user_id', $this->key, PDO::PARAM_INT);
 				$q->execute();
-				$this->set('usr_authhash', $authhash);
+				$this->set_as_stored('usr_authhash', $authhash);
 			}
 			catch(PDOException $e){
 				$dbhelper->handle_query_error($e);

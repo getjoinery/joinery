@@ -127,7 +127,7 @@ class SupportIntake {
 		);
 		SupportThread::updateColumns((int)$thread->key, $columns);
 		foreach ($columns as $column => $value) {
-			$thread->set($column, $value);
+			$thread->set_as_stored($column, $value);
 		}
 
 		return self::addQuestion($thread, $message, $token);
@@ -253,7 +253,7 @@ class SupportIntake {
 		$conversation->save();
 		$conversation->load();
 		SupportThread::updateColumns((int)$thread->key, array('sth_aic_conversation_id' => (int)$conversation->key));
-		$thread->set('sth_aic_conversation_id', (int)$conversation->key);
+		$thread->set_as_stored('sth_aic_conversation_id', (int)$conversation->key);
 		return array($thread, $token);
 	}
 

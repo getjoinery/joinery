@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.3 - fetch_query_row(): the row an executed statement returned, for UPDATE ... RETURNING
  * @version 1.2 - in_test_mode(): whether the links point at the test or the live database now, for work queued to run later
  * @version 1.1 - reconnect(): rebuild the current mode's link, for a long-running CLI process
  *                whose connection died under it
@@ -135,6 +136,11 @@ class DbConnector {
 		}
 		$q->execute();
 		return true;
+	}
+
+	/** The next row the last executed statement returned, or false when it returned none. */
+	public function fetch_query_row() {
+		return $this->current_query->fetch(PDO::FETCH_ASSOC);
 	}
 
 	public static function Rollback() {

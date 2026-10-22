@@ -259,6 +259,21 @@ try {
 	});
 	check($passthrough === null, 'an update to a row sealed to the recorded owner passes while hot');
 
+	// A save reads back the columns it did not write in the same statement.
+	// Naming columns to return sends nothing anywhere.
+	$returning = seg_refusal(function () use ($db, $idem) {
+		$stmt = $db->prepare('UPDATE aik_api_idempotency_keys SET aik_action = ?
+			WHERE aik_api_idempotency_key_id = ? RETURNING aik_response_status, aik_create_time');
+		$stmt->execute(array(substr(seg_long('a'), 0, 120), (int)$idem->key));
+	});
+	check($returning === null, 'so does the same update returning plain columns');
+	$returning_expr = seg_refusal(function () use ($db, $idem) {
+		$stmt = $db->prepare('UPDATE aik_api_idempotency_keys SET aik_action = ?
+			WHERE aik_api_idempotency_key_id = ? RETURNING (SELECT 1)');
+		$stmt->execute(array(substr(seg_long('a'), 0, 120), (int)$idem->key));
+	});
+	check($returning_expr !== null, 'but one returning anything other than column names is still refused');
+
 	// =====================================================================
 	section('mail is refused unless the call site says why it is allowed');
 

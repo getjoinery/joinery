@@ -123,6 +123,21 @@ try {
 	$fresh->save();
 	check($queued('account.updated', $m) === array(), 'and saving it again changes nothing');
 
+	// A copy loaded before another save names only what it changed itself, and
+	// leaves the other save's change in place.
+	$m = $mark();
+	$earlier = new User((int)$member->key, TRUE);
+	$elsewhere = new User((int)$member->key, TRUE);
+	$elsewhere->set('usr_last_name', 'Elsewhere');
+	$elsewhere->save();
+	$earlier->set('usr_nickname', 'Nick');
+	$earlier->save();
+	$got = $queued('account.updated', $m);
+	check(count($got) === 2 && ($got[1]['changed'] ?? '') === 'nickname',
+		'A save through an earlier copy names only what it changed', json_encode($got));
+	check((string)(new User((int)$member->key, TRUE))->get('usr_last_name') === 'Elsewhere',
+		'and keeps the change saved since that copy was loaded');
+
 	section('message.received');
 	$other = make_user('SigOther', 0);
 	$m = $mark();
