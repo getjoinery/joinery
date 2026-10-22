@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.6 - Sync counts only the plugin migrations that applied; a failed or deferred one is named in the list, not counted
  * @version 1.5 - a sandboxed plugin waiting on approval: activate says so, with a link to approve it; never looked up as a fork
  * @version 1.4 - `edited`: shipped plugins whose files changed here since
  *                install, for Edited since install and Keep my changes
@@ -181,8 +182,9 @@ function admin_plugins_logic(array $input): LogicResult {
 				if (!empty($result['table_messages'])) {
 					$parts[] = count($result['table_messages']) . ' table change(s)';
 				}
-				if (!empty($result['migration_messages'])) {
-					$parts[] = count($result['migration_messages']) . ' migration(s) applied';
+				$applied = count(array_filter($result['migrations_run'] ?? [], function ($m) { return $m['outcome'] === 'applied'; }));
+				if ($applied) {
+					$parts[] = $applied . ' migration(s) applied';
 				}
 				if (!empty($result['deletion_rule_messages'])) {
 					$parts[] = count($result['deletion_rule_messages']) . ' deletion-rule notice(s)';

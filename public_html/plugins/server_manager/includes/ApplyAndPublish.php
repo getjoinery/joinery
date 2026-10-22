@@ -19,6 +19,7 @@
  * publish job, or 'refused' with the reason. The AdvanceStagedRollouts task
  * advances it every run.
  *
+ * @version 1.1 - followUp() says where the publish it started stands (publish_status)
  * @version 1.0
  */
 
@@ -77,13 +78,24 @@ class ApplyAndPublish {
 		)), $uid);
 	}
 
-	/** The publish an apply job is to be followed by, with what became of it; null when none. */
+	/**
+	 * The publish an apply job is to be followed by, with what became of it;
+	 * null when none. Once the publish has started, publish_status is that
+	 * job's own status ('' when the job is gone).
+	 */
 	public static function followUp($job): ?array {
 		if ((string)$job->get('mjb_job_type') !== 'apply_update') {
 			return null;
 		}
 		$then = StagedRolloutRunner::job_params($job)['then_publish'] ?? null;
-		return is_array($then) ? $then : null;
+		if (!is_array($then)) {
+			return null;
+		}
+		if (($then['outcome'] ?? '') === 'started' && !empty($then['publish_job_id'])) {
+			$publish = new ManagementJob((int)$then['publish_job_id'], TRUE);
+			$then['publish_status'] = (string)$publish->get('mjb_status');
+		}
+		return $then;
 	}
 
 	/** Advance every recent apply whose publish has not started or been refused. What the task calls each run. */

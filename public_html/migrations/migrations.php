@@ -1799,3 +1799,13 @@
 	$migration['migration_sql'] = "UPDATE usr_users SET usr_timezone = COALESCE(NULLIF((SELECT stg_value FROM stg_settings WHERE stg_name = 'default_timezone'), ''), 'America/New_York') WHERE usr_timezone IS NULL OR usr_timezone = ''";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// Two group memberships could share an id where grm_group_members lost its
+	// primary key and its sequence started over. The first keeps the id, every
+	// other row takes a fresh one, and the next update_database adds the key.
+	$migration = array();
+	$migration['database_version'] = '220';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM grm_group_members GROUP BY grm_group_member_id HAVING count(*) > 1) THEN 0 ELSE 1 END as count";
+	$migration['migration_file'] = 'group_members_duplicate_ids.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

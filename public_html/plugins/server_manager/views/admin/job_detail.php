@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.23 - that publish reads 'published' once its job completes, and warns when it failed
  * @version 1.22 - an apply that Apply and publish follows with a publish says where that publish stands
  * @version 1.21 - an install_security_updates result says what it reloaded, what still serves old code, and a
  *                half-done package run finished first (install_security_updates.sh 1.2; fleet_security_patching WP3)
@@ -243,12 +244,22 @@ $status_class = match($job->get('mjb_status')) {
 			<?php
 			$tp_status  = (string)$job->get('mjb_status');
 			$tp_outcome = (string)($then_publish['outcome'] ?? '');
+			$tp_publish = (string)($then_publish['publish_status'] ?? '');
 			?>
-			<div class="jy-callout <?php echo $tp_outcome === 'refused' || in_array($tp_status, ['failed', 'cancelled'], true) ? 'jy-callout-warning' : 'jy-callout-info'; ?> mt-2">
+			<div class="jy-callout <?php echo $tp_outcome === 'refused' || in_array($tp_status, ['failed', 'cancelled'], true) || in_array($tp_publish, ['failed', 'cancelled'], true) ? 'jy-callout-warning' : 'jy-callout-info'; ?> mt-2">
 				<strong>Then publish:</strong>
 				<?php if ($tp_outcome === 'started'): ?>
-					<?php $tp_job = (int)($then_publish['publish_job_id'] ?? 0); ?>
-					publishing <?php echo htmlspecialchars((string)($then_publish['version'] ?? '')); ?>
+					<?php
+					$tp_job = (int)($then_publish['publish_job_id'] ?? 0);
+					$tp_version = htmlspecialchars((string)($then_publish['version'] ?? ''));
+					if ($tp_publish === 'completed') {
+						echo 'published ' . $tp_version;
+					} elseif (in_array($tp_publish, ['failed', 'cancelled'], true)) {
+						echo 'the publish of ' . $tp_version . ' ' . ($tp_publish === 'failed' ? 'failed' : 'was cancelled');
+					} else {
+						echo 'publishing ' . $tp_version;
+					}
+					?>
 					(<a href="/admin/server_manager/job_detail?job_id=<?php echo $tp_job; ?>">job #<?php echo $tp_job; ?></a>).
 				<?php elseif ($tp_outcome === 'refused'): ?>
 					not published — <?php echo htmlspecialchars((string)($then_publish['reason'] ?? '')); ?>.

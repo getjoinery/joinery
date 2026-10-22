@@ -17,6 +17,7 @@
  * scheduled task's scan (advanceAll) never picks them up while the test
  * drives advance() directly.
  *
+ * @version 1.1 - followUp() gives the started publish's own status
  * @version 1.0
  */
 
@@ -98,6 +99,11 @@ check($publish->get('mjb_job_type') === 'publish_upgrade' && (int)$publish->get(
 	&& ($pp['version'] ?? '') === '0.8.901' && ($pp['notes'] ?? '') === "- Better things\n- Faster things",
 	'the publish is of the version the node reached, with the notes, on the same node', json_encode($pp));
 check(ApplyAndPublish::advance($good) === false, 'an apply starts its publish once');
+check(($then['publish_status'] ?? '') !== '' && $then['publish_status'] === (string)$publish->get('mjb_status'),
+	'the apply job says where its publish stands', json_encode($then));
+$publish->set('mjb_status', 'completed');
+$publish->save();
+check((ApplyAndPublish::followUp($good)['publish_status'] ?? null) === 'completed', 'and follows it to completed');
 
 check(ApplyAndPublish::followUp($publish) === null, 'a publish job is followed by nothing');
 

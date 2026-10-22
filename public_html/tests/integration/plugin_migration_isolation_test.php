@@ -22,8 +22,14 @@
  * rolling the wrapper back — which also erases every row the test recorded,
  * so the test leaves no residue.
  *
+ * And each migration is reported as what became of it: a deferred one and a
+ * failed one (an error, or an up function that returned false) are never
+ * reported as applied (PluginManager::migrationOutcome, which sync() and the
+ * structured apply result read).
+ *
  * Run: php tests/integration/plugin_migration_isolation_test.php
  *
+ * @version 1.1 - D: each outcome is reported as what it was
  * @version 1.0
  */
 
@@ -142,6 +148,40 @@ PHP
 		'sql migration error is the REAL error');
 	check($dblink->inTransaction() && intval($dblink->query("SELECT 7")->fetchColumn()) === 7,
 		'transaction survived the sql failure');
+
+	$dblink->rollBack();
+
+	section('D. Each migration is reported as what became of it');
+
+	file_put_contents($migrations_file, <<<'PHP'
+<?php
+return [
+	['id' => 'probe_010_defer', 'version' => '1.0.0', 'up' => function($dbconnector) { return 'defer'; }],
+	['id' => 'probe_011_false', 'version' => '1.0.0', 'up' => function($dbconnector) { return false; }],
+	['id' => 'probe_012_throws', 'version' => '1.0.0', 'up' => function($dbconnector) { throw new Exception('probe says no'); }],
+	['id' => 'probe_013_ok', 'version' => '1.0.0', 'up' => function($dbconnector) { $dbconnector->get_db_link()->exec("SELECT 1"); }],
+];
+PHP
+	);
+
+	$dblink->beginTransaction();
+	$outcome = new ReflectionMethod('PluginManager', 'migrationOutcome');
+	$reported = array();
+	foreach ($run_php->invoke($manager, $PLUGIN, $migrations_file) as $r) {
+		$reported[$r['id']] = $outcome->invoke(null, $PLUGIN, $r);
+	}
+	$expect = array(
+		'probe_010_defer'  => array('deferred', "$PLUGIN: deferred probe_010_defer to the next pass"),
+		'probe_011_false'  => array('failed', "$PLUGIN: probe_011_false failed - its up function returned false"),
+		'probe_012_throws' => array('failed', "$PLUGIN: probe_012_throws failed - probe says no"),
+		'probe_013_ok'     => array('applied', "$PLUGIN: applied probe_013_ok"),
+	);
+	foreach ($expect as $id => $want) {
+		check(($reported[$id] ?? null) === $want, "$id is reported as {$want[0]}", json_encode($reported[$id] ?? null));
+	}
+	$stmt = $dblink->prepare("SELECT count(*) FROM plm_plugin_migrations WHERE plm_plugin_name = ? AND plm_migration_id = 'probe_010_defer'");
+	$stmt->execute(array($PLUGIN));
+	check((int)$stmt->fetchColumn() === 0, 'the deferred one recorded nothing, so the next pass runs it');
 
 	$dblink->rollBack();
 } finally {
