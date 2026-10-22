@@ -171,6 +171,8 @@ exposing itself — but it is still wrong. Use `0` for "any member," omit the ke
 
 PHP closures for complex logic. Return `true` if handled, `false` to continue to next route.
 
+A handler that returns `true` and writes nothing is answered with a 500 and a `ROUTING ERROR` line in the error log, since a page that renders nothing is a bug nobody sees. An empty body the handler means is served: a redirect, a status it set itself (304, 204, 416), a `Content-Length` it declared (a zero-byte file is `200` with `Content-Length: 0`), or an answer to HEAD. What a handler writes is buffered; one that streams a file body leaves those buffers first, as `File::serve_from_path()` does, so the download never sits in memory.
+
 ```php
 'custom' => [
     '/' => function($params, $settings, $session, $template_directory) {
