@@ -4,6 +4,8 @@
  *
  * Generates .ics files for single event downloads and multi-event calendar feeds.
  *
+ * @version 1.4 - buildVevent() writes all-day dates, a zone's wall clock (TZID), RRULE, EXDATE,
+ *                RECURRENCE-ID, TRANSP and TENTATIVE; vtimezone() writes the VTIMEZONE a TZID needs.
  * @version 1.3 - foldLines() never folds inside a UTF-8 character; the vCard writer folds with it too.
  * @version 1.2 - buildVevent() is the one VEVENT writer and uid() the one UID rule; generateVevent()
  *                maps an Event onto them, and the Bookings invite does the same. foldLines() is public.
@@ -57,26 +59,57 @@ class IcsHelper {
 	}
 
 	/**
-	 * The one VEVENT writer. Every invite and feed on the platform goes through it,
-	 * so text is escaped and times are written the same way everywhere.
+	 * The one VEVENT writer. Every invite, feed and calendar download on the platform
+	 * goes through it, so text is escaped and times are written the same way everywhere.
 	 *
-	 * @param array $f 'uid' and 'start_utc' (Y-m-d H:i:s, UTC) are required. Optional:
-	 *                 'end_utc', 'summary', 'description', 'location', 'url' (written as is),
-	 *                 'status' ('CONFIRMED' by default, or 'CANCELLED'). A field that is empty
-	 *                 is left out. Times are UTC instants; there is no zone to carry.
+	 * @param array $f 'uid' and a start are required. The times take one of three forms:
+	 *   - 'start_utc' / 'end_utc' (Y-m-d H:i:s, UTC): UTC instants;
+	 *   - 'tzid' with 'start_local' / 'end_local' (Y-m-d H:i:s): the zone's wall clock,
+	 *     for a thing that keeps its local time (a repeating entry across a clock
+	 *     change). The file then carries a VTIMEZONE for the zone (vtimezone());
+	 *   - 'all_day' true with 'start_date' / 'end_date' (Y-m-d, the end exclusive): dates.
+	 *   Optional: 'summary', 'description', 'location', 'url' (written as is), 'status'
+	 *   ('CONFIRMED' by default, 'TENTATIVE' or 'CANCELLED'), 'transparent' (true: the
+	 *   time stays free), 'rrule' (written as is), 'exdates' (skipped occurrences, each
+	 *   a date or wall clock in the start's form) and 'recurrence_id' (['value',
+	 *   'all_day', 'tzid']: the occurrence of a series this one replaces, in the
+	 *   series' form). A field that is empty is left out.
 	 * @return string one VEVENT block, or '' when the uid or the start is missing
 	 */
 	public static function buildVevent(array $f) {
-		if (empty($f['uid']) || empty($f['start_utc'])) {
+		if (!empty($f['all_day'])) {
+			$form = array(true, null);
+			$start = $f['start_date'] ?? '';
+			$end = $f['end_date'] ?? '';
+		} elseif (!empty($f['tzid'])) {
+			$form = array(false, $f['tzid']);
+			$start = $f['start_local'] ?? '';
+			$end = $f['end_local'] ?? '';
+		} else {
+			$form = array(false, null);
+			$start = $f['start_utc'] ?? '';
+			$end = $f['end_utc'] ?? '';
+		}
+		if (empty($f['uid']) || empty($start)) {
 			return '';
 		}
 		$lines = [];
 		$lines[] = 'BEGIN:VEVENT';
 		$lines[] = 'UID:' . $f['uid'];
 		$lines[] = 'DTSTAMP:' . self::formatUtcDateTime(gmdate('Y-m-d H:i:s'));
-		$lines[] = 'DTSTART:' . self::formatUtcDateTime($f['start_utc']);
-		if (!empty($f['end_utc'])) {
-			$lines[] = 'DTEND:' . self::formatUtcDateTime($f['end_utc']);
+		$lines[] = self::timeProperty('DTSTART', $start, $form[0], $form[1]);
+		if (!empty($end)) {
+			$lines[] = self::timeProperty('DTEND', $end, $form[0], $form[1]);
+		}
+		if (!empty($f['recurrence_id']['value'])) {
+			$rid = $f['recurrence_id'];
+			$lines[] = self::timeProperty('RECURRENCE-ID', $rid['value'], !empty($rid['all_day']), $rid['tzid'] ?? null);
+		}
+		if (!empty($f['rrule'])) {
+			$lines[] = 'RRULE:' . $f['rrule'];
+		}
+		foreach ($f['exdates'] ?? [] as $exdate) {
+			$lines[] = self::timeProperty('EXDATE', $exdate, $form[0], $form[1]);
 		}
 		foreach (['summary' => 'SUMMARY', 'description' => 'DESCRIPTION', 'location' => 'LOCATION'] as $key => $name) {
 			if (!empty($f[$key])) {
@@ -86,9 +119,142 @@ class IcsHelper {
 		if (!empty($f['url'])) {
 			$lines[] = 'URL:' . $f['url'];
 		}
-		$lines[] = 'STATUS:' . (($f['status'] ?? 'CONFIRMED') === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED');
+		$status = $f['status'] ?? 'CONFIRMED';
+		$lines[] = 'STATUS:' . (in_array($status, ['TENTATIVE', 'CANCELLED'], true) ? $status : 'CONFIRMED');
+		if (!empty($f['transparent'])) {
+			$lines[] = 'TRANSP:TRANSPARENT';
+		}
 		$lines[] = 'END:VEVENT';
 		return implode("\r\n", $lines);
+	}
+
+	/**
+	 * One date or time property: NAME;VALUE=DATE:20261012 for a date,
+	 * NAME;TZID=zone:20261012T090000 for a zone's wall clock, else NAME:20261012T130000Z.
+	 */
+	private static function timeProperty($name, $value, $is_date, $tzid) {
+		$value = (string)$value;
+		if ($is_date) {
+			return $name . ';VALUE=DATE:' . str_replace('-', '', substr($value, 0, 10));
+		}
+		if ($tzid) {
+			return $name . ';TZID=' . $tzid . ':' . str_replace(['-', ':', ' '], ['', '', 'T'], substr($value, 0, 19));
+		}
+		return $name . ':' . self::formatUtcDateTime($value);
+	}
+
+	/**
+	 * The VTIMEZONE a file carries for each TZID it names (RFC 5545 3.6.5). A calendar
+	 * program that knows the zone by name uses its own copy; one that does not
+	 * (Outlook) reads this.
+	 *
+	 * Written the way Google, Apple and Outlook write theirs: while the zone has changed
+	 * its clocks by the same rule every year (the second Sunday of March at 2:00), one
+	 * DAYLIGHT and one STANDARD part repeat yearly from the first year the rule held.
+	 * A rule is taken only when it holds for 28 years running, every way the weekdays
+	 * fall on the dates, so Israel's (the Friday before the last Sunday of March) is
+	 * never mistaken for the fourth Friday. Changes before the rule, and those of a zone
+	 * that follows no such rule, are listed one by one, at least 30 years ahead. A zone
+	 * that does not change its clocks has one part.
+	 *
+	 * @param string $tzid an IANA zone
+	 * @param int $from the earliest instant the file needs (Unix time)
+	 * @param int $to the latest instant it needs
+	 */
+	public static function vtimezone($tzid, $from, $to) {
+		$begin = gmmktime(0, 0, 0, 1, 1, (int)gmdate('Y', $from) - 1);
+		$end = max($to, gmmktime(0, 0, 0, 1, 1, (int)gmdate('Y') + 30));
+		$transitions = (new DateTimeZone($tzid))->getTransitions($begin, $end);
+		$state = array_shift($transitions);   // where the zone stands at $begin, not a change
+		$changes = [];
+		$now = ['offset' => $state['offset'], 'dst' => (bool)$state['isdst'], 'abbr' => $state['abbr']];
+		foreach ($transitions as $t) {
+			$next = ['offset' => $t['offset'], 'dst' => (bool)$t['isdst'], 'abbr' => $t['abbr']];
+			// PHP reports a change that changes nothing at 2038-01-19, where 32-bit time ends.
+			if ($next !== $now) {
+				$changes[] = ['ts' => $t['ts'], 'from' => $now['offset'], 'to' => $next['offset'], 'dst' => $next['dst'], 'abbr' => $next['abbr']];
+				$now = $next;
+			}
+		}
+
+		// The yearly rule: walk back from the last change while every change matches the
+		// last one of its kind (month, weekday, time, offsets, name), a year apart, and on
+		// a week of the month (2nd, or last) they all share.
+		$rules = [];
+		$tail = count($changes);
+		for ($i = count($changes) - 1; $i >= 0; $i--) {
+			$c = $changes[$i];
+			$local = $c['ts'] + $c['from'];
+			$day = (int)gmdate('j', $local);
+			$weeks = $day <= 28 ? [(int)ceil($day / 7)] : [];
+			if ($day > (int)gmdate('t', $local) - 7) {
+				$weeks[] = -1;
+			}
+			$key = gmdate('n|w|His', $local) . '|' . $c['from'] . '|' . $c['to'] . '|' . $c['abbr'];
+			$year = (int)gmdate('Y', $local);
+			$kind = (int)$c['dst'];
+			if (isset($rules[$kind])) {
+				$weeks = array_values(array_intersect($rules[$kind]['weeks'], $weeks));
+				if ($rules[$kind]['key'] !== $key || $rules[$kind]['year'] !== $year + 1 || !$weeks) {
+					break;
+				}
+			} elseif (count($rules) === 1 && abs(reset($rules)['year'] - $year) > 1) {
+				break;
+			}
+			$rules[$kind] = ['key' => $key, 'year' => $year, 'weeks' => $weeks, 'first' => $c];
+			$tail = $i;
+		}
+		if (count($rules) < 2 || count($changes) - $tail < 56) {
+			$rules = [];
+			$tail = count($changes);
+		}
+
+		$lines = ['BEGIN:VTIMEZONE', 'TZID:' . $tzid];
+		if ($tail > 0 || !$rules) {
+			$lines = array_merge($lines, self::observance((bool)$state['isdst'], $begin, $state['offset'], $state['offset'], $state['abbr']));
+		}
+		foreach (array_slice($changes, 0, $tail) as $c) {
+			$lines = array_merge($lines, self::observance($c['dst'], $c['ts'], $c['from'], $c['to'], $c['abbr']));
+		}
+		$days = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+		foreach ([1, 0] as $kind) {
+			if (!isset($rules[$kind])) {
+				continue;
+			}
+			$c = $rules[$kind]['first'];
+			$local = $c['ts'] + $c['from'];
+			$rrule = 'FREQ=YEARLY;BYMONTH=' . gmdate('n', $local) . ';BYDAY=' . $rules[$kind]['weeks'][0] . $days[(int)gmdate('w', $local)];
+			$lines = array_merge($lines, self::observance($c['dst'], $c['ts'], $c['from'], $c['to'], $c['abbr'], $rrule));
+		}
+		$lines[] = 'END:VTIMEZONE';
+		return implode("\r\n", $lines);
+	}
+
+	/** One STANDARD or DAYLIGHT part: from $ts (Unix time) the zone's offset is $to. */
+	private static function observance($dst, $ts, $from, $to, $abbr, $rrule = null) {
+		$kind = $dst ? 'DAYLIGHT' : 'STANDARD';
+		$lines = [
+			'BEGIN:' . $kind,
+			'DTSTART:' . gmdate('Ymd\THis', $ts + $from),
+			'TZOFFSETFROM:' . self::utcOffset($from),
+			'TZOFFSETTO:' . self::utcOffset($to),
+		];
+		if ($abbr !== '') {
+			$lines[] = 'TZNAME:' . self::escapeText($abbr);
+		}
+		if ($rrule !== null) {
+			$lines[] = 'RRULE:' . $rrule;
+		}
+		$lines[] = 'END:' . $kind;
+		return $lines;
+	}
+
+	/** A UTC offset in seconds as +HHMM, or +HHMMSS when it has seconds. */
+	private static function utcOffset($seconds) {
+		$sign = $seconds < 0 ? '-' : '+';
+		$seconds = abs($seconds);
+		$out = sprintf('%s%02d%02d', $sign, intdiv($seconds, 3600), intdiv($seconds % 3600, 60));
+		return $seconds % 60 ? $out . sprintf('%02d', $seconds % 60) : $out;
 	}
 
 	/**

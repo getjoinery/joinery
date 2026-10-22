@@ -17,8 +17,16 @@
  *  - a cancelled thing says so; an empty optional field is left out
  *  - the UID is {kind}-{id}[-{instance}]@{site host}, the same every time
  *  - an Event still maps onto it with the UID and fields it always had
+ *  - an all-day thing is written as dates, a zone's wall clock with its TZID; a
+ *    repeat rule, skipped dates and a replaced occurrence are written in the
+ *    start's form; free time and tentative say so
+ *  - vtimezone() gives the zone's offset PHP gives, at every clock change and
+ *    between them, for 30 years: as a yearly rule where the zone keeps one, one
+ *    change at a time where it does not (Israel)
  *
  * Run: php tests/unit/ics_vevent_test.php
+ *
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -81,6 +89,112 @@ check(count($wide_lines) > 1, 'a long line of wide characters folds');
 check(array_filter($wide_lines, function ($l) { return strlen($l) > 75 || !mb_check_encoding($l, 'UTF-8'); }) === array(),
 	'every folded line is 75 octets or under and valid UTF-8 on its own');
 check(str_replace("\r\n ", '', $wide_folded) === $wide, 'and unfolding gives the original characters back');
+
+section('dates, zones and repeats');
+$day = explode("\r\n", IcsHelper::buildVevent(array('uid' => 'a@b', 'all_day' => true, 'start_date' => '2026-10-12', 'end_date' => '2026-10-14',
+	'rrule' => 'FREQ=YEARLY', 'exdates' => array('2027-10-12'))));
+check(in_array('DTSTART;VALUE=DATE:20261012', $day, true) && in_array('DTEND;VALUE=DATE:20261014', $day, true),
+	'an all-day thing is written as dates', implode(' | ', $day));
+check(in_array('RRULE:FREQ=YEARLY', $day, true) && in_array('EXDATE;VALUE=DATE:20271012', $day, true), 'its rule as given, its skipped dates as dates');
+$zoned = IcsHelper::buildVevent(array('uid' => 'a@b', 'tzid' => 'America/New_York', 'start_local' => '2026-10-12 09:00:00', 'end_local' => '2026-10-12 09:30:00',
+	'rrule' => 'FREQ=WEEKLY;BYDAY=MO', 'exdates' => array('2026-10-19 09:00:00', '2026-10-26 09:00:00'), 'transparent' => true, 'status' => 'TENTATIVE'));
+$zl = explode("\r\n", $zoned);
+check(in_array('DTSTART;TZID=America/New_York:20261012T090000', $zl, true) && in_array('DTEND;TZID=America/New_York:20261012T093000', $zl, true),
+	'a zone\'s wall clock is written with its TZID', $zoned);
+check(in_array('EXDATE;TZID=America/New_York:20261019T090000', $zl, true) && in_array('EXDATE;TZID=America/New_York:20261026T090000', $zl, true),
+	'each skipped date on its own line, in the start\'s form');
+check(in_array('TRANSP:TRANSPARENT', $zl, true) && in_array('STATUS:TENTATIVE', $zl, true), 'free time and tentative say so');
+check(strpos(IcsHelper::buildVevent(array('uid' => 'a@b', 'start_utc' => '2026-10-12 10:00:00')), 'TRANSP') === false, 'busy time is the default and is left unsaid');
+$over = IcsHelper::buildVevent(array('uid' => 's@b', 'all_day' => true, 'start_date' => '2026-10-20', 'end_date' => '2026-10-21',
+	'recurrence_id' => array('value' => '2026-10-19 09:00:00', 'tzid' => 'America/New_York')));
+check(strpos($over, "RECURRENCE-ID;TZID=America/New_York:20261019T090000\r\n") !== false && strpos($over, 'DTSTART;VALUE=DATE:20261020') !== false,
+	'a replaced occurrence is named in its series\' form, whatever form the replacement takes', $over);
+check(IcsHelper::buildVevent(array('uid' => 'a@b', 'all_day' => true, 'start_utc' => '2026-10-12 10:00:00')) === ''
+	&& IcsHelper::buildVevent(array('uid' => 'a@b', 'tzid' => 'UTC', 'start_utc' => '2026-10-12 10:00:00')) === '',
+	'a start missing from the form the times are in gives nothing');
+
+section('vtimezone()');
+/** The parts of a VTIMEZONE, each a property map. */
+function vtz_parts(string $ics): array {
+	$parts = array();
+	$cur = null;
+	foreach (explode("\r\n", $ics) as $l) {
+		if ($l === 'BEGIN:STANDARD' || $l === 'BEGIN:DAYLIGHT') { $cur = array('KIND' => substr($l, 6)); continue; }
+		if ($l === 'END:STANDARD' || $l === 'END:DAYLIGHT') { $parts[] = $cur; $cur = null; continue; }
+		if ($cur !== null) { list($k, $v) = explode(':', $l, 2); $cur[$k] = $v; }
+	}
+	return $parts;
+}
+function vtz_seconds(string $o): int {
+	$s = (int)substr($o, 1, 2) * 3600 + (int)substr($o, 3, 2) * 60 + (strlen($o) > 5 ? (int)substr($o, 5, 2) : 0);
+	return $o[0] === '-' ? -$s : $s;
+}
+/** The offset a calendar program reads from the parts at Unix time $t: the latest onset at or before it. */
+function vtz_offset_at(array $parts, int $t): int {
+	$best = null;
+	$earliest = null;
+	foreach ($parts as $p) {
+		$from = vtz_seconds($p['TZOFFSETFROM']);
+		$d = $p['DTSTART'];
+		$clock = array((int)substr($d, 9, 2), (int)substr($d, 11, 2), (int)substr($d, 13, 2));
+		$first = gmmktime($clock[0], $clock[1], $clock[2], (int)substr($d, 4, 2), (int)substr($d, 6, 2), (int)substr($d, 0, 4));
+		$onsets = array($first - $from);
+		if (isset($p['RRULE']) && preg_match('/BYMONTH=(\d+);BYDAY=(-?\d)(\w\w)/', $p['RRULE'], $m)) {
+			$dow = array_search($m[3], array('SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'), true);
+			for ($y = (int)substr($d, 0, 4); $y <= (int)gmdate('Y', $t) + 1; $y++) {
+				if ((int)$m[2] > 0) {
+					$day = 1 + (($dow - (int)gmdate('w', gmmktime(0, 0, 0, (int)$m[1], 1, $y)) + 7) % 7) + 7 * ((int)$m[2] - 1);
+				} else {
+					$last = gmmktime(0, 0, 0, (int)$m[1] + 1, 0, $y);
+					$day = (int)gmdate('j', $last) - (((int)gmdate('w', $last) - $dow + 7) % 7);
+				}
+				$local = gmmktime($clock[0], $clock[1], $clock[2], (int)$m[1], $day, $y);
+				if ($local >= $first) { $onsets[] = $local - $from; }
+			}
+		}
+		foreach ($onsets as $o) {
+			if ($earliest === null || $o < $earliest[0]) { $earliest = array($o, $from); }
+			if ($o <= $t && ($best === null || $o > $best[0])) { $best = array($o, vtz_seconds($p['TZOFFSETTO'])); }
+		}
+	}
+	return $best === null ? $earliest[1] : $best[1];
+}
+
+$ny = IcsHelper::vtimezone('America/New_York', strtotime('2026-01-15 UTC'), strtotime('2026-12-15 UTC'));
+$parts = vtz_parts($ny);
+check(strpos($ny, "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\n") === 0 && count($parts) === 2
+	&& in_array('FREQ=YEARLY;BYMONTH=3;BYDAY=2SU', array_column($parts, 'RRULE'), true)
+	&& in_array('FREQ=YEARLY;BYMONTH=11;BYDAY=1SU', array_column($parts, 'RRULE'), true),
+	'New York is one DAYLIGHT and one STANDARD part, each repeating yearly, as Google writes it', $ny);
+$tokyo = vtz_parts(IcsHelper::vtimezone('Asia/Tokyo', strtotime('2026-01-15 UTC'), strtotime('2026-12-15 UTC')));
+check(count($tokyo) === 1 && $tokyo[0]['TZOFFSETTO'] === '+0900' && $tokyo[0]['TZNAME'] === 'JST', 'a zone with no clock changes is one part');
+$kathmandu = vtz_parts(IcsHelper::vtimezone('Asia/Kathmandu', strtotime('2026-01-15 UTC'), strtotime('2026-12-15 UTC')));
+check(count($kathmandu) === 1 && $kathmandu[0]['TZOFFSETTO'] === '+0545', 'an offset with minutes is written with them');
+$jerusalem = IcsHelper::vtimezone('Asia/Jerusalem', strtotime('2026-01-15 UTC'), strtotime('2026-12-15 UTC'));
+check(strpos($jerusalem, 'RRULE') === false && count(vtz_parts($jerusalem)) > 50,
+	'Israel\'s change (the Friday before the last Sunday of March) is no fixed week of the month, so each one is listed');
+$old = vtz_parts(IcsHelper::vtimezone('America/New_York', strtotime('2004-06-01 UTC'), strtotime('2005-06-01 UTC')));
+check(count($old) > 2 && !isset($old[1]['RRULE']) && $old[count($old) - 1]['DTSTART'] === '20071104T020000',
+	'a rule that began in 2007 repeats from 2007; the changes before it are listed', json_encode(array_column($old, 'DTSTART')));
+
+$horizon = gmmktime(0, 0, 0, 1, 1, (int)gmdate('Y') + 30);
+foreach (array('America/New_York', 'Europe/London', 'Australia/Sydney', 'Australia/Lord_Howe', 'Atlantic/Azores', 'America/Sao_Paulo',
+		'Asia/Jerusalem', 'America/Santiago', 'Africa/Casablanca', 'Asia/Tehran', 'UTC') as $zone) {
+	foreach (array(strtotime('2001-06-01 UTC'), strtotime('2026-02-01 UTC')) as $from) {
+		$parts = vtz_parts(IcsHelper::vtimezone($zone, $from, $from + 86400 * 400));
+		$tz = new DateTimeZone($zone);
+		$samples = array();
+		foreach ($tz->getTransitions($from, $horizon) as $i => $tr) {
+			if ($i) { $samples[] = $tr['ts'] - 1; $samples[] = $tr['ts']; }
+		}
+		for ($t = $from; $t < $horizon; $t += 86400 * 30) { $samples[] = $t; }
+		$wrong = null;
+		foreach ($samples as $t) {
+			if (vtz_offset_at($parts, $t) !== $tz->getOffset(new DateTime('@' . $t))) { $wrong = gmdate('c', $t); break; }
+		}
+		check($wrong === null, $zone . ' from ' . gmdate('Y', $from) . ': the offset PHP gives, at every change and between them, for 30 years', (string)$wrong);
+	}
+}
 
 section('an Event maps onto it');
 $ev = new stdClass();

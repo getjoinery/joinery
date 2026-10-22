@@ -11,10 +11,17 @@
  *   translateRecurrence() parsed RRULE  → native cal_recurrence_* fields, or null
  *   import()             parsed events  → saved CalendarEntry rows + a summary
  *
+ * nativeToRrule() is translateRecurrence() run backwards, kept beside it so the two
+ * stay inverses: IcsExporter writes a native series with it.
+ *
  * Import is one-directional, manual, owner-scoped: each VEVENT becomes a native
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - nativeToRrule(), the inverse of translateRecurrence(). A UTC UNTIL,
+ *   EXDATE or RECURRENCE-ID counts in the series' zone: read as a UTC date it could
+ *   land a day off. STATUS maps to cal_status. An entry downloaded from this calendar
+ *   (UID cal-{id}@{site}) is already here and is skipped on a re-import.
  * @changelog 1.3 - LOCATION / DESCRIPTION / URL map to the entry's details
  * @changelog 1.3 - the file-scope requires are gone. parse() used none of them,
  *   and they are what put the site config inside the parser jail: any of them
@@ -200,11 +207,12 @@ class IcsImporter {
 	 * rule is not expressible in the native model. This is the single source of
 	 * truth for "is this rule natively expressible?"
 	 *
-	 * @param array  $rrule       e.g. ['FREQ'=>'WEEKLY','BYDAY'=>'MO,WE','INTERVAL'=>'2']
-	 * @param string $start_local Event local start 'Y-m-d H:i:s' (anchor for by-day / COUNT)
+	 * @param array       $rrule       e.g. ['FREQ'=>'WEEKLY','BYDAY'=>'MO,WE','INTERVAL'=>'2']
+	 * @param string      $start_local Event local start 'Y-m-d H:i:s' (anchor for by-day / COUNT)
+	 * @param string|null $tz          The series' zone, which a UTC UNTIL is read in
 	 * @return array|null ['type','interval','days_of_week','week_of_month','end_date']
 	 */
-	public static function translateRecurrence(array $rrule, string $start_local): ?array {
+	public static function translateRecurrence(array $rrule, string $start_local, ?string $tz = null): ?array {
 		$freq = isset($rrule['FREQ']) ? strtoupper($rrule['FREQ']) : '';
 		$type_map = ['DAILY'=>'daily', 'WEEKLY'=>'weekly', 'MONTHLY'=>'monthly', 'YEARLY'=>'yearly'];
 		if (!isset($type_map[$freq])) { return null; }
@@ -278,8 +286,7 @@ class IcsImporter {
 		// End condition: UNTIL → end date; COUNT → walk to the Nth occurrence.
 		$end_date = null;
 		if ($has('UNTIL')) {
-			$u = self::_parseDt($rrule['UNTIL']);
-			if ($u !== null) { $end_date = $u['date']; }
+			$end_date = self::_untilDate($rrule['UNTIL'], $start_local, $tz);
 		} elseif ($has('COUNT')) {
 			$count = (int)$rrule['COUNT'];
 			if ($count >= 1) {
@@ -300,6 +307,76 @@ class IcsImporter {
 			'week_of_month' => $week,
 			'end_date'      => $end_date,
 		];
+	}
+
+	/**
+	 * The RRULE for native recurrence fields: translateRecurrence() run backwards, so a
+	 * rule written here reads back as the same fields.
+	 *
+	 * @param array       $native      ['type','interval','days_of_week','week_of_month','end_date']
+	 * @param string      $start_local The series' local start 'Y-m-d H:i:s'
+	 * @param string|null $tz          The series' zone, or null for an all-day series. The end
+	 *                                 date is written as a date for an all-day series, else as
+	 *                                 the UTC instant of its last second in $tz (RFC 5545 asks
+	 *                                 for UTC beside a TZID start)
+	 * @return string '' when the type is not one the native model has
+	 */
+	public static function nativeToRrule(array $native, string $start_local, ?string $tz): string {
+		$freq = ['daily'=>'DAILY', 'weekly'=>'WEEKLY', 'monthly'=>'MONTHLY', 'yearly'=>'YEARLY'];
+		$type = (string)($native['type'] ?? '');
+		if (!isset($freq[$type])) { return ''; }
+		$parts = ['FREQ=' . $freq[$type]];
+		$interval = max(1, (int)($native['interval'] ?? 1));
+		if ($interval > 1) { $parts[] = 'INTERVAL=' . $interval; }
+
+		$code = array_flip(self::$DAY);
+		$days = trim((string)($native['days_of_week'] ?? ''));
+		$week = $native['week_of_month'] ?? null;
+		if ($type === 'weekly' && $days !== '') {
+			$parts[] = 'BYDAY=' . implode(',', array_map(function ($d) use ($code) { return $code[(int)$d]; }, explode(',', $days)));
+		} elseif ($type === 'monthly' && $week !== null && $week !== '') {
+			// The weekday is the stored digit, else the one the series starts on.
+			$dow = $days !== '' ? (int)$days : (int)date('w', strtotime(substr($start_local, 0, 10)));
+			$parts[] = 'BYDAY=' . (int)$week . $code[$dow];
+		}
+		// A monthly series by date and a yearly one repeat on the start's day and month,
+		// which is what an RRULE with no BYMONTHDAY or BYMONTH means.
+
+		if (!empty($native['end_date'])) {
+			$end = substr((string)$native['end_date'], 0, 10);
+			$parts[] = 'UNTIL=' . ($tz === null
+				? str_replace('-', '', $end)
+				: str_replace(['-', ':', ' '], ['', '', 'T'], LibraryFunctions::convert_time($end . ' 23:59:59', $tz, 'UTC', 'Y-m-d H:i:s')) . 'Z');
+		}
+		return implode(';', $parts);
+	}
+
+	/**
+	 * The last date a series may land on, from its UNTIL. A date is that date. A time
+	 * counts in the series' zone: a UTC time (what RFC 5545 asks for) is moved into $tz
+	 * first, and when it falls earlier in the day than the series starts, that day's
+	 * occurrence is past it and the series ends the day before.
+	 */
+	private static function _untilDate(string $until, string $start_local, ?string $tz): ?string {
+		$u = self::_parseDt($until);
+		if ($u === null) { return null; }
+		if ($u['is_date']) { return $u['date']; }
+		$local = $u['date'] . ' ' . $u['time'];
+		if ($u['is_utc'] && $tz !== null) {
+			$local = LibraryFunctions::convert_time($local, 'UTC', $tz, 'Y-m-d H:i:s');
+		}
+		$day = substr($local, 0, 10);
+		return substr($local, 11, 8) < substr($start_local, 11, 8)
+			? date('Y-m-d', strtotime($day . ' -1 day'))
+			: $day;
+	}
+
+	/** The date a parsed DATE or DATE-TIME falls on in $tz: a UTC time is moved into $tz first. */
+	private static function _localDate(array $dt, string $tz): string {
+		if ($dt['is_utc'] && !$dt['is_date']) {
+			return LibraryFunctions::convert_time($dt['date'] . ' ' . $dt['time'], 'UTC', $tz, 'Y-m-d');
+		}
+		return $dt['date'];
 	}
 
 	// =========================================================================
@@ -387,12 +464,13 @@ class IcsImporter {
 				$rid_dt = self::_parseDt($rid['value']);
 
 				if ($parent !== null && $parent->is_recurring_parent() && $rid_dt !== null) {
+					$rid_date = self::_localDate($rid_dt, $parent->get('cal_timezone') ?: $tz);
 					$exc = new CalEntryException(NULL);
 					$exc->set('cex_cal_entry_id',   $parent->key);
-					$exc->set('cex_exception_date', $rid_dt['date']);
+					$exc->set('cex_exception_date', $rid_date);
 					$exc->save();
 					$rep->set('cal_parent_entry_id',   $parent->key);
-					$rep->set('cal_parent_entry_date', $rid_dt['date']);
+					$rep->set('cal_parent_entry_date', $rid_date);
 				} else {
 					$summary['warnings'][] = 'An edited occurrence had no matching series in the file; it was imported as a standalone entry.';
 				}
@@ -517,6 +595,10 @@ class IcsImporter {
 		$transp = isset($props['TRANSP']) ? strtoupper(trim($props['TRANSP']['value'])) : 'OPAQUE';
 		$entry->set('cal_blocks_availability', $transp !== 'TRANSPARENT');
 
+		// STATUS: what the calendar it came from says (absent = confirmed).
+		$status = isset($props['STATUS']) ? strtoupper(trim($props['STATUS']['value'])) : '';
+		$entry->set('cal_status', $status === 'TENTATIVE' ? 'tentative' : ($status === 'CANCELLED' ? 'cancelled' : 'confirmed'));
+
 		// Details: LOCATION, DESCRIPTION (as plain-text notes), URL. A URL that
 		// is not http(s) is dropped and reported rather than refusing the event.
 		$link = isset($props['URL']) ? trim((string)$props['URL']['value']) : '';
@@ -541,7 +623,7 @@ class IcsImporter {
 		if (!$skip_recurrence && isset($props['RRULE'])) {
 			$raw = $props['RRULE']['value'];
 			$entry->set('cal_rrule_raw', $raw); // always preserved
-			$native = self::translateRecurrence(self::_parseRruleString($raw), $map['start_local']);
+			$native = self::translateRecurrence(self::parseRrule($raw), $map['start_local'], $map['timezone']);
 			if ($native !== null) {
 				$entry->set('cal_recurrence_type',          $native['type']);
 				$entry->set('cal_recurrence_interval',      $native['interval']);
@@ -679,7 +761,7 @@ class IcsImporter {
 	}
 
 	/** Parse an RRULE value string into an uppercase-keyed assoc. */
-	private static function _parseRruleString($val) {
+	public static function parseRrule($val) {
 		$out = [];
 		foreach (explode(';', $val) as $pair) {
 			if ($pair === '') { continue; }
@@ -697,7 +779,11 @@ class IcsImporter {
 		return in_array($tz, $list, true);
 	}
 
-	/** Existing imported UIDs for a subject (skip-duplicate set). */
+	/**
+	 * The UIDs already on a subject's calendar (skip-duplicate set): what an import
+	 * stored, and the cal-{id}@{site} an entry of this calendar is downloaded with
+	 * (IcsExporter), so a downloaded file uploaded again adds nothing.
+	 */
 	private static function _existingUids(CalendarSubject $subject) {
 		$set  = [];
 		$rows = new MultiCalendarEntry([
@@ -707,6 +793,7 @@ class IcsImporter {
 		]);
 		$rows->load();
 		foreach ($rows as $r) {
+			$set[IcsHelper::uid('cal', $r->key)] = true;
 			if ($r->get('cal_source') === 'ical_import') {
 				$sid = $r->get('cal_source_event_id');
 				if ($sid !== null && $sid !== '') { $set[$sid] = true; }
@@ -723,7 +810,7 @@ class IcsImporter {
 				if ($dt === null) { continue; }
 				$exc = new CalEntryException(NULL);
 				$exc->set('cex_cal_entry_id',   $entry->key);
-				$exc->set('cex_exception_date', $dt['date']);
+				$exc->set('cex_exception_date', self::_localDate($dt, $entry->get('cal_timezone') ?: 'UTC'));
 				$exc->save();
 			}
 		}

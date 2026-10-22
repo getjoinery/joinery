@@ -406,6 +406,12 @@ function _calendar_parse_reminder($raw): ?int {
     return in_array($v, CalendarPreference::REMINDER_MINUTE_CHOICES, true) ? $v : null;
 }
 
+/**
+ * Write an entry's repeat, the one path every form and API save takes. When the
+ * repeat changes, the rule the entry was imported with (cal_rrule_raw) is dropped:
+ * it means "the repeat as it came in, untouched", and the calendar download gives
+ * it back to other calendars (IcsExporter), which must never undo the member's change.
+ */
 function _calendar_set_recurrence(
     CalendarEntry $entry,
     ?string $type,
@@ -414,8 +420,6 @@ function _calendar_set_recurrence(
     ?int $week_of_month,
     ?string $end_date
 ): void {
-    $entry->set('cal_recurrence_type',      $type);
-    $entry->set('cal_recurrence_interval',  $type ? max(1, $interval) : 1);
     // Weekly: store comma-separated DOW list. Monthly-by-week: store single DOW digit.
     // Clear for all other types.
     $store_days = null;
@@ -424,9 +428,27 @@ function _calendar_set_recurrence(
     } elseif ($type === 'monthly' && $week_of_month !== null) {
         $store_days = $days_of_week; // single digit like "2" for Tuesday
     }
-    $entry->set('cal_recurrence_days_of_week',  $store_days);
-    $entry->set('cal_recurrence_week_of_month', ($type === 'monthly') ? $week_of_month : null);
-    $entry->set('cal_recurrence_end_date',       $end_date);
+    $repeat = array(
+        'cal_recurrence_type'          => $type,
+        'cal_recurrence_interval'      => $type ? max(1, $interval) : 1,
+        'cal_recurrence_days_of_week'  => $store_days,
+        'cal_recurrence_week_of_month' => ($type === 'monthly') ? $week_of_month : null,
+        'cal_recurrence_end_date'      => $end_date,
+    );
+    $changed = false;
+    foreach ($repeat as $column => $value) {
+        $stored = $entry->get($column);
+        // A stored date may carry a time; a stored interval may be NULL on an old row.
+        if ($column === 'cal_recurrence_end_date' && $stored !== null) { $stored = substr((string)$stored, 0, 10); }
+        if ($column === 'cal_recurrence_interval') { $stored = $stored === null ? 1 : (int)$stored; }
+        if (($stored === null ? null : (string)$stored) !== ($value === null ? null : (string)$value)) {
+            $changed = true;
+        }
+        $entry->set($column, $value);
+    }
+    if ($changed && $entry->get('cal_rrule_raw') !== null) {
+        $entry->set('cal_rrule_raw', null);
+    }
 }
 
 function _calendar_delete_recurring(CalendarEntry $entry, string $scope, string $odate): void {
