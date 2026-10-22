@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/plugin.json]
  */
 /**
  * The spam verdict and the classifier's pure parts (spam_learning_in_core.md).

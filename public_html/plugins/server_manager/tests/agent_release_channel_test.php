@@ -4,9 +4,14 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/release_keys/**, maintenance_scripts/install_tools/install_agent.sh]
  */
 /**
  * Agent release channel — the publish-side half of agent self-update.
+ *
+ * It reads the agent source, which lives outside the repository
+ * (AgentDistPublisher::sourcePath()). covers cannot name it, so a change there
+ * does not select this test under --changed.
  *
  * The agent will only install a binary whose Ed25519 signature verifies
  * against the public key baked into it at build time. That makes the

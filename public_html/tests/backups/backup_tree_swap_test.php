@@ -5,6 +5,7 @@
  * env: any
  * needs: []
  * timeout: 120
+ * covers: [maintenance_scripts/sysadmin_tools/backup_files.sh, maintenance_scripts/sysadmin_tools/_backup_root_only_files.sh]
  */
 /**
  * No incremental ever spans a swap of the code tree, and a swap re-bases the

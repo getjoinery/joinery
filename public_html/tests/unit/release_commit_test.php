@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/joinery_jail/go.mod, public_html/plugins/mailbox/provisioning/relay-sealer/go.mod, public_html/plugins/server_manager/includes/publish_upgrade.php, public_html/includes/*Publisher.php, public_html/plugins/**Publisher.php]
  */
 /**
  * A release is a commit (spec release_transparency D1, D2, D3):

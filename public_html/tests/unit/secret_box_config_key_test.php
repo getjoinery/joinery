@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_config_secrets.sh]
  */
 /**
  * secret_box_key: the PHP side reports, the root side mints.

@@ -28,6 +28,9 @@ harness_boot();
 $fixture_only = array(
 	'tests/unit/rollback_previous_release_test.php' => 'reads the fixture trees it builds in a temporary folder',
 	'tests/backups/backup_download_test.php' => 'reads the README it built, which names restore_project.sh, from the tar it unpacked',
+	'plugins/server_manager/tests/agent_vocabulary_words_test.php' => 'reads the agent source outside the repository (AgentDistPublisher::sourcePath()), which covers cannot name',
+	'plugins/server_manager/tests/republish_from_manifest_test.php' => 'reads the trees rfm_tree() builds in a temporary folder',
+	'tests/security/package_signature_test.php' => 'reads the trees and keys it writes into its scratch folder',
 );
 
 /**
@@ -36,24 +39,6 @@ $fixture_only = array(
  * on it that reads a script with no covers fails here.
  */
 $known_b16 = array(
-	'plugins/mailbox/tests/listener_decommission_test.php',
-	'plugins/mailbox/tests/relay_upgrade_test.php',
-	'plugins/mailbox/tests/spam_filtering_test.php',
-	'plugins/persona_browser/tests/media_cache_location_test.php',
-	'plugins/server_manager/tests/agent_artifact_channel_test.php',
-	'plugins/server_manager/tests/agent_release_channel_test.php',
-	'plugins/server_manager/tests/agent_vocabulary_words_test.php',
-	'plugins/server_manager/tests/republish_from_manifest_test.php',
-	'plugins/server_manager/tests/tree_manifest_test.php',
-	'tests/backups/backup_ledger_test.php',
-	'tests/backups/backup_tree_swap_test.php',
-	'tests/direct/joinery_direct_relay_test.php',
-	'tests/security/package_signature_test.php',
-	'tests/security/upgrade_stale_release_files_test.php',
-	'tests/unit/image_decoder_test.php',
-	'tests/unit/release_commit_test.php',
-	'tests/unit/root_request_test.php',
-	'tests/unit/secret_box_config_key_test.php',
 );
 
 section('Every test that reads a script declares what it covers');

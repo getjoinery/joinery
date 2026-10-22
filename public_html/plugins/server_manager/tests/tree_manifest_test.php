@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/plugins/server_manager/includes/publish_upgrade.php]
  */
 /**
  * The signed per-file release manifest (component G, spec §3.2).
