@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.69 - publish_upgrade's Apply and publish button queues the apply with the publish to follow it
+ *                (ApplyAndPublish); the plain publish goes through ApplyAndPublish::queuePublish()
  * @version 1.67 - install_security_updates: the nightly security updates, now (agent 1.87.0)
  * @version 1.66 - site_state_report: what the machine's site state directories hold (agent 1.86.0)
  * @version 1.65 - copy_retry_settle: let go of the old server again after a DNS switch's settle stopped
@@ -746,25 +748,21 @@ class NodeDetailActions {
 
 			case 'publish_upgrade': {
 				// The node builds and signs its own release, as its own agent.
-				// The builder refuses a node without the primitive and says
-				// why; the publisher on the node keeps every rule about the
-				// number (may this site mint it, duplicate, downgrade).
-				$params = [
-					'release_notes' => trim((string)($_POST['release_notes'] ?? '')),
+				// Apply and publish applies the version the page offered first,
+				// and publishes once that apply has proved good.
+				$notes = trim((string)($_POST['release_notes'] ?? ''));
+				// A submit button posts its name with an empty value.
+				if (isset($_POST['btn_apply_and_publish'])) {
+					$job = ApplyAndPublish::request($node, $notes, trim((string)($_POST['apply_target'] ?? '')),
+						!empty($_POST['deploy_all']), $uid);
+					return self::jobUrl($job);
+				}
+				$job = ApplyAndPublish::queuePublish($node, [
+					'release_notes' => $notes,
 					'major'         => $_POST['version_major'] ?? null,
 					'minor'         => $_POST['version_minor'] ?? null,
 					'patch'         => $_POST['version_patch'] ?? null,
-				];
-				$built = JobCommandBuilder::build_publish_upgrade($node, $params);
-				if ($node->is_self() && ($blocked = AgentDistPublisher::uncommittedAdvice()['lines'])) {
-					throw new Exception('Commit and push first. ' . implode(' ', $blocked));
-				}
-				// Recorded on the job, never sent to the node: the plane starts
-				// the rollout itself once the publish completes.
-				if ($node->is_self() && !empty($_POST['deploy_all'])) {
-					$params['deploy_all'] = true;
-				}
-				$job = ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
+				], !empty($_POST['deploy_all']), $uid);
 				return self::jobUrl($job);
 			}
 

@@ -18,10 +18,13 @@
  *     a marker forged inside it cannot close the envelope;
  *   - the model's text comes back trimmed and bounded, and an empty answer is
  *     an error, not empty notes;
- *   - a long history is cut to the total budget rather than sent whole.
+ *   - a long history is cut to the total budget rather than sent whole;
+ *   - a republishing site's draft runs through a newer version (Apply and
+ *     publish), never an older one or something that is not a version.
  *
  * Run: php plugins/server_manager/tests/release_notes_drafter_test.php
  *
+ * @version 1.1 - the version a republishing site's draft runs through
  * @version 1.0
  */
 
@@ -118,5 +121,20 @@ section('A long history');
 $joined = $join_capped->invoke(null, array_fill(0, 200, str_repeat('y', 1000)));
 check(mb_strlen($joined) <= ReleaseNotesDrafter::TOTAL_CHARS + 100, 'Cut to the total budget', (string)mb_strlen($joined));
 check(strpos($joined, 'left out for length') !== false, 'And says that it was cut');
+
+// ── Through which version ──
+section('The version a republishing site drafts through');
+
+$upstream = new ReflectionMethod('ReleaseNotesDrafter', 'upstreamMaterial');
+$upstream->setAccessible(true);
+foreach (array('0.0.1' => 'an older version than the one running', 'latest' => 'something that is not a version') as $through => $what) {
+	$why = '';
+	try {
+		$upstream->invoke(null, $through);
+	} catch (ReleaseNotesDrafterException $e) {
+		$why = $e->getMessage();
+	}
+	check(strpos($why, 'not ' . $through) !== false, 'Refused before anything is fetched: ' . $what, $why);
+}
 
 harness_finish();

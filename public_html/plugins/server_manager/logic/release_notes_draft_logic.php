@@ -4,6 +4,7 @@
  * Auto-notes button on the publish form (ReleaseNotesDrafter). It returns the
  * draft to the page; nothing is saved.
  *
+ * @version 1.1.0 - through: a republishing site drafts through the newer version Apply and publish brings in
  * @version 1.0.0
  */
 
@@ -15,7 +16,7 @@ function release_notes_draft_logic(array $input): LogicResult {
 		return LogicResult::error('Only a superadmin can draft release notes.');
 	}
 	try {
-		$draft = ReleaseNotesDrafter::draft();
+		$draft = ReleaseNotesDrafter::draft(null, null, trim((string)($input['through'] ?? '')));
 	} catch (ReleaseNotesDrafterException $e) {
 		return LogicResult::render(array('ok' => false, 'message' => $e->getMessage()));
 	} catch (Throwable $e) {
@@ -36,7 +37,9 @@ function release_notes_draft_logic_descriptor(): array {
 		'requires_session' => true,
 		'mutates'          => false,
 		'auth'             => array('min_user_permission' => 10),
-		'input'            => array(),
+		'input'            => array(
+			'through' => array('type' => 'string', 'required' => false, 'label' => 'Through version (a newer upstream version the release applies first)'),
+		),
 	);
 }
 ?>
