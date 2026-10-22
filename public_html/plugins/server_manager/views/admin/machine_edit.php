@@ -1,14 +1,16 @@
 <?php
 /**
  * Server Manager - a machine written down by hand
- * URL: /admin/server_manager/machine_edit[?fhm_fleet_hand_machine_id=N][?ref=oca:3:12345&name=label]
+ * URL: /admin/server_manager/machine_edit[?fhm_fleet_hand_machine_id=N][?ref=oca:3:12345&name=label][?ref=node:15&name=label]
  *
  * A machine we pay for that this management node cannot read for itself (a
  * cloud account it holds no key for), or a note on a listed server no node
- * manages: what it is, who owns it, what it serves, when to retire it
+ * manages, or on a node with no agent (whose own report can never say what it
+ * runs): what it is, who owns it, what it serves, when to retire it
  * (specs/fleet_security_patching.md WP8, FleetHandMachine). Saving it confirms
  * it as true now; Confirm does that alone.
  *
+ * @version 1.1 - a note on a node with no agent (ref node:N)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -63,9 +65,9 @@ if ($_POST && ($_POST['action'] ?? '') === 'remove_machine' && $is_edit) {
 		$error = $e->getMessage();
 	}
 } elseif (!$is_edit) {
-	// A note on a listed server, from its row: the server named already.
+	// A note on a listed server or a node, from its row: the machine named already.
 	$ref = (string)($_GET['ref'] ?? '');
-	if (preg_match('/^[a-z]+:[0-9]+:[A-Za-z0-9-]{1,64}$/', $ref)) {
+	if (preg_match('/^([a-z]+:[0-9]+:[A-Za-z0-9-]{1,64}|node:[0-9]+)$/', $ref)) {
 		$machine->set('fhm_instance_ref', $ref);
 		$machine->set('fhm_name', substr((string)($_GET['name'] ?? ''), 0, 120));
 		$machine->set('fhm_address', substr((string)($_GET['address'] ?? ''), 0, 64));
@@ -95,7 +97,10 @@ $formwriter->textinput('fhm_address', 'Public address', array('maxlength' => 64,
 $formwriter->textinput('fhm_where', 'Where it runs', array('maxlength' => 160, 'helptext' => 'The provider and account, for example: Linode, the owner\'s own account.'));
 if ((string)$machine->get('fhm_instance_ref') !== '') {
 	$formwriter->hiddeninput('fhm_instance_ref', '', array('value' => (string)$machine->get('fhm_instance_ref')));
-	echo '<p class="small text-muted">A note on listed server ' . htmlspecialchars((string)$machine->get('fhm_instance_ref')) . '.</p>';
+	$on = (string)$machine->get('fhm_instance_ref');
+	echo '<p class="small text-muted">' . (strpos($on, 'node:') === 0
+		? 'A note on managed node ' . (int)substr($on, 5) . ', which has no agent to report what it runs.'
+		: 'A note on listed server ' . htmlspecialchars($on) . '.') . '</p>';
 }
 $formwriter->textinput('fhm_purpose', 'What it is for', array('maxlength' => 255));
 $formwriter->textinput('fhm_owner', 'Whose it is', array('maxlength' => 120));

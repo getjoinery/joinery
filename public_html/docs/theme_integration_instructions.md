@@ -351,7 +351,7 @@ class PublicPage extends PublicPageBase {
         <meta name="description" content="<?php echo htmlspecialchars($description); ?>">
 
         <!-- CSS files - use absolute paths -->
-        <link rel="stylesheet" href="/theme/<?php echo $THEME_NAME; ?>/assets/css/bootstrap.min.css">
+        <link rel="stylesheet" href="/theme/<?php echo $THEME_NAME; ?>/assets/css/bootstrap.min.css?v=<?php echo $this->asset_mtime('theme/' . $THEME_NAME . '/assets/css/bootstrap.min.css'); ?>">
         <!-- Add all theme CSS files here -->
 
         <title><?php echo htmlspecialchars($title); ?></title>
@@ -1142,7 +1142,7 @@ Create `theme/[themename]/assets/css/joinery-custom.css` with theme-specific ove
 Then include in PublicPage.php header (after main theme CSS):
 ```php
 <!-- Joinery Custom CSS -->
-<link rel="stylesheet" href="/theme/[themename]/assets/css/joinery-custom.css">
+<link rel="stylesheet" href="/theme/[themename]/assets/css/joinery-custom.css?v=<?php echo $this->asset_mtime('theme/[themename]/assets/css/joinery-custom.css'); ?>">
 ```
 
 **Benefits of separate custom CSS file:**
@@ -2185,10 +2185,13 @@ comes from removing jQuery wrapper overhead, not from removing features.
 
 ### Cache Busting Is Non-Negotiable
 
-CSS/JS files are often served with aggressive `max-age` headers (12+ hours). After ANY change to
-a CSS or JS file, bump its `?v=N` query string in the `<link>` or `<script>` tag — otherwise the
-old cached version will persist and you'll think your fix didn't work. This has caused multiple
-hours of debugging changes that "didn't take effect."
+CSS/JS files are served with long `max-age` headers, and a site behind Cloudflare keeps an
+unversioned stylesheet for up to 12 hours. Every `<link>` or `<script>` to one of the theme's own
+files carries the file's time, so the URL changes whenever the file does:
+`?v=<?php echo $this->asset_mtime('theme/[themename]/assets/css/style.css'); ?>` (for a file found
+through `PathHelper::getThemeFilePath(..., 'web')`, pass that URL without its leading slash).
+`tests/integration/asset_link_versions_test.php` fails on a link to a local `.css` or `.js` file
+without a version.
 
 ### CSS Dead Section Removal
 

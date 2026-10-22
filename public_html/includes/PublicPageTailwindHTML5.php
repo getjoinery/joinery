@@ -188,7 +188,9 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 		
 		<!-- CSS -->
 
-		<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
+		<?php // Versioned by its file time, so a changed stylesheet passes a cache in front of the site at once.
+		$tw_css = PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>
+		<link rel="stylesheet" type="text/css" href="<?php echo $tw_css . '?v=' . $this->asset_mtime(ltrim($tw_css, '/')); ?>">
 		<?php $this->render_theme_tail(); ?>
 	</head>
 	

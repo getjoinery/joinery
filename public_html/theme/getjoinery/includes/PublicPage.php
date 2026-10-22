@@ -257,7 +257,7 @@ class PublicPage extends PublicPageBase {
 </footer>
 <?php endif; ?>
 
-<script src="/assets/js/joinery-validate.js"></script>
+<script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
 <script src="/theme/getjoinery/assets/js/script.js?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/js/script.js'); ?>"></script>
 
 </body>

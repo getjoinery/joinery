@@ -40,11 +40,14 @@ $hand = function (array $over) {
 $addr = function ($ip) { return array('host' => array(IpAddress::binary($ip)), 'join' => array(), 'is_host' => false); };
 $snap = array(
 	'nodes' => array(
-		7 => array('id' => 7, 'name' => 'getjoinery', 'address' => '173.255.229.58', 'os' => 'Ubuntu 26.04', 'hosted_at' => 'One of our cloud accounts (main)'),
-		8 => array('id' => 8, 'name' => 'quiet one', 'address' => '192.0.2.8', 'os' => '', 'hosted_at' => 'Elsewhere (not hosted by us)'),
-		9 => array('id' => 9, 'name' => 'old source', 'address' => '192.0.2.55', 'os' => 'Ubuntu 24.04', 'hosted_at' => 'One of our cloud accounts (main)', 'state' => 'retired'),
+		7 => array('id' => 7, 'name' => 'getjoinery', 'address' => '173.255.229.58', 'os' => 'Ubuntu 26.04', 'hosted_at' => 'One of our cloud accounts (main)', 'agent' => true),
+		8 => array('id' => 8, 'name' => 'quiet one', 'address' => '192.0.2.8', 'os' => '', 'hosted_at' => 'Elsewhere (not hosted by us)', 'agent' => true),
+		9 => array('id' => 9, 'name' => 'old source', 'address' => '192.0.2.55', 'os' => 'Ubuntu 24.04', 'hosted_at' => 'One of our cloud accounts (main)', 'state' => 'retired', 'agent' => true),
+		// Watched from here, never given an agent (the relay, the DNS servers).
+		10 => array('id' => 10, 'name' => 'relay node', 'address' => '192.0.2.10', 'os' => '', 'hosted_at' => 'Elsewhere (not hosted by us)', 'agent' => false),
+		11 => array('id' => 11, 'name' => 'dns node', 'address' => '192.0.2.11', 'os' => '', 'hosted_at' => 'Elsewhere (not hosted by us)', 'agent' => false),
 	),
-	'addresses' => array(7 => $addr('173.255.229.58'), 8 => $addr('192.0.2.8'), 9 => $addr('192.0.2.55')),
+	'addresses' => array(7 => $addr('173.255.229.58'), 8 => $addr('192.0.2.8'), 9 => $addr('192.0.2.55'), 10 => $addr('192.0.2.10'), 11 => $addr('192.0.2.11')),
 	'accounts' => array(
 		'oca:1' => array('name' => 'Linode — Joinery', 'error' => '', 'instances' => array(
 			array('id' => '100', 'label' => 'getjoinery', 'region' => 'us-east', 'ipv4_public' => array('173.255.229.58'), 'ipv6' => '', 'image' => 'linode/ubuntu26.04', 'created' => '2026-01-01 00:00:00', 'status' => 'running'),
@@ -64,13 +67,14 @@ $snap = array(
 		$hand(array('id' => 14, 'name' => 'gone soon', 'os' => 'Ubuntu 24.04', 'serves' => 'x.example', 'retire_by' => '2026-10-01')),
 		$hand(array('id' => 15, 'name' => 'note on a server gone', 'instance_ref' => 'oca:1:999', 'os' => 'Ubuntu 24.04', 'serves' => 'y.example')),
 		$hand(array('id' => 16, 'name' => 'upgraded note', 'instance_ref' => 'oca:1:600', 'os' => 'Ubuntu 24.04', 'purpose' => 'build box')),
+		$hand(array('id' => 17, 'name' => 'dns note', 'instance_ref' => 'node:11', 'os' => 'Ubuntu 22.04', 'purpose' => 'DNS secondary')),
 	),
 );
 $rows = MachineInventory::rows($snap, $NOW);
 $by = array();
 foreach ($rows as $r) { $by[$r['name']] = $r; }
 
-check(count($rows) === 12, 'twelve rows: three managed, five servers no node runs on, four written down (a note on a listed server is its row)', json_encode(array_column($rows, 'name')));
+check(count($rows) === 14, 'fourteen rows: five managed, five servers no node runs on, four written down (a note on a listed server or a node is its row)', json_encode(array_column($rows, 'name')));
 check($by['getjoinery']['kind'] === 'managed' && $by['getjoinery']['verdict'] === 'green' && $by['getjoinery']['where'] === 'Linode — Joinery'
 		&& $by['getjoinery']['instance'] === '100' && $by['getjoinery']['os'] === 'Ubuntu 26.04',
 	'a managed machine matched to its server by address: green, in that account, its report\'s release', json_encode($by['getjoinery']));
@@ -100,8 +104,15 @@ check($by['old source']['kind'] === 'managed' && $by['old source']['state'] === 
 check($by['upgraded']['os'] === 'Ubuntu 24.04' && $by['upgraded']['verdict'] === 'green',
 	'a server made from 20.04 and upgraded in place: what its note says it runs, green', json_encode($by['upgraded']));
 check($by['v6only']['address'] === '2600:3c03::f03c:91ff:fe00:7', 'a server with no IPv4 shows its IPv6', json_encode($by['v6only']));
+check($by['relay node']['verdict'] === 'amber' && $by['relay node']['ref'] === 'node:10' && $by['relay node']['agent'] === false
+		&& in_array('no agent reports from it, so nothing says what it runs: write it down', $by['relay node']['reasons'], true),
+	'a node with no agent and nothing written: amber, asking for a note, not grey for ever', json_encode($by['relay node']));
+check($by['dns node']['verdict'] === 'green' && $by['dns node']['os'] === 'Ubuntu 22.04' && $by['dns node']['hand']['purpose'] === 'DNS secondary'
+		&& !isset($by['dns note']),
+	'a node with no agent and a note: what the note says it runs, on its own row', json_encode($by['dns node']));
+check($by['quiet one']['reasons'] === array('its agent has not reported what it runs yet'), 'a node whose agent has not reported is grey, waiting for it', json_encode($by['quiet one']));
 $order = array_column($rows, 'verdict');
-check($order === array('red', 'red', 'red', 'amber', 'amber', 'amber', 'amber', 'grey', 'green', 'green', 'green', 'green'), 'red first, then amber, grey, green', json_encode($order));
+check($order === array('red', 'red', 'red', 'amber', 'amber', 'amber', 'amber', 'amber', 'grey', 'green', 'green', 'green', 'green', 'green'), 'red first, then amber, grey, green', json_encode($order));
 
 section('Which accounts are ours to list');
 

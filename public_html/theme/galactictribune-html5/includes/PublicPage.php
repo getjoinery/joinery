@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.2 - the stylesheet's link carries its file time, so a changed one reaches visitors past a cache at once
  * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
  */
@@ -39,7 +40,9 @@ class PublicPage extends PublicPageBase {
             <?php $this->global_includes_top($options); ?>
 
             <!-- CSS -->
-            <link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
+            <?php // Versioned by its file time, so a changed stylesheet passes a cache in front of the site at once.
+            $gt_css = PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>
+            <link rel="stylesheet" type="text/css" href="<?php echo $gt_css . '?v=' . $this->asset_mtime(ltrim($gt_css, '/')); ?>">
             <?php $this->render_theme_tail(); ?>
 
             <script>

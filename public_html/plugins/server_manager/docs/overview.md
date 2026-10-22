@@ -616,14 +616,14 @@ A later join from the adopted server's address is checked with the provider like
 
 `/admin/server_manager/machines` lists every machine we pay for (`MachineInventory`), from three sources:
 
-- **Managed:** each node that is not a site in a container, in whatever install state (a dormant copy and a retired source are machines we pay for, and the row names the state), with its operating system from its own host report.
+- **Managed:** each node that is not a site in a container, in whatever install state (a dormant copy and a retired source are machines we pay for, and the row names the state), with its operating system from its own host report. A node with no agent (the relay and the DNS servers, watched from here and never given one) reports nothing, so a note written on it (`fhm_instance_ref` `node:N`, from its row's **Write down**) says what it runs.
 - **Not managed:** each server in our own cloud accounts this management node holds a key for that no node runs on (`MachineInventory::lists_account()`: not the test account, whose servers are thrown away nightly, and not a customer's Connect grant). A server is matched to a node by its addresses, as the transfer watch matches them. It shows its IPv4, or its IPv6 where it has none, and the release a note on it says it runs, or else the release of the image it was made from.
 - **Written down:** each machine written down by hand (`FleetHandMachine`, `fhm_fleet_hand_machines`, at `/admin/server_manager/machine_edit`). That is a machine in an account no key here reads, or a note on a listed server that is not managed on purpose: what it is for, whose it is, what it serves, its release and a retire-by date. Saving it confirms it as true now, and **Confirm** does that alone.
 
 The verdicts:
 
 - **Red:** an Ubuntu release past standard support (`MachineInventory::UBUNTU_SUPPORT_ENDS`, which holds the first day of the earliest end Canonical's pages give), or a retire-by date passed.
-- **Amber:** a server no node manages and nothing written down explains; a machine written down and not confirmed for 90 days; a written-down machine that serves nothing written and has no retire-by date; a retired source, kept for the way back; or a node whose install failed.
+- **Amber:** a server no node manages and nothing written down explains; a node with no agent and nothing written saying what it runs; a machine written down and not confirmed for 90 days; a written-down machine that serves nothing written and has no retire-by date; a retired source, kept for the way back; or a node whose install failed.
 
 An account that cannot be read is named at the top, since its servers are missing until it can be.
 

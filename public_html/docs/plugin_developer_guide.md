@@ -1674,7 +1674,7 @@ A provisioner declared `"fleet_report": true` also reaches the management node t
 
 Declare it only on a check that is cheap enough to run hourly and whose failure means the site needs someone's attention; the reason is shown to the fleet operator as written.
 
-The report also carries one check of core's own, under the plugin name `core`: `outbound_mail` (`PluginProvisioning::outboundMailCheck()`). It passes when a mail service is set (`email_service`) and that provider's `validateConfiguration()` finds its settings complete. A site that cannot send mail fails its node's health like a failing plugin check, since nothing it sends would leave it.
+The report also carries one check of core's own, under the plugin name `core`: `outbound_mail` (`PluginProvisioning::outboundMailCheck()`). It passes when the mail service (`email_service`) or its fallback (`email_fallback_service`) is set and that provider's `validateConfiguration()` finds its settings complete: the sender uses the fallback when no service is set and tries it when the service fails, so either one working is mail leaving. A site that cannot send mail fails its node's health like a failing plugin check, since nothing it sends would leave it.
 
 ## Parsing Outside Bytes
 
@@ -1966,26 +1966,17 @@ Theme assets are served through the theme asset route with automatic caching:
 
 **Basic Asset Usage:**
 ```php
-// In theme templates
-<link rel="stylesheet" href="/theme/<?= $template_directory ?>/assets/css/style.css">
-<script src="/theme/<?= $template_directory ?>/assets/js/app.js"></script>
-<img src="/theme/<?= $template_directory ?>/assets/images/logo.png" alt="Logo">
+// In a theme's PublicPage: each stylesheet and script carries its file time
+<link rel="stylesheet" href="/theme/mytheme/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/mytheme/assets/css/style.css'); ?>">
+<script src="/theme/mytheme/assets/js/app.js?v=<?php echo $this->asset_mtime('theme/mytheme/assets/js/app.js'); ?>"></script>
+<img src="/theme/mytheme/assets/images/logo.png" alt="Logo">
 ```
+
+The `?v=` query changes whenever the file does, so a cache in front of the site (Cloudflare keeps an unversioned stylesheet for up to 12 hours) never serves the old copy. `tests/integration/asset_link_versions_test.php` fails on a link to a local `.css` or `.js` file without one.
 
 **Base Assets:**
 
 `PublicPageBase` loads fallback CSS/JS (`base.css`, `joinery-styles.css`, `base.js`) via the `render_base_assets()` method, called from `global_includes_top()`. Themes that provide their own complete CSS (like `PublicPageJoinerySystem`) override `render_base_assets()` with an empty body to prevent style conflicts. See [Theme Integration Instructions](theme_integration_instructions.md) for details.
-
-**Using ThemeHelper for Assets:**
-```php
-// Enhanced asset management
-<?php
-$theme = ThemeHelper::getInstance();
-?>
-<link rel="stylesheet" href="<?= $theme->asset('css/bootstrap.min.css') ?>">
-<link rel="stylesheet" href="<?= $theme->asset('css/theme.css') ?>">
-<script src="<?= $theme->asset('js/theme.js') ?>"></script>
-```
 
 **Theme Configuration:**
 ```php

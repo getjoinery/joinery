@@ -23,6 +23,8 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.5 - the mail check passes when either the mail service or its fallback works, as the sender
+ *                tries both; a failure names each
  * @version 1.4 - the fleet report carries core's own check that the site can send mail (outboundMailCheck: a mail
  *                service set, and its provider's settings complete), so a site that cannot fails its node's health
  *                (fleet_security_patching WP10)
@@ -121,34 +123,51 @@ class PluginProvisioning {
     }
 
     /**
-     * Whether this site can send mail: a mail service is set, and that
-     * provider says its own settings are complete (validateConfiguration). A
-     * site with none sends nothing at all: no password reset, no notice, no
-     * receipt (xandyliberato.com after its conversion, 2026-10-21;
-     * fleet_security_patching WP10). Reported to a management node with the
-     * plugin checks, where a failure fails the node's health.
+     * Whether this site can send mail: its mail service (email_service), or
+     * else its fallback (email_fallback_service), is one this release carries
+     * and that provider says its own settings are complete
+     * (validateConfiguration). EmailSender sends with the fallback when the
+     * service is not named, and tries it when the service fails, so either one
+     * working is mail leaving. A site with neither sends nothing at all: no
+     * password reset, no notice, no receipt (xandyliberato.com after its
+     * conversion, 2026-10-21; fleet_security_patching WP10). Reported to a
+     * management node with the plugin checks, where a failure fails the node's
+     * health.
+     *
+     * $service and $fallback name the services instead of the site's settings
+     * (a test).
      */
-    public static function outboundMailCheck(?string $service = null): array {
+    public static function outboundMailCheck(?string $service = null, ?string $fallback = null): array {
         $out = ['plugin' => 'core', 'key' => 'outbound_mail', 'label' => 'This site can send mail', 'state' => 'verified', 'reason' => ''];
-        // $service names the service instead of the site's setting (a test).
-        $key = $service ?? EmailSender::activeServiceKey();
-        if ($key === '') {
+        $settings = Globalvars::get_instance();
+        $named = array_values(array_unique(array_filter(array(
+            trim((string)($service ?? EmailSender::activeServiceKey())),
+            trim((string)($fallback ?? $settings->get_setting('email_fallback_service'))),
+        ), 'strlen')));
+        if (!$named) {
             $out['state'] = 'error';
             $out['reason'] = 'No mail service is set (email_service), so nothing this site sends leaves it: password resets, notices, receipts. Choose one in the email settings.';
             return $out;
         }
-        $provider = EmailSender::providerFor($key);
-        if (!$provider) {
-            $out['state'] = 'error';
-            $out['reason'] = "The mail service '{$key}' is not one this release carries. Choose one in the email settings.";
-            return $out;
+        $why = array();
+        foreach ($named as $i => $key) {
+            $provider = EmailSender::providerFor($key);
+            if (!$provider) {
+                $what = "the mail service '{$key}'";
+                $problem = 'is not one this release carries';
+            } else {
+                $class = get_class($provider);
+                $v = $class::validateConfiguration();
+                if (!empty($v['valid'])) {
+                    return $out;
+                }
+                $what = $class::getLabel();
+                $problem = 'is not set up: ' . implode('; ', array_map('strval', (array)($v['errors'] ?? array())));
+            }
+            $why[] = ($i === 0 ? $what : 'its fallback, ' . $what . ',') . ' ' . $problem;
         }
-        $class = get_class($provider);
-        $v = $class::validateConfiguration();
-        if (empty($v['valid'])) {
-            $out['state'] = 'error';
-            $out['reason'] = mb_substr($class::getLabel() . ' is not set up: ' . implode('; ', array_map('strval', (array)($v['errors'] ?? array()))), 0, self::FLEET_REASON_MAX);
-        }
+        $out['state'] = 'error';
+        $out['reason'] = mb_substr(ucfirst(implode('; and ', $why)) . '. Nothing this site sends leaves it. Set one up in the email settings.', 0, self::FLEET_REASON_MAX);
         return $out;
     }
 

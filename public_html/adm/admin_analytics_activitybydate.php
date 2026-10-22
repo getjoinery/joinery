@@ -20,7 +20,7 @@ $session->check_permission(10);
 	);
 ?>
 
-<script src="/assets/js/form-visibility-helper.js"></script>
+<script src="/assets/js/form-visibility-helper.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/form-visibility-helper.js')); ?>"></script>
 
 <script type="text/javascript">
 (function() {

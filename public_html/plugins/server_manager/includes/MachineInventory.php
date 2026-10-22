@@ -19,21 +19,26 @@
  *     is listed as not managed, with what a note on it says it runs over the
  *     image it was made from;
  *   - the machines written down by hand (FleetHandMachine): those in an
- *     account no key here reads (Q6), and notes on a listed server that is
- *     not managed on purpose.
+ *     account no key here reads (Q6), notes on a listed server that is not
+ *     managed on purpose, and notes on a node with no agent (the relay and
+ *     the DNS servers are watched from here and never run one), whose own
+ *     report can never say what it runs.
  *
  * The verdict, most serious first:
  *   red    its Ubuntu release is past standard support, or its retire-by date
  *          has passed
  *   amber  a server no node manages and nothing written down explains, a
- *          hand-written row not confirmed for 90 days, a retired source, or
+ *          node with no agent and nothing written down saying what it runs,
+ *          a hand-written row not confirmed for 90 days, a retired source, or
  *          a machine whose install failed
- *   grey   nothing says what it runs
+ *   grey   its agent has not reported what it runs yet
  *   green  none of these
  *
  * snapshot() reads the nodes, the providers and the hand rows; rows() is
  * pure, so the test drives it with arrays.
  *
+ * @version 1.1 - a node with no agent can carry a note (fhm_instance_ref node:N) saying what it runs; with none
+ *                it is amber, asking for one, instead of grey for ever
  * @version 1.0
  */
 class MachineInventory {
@@ -102,6 +107,8 @@ class MachineInventory {
 				'os'        => $os,
 				'hosted_at' => CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node)),
 				'state'     => trim((string)$node->get('mgn_install_state')),
+				// No agent paired: nothing will ever report what it runs.
+				'agent'     => trim((string)$node->get('mgn_agent_public_key')) !== '',
 			);
 		}
 		$accounts = array();
@@ -195,23 +202,30 @@ class MachineInventory {
 		}
 		foreach ($snap['nodes'] as $id => $n) {
 			$inst = $node_instance[$id] ?? null;
+			$ref = 'node:' . $id;
+			// Its own report says what it runs; a note says it where no agent reports.
+			$note = $hand_for[$ref] ?? null;
 			$rows[] = self::verdict(array(
 				'kind'      => 'managed',
 				'name'      => $n['name'],
 				'address'   => $n['address'],
 				'where'     => $inst ? $inst['where'] : $n['hosted_at'],
 				'instance'  => $inst ? $inst['id'] : '',
-				'ref'       => '',
-				'os'        => $n['os'] !== '' ? $n['os'] : ($inst && self::release_of($inst['image']) !== null ? 'Ubuntu ' . self::release_of($inst['image']) . ' (as made)' : ''),
+				'ref'       => $ref,
+				'os'        => $n['os'] !== '' ? $n['os']
+					: (($note && trim($note['os']) !== '') ? $note['os']
+					: ($inst && self::release_of($inst['image']) !== null ? 'Ubuntu ' . self::release_of($inst['image']) . ' (as made)' : '')),
 				'created'   => $inst ? $inst['created'] : '',
 				'status'    => '',
 				'state'     => (string)($n['state'] ?? ''),
-				'hand'      => null,
+				'hand'      => $note,
 				'node_id'   => $id,
+				'agent'     => !empty($n['agent']),
 			), $now);
+			$listed[$ref] = true;
 		}
 		foreach ($snap['hand'] as $h) {
-			// A note on a listed server is shown on that server's row.
+			// A note on a listed server or a node is shown on that row.
 			if ($h['instance_ref'] !== '' && isset($listed[$h['instance_ref']])) { continue; }
 			$rows[] = self::verdict(array(
 				'kind'      => 'hand',
@@ -258,6 +272,10 @@ class MachineInventory {
 		} elseif ($row['kind'] === 'unmanaged') {
 			$amber[] = 'no node manages it and nothing here says what it is: convert it, retire it, or write it down';
 		}
+		if ($row['kind'] === 'managed' && empty($row['agent']) && $release === null) {
+			$amber[] = $h === null ? 'no agent reports from it, so nothing says what it runs: write it down'
+				: 'no agent reports from it, and what is written does not name its release';
+		}
 		if ($row['state'] === 'retired') {
 			$amber[] = 'a retired source, kept for the way back: delete it once that is no longer needed';
 		} elseif ($row['state'] === 'install_failed') {
@@ -266,7 +284,7 @@ class MachineInventory {
 		$row['verdict'] = $red ? 'red' : ($amber ? 'amber' : ($release === null && $row['kind'] === 'managed' && $row['os'] === '' ? 'grey' : 'green'));
 		$row['reasons'] = array_merge($red, $amber);
 		if ($row['verdict'] === 'grey') {
-			$row['reasons'][] = 'its host report does not say what it runs yet';
+			$row['reasons'][] = 'its agent has not reported what it runs yet';
 		}
 		return $row;
 	}
