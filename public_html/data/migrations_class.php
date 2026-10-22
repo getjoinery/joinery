@@ -319,8 +319,9 @@ function authenticate_write($data) {
 				'version' => $migration['database_version']
 			];
 			
-		} catch (Exception $e) {
-			// Rollback transaction
+		} catch (Throwable $e) {
+			// Rollback transaction. A PHP Error in a migration file (a TypeError,
+			// an undefined function) is a failed migration like any other.
 			if ($dblink->inTransaction()) {
 				$dblink->rollback();
 			}

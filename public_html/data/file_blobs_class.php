@@ -416,27 +416,13 @@ class FileBlob extends SystemBase {
 		if ($blob_id <= 0) {
 			return false;
 		}
-		$dblink = DbConnector::get_instance()->get_db_link();
-		$own_tx = !$dblink->inTransaction();
-		if ($own_tx) {
-			$dblink->beginTransaction();
-		}
-		try {
+		return DbConnector::transaction(function ($dblink) use ($blob_id) {
 			$q = $dblink->prepare(
 				"UPDATE fbb_file_blobs SET fbb_reference_count = fbb_reference_count + 1
 				 WHERE fbb_file_blob_id = ? AND fbb_reference_count > 0");
 			$q->execute([$blob_id]);
-			$took = ($q->rowCount() === 1);
-			if ($own_tx) {
-				$dblink->commit();
-			}
-			return $took;
-		} catch (Exception $e) {
-			if ($own_tx && $dblink->inTransaction()) {
-				$dblink->rollBack();
-			}
-			throw $e;
-		}
+			return ($q->rowCount() === 1);
+		});
 	}
 
 	/**
@@ -467,29 +453,15 @@ class FileBlob extends SystemBase {
 		if ($blob_id <= 0) {
 			return;
 		}
-		$dblink = DbConnector::get_instance()->get_db_link();
-		$own_tx = !$dblink->inTransaction();
-		if ($own_tx) {
-			$dblink->beginTransaction();
-		}
-		$now_zero = false;
-		try {
+		$own_tx = !DbConnector::get_instance()->get_db_link()->inTransaction();
+		$new = DbConnector::transaction(function ($dblink) use ($blob_id) {
 			$q = $dblink->prepare(
 				"UPDATE fbb_file_blobs SET fbb_reference_count = GREATEST(fbb_reference_count - 1, 0)
 				 WHERE fbb_file_blob_id = ? RETURNING fbb_reference_count");
 			$q->execute([$blob_id]);
-			$new = $q->fetchColumn();
-			if ($own_tx) {
-				$dblink->commit();
-			}
-			$now_zero = ($new !== false && (int)$new === 0);
-		} catch (Exception $e) {
-			if ($own_tx && $dblink->inTransaction()) {
-				$dblink->rollBack();
-			}
-			throw $e;
-		}
-		if ($now_zero) {
+			return $q->fetchColumn();
+		});
+		if ($new !== false && (int)$new === 0) {
 			if ($own_tx) {
 				self::_reclaim($blob_id);
 			} else {
@@ -749,7 +721,7 @@ class FileBlob extends SystemBase {
 					@chmod($dest, 0666);
 				}
 			}
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			foreach ($written as $p) {
 				if (is_file($p)) {
 					@unlink($p);
@@ -957,7 +929,7 @@ class FileBlob extends SystemBase {
 				$driver->get($this->remote_key_for($size_key), $tmp_path);
 				$temp_paths[$size_key] = $tmp_path;
 			}
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			$drop_temps();
 			throw new FileBlobException('Phase 1 (pull from bucket) failed: ' . $e->getMessage(), 0, $e);
 		}
@@ -973,7 +945,7 @@ class FileBlob extends SystemBase {
 					$driver->delete($this->remote_key_for($size_key));
 					$delete_ok = true;
 					break;
-				} catch (Exception $e) {
+				} catch (Throwable $e) {
 					$last_err = $e;
 				}
 			}
@@ -981,7 +953,7 @@ class FileBlob extends SystemBase {
 				foreach ($deleted_keys as $rb) {
 					try {
 						$driver->put($temp_paths[$rb], $this->remote_key_for($rb), $ct);
-					} catch (Exception $rb_err) { /* swallow — broader trouble already */ }
+					} catch (Throwable $rb_err) { /* swallow — broader trouble already */ }
 				}
 				$drop_temps();
 				throw new FileBlobException('Phase 2 (bucket delete) failed for ' . $size_key . ': ' . ($last_err ? $last_err->getMessage() : 'unknown'), 0, $last_err);
@@ -1011,6 +983,10 @@ class FileBlob extends SystemBase {
 				$copied_paths[] = $dest;
 			}
 
+			// Its own transaction, never a caller's: the bucket copies are gone,
+			// so the flip must be durable before this returns. Inside a caller's
+			// transaction, beginTransaction() refuses and the catch below puts
+			// the bytes back.
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$dblink->beginTransaction();
 			try {
@@ -1021,8 +997,10 @@ class FileBlob extends SystemBase {
 				$q->bindValue(':id', $this->key, PDO::PARAM_INT);
 				$q->execute();
 				$dblink->commit();
-			} catch (PDOException $e) {
-				$dblink->rollBack();
+			} catch (Throwable $e) {
+				if ($dblink->inTransaction()) {
+					$dblink->rollBack();
+				}
 				throw new FileBlobException('Phase 3 (DB commit) failed: ' . $e->getMessage(), 0, $e);
 			}
 
@@ -1030,12 +1008,12 @@ class FileBlob extends SystemBase {
 			$this->set_as_stored('fbb_is_private', $to_private);
 			$this->set_as_stored('fbb_bkt_backup_target_id', null);
 			$this->set_as_stored('fbb_remote_key', null);
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			foreach ($copied_paths as $p) @unlink($p);
 			foreach ($keys as $size_key) {
 				try {
 					$driver->put($temp_paths[$size_key], $this->remote_key_for($size_key), $ct);
-				} catch (Exception $reput) { /* row genuinely broken; logged below */ }
+				} catch (Throwable $reput) { /* row genuinely broken; logged below */ }
 			}
 			$drop_temps();
 			error_log('CLOUD_STORAGE_PARTIAL_FLIP: fbb=' . $this->key . ' name=' . $name . ' err=' . $e->getMessage());

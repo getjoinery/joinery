@@ -182,37 +182,24 @@ function prepare() {
 	}
 
 	function permanent_delete($debug=false){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}		
-		
-		//DELETE ANY GROUP MEMBERSHIPS
-		$groups = Group::get_groups_in_category('post_tag', false, 'objects');
-		foreach($groups as $group){
-			$group->remove_member($this->key);
-		}
+		DbConnector::transaction(function () use ($debug) {
+			//DELETE ANY GROUP MEMBERSHIPS
+			$groups = Group::get_groups_in_category('post_tag', false, 'objects');
+			foreach($groups as $group){
+				$group->remove_member($this->key);
+			}
 
-		//DELETE ENTITY PHOTOS
-		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		$photos = new MultiEntityPhoto(
-			['entity_type' => 'post', 'entity_id' => $this->key]
-		);
-		$photos->load();
-		foreach($photos as $photo){
-			$photo->permanent_delete();
-		}
+			//DELETE ENTITY PHOTOS
+			$photos = new MultiEntityPhoto(
+				['entity_type' => 'post', 'entity_id' => $this->key]
+			);
+			foreach($photos as $photo){
+				$photo->permanent_delete();
+			}
 
-		parent::permanent_delete($debug);
-		
-		if($this_transaction){
-			$dblink->commit();
-		}	
-		
+			parent::permanent_delete($debug);
+		});
+
 		return true;
 	}
 	

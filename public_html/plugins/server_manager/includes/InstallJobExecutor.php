@@ -111,8 +111,10 @@ class InstallJobExecutor {
 			$db->commit();
 			if (!$claimed) { return null; }
 			return new ManagementJob((int)$row['mjb_management_job_id'], TRUE);
-		} catch (Exception $e) {
-			$db->rollBack();
+		} catch (Throwable $e) {
+			if ($db->inTransaction()) {
+				$db->rollBack();
+			}
 			throw $e;
 		}
 	}

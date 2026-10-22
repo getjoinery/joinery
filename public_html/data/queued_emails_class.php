@@ -116,24 +116,26 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	 *        Pass false when retrying to prevent infinite re-queuing.
 	 */
 	function send($queue_on_failure = true) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
-		$dblink->beginTransaction();
-
-		// Load the email and double check its status before we send it
-		$this->load();
-		if ($this->get('equ_status') != self::READY_TO_SEND) {
-			$dblink->rollBack();
+		// The LOCKED claim has to be durable before the email goes out. Inside a
+		// caller's transaction, a rollback after the send would put it back to
+		// READY_TO_SEND and the email would go out again.
+		if (DbConnector::get_instance()->get_db_link()->inTransaction()) {
 			throw new QueuedEmailException(
-				'Attempting to send a Queued Email which is not in the correct state. Aborting...');
+				'A queued email is sent outside any transaction, so its claim commits before it goes out.');
 		}
 
-		// Set this email to locked
-		$this->set('equ_status', self::LOCKED);
-		$this->save();
+		DbConnector::transaction(function () {
+			// Load the email and double check its status before we send it
+			$this->load();
+			if ($this->get('equ_status') != self::READY_TO_SEND) {
+				throw new QueuedEmailException(
+					'Attempting to send a Queued Email which is not in the correct state. Aborting...');
+			}
 
-		$dblink->commit();
+			// Set this email to locked
+			$this->set('equ_status', self::LOCKED);
+			$this->save();
+		});
 
 		// Build EmailMessage and send via EmailSender (service selection + fallback)
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
@@ -147,18 +149,17 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 		$sender = new EmailSender();
 		$result = $sender->send($message, $queue_on_failure);
 
-		$dblink->beginTransaction();
+		DbConnector::transaction(function () use ($result) {
+			$this->load();
 
-		$this->load();
+			if ($result) {
+				$this->set('equ_status', self::SENT);
+			} else {
+				$this->set('equ_status', self::ERROR_SENDING);
+			}
 
-		if ($result) {
-			$this->set('equ_status', self::SENT);
-		} else {
-			$this->set('equ_status', self::ERROR_SENDING);
-		}
-
-		$this->save();
-		$dblink->commit();
+			$this->save();
+		});
 	}
 
 }

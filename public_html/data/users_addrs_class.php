@@ -419,44 +419,33 @@ private static function UcAddress($string) {
 	}
 
 	public static function SetDefaultAddressForUser($user_id, $address_id, $use_transaction=TRUE) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-
 		// Run this operation in a transaction, since we rely on the SELECT from the first
 		// query for the UPDATE in the 2nd one
-		if ($use_transaction) {
-			$dblink->beginTransaction();
-		}
+		$set_default = function () use ($user_id, $address_id) {
+			$dbhelper = DbConnector::get_instance();
+			$dblink = $dbhelper->get_db_link();
 
-		$address = new Address($address_id, TRUE);
-		if ($address->get('usa_usr_user_id') != $user_id) {
-			if ($use_transaction) {
-				$dblink->rollBack();
+			$address = new Address($address_id, TRUE);
+			if ($address->get('usa_usr_user_id') != $user_id) {
+				throw new AddressException('Invalid Address or User.');
 			}
-			throw new AddressException('Invalid Address or User.');
-		}
 
-		//SET ALL DEFAULT FOR THIS USER TO ZERO
-		$sql = "UPDATE usa_users_addrs
-			SET usa_is_default = (usa_users_addr_id = :address_id)
-			WHERE usa_usr_user_id = :usr_user_id";
+			//SET ALL DEFAULT FOR THIS USER TO ZERO
+			$sql = "UPDATE usa_users_addrs
+				SET usa_is_default = (usa_users_addr_id = :address_id)
+				WHERE usa_usr_user_id = :usr_user_id";
 
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':address_id', $address_id, PDO::PARAM_INT);
-			$q->bindValue(':usr_user_id', $user_id, PDO::PARAM_INT);
-			$q->execute();
-		}
-		catch(PDOException $e){
-			if ($use_transaction) {
-				$dblink->rollBack();
+			try{
+				$q = $dblink->prepare($sql);
+				$q->bindValue(':address_id', $address_id, PDO::PARAM_INT);
+				$q->bindValue(':usr_user_id', $user_id, PDO::PARAM_INT);
+				$q->execute();
 			}
-			$dbhelper->handle_query_error($e);
-		}
-
-		if ($use_transaction) {
-			$dblink->commit();
-		}
+			catch(PDOException $e){
+				$dbhelper->handle_query_error($e);
+			}
+		};
+		$use_transaction ? DbConnector::transaction($set_default) : $set_default();
 	}
 
 	function export_as_array() {

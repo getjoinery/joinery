@@ -419,8 +419,8 @@ SELECT del_action, COUNT(*) FROM del_deletion_rules GROUP BY del_action;
 
 **Problem**: Nested transaction error
 **Solution**:
-- Already fixed in SystemBase - it checks `inTransaction()` before starting new transaction
-- If you see this, you may have custom code starting transactions
+- `permanent_delete()` checks `inTransaction()` and joins a transaction its caller already opened
+- If you see this, custom code is starting a transaction by hand; move it onto `DbConnector::transaction()`, which joins one already open
 
 ### Debug Tools
 

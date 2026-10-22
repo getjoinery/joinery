@@ -2825,8 +2825,8 @@ abstract class SystemBase {
 				$this->key = NULL;
 			}
 
-		} catch (Exception $e) {
-			if($this_transaction){
+		} catch (Throwable $e) {
+			if($this_transaction && $db->inTransaction()){
 				$db->rollback();
 			}
 			throw $e;
@@ -2835,20 +2835,15 @@ abstract class SystemBase {
 		return true;
 	}
 
-	function safe_load_and_set($key, $value, $and_prepare=FALSE) { 
-		DbConnector::BeginTransaction();
-		try { 
+	function safe_load_and_set($key, $value, $and_prepare=FALSE) {
+		DbConnector::transaction(function () use ($key, $value, $and_prepare) {
 			$this->load(TRUE);
 			$this->set($key, $value);
-			if ($and_prepare) { 
+			if ($and_prepare) {
 				$this->prepare();
 			}
 			$this->save();
-		} catch(Exception $e) { 
-			DbConnector::Rollback();
-			throw $e;
-		}
-		DbConnector::Commit();
+		});
 	}
 
 	function load_from_data($data, $fields) {
@@ -3340,81 +3335,92 @@ abstract class SystemBase {
 			$owns_seal_transaction = true;
 		}
 
-		$stored = false;
+		// Every way out of what follows closes a seal transaction this save
+		// opened: a PHP Error (not only a PDOException) between the INSERT and
+		// the commit would otherwise leave it open for the rest of the request.
 		try {
-			if ($rowdata) {
-				$dbhelper->execute_query();
-				if ($op == 'edit' && $read_back) {
-					$stored = $dbhelper->fetch_query_row();
-				}
-			} elseif ($read_back) {
-				$rq = $dblink->prepare('SELECT ' . implode(', ', $read_back) . ' FROM ' . static::$tablename
-					. ' WHERE ' . static::$pkey_column . ' = ?');
-				$rq->execute(array($p_keys[static::$pkey_column]));
-				$stored = $rq->fetch(PDO::FETCH_ASSOC);
-			}
-		} catch (PDOException $e) {
-			if ($owns_seal_transaction && $dblink->inTransaction()) {
-				$dblink->rollBack();
-			}
-			// Add context about the operation
-			$operation = $op == 'add' ? 'INSERT' : 'UPDATE';
-			$context = "Database $operation failed on table '" . static::$tablename . "'";
-
-			if ($op == 'edit' && $p_keys) {
-				$context .= " for record: " . json_encode($p_keys);
-			}
-
-			$dbhelper->handle_query_error(
-				new PDOException($context . " - " . $e->getMessage(), (int)$e->getCode(), $e)
-			);
-		}
-
-		if($op == 'edit'){
-			if($debug){
-				exit;
-			}
-			$this->key = $p_keys[static::$pkey_column];
-			// The columns the save did not write take the row's values, before
-			// the seal step, which then drops whatever it sealed. Written
-			// straight into $this->data: a subclass set() must not see them. A
-			// row deleted under the save returns nothing and leaves the copy as
-			// it was.
-			if ($stored) {
-				foreach ($read_back as $column) {
-					$this->data->$column = $stored[$column];
-				}
-			}
-		}
-		else{
-			$seq = static::$tablename . '_' . static::$pkey_column . '_seq';
-
-			if($debug){
-				echo "Sequence: $seq\n";
-				exit;
-			}
-
-			$this->key = $dblink->lastInsertId($seq);
-			// The new row's id is one of its fields too: without it, an
-			// export straight after a create (the API's POST answer) had no id.
-			if ($this->key !== false && $this->key !== null && is_object($this->data)) {
-				$this->data->{static::$pkey_column} = is_numeric($this->key) ? (int)$this->key : $this->key;
-			}
-		}
-
-		if ($seal_plan !== null) {
+			$stored = false;
 			try {
-				$this->applySealOnSave($seal_plan);
-				if ($owns_seal_transaction) {
-					$dblink->commit();
+				if ($rowdata) {
+					$dbhelper->execute_query();
+					if ($op == 'edit' && $read_back) {
+						$stored = $dbhelper->fetch_query_row();
+					}
+				} elseif ($read_back) {
+					$rq = $dblink->prepare('SELECT ' . implode(', ', $read_back) . ' FROM ' . static::$tablename
+						. ' WHERE ' . static::$pkey_column . ' = ?');
+					$rq->execute(array($p_keys[static::$pkey_column]));
+					$stored = $rq->fetch(PDO::FETCH_ASSOC);
 				}
-			} catch (Throwable $e) {
+			} catch (PDOException $e) {
 				if ($owns_seal_transaction && $dblink->inTransaction()) {
 					$dblink->rollBack();
-					$this->key = ($op == 'edit') ? $p_keys[static::$pkey_column] : NULL;
 				}
-				throw $e;
+				// Add context about the operation
+				$operation = $op == 'add' ? 'INSERT' : 'UPDATE';
+				$context = "Database $operation failed on table '" . static::$tablename . "'";
+
+				if ($op == 'edit' && $p_keys) {
+					$context .= " for record: " . json_encode($p_keys);
+				}
+
+				$dbhelper->handle_query_error(
+					new PDOException($context . " - " . $e->getMessage(), (int)$e->getCode(), $e)
+				);
 			}
+
+			if($op == 'edit'){
+				if($debug){
+					exit;
+				}
+				$this->key = $p_keys[static::$pkey_column];
+				// The columns the save did not write take the row's values, before
+				// the seal step, which then drops whatever it sealed. Written
+				// straight into $this->data: a subclass set() must not see them. A
+				// row deleted under the save returns nothing and leaves the copy as
+				// it was.
+				if ($stored) {
+					foreach ($read_back as $column) {
+						$this->data->$column = $stored[$column];
+					}
+				}
+			}
+			else{
+				$seq = static::$tablename . '_' . static::$pkey_column . '_seq';
+
+				if($debug){
+					echo "Sequence: $seq\n";
+					exit;
+				}
+
+				$this->key = $dblink->lastInsertId($seq);
+				// The new row's id is one of its fields too: without it, an
+				// export straight after a create (the API's POST answer) had no id.
+				if ($this->key !== false && $this->key !== null && is_object($this->data)) {
+					$this->data->{static::$pkey_column} = is_numeric($this->key) ? (int)$this->key : $this->key;
+				}
+			}
+
+			if ($seal_plan !== null) {
+				try {
+					$this->applySealOnSave($seal_plan);
+					if ($owns_seal_transaction) {
+						$dblink->commit();
+					}
+				} catch (Throwable $e) {
+					if ($owns_seal_transaction && $dblink->inTransaction()) {
+						$dblink->rollBack();
+						$this->key = ($op == 'edit') ? $p_keys[static::$pkey_column] : NULL;
+					}
+					throw $e;
+				}
+			}
+		} catch (Throwable $e) {
+			if ($owns_seal_transaction && $dblink->inTransaction()) {
+				$dblink->rollBack();
+				$this->key = ($op == 'edit') ? $p_keys[static::$pkey_column] : NULL;
+			}
+			throw $e;
 		}
 
 		// The copy now matches the row: saving it again writes nothing.
@@ -4282,14 +4288,14 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	// This means that when a user loads a page, another user cannot load that same element for at
 	// least one hour, which means users wont be accidentally doing the same work over and over.
 	function load_and_lock($lock_key, $duration='1 hour') {
-		DbConnector::BeginTransaction();
-		$this->load();
-		$future_time = new DateTime('now + ' . $duration);
-		foreach ($this as $row) {
-			$row->set($lock_key, $future_time->format(DATE_ATOM));
-			$row->save();
-		}
-		DbConnector::Commit();
+		DbConnector::transaction(function () use ($lock_key, $duration) {
+			$this->load();
+			$future_time = new DateTime('now + ' . $duration);
+			foreach ($this as $row) {
+				$row->set($lock_key, $future_time->format(DATE_ATOM));
+				$row->save();
+			}
+		});
 		return $this;
 	}
 

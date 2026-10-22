@@ -40,26 +40,21 @@ function admin_sandbox_approve_logic(array $input): LogicResult {
 			return LogicResult::error('This site cannot run it: ' . implode(' ', $problems));
 		}
 		$user = new User($session->get_user_id(), TRUE);
-		$dblink = DbConnector::get_instance()->get_db_link();
 		try {
 			// The approval and what it sets going stand or fall together: an
 			// activation that fails leaves no approval behind.
-			$dblink->beginTransaction();
-			SandboxConsent::approve($plugin, $user, (string)($input['reviewed'] ?? ''));
-			if ($row->is_active()) {
-				SandboxPluginManager::reconcile($plugin);
-				$message = $manifest->title() . ' is approved for what it now asks.';
-			} else {
+			$message = DbConnector::transaction(function () use ($plugin, $user, $input, $row, $manifest) {
+				SandboxConsent::approve($plugin, $user, (string)($input['reviewed'] ?? ''));
+				if ($row->is_active()) {
+					SandboxPluginManager::reconcile($plugin);
+					return $manifest->title() . ' is approved for what it now asks.';
+				}
 				(new PluginManager())->activate($plugin);
-				$message = $manifest->title() . ' is approved and active.';
-			}
-			$dblink->commit();
+				return $manifest->title() . ' is approved and active.';
+			});
 			// The member menu follows what was approved.
 			(new PluginManager())->syncMenus($plugin, SandboxPluginManager::menus($plugin));
 		} catch (Exception $e) {
-			if ($dblink->inTransaction()) {
-				$dblink->rollBack();
-			}
 			$session->save_message(new DisplayMessage('It could not be approved: ' . $e->getMessage(), '', NULL,
 				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 			return LogicResult::redirect($here);

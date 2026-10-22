@@ -106,36 +106,26 @@ public static $phone_carriers = array(
 			return $duplicate_number->key;
 		}
 
-		if ($use_transaction) {
-			$dbhelper = DbConnector::get_instance();
-			$dblink = $dbhelper->get_db_link();
-			$dblink->beginTransaction();
-		}
-
-		try {
-			$phone_number->prepare();
-			$phone_number->save();
-
-			// Here we also want to check and see if this is the user's first phone #.
-			// if so, make it the default
-			$user = new User($owner, TRUE);
-			if ($user->get('usr_phn_phone_number_id') === NULL) {
-				// User has no default phone #
-				$user->set('usr_phn_phone_number_id', $phone_number->key);
-				$user->save();
-				$phone_number->set('phn_is_default', TRUE);
+		$create = function () use ($phone_number, $owner) {
+			try {
+				$phone_number->prepare();
 				$phone_number->save();
-			}
 
-			if ($use_transaction) {
-				$dblink->commit();
+				// Here we also want to check and see if this is the user's first phone #.
+				// if so, make it the default
+				$user = new User($owner, TRUE);
+				if ($user->get('usr_phn_phone_number_id') === NULL) {
+					// User has no default phone #
+					$user->set('usr_phn_phone_number_id', $phone_number->key);
+					$user->save();
+					$phone_number->set('phn_is_default', TRUE);
+					$phone_number->save();
+				}
+			} catch (PDOException $e) {
+				DbConnector::get_instance()->handle_query_error($e);
 			}
-		} catch (PDOException $e) {
-			if ($use_transaction) {
-				$dblink->rollBack();
-			}
-			$dbhelper->handle_query_error($e);
-		}
+		};
+		$use_transaction ? DbConnector::transaction($create) : $create();
 		
 		return $phone_number->key;
 	}
@@ -292,64 +282,32 @@ public static $phone_carriers = array(
 	}	
 
 	function set_default($use_transaction=TRUE) {
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		
-		if ($use_transaction) {
-			$dblink->beginTransaction();
-		}		
-		
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-	
-		//SET ALL DEFAULT FOR THIS USER TO ZERO
-		$sql = "UPDATE phn_phone_numbers SET phn_is_default = FALSE WHERE phn_usr_user_id = :usr_user_id";
-	
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':usr_user_id', $this->get('phn_usr_user_id'), PDO::PARAM_INT);
-			$success = $q->execute();
-		}
-		catch(PDOException $e){
-			if ($use_transaction) {
-				$dblink->rollBack();
-			}
-			$dbhelper->handle_query_error($e);
-		}
+		$set_default = function () {
+			$dbhelper = DbConnector::get_instance();
+			$dblink = $dbhelper->get_db_link();
+			$user_id = $this->get('phn_usr_user_id');
 
-		$sql = "UPDATE phn_phone_numbers SET phn_is_default = TRUE WHERE phn_phone_number_id = :phn_phone_number_id";
-	
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':phn_phone_number_id', $this->key, PDO::PARAM_INT);
-			$success = $q->execute();
-		}
-		catch(PDOException $e){
-			if ($use_transaction) {
-				$dblink->rollBack();
+			try{
+				//SET ALL DEFAULT FOR THIS USER TO ZERO
+				$q = $dblink->prepare("UPDATE phn_phone_numbers SET phn_is_default = FALSE WHERE phn_usr_user_id = :usr_user_id");
+				$q->bindValue(':usr_user_id', $user_id, PDO::PARAM_INT);
+				$q->execute();
+
+				$q = $dblink->prepare("UPDATE phn_phone_numbers SET phn_is_default = TRUE WHERE phn_phone_number_id = :phn_phone_number_id");
+				$q->bindValue(':phn_phone_number_id', $this->key, PDO::PARAM_INT);
+				$q->execute();
+
+				$q = $dblink->prepare("UPDATE usr_users SET usr_phn_phone_number_id = :phn_phone_number_id WHERE usr_user_id = :usr_user_id");
+				$q->bindValue(':phn_phone_number_id', $this->key, PDO::PARAM_INT);
+				$q->bindValue(':usr_user_id', $user_id, PDO::PARAM_INT);
+				$q->execute();
 			}
-			$dbhelper->handle_query_error($e);
-		}
-	
-		$sql = "UPDATE usr_users SET usr_phn_phone_number_id = :phn_phone_number_id WHERE usr_user_id = :usr_user_id";
-	
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':phn_phone_number_id', $this->key, PDO::PARAM_INT);
-			$q->bindParam(':usr_user_id', $this->get('phn_usr_user_id'), PDO::PARAM_INT);
-			$success = $q->execute();
-		}
-		catch(PDOException $e){
-			if ($use_transaction) {
-				$dblink->rollBack();
+			catch(PDOException $e){
+				$dbhelper->handle_query_error($e);
 			}
-			$dbhelper->handle_query_error($e);
-		}
-		
-		if ($use_transaction) {
-			$dblink->commit();
-		}
-	}	
+		};
+		$use_transaction ? DbConnector::transaction($set_default) : $set_default();
+	}
 
 
 	function authenticate_write($data) {

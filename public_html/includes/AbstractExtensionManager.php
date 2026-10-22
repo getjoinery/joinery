@@ -124,17 +124,7 @@ abstract class AbstractExtensionManager {
      * @throws Exception on failure (transaction rolled back)
      */
     public function activate($name) {
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-
-        $this_transaction = false;
-        if (!$dblink->inTransaction()) {
-            $dblink->beginTransaction();
-            $this_transaction = true;
-        }
-
-        $model = null;
-        try {
+        $model = DbConnector::transaction(function ($dblink) use ($name) {
             $model = $this->getExistingByName($name);
             if (!$model) {
                 throw new Exception(ucfirst($this->extension_type) . " '$name' not found in database.");
@@ -144,16 +134,8 @@ abstract class AbstractExtensionManager {
 
             $model->set($this->table_prefix . '_status', 'active');
             $model->save();
-
-            if ($this_transaction) {
-                $dblink->commit();
-            }
-        } catch (Exception $e) {
-            if ($this_transaction && $dblink->inTransaction()) {
-                $dblink->rollBack();
-            }
-            throw $e;
-        }
+            return $model;
+        });
 
         // Post-commit hook (non-transactional, non-fatal)
         try {
@@ -179,16 +161,7 @@ abstract class AbstractExtensionManager {
      * @throws Exception on failure (transaction rolled back)
      */
     public function deactivate($name) {
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-
-        $this_transaction = false;
-        if (!$dblink->inTransaction()) {
-            $dblink->beginTransaction();
-            $this_transaction = true;
-        }
-
-        try {
+        DbConnector::transaction(function ($dblink) use ($name) {
             $model = $this->getExistingByName($name);
             if (!$model) {
                 throw new Exception(ucfirst($this->extension_type) . " '$name' not found in database.");
@@ -198,16 +171,7 @@ abstract class AbstractExtensionManager {
 
             $model->set($this->table_prefix . '_status', 'inactive');
             $model->save();
-
-            if ($this_transaction) {
-                $dblink->commit();
-            }
-        } catch (Exception $e) {
-            if ($this_transaction && $dblink->inTransaction()) {
-                $dblink->rollBack();
-            }
-            throw $e;
-        }
+        });
 
         // A deactivated extension's cached pages would keep serving from the
         // static cache instead of 404ing — the route gate runs after the cache.

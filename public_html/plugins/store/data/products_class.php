@@ -858,30 +858,17 @@ public function get_requirement_info($output='text') {
 	}
 
 	function permanent_delete($debug=false){
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
+		DbConnector::transaction(function () use ($debug) {
+			//DELETE ENTITY PHOTOS
+			$photos = new MultiEntityPhoto(
+				['entity_type' => 'product', 'entity_id' => $this->key]
+			);
+			foreach($photos as $photo){
+				$photo->permanent_delete();
+			}
 
-		$this_transaction = false;
-		if(!$dblink->inTransaction()){
-			$dblink->beginTransaction();
-			$this_transaction = true;
-		}
-
-		//DELETE ENTITY PHOTOS
-		require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
-		$photos = new MultiEntityPhoto(
-			['entity_type' => 'product', 'entity_id' => $this->key]
-		);
-		$photos->load();
-		foreach($photos as $photo){
-			$photo->permanent_delete();
-		}
-
-		parent::permanent_delete($debug);
-
-		if($this_transaction){
-			$dblink->commit();
-		}
+			parent::permanent_delete($debug);
+		});
 
 		return true;
 	}
