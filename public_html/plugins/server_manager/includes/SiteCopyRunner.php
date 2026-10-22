@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.34 - a manual switch's way back names the records the owner points back (manual_records_back), and
+ *                 the note stays while DNS still names the copy (went_back_notes, C4's B28)
  * @version 1.33 - a DNS switch records the TTL the DNS host holds for each lowered record (ttl_held, B12)
  * @version 1.32 - a kept switch-over keeps the old server Keep named: removing the old row afterwards made the tab
  *                 name the copy's own server, the one the site now runs on (B22)
@@ -3114,8 +3116,10 @@ class SiteCopyRunner {
 	 */
 	/**
 	 * What going back noted, for the Copy tab: what it recorded (a reverse
-	 * DNS set back, records a move back left), and a site AAAA record still
-	 * at the copy's IPv6 for as long as DNS still names it (B66).
+	 * DNS set back, records a move back left), a site AAAA record still at
+	 * the copy's IPv6 for as long as DNS still names it (B66), and, after a
+	 * manual switch went back, each record the owner has yet to point back,
+	 * for as long as DNS still names the copy there.
 	 */
 	public static function went_back_notes(array $switch): array {
 		$notes = array_values(array_filter(array_map('strval', (array)($switch['moved_back_notes'] ?? array()))));
@@ -3123,7 +3127,55 @@ class SiteCopyRunner {
 		if ($aaaa !== '') {
 			$notes[] = $aaaa;
 		}
+		if ((string)($switch['method'] ?? '') === self::METHOD_MANUAL && ($switch['address_at'] ?? '') === 'source'
+				&& !empty($switch['moved_back_time'])) {
+			$left = self::manual_records_back($switch, true);
+			if ($left) {
+				$notes[] = 'DNS still names the copy. At your DNS host, point these back at this site\'s own server: '
+					. implode('; ', $left) . '. Until then visitors whose resolvers follow it reach the copy, which no longer serves the site.';
+			}
+		}
 		return $notes;
+	}
+
+	/**
+	 * A manual switch's records as the owner points them back at their DNS
+	 * host, one line each ("NAME TYPE: copy address → site's address"). With
+	 * $still_at_copy, only those DNS still names the copy's address for; a
+	 * lookup that fails says nothing either way, so the record is left out.
+	 */
+	public static function manual_records_back(array $switch, bool $still_at_copy = false): array {
+		if ((string)($switch['method'] ?? '') !== self::METHOD_MANUAL) {
+			return array();
+		}
+		$out = array();
+		foreach ((array)($switch['records'] ?? array()) as $rec) {
+			$name = (string)($rec['name'] ?? '');
+			$type = (string)($rec['type'] ?? '');
+			$to = (string)($rec['to'] ?? '');
+			$from = (string)($rec['from'] ?? '');
+			if ($name === '' || $to === '' || $from === '') {
+				continue;
+			}
+			if ($still_at_copy) {
+				try {
+					$now = $type === DnsRecord::TYPE_AAAA ? DnsResolver::getAaaa($name) : DnsResolver::getA($name);
+				} catch (Throwable $e) {
+					continue;
+				}
+				$named = false;
+				foreach ($now as $a) {
+					if (@inet_pton((string)$a) !== false && @inet_pton((string)$a) === @inet_pton($to)) {
+						$named = true;
+					}
+				}
+				if (!$named) {
+					continue;
+				}
+			}
+			$out[] = $name . ' ' . $type . ' from ' . $to . ' to ' . $from;
+		}
+		return $out;
 	}
 
 	public static function go_back(SiteCopy $copy, ?DnsProvider $driver): void {
@@ -3187,7 +3239,8 @@ class SiteCopyRunner {
 				}
 			} elseif ($method === self::METHOD_MANUAL && ($switch['address_at'] ?? 'source') === 'copy') {
 				// The owner changes the records back at their DNS host; the tab
-				// names them.
+				// names them (manual_records_back), and keeps naming any DNS
+				// still points at the copy (went_back_notes).
 				$switch['address_at'] = 'source';
 				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
 			}

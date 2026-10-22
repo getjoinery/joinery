@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.27 - a manual switch's way back names each record to point back at the DNS host, before going back and
+ *                  (in the notes) after, while DNS still names the copy (B28)
  * @version 1.26 - a DNS switch's records say the TTL the DNS host holds while they move, which can be longer
  *                  than the one asked for (B12)
  * @version 1.25 - each way the address can move lists what would still name this server's address after it
@@ -1012,12 +1014,10 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 				. 'its server is discarded afterwards. Keeping those writes would be a copy in the other direction.</p>';
 		} elseif ($site_copy->on_host()) {
 			echo '<p>This site runs again: its host lets it back onto the network, then it leaves its maintenance page. The copy stays '
-				. 'a dormant copy.' . ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy ? ' Point the DNS back yourself.' : '')
-				. '</p>';
+				. 'a dormant copy.</p>';
 		} elseif ($copy_backups) {
 			echo '<p>The copy stays a dormant copy, and the old ' . (trim((string)$node->get('mgn_container_name')) !== ''
-					? 'container keeps running: it is stopped only once the copy has taken over.' : 'server stays off.')
-				. ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy ? ' Point the DNS back yourself.' : '') . '</p>';
+					? 'container keeps running: it is stopped only once the copy has taken over.' : 'server stays off.') . '</p>';
 		} else {
 			echo '<p>This site runs again on its own server, as before. The copy stays a dormant copy.</p>';
 		}
@@ -1028,6 +1028,17 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		} elseif ($copy_method === SiteCopyRunner::METHOD_DNS && $copy_address_at_copy) {
 			echo '<p>The records name the copy, so going back changes them back: enter the DNS token.</p>';
 			$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm, array(), 'records');
+		} elseif ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy) {
+			// Only the owner moves the records back; going back without them
+			// leaves the name at a server that no longer serves the site.
+			$copy_back = SiteCopyRunner::manual_records_back($copy_switch);
+			echo '<p>The records name the copy, and going back does not change them. At your DNS host, point them back at this '
+				. 'site\'s own server' . ($copy_back ? ': ' . $copy_h(implode('; ', $copy_back)) : '') . '.</p>';
+			if ($confirm !== '') {
+				$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm);
+			} else {
+				$copy_plain_form('copy_go_back', 'Go back', 'btn-outline-danger');
+			}
 		} elseif ($confirm !== '') {
 			$copy_press_form('copy_go_back', 'Go back', 'btn-outline-danger', $confirm);
 		} else {

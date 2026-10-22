@@ -1,6 +1,10 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.6 - an empty field nobody has typed in is not judged as it
+ *   loses focus: the error line it drew moved whatever was being pressed, so a
+ *   first click on a button below an autofocused field (Use a passkey on
+ *   /verify-totp) was lost between mousedown and mouseup. Submit still checks it.
  * @version 1.2.5 - one validator per form: a second set-up of the same form adds
  *   its rules to the first (addRules) instead of attaching a second submit
  *   listener, which cancelled every validated re-dispatch, so every product
@@ -33,7 +37,7 @@
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.2.5 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.2.6 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -90,6 +94,9 @@ console.log('%c=== JOINERY VALIDATION v1.2.5 ===', 'color: blue; font-weight: bo
 
             // Track which fields have been touched by user
             this.touchedFields = new Set();
+            // Fields the person has typed in (an input event), so a blur
+            // judges only those, or ones that hold a value already.
+            this.typedFields = new Set();
 
             // Fields checked only once their value changes, and the value each
             // was drawn with.
@@ -419,7 +426,16 @@ console.log('%c=== JOINERY VALIDATION v1.2.5 ===', 'color: blue; font-weight: bo
                             await this.validateField(fieldName);
                         });
                     } else {
+                        field.addEventListener('input', () => {
+                            this.typedFields.add(fieldName);
+                        });
                         field.addEventListener('blur', async (e) => {
+                            // Left empty and never typed in: nothing to say
+                            // yet. Its error line would move what is being
+                            // clicked, and the click would be lost.
+                            if (!this.typedFields.has(fieldName) && field.value === '') {
+                                return;
+                            }
                             this.touchedFields.add(fieldName);
                             await this.validateField(fieldName);
                         });
