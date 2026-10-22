@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.19 - with no plan chosen, the driver's default plan is the one sold in the provision's region (B31)
  * @version 2.18 - the provider's own layer is recorded for every server it creates, not only one we encrypt
  *                (specs/site_copy_final_test.md E4)
  * @version 2.17 - an encrypted data root in its owner's account is sealed to the key on its provision
@@ -327,7 +328,7 @@ class ProvisionCustomerCloud {
 		$region = trim((string)$provision->get('cvp_region')) ?: ($setting('server_manager_customer_cloud_region')
 			?: ($defaults ? $defaults->defaultRegion() : ''));
 		$type = trim((string)$provision->get('cvp_instance_type')) ?: ($setting('server_manager_customer_cloud_type')
-			?: ($defaults ? $defaults->defaultInstanceType() : ''));
+			?: ($defaults ? $defaults->defaultInstanceType($region) : ''));
 		$image = $setting('server_manager_customer_cloud_image') ?: ($defaults ? $defaults->defaultImage() : '');
 		return array($region, $type, $image);
 	}

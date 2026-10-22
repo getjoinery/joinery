@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.28 - a new server's plans are those the region shown sells (B31)
  * @version 1.27 - a manual switch's way back names each record to point back at the DNS host, before going back and
  *                  (in the notes) after, while DNS still names the copy (B28)
  * @version 1.26 - a DNS switch's records say the TTL the DNS host holds while they move, which can be longer
@@ -334,10 +335,20 @@ if (!$site_copy) {
 			} catch (Exception $e) {
 				$copy_driver = null;
 			}
+			$copy_default_region = $copy_driver instanceof CloudInstanceTypes ? $copy_driver->defaultRegion() : '';
+			if ($copy_p === ProvisionCustomerCloud::CLOUD_SETTINGS_PROVIDER) {
+				$copy_default_region = $settings_g->get_setting('server_manager_customer_cloud_region') ?: $copy_default_region;
+			}
+			if ($src_provision && (string)$src_provision->get('cvp_provider') === $copy_p && $src_provision->get('cvp_region')) {
+				$copy_default_region = (string)$src_provision->get('cvp_region');
+			}
+			$copy_default_regions[$copy_p] = $copy_default_region;
+			// The plans the region shown sells: a provider can withdraw a plan
+			// from one region and sell it in another.
 			$copy_plans = array();
 			if ($copy_driver instanceof CloudInstanceTypes) {
 				try {
-					$copy_plans = $copy_driver->instanceTypes();
+					$copy_plans = $copy_driver->instanceTypes($copy_default_region);
 				} catch (Exception $e) {
 					$copy_plans = array();
 				}
@@ -349,14 +360,6 @@ if (!$site_copy) {
 			} catch (Exception $e) {
 				$copy_same = '';
 			}
-			$copy_default_region = $copy_driver instanceof CloudInstanceTypes ? $copy_driver->defaultRegion() : '';
-			if ($copy_p === ProvisionCustomerCloud::CLOUD_SETTINGS_PROVIDER) {
-				$copy_default_region = $settings_g->get_setting('server_manager_customer_cloud_region') ?: $copy_default_region;
-			}
-			if ($src_provision && (string)$src_provision->get('cvp_provider') === $copy_p && $src_provision->get('cvp_region')) {
-				$copy_default_region = (string)$src_provision->get('cvp_region');
-			}
-			$copy_default_regions[$copy_p] = $copy_default_region;
 			$fw->textinput('copy_region_' . $copy_p, 'Region' . (count($copy_providers) > 1 ? ' at ' . $copy_label : ''),
 				['value' => $copy_default_region,
 				'helptext' => $copy_label . '\'s region id' . ($copy_default_region !== '' ? ', e.g. ' . $copy_default_region : '') . '.']);
@@ -369,13 +372,15 @@ if (!$site_copy) {
 				$fw->dropinput('copy_type_' . $copy_p, 'Size' . (count($copy_providers) > 1 ? ' at ' . $copy_label : ''),
 					['options' => $copy_plan_options,
 					'value' => $copy_same !== '' ? $copy_same : (string)array_key_first($copy_plan_options),
-					'helptext' => trim("Chosen to match this site's server; pick another to resize. Disk needs room for the figure above."
+					'helptext' => trim("The plans " . ($copy_default_region !== '' ? $copy_default_region : 'the region') . " sells, chosen to match this "
+						. "site's server; pick another to resize. Disk needs room for the figure above. In another region, a plan it does not "
+						. "sell is refused, naming the ones it does."
 						. ($node->get('mgn_container_name') ? ' A container site\'s size is its whole shared server\'s, so a smaller plan often fits.' : ''))]);
 			} else {
 				$fw->textinput('copy_type_' . $copy_p, 'Instance type' . (count($copy_providers) > 1 ? ' at ' . $copy_label : ''),
 					['value' => $copy_same,
 					'helptext' => $copy_label . '\'s plan list did not answer. Its plan id'
-						. ($copy_driver instanceof CloudInstanceTypes ? ', such as ' . $copy_driver->defaultInstanceType() : '') . '.']);
+						. ($copy_driver instanceof CloudInstanceTypes ? ', such as ' . $copy_driver->defaultInstanceType($copy_default_region) : '') . '.']);
 			}
 		}
 		// The source's root SSH keys: shown by fingerprint, carried only when ticked.

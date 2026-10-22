@@ -27,6 +27,7 @@ harness_boot();
 /** Tests that read only files they make themselves, never a repo script, with why. */
 $fixture_only = array(
 	'tests/unit/rollback_previous_release_test.php' => 'reads the fixture trees it builds in a temporary folder',
+	'tests/backups/backup_download_test.php' => 'reads the README it built, which names restore_project.sh, from the tar it unpacked',
 );
 
 /**

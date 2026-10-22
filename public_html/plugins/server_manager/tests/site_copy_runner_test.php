@@ -14,6 +14,8 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.8 - a copy onto a new server takes a plan its region sells: an own plan withdrawn there is not carried,
+ *               and one it does not sell is refused before anything is made (B31)
  * @version 1.7 - a kept switch-over names the old server Keep named, after its row is removed too (B22)
  * @version 1.6 - an ended copy whose row and provision were removed still names its server's instance
  * @version 1.5 - a run backs the source up first and copies the chain that backup is in (B53)
@@ -306,6 +308,11 @@ check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans, 'linod
 	'a server this management node created is copied onto its own plan');
 check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans, 'hetzner') === 'g6-nanode-1',
 	'onto another provider its plan means nothing: sized by memory instead');
+$withdrawn = function () use ($plans) {
+	return array_values(array_filter($plans(), function ($p) { return $p['id'] !== 'g6-standard-1'; }));
+};
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $withdrawn, 'linode') === 'g6-nanode-1',
+	'its own plan, no longer sold in the copy\'s region, is not carried: sized by memory instead (B31)');
 $n = new ManagedNode($src->key, TRUE);
 $n->set('mgn_container_name', 'scpsite');
 check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-nanode-1',
@@ -358,6 +365,45 @@ check($wp15_carry->invoke(null, $wp15_n, array('carry_root_keys' => true, 'key_f
 $wp15_threw = '';
 try { $wp15_carry->invoke(null, $wp15_n, array('carry_root_keys' => true, 'key_fingerprints' => $wp15_fp2)); } catch (Exception $e) { $wp15_threw = $e->getMessage(); }
 check(strpos($wp15_threw, 'changed since you looked') !== false, 'keys that differ from the ones shown are refused', $wp15_threw);
+
+// ---------------------------------------------------------------------------
+section('A copy onto a new server takes a plan its region sells (B31)');
+
+// A provider that withdrew a plan from one region and still sells it in another.
+$b31_driver = new class implements CloudInstanceTypes {
+	public function instanceTypes(string $region = ''): array {
+		$old = array('id' => 'old-1', 'memory_mb' => 2048, 'disk_mb' => 40960);
+		$new = array('id' => 'new-1', 'memory_mb' => 4096, 'disk_mb' => 81920);
+		return array('east' => array($old, $new), 'west' => array($new), 'nowhere' => array())[$region] ?? array($old, $new);
+	}
+	public function defaultRegion(): string { return 'east'; }
+	public function defaultInstanceType(string $region = ''): string { return $region === 'west' ? 'new-1' : 'old-1'; }
+	public function defaultImage(): string { return 'ubuntu-26.04'; }
+};
+OperatorCloudAccount::$driver_factory = function ($token, $provider) use ($b31_driver) { return $b31_driver; };
+harness_defer(function () { OperatorCloudAccount::$driver_factory = null; });
+$b31_oca = new OperatorCloudAccount(NULL);
+$b31_oca->set('oca_provider', 'linode');
+$b31_oca->set('oca_account_name', 'B31 plans ' . $tag);
+$b31_oca->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+$b31_oca->set('oca_status', OperatorCloudAccount::STATUS_ACTIVE);
+$b31_oca->store_credential('b31-token-' . $tag);
+$b31_oca->save();
+harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $b31_oca->key);
+$b31_start = function (string $region, string $type) use ($src, $b31_oca) {
+	try {
+		SiteCopyRunner::start_new_server($src, array('account' => 'oca:' . (int)$b31_oca->key, 'region' => $region, 'type' => $type), 1);
+	} catch (Exception $e) {
+		return $e->getMessage();
+	}
+	return '';
+};
+$b31_why = $b31_start('west', 'old-1');
+check(strpos($b31_why, 'does not sell plan old-1 in west. Plans sold there: new-1.') !== false && SiteCopy::live_for_source((int)$src->key) === null,
+	'a plan the region does not sell is refused with the plans it does, and nothing is made', $b31_why);
+$b31_why = $b31_start('nowhere', 'new-1');
+check(strpos($b31_why, 'sells no plan in nowhere') !== false && SiteCopy::live_for_source((int)$src->key) === null,
+	'a region that sells no plan is refused, and nothing is made', $b31_why);
 
 // ---------------------------------------------------------------------------
 section('A copy onto a server the owner brings');

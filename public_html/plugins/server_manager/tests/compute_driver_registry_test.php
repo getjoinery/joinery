@@ -19,6 +19,7 @@
  *  - nothing outside the registry, the Linode driver and the relay (born on
  *    Linode by design) builds the Linode driver by name.
  *
+ * @version 1.1 - the fake's plans take a region (B31); its own plan is kept only where the plan list has it
  * @version 1.0
  */
 
@@ -38,14 +39,14 @@ class RegistryFakeCloud implements CloudComputeProvider, CloudInstanceTypes {
 	public function bootInstance(string $instance_id): void {}
 	public function getTransfer(): array { return array('used_gb' => 0.0, 'quota_gb' => 0.0, 'billable_gb' => 0.0); }
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array { return array('ip' => $ip, 'rdns' => $hostname); }
-	public function instanceTypes(): array {
+	public function instanceTypes(string $region = ''): array {
 		return array(
 			array('id' => 'fc-small', 'memory_mb' => 2048, 'disk_mb' => 40960),
 			array('id' => 'fc-large', 'memory_mb' => 8192, 'disk_mb' => 163840),
 		);
 	}
 	public function defaultRegion(): string { return 'fc-1'; }
-	public function defaultInstanceType(): string { return 'fc-small'; }
+	public function defaultInstanceType(string $region = ''): string { return 'fc-small'; }
 	public function defaultImage(): string { return 'fc-ubuntu-26.04'; }
 }
 
@@ -156,7 +157,11 @@ SiteCopyRunner::$chain_lister = function ($node) {
 		'objects' => array(), 'error' => null);
 };
 harness_defer(function () { SiteCopyRunner::$chain_lister = null; });
-check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $types, 'linode') === 'g6-standard-2',
+$linode_plans = function () {
+	return array(array('id' => 'g6-standard-1', 'memory_mb' => 2048, 'disk_mb' => 51200),
+		array('id' => 'g6-standard-2', 'memory_mb' => 4096, 'disk_mb' => 81920));
+};
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $linode_plans, 'linode') === 'g6-standard-2',
 	'at the source\'s own provider, its own plan');
 check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $types, 'fakecloud') === 'fc-large',
 	'at another, the provider\'s smallest plan with the source\'s memory');
