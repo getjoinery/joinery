@@ -23,6 +23,8 @@
  *     taken up.
  *   - Its activity log is the server's actions, by Hetzner's own command names.
  *
+ * @version 1.5 - a server's region is its location, read at the top of the server: the datacenter field it was read
+ *               from answers null, so every server read as in no region and an IP swap refused it (B43)
  * @version 1.4 - listInstances carries each server's image name, for the list of every machine we pay for
  *               (fleet_security_patching WP8)
  * @version 1.3 - root's password is set by runcmd from its hash: Hetzner's vendor data set root's password after
@@ -517,7 +519,9 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 			'ip'     => (string)($s['public_net']['ipv4']['ip'] ?? ''),
 			'ipv6'   => $v6,
 			'label'  => (string)($s['name'] ?? ''),
-			'region' => (string)($s['datacenter']['location']['name'] ?? ''),
+			// The server's own location: Hetzner's datacenter field, which carried
+			// it before, now answers null.
+			'region' => (string)($s['location']['name'] ?? ''),
 			// Hetzner has no disk encryption of its own.
 			'disk_encryption' => 'disabled',
 		);

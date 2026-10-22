@@ -15,6 +15,7 @@
  * jobs are finished by hand, as site_copy_runner does; the proof through the
  * proxy is a stand-in that answers as the copy or as the frozen site.
  *
+ * @version 1.3 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.2 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
  *               up only through a storage space, the suite had been skipping;
  *               the source on the broker's release floor
@@ -25,6 +26,11 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
+
+// The task that advances the live copies on this database takes the same lock
+// for each tick; held for the run, the tick skips while these copies are driven,
+// instead of an action here refusing ('being moved along right now').
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . SiteCopyRunner::LOCK_KEY . ')');
 require_once(PathHelper::getIncludePath('includes/dns/drivers/CloudflareDnsDriver.php'));
 
 use GuzzleHttp\Client;
@@ -523,4 +529,5 @@ ProxiedOriginMove::$sleeper = null;
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;
 JobCommandBuilder::set_shelf_listing_for_tests(null);
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();

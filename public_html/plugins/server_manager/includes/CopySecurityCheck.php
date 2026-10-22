@@ -14,6 +14,8 @@
  * machine), pass (true, false, or null when the report does not say), and
  * evidence.
  *
+ * @version 1.3 - a site on its own server is quiet when its host report says PHP-FPM is: Apache answered 'yes' to
+ *               the quiet state's 503 too, so a dormant copy always failed its quiet row (B44)
  * @version 1.2 - the rows that act as the site are the copy_probes word's
  * @version 1.1 - layers is UNKNOWN when the provider's layer is not known; the setuid row says it counts the image
  * @version 1.0
@@ -113,7 +115,10 @@ class CopySecurityCheck {
 		$add('backup', 'Its scheduled backup runs', true, $node->get('mgn_last_backup_outcome') === null ? null
 			: (string)$node->get('mgn_last_backup_outcome') === 'success',
 			'last backup ' . json_encode($node->get('mgn_last_backup_outcome')) . ' at ' . json_encode($node->get('mgn_last_backup_time')));
-		$answers = $container ? (is_array($entry) ? ($entry['answers'] ?? null) : null) : ($site_report['answers']['apache2'] ?? null);
+		// A quiet site's own pages are the quiet state's 503, so Apache answers
+		// either way; the host report marks the quiet state on PHP-FPM, which the
+		// quiet state keeps every request from.
+		$answers = $container ? (is_array($entry) ? ($entry['answers'] ?? null) : null) : ($site_report['answers']['php-fpm'] ?? null);
 		$add('quiet', $quiet ? 'Quiet, as it should be' : 'Live: no longer quiet', true,
 			$answers === null || $answers === 'unknown' ? null : (($answers === 'quiet') === $quiet), 'answers ' . json_encode($answers));
 		return $rows;

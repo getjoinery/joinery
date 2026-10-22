@@ -474,6 +474,17 @@ a whole release.
 |---|---|---|
 | To run the site's schema pass (`update_database --upgrade`) on a node without redeploying its release | Re-ran `apply_update` at the version the node already had (jobs 7493, 7496): a full redeploy of 0.8.521, its swap window included, for one `ALTER TABLE ... ADD PRIMARY KEY` | `update_database` (operate, site, no parameters): runs the site's own `utils/update_database.php --upgrade` as an apply does and posts its `UPDATE_DATABASE_RESULT` as the structured result |
 
+**2026-10-22, the site copy final test's C6 (an IP swap onto a Hetzner server this
+management node made; root login off there).** After the swap's power cycle, and again on
+the second copy, the copy's host report named failed units (`cloud-final`,
+`cloud-init-main`, `cloud-init-network`) and opened a failed-units incident. The node page
+offered no Why? or Clear for them: `unit_journal` and `reset_failed_unit` read only their
+compiled list, which has no cloud-init unit. With root login off, nothing could say why.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Why a cloud-init unit failed on a plane-made server, and to clear it once understood | Nothing: the incident stays open unexplained (copy-final's B46) | `unit_journal` and `reset_failed_unit` gain `cloud-init-local`, `cloud-init-network`, `cloud-init-main`, `cloud-init` and `cloud-final` (the three copies of the list: agent, `unit_journal.sh`, the plane) |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.
