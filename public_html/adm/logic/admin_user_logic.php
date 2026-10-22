@@ -63,14 +63,14 @@ function admin_user_logic(array $input): LogicResult {
 	// Process actions
 	$action = $input['action'] ?? $input['action'] ?? null;
 
-	// Handle GET actions.
-	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-	if(isset($input['action']) && $input['action'] == 'delete'){
+	// Delete and undelete are buttons (POST): a link is a GET any site can make
+	// the browser follow.
+	if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'delete'){
 		$user->assert_can_write($session);
 		$user->soft_delete();
 		return LogicResult::redirect('/admin/admin_users');
 	}
-	else if(isset($input['action']) && $input['action'] == 'undelete'){
+	else if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'undelete'){
 		$user->assert_can_write($session);
 		$user->undelete();
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
@@ -241,7 +241,7 @@ function admin_user_logic(array $input): LogicResult {
 				$options['altlinks']['Activate User'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'activate', 'usr_user_id' => $user->key));
 			}
 			if ($_SESSION['permission'] == 10) {
-				$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
+				$options['altlinks']['Log in as user'] = array('post' => '/admin/admin_user_login_as', 'hidden' => array('usr_user_id' => $user->key));
 			}
 		}
 	}

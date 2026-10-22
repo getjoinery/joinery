@@ -38,8 +38,8 @@ function admin_themes_logic(array $input): LogicResult {
 	// to replace it or discard the upload (specs/package_replace_on_upload.md).
 	$replace_panel = null;
 
-	// Handle form submissions and GET actions
-	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : null);
+	// Actions are buttons (POST): a link is a GET any other site can make the browser follow.
+	$action = LibraryFunctions::isFormSubmission() ? ($input['action'] ?? null) : null;
 	if (isset($input['unsigned'])) {
 		// Root refused an upload as not ours: show the warning for it.
 		$why = '';

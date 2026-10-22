@@ -33,16 +33,42 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product = new Product(NULL);
 	}
 
-	// Photo action handlers (early return — skip full product save).
-	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-	if ($product->key && isset($input['action']) && $input['action'] == 'set_primary_photo') {
+	// Actions are buttons (POST), handled ahead of the form's save, which would
+	// otherwise take one for a form with every field empty. Opening the page is
+	// a GET and changes nothing.
+	$action = LibraryFunctions::isFormSubmission() ? (string)($input['action'] ?? '') : '';
+
+	// Photo actions (early return — skip full product save).
+	if ($product->key && $action === 'set_primary_photo') {
 		$product->set_primary_photo((int)$input['photo_id']);
 		return LogicResult::redirect('/plugins/store/admin/admin_product_edit?pro_product_id='.$product->key);
 	}
 
-	if ($product->key && isset($input['action']) && $input['action'] == 'clear_primary_photo') {
+	if ($product->key && $action === 'clear_primary_photo') {
 		$product->clear_primary_photo();
 		return LogicResult::redirect('/plugins/store/admin/admin_product_edit?pro_product_id='.$product->key);
+	}
+
+	// A new version for this product.
+	if ($action === 'new_version') {
+		// Boundary: ownership stays out of subscriptions, from both directions —
+		// a tag cannot be saved onto a subscription product, and a subscription
+		// version cannot be added to a tagged product.
+		if (in_array($input['prv_price_type'] ?? '', array('day', 'week', 'month', 'year'), true)
+			&& trim((string)$product->get('pro_ownership_tag')) !== '') {
+			return LogicResult::error('This product can only be owned once, and ownership applies to '
+				. 'one-time purchases only — a subscription version cannot be added. '
+				. 'Set Ownership to "No limit" first.');
+		}
+		$product_version = new ProductVersion(NULL);
+		$product_version->set('prv_pro_product_id', $product->key);
+		$product_version->set('prv_version_name', $input['version_name']);
+		$product_version->set('prv_version_price', $input['version_price']);
+		$product_version->set('prv_price_type', $input['prv_price_type']);
+		$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
+		$product_version->set('prv_status', 1);
+		$product_version->prepare(); $product_version->save();
+		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
 	}
 
 	// Process POST actions
@@ -217,41 +243,6 @@ function admin_product_edit_logic(array $input): LogicResult {
 
 		$product->save_requirement_instances($requirement_specs);
 
-		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
-	}
-
-	// Handle GET actions for version management.
-	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-	if (($input['action'] ?? '') == 'new_version') {
-		// Boundary: ownership stays out of subscriptions, from both directions —
-		// a tag cannot be saved onto a subscription product, and a subscription
-		// version cannot be added to a tagged product.
-		if (in_array($input['prv_price_type'] ?? '', array('day', 'week', 'month', 'year'), true)
-			&& trim((string)$product->get('pro_ownership_tag')) !== '') {
-			return LogicResult::error('This product can only be owned once, and ownership applies to '
-				. 'one-time purchases only — a subscription version cannot be added. '
-				. 'Set Ownership to "No limit" first.');
-		}
-		$product_version = new ProductVersion(NULL);
-		$product_version->set('prv_pro_product_id', $product->key);
-		$product_version->set('prv_version_name', $input['version_name']);
-		$product_version->set('prv_version_price', $input['version_price']);
-		$product_version->set('prv_price_type', $input['prv_price_type']);
-		$product_version->set('prv_trial_period_days', $input['prv_trial_period_days']);
-		$product_version->set('prv_status', 1);
-		$product_version->prepare(); $product_version->save();
-		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
-	}
-	else if (($input['action'] ?? '') == 'remove_version') {
-		$product_version = new ProductVersion($input['v'], TRUE);
-		$product_version->set('prv_status', 0);
-		$product_version->prepare(); $product_version->save();
-		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
-	}
-	else if (($input['action'] ?? '') == 'activate_version') {
-		$product_version = new ProductVersion($input['v'], TRUE);
-		$product_version->set('prv_status', 1);
-		$product_version->prepare(); $product_version->save();
 		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
 	}
 

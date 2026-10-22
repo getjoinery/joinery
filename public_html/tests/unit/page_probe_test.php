@@ -20,6 +20,7 @@
  *     is refused before the database is asked.
  *   - A report carries a warning's type and place, never its text.
  *
+ * @version 1.1 - a page view does not write: GuardedPdo logs or refuses a write on GET, HEAD and OPTIONS
  * @version 1.0
  */
 
@@ -99,6 +100,66 @@ check(!$threw('INSERT INTO rql_request_logs VALUES (1)'), 'the server\'s own wri
 SystemBase::$allow_get_mutation = false;
 GuardedPdo::$read_only = false;
 check(!$threw('INSERT INTO x VALUES (1)'), 'and outside a probe nothing is refused');
+
+section('A page view does not write (GuardedPdo 1.3)');
+
+$saved_server = $_SERVER;
+$saved_sapi = GuardedPdo::$sapi;
+GuardedPdo::$sapi = 'fpm-fcgi';
+foreach (array('GET' => true, 'HEAD' => true, 'OPTIONS' => true, 'POST' => false, 'PUT' => false) as $method => $view) {
+	$_SERVER['REQUEST_METHOD'] = $method;
+	check(GuardedPdo::isPageView() === $view, $method . ($view ? ' is' : ' is not') . ' a page view');
+}
+$_SERVER['REQUEST_METHOD'] = 'GET';
+GuardedPdo::$sapi = 'cli';
+check(!GuardedPdo::isPageView(), 'the CLI (cron, tasks, scripts) never is, whatever it says its method is');
+GuardedPdo::$sapi = 'fpm-fcgi';
+
+check(!GuardedPdo::writes('SELECT 1') && !GuardedPdo::writes("  select * from usr_users where a = 'DELETE'"), 'a read is not a write');
+check(GuardedPdo::writes('INSERT INTO x VALUES (1)') && GuardedPdo::writes('WITH t AS (SELECT 1) UPDATE z SET a=1'), 'a write is');
+$name = GuardedPdo::statementName("UPDATE usr_users SET usr_email = 'someone@example.com' WHERE usr_user_id = 5");
+check($name === 'UPDATE usr_users', 'the log names the verb and table, never a value', $name);
+$trail = GuardedPdo::writer(array(
+	array('file' => $root . '/includes/GuardedPdo.php', 'line' => 1),
+	array('file' => $root . '/includes/SystemBase.php', 'line' => 2),
+	array('file' => $root . '/logic/foo_logic.php', 'line' => 30),
+	array('file' => $root . '/views/foo.php', 'line' => 4),
+));
+check($trail === array('logic/foo_logic.php:30', 'views/foo.php:4'), 'the place is the first frame past the plumbing', implode(' < ', $trail));
+
+$log_file = tempnam(sys_get_temp_dir(), 'getwrite');
+$saved_log = ini_set('error_log', $log_file);
+$_SERVER['REQUEST_URI'] = '/admin/admin_user?usr_user_id=5&action=delete';
+$threw = null;
+try {
+	for ($i = 0; $i < 3; $i++) { GuardedPdo::assertMayRun('DELETE FROM probe_test_rows WHERE id = 1'); }
+} catch (RuntimeException $e) {
+	$threw = $e->getMessage();
+}
+$logged = (string)file_get_contents($log_file);
+if (GuardedPdo::PAGE_VIEW_WRITES === 'refuse') {
+	check($threw !== null && strpos($threw, 'DELETE FROM probe_test_rows') !== false, 'a page view\'s write is refused, naming what it was');
+} else {
+	check(GuardedPdo::PAGE_VIEW_WRITES === 'log' && $threw === null, 'while logging, the write goes on');
+	check(substr_count($logged, '[GET_WRITE]') === 1, 'one line per place, not one per statement', (string)substr_count($logged, '[GET_WRITE]'));
+	check(strpos($logged, 'GET /admin/admin_user wrote (DELETE FROM probe_test_rows)') !== false, 'the line names the request without its query, and the write');
+}
+$logged_before = substr_count((string)file_get_contents($log_file), '[GET_WRITE]');
+$threw = null;
+try {
+	SystemBase::server_initiated_write(function () { GuardedPdo::assertMayRun('INSERT INTO probe_other_rows VALUES (1)'); });
+} catch (RuntimeException $e) {
+	$threw = $e->getMessage();
+}
+check($threw === null && substr_count((string)file_get_contents($log_file), '[GET_WRITE]') === $logged_before,
+	'the server\'s own write (server_initiated_write) is neither refused nor logged');
+$_SERVER['REQUEST_METHOD'] = 'POST';
+GuardedPdo::assertMayRun('INSERT INTO probe_third_rows VALUES (1)');
+check(substr_count((string)file_get_contents($log_file), '[GET_WRITE]') === $logged_before, 'a POST writes freely');
+ini_set('error_log', $saved_log === false ? '' : $saved_log);
+@unlink($log_file);
+GuardedPdo::$sapi = $saved_sapi;
+$_SERVER = $saved_server;
 
 section('A report names a place, never a message');
 

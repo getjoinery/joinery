@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.29 - On a virtual machine fwupd-refresh is masked and a failure it left is cleared: a VM has no
+#                firmware to refresh, and a slow LVFS failed the run on every VM at once, each opening an
+#                incident (B30)
 # Version: 1.28 - The kernel settings file is 99-zz-joinery-kernel.conf, applied after every file the
 #                distribution ships: as 90-joinery-kernel.conf, Ubuntu's 99-protect-links.conf set
 #                fs.protected_fifos back to 1 at every boot (site_copy_final_test C5, B34)
@@ -1039,6 +1042,27 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
         warn "the hourly security check: $(printf '%s' "${SCK_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
     fi
+fi
+
+# --- 10e. A virtual machine does not refresh firmware it does not have ----------
+# fwupd-refresh fetches firmware metadata every few hours. A virtual machine
+# has no firmware for it to update, so a run does nothing useful, and when the
+# firmware service (LVFS) is slow every VM's run fails at once and each opens
+# 'A service on the machine failed' (B30). On a VM the timer and its service
+# are masked (a package upgrade cannot switch them back on) and a failure
+# already recorded is cleared. A physical machine keeps them.
+if [[ "${IN_CONTAINER}" == 0 && "${HAVE_SYSTEMD}" == 1 ]] && command -v systemd-detect-virt >/dev/null 2>&1 \
+        && [[ "$(systemd-detect-virt --vm 2>/dev/null || true)" != "none" ]] \
+        && systemctl cat fwupd-refresh.timer >/dev/null 2>&1; then
+    if [[ "$(systemctl is-enabled fwupd-refresh.timer 2>/dev/null || true)" != "masked" ]]; then
+        systemctl stop fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1 || true
+        if systemctl mask fwupd-refresh.timer fwupd-refresh.service >/dev/null 2>&1; then
+            say "fwupd-refresh masked: a virtual machine ($(systemd-detect-virt --vm 2>/dev/null)) has no firmware to refresh"
+        else
+            warn "could not mask fwupd-refresh on this virtual machine"
+        fi
+    fi
+    systemctl reset-failed fwupd-refresh.service >/dev/null 2>&1 || true
 fi
 
 # --- 11. The kernel loads nothing a site can ask for and no machine uses -------

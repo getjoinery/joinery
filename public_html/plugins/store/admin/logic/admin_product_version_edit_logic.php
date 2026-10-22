@@ -41,6 +41,16 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 		$has_orders = $q->fetchColumn() > 0;
 	}
 
+	// The product page's Activate and Deactivate buttons, ahead of the edit
+	// form's save, which would otherwise take the button for a form with every
+	// field empty and blank the version's name.
+	$version_action = LibraryFunctions::isFormSubmission() ? ($input['action'] ?? '') : '';
+	if (($version_action === 'remove_version' || $version_action === 'activate_version') && $product_version->key) {
+		$product_version->set('prv_status', $version_action === 'activate_version' ? 1 : 0);
+		$product_version->prepare(); $product_version->save();
+		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
+	}
+
 	// Process POST actions
 	// CRITICAL: Check for POST submission
 	if (LibraryFunctions::isFormSubmission()) {
@@ -82,21 +92,6 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 			}
 		}
 
-		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
-	}
-
-	// Handle GET actions for version management.
-	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-	if (($input['action'] ?? '') == 'remove_version') {
-		$product_version = new ProductVersion($input['product_version_id'], TRUE);
-		$product_version->set('prv_status', 0);
-		$product_version->prepare(); $product_version->save();
-		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
-	}
-	else if (($input['action'] ?? '') == 'activate_version') {
-		$product_version = new ProductVersion($input['product_version_id'], TRUE);
-		$product_version->set('prv_status', 1);
-		$product_version->prepare(); $product_version->save();
 		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
 	}
 

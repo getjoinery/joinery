@@ -26,6 +26,15 @@
 			echo "<p>Access denied. Administrator permissions (level 10) required to run database updates.</p>";
 			exit;
 		}
+
+		// A button on the Utilities page (POST), never a link: a link is a GET
+		// any other site can make the browser follow.
+		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+			http_response_code(405);
+			echo "<h1>405 Method Not Allowed</h1>";
+			echo "<p>Run database updates with the buttons on the <a href='/admin/admin_utilities'>Utilities</a> page.</p>";
+			exit;
+		}
 	}
 
 	// Migrations are now loaded automatically by the Migration class

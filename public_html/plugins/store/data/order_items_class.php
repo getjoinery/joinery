@@ -375,6 +375,25 @@ function get_order() {
 		return $provider_id;
 	}
 
+	/**
+	 * What a subscription costs, as a person reads it: the site's currency and
+	 * the plan's own period ('$29.99/year'). No period when the version is gone
+	 * or is not a subscription, rather than a guessed '/month'.
+	 */
+	function subscription_price_label(): string {
+		$symbol = CurrencyHelper::symbol(Globalvars::get_instance()->get_setting('site_currency')) ?? '$';
+		$label = $symbol . number_format((float)$this->get('odi_price'), 2);
+		$version_id = (int)$this->get('odi_prv_product_version_id');
+		if ($version_id) {
+			$version = new ProductVersion($version_id, TRUE);
+			$period = $version->key ? $version->is_subscription() : false;
+			if ($period) {
+				$label .= '/' . $period;
+			}
+		}
+		return $label;
+	}
+
 	function readable_subscription_status(){
 		$settings = Globalvars::get_instance(); 
 		$session = SessionControl::get_instance();

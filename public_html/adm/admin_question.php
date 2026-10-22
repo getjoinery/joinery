@@ -29,7 +29,6 @@
 
 	$options['title'] = 'Question '.$question->key;
 	$options['altlinks'] = array('Edit Question' => '/admin/admin_question_edit?qst_question_id='.$question->key);
-	$options['altlinks'] += array('Delete Question' => '/admin/admin_question_permanent_delete?qst_question_id='.$question->key);
 	if(!$question->get('qst_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_question', 'hidden' => array('action' => 'delete', 'qst_question_id' => $question->key));
 	}

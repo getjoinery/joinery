@@ -38,10 +38,10 @@ class Activation {
 			return FALSE;
 		}
 
-		// Attempt to activate a user
+		// Attempt to activate a user. The mailed link's secret authorizes this,
+		// not the session cookie, so no other site can make it; the link is a GET.
 		if (!$user->get('usr_email_is_verified')) {
-			// The user is valid
-			$user->email_verify_user(TRUE, TRUE);
+			SystemBase::server_initiated_write(function () use ($user) { $user->email_verify_user(TRUE, TRUE); });
 		}
 
 		return $user;

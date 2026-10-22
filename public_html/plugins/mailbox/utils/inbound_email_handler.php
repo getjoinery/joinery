@@ -28,6 +28,8 @@
  * returned: deferred past the queue lifetime, Postfix bounces it
  * (InboundDeferralExpiry).
  *
+ * @version 1.6 - a message arriving while the mailbox is switched off is deferred (and, on its last retry,
+ *               dropped and logged like any deferral), not accepted with nothing stored
  * @version 1.5 - the database is first read inside the try, and a fatal error defers instead of
  *                exiting 255 (which Postfix bounces)
  * @version 1.4 - logs a 67 as a lookup/router mismatch; drops a deferral that would expire into a bounce
@@ -83,8 +85,11 @@ try {
 	// Master switch. Inside the try: it is the handler's first database read,
 	// and a database that is down must defer the message, never bounce it.
 	$settings = Globalvars::get_instance();
+	// Switched off, a message is deferred like any other, never accepted: 0
+	// told the sender it was delivered while nothing stored it. Postfix keeps
+	// it and retries, so it arrives once the mailbox is switched on.
 	if (!$settings->get_setting('mailbox_enabled')) {
-		exit(0); // Accept silently when disabled
+		exit(InboundDeferralExpiry::defer_or_drop($raw_email, $envelope_recipient, $queue_id, 'the mailbox is switched off'));
 	}
 
 	// Hand off to the Postfix provider, parallel to webhook providers.

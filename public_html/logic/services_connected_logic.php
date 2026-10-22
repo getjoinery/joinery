@@ -44,7 +44,10 @@ function services_connected_logic(array $input): LogicResult {
 		return LogicResult::render(array('error' => 'The connection return has to be opened as a page.'));
 	}
 
-	$result = ServicesClient::finishConnect($input);
+	// Third-party redirect: getjoinery sends the browser back with a GET, and
+	// storing the keys is the request's purpose. The one-time state it carries
+	// (checked in finishConnect) is what no other site can supply.
+	$result = SystemBase::server_initiated_write(function () use ($input) { return ServicesClient::finishConnect($input); });
 	$_SESSION['setup_services_connect_result'] = $result;
 	return LogicResult::redirect('/setup?step=' . urlencode((string)$result['step']));
 }

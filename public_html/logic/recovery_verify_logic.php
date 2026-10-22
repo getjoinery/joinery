@@ -59,17 +59,20 @@ function recovery_verify_logic(array $input): LogicResult {
 	// link no longer matches and is refused — it can neither resurrect a removed
 	// address nor revert a newer choice.
 	$current = strtolower(trim((string)$user->get('usr_recovery_email')));
+	// The link's one-time secret is what authorizes these writes, not the
+	// session cookie, so no other site can make them: a mailed link is a GET.
 	if ($current === '' || $current !== $recovery_email) {
-		Activation::deleteTempCode($act_code);
+		SystemBase::server_initiated_write(function () use ($act_code) { Activation::deleteTempCode($act_code); });
 		$page_vars['ok'] = false;
 		$page_vars['message'] = 'This confirmation link no longer matches your current recovery address. Please request a fresh one from your security settings.';
 		return LogicResult::render($page_vars);
 	}
 
 	$user->set('usr_recovery_email_verified_time', gmdate('Y-m-d H:i:s'));
-	$user->save();
-
-	Activation::deleteTempCode($act_code);
+	SystemBase::server_initiated_write(function () use ($user, $act_code) {
+		$user->save();
+		Activation::deleteTempCode($act_code);
+	});
 
 	$page_vars['ok'] = true;
 	$page_vars['recovery_email'] = $recovery_email;

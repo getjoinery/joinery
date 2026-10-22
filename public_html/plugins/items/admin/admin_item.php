@@ -49,10 +49,7 @@
 	else{
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key));
 	}
-	
-	if($_SESSION['permission'] >= 8) {
-		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_item_permanent_delete?itm_item_id='.$item->key);
-	}
+
 
 	$page->begin_box($options);
 

@@ -80,7 +80,7 @@ class SubscriptionsPanel implements AdminUserPanel {
 							<div class="fw-semi-bold">
 								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
-								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
+								</a> - <?php echo htmlspecialchars($subscription->subscription_price_label()); ?>
 							</div>
 							<div class="fs-11 text-600 mt-1">
 								Status: <span class="text-success"><?php echo htmlspecialchars($status_words); ?></span><br>
@@ -119,7 +119,7 @@ class SubscriptionsPanel implements AdminUserPanel {
 							<div class="fw-semi-bold">
 								<a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $subscription->get('odi_ord_order_id'); ?>">
 									Order <?php echo $subscription->get('odi_ord_order_id'); ?>
-								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
+								</a> - <?php echo htmlspecialchars($subscription->subscription_price_label()); ?>
 							</div>
 							<div class="fs-11 text-600 mt-1">
 								Canceled: <?php echo $subscription->get_local('odi_subscription_cancelled_time'); ?>

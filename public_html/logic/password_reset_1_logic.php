@@ -19,7 +19,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('This feature is turned off');
 	}
 
-	if (isset($input['email']) || isset($input['usr_email'])){
+	// Sending the reset is the form's button (POST). A link carrying ?email= is
+	// a GET any site can make a browser follow, mailing someone a reset unasked;
+	// opening the page with one only shows the form.
+	if (LibraryFunctions::isFormSubmission() && (isset($input['email']) || isset($input['usr_email']))){
 
 		// Rate limiting: block after too many password reset requests from this IP
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));

@@ -30,7 +30,9 @@ function admin_notification_preferences_logic(array $input): LogicResult {
 	$user_id = $session->get_user_id();
 	$signals = Notify::notifiable_signals();
 
-	if (isset($input['action']) && $input['action'] === 'save') {
+	// Saving is the form's button (POST). A GET with action=save would turn
+	// every alert off, the unticked boxes arriving as nothing.
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'save') {
 		$subscribed = (isset($input['subscribe']) && is_array($input['subscribe']))
 			? $input['subscribe'] : array();
 		$emails = (isset($input['notify_email']) && is_array($input['notify_email']))

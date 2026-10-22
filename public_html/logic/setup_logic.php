@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.12 - every action, and the DNS box's, runs only on a POST: opening a step changes nothing
  * @version 2.11 - a saved backup target is made the scheduled one by save_target itself; the newest-enabled guess is gone
  * @version 2.10 - the Calendar step's protection level (action calendar_level)
  * @version 2.9.1
@@ -103,7 +104,9 @@ function setup_logic(array $input): LogicResult {
 	}
 
 	$error = '';
-	$action = (string)($input['action'] ?? '');
+	// Every action here is a button (POST); opening a step is a GET and changes
+	// nothing a person asked for.
+	$action = LibraryFunctions::isFormSubmission() ? (string)($input['action'] ?? '') : '';
 
 	// The Secure connection screen's DNS publish box: the site's own address
 	// record, written through the domain's DNS host. The box's actions arrive

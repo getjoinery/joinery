@@ -68,8 +68,8 @@ function admin_plugins_logic(array $input): LogicResult {
 		];
 	}
 
-	// Handle form submissions and GET actions
-	$action = isset($input['action']) ? $input['action'] : (isset($input['action']) ? $input['action'] : '');
+	// Actions are buttons (POST): a link is a GET any other site can make the browser follow.
+	$action = LibraryFunctions::isFormSubmission() ? (string)($input['action'] ?? '') : '';
 	$plugin_name = isset($input['plugin_name']) ? $input['plugin_name'] : (isset($input['plugin_name']) ? $input['plugin_name'] : '');
 	// An action, or the one GET that is not one: the warning for a refused
 	// upload. A bare ?show_upload=1 used to fall through to "Invalid plugin

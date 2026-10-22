@@ -132,7 +132,7 @@ function pt_create_version($product_id, $version_name, $price, $price_type = 'si
 			'prv_price_type'        => $price_type,
 			'prv_trial_period_days' => '0',
 		),
-		'GET'
+		'POST'
 	);
 
 	$versions = new MultiProductVersion(

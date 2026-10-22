@@ -215,7 +215,9 @@ class GooglePlayHelper {
 			$order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
 		}
 
-		$order_item->save();
+		// Reconciliation: the row brought into line with what Google just said,
+		// often on a page view that checked the subscription lazily.
+		SystemBase::server_initiated_write(function () use ($order_item) { $order_item->save(); });
 		return $order_item;
 	}
 

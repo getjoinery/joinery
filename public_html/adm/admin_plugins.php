@@ -51,7 +51,7 @@ $fork_help = 'Uploaded here. Deploys leave it alone, so it gets no updates from 
 
 // Build Options dropdown links
 $altlinks = array();
-$altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync_filesystem';
+$altlinks['Sync with Filesystem'] = array('post' => '/admin/admin_plugins', 'hidden' => array('action' => 'sync_filesystem'));
 $altlinks['Add New'] = '/admin/admin_marketplace';
 $altlinks['Upload ZIP'] = '/admin/admin_plugins?show_upload=1';
 

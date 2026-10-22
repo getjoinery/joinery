@@ -249,6 +249,17 @@ $permitted = array(
 	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
 	'includes/PageProbe.php'                                  => 'a page_probe grant consumed and its render report written, by the probe request itself from this machine',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
+	'includes/SessionControl.php'                             => 'a visitor event and its A/B counters, recorded on the page view they describe; and logout\'s cleanup (this device\'s remember-me token, its push destination), on whichever request ended the session',
+	'includes/LibraryFunctions.php'                           => 'the scheme a request arrived on, recorded once when it changes, on whatever request saw it',
+	'includes/Activation.php'                               => 'an email verified from its mailed link: the link\'s one-time secret, not the session, is the authority, so no other site can make it',
+	'logic/recovery_verify_logic.php'                         => 'a recovery address confirmed from its mailed link, and the link spent: the link\'s secret is the authority',
+	'data/app_bridge_tokens_class.php'                        => 'an app bridge token claimed when the app opens the bridge page: the token is the authority',
+	'logic/conversation_logic.php'                            => 'a conversation marked read, on the page view that read it',
+	'logic/conversation_thread_logic.php'                     => 'a conversation marked read, on the thread view that read it',
+	'data/sync_devices_class.php'                             => 'a sync device\'s last check-in and cursor, on whatever request the device made',
+	'data/file_share_links_class.php'                         => 'a share link\'s access count, on the page view that opened it',
+	'logic/services_connected_logic.php'                  => 'getjoinery redirecting back after Connect: storing the keys IS the request, and its one-time state is checked first',
+	'includes/joinery_direct/DirectCapability.php'            => 'a domain\'s Direct capability, cached from the DNS answer just read, on whatever request looked it up',
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',
 	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',
 	'includes/SecretReconciler.php'                           => 'sealed-secret reconciliation: dead secrets healed/flagged and the cached verdict written, on whatever cold request runs the reconciler',
@@ -259,6 +270,9 @@ $permitted = array(
 	'plugins/mailbox/includes/relay_admin.php'                => 'relay/shard reconciliation from node facts',
 	'plugins/server_manager/includes/JobResultProcessor.php'  => 'job results processed lazily on first view',
 	'plugins/store/logic/cart_charge_logic.php'               => 'payment gateway return — persisting the order IS the request',
+	'plugins/store/includes/StripeHelper.php'                 => 'a subscription row reconciled with the status Stripe just returned, on a page that shows or checks it',
+	'plugins/store/includes/AppStoreHelper.php'               => 'a subscription row reconciled with the status the App Store just returned, on a page that checks it',
+	'plugins/store/includes/GooglePlayHelper.php'             => 'a subscription row reconciled with the status Google Play just returned, on a page that checks it',
 );
 
 $found = array();

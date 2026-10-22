@@ -24,8 +24,8 @@ if (!defined('JOINERY_HARNESS_LOGIC_LOADED')) {
  *   - Saves are gated on LibraryFunctions::isFormSubmission(), which tests
  *     REQUEST_METHOD === 'POST'. The CLI has no request method, so without this
  *     simulation nothing ever saves and the logic still returns a clean result.
- *   - Actions like new_version are GET actions. Send them as POST and the form-
- *     save path claims them instead, nulling fields on the way through.
+ *   - Actions are POSTs too (a page view changes nothing, CLAUDE.md rule 7).
+ *     Send GET to test what opening the page shows.
  *
  * The superglobals are restored afterwards so one call cannot leak request state
  * into the next.
@@ -47,6 +47,13 @@ function harness_call_logic($logic_path, $logic_fn, array $data = array(), $meth
 	$_GET = ($method === 'GET') ? $data : array();
 	$_REQUEST = $data;
 	$_SERVER['REQUEST_METHOD'] = $method;
+	// A GET is a page view, exactly as on the web: a write the logic makes
+	// meets GuardedPdo's page-view check ([GET_WRITE] while it logs, a refusal
+	// once it refuses), so a suite finds a GET that writes before a person does.
+	$saved_sapi = GuardedPdo::$sapi;
+	if ($method === 'GET' || $method === 'HEAD') {
+		GuardedPdo::$sapi = 'fpm-fcgi';
+	}
 
 	try {
 		require_once(PathHelper::getIncludePath($logic_path));
@@ -55,6 +62,7 @@ function harness_call_logic($logic_path, $logic_fn, array $data = array(), $meth
 		}
 		return $logic_fn($data);
 	} finally {
+		GuardedPdo::$sapi = $saved_sapi;
 		$_POST = $saved['post'];
 		$_GET = $saved['get'];
 		$_REQUEST = $saved['req'];

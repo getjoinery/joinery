@@ -6,6 +6,10 @@
 	$session = SessionControl::get_instance();
 	//$session->set_return();
 	$session->check_permission(8);
+	// Queueing is a button (POST): a link is a GET any other site can make the browser follow.
+	if (!LibraryFunctions::isFormSubmission()) {
+		throw new SystemDisplayableError('Queue an email with the Add to Send Queue button on its page.');
+	}
 	
 	$eml_email_id = LibraryFunctions::fetch_variable('eml_email_id', 0, TRUE, 'Email id is required');
 	

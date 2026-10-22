@@ -18,6 +18,10 @@
 	//$session->set_return();
 	if (!defined('SCHEDULED_TASK_CONTEXT')) {
 		$session->check_permission(8);
+		// Sending is a button (POST): a link is a GET any other site can make the browser follow.
+		if (!LibraryFunctions::isFormSubmission()) {
+			throw new SystemDisplayableError('Send emails with the buttons on the Emails pages.');
+		}
 	}
 
 	//IF IT IS A TEST EMAIL

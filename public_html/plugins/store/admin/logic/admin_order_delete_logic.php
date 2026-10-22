@@ -19,8 +19,9 @@ function admin_order_delete_logic(array $input): LogicResult {
 
 	$page_vars = array();
 
-	// Handle POST - Process deletion
-	if (!empty($input)) {
+	// The confirm form's button (POST) deletes. Opening the page is a GET and
+	// only shows the preview: a link is a GET any site can make a browser follow.
+	if (LibraryFunctions::isFormSubmission()) {
 		$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to delete here.', $input);
 		$confirm = LibraryFunctions::fetch_variable('confirm', NULL, 1, 'You must confirm the action.', $input);
 

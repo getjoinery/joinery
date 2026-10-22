@@ -9,6 +9,12 @@ function admin_user_login_as_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
+	// A button (POST): a link is a GET any other site can make the browser
+	// follow, which would switch an admin into another account unasked.
+	if (!LibraryFunctions::isFormSubmission()) {
+		return LogicResult::error('Log in as a user with the Log in as user button on their page.');
+	}
+
 	// Validate user ID is a positive integer
 	$usr_user_id = (int) LibraryFunctions::fetch_variable_local($input, 'usr_user_id', 0);
 	if ($usr_user_id <= 0) {
