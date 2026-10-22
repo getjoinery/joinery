@@ -464,6 +464,16 @@ the copy's `log_logins`. The address it recorded could not be read, by design:
 |---|---|---|
 | Whether a request sent through the old server reached the copy carrying the visitor's own address, not the old server's | Proven on brought servers over SSH (C4, C4b); on a plane-made copy, only that the request arrived | `copy_probes` takes a one-time path token and the address the plane sent it from, and answers whether the copy's access log holds a request for that token from that address: yes or no, no address leaving the machine |
 
+**2026-10-22, migration 220 after 0.8.521 (getjoinery, getjoinery-orgs, getjoinery-developers).**
+220 gave the shared grm_group_members ids their own; the table's missing primary key could
+then be added, but only by update_database's upgrade pass, which runs in an apply. getjoinery
+(the management node) ran it from its own Utilities page. The other two had no way short of
+a whole release.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| To run the site's schema pass (`update_database --upgrade`) on a node without redeploying its release | Re-ran `apply_update` at the version the node already had (jobs 7493, 7496): a full redeploy of 0.8.521, its swap window included, for one `ALTER TABLE ... ADD PRIMARY KEY` | `update_database` (operate, site, no parameters): runs the site's own `utils/update_database.php --upgrade` as an apply does and posts its `UPDATE_DATABASE_RESULT` as the structured result |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.

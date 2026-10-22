@@ -75,7 +75,14 @@
 	} elseif (isset($argv) && in_array('--cleanup', $argv)) {
 		$cleanup = true;
 	}
-	
+
+	// --schema-ahead (CLI only): the additive half of the schema and nothing
+	// else, run by upgrade.php from the staged tree before it goes live. It
+	// needs no Composer packages, and the staged tree has none of its own.
+	if ($is_cli && isset($argv) && in_array('--schema-ahead', $argv)) {
+		exit(update_database_schema_ahead() ? 0 : 1);
+	}
+
 	// Validate Composer setup before proceeding
 	echo "\n=== COMPOSER VALIDATION ===\n";
 	require_once(PathHelper::getIncludePath('includes/ComposerValidator.php'));
@@ -123,6 +130,69 @@
 			$m = trim(strip_tags((string)$m));
 			if ($m !== '') { update_database_fact('schema_changes', mb_substr($m, 0, 200)); }
 		}
+	}
+
+	/**
+	 * --schema-ahead: every missing table and column, core and active plugins,
+	 * and nothing else.
+	 *
+	 * upgrade.php runs this from the STAGED tree a moment before that tree goes
+	 * live, so the new release's tables and columns exist while the old code is
+	 * still serving. The old code never asks for what it does not know about,
+	 * and the new code's first request finds what it writes already there.
+	 * Before it, the new code served for the seconds between the swap and the
+	 * full run below with those columns missing, and every write that named one
+	 * failed (getjoinery, 0.8.520 and 0.8.521: each agent check-in in that
+	 * window, 'Undefined column mgn_agent_test_build').
+	 *
+	 * Additive only. Type changes, keys, constraints, indexes, migrations and
+	 * drops wait for the full run after the swap, as they always have. A lock
+	 * it cannot have within a few seconds is given up rather than queued in
+	 * front of the live site's requests; the full run then adds what this did
+	 * not. Prints its changes and one UPDATE_DATABASE_RESULT line.
+	 */
+	function update_database_schema_ahead() {
+		$GLOBALS['UPDATE_DATABASE_FACTS'] = ['migrations' => [], 'schema_changes' => []];
+		$dblink = DbConnector::get_instance()->get_db_link();
+		if (!$dblink->query("SELECT pg_try_advisory_lock(99999)")->fetchColumn()) {
+			echo "update_database is already running in another process.\n";
+			return false;
+		}
+		$dblink->exec("SET lock_timeout = '5s'");
+
+		$ok = true;
+		$updater = new DatabaseUpdater(false, false, false);
+		$core = $updater->runCoreTablesOnly();
+		foreach (($core['messages'] ?? []) as $m) {
+			echo $m . "\n";
+		}
+		update_database_schema_facts($core['messages'] ?? []);
+		foreach (($core['errors'] ?? []) as $e) {
+			echo 'ERROR: ' . $e . "\n";
+			$ok = false;
+		}
+
+		if ($ok) {
+			try {
+				require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+				$plugin_tables = PluginManager::getInstance()->syncTables();
+				$plugin_messages = array_map(function ($m) { return 'plugin: ' . $m; }, (array)$plugin_tables['messages']);
+				foreach ($plugin_messages as $m) {
+					echo $m . "\n";
+				}
+				update_database_schema_facts($plugin_messages);
+				foreach ($plugin_tables['errors'] as $e) {
+					echo 'ERROR: ' . $e . "\n";
+					$ok = false;
+				}
+			} catch (Exception $e) {
+				echo 'ERROR: plugin tables: ' . $e->getMessage() . "\n";
+				$ok = false;
+			}
+		}
+
+		echo "UPDATE_DATABASE_RESULT: " . json_encode($GLOBALS['UPDATE_DATABASE_FACTS']) . "\n";
+		return $ok;
 	}
 
 	function update_database($verbose=false, $upgrade=false, $cleanup=false){
@@ -236,6 +306,10 @@
 			// Display results
 			if (!empty($primary_key_result['messages'])) {
 				echo implode('<br>', $primary_key_result['messages']) . "<br>\n";
+				update_database_schema_facts($primary_key_result['messages']);
+			}
+			if ($verbose && !empty($primary_key_result['notes'])) {
+				echo implode('<br>', $primary_key_result['notes']) . "<br>\n";
 			}
 			
 			if (!empty($primary_key_result['warnings'])) {
@@ -262,6 +336,10 @@
 		// Display constraint results
 		if (!empty($constraint_result['messages'])) {
 			echo implode('<br>', $constraint_result['messages']) . "<br>\n";
+			update_database_schema_facts($constraint_result['messages']);
+		}
+		if ($verbose && !empty($constraint_result['notes'])) {
+			echo implode('<br>', $constraint_result['notes']) . "<br>\n";
 		}
 
 		if (!empty($constraint_result['warnings'])) {
@@ -286,6 +364,10 @@
 
 		if (!empty($index_result['messages'])) {
 			echo implode('<br>', $index_result['messages']) . "<br>\n";
+			update_database_schema_facts($index_result['messages']);
+		}
+		if ($verbose && !empty($index_result['notes'])) {
+			echo implode('<br>', $index_result['notes']) . "<br>\n";
 		}
 
 		if (!empty($index_result['warnings'])) {
@@ -591,6 +673,10 @@
 		$fk_result = $database_updater->manageForeignKeys($classes);
 		if (!empty($fk_result['messages'])) {
 			echo implode('<br>', $fk_result['messages']) . "<br>\n";
+			update_database_schema_facts($fk_result['messages']);
+		}
+		if ($verbose && !empty($fk_result['notes'])) {
+			echo implode('<br>', $fk_result['notes']) . "<br>\n";
 		}
 		if (!empty($fk_result['warnings'])) {
 			foreach ($fk_result['warnings'] as $warning) {

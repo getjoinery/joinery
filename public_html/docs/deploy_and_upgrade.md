@@ -737,13 +737,14 @@ A download serves the archive `publish_upgrade.php` wrote to `static_files/theme
    - Plugin class loading
    - Bootstrap/core components
 4. DeploymentHelper preserves extensions marked `receives_upgrades: false`
-5. Backup current installation to public_html_last/
-6. Deploy staged files to public_html/
-7. Keep the previous maintenance_scripts/ and RELEASE_MANIFEST(.sig) under public_html_last/.release_last, then sync the staged maintenance_scripts/ into the site root (files the release stopped shipping are removed once it passes its deploy tier)
-8. Fix permissions (`fix_permissions.sh --production`: the code to root at 755/644, the data to www-data)
-9. Run composer_install_if_needed.php (composer under umask 022), then fix permissions again, so what composer installed is owned and moded like the tree
-10. Run database migrations (update_database.php)
-11. Run the deploy test tier against the new code
+5. Add the new release's missing tables and columns while the old code serves (`DeploymentHelper::schemaAhead`)
+6. Backup current installation to public_html_last/
+7. Give the staged tree the executable set's modes (directories and `*.sh` 755, other files 644), then deploy it to public_html/
+8. Keep the previous maintenance_scripts/ and RELEASE_MANIFEST(.sig) under public_html_last/.release_last, then sync the staged maintenance_scripts/ into the site root (files the release stopped shipping are removed once it passes its deploy tier)
+9. Fix permissions (`fix_permissions.sh --production`: the code to root at 755/644, the data to www-data)
+10. Run composer_install_if_needed.php (composer under umask 022), then fix permissions again, so what composer installed is owned and moded like the tree
+11. Run database migrations (update_database.php)
+12. Run the deploy test tier against the new code
 
 If ANY step fails → Automatic rollback of the whole previous release (public_html, maintenance_scripts, the manifest pair)
 ```
@@ -764,6 +765,8 @@ If ANY step fails → Automatic rollback of the whole previous release (public_h
 ```
 
 The code is swapped by moving, not copying: the live tree's contents move into `public_html_last/` and the staged tree's contents move into `public_html/`. On one filesystem each move is a rename. A successful upgrade removes `public_html_last/` and every `public_html_failed_*`; a rollback keeps only the newest failed tree, removing older ones. User data (uploads, static_files, backups, cache, logs, config, vendor) lives beside `public_html/`, never in it, so an upgrade never copies it. Staging and the archives stay beside the code and out of `uploads/`: user data may be on another filesystem (the data root, `/srv/joinery`), and a staged tree there would be copied into place file by file instead of renamed.
+
+The new code serves from the moment it is moved in, so two things are done to it first. Its tables and columns are added while the old code still serves: `DeploymentHelper::schemaAhead()` runs the staged tree's own `utils/update_database.php --schema-ahead`, which creates missing tables and adds missing columns, core and active plugins, and nothing else. Type changes, keys, constraints, indexes and migrations wait for the full run in step 11. The staged tree finds its site's settings and Composer packages beside it, so the site's `config/` and `vendor/` are lent into the staging directory as links for that one run. The staged tree's own `cache/` and `logs/` are not lent, so nothing it builds reaches the live site. A lock it cannot get within five seconds is given up rather than queued in front of live requests, and a pass that does not complete costs only its head start, since step 11 adds the same. The old code never asks for a column it does not know about. The staged tree is also given the modes `fix_permissions.sh` gives the executable set, so the PHP pool can read it the moment it serves. Only the owner is left to step 9.
 
 Before downloading, an upgrade checks for free space in the deploy root measured from the size of the live code tree: three times that (the archives, the staged copy, and a failed copy if it rolls back), and never less than 500 MB.
 

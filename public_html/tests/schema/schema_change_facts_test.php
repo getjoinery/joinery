@@ -20,6 +20,11 @@
  * class-loading debug output (about 250 KB a run) that pushed the rest of the
  * upgrade's transcript past the agent's output cap (B81, 2026-10-17).
  *
+ * The same holds for the primary-key, unique-constraint, index and foreign-key
+ * steps: a key added to a table that lacked one is a change, and it reaches the
+ * apply result (a site that gained its grm_group_members key on 0.8.521 showed
+ * no schema change at all); 'already exists' and 'Checking' are notes.
+ *
  * Runs inside a transaction that is rolled back, so it persists nothing.
  *
  * CLI:  php tests/schema/schema_change_facts_test.php
@@ -35,6 +40,15 @@ class SchemaFactsStub {
 	public static $field_specifications = array(
 		'zsf_id'   => array('type' => 'int8', 'serial' => true),
 		'zsf_name' => array('type' => 'varchar(64)', 'is_nullable' => false),
+	);
+}
+
+class SchemaFactsKeyStub {
+	public static $tablename = 'zz_schema_facts_keys';
+	public static $pkey_column = 'zsk_id';
+	public static $field_specifications = array(
+		'zsk_id'   => array('type' => 'int8', 'serial' => true),
+		'zsk_code' => array('type' => 'varchar(32)', 'unique' => true),
 	);
 }
 
@@ -69,6 +83,29 @@ try {
 	$quiet = new DatabaseUpdater(false, true, false);
 	$r = $create->invoke($quiet, 'SchemaFactsStub', LibraryFunctions::get_tables_and_columns(), $dblink);
 	check(empty($r['notes']) && empty($r['messages']), 'a run that is not verbose has nothing to note');
+
+	section('A primary key or unique constraint added is a message; one already there is a note');
+	$dblink->exec("DROP TABLE IF EXISTS zz_schema_facts_keys CASCADE");
+	$dblink->exec("CREATE TABLE zz_schema_facts_keys (zsk_id int8 NOT NULL, zsk_code varchar(32))");
+	$dblink->exec("INSERT INTO zz_schema_facts_keys VALUES (1, 'a'), (2, 'b')");
+	ob_start();
+	$r = $updater->fixPrimaryKeys(array('SchemaFactsKeyStub'));
+	ob_end_clean();
+	$messages = implode("\n", $r['messages']);
+	$notes = implode("\n", $r['notes']);
+	check(strpos($messages, 'FIXED: Added primary key constraint to zz_schema_facts_keys.zsk_id') !== false,
+		'a primary key added to a table that had none is a message', $messages);
+	check(strpos($notes, 'Checking primary key for SchemaFactsKeyStub') !== false && strpos($messages, 'Checking') === false,
+		'looking at the table is a note', $notes);
+	$r = $updater->fixPrimaryKeys(array('SchemaFactsKeyStub'));
+	check(empty($r['messages']) && strpos(implode("\n", $r['notes']), 'already has primary key constraint') !== false,
+		'a second run changes nothing and says so only as a note', json_encode($r));
+	$r = $updater->manageUniqueConstraints(array('SchemaFactsKeyStub'));
+	check(strpos(implode("\n", $r['messages']), 'Added unique constraint') !== false,
+		'a unique constraint added is a message', json_encode($r['messages']));
+	$r = $updater->manageUniqueConstraints(array('SchemaFactsKeyStub'));
+	check(empty($r['messages']) && strpos(implode("\n", $r['notes']), 'Unique constraint already exists') !== false,
+		'one already there is a note', json_encode($r));
 } finally {
 	$dblink->rollBack();
 }
@@ -78,6 +115,10 @@ $udb = (string)file_get_contents(PathHelper::getIncludePath('utils/update_databa
 preg_match_all('/update_database_schema_facts\(([^;]*)\);/', $udb, $calls);
 $bad = array_filter($calls[1], function ($a) { return strpos($a, 'notes') !== false; });
 check(count($calls[1]) >= 3 && !$bad, 'update_database records messages as facts and never notes', json_encode($calls[1]));
+$recorded = implode(' ', $calls[1]);
+$steps = array('primary_key_result', 'constraint_result', 'index_result', 'fk_result');
+$missing = array_filter($steps, function ($v) use ($recorded) { return strpos($recorded, '$' . $v . "['messages']") === false; });
+check(!$missing, 'the key, constraint, index and foreign-key steps record their changes too', json_encode(array_values($missing)));
 $up = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 $at = strpos($up, '$update_cmd = ');
 $line = $at === false ? '' : substr($up, $at, strpos($up, "\n", $at) - $at);
