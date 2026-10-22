@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.15 - a session whose account no longer exists ends without writing a logout row, a vault audit
+ *                 row or token cleanup against the missing user (logout(true))
  * @version 1.14 - a visitor event and its A/B counters, and logout's cleanup (this device's remember-me token, its push
  *                 destination), are the server's own writes (server_initiated_write), so a page view may make them
  * @version 1.13 - the session's network check covers IPv6 (a /32) beside IPv4 (a /16), keeping one
@@ -828,14 +830,20 @@ class SessionControl{
 	 * the server ends a session itself (a revoked app key, a disabled account),
 	 * so the cleanup writes below are the server's own: a session that has ended
 	 * forgets this device and stops its pushes, whoever ended it.
+	 *
+	 * $account_gone: the session's account row no longer exists (deleted for
+	 * good). Its rows went with it, so nothing is recorded against it — no
+	 * logout row, no token cleanup, no vault audit, no push retire, each of
+	 * which would leave a row naming a user that is not there. The vault
+	 * window's keys are still wiped and the session still ends.
 	 */
-	function logout() {
-		if($this->get_user_id()) {
+	function logout(bool $account_gone = false) {
+		if($this->get_user_id() && !$account_gone) {
 			Login::record_logout($this->get_user_id());
 		}
 
 		// Remove this device's remember-me token from the user's token list
-		if (!empty($_COOKIE['tt']) && $this->get_user_id()) {
+		if (!empty($_COOKIE['tt']) && $this->get_user_id() && !$account_gone) {
 			$raw_token = $_COOKIE['tt'];
 			if (preg_match('/^[0-9a-f]{64}$/', $raw_token)) {
 				try {
@@ -862,7 +870,7 @@ class SessionControl{
 		if ($this->get_user_id()) {
 			try {
 				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-				VaultUnlock::close($this->get_user_id(), 'user', VaultAudit::REASON_LOGOUT);
+				VaultUnlock::close($this->get_user_id(), 'user', VaultAudit::REASON_LOGOUT, !$account_gone);
 			} catch (\Throwable $e) {
 				error_log('logout: vault window close failed: ' . $e->getMessage());
 			}
@@ -870,7 +878,7 @@ class SessionControl{
 
 		// Signing out on a browser stops its push notifications: the next person
 		// at it must not get this member's alerts.
-		if ($this->get_user_id() && PushSender::device_token() !== null) {
+		if ($this->get_user_id() && !$account_gone && PushSender::device_token() !== null) {
 			try {
 				SystemBase::server_initiated_write(function () {
 					PushSender::retire_device((int)$this->get_user_id(), PushSender::device_token());
@@ -1244,7 +1252,9 @@ class SessionControl{
 			error_log('SessionControl: account standing not checked: ' . $e->getMessage());
 			return;
 		}
-		if (!$user->key || $user->get('usr_delete_time') || !$user->actions_allowed()
+		if (!$user->key) {
+			$this->logout(true);
+		} elseif ($user->get('usr_delete_time') || !$user->actions_allowed()
 				|| (int)($_SESSION['session_generation'] ?? 0) !== (int)$user->get('usr_session_generation')) {
 			$this->logout();
 		}

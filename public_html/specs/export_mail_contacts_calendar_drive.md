@@ -1,6 +1,6 @@
 # Export Mail, Contacts, Calendar and Drive
 
-**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`, released in 0.8.520. WP3 (calendar) built and reviewed 2026-10-22, released in 0.8.521 and checked on getjoinery; the Google Calendar import is in the live verification queue. WP4 (Drive folder zip) built and reviewed 2026-10-22, live walk on dev passed; the checks after release are in the live verification queue. WP1 is not built. No questions are open.
+**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`, released in 0.8.520. WP3 (calendar) built and reviewed 2026-10-22, released in 0.8.521 and checked on getjoinery; the Google Calendar import is in the live verification queue. WP4 (Drive folder zip) built and reviewed 2026-10-22, released in 0.8.524, live walk on dev passed; the checks after release are in the live verification queue (getjoinery has Drive off). WP1 is not built. No questions are open.
 
 Everything else from the first draft (member data download, closing an account, admin list exports, member import, backup download and restore from a file) is in `DEFERRED_data_portability.md`.
 
@@ -216,6 +216,11 @@ Found in review of WP4, all fixed with it:
 - **B24.** A deflate step that failed was skipped, leaving a short entry and a broken archive with no error. It now throws.
 - **B25.** A Fortress zip held in the tab saved its parts with clicks the page made itself, long after the member's; Safari blocks those and Firefox may ask for each. Each part now waits for the member's own Save press, and the tree is listed first so only one part is held at a time.
 - **B26.** A member's own file named `Files not included.txt` in the top folder would have shared its name with the note. The note now takes the next free name.
+
+Found while checking WP4 after its release, fixed:
+
+- **B27.** On a site with Drive off, `/drive` answered a 500 error page with an error reference ('Drive is not available.'), because the page had no route of its own and its logic's refusal was rendered as a failure. Every other Drive URL was gated on `drive_active`; `/drive` now is too (serve.php 1.16.0), so it is a 404.
+- **B28.** A WP4 walk left a `log_logins` row (a logout) and a vault-closed audit row naming its walk user after the user was deleted, failing `referential_integrity`. The browser still held that user's session; its next request found the account gone and signed it out, and `logout()` wrote both rows against the missing id. A session whose account no longer exists now ends without writing anything in its name (`SessionControl::logout(true)`, `VaultUnlock::close(..., $audit = false)`); the window's keys are still wiped.
 
 ## Decided
 

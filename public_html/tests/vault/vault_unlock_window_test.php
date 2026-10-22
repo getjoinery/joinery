@@ -113,5 +113,24 @@ check(!VaultUnlock::hasAnyOpenWindow($uid), 'an expired marker reads as no-windo
 check(!file_exists($marker), 'and is reclaimed opportunistically');
 VaultUnlock::close($uid);
 
+section('A close without an audit row');
+// For an account that no longer exists (SessionControl::logout(true)): the
+// window's keys go, and nothing is written to the audit log in its name.
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+check(VaultUnlock::isOpen($uid, $scope), 'a window is open');
+$count_closes = function () use ($uid) {
+	$q = DbConnector::get_instance()->get_db_link()->prepare(
+		"SELECT COUNT(*) FROM evl_event_logs WHERE evl_usr_user_id = ? AND evl_event = ?");
+	$q->execute(array($uid, VaultAudit::EVENT_CLOSED));
+	return (int)$q->fetchColumn();
+};
+$before = $count_closes();
+VaultUnlock::close($uid, $scope, VaultAudit::REASON_LOGOUT, false);
+check(!VaultUnlock::isOpen($uid, $scope), 'close(..., false) ends the window');
+check($count_closes() === $before, 'and writes no close row');
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+VaultUnlock::close($uid, $scope, VaultAudit::REASON_LOGOUT);
+check($count_closes() === $before + 1, 'an ordinary close still writes its row');
+
 harness_finish();
 ?>
