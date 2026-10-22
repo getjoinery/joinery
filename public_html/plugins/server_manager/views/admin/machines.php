@@ -12,6 +12,7 @@
  *
  * Reading the providers takes a second or two per account.
  *
+ * @version 1.1 - a node with no agent offers Write down: a note is the only thing that can say what it runs
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -47,7 +48,8 @@ $page->begin_box(array());
 <p>Every machine we pay for: those this management node manages, every server in our own cloud accounts, and those
 written down by hand for accounts no key here can read. A server no node manages is listed so it is converted, retired,
 or written down. <strong>Red</strong>: an Ubuntu release past standard support, or a retire-by date passed.
-<strong>Amber</strong>: a server nothing explains, or a written-down machine not confirmed for
+<strong>Amber</strong>: a server nothing explains, a node with no agent and nothing written saying what it runs,
+or a written-down machine not confirmed for
 <?php echo (int)FleetHandMachine::CONFIRM_DAYS; ?> days. The test account's servers are not listed: they are thrown away nightly.</p>
 
 <p>
@@ -90,7 +92,7 @@ or written down. <strong>Red</strong>: an Ubuntu release past standard support, 
 				<?php echo $hm['serves'] !== '' ? '<br><span class="text-muted">serves ' . $h($hm['serves']) . '</span>' : ''; ?>
 				<?php echo $hm['retire_by'] !== '' ? '<br><span class="text-muted">retire by ' . $h($hm['retire_by']) . '</span>' : ''; ?><?php endif; ?></td>
 			<td class="small"><?php if ($hm): ?><a href="/admin/server_manager/machine_edit?fhm_fleet_hand_machine_id=<?php echo (int)$hm['id']; ?>">Edit</a>
-				<?php elseif ($r['kind'] === 'unmanaged'): ?><a href="/admin/server_manager/machine_edit?ref=<?php echo urlencode($r['ref']); ?>&amp;name=<?php echo urlencode($r['name']); ?>&amp;address=<?php echo urlencode($r['address']); ?>">Write down</a><?php endif; ?></td>
+				<?php elseif ($r['kind'] === 'unmanaged' || ($r['kind'] === 'managed' && empty($r['agent']))): ?><a href="/admin/server_manager/machine_edit?ref=<?php echo urlencode($r['ref']); ?>&amp;name=<?php echo urlencode($r['name']); ?>&amp;address=<?php echo urlencode($r['address']); ?>">Write down</a><?php endif; ?></td>
 		</tr>
 	<?php endforeach; ?>
 	</tbody>

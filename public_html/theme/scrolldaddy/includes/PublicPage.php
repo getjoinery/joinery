@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.3 - its stylesheet and joinery-validate.js carry their file times, so a change reaches visitors past a cache at once
  * @version 1.2.2 - BeginPage escapes the title, as every theme does
  * @changelog 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
@@ -238,7 +239,7 @@ Career Area
     <!-- Responsive utilities (replaces Bootstrap grid/display classes) -->
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/responsive-utils.css?v=5">
     <!-- Theme Custom CSS -->
-    <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/style.css">
+    <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/scrolldaddy/assets/css/style.css'); ?>">
     <!-- ScrollDaddy Plugin CSS -->
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=18">
     <?php $this->render_theme_tail(); ?>
@@ -568,7 +569,7 @@ Career Area
 ============================== -->
 
 	<!-- Joinery Validation (Pure JS, no jQuery dependency) -->
-	<script src="/assets/js/joinery-validate.js"></script>
+	<script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
     <!-- Main Js File -->
     <script src="/theme/scrolldaddy/assets/js/main.js?v=3"></script>
     <!-- ScrollDaddy Plugin JS -->

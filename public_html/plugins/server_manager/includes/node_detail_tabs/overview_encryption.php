@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.9 - copy-key.js carries its file time, so a changed one is never served from a cache
  * @version 1.8 - the "keep the provider's layer as well" tick only on a management node; any other machine whose
  *                provider layer is on is pointed at its Copy tab (specs/site_copy_final_test.md E2)
  * @version 1.7 - Before it answers: a Tier 2 machine whose cloud account's key does not work is shown as Tier 2 that cannot
@@ -241,7 +242,7 @@ if (is_array($dre_enc) || $dre_row) {
 			. '<button type="button" class="btn btn-sm btn-warning" id="copy_key_open">Unlock</button>'
 			. '<div id="copy_key_status" class="small mt-2"></div></form>';
 		echo '<script>window.copyKeyCeremony = ' . json_encode(array('fingerprint' => $parts['fingerprint'], 'ephemeralPublic' => $parts['ephemeral'])) . ';</script>';
-		echo '<script src="/assets/js/copy-key.js"></script>';
+		echo '<script src="/assets/js/copy-key.js?v=' . filemtime(PathHelper::getIncludePath('assets/js/copy-key.js')) . '"></script>';
 		echo '</div>';
 	}
 

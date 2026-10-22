@@ -445,6 +445,14 @@ the journal, which a non-root session cannot read, and the plane has no word for
 |---|---|---|
 | Whether the data root's mount point is locked underneath it, or holds files written while it was not mounted | Read `/run/joinery/data-root.mountpoint-seen` on dev (the tick records `locked`, `mode-only`, `holds-files`, `failed` or `unreachable` there) | `host_report`'s `data_root_script` carries `mountpoint`: that file's word, or none yet this boot, so the node page can say when a host's data root is not locked underneath |
 
+**2026-10-22, the 0.8.520 live check of fleet_security_patching WP10.** The new
+`outbound_mail` check failed on galactictribune and joinerydemo ("Mailgun is not set up").
+Whether a fallback service would still send their mail could not be read from here.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Which mail service a site names, and its fallback (`email_service`, `email_fallback_service`): the names only, never a key | Read-only SSH to docker-prod, `docker exec` and the site's own PHP (galactictribune: Mailgun with no key, fallback SMTP with no host). joinerydemo has no SSH, so it stays unknown | Covered by the fix instead: the check itself names the service and the fallback (PluginProvisioning 1.5). A general `site_settings` observe word would take a closed list of non-secret setting names |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.

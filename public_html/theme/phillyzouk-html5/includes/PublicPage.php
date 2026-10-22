@@ -4,6 +4,7 @@
  * profile menu store via get_menu_data() — themes style the markup but do
  * not own the list (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.2 - its stylesheets and scripts carry their file times, so a change reaches visitors past a cache at once
  * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
  */
@@ -76,8 +77,8 @@ class PublicPage extends PublicPageBase {
     <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>
 
-    <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/boxicons.min.css">
-    <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/style.css">
+    <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/boxicons.min.css?v=<?php echo $this->asset_mtime('theme/phillyzouk-html5/assets/css/boxicons.min.css'); ?>">
+    <link rel="stylesheet" href="/theme/phillyzouk-html5/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/phillyzouk-html5/assets/css/style.css'); ?>">
     <?php $this->render_theme_tail(); ?>
     <link rel="icon" type="image/png" href="/theme/phillyzouk-html5/assets/images/favicon.png">
 </head>
@@ -243,8 +244,8 @@ class PublicPage extends PublicPageBase {
     <div class="go-top">&#8679;</div>
     <?php endif; ?>
 
-    <script src="/assets/js/joinery-validate.js"></script>
-    <script src="/theme/phillyzouk-html5/assets/js/script.js"></script>
+    <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
+    <script src="/theme/phillyzouk-html5/assets/js/script.js?v=<?php echo $this->asset_mtime('theme/phillyzouk-html5/assets/js/script.js'); ?>"></script>
     <script>
         // Mobile menu toggle
         const menuToggle = document.querySelector('.menu-toggle');

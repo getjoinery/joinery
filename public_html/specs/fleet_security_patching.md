@@ -3,7 +3,8 @@
 **Status:** Draft, 2026-10-21. Written after the PHP2Shell patch day by oldmigration at the
 owner's request ("write all of these up in a spec and we'll start working through it").
 Q1–Q6 are decided (2026-10-21). Q1 and Q4 went to their own specs. WP1–WP6 and WP7's warning
-were released in 0.8.519 (2026-10-22). WP8–WP10 and WP3's lost-.deb fix are built (not released).
+were released in 0.8.519 (2026-10-22). WP8–WP10, B8 and WP3's lost-.deb fix were released in 0.8.520 (2026-10-22); its live check found
+B18, B19 and B20, fixed and not yet released (see "0.8.520 live check").
 Open: Q7, and Q8 before WP7's automated live test can be built. See "Progress" below.
 
 ## The owner's goal in plain terms
@@ -230,7 +231,7 @@ owner's local `~/work-tool` repository.
 
 ## Progress (2026-10-22)
 
-Built, uncommitted, not released. Gates: site_refresh 153+, host_report 236, security_check 20,
+WP1–WP6 and WP7's warning: released in 0.8.519. WP8–WP10, B8 and the lost .deb fix: released in 0.8.520. Gates: site_refresh 153+, host_report 236, security_check 20,
 install_security_updates 48, fleet_security 34, job_result_processor 411, incident_sources 130,
 job_command_builder 566, agent_machine_scripts_bundled 88, agent `go test ./...` green. reviewer2
 reviewed WP4 (A–E, F1–F4, all taken).
@@ -400,6 +401,46 @@ reviewed WP4 (A–E, F1–F4, all taken).
 - **docker-prod, 2026-10-22 02:56 UTC.** Refresh now (job 7049) built base 2.2 and replaced all
   six sites, 11.8 to 15.8 s down each. The public probes agree: one 502 burst per site. There
   were no forced stops and no PostgreSQL recovery.
+
+**0.8.520 live check (2026-10-22, from 13:25 UTC, rollout still running).**
+
+- **Machines page, getjoinery:** 10 rows; 5 green, 2 amber, 3 grey. The two amber rows are servers
+  in our Linode account that no node manages: drive-test (made 08-06) and test_2404 (made 06-22).
+  Each waits on the owner: write it down or retire it. The 3 grey rows found B18.
+- **B18 (fixed, not released).** The relay and the two ScrollDaddy DNS servers are nodes with no
+  agent, by standing decision, so their rows read "its host report does not say what it runs yet"
+  forever. `MachineInventory` 1.1: a note can sit on a node (`fhm_instance_ref` `node:N`, from the
+  row's Write down), and its release counts where no report does. A node with no agent and no
+  note is amber, asking for one; grey now means only an agent that has not reported yet. Test
+  machine_inventory 24/24.
+- **Theme CSS (B16), galactictribune.net:** the node serves the 1.0.11 stylesheet, but Cloudflare
+  kept serving the old one, age about 8 hours of its 12. That found B19.
+- **B19 (fixed, not released).** Fourteen links to our own stylesheets and scripts carried no
+  version: the Tailwind base page and the galactictribune, scrolldaddy, phillyzouk and getjoinery
+  themes, `copy-key.js` twice, and `form-visibility-helper.js` on three admin pages. A changed
+  file reached visitors up to 12 hours late. Each now carries its file time (`?v=`, the pattern
+  core's own assets use). New safe test `asset_link_versions` fails on a local `.css` or `.js`
+  link without one. The plugin guide's `ThemeHelper::asset()` example named a method that does
+  not exist; both theme docs now show the real pattern.
+- **Test DNS cleanup, dev:** the 13:01 run had nothing old enough to delete, reached the zone, and
+  failed nothing. Live proof set up: record `wp4dock-proof.joinerytest.com` points at wp4dock
+  (made 01:00, no keep tag). The first run after 01:00 on 10-23 should delete both.
+- **Mail check (`outbound_mail`), 14:39 UTC:** reported by 8 of the 10 sites. It passes on
+  getjoinery.com, getjoinery-orgs, mapsofwisdom, phillyzouk, scrolldaddy and jeremytunnell-vps,
+  and fails on galactictribune and joinerydemo ("Mailgun is not set up: Mailgun API key not
+  configured; Mailgun domain not configured"). galactictribune, read over SSH (no agent word
+  reads a setting): service Mailgun with no key, fallback SMTP with no host, so it really sends
+  nothing. joinerydemo has no SSH and stays unknown until B20's fix reports it. That found B20.
+- **B20 (fixed, not released).** The check read only `email_service`. The sender uses
+  `email_fallback_service` when no service is set and tries it when the service fails, so a site
+  whose fallback works was failed. `PluginProvisioning` 1.5: either one working passes, and a
+  failure names both. Test outbound_mail_check 9/9.
+- **Mail check, the last two (15:25, after a Check Status on each):** xandy passes (its mail
+  service, missing after the 10-21 conversion, is set). getjoinery-developers fails: read over
+  SSH, it names no mail service and no fallback, so it sends nothing. In all: 7 pass, 3 fail
+  (galactictribune, getjoinery-developers, joinerydemo), each a site that cannot send mail
+  today, for the owner to set up.
+- **Still to check:** containers drop docker-clean at their next replacement on docker-prod.
 
 Bugs the box proof found and fixed:
 
