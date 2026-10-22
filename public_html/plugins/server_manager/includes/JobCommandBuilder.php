@@ -5805,11 +5805,11 @@ class JobCommandBuilder {
 				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}";
 			}
 		} else {
-			// Bare metal: prerequisites, then the site. install.sh server
-			// hardens SSH (PermitRootLogin prohibit-password, no password
-			// auth) — this session survives that, and there is no next one:
-			// on a keyless box the root password was the only credential, so
-			// a bare-metal bootstrap is ONE-SHOT. retry_install refuses it.
+			// Bare metal: prerequisites, then the site. On a box whose root
+			// holds no SSH key, install.sh server leaves root password login on
+			// (derive_ssh_access): the password is the only way in, and this
+			// plane retires it itself once the machine's agents are admitted.
+			// retry_install is refused only after that (B37).
 			//
 			// _site_init.sh uses the site's DB password as PGPASSWORD for the
 			// postgres role when it runs createdb, so the site's password MUST

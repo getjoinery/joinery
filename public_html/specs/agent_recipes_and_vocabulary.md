@@ -712,3 +712,12 @@ All work packages are built and released. A `page_probe` is proven live
 ## Open questions
 
 Settled by the owner 2026-09-13; recorded in `agent_tier1_recipes.md`.
+
+**2026-10-22, the 0.8.521 live check of fleet_security_patching (B24, dev).** Dev's host
+converger read `installer-failed` on every run, and which installer failed could not be seen:
+its transcript file stopped being written on 10-13, its journal is root's, and `unit_journal`
+does not carry `joinery-host-converger`.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| The host converger's last run: its outcome, and the warn lines of the installer that failed (`joinery-host-converger`'s journal, or the converger keeping its own last transcript under `cache/`) | Read the installers' code: housekeeping's security check refuses a tree not root's alone and fails the run; proven when the fix made the next converge read `converged` | Add `joinery-host-converger` to `unit_journal`'s compiled list (and `UNIT_JOURNAL_UNITS` on the plane), or have the converger keep its last run's transcript where `host_report` can carry its last failure |

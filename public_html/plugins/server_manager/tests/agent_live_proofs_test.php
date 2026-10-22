@@ -119,5 +119,23 @@ if (is_dir(AgentDistPublisher::sourcePath() . '/primitives')) {
 	check(strpos($threw, "registers no word 'no_such_word'") !== false, 'a word the agent source does not register is refused', $threw);
 }
 
+section('The site run\'s candidate stages the core as publish does');
+
+// AgentLiveProofRun::build_candidate() stages public_html with publish's own
+// exclusions; were the two to drift, the candidate would ship what a release
+// does not (or leave out what it does), and the proof would be of another tree.
+$pub_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
+$rs_at = strpos($pub_src, "'rsync -av --exclude=.git");
+$rs_line = $rs_at !== false ? substr($pub_src, $rs_at, strpos($pub_src, "\n", $rs_at) - $rs_at) : '';
+preg_match_all('/--exclude=("?)([^ "%]+)\1/', $rs_line, $em);
+$publish_excludes = $em[2] ?? array();
+$candidate_excludes = AgentLiveProofRun::CORE_EXCLUDES;
+sort($publish_excludes);
+sort($candidate_excludes);
+check($rs_line !== '' && $publish_excludes === $candidate_excludes,
+	'the candidate leaves out of public_html exactly what publish_upgrade.php does', implode(' ', $publish_excludes) . ' | ' . implode(' ', $candidate_excludes));
+check(AgentLiveProofRun::next_version('0.8.522') === '0.8.523' && AgentLiveProofRun::next_version('1.9.0') === '1.9.1',
+	'the candidate is the version after the newest published');
+
 exec('rm -rf ' . escapeshellarg($T));
 harness_finish();
