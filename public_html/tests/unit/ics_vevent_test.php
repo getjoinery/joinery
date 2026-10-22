@@ -12,7 +12,8 @@
  * platform goes through them, so a calendar app that accepts one accepts all.
  *
  *  - text is escaped (commas, semicolons, backslashes, newlines) and times are UTC
- *  - a line over 75 octets folds, and unfolds back to the same text
+ *  - a line over 75 octets folds, and unfolds back to the same text; no fold
+ *    lands inside a UTF-8 character
  *  - a cancelled thing says so; an empty optional field is left out
  *  - the UID is {kind}-{id}[-{instance}]@{site host}, the same every time
  *  - an Event still maps onto it with the UID and fields it always had
@@ -71,6 +72,15 @@ $over = array_filter(explode("\r\n", $folded), function ($l) { return strlen($l)
 check($over === array(), 'no line is over 75 octets after folding');
 check(preg_match('/\r\n [^\r\n]/', $folded) === 1, 'a long line is continued on a line that starts with a space');
 check(str_replace("\r\n ", '', $folded) === IcsHelper::wrapInVcalendar($long), 'and unfolding gives the original text back');
+
+// Two-, three- and four-byte characters at every offset: no fold may land inside one.
+$wide = 'SUMMARY:' . str_repeat('é漢😀', 30);
+$wide_folded = IcsHelper::foldLines($wide);
+$wide_lines = explode("\r\n", $wide_folded);
+check(count($wide_lines) > 1, 'a long line of wide characters folds');
+check(array_filter($wide_lines, function ($l) { return strlen($l) > 75 || !mb_check_encoding($l, 'UTF-8'); }) === array(),
+	'every folded line is 75 octets or under and valid UTF-8 on its own');
+check(str_replace("\r\n ", '', $wide_folded) === $wide, 'and unfolding gives the original characters back');
 
 section('an Event maps onto it');
 $ev = new stdClass();

@@ -3,7 +3,8 @@
  * Member "Contacts" page, mounted at /profile/mailbox/contacts.
  *
  * Where a member manages the contacts of one mailbox at a time: add one, import
- * a .vcf / .csv, change a contact's name or address, delete one. A contact is
+ * a .vcf / .csv, download them all as either, change a contact's name or
+ * address, delete one. A contact is
  * permission for that address to reach the member directly, so nothing lands
  * here except by one of those deliberate acts.
  *
@@ -15,6 +16,7 @@
  * The list is server-rendered (mailbox_contacts_page_logic); every change is a
  * call to the mailbox API actions from mailbox_contacts.js, then a reload.
  *
+ * @version 1.1 - Download vCard / Download CSV beside the list's heading
  * @version 1.0
  */
 
@@ -93,7 +95,16 @@ $pencil = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wid
 	</div>
 
 	<div class="jy-panel">
-		<h2><?php echo count($contacts) === 1 ? '1 contact' : count($contacts) . ' contacts'; ?></h2>
+		<div class="mbx-cp-list-head">
+			<h2><?php echo count($contacts) === 1 ? '1 contact' : count($contacts) . ' contacts'; ?></h2>
+			<?php if ($contacts): ?>
+			<div class="mbx-cp-export">
+				<button type="button" class="btn btn-secondary btn-sm" data-contacts-export="vcard">Download vCard</button>
+				<button type="button" class="btn btn-secondary btn-sm" data-contacts-export="csv">Download CSV</button>
+			</div>
+			<?php endif; ?>
+		</div>
+		<p class="mbx-cp-note" role="status" data-contacts-export-note hidden></p>
 		<?php if (!$contacts): ?>
 			<p class="jy-muted">No contacts for this mailbox yet.</p>
 		<?php else: ?>
