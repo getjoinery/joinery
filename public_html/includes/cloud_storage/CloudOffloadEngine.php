@@ -348,8 +348,10 @@ class CloudOffloadEngine {
 				);
 				$upd->execute([$id]);
 				$dblink->commit();
-			} catch (PDOException $e) {
-				$dblink->rollBack();
+			} catch (Throwable $e) {
+				if ($dblink->inTransaction()) {
+					$dblink->rollBack();
+				}
 				throw new RuntimeException('DB commit failed: ' . $e->getMessage(), 0, $e);
 			}
 		} catch (Exception $e) {

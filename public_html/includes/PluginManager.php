@@ -1255,88 +1255,74 @@ class PluginManager extends AbstractExtensionManager {
             $plugin->set('plg_name', $name);
         }
 
-        $dbconnector = DbConnector::get_instance();
-        $dblink = $dbconnector->get_db_link();
-
-        $this_transaction = false;
-        if (!$dblink->inTransaction()) {
-            $dblink->beginTransaction();
-            $this_transaction = true;
-        }
-
         try {
-            // Validate dependencies
-            $validation = $this->validatePlugin($name);
-            if (!$validation['valid']) {
-                throw new Exception("Plugin validation failed: " . implode('; ', $validation['errors']));
-            }
-
-            // Create plugin tables
-            require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
-            $database_updater = new DatabaseUpdater();
-            $table_result = $database_updater->runPluginTablesOnly($name);
-            if (!$table_result['success']) {
-                throw new Exception("Plugin table creation failed: " . implode('; ', $table_result['errors']));
-            }
-
-            // Run migrations
-            $migration_results = $this->runPendingMigrations($name);
-            $migration_errors = array();
-            foreach ($migration_results as $result) {
-                if (!empty($result['error'])) {
-                    $migration_errors[] = $result['error'];
+            DbConnector::transaction(function () use ($name, $plugin) {
+                // Validate dependencies
+                $validation = $this->validatePlugin($name);
+                if (!$validation['valid']) {
+                    throw new Exception("Plugin validation failed: " . implode('; ', $validation['errors']));
                 }
-            }
-            if (!empty($migration_errors)) {
-                throw new Exception("Plugin migration failed: " . implode('; ', $migration_errors));
-            }
 
-            // Materialize declared foreign keys on the plugin's tables (after
-            // migrations, so a data-fix migration can clear orphans first)
-            $fk_result = $database_updater->manageForeignKeys(LibraryFunctions::discover_model_classes([
-                'require_tablename' => true,
-                'require_field_specifications' => true,
-                'include_plugins' => true,
-                'plugin_filter' => $name
-            ]));
-            if (!empty($fk_result['errors'])) {
-                throw new Exception("Plugin foreign key sync failed: " . implode('; ', $fk_result['errors']));
-            }
+                // Create plugin tables
+                require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
+                $database_updater = new DatabaseUpdater();
+                $table_result = $database_updater->runPluginTablesOnly($name);
+                if (!$table_result['success']) {
+                    throw new Exception("Plugin table creation failed: " . implode('; ', $table_result['errors']));
+                }
 
-            // Load metadata
-            $this->loadMetadataIntoModel($plugin, $name);
+                // Run migrations
+                $migration_results = $this->runPendingMigrations($name);
+                $migration_errors = array();
+                foreach ($migration_results as $result) {
+                    if (!empty($result['error'])) {
+                        $migration_errors[] = $result['error'];
+                    }
+                }
+                if (!empty($migration_errors)) {
+                    throw new Exception("Plugin migration failed: " . implode('; ', $migration_errors));
+                }
 
-            // Update status. A row left by an uninstall comes back as an
-            // installed plugin: the stamp and the removal request are cleared.
-            $plugin->set('plg_installed_time', gmdate('Y-m-d H:i:s'));
-            $plugin->set('plg_status', 'inactive');
-            $plugin->set('plg_uninstalled_time', null);
-            $plugin->set('plg_install_error', null);
-            $this->setRemoveRequestId($plugin, '');
-            $plugin->save();
+                // Materialize declared foreign keys on the plugin's tables (after
+                // migrations, so a data-fix migration can clear orphans first)
+                $fk_result = $database_updater->manageForeignKeys(LibraryFunctions::discover_model_classes([
+                    'require_tablename' => true,
+                    'require_field_specifications' => true,
+                    'include_plugins' => true,
+                    'plugin_filter' => $name
+                ]));
+                if (!empty($fk_result['errors'])) {
+                    throw new Exception("Plugin foreign key sync failed: " . implode('; ', $fk_result['errors']));
+                }
 
-            // An active sandboxed plugin whose files were replaced: what it
-            // owns follows its new manifest at once, within what was approved
-            // (anything more waits on an admin's approval).
-            if (SandboxPlugins::isSandboxed($name) && $plugin->is_active()) {
-                SandboxPluginManager::reconcile($name);
-                $this->syncMenus($name, SandboxPluginManager::menus($name));
-                $this->keepStoredMetadata($plugin);
-            }
+                // Load metadata
+                $this->loadMetadataIntoModel($plugin, $name);
 
-            if ($this_transaction) {
-                $dblink->commit();
-            }
-        } catch (Exception $e) {
-            if ($this_transaction && $dblink->inTransaction()) {
-                $dblink->rollBack();
-            }
+                // Update status. A row left by an uninstall comes back as an
+                // installed plugin: the stamp and the removal request are cleared.
+                $plugin->set('plg_installed_time', gmdate('Y-m-d H:i:s'));
+                $plugin->set('plg_status', 'inactive');
+                $plugin->set('plg_uninstalled_time', null);
+                $plugin->set('plg_install_error', null);
+                $this->setRemoveRequestId($plugin, '');
+                $plugin->save();
+
+                // An active sandboxed plugin whose files were replaced: what it
+                // owns follows its new manifest at once, within what was approved
+                // (anything more waits on an admin's approval).
+                if (SandboxPlugins::isSandboxed($name) && $plugin->is_active()) {
+                    SandboxPluginManager::reconcile($name);
+                    $this->syncMenus($name, SandboxPluginManager::menus($name));
+                    $this->keepStoredMetadata($plugin);
+                }
+            });
+        } catch (Throwable $e) {
             // Record error on plugin
             try {
                 $plugin->set('plg_status', 'error');
                 $plugin->set('plg_install_error', $e->getMessage());
                 $plugin->save();
-            } catch (Exception $save_error) {
+            } catch (Throwable $save_error) {
                 // Ignore save errors during error reporting
             }
             throw $e;

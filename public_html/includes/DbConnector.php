@@ -1,5 +1,7 @@
 <?php
 /**
+ * @version 1.4 - transaction(): run work in one transaction that rolls back on any throw, Error
+ *                included, and joins a transaction its caller already opened
  * @version 1.3 - fetch_query_row(): the row an executed statement returned, for UPDATE ... RETURNING
  * @version 1.2 - in_test_mode(): whether the links point at the test or the live database now, for work queued to run later
  * @version 1.1 - reconnect(): rebuild the current mode's link, for a long-running CLI process
@@ -147,6 +149,37 @@ class DbConnector {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$dblink->rollBack();
+	}
+
+	/**
+	 * Run $work in one transaction and return what it returns.
+	 *
+	 * Commits when $work returns. Rolls back when it throws anything, a PHP
+	 * Error (TypeError, an undefined method) as well as an Exception, then
+	 * rethrows: a transaction left open keeps its row locks, and whatever the
+	 * request writes afterwards joins it and is lost when the connection
+	 * closes. Called while a transaction is already open, $work runs inside
+	 * that one, and committing or rolling back is left to whoever opened it.
+	 *
+	 * $work gets the PDO link. Catch what you mean to report outside the call;
+	 * the rollback has already happened by then.
+	 */
+	public static function transaction(callable $work) {
+		$dblink = self::get_instance()->get_db_link();
+		if ($dblink->inTransaction()) {
+			return $work($dblink);
+		}
+		$dblink->beginTransaction();
+		try {
+			$result = $work($dblink);
+			$dblink->commit();
+			return $result;
+		} catch (Throwable $e) {
+			if ($dblink->inTransaction()) {
+				$dblink->rollBack();
+			}
+			throw $e;
+		}
 	}
 
 	public function get_db_link() {

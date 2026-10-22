@@ -76,19 +76,17 @@ function booking_manage_logic(array $input): LogicResult {
 		}
 
 		$provider = SchedulingProviderRegistry::get($type->get('bty_provider'));
-		$dblink = DbConnector::get_instance()->get_db_link();
-		$conflict = false;
 		try {
-			$dblink->beginTransaction();
-			$dblink->prepare('SELECT pg_advisory_xact_lock(?)')->execute([(int)$host->key]);
-			$day = substr($slot_start, 0, 10);
-			$open = false;
-			foreach ($provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59') as $s) {
-				if ($s['start'] === $slot_start) { $open = true; break; }
-			}
-			if (!$open) {
-				$conflict = true; $dblink->rollBack();
-			} else {
+			$conflict = !DbConnector::transaction(function ($dblink) use ($host, $provider, $type, $slot_start, $booking) {
+				$dblink->prepare('SELECT pg_advisory_xact_lock(?)')->execute([(int)$host->key]);
+				$day = substr($slot_start, 0, 10);
+				$open = false;
+				foreach ($provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59') as $s) {
+					if ($s['start'] === $slot_start) { $open = true; break; }
+				}
+				if (!$open) {
+					return false;
+				}
 				$dur = (int)($type->get('bty_duration_minutes') ?: 30);
 				$new_end = gmdate('Y-m-d H:i:s', strtotime($slot_start) + $dur * 60);
 				$booking->set('bkn_start_time', $slot_start);
@@ -102,10 +100,9 @@ function booking_manage_logic(array $input): LogicResult {
 				$booking->set('bkn_status', Booking::BOOKING_STATUS_BOOKED);
 				$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
 				$booking->save();
-				$dblink->commit();
-			}
+				return true;
+			});
 		} catch (Exception $e) {
-			if ($dblink->inTransaction()) { $dblink->rollBack(); }
 			$page_vars['errors'][] = 'Could not reschedule. Please try again.';
 			return LogicResult::render($page_vars);
 		}

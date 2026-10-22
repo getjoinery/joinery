@@ -136,7 +136,7 @@ try {
     echo "<h3>✓ Anonymization completed successfully!</h3>";
     echo "<p>" . count($users) . " users have been anonymized.</p>";
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
     // Rollback on error
     if ($dblink->inTransaction()) {
         $dblink->rollback();

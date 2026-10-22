@@ -471,7 +471,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			}
 			$file->save();
 			$file->load();
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			FileBlob::release($blob->key);
 			throw $e;
 		}
@@ -588,7 +588,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			}
 			$file->save();
 			$file->load();
-		} catch (Exception $e) {
+		} catch (Throwable $e) {
 			FileBlob::release($blob->key);
 			throw $e;
 		}
@@ -1837,8 +1837,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		// stale read.
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 		$own_tx = !$dblink->inTransaction();
-		if ($own_tx) { $dblink->beginTransaction(); }
-		try {
+		DbConnector::transaction(function ($dblink) use ($debug) {
 			$hq = $dblink->prepare('SELECT fil_fbb_file_blob_id FROM fil_files WHERE fil_file_id = ? FOR UPDATE');
 			$hq->execute([$this->key]);
 			$blob_id = (int)$hq->fetchColumn();
@@ -1846,11 +1845,7 @@ public static function get_by_name($name, $search_deleted = false) {
 				FileBlob::release($blob_id);
 			}
 			parent::permanent_delete($debug);
-			if ($own_tx) { $dblink->commit(); }
-		} catch (Exception $e) {
-			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
-			throw $e;
-		}
+		});
 		// release() saw this method's transaction open and deferred any at-zero
 		// reclaim to shutdown, mistaking our transaction for the caller's. When we
 		// own it, it is committed by now — reclaim immediately, so the bytes never

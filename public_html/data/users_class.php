@@ -985,38 +985,28 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		return false;
 	}
 
-		function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
-		if ($use_transaction) {
-			DbConnector::BeginTransaction();
-		}
+	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
+		$verify = function () use ($and_save) {
+			$this->set('usr_is_activated', TRUE);
+			$this->set('usr_email_is_verified', TRUE);
+			$this->set('usr_email_is_verified_time', 'now');
 
-		$this->set('usr_is_activated', TRUE);
-		$this->set('usr_email_is_verified', TRUE);
-		$this->set('usr_email_is_verified_time', 'now');
-
-		if ($and_save) {
-			$this->save();
-		}
-
-		if ($use_transaction) {
-			DbConnector::Commit();
-		}
+			if ($and_save) {
+				$this->save();
+			}
+		};
+		$use_transaction ? DbConnector::transaction($verify) : $verify();
 	}
 
 	function email_unverify_bouncing_user($use_transaction=TRUE) {
-		if ($use_transaction) {
-			DbConnector::BeginTransaction();
-		}
+		$unverify = function () {
+			$this->set('usr_is_activated', FALSE);
+			$this->set('usr_email_is_verified', FALSE);
+			$this->set('usr_email_bounce_unverify_time', 'now');
 
-		$this->set('usr_is_activated', FALSE);
-		$this->set('usr_email_is_verified', FALSE);
-		$this->set('usr_email_bounce_unverify_time', 'now');
-
-		$this->save();
-
-		if ($use_transaction) {
-			DbConnector::Commit();
-		}
+			$this->save();
+		};
+		$use_transaction ? DbConnector::transaction($unverify) : $unverify();
 	}
 
 	function display_name() {

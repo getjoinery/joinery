@@ -72,8 +72,7 @@ class Login extends SystemBase {
 	 * the event, not something a link asked for.
 	 */
 	public static function record($user_id, $login_type) {
-		return SystemBase::server_initiated_write(function () use ($user_id, $login_type) {
-			DbConnector::BeginTransaction();
+		return SystemBase::server_initiated_write(fn() => DbConnector::transaction(function () use ($user_id, $login_type) {
 
 			$statement = DbConnector::GetPreparedStatement("UPDATE usr_users
 				SET usr_lastlogin_time = NOW()
@@ -88,9 +87,8 @@ class Login extends SystemBase {
 			$login->set('log_login_type', (int)$login_type);
 			$login->save();
 
-			DbConnector::Commit();
 			return $login;
-		});
+		}));
 	}
 
 	public static function record_logout($user_id) {

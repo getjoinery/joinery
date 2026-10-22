@@ -162,32 +162,30 @@ function get_previous_version(){
 	}
 
 	function permanent_delete($debug=false){
-		DbConnector::BeginTransaction();
-		
-		$next_version = $this->get_next_version();
-		$previous_version = $this->get_previous_version();
-		
-		if($next_version && $previous_version){
-			$next_version->set('cvn_previous_version_id', $previous_version->key);
-			$next_version->save();
+		DbConnector::transaction(function () {
+			$next_version = $this->get_next_version();
+			$previous_version = $this->get_previous_version();
 
-			$previous_version->set('cvn_next_version_id', $next_version->key);
-			$previous_version->save();			
-		}
-		else if($previous_version){
-			$previous_version->set('cvn_next_version_id', NULL);
-			$previous_version->save();	
-		}
-		else if($next_version){
-			$next_version->set('cvn_previous_version_id', NULL);
-			$next_version->save();	
-		}
-		
-		parent::permanent_delete();
-		
-		DbConnector::Commit();
-		
-		return true;		
+			if($next_version && $previous_version){
+				$next_version->set('cvn_previous_version_id', $previous_version->key);
+				$next_version->save();
+
+				$previous_version->set('cvn_next_version_id', $next_version->key);
+				$previous_version->save();			
+			}
+			else if($previous_version){
+				$previous_version->set('cvn_next_version_id', NULL);
+				$previous_version->save();	
+			}
+			else if($next_version){
+				$next_version->set('cvn_previous_version_id', NULL);
+				$next_version->save();	
+			}
+
+			parent::permanent_delete();
+		});
+
+		return true;
 	}
 
 }

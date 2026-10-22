@@ -317,6 +317,25 @@ function checkout_logic(array $input): LogicResult {
 }
 ```
 
+### Transaction Pattern
+
+Writes that must stand or fall together go in `DbConnector::transaction()`. It commits when the function returns and rolls back on anything thrown, a PHP Error (a TypeError, an undefined method) as well as an Exception, then rethrows. Called while a transaction is already open, the work runs inside that one and the caller decides. It returns what the function returns. Catch what you mean to show the user outside the call; the rollback has already happened.
+
+```php
+try {
+    $order = DbConnector::transaction(function ($dblink) use ($cart, $user) {
+        $order = Order::from_cart($cart, $user);
+        $order->save();
+        $cart->clear();
+        return $order;
+    });
+} catch (Exception $e) {
+    return LogicResult::error('The order could not be placed.', $input);
+}
+```
+
+Do not call `beginTransaction()` by hand where the helper fits. A function that does (one that must own its transaction, say, and refuse to join a caller's) catches `Throwable` or closes the transaction in a `finally`; `tests/unit/db_transaction_test.php` fails on one that does neither.
+
 ### Missing/Invalid Parameter Pattern
 
 ```php

@@ -70,25 +70,21 @@ function book_logic(array $input): LogicResult {
 		// inside the transaction, so a failure past that point rolls it back.
 		// The email-save failure keeps its own flag so the invitee still gets
 		// the specific message rather than the generic one.
-		$dblink = DbConnector::get_instance()->get_db_link();
-		$booking = null;
 		$client = null;
-		$conflict = false;
 		$email_error = false;
 		try {
-			$dblink->beginTransaction();
-			$lock = $dblink->prepare('SELECT pg_advisory_xact_lock(?)');
-			$lock->execute([(int)$type->get('bty_usr_user_id')]);
+			$booking = DbConnector::transaction(function ($dblink) use ($type, $provider, $slot_start, $email, $name, $invitee_tz, $notes, $input, &$client, &$email_error) {
+				$lock = $dblink->prepare('SELECT pg_advisory_xact_lock(?)');
+				$lock->execute([(int)$type->get('bty_usr_user_id')]);
 
-			$day = substr($slot_start, 0, 10);
-			$check = $provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59');
-			$open = false;
-			foreach ($check as $s) { if ($s['start'] === $slot_start) { $open = true; break; } }
+				$day = substr($slot_start, 0, 10);
+				$check = $provider->getAvailableSlots($type, $day . ' 00:00:00', $day . ' 23:59:59');
+				$open = false;
+				foreach ($check as $s) { if ($s['start'] === $slot_start) { $open = true; break; } }
+				if (!$open) {
+					return null;
+				}
 
-			if (!$open) {
-				$conflict = true;
-				$dblink->rollBack();
-			} else {
 				// Match-or-create the invitee by email (an inactive record is fine).
 				$client = User::GetByEmail($email);
 				if (!$client) {
@@ -103,36 +99,30 @@ function book_logic(array $input): LogicResult {
 						$client->save();
 					} catch (Exception $e) {
 						$email_error = true;
-						$dblink->rollBack();
+						throw $e;
 					}
 				}
 
-				if (!$email_error) {
-					$booking = $provider->createBooking($type, array(
-						'user_id'  => $client->key,
-						'notes'    => $notes,
-						'timezone' => $invitee_tz,
-						'utm'      => array(
-							'source'   => $input['utm_source'] ?? null,
-							'medium'   => $input['utm_medium'] ?? null,
-							'campaign' => $input['utm_campaign'] ?? null,
-							'content'  => $input['utm_content'] ?? null,
-							'term'     => $input['utm_term'] ?? null,
-						),
-					), $slot_start);
-					$dblink->commit();
-				}
-			}
+				return $provider->createBooking($type, array(
+					'user_id'  => $client->key,
+					'notes'    => $notes,
+					'timezone' => $invitee_tz,
+					'utm'      => array(
+						'source'   => $input['utm_source'] ?? null,
+						'medium'   => $input['utm_medium'] ?? null,
+						'campaign' => $input['utm_campaign'] ?? null,
+						'content'  => $input['utm_content'] ?? null,
+						'term'     => $input['utm_term'] ?? null,
+					),
+				), $slot_start);
+			});
 		} catch (Exception $e) {
-			if ($dblink->inTransaction()) { $dblink->rollBack(); }
-			$page_vars['errors'][] = 'Could not complete the booking. Please try again.';
+			$page_vars['errors'][] = $email_error
+				? 'We couldn\'t use that email address. Please double-check it.'
+				: 'Could not complete the booking. Please try again.';
 			return LogicResult::render($page_vars);
 		}
-
-		if ($email_error) {
-			$page_vars['errors'][] = 'We couldn\'t use that email address. Please double-check it.';
-			return LogicResult::render($page_vars);
-		}
+		$conflict = ($booking === null);
 
 		if ($conflict) {
 			$page_vars['errors'][] = 'Sorry — that time was just taken. Please pick another.';
