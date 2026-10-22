@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.12 - schemaAhead() sets the release's own config/ (it ships default_Globalvars_site.php) aside for
+ *                 the run and puts it back; it refused to run beside it, so 0.8.523 added nothing ahead
  * @version 1.11 - schemaAhead(): the staged release's missing tables and columns are added before its
  *                 code goes live, by its own update_database.php --schema-ahead with the site's config/ and
  *                 vendor/ lent beside it
@@ -826,24 +828,41 @@ class DeploymentHelper {
             $result['reason'] = 'the staged update_database.php has no --schema-ahead';
             return $result;
         }
+        // What the release ships under a lent name (the core archive carries
+        // config/default_Globalvars_site.php, for install.sh) is set aside for
+        // the run and put back after it; upgrade.php itself never reads it.
         $lent = array();
-        $give_back = function () use (&$lent) {
+        $aside = array();
+        $give_back = function () use (&$lent, &$aside) {
             foreach ($lent as $link) {
                 @unlink($link);
+            }
+            foreach ($aside as $path => $kept) {
+                if (!file_exists($path) && !is_link($path)) {
+                    @rename($kept, $path);
+                }
             }
         };
         foreach (self::SCHEMA_AHEAD_LENT as $name) {
             $link = $stage_location . '/' . $name;
+            $kept = $stage_location . '/.' . $name . '.staged';
             if (is_link($link)) {
                 @unlink($link);
             }
-            if (file_exists($link)) {
-                $give_back();
-                $result['reason'] = $link . ' exists and is not a link this step made';
-                return $result;
+            // A run killed before it gave back left the release's copy aside.
+            if (!file_exists($link) && is_dir($kept) && !is_link($kept)) {
+                @rename($kept, $link);
             }
             if (!is_dir($site_dir . '/' . $name)) {
                 continue;
+            }
+            if (file_exists($link)) {
+                if (!is_dir($link) || file_exists($kept) || is_link($kept) || !@rename($link, $kept)) {
+                    $give_back();
+                    $result['reason'] = 'could not set the release\'s own ' . $name . '/ aside at ' . $kept;
+                    return $result;
+                }
+                $aside[$link] = $kept;
             }
             if (!@symlink($site_dir . '/' . $name, $link)) {
                 $give_back();
