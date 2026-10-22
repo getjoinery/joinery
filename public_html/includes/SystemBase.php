@@ -148,12 +148,20 @@ abstract class SystemBase {
 
 	/**
 	 * @var array<string,bool> sealed columns this instance was handed plaintext
-	 * for, as a set. There is no general dirty tracking on SystemBase and this is
-	 * not it — it exists only to tell caller-supplied plaintext apart from the
+	 * for, as a set. It tells caller-supplied plaintext apart from the
 	 * ciphertext sitting in $this->data after a load, which is the one
-	 * distinction the sealing path cannot make by looking at the value.
+	 * distinction the sealing path cannot make by looking at the value. It is
+	 * not $changed: a save clears $changed, while a sealed column the save did
+	 * not write keeps its mark for as long as the copy holds the plaintext.
 	 */
 	protected $sealed_dirty = array();
+
+	/**
+	 * @var array<string,bool> columns set() was called for since this copy was
+	 * loaded or last saved, as a set. An update writes exactly these, so a copy
+	 * loaded earlier cannot put back what another save changed in between.
+	 */
+	protected $changed = array();
 
 	/**
 	 * @var array{0:mixed,1:bool}|null memo of [row id, sealed?] as the DATABASE
@@ -227,13 +235,12 @@ abstract class SystemBase {
 	}
 
 	/**
-	 * Targeted single-row UPDATE of exactly the given columns — never a full-row
-	 * save(). For rows some other path writes behind the model's back (sealed
-	 * content columns, adopted attachment bytes), where a full save() from a
-	 * stale in-memory object would clobber what it did not read. Callers that
-	 * only need to flip a few columns use this instead. Unknown column names are
-	 * dropped rather than built into SQL. $columns maps column name => value
-	 * (null allowed).
+	 * Targeted single-row UPDATE of exactly the given columns, without loading
+	 * the row or running save()'s checks of every column. For columns some other
+	 * path owns (sealed content columns, adopted attachment bytes), and for
+	 * writes that must not fail on an unrelated column's validation. Unknown
+	 * column names are dropped rather than built into SQL. $columns maps column
+	 * name => value (null allowed).
 	 */
 	public static function updateColumns(int $id, array $columns): void {
 		if ($id <= 0 || empty($columns)) {
@@ -426,7 +433,23 @@ abstract class SystemBase {
 		if (!empty(static::$sealed_fields) && in_array($key, static::$sealed_fields, true)) {
 			$this->sealed_dirty[$key] = true;
 		}
+		$this->changed[$key] = true;
 		$this->data->$key = $value;
+	}
+
+	/**
+	 * Record a value the database already holds, as after a targeted UPDATE,
+	 * without marking the column changed: the next save() does not write it
+	 * again. Writes $this->data directly, so a subclass set() never sees it.
+	 */
+	function set_as_stored($key, $value) {
+		$this->data->$key = $value;
+		unset($this->changed[$key]);
+	}
+
+	/** The columns set() was called for since this copy was loaded or last saved. */
+	function changed_columns() {
+		return array_keys($this->changed);
 	}
 	
 	
@@ -2477,6 +2500,7 @@ abstract class SystemBase {
 		// Whatever the caller had set is gone; the sealed columns now hold the
 		// row's ciphertext again.
 		$this->sealed_dirty = array();
+		$this->changed = array();
 		$this->db_seal_state = null;
 		if ($this->key === NULL) {
 			throw new SystemBaseNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
@@ -2847,6 +2871,7 @@ abstract class SystemBase {
 		// (load_from_object() deliberately keeps its marks: it copies through
 		// get(), so it really is holding plaintext to be re-sealed.)
 		$this->sealed_dirty = array();
+		$this->changed = array();
 		$this->db_seal_state = null;
 	}
 
@@ -3075,19 +3100,38 @@ abstract class SystemBase {
 			}
 		}
 
-		// An 'insert_only' column is written when the row is created and moved
-		// afterwards only by its owner's targeted UPDATE. A copy loaded before
-		// that UPDATE would otherwise put the old value back when it is saved for
-		// any other reason.
+		// An insert writes every column. An update writes the columns set() was
+		// called for, and reads every other column back from the row in the same
+		// statement, so a copy loaded earlier neither puts back what another save
+		// changed nor goes on acting on the old value. An 'insert_only' column is
+		// never written by an update, even when set: its owner moves it with a
+		// targeted UPDATE, and the copy takes the stored value. A sealed column
+		// the copy holds plaintext for keeps it, whether or not it was written.
 		$rowdata = array();
-		$kept_columns = array();
+		$read_back = array();
 		foreach(get_class($this)::$field_specifications as $field => $spec) {
-			if (isset($skip_sealed[$field])) continue;
-			if ($this->key && !empty($spec['insert_only'])) {
-				$kept_columns[] = $field;
+			if (!$this->key) {
+				if (!isset($skip_sealed[$field])) {
+					$rowdata[$field] = $this->get($field);
+				}
 				continue;
 			}
-			$rowdata[$field] = $this->get($field);
+			if (isset($this->sealed_dirty[$field])) {
+				if (isset($this->changed[$field]) && !isset($skip_sealed[$field]) && empty($spec['insert_only'])) {
+					$rowdata[$field] = $this->get($field);
+				}
+				continue;
+			}
+			if (isset($this->changed[$field]) && !isset($skip_sealed[$field]) && empty($spec['insert_only'])) {
+				$rowdata[$field] = $this->get($field);
+			} else {
+				$read_back[] = $field;
+			}
+		}
+		foreach ($rowdata as $field => $value) {
+			if ($value === '-NOUPDATE-') {
+				throw new SystemBaseException('Field "' . $field . '" holds -NOUPDATE-: a column save() should leave alone is left unset instead.');
+			}
 		}
 
 		if ($this->key) {
@@ -3147,10 +3191,14 @@ abstract class SystemBase {
 
 		// --- BEGIN: SQL generation and execution (from edit_table) ---
 
-		if(count($rowdata) == 0){
+		if (is_null($p_keys) && count($rowdata) == 0) {
 			return FALSE;
 		}
 
+		// An update with nothing to write runs no UPDATE; the copy is still read
+		// back below, and the seal and post-save steps still run.
+		$op = is_null($p_keys) ? 'add' : 'edit';
+		if ($rowdata) {
 		if(is_null($p_keys)){
 			$op = 'add';
 			$sql = 'INSERT INTO ' . static::$tablename . ' ';
@@ -3158,11 +3206,8 @@ abstract class SystemBase {
 			$colphrase="";
 			$valphrase="";
 			foreach($rowdata as $column_name=>$column_val){
-				if(is_array($column_val) || is_object($column_val) || !is_string($column_val) || $column_val !== "-NOUPDATE-"){
-					$colphrase .= $column_name . ',';
-						$valphrase .= ':' . $column_name . ',';
-
-				}
+				$colphrase .= $column_name . ',';
+				$valphrase .= ':' . $column_name . ',';
 			}
 
 			$colphrase[strlen($colphrase)-1] = ' ';
@@ -3175,9 +3220,7 @@ abstract class SystemBase {
 			$sql = 'UPDATE ' . static::$tablename . ' SET ';
 
 			foreach($rowdata as $column_name=>$column_val){
-				if(is_array($column_val) || is_object($column_val) || !is_string($column_val) || $column_val !== "-NOUPDATE-"){
-						$sql .= $column_name . '=:' . $column_name . ',';
-				}
+				$sql .= $column_name . '=:' . $column_name . ',';
 			}
 
 			$sql[strlen($sql)-1] = ' ';
@@ -3190,13 +3233,16 @@ abstract class SystemBase {
 			}
 			//REMOVE THE LAST ' AND '
 			$sql = substr($sql, 0, strlen($sql)-5);
+			if ($read_back) {
+				$sql .= ' RETURNING ' . implode(', ', $read_back);
+			}
 		}
 
 		//BIND VALUES AND PREPARE STATEMENT
 		$dbhelper->prepare_query($sql);
 
 		foreach($rowdata as $column_name=>$column_val){
-			if(is_array($column_val) || is_object($column_val) || !is_string($column_val) || $column_val !== "-NOUPDATE-"){
+			{
 				if($column_meta[$column_name]['data_type'] == 'integer' || $column_meta[$column_name]['data_type'] == 'smallint' || $column_meta[$column_name]['data_type'] == 'bigint'){
 					if($column_val === '') $column_val = NULL;
 					$dbhelper->bind_value(":$column_name", $column_val, PDO::PARAM_INT);
@@ -3282,6 +3328,7 @@ abstract class SystemBase {
 			echo $error_var_statement;
 			echo '</pre>';
 		}
+		}
 
 		// The row and its seal are one write. An insert is necessarily two
 		// statements (the AEAD binds to the primary key, which does not exist
@@ -3293,8 +3340,19 @@ abstract class SystemBase {
 			$owns_seal_transaction = true;
 		}
 
+		$stored = false;
 		try {
-			$dbhelper->execute_query();
+			if ($rowdata) {
+				$dbhelper->execute_query();
+				if ($op == 'edit' && $read_back) {
+					$stored = $dbhelper->fetch_query_row();
+				}
+			} elseif ($read_back) {
+				$rq = $dblink->prepare('SELECT ' . implode(', ', $read_back) . ' FROM ' . static::$tablename
+					. ' WHERE ' . static::$pkey_column . ' = ?');
+				$rq->execute(array($p_keys[static::$pkey_column]));
+				$stored = $rq->fetch(PDO::FETCH_ASSOC);
+			}
 		} catch (PDOException $e) {
 			if ($owns_seal_transaction && $dblink->inTransaction()) {
 				$dblink->rollBack();
@@ -3317,15 +3375,14 @@ abstract class SystemBase {
 				exit;
 			}
 			$this->key = $p_keys[static::$pkey_column];
-			// The columns the save left alone are read back, so this copy holds
-			// the row as stored rather than what it was loaded with.
-			if ($kept_columns) {
-				$kq = $dblink->prepare('SELECT ' . implode(', ', $kept_columns) . ' FROM ' . static::$tablename
-					. ' WHERE ' . static::$pkey_column . ' = ?');
-				$kq->execute(array($this->key));
-				$kept_row = $kq->fetch(PDO::FETCH_ASSOC);
-				foreach ($kept_columns as $kept) {
-					$this->set($kept, $kept_row ? $kept_row[$kept] : NULL, false);
+			// The columns the save did not write take the row's values, before
+			// the seal step, which then drops whatever it sealed. Written
+			// straight into $this->data: a subclass set() must not see them. A
+			// row deleted under the save returns nothing and leaves the copy as
+			// it was.
+			if ($stored) {
+				foreach ($read_back as $column) {
+					$this->data->$column = $stored[$column];
 				}
 			}
 		}
@@ -3359,6 +3416,9 @@ abstract class SystemBase {
 				throw $e;
 			}
 		}
+
+		// The copy now matches the row: saving it again writes nothing.
+		$this->changed = array();
 
 		// --- END: SQL generation and execution ---
 

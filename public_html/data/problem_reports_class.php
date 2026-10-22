@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.1.1 - no save() override: an update writes only the columns it set, so a recurrence counted meanwhile is never put back
  * @version 1.1.0 - automatic reports: noteError(), counts, and the count update on send
  * @version 1.0.0
  */
@@ -543,25 +544,6 @@ class ProblemReport extends SystemBase {
 			}
 		}
 		return array(implode('', $parts) . '--' . $boundary . "--\r\n", 'multipart/form-data; boundary=' . $boundary);
-	}
-
-	/**
-	 * Save, first reloading an automatic report's count: save() writes every
-	 * column, and noteError() counts recurrences with its own UPDATE from other
-	 * requests, so a row loaded before a recurrence would write its count back
-	 * over it.
-	 */
-	function save($debug = false) {
-		if ($this->key && (bool)$this->get('prr_automatic')) {
-			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
-				'SELECT prr_occurrences FROM prr_problem_reports WHERE prr_problem_report_id = ?');
-			$stmt->execute(array((int)$this->key));
-			$current = $stmt->fetchColumn();
-			if ($current !== false) {
-				$this->set('prr_occurrences', (int)$current);
-			}
-		}
-		return parent::save($debug);
 	}
 
 	// -------------------------------------------------------------- deleting

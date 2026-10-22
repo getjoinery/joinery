@@ -176,7 +176,7 @@ foreach ($rows as $row) {
 			FileBlob::release($blob->key);
 			throw new Exception('file record gained bytes while this ran');
 		}
-		$file->set('fil_fbb_file_blob_id', (int)$blob->key, false);
+		$file->set_as_stored('fil_fbb_file_blob_id', (int)$blob->key);
 
 		echo "  OK     [{$id}] {$name} -> blob {$blob->key} ({$bytes} bytes, "
 			. ($is_private ? 'private' : 'public') . "){$note}\n";

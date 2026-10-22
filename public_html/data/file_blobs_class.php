@@ -827,8 +827,8 @@ class FileBlob extends SystemBase {
 		$q = $dblink->prepare(
 			"UPDATE fbb_file_blobs SET fbb_sha256 = NULL, fbb_size_bytes = ? WHERE fbb_file_blob_id = ?");
 		$q->execute([(int)$size, $this->key]);
-		$this->set('fbb_sha256', null, false);
-		$this->set('fbb_size_bytes', (int)$size, false);
+		$this->set_as_stored('fbb_sha256', null);
+		$this->set_as_stored('fbb_size_bytes', (int)$size);
 		return true;
 	}
 
@@ -856,8 +856,8 @@ class FileBlob extends SystemBase {
 		$q = $dblink->prepare(
 			"UPDATE fbb_file_blobs SET fbb_sha256 = NULL, fbb_size_bytes = ? WHERE fbb_file_blob_id = ?");
 		$q->execute([$size, $this->key]);
-		$this->set('fbb_sha256', null, false);
-		$this->set('fbb_size_bytes', $size, false);
+		$this->set_as_stored('fbb_sha256', null);
+		$this->set_as_stored('fbb_size_bytes', $size);
 		return true;
 	}
 
@@ -897,7 +897,7 @@ class FileBlob extends SystemBase {
 		$q->bindValue(':priv', $to_private, PDO::PARAM_BOOL);
 		$q->bindValue(':id', $this->key, PDO::PARAM_INT);
 		$q->execute();
-		$this->set('fbb_is_private', $to_private, false);
+		$this->set_as_stored('fbb_is_private', $to_private);
 	}
 
 	private function _move_single($source_dir, $target_dir, $name) {
@@ -1026,10 +1026,10 @@ class FileBlob extends SystemBase {
 				throw new FileBlobException('Phase 3 (DB commit) failed: ' . $e->getMessage(), 0, $e);
 			}
 
-			$this->set('fbb_storage_driver', 'local', false);
-			$this->set('fbb_is_private', $to_private, false);
-			$this->set('fbb_bkt_backup_target_id', null, false);
-			$this->set('fbb_remote_key', null, false);
+			$this->set_as_stored('fbb_storage_driver', 'local');
+			$this->set_as_stored('fbb_is_private', $to_private);
+			$this->set_as_stored('fbb_bkt_backup_target_id', null);
+			$this->set_as_stored('fbb_remote_key', null);
 		} catch (Exception $e) {
 			foreach ($copied_paths as $p) @unlink($p);
 			foreach ($keys as $size_key) {
@@ -1191,7 +1191,7 @@ class FileBlob extends SystemBase {
 	public function clear_variant_refusal() {
 		if ($this->key && $this->is_variant_refused()) {
 			self::updateColumns((int)$this->key, array('fbb_variant_refused' => null));
-			$this->set('fbb_variant_refused', null, false);
+			$this->set_as_stored('fbb_variant_refused', null);
 		}
 	}
 
@@ -1396,7 +1396,7 @@ class FileBlob extends SystemBase {
 		SystemBase::server_initiated_write(function () use ($why) {
 			self::updateColumns((int)$this->key, array('fbb_variant_refused' => $why));
 		});
-		$this->set('fbb_variant_refused', $why, false);
+		$this->set_as_stored('fbb_variant_refused', $why);
 	}
 
 	/**

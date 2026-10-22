@@ -610,6 +610,14 @@ try {
 		&& intval($wrap_row['rcr_sealed_owner_user_id']) === $owner_id,
 		'a status save on the sealing instance leaves the DEK wrapping intact');
 
+	// The same instance saves again, as the runner does after every step. Its
+	// copy now holds the row's ciphertext, which must not be taken for content
+	// the caller set and sealed a second time.
+	$sealed_run->set('rcr_status', RecipeRun::STATUS_RUNNING);
+	$sealed_run->saveContent();
+	check(strpos((string)(new RecipeRun(intval($sealed_run->key), TRUE))->contentOrNull('rcr_output'), $leaky_subject) !== false,
+		'a second save on the sealing instance leaves the output readable');
+
 	// The estate assertion: EVERY column of the row, not a list someone has to
 	// remember to update. A content column added later is covered by this
 	// without anyone touching the test.

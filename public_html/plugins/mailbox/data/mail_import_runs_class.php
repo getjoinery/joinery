@@ -232,7 +232,7 @@ class MailImportRun extends SystemBase {
 		// Keep this copy consistent with the row, so a caller that reads back
 		// immediately sees what it just asked for.
 		foreach ($columns as $col => $value) {
-			$this->set($col, $value);
+			$this->set_as_stored($col, $value);
 		}
 	}
 

@@ -103,9 +103,8 @@ class ApplyInboundEmailFilters implements ScheduledTaskInterface {
 			$total_scanned += $scanned;
 			$total_matched += $matched;
 
-			// Write only this walk's two columns: the batch took time, and a
-			// whole-row save from the copy loaded before it would undo whatever
-			// else changed on the rule meanwhile (an edit, a new request).
+			// Write only this walk's two columns, straight to the row the batch
+			// started from.
 			$done = count($ids) < $batch;
 			$db->prepare('UPDATE ief_inbound_email_filters SET ief_apply_existing_pending = ?, ief_apply_existing_cursor = ?
 				WHERE ief_inbound_email_filter_id = ?')

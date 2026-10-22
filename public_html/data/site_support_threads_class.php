@@ -121,8 +121,8 @@ class SiteSupportThread extends SystemBase {
 		}
 		self::updateColumns((int)$this->key, array('spt_remote_id' => $remote_id, 'spt_token' => mb_substr($token, 0, 128),
 			'spt_nonce_hash' => null, 'spt_update_time' => gmdate('Y-m-d H:i:s')));
-		$this->set('spt_remote_id', $remote_id);
-		$this->set('spt_token', $token);
+		$this->set_as_stored('spt_remote_id', $remote_id);
+		$this->set_as_stored('spt_token', mb_substr($token, 0, 128));
 	}
 
 	public function token(): string {

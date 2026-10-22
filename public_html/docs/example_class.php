@@ -154,14 +154,12 @@ class Example extends SystemBase
     //                                backfill renders them unquoted.
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
     // 'insert_only' => true        - save() writes it when the row is created
-    //                                and never afterwards; its owner moves it
-    //                                with a targeted UPDATE. A save of an
-    //                                existing row reads it back, so the copy
-    //                                holds the value as stored. Declare it on a
-    //                                column another writer moves under a lock
-    //                                (File's head blob): a copy loaded before
-    //                                that write would otherwise put the old
-    //                                value back when saved for any reason.
+    //                                and never afterwards, even when set; its
+    //                                owner moves it with a targeted UPDATE, and
+    //                                a save leaves the copy holding the stored
+    //                                value. Declare it on a column only one
+    //                                writer may move, under a lock (File's head
+    //                                blob).
     // 'allowed_values' => array()  - Declared enum: save() refuses any non-NULL
     //                                value outside the set, and the model test
     //                                suite generates only members of the set.
@@ -597,7 +595,13 @@ class MultiExample extends SystemMultiBase
  *     echo "Created: " . $created->format('Y-m-d H:i:s');
  * }
  * 
- * // Update record - defaults not applied on updates
+ * // Update record - defaults not applied on updates. An update writes only
+ * // the columns set() was called for since the copy was loaded or last saved,
+ * // so a copy loaded earlier never puts back what another save changed. Every
+ * // other column is read back in the same statement: after save() the copy
+ * // holds the row as stored, with its own changes. Saving a copy with nothing
+ * // changed writes nothing. After a targeted UPDATE, record the value with
+ * // set_as_stored(), which does not mark the column changed.
  * $example->set('exm_name', 'Updated Name');
  * $example->save();
  * 

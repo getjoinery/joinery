@@ -47,7 +47,7 @@ function desk_threads_logic(array $input): LogicResult {
 			$thread = SupportIntake::openThread((int)$input['thread_id'], (string)($input['token'] ?? ''), $host, $key);
 			if ((bool)$thread->get('sth_unread_reply')) {
 				SupportThread::updateColumns((int)$thread->key, array('sth_unread_reply' => false));
-				$thread->set('sth_unread_reply', false);
+				$thread->set_as_stored('sth_unread_reply', false);
 			}
 			$out['thread'] = SupportIntake::summary($thread);
 			$out['messages'] = SupportIntake::transcript($thread);

@@ -1934,8 +1934,7 @@ to the old key is left behind.
   too: `requestApplyExisting()` stamps `ief_device_backlog_requested_time`, and each
   owner's place in that request is a row of `ifp_inbound_email_filter_device_progress`
   (rule, owner, request time, cursor, done — a domain-wide rule reaches several
-  owners' mailboxes, and keeping the places off the rule row means a whole-row save
-  of the rule cannot move them). `mailbox/rule_backlog` hands the device one
+  owners' mailboxes, and each needs a place of its own). `mailbox/rule_backlog` hands the device one
   rule and a page of the caller's own parsed rows past their cursor (sealed fields
   only), and `mailbox/rule_outcomes {rule_id, through_id, matched_ids}` applies the
   rule's actions to the rows the device matched (never a forward) and moves that

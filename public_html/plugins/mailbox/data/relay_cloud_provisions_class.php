@@ -249,7 +249,7 @@ class RelayCloudProvision extends SystemBase {
 		if ($q->rowCount() !== 1) {
 			return false;
 		}
-		$this->set('rcl_status', 'creating');
+		$this->set_as_stored('rcl_status', 'creating');
 		return true;
 	}
 

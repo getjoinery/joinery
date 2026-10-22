@@ -782,6 +782,10 @@ state (a deferred ingest, another request), and a save that trusted its own
 stale flag would mint over the live wrapping. For the same reason `save()`
 treats the seal flag and wrapping columns as owned by the sealing path on a
 sealed row — a stale instance's `false`/`NULL` copies are never written back.
+An update writes only the columns the caller set; sealed columns among them
+travel through the seal plan, and the copy reads every other column back from
+the row, ciphertext included, exactly as a load would, except a sealed column
+it still holds the caller's plaintext for.
 
 **A first-time seal of an existing row seals the whole row**, not just the
 columns the edit touched. A row created plaintext (its owner had no vault yet,

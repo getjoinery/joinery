@@ -218,9 +218,7 @@ class MultiAdminMenu extends SystemMultiBase {
 			}
 			$obj = new AdminMenu($row->amu_admin_menu_id);
 			// Hydrate from row data we already have to avoid an extra query per item
-			foreach ((array)$row as $col => $val) {
-				$obj->set($col, $val, false);
-			}
+			$obj->load_from_data($row, array_keys((array)$row));
 			$results[] = $obj;
 		}
 

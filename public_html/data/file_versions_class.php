@@ -174,18 +174,16 @@ class FileVersion extends SystemBase {
 			// new blob (which already counts this reference). No retain/release: the
 			// reference is transferred, so the blob refcounts stay correct.
 			//
-			// Written as a targeted update rather than a full-row save: the
-			// caller's copy of this file was read before the lock was held, so
-			// saving all of its columns back would undo whatever the writer we
-			// just waited for had changed.
+			// Written as a targeted update: the head is insert_only, so this
+			// UPDATE, under the row hold, is the only thing that moves it.
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$q = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
 			$q->execute(array((int)$new_blob->key, (int)$file->key));
-			$file->set('fil_fbb_file_blob_id', (int)$new_blob->key, false);
+			$file->set_as_stored('fil_fbb_file_blob_id', (int)$new_blob->key);
 			if ($new_metadata !== '') {
 				$q = $dblink->prepare('UPDATE fil_files SET fil_encrypted_metadata = ? WHERE fil_file_id = ?');
 				$q->execute(array($new_metadata, (int)$file->key));
-				$file->set('fil_encrypted_metadata', $new_metadata, false);
+				$file->set_as_stored('fil_encrypted_metadata', $new_metadata);
 			}
 
 			DbConnector::Commit();
@@ -231,8 +229,8 @@ class FileVersion extends SystemBase {
 			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
 			throw $e;
 		}
-		$file->set('fil_encrypted_metadata', (string)$new_metadata, false);
-		$file->set('fil_fbb_file_blob_id', self::_head_blob_id((int)$file->key), false);
+		$file->set_as_stored('fil_encrypted_metadata', (string)$new_metadata);
+		$file->set_as_stored('fil_fbb_file_blob_id', self::_head_blob_id((int)$file->key));
 	}
 
 	/** A blob's content hash, '' when it has none on record. */
@@ -306,7 +304,7 @@ class FileVersion extends SystemBase {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$rq = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
 			$rq->execute(array($restored_blob_id, (int)$file->key));
-			$file->set('fil_fbb_file_blob_id', $restored_blob_id, false);
+			$file->set_as_stored('fil_fbb_file_blob_id', $restored_blob_id);
 			FileBlob::release($restored_blob_id);
 			self::_delete_row((int)$version->key);
 

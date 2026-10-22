@@ -134,13 +134,13 @@ class SyncDevice extends SystemBase {
 					"UPDATE sde_sync_devices SET sde_last_seen_time = ?, sde_last_cursor = ?
 					  WHERE sde_sync_device_id = ?");
 				$q->execute(array($now, (int)$cursor, (int)$this->key));
-				$this->set('sde_last_cursor', (int)$cursor, false);
+				$this->set_as_stored('sde_last_cursor', (int)$cursor);
 			} else {
 				$q = $dblink->prepare(
 					"UPDATE sde_sync_devices SET sde_last_seen_time = ? WHERE sde_sync_device_id = ?");
 				$q->execute(array($now, (int)$this->key));
 			}
-			$this->set('sde_last_seen_time', $now, false);
+			$this->set_as_stored('sde_last_seen_time', $now);
 		} catch (Exception $e) {
 			error_log('SyncDevice::touch_seen failed for sde=' . $this->key . ': ' . $e->getMessage());
 		}

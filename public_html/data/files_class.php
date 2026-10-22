@@ -500,7 +500,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		$now = gmdate('Y-m-d H:i:s');
 		self::updateColumns((int)$this->key, array('fil_announced_time' => $now));
-		$this->set('fil_announced_time', $now);
+		$this->set_as_stored('fil_announced_time', $now);
 		SignalBus::dispatch('file.uploaded', array(
 			'file_id'        => (int)$this->key,
 			'file_title'     => (string)$this->get('fil_title'),
@@ -701,7 +701,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$q = $dblink->prepare("UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?");
 			$q->execute([$copy->key, $this->key]);
-			$this->set('fil_fbb_file_blob_id', $copy->key, false);
+			$this->set_as_stored('fil_fbb_file_blob_id', $copy->key);
 			FileBlob::release($blob->key);
 			$blob = $copy;
 		}
@@ -1502,7 +1502,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$q = $dblink->prepare("UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?");
 		$q->execute([$new->key, $this->key]);
-		$this->set('fil_fbb_file_blob_id', $new->key, false);
+		$this->set_as_stored('fil_fbb_file_blob_id', $new->key);
 		$this->_blob_cache = $new;
 		$this->_blob_cache_id = (int)$new->key;
 		FileBlob::release($blob->key);

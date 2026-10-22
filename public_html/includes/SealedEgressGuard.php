@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.5 - an owner-sealed UPDATE may end in RETURNING plain columns
  * @version 1.4 - consentToValues() for an owner-approved action's literal arguments;
  *                contentFree() for metadata-only writes at a declared site
  * @version 1.3 - the browser's format (v1.edge., v1.edgeseal.) is sealed too
@@ -502,9 +503,13 @@ class SealedEgressGuard {
 		if (!preg_match('/^\s*UPDATE\b/i', $sql)) {
 			return false;
 		}
-		// A single equality on the table's own id column, bound or literal.
+		// A single equality on the table's own id column, bound or literal,
+		// optionally returning plain columns of the row it wrote (a save reads
+		// back what it did not write), which sends nothing anywhere.
+		$statement = rtrim($sql, "; \t\n\r");
+		$statement = preg_replace('/\s+RETURNING\s+"?[A-Za-z0-9_]+"?(\s*,\s*"?[A-Za-z0-9_]+"?)*$/i', '', $statement);
 		if (!preg_match('/\bWHERE\s+"?([A-Za-z0-9_]+)"?\s*=\s*(:[A-Za-z0-9_]+|\?|\d+)\s*$/i',
-				rtrim($sql, "; \t\n\r"), $m)) {
+				$statement, $m)) {
 			return false;
 		}
 		$where_column = strtolower($m[1]);

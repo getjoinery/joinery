@@ -132,8 +132,8 @@ class InboundEmailFilter extends SystemBase {
 		// The same walk over end-to-end rows, which only each row's owner's
 		// device can read (MailboxDeviceRules): when it was last asked for, NULL
 		// when never. Each owner's place is kept apart, in
-		// ifp_inbound_email_filter_device_progress (a domain-wide rule reaches
-		// several owners, and a whole-row save of the rule must not move them).
+		// ifp_inbound_email_filter_device_progress, since a domain-wide rule
+		// reaches several owners and each needs a place of its own.
 		'ief_device_backlog_requested_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 
 		'ief_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
