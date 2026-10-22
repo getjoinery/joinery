@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.83 - Test releases here first (mgn_rollout_first) on a site's settings form
  * @version 1.82 - the Cloud server panel shows the daily watch's match on any provider's account, Hetzner's too (B40)
  * @version 1.81 - the Reverse DNS panel shows what the node's IPv6 answers as well as its IPv4 (B33)
  * @version 1.80 - a node whose agent moved away is not offered Connect agent or Reverse DNS: the machine is
@@ -2808,6 +2809,14 @@
 		'helptext' => 'Whether the superadmins get a bell and an email when an incident opens on this node. Incidents open either way and wait in the incident inbox. '
 			. 'This node\'s alerts are ' . ($node->sends_alerts() ? 'on' : 'off') . ' now.',
 	]);
+
+	if ($node->hosts_site()) {
+		$formwriter->checkboxinput('mgn_rollout_first', 'Test releases here first', [
+			'checked'  => $node->get('mgn_rollout_first'),
+			'helptext' => 'Deploy to all managed nodes applies a release to the sites marked here first, and the rest only once they have all taken it well. '
+				. 'Mark sites you would least mind breaking.',
+		]);
+	}
 
 	echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';
 

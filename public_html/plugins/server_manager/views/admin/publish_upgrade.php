@@ -11,6 +11,7 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.16 - Deploy to all managed nodes is described by StagedRolloutRunner::deploy_all_description (its two stages)
  * @version 1.15 - the changed agent words with no recorded run on a real machine are listed, and a publish of them
  *                needs the Publish these without a live run box (AgentLiveProofs; fleet_security_patching WP7, Q5)
  * @version 1.14 - the Auto-notes button comes from ReleaseNotesDrafter::buttonHtml(), shared with the node page
@@ -531,18 +532,9 @@ $formwriter->textarea('release_notes', 'Release notes', [
 	'placeholder' => 'Describe what changed in this release...',
 ]);
 echo ReleaseNotesDrafter::buttonHtml('#publish_form textarea[name="release_notes"]');
-$deploy_plan = StagedRolloutRunner::deploy_all_plan();
-$deploy_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $deploy_plan['nodes']);
-$deploy_help = $deploy_names
-	? 'Once the publish completes, the release is rolled out to ' . implode(', ', $deploy_names)
-		. ', one node at a time in that order, stopping at the first node whose upgrade fails.'
-	: 'No managed node can take a rollout right now.';
-foreach ($deploy_plan['left_out'] as $lo) {
-	$deploy_help .= ' Left out: ' . $lo['name'] . ' (' . $lo['reason'] . ').';
-}
 $formwriter->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
 	'checked'  => false,
-	'helptext' => $deploy_help,
+	'helptext' => StagedRolloutRunner::deploy_all_description(StagedRolloutRunner::deploy_all_plan()),
 ]);
 // The changed agent words with no recorded run on a real machine (WP7, Q5): a
 // root process the fleet runs on this plane's say-so, shipped untried only

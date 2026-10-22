@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.11 - Deploy to all managed nodes is described by StagedRolloutRunner::deploy_all_description (its two stages)
  * @version 1.10 - Apply and publish beside Publish, while the node is behind: the apply, then the publish of the
  *                 version it reaches (ApplyAndPublish); Auto-notes then drafts through that version
  * @version 1.9 - Publish Release on this site's own node offers the Auto-notes button
@@ -173,18 +174,9 @@
 		}
 		// Only the management node that serves the fleet's release can roll it out.
 		if ($node->is_self()) {
-			$deploy_plan = StagedRolloutRunner::deploy_all_plan();
-			$deploy_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $deploy_plan['nodes']);
-			$deploy_help = $deploy_names
-				? 'Once the publish completes, the release is rolled out to ' . implode(', ', $deploy_names)
-					. ', one node at a time in that order, stopping at the first node whose upgrade fails.'
-				: 'No managed node can take a rollout right now.';
-			foreach ($deploy_plan['left_out'] as $lo) {
-				$deploy_help .= ' Left out: ' . $lo['name'] . ' (' . $lo['reason'] . ').';
-			}
 			$pub_form->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
 				'checked'  => false,
-				'helptext' => $deploy_help,
+				'helptext' => StagedRolloutRunner::deploy_all_description(StagedRolloutRunner::deploy_all_plan()),
 			]);
 		}
 		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));

@@ -1,16 +1,26 @@
 <?php
 /**
- * StagedRolloutRunner - moves a StagedRollout along, one node at a time.
+ * StagedRolloutRunner - moves a StagedRollout along, stage by stage.
  *
  * specs/agent_recipes_and_vocabulary.md, "staged_rollout {release, order}".
  * The plane takes a release (the newest one this management node has
- * published, which is what a node's apply pulls) and an
- * ordered node list, applies to one node at a time with the node's own
- * apply_update, and moves on only when that node's structured apply result
- * (JobResultProcessor::apply_result) says: job completed, deploy tier
- * passed, the release's version reported, no rollback. The first miss halts
- * the rollout and names the node and the reason. Stop takes effect between
- * nodes: an apply in flight finishes, and nothing further is queued.
+ * published, which is what a node's apply pulls) and the nodes in stages,
+ * applies with each node's own apply_update, and counts a node done only when
+ * its structured apply result (JobResultProcessor::apply_result) says: job
+ * completed, deploy tier passed, the release's version reported, no rollback.
+ * A stage starts only when every node of the one before is done. Within a
+ * stage the nodes go at once, one at a time on each machine
+ * (FleetBackupPolicy::machine_key: container sites share their host): an
+ * upgrade's syntax sweep, unpacking and tests load the machine it runs on.
+ *
+ * A rollout started by hand gives every node a stage of its own, so it goes
+ * one node at a time in the order given. Deploy to all managed nodes has two:
+ * the nodes marked Test releases here first, then the rest (deploy_all_plan).
+ *
+ * The first miss halts the rollout and names the node and the reason: nothing
+ * further is started, the applies already under way are still judged, and it
+ * ends halted once none is left running. Stop ends it at once: an apply in
+ * flight finishes on its node, and nothing further is queued.
  *
  * advance() is called by the AdvanceStagedRollouts task every tick and by the
  * page on load; it is idempotent, and every state it moves between is saved
@@ -20,6 +30,10 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.10 - stages: a stage's nodes go at once, one per machine, and the next stage waits for all of them;
+ *                deploy to all managed nodes tests a release on the nodes marked mgn_rollout_first (or, with
+ *                none marked, the first site) before the rest. A miss lets the applies under way finish and be
+ *                judged before the rollout halts (srl_halt_reason is set while it is still running)
  * @version 1.9 - deploy_all_plan() does not list a node whose agent moved away
  * @version 1.8 - copy_hold(): a node's step waits while a copy of its site is being made, switching over, or
  *                switched and not yet kept, so the copy and its site keep one release
@@ -159,23 +173,35 @@ class StagedRolloutRunner {
 
 	/**
 	 * Start a rollout of the release this management node serves over the
-	 * given nodes, in the given order.
+	 * given nodes, in the given order, one node at a time.
 	 *
 	 * @param int[] $node_ids ordered, first applied first
 	 * @throws StagedRolloutException naming what refused
 	 */
 	public static function start(array $node_ids, $user_id, array $probe_pages = array()) {
+		return self::start_stages(array_map(function ($id) { return array($id); }, array_values($node_ids)), $user_id, $probe_pages);
+	}
+
+	/**
+	 * Start a rollout in stages: each stage's nodes at once, one per machine,
+	 * and each stage only once every node of the one before has taken the
+	 * release well.
+	 *
+	 * @param int[][] $stages the node ids of each stage, first stage first
+	 * @throws StagedRolloutException naming what refused
+	 */
+	public static function start_stages(array $stages, $user_id, array $probe_pages = array()) {
 		if (!self::lock()) {
 			throw new StagedRolloutException('A rollout is being started or moved right now; try again in a moment.');
 		}
 		try {
-			return self::start_locked($node_ids, $user_id, $probe_pages);
+			return self::start_locked($stages, $user_id, $probe_pages);
 		} finally {
 			self::unlock();
 		}
 	}
 
-	private static function start_locked(array $node_ids, $user_id, array $probe_pages = array()) {
+	private static function start_locked(array $stages, $user_id, array $probe_pages = array()) {
 		if (StagedRollout::running()) {
 			throw new StagedRolloutException('A rollout is already running; stop it or let it finish first.');
 		}
@@ -185,21 +211,30 @@ class StagedRolloutRunner {
 		}
 		$steps = array();
 		$seen = array();
-		foreach ($node_ids as $id) {
-			$id = (int)$id;
-			if ($id <= 0 || isset($seen[$id])) { continue; }
-			$seen[$id] = true;
-			try {
-				$node = new ManagedNode($id, TRUE);
-			} catch (Exception $e) {
-				throw new StagedRolloutException("Node #{$id} does not exist.");
+		$stage = 0;
+		foreach ($stages as $node_ids) {
+			$added = false;
+			foreach ((array)$node_ids as $id) {
+				$id = (int)$id;
+				if ($id <= 0 || isset($seen[$id])) { continue; }
+				$seen[$id] = true;
+				try {
+					$node = new ManagedNode($id, TRUE);
+				} catch (Exception $e) {
+					throw new StagedRolloutException("Node #{$id} does not exist.");
+				}
+				$why = self::node_refusal($node, (bool)$probe_pages);
+				if ($why !== null) {
+					throw new StagedRolloutException("'{$node->get('mgn_name')}' cannot be in a rollout: {$why}");
+				}
+				$steps[] = array('node_id' => $id, 'name' => (string)$node->get('mgn_name'),
+					'stage' => $stage, 'machine' => FleetBackupPolicy::machine_key($node),
+					'job_id' => null, 'verdict' => 'pending', 'reason' => '');
+				$added = true;
 			}
-			$why = self::node_refusal($node, (bool)$probe_pages);
-			if ($why !== null) {
-				throw new StagedRolloutException("'{$node->get('mgn_name')}' cannot be in a rollout: {$why}");
+			if ($added) {
+				$stage++;
 			}
-			$steps[] = array('node_id' => $id, 'name' => (string)$node->get('mgn_name'),
-				'job_id' => null, 'verdict' => 'pending', 'reason' => '');
 		}
 		if (!$steps) {
 			throw new StagedRolloutException('Choose at least one node.');
@@ -221,20 +256,23 @@ class StagedRolloutRunner {
 	const DEPLOY_ALL_WINDOW_HOURS = 24;
 
 	/**
-	 * The nodes "Deploy to all managed nodes" rolls a release out to, in the
-	 * order it applies them, and the ones it leaves out with why. This
-	 * management node is the release's source, a node that hosts no site has
-	 * nothing to apply, a node whose agent moved away is managed elsewhere, and
-	 * a test's fixture node is nobody's site; those are not listed at all. A
-	 * disabled node or one the rollout would refuse is listed as left out, so
-	 * "all" never quietly means "some".
+	 * The nodes "Deploy to all managed nodes" rolls a release out to, in its
+	 * two stages, and the ones it leaves out with why. This management node is
+	 * the release's source, a node that hosts no site has nothing to apply, a
+	 * node whose agent moved away is managed elsewhere, and a test's fixture
+	 * node is nobody's site; those are not listed at all. A disabled node or
+	 * one the rollout would refuse is listed as left out, so "all" never
+	 * quietly means "some".
 	 *
-	 * Plain sites go first and management nodes last: a management node that
-	 * breaks takes its own fleet's dashboard with it, so it waits until the
-	 * release has proved good elsewhere.
+	 * The first stage is the nodes marked Test releases here first
+	 * (mgn_rollout_first); with none marked, the first site, so a release is
+	 * never applied everywhere untried. The second is the rest: plain sites,
+	 * then management nodes, so on a machine that carries both a management
+	 * node's turn comes last (one that breaks takes its own fleet's dashboard
+	 * with it).
 	 *
 	 * @param ManagedNode[]|null $candidates the nodes to consider; null is every node on record
-	 * @return array{nodes: ManagedNode[], left_out: array<int, array{name: string, reason: string}>}
+	 * @return array{nodes: ManagedNode[], first: ManagedNode[], rest: ManagedNode[], left_out: array<int, array{name: string, reason: string}>}
 	 */
 	public static function deploy_all_plan(?array $candidates = null): array {
 		if ($candidates === null) {
@@ -244,6 +282,7 @@ class StagedRolloutRunner {
 				$candidates[] = $node;
 			}
 		}
+		$first = array();
 		$sites = array();
 		$managers = array();
 		$left_out = array();
@@ -259,13 +298,45 @@ class StagedRolloutRunner {
 				$left_out[] = array('name' => $name, 'reason' => $why);
 				continue;
 			}
-			if ($node->is_management_node()) {
+			if ($node->get('mgn_rollout_first')) {
+				$first[] = $node;
+			} elseif ($node->is_management_node()) {
 				$managers[] = $node;
 			} else {
 				$sites[] = $node;
 			}
 		}
-		return array('nodes' => array_merge($sites, $managers), 'left_out' => $left_out);
+		if (!$first) {
+			$first = $sites ? array(array_shift($sites)) : ($managers ? array(array_shift($managers)) : array());
+		}
+		$rest = array_merge($sites, $managers);
+		return array('nodes' => array_merge($first, $rest), 'first' => $first, 'rest' => $rest, 'left_out' => $left_out);
+	}
+
+	/**
+	 * What Deploy to all managed nodes will do, in a sentence, for the pages
+	 * that offer it: the nodes of each stage, and (unless the page lists them
+	 * itself) the nodes it leaves out.
+	 */
+	public static function deploy_all_description(array $plan, bool $with_left_out = true): string {
+		$names = function (array $nodes) {
+			return implode(', ', array_map(function ($n) { return (string)$n->get('mgn_name'); }, $nodes));
+		};
+		if (!$plan['nodes']) {
+			$text = 'No managed node can take a rollout right now.';
+		} else {
+			$text = 'Once the publish completes, the release is applied to ' . $names($plan['first'])
+				. (count($plan['first']) > 1 ? ' first, at once' : ' first');
+			if ($plan['rest']) {
+				$text .= ', and when ' . (count($plan['first']) > 1 ? 'they have' : 'it has') . ' taken it well, to '
+					. $names($plan['rest']) . ' at once, one at a time on each machine';
+			}
+			$text .= '. The first upgrade that fails stops anything not yet started.';
+		}
+		foreach ($with_left_out ? $plan['left_out'] : array() as $lo) {
+			$text .= ' Left out: ' . $lo['name'] . ' (' . $lo['reason'] . ').';
+		}
+		return $text;
 	}
 
 	/**
@@ -329,9 +400,11 @@ class StagedRolloutRunner {
 				return false;
 			}
 			$plan = self::deploy_all_plan($candidates);
-			$ids = array_map(function ($n) { return (int)$n->key; }, $plan['nodes']);
+			$key = function ($n) { return (int)$n->key; };
+			$ids = array_map($key, $plan['nodes']);
 			try {
-				$rollout = self::start_locked($ids, $job->get('mjb_created_by'));
+				$rollout = self::start_locked(array(array_map($key, $plan['first']), array_map($key, $plan['rest'])),
+					$job->get('mjb_created_by'));
 			} catch (StagedRolloutException $e) {
 				self::record_deploy_all($job, $params, array('deploy_all_outcome' => 'refused',
 					'deploy_all_reason' => $ids ? $e->getMessage() : 'no managed node can take a rollout',
@@ -360,7 +433,7 @@ class StagedRolloutRunner {
 		$job->save();
 	}
 
-	/** Stop between nodes: the apply in flight finishes; nothing further is queued. */
+	/** Stop now: an apply in flight finishes on its node; nothing further is queued. */
 	public static function stop(StagedRollout $rollout, $user_id) {
 		// Waits for a step in progress rather than racing it: a step saves the
 		// whole row, and would write "running" back over a stop.
@@ -395,8 +468,12 @@ class StagedRolloutRunner {
 	}
 
 	/**
-	 * One step of the state machine. Each call does at most one of: queue the
-	 * current node's apply, judge its finished apply, finish the rollout.
+	 * One tick of the state machine, over the current stage: every step under
+	 * way is moved (judged, or left waiting); then, while nothing has failed,
+	 * a step not yet begun starts on each machine with none running; then the
+	 * stage is done when every step passed, and the rollout when the last
+	 * stage is. A failed step stops anything further from starting, and the
+	 * rollout ends halted once no step of the stage is still running.
 	 */
 	public static function advance(StagedRollout $rollout) {
 		if (!self::lock()) {
@@ -415,11 +492,102 @@ class StagedRolloutRunner {
 			return;
 		}
 		$steps = $rollout->steps();
-		$pos = (int)$rollout->get('srl_position');
-		if ($pos >= count($steps)) {
+		$stage = (int)$rollout->get('srl_position');
+		$in_stage = array();
+		$later = false;
+		foreach ($steps as $i => $s) {
+			$at = self::step_stage($s, $i);
+			if ($at === $stage) {
+				$in_stage[] = $i;
+			} elseif ($at > $stage) {
+				$later = true;
+			}
+		}
+		if (!$in_stage) {
 			self::finish($rollout, StagedRollout::STATUS_COMPLETED, null);
 			return;
 		}
+
+		$busy = array();
+		foreach ($in_stage as $i) {
+			if (self::under_way($steps[$i])) {
+				self::advance_step($rollout, $steps, $i);
+				if (self::under_way($steps[$i])) {
+					$busy[self::step_machine($steps[$i])] = true;
+				}
+			}
+		}
+		foreach ($in_stage as $i) {
+			if (self::halting($rollout)) {
+				break;
+			}
+			$v = (string)$steps[$i]['verdict'];
+			$begun = $v === 'pending' || ($v === 'running' && !self::under_way($steps[$i]));
+			$machine = self::step_machine($steps[$i]);
+			if (!$begun || isset($busy[$machine])) {
+				continue;
+			}
+			self::advance_step($rollout, $steps, $i);
+			if (self::under_way($steps[$i])) {
+				$busy[$machine] = true;
+			}
+		}
+
+		$open = false;
+		$all_passed = true;
+		foreach ($in_stage as $i) {
+			$open = $open || self::under_way($steps[$i]);
+			$all_passed = $all_passed && $steps[$i]['verdict'] === 'passed';
+		}
+		if (self::halting($rollout)) {
+			if (!$open) {
+				$rollout->set_steps(self::skip_pending($steps));
+				self::finish($rollout, StagedRollout::STATUS_HALTED, (string)$rollout->get('srl_halt_reason'));
+			}
+			return;
+		}
+		if ($all_passed) {
+			$rollout->set('srl_position', $stage + 1);
+			$rollout->save();
+			if (!$later) {
+				self::finish($rollout, StagedRollout::STATUS_COMPLETED, null);
+			}
+		}
+	}
+
+	/** A step's stage; a step recorded before stages existed is a stage of its own. */
+	private static function step_stage(array $step, $index): int {
+		return isset($step['stage']) ? (int)$step['stage'] : (int)$index;
+	}
+
+	/** The machine a step's apply loads; one recorded before stages carried none is its node's own. */
+	private static function step_machine(array $step): string {
+		return (string)($step['machine'] ?? ('node:' . (int)$step['node_id']));
+	}
+
+	/**
+	 * Whether something of this step is running on its node: its readiness
+	 * check, its page checks or its apply. A step held by a copy, or not yet
+	 * begun, is not: it occupies no machine.
+	 */
+	private static function under_way(array $step): bool {
+		return ($step['verdict'] ?? '') === 'running'
+			&& (!empty($step['job_id']) || !empty($step['preflight_job_id']) || !empty($step['probes_before']));
+	}
+
+	/** Whether a step has failed and the rollout is only waiting for the applies under way. */
+	private static function halting(StagedRollout $rollout): bool {
+		return $rollout->is_running() && (string)$rollout->get('srl_halt_reason') !== '';
+	}
+
+	/**
+	 * Move one step along by at most one of: wait while a copy holds it, ask
+	 * its node whether it can take an upgrade, render its pages before, queue
+	 * its apply, judge the finished apply, render its pages after, pass it.
+	 * A failure marks it failed (fail_step); the rollout is ended by
+	 * advance_locked().
+	 */
+	private static function advance_step(StagedRollout $rollout, array &$steps, $pos) {
 		$step = $steps[$pos];
 
 		try {
@@ -476,6 +644,7 @@ class StagedRolloutRunner {
 			}
 			$steps[$pos]['job_id'] = (int)$job->key;
 			$steps[$pos]['verdict'] = 'running';
+			$steps[$pos]['reason'] = '';
 			$rollout->set_steps($steps);
 			$rollout->save();
 			return;
@@ -525,11 +694,7 @@ class StagedRolloutRunner {
 		$steps[$pos]['verdict'] = 'passed';
 		$steps[$pos]['reason'] = '';
 		$rollout->set_steps($steps);
-		$rollout->set('srl_position', $pos + 1);
 		$rollout->save();
-		if ($pos + 1 >= count($steps)) {
-			self::finish($rollout, StagedRollout::STATUS_COMPLETED, null);
-		}
 	}
 
 	/**
@@ -805,21 +970,33 @@ class StagedRolloutRunner {
 		return null;
 	}
 
-	/** Every step not yet started, marked skipped: the rollout will not reach it. */
+	/**
+	 * Every step not yet started, marked skipped: the rollout will not reach
+	 * it. A step a copy held, with nothing queued on its node, is one of them.
+	 */
 	private static function skip_pending(array $steps): array {
 		foreach ($steps as $i => $s) {
-			if (($s['verdict'] ?? '') === 'pending') {
+			$v = $s['verdict'] ?? '';
+			if ($v === 'pending' || ($v === 'running' && !self::under_way($s))) {
 				$steps[$i]['verdict'] = 'skipped';
 			}
 		}
 		return $steps;
 	}
 
-	private static function fail_step(StagedRollout $rollout, array $steps, $pos, $why) {
+	/**
+	 * Mark a step failed. The first failure is the rollout's halt reason, and
+	 * from then on nothing further starts; advance_locked() ends the rollout
+	 * once no step is still running.
+	 */
+	private static function fail_step(StagedRollout $rollout, array &$steps, $pos, $why) {
 		$steps[$pos]['verdict'] = 'failed';
 		$steps[$pos]['reason'] = mb_substr((string)$why, 0, 500);
-		$rollout->set_steps(self::skip_pending($steps));
-		self::finish($rollout, StagedRollout::STATUS_HALTED, ($steps[$pos]['name'] ?? ('node #' . $steps[$pos]['node_id'])) . ': ' . $why);
+		$rollout->set_steps($steps);
+		if (!self::halting($rollout)) {
+			$rollout->set('srl_halt_reason', mb_substr(($steps[$pos]['name'] ?? ('node #' . $steps[$pos]['node_id'])) . ': ' . $why, 0, 1000));
+		}
+		$rollout->save();
 	}
 
 	private static function finish(StagedRollout $rollout, $status, $reason) {

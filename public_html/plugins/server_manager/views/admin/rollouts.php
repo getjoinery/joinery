@@ -6,10 +6,13 @@
  * Apply the release this management node serves across chosen nodes, one at
  * a time, in the order given, stopping at the first node whose apply does not
  * prove good by its structured apply result (specs/agent_recipes_and_vocabulary.md,
- * "staged_rollout"). A tracked record: it survives a reload, shows where it
- * is, and can be stopped between nodes. The AdvanceStagedRollouts task moves
- * it; loading this page moves it too.
+ * "staged_rollout"). A rollout started by Deploy to all managed nodes runs in
+ * two stages instead, shown by the # column. A tracked record: it survives a
+ * reload, shows where it is, and can be stopped. The AdvanceStagedRollouts
+ * task moves it; loading this page moves it too.
  *
+ * @version 1.4 - stages: # is the step's stage, and a rollout whose step failed says it is halting while the
+ *                applies under way finish
  * @version 1.3 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running rollout
  * @version 1.2 - Pages to check on each node: the page_probe gate, before and after each node's apply
  * @version 1.1 - the release shown and rolled out is the newest published one (review B20)
@@ -108,12 +111,13 @@ $render_rollout = function (StagedRollout $r) use ($verdict_class) {
 		echo '<p class="small text-muted mb-1">Pages checked on each node before and after its apply: ' . htmlspecialchars(implode(', ', $labels)) . '</p>';
 	}
 	if ($r->get('srl_halt_reason')) {
-		echo '<div class="alert alert-danger small">Halted at ' . htmlspecialchars($r->get('srl_halt_reason')) . '</div>';
+		echo '<div class="alert alert-danger small">' . ($r->is_running() ? 'Halting: ' : 'Halted at ') . htmlspecialchars($r->get('srl_halt_reason'))
+			. ($r->is_running() ? '. Nothing further starts; the applies already under way finish and are judged first.' : '') . '</div>';
 	}
 	echo '<table class="table table-sm mb-2"><thead><tr><th>#</th><th>Node</th><th>Result</th><th>Job</th></tr></thead><tbody>';
 	foreach ($r->steps() as $i => $s) {
 		$v = (string)$s['verdict'];
-		echo '<tr><td>' . ($i + 1) . '</td><td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$s['node_id'] . '">'
+		echo '<tr><td>' . ((isset($s['stage']) ? (int)$s['stage'] : $i) + 1) . '</td><td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$s['node_id'] . '">'
 			. htmlspecialchars($s['name']) . '</a></td><td class="' . ($verdict_class[$v] ?? '') . '">' . htmlspecialchars($v)
 			. ($s['reason'] !== '' ? ' — ' . htmlspecialchars($s['reason']) : '') . '</td><td>'
 			. (!empty($s['job_id']) ? '<a href="/admin/server_manager/job_detail?job_id=' . (int)$s['job_id'] . '">#' . (int)$s['job_id'] . '</a>' : '')
@@ -132,7 +136,8 @@ if ($running) {
 } else {
 	echo '<p class="text-muted mb-0">None. A rollout applies this management node\'s release (' . htmlspecialchars($release)
 		. ') to one node at a time and moves on only when that node\'s apply completed, passed its deploy tier, reports the new version, and did not roll back,'
-		. ' and, where pages are named, no page renders worse than it did before the apply.</p>';
+		. ' and, where pages are named, no page renders worse than it did before the apply. Deploy to all managed nodes applies it to the sites marked Test releases here first,'
+		. ' then to the rest at once, one at a time on each machine.</p>';
 }
 $page->end_box();
 
