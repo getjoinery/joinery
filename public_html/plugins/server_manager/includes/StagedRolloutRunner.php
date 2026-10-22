@@ -20,6 +20,7 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.9 - deploy_all_plan() does not list a node whose agent moved away
  * @version 1.8 - copy_hold(): a node's step waits while a copy of its site is being made, switching over, or
  *                switched and not yet kept, so the copy and its site keep one release
  * @version 1.7 - the page_probe gate: a rollout may name up to MAX_PROBE_PAGES pages; each node renders them before
@@ -223,9 +224,10 @@ class StagedRolloutRunner {
 	 * The nodes "Deploy to all managed nodes" rolls a release out to, in the
 	 * order it applies them, and the ones it leaves out with why. This
 	 * management node is the release's source, a node that hosts no site has
-	 * nothing to apply, and a test's fixture node is nobody's site; those are
-	 * not listed at all. A disabled node or one the rollout would refuse is
-	 * listed as left out, so "all" never quietly means "some".
+	 * nothing to apply, a node whose agent moved away is managed elsewhere, and
+	 * a test's fixture node is nobody's site; those are not listed at all. A
+	 * disabled node or one the rollout would refuse is listed as left out, so
+	 * "all" never quietly means "some".
 	 *
 	 * Plain sites go first and management nodes last: a management node that
 	 * breaks takes its own fleet's dashboard with it, so it waits until the
@@ -246,7 +248,7 @@ class StagedRolloutRunner {
 		$managers = array();
 		$left_out = array();
 		foreach ($candidates as $node) {
-			if (!$node->hosts_site()) { continue; }
+			if (!$node->hosts_site() || $node->agent_moved_away() !== null) { continue; }
 			$name = (string)$node->get('mgn_name');
 			if (!$node->get('mgn_enabled')) {
 				$left_out[] = array('name' => $name, 'reason' => 'it is disabled');

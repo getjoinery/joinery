@@ -26,6 +26,7 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.2 - a node whose agent moved away is not listed: it is patched from where it is managed now
  * @version 1.1 - a kernel fix is amber, not red: nothing installs it before the night, and its reboot is a
  *                person's (reviewer2 G3); other fixes wait for the next run, which a critical fix brings forward
  * @version 1.0
@@ -59,7 +60,7 @@ class FleetSecurityView {
 		$out = array();
 		$host_of_group = array();
 		foreach (new MultiManagedNode(array('deleted' => false), array('mgn_name' => 'ASC')) as $node) {
-			if (!$node->is_operational()) {
+			if (!$node->is_operational() || $node->agent_moved_away() !== null) {
 				continue;
 			}
 			$hr = $node->get('mgn_last_host_report');

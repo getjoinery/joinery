@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.61 - mgn_agent_left_time / mgn_agent_left_to and agent_moved_away(): the node's agent said goodbye,
+ *                and to which management node it moved; nothing here reaches the machine after that
  * @version 1.60 - mgn_backup_recovery_public_key: a proven recovery key's public half (specs/site_copy_final_test.md E1)
  * @version 1.59 - a host whose agent this node was is retired even with Enable automated provisioning checked
  *                (ManagedHost 1.7; owner 2026-10-16)
@@ -371,6 +373,12 @@ class ManagedNode extends SystemBase {
 		// Compared against mgn_agent_last_poll rather than cleared, so a node that
 		// comes back needs no second write to look alive again.
 		'mgn_agent_quiet_time'         => array('type'=>'timestamp(6)'),
+		// When the node's agent said goodbye (the leave call), and the
+		// management node it moved to when that was a move this plane asked
+		// for (move_to_plane). The goodbye erases the key; these keep the
+		// row from reading as a dead agent afterwards. A new pairing clears them.
+		'mgn_agent_left_time'          => array('type'=>'timestamp(6)'),
+		'mgn_agent_left_to'            => array('type'=>'varchar(255)'),
 
 		// Liveness, centrally visible. The agent's own heartbeat row lives in
 		// each site's OWN database and stays there; a poll against this plane
@@ -546,6 +554,33 @@ class ManagedNode extends SystemBase {
 	 * dozen, and nearly all of them start with a condition nobody will fix
 	 * (no recovery key), so it is quiet unless someone turns its alerts on.
 	 */
+	/**
+	 * The node's agent said goodbye and none has paired since: the machine is
+	 * managed from somewhere else now, or by nobody. Null otherwise.
+	 * Nothing here reaches it: no job, backup or patch run is sent, and its
+	 * figures are from before it left. An uptime check from outside still
+	 * runs when it is switched on, because that needs no agent.
+	 *
+	 * @return array{time: string, to: string}|null 'to' is the management node it moved to, '' when not known
+	 */
+	public function agent_moved_away(): ?array {
+		$left = trim((string)$this->get('mgn_agent_left_time'));
+		if ($left === '' || trim((string)$this->get('mgn_agent_public_key')) !== '') {
+			return null;
+		}
+		return array('time' => $left, 'to' => trim((string)$this->get('mgn_agent_left_to')));
+	}
+
+	/** One line for a page: 'Its agent moved to getjoinery.com on 2026-10-09.' */
+	public function agent_moved_away_text(): string {
+		$moved = $this->agent_moved_away();
+		if ($moved === null) {
+			return '';
+		}
+		$to = $moved['to'] !== '' ? (parse_url($moved['to'], PHP_URL_HOST) ?: $moved['to']) : '';
+		return 'Its agent ' . ($to !== '' ? 'moved to ' . $to : 'disconnected itself') . ' on ' . substr($moved['time'], 0, 10) . '.';
+	}
+
 	public function sends_alerts(): bool {
 		$choice = (string)$this->get('mgn_alerts');
 		if ($choice === 'on' || $choice === 'off') {

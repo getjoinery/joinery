@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.53 - leave records the goodbye on the node (mgn_agent_left_time) and, after a move this plane asked
+ *                 for, the management node it went to (mgn_agent_left_to); approveJoin clears both
  * @version 1.52 - a job is addressed to the node id its claim was signed as, which a moved machine still holds
  *                 as its own; the agent refuses any other (found in the site copy final test's C3)
  * @version 1.51 - a machine of a live switch-over that signs as the node with the key of the copy's row (the
@@ -1012,6 +1014,8 @@ class AgentChannelEndpoint {
 		$node->set('mgn_agent_public_key', (string)$request->get('ajr_public_key'));
 		$node->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
 		$node->set('mgn_agent_last_poll', null);
+		$node->set('mgn_agent_left_time', null);
+		$node->set('mgn_agent_left_to', null);
 		if ($request->get('ajr_agent_version')) {
 			$node->set('mgn_agent_version', (string)$request->get('ajr_agent_version'));
 		}
@@ -2641,8 +2645,46 @@ class AgentChannelEndpoint {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 
-		self::forgetAgent($node);
+		self::recordLeave($node);
 		api_success(['left' => true], '', 200);
+	}
+
+	/**
+	 * The node's goodbye: the pairing is forgotten, and the node records that
+	 * its agent left, and where to when this plane asked it to move.
+	 */
+	public static function recordLeave($node) {
+		// Read before the pairing is forgotten: only a move asked for since
+		// this pairing began counts.
+		$moved_to = self::moveDestination($node);
+		self::forgetAgent($node);
+		$node->set('mgn_agent_left_time', gmdate('Y-m-d H:i:s'));
+		$node->set('mgn_agent_left_to', $moved_to !== '' ? $moved_to : null);
+		$node->save();
+	}
+
+	/**
+	 * The management node this plane last asked the node's agent to move to
+	 * (a completed move_to_plane job since the node was paired), or ''. A
+	 * goodbye that follows one is that move finishing; a plain
+	 * 'joinery-agent leave' has none.
+	 */
+	public static function moveDestination($node): string {
+		$paired = trim((string)$node->get('mgn_agent_paired_time'));
+		$jobs = new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => 'move_to_plane', 'status' => 'completed'),
+			array('mjb_management_job_id' => 'DESC'), 1);
+		foreach ($jobs as $job) {
+			if ($paired !== '' && strtotime((string)$job->get('mjb_create_time') . ' UTC') < strtotime($paired . ' UTC')) {
+				return '';
+			}
+			$params = $job->get('mjb_parameters');
+			if (is_string($params)) {
+				$params = json_decode($params, true);
+			}
+			$to = trim((string)(is_array($params) ? ($params['management_node'] ?? '') : ''));
+			return preg_match('#^https://#', $to) ? mb_substr($to, 0, 255) : '';
+		}
+		return '';
 	}
 
 	/**

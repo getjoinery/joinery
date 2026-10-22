@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.70 - set_reverse_dns is refused for a node whose agent moved away (ManagedNode::agent_moved_away())
  * @version 1.69 - publish_upgrade's Apply and publish button queues the apply with the publish to follow it
  *                (ApplyAndPublish); the plain publish goes through ApplyAndPublish::queuePublish()
  * @version 1.68 - refresh_site_containers: a container host's nightly replacement of its site containers, now
@@ -957,6 +958,9 @@ class NodeDetailActions {
 			}
 
 			case 'set_reverse_dns': {
+				if ($node->agent_moved_away() !== null) {
+					throw new Exception($node->agent_moved_away_text() . ' Its reverse DNS is set from where it is managed now.');
+				}
 				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
 				$rdns_hostname = trim($_POST['rdns_hostname'] ?? '');
 				try {

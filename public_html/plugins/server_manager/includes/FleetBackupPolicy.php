@@ -13,6 +13,7 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.9 - a node whose agent moved away is not eligible: nothing here reaches it
  * @version 1.8 - a node verifies weekly by default, and an unverified or stale verify is a problem a day past the
  *                interval (verify_alarm_days(), specs/storage_targets.md F1); the fixed 45 and 60 days are gone
  * @version 1.7 - machine_key() and agent_unheard() replace max_concurrent(): backups are limited to one at a
@@ -118,7 +119,8 @@ class FleetBackupPolicy {
 			&& trim((string)$node->get('mgn_delete_time')) === ''
 			&& (bool)$node->get('mgn_web_root')
 			&& !$node->get('mgn_skip_joinery_checks')
-			&& $node->is_operational();
+			&& $node->is_operational()
+			&& $node->agent_moved_away() === null;
 	}
 
 	/**

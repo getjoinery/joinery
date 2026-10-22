@@ -37,6 +37,8 @@
  *                names one hosts a site; a malformed one is dropped and the join still stands
  * @version 1.7 - a result is folded as it arrives through record_result, failed and refused as much as
  *                completed, and no terminal control code survives into any field the card reads
+ * @version 1.7 - a goodbye records that the agent left and, after a move this plane asked for, where to;
+ *                such a node is out of backups, patch runs and deploy-all, and a new pairing clears it
  * @version 1.6 - the claim's closed field set gains cases (an object keyed by source); a list, and a
  *                field that would close a case from the plane's side, are refused
  * @version 1.5 - a join with no node record is approved by making the record from the request
@@ -159,11 +161,18 @@ check($stale->is_expired() === true,
 $stale->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
 $stale->save();
 
+// A machine whose agent once said goodbye here, paired again: it is not moved away.
+$node->set('mgn_agent_left_time', gmdate('Y-m-d H:i:s', time() - 86400));
+$node->set('mgn_agent_left_to', 'https://elsewhere.example');
+$node->save();
+
 // Approval IS enrollment: the binding writes the public key onto the node and
 // stamps when. This is the exact moment the trust decision lands.
 AgentChannelEndpoint::approveJoin($jr, $node);
 $node->load();
 $jr->load();
+check(empty($node->get('mgn_agent_left_time')) && empty($node->get('mgn_agent_left_to')) && $node->agent_moved_away() === null,
+	'A new pairing clears a goodbye recorded before it');
 
 check($node->get('mgn_agent_public_key') === base64_encode($public),
 	'Approval binds the requesting key to the node');
@@ -259,6 +268,65 @@ check(empty($leaver->get('mgn_agent_public_key')) && empty($leaver->get('mgn_age
 	'Forgetting erases the verifier and the pairing stamp');
 check(JobCommandBuilder::has_agent_channel($leaver) === false,
 	'A forgotten agent routes over api/ssh again — ending is symmetric, whichever side ends it');
+check($leaver->agent_moved_away() === null,
+	'A plane-side Disconnect is not a goodbye: the node is not recorded as moved away');
+
+// ---------------------------------------------------------------------------
+section('A goodbye says the agent left, and where to after a move this plane asked for');
+
+$mover = agent_channel_node('agtest-mover-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$made_nodes[] = $mover->key;
+$pair = function () use ($mover, $public) {
+	$mover->set('mgn_agent_public_key', base64_encode($public));
+	$mover->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s', time() - 3600));
+	$mover->set('mgn_agent_left_time', null);
+	$mover->set('mgn_agent_left_to', null);
+	$mover->set('mgn_web_root', '/var/www/html/agtest/public_html');
+	$mover->set('mgn_enabled', true);
+	$mover->save();
+};
+$move_job = function ($status, $to, $age) use ($mover) {
+	$j = new ManagementJob(NULL);
+	$j->set('mjb_mgn_managed_node_id', $mover->key);
+	$j->set('mjb_job_type', 'move_to_plane');
+	$j->set('mjb_status', $status);
+	$j->set('mjb_commands', json_encode(array('primitive' => 'move_to_plane', 'params' => new stdClass(), 'steps' => array())));
+	$j->set('mjb_parameters', json_encode(array('name' => 'agtest', 'management_node' => $to)));
+	$j->set('mjb_total_steps', 1);
+	$j->set('mjb_create_time', gmdate('Y-m-d H:i:s', time() - $age));
+	$j->save();
+};
+
+$pair();
+check($mover->agent_moved_away() === null && FleetBackupPolicy::is_eligible($mover),
+	'A paired node has not moved away, and its backups run');
+
+// A move asked for before this pairing, and one never completed: neither is where it went.
+$move_job('completed', 'https://before-pairing.example', 7200);
+$move_job('pending', 'https://never-finished.example', 60);
+AgentChannelEndpoint::recordLeave($mover);
+$mover->load();
+$moved = $mover->agent_moved_away();
+check(is_array($moved) && $moved['to'] === '' && empty($mover->get('mgn_agent_public_key')),
+	'A goodbye with no move behind it records that the agent left, and not where', json_encode($moved));
+check(strpos($mover->agent_moved_away_text(), 'disconnected itself') !== false, 'and says the agent disconnected itself',
+	$mover->agent_moved_away_text());
+
+$pair();
+$move_job('completed', 'https://elsewhere.example', 60);
+AgentChannelEndpoint::recordLeave($mover);
+$mover->load();
+$moved = $mover->agent_moved_away();
+check(is_array($moved) && $moved['to'] === 'https://elsewhere.example' && JobCommandBuilder::has_agent_channel($mover) === false,
+	'A goodbye after a completed move records the management node it went to', json_encode($moved));
+check($mover->agent_moved_away_text() === 'Its agent moved to elsewhere.example on ' . gmdate('Y-m-d') . '.',
+	'and the page says so in a line', $mover->agent_moved_away_text());
+
+check(FleetBackupPolicy::is_eligible($mover) === false, 'A node whose agent moved away gets no fleet backups');
+$plan = StagedRolloutRunner::deploy_all_plan(array($mover));
+check(!$plan['nodes'] && !$plan['left_out'], 'Deploy to all does not list it, not even as left out', json_encode($plan['left_out']));
+$patch = FleetSecurityRunner::plan(array($mover));
+check(!$patch['nodes'] && !$patch['left_out'], 'A patch run does not list it, not even as left out', json_encode($patch['left_out']));
 
 // ---------------------------------------------------------------------------
 section('Primitive jobs are stored as an envelope, and are readable as one');

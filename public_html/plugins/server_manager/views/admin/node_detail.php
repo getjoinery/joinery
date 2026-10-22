@@ -9,6 +9,7 @@
  * includes/, not views/, so a partial is never reachable as a standalone URL
  * that would bypass this file's node loading and check_permission(10).
  *
+ * @version 2.5 - a node whose agent moved away says so above every tab: managed elsewhere, nothing here reaches it
  * @version 2.4 - Copy tab (specs/site_copy.md WP8)
  * @version 2.3 - drop the local flash-message block; admin_header already renders them (they showed twice)
  * @version 2.2 - Console tab (ad-hoc command on the node, per-node opt-in)
@@ -79,15 +80,19 @@ if ($redirect !== null) {
 // publishable through the shared box instead of hand-typed into a dashboard.
 require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeDnsPlan.php'));
-$dns_return_url = $base_url . '&tab=overview';
-$dns_result = DnsPublishBox::handle(array_merge($_GET, $_POST), function () use ($node) {
-	return NodeDnsPlan::forNode($node);
-}, $dns_return_url);
-if ($dns_result !== null && $dns_result->redirect !== null) {
-	header('Location: ' . $dns_result->redirect);
-	exit;
+// A machine whose agent moved away has its DNS published from where it is managed now.
+$dns_box = null;
+if ($node->agent_moved_away() === null) {
+	$dns_return_url = $base_url . '&tab=overview';
+	$dns_result = DnsPublishBox::handle(array_merge($_GET, $_POST), function () use ($node) {
+		return NodeDnsPlan::forNode($node);
+	}, $dns_return_url);
+	if ($dns_result !== null && $dns_result->redirect !== null) {
+		header('Location: ' . $dns_result->redirect);
+		exit;
+	}
+	$dns_box = DnsPublishBox::build(NodeDnsPlan::forNode($node), array_merge($_GET, $_POST), $dns_return_url);
 }
-$dns_box = DnsPublishBox::build(NodeDnsPlan::forNode($node), array_merge($_GET, $_POST), $dns_return_url);
 
 // ── Page rendering ──
 
@@ -131,6 +136,15 @@ echo '<script>var smNodeName = '
 </ul>
 
 <?php
+// A machine whose agent said goodbye is managed from somewhere else now (or by
+// nobody); what this page holds about it stops at that moment.
+if ($node->agent_moved_away() !== null) {
+	echo '<div class="jy-callout jy-callout-info mb-3"><strong>' . htmlspecialchars($node->agent_moved_away_text()) . '</strong> '
+		. 'Nothing here reaches this machine any more: no jobs, backups or updates are sent to it, and its figures are from before then.'
+		. ($node->get('mgn_uptime_enabled') ? ' This management node still checks from outside that its site answers.' : '')
+		. '</div>';
+}
+
 // ── Tab body ──
 require(PathHelper::getIncludePath('plugins/server_manager/includes/node_detail_tabs/' . $tab . '.php'));
 

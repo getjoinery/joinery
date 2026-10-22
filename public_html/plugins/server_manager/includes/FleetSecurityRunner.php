@@ -20,6 +20,7 @@
  * the page on load; it is idempotent, and each state is saved before the next
  * is entered, so a crash between two calls resumes where it stood.
  *
+ * @version 1.2 - a node whose agent moved away is not part of the plan, not even as left out
  * @version 1.1 - a container whose host is replacing its containers is left out, or skipped while its install is
  *                open, instead of waiting out a job that dies with the container (reviewer2 c)
  * @version 1.0
@@ -64,7 +65,8 @@ class FleetSecurityRunner {
 		$containers = array();
 		$left_out = array();
 		foreach ($candidates as $n) {
-			if (!$n->is_operational()) {
+			// A machine whose agent moved away is patched from where it is managed now.
+			if (!$n->is_operational() || $n->agent_moved_away() !== null) {
 				continue;
 			}
 			$name = (string)$n->get('mgn_name');
