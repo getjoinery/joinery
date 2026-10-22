@@ -460,7 +460,7 @@ The assertion surface:
 - `check($condition, $label, $detail = '')` — condition-first.
 - `ok($label, $condition, $detail = '')` — label-first alias (same recorder).
 - `section($title)` — group the checks that follow.
-- `harness_skip($label, $detail = '')` — a skipped check (e.g. an unmet `needs`).
+- `harness_skip($label, $detail = '')` — a skipped check (e.g. an unmet `needs`). The runner's line for the test shows it, `125/125 (1 skipped)`, so a proof that did not run is visible without reading the totals.
 
 Fixtures and teardown (all LIFO, run automatically at finish or on crash):
 

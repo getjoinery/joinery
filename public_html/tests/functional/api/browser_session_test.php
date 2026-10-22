@@ -18,9 +18,12 @@
  *      lifting that does not sign the old session back in.
  *   8. A password change made on the website ends the account's other
  *      sessions and remembered devices, and keeps the browser that made it.
+ *   9. A session whose account was deleted for good ends without writing a
+ *      row that names the missing account.
  *
  * Usage: php browser_session_test.php [base_url] [origin_ip]
  *
+ * @version 1.3.0 - section 9, a deleted account's session ends leaving no orphan rows
  * @version 1.2.0 - section 8, a password change ends the other sessions
  * @version 1.1.0 - section 7, a barred account's website session ends
  */
@@ -215,6 +218,27 @@ try {
 	$r = harness_request('GET', '/profile/profile', array('jar' => $jar_there, 'accept' => null));
 	check(in_array($r['status'], array(301, 302, 303), true) && strpos($r['redirect_url'], '/login') !== false,
 		'the other browser is signed out at its next page', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+
+	section('9. A session whose account was deleted for good ends leaving nothing that names it');
+	// The account's rows go with it; the sign-out its next page triggers must
+	// not write a fresh one (a logout row, a vault audit row) against an id
+	// that no longer exists.
+	$gone = make_user('BrwG' . $run_id);
+	$gone_id = (int)$gone->key;
+	list($gone_jar, $gone_token) = web_login_and_scrape_token($gone, 'BrwG' . $run_id);
+	$r = harness_request('GET', '/profile/profile', array('jar' => $gone_jar, 'accept' => null));
+	check($r['status'] === 200, 'signed in to begin with', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	(new User($gone_id, TRUE))->permanent_delete();
+	check(!User::check_if_exists($gone_id), 'the account is deleted for good');
+	$r = harness_request('GET', '/profile/profile', array('jar' => $gone_jar, 'accept' => null));
+	check(in_array($r['status'], array(301, 302, 303), true) && strpos($r['redirect_url'], '/login') !== false,
+		'the next page sends it to sign in', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	$dblink = DbConnector::get_instance()->get_db_link();
+	foreach (array('log_logins' => 'log_usr_user_id', 'evl_event_logs' => 'evl_usr_user_id') as $table => $col) {
+		$q = $dblink->prepare("SELECT COUNT(*) FROM $table WHERE $col = ?");
+		$q->execute(array($gone_id));
+		check((int)$q->fetchColumn() === 0, "no $table row names the deleted account");
+	}
 
 } finally {
 	harness_teardown_data();

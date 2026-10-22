@@ -42,7 +42,9 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
- * @version 1.16
+ * @version 1.17
+ * @changelog 1.17 - close()/lock() take $audit: false wipes a window without an
+ *   audit row, for an account that no longer exists (SessionControl::logout).
  * @changelog 1.16 - Borrowed windows: arm() from the website also arms each
  *   borrowing app credential's slot; useCredentialWindow(), touchActivity(),
  *   lockBorrowed(), lockCredentialWindow(), borrowedWindows().
@@ -670,17 +672,21 @@ class VaultUnlock {
 
 	/** Close the current session's window. */
 	public static function close(int $user_id, string $scope = 'user',
-			string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
-		self::lock($user_id, self::currentSessionId(), $scope, $reason);
+			string $reason = VaultAudit::REASON_EXPLICIT_LOCK, bool $audit = true): void {
+		self::lock($user_id, self::currentSessionId(), $scope, $reason, $audit);
 	}
 
 	/**
 	 * Wipe a specific session's window — the generic surface consumer-policy
 	 * events call (a credential event, a heartbeat/IP-change trigger, an
 	 * explicit lock button). Not necessarily the calling session.
+	 *
+	 * $audit false wipes the window without writing its close to the audit
+	 * log: for an account that no longer exists, whose log went with it, a row
+	 * would name a user that is not there.
 	 */
 	public static function lock(int $user_id, string $session_id, string $scope = 'user',
-			string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
+			string $reason = VaultAudit::REASON_EXPLICIT_LOCK, bool $audit = true): void {
 		$meta = apcu_fetch(self::metaKey($session_id, $user_id, $scope), $had_meta);
 		$was_open = apcu_exists(self::apcuKey($session_id, $user_id, $scope));
 
@@ -699,8 +705,10 @@ class VaultUnlock {
 		// log full of closes for windows that never opened teaches nobody anything.
 		if ($was_open) {
 			$armed = ($had_meta && is_array($meta)) ? (int)($meta['armed'] ?? 0) : 0;
-			VaultAudit::closed($user_id, $scope, $reason, $session_id,
-				$armed > 0 ? time() - $armed : null);
+			if ($audit) {
+				VaultAudit::closed($user_id, $scope, $reason, $session_id,
+					$armed > 0 ? time() - $armed : null);
+			}
 			self::noteClosed($user_id, $session_id, $scope, $reason);
 		}
 		self::runWipeCallbacks($user_id, $scope);
