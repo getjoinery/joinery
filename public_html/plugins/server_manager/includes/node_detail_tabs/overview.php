@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.80 - a node whose agent moved away is not offered Connect agent or Reverse DNS: the machine is
+ *                managed elsewhere
  * @version 1.79 - the security fixes a machine waits for and what still runs replaced code (host_report 1.37), and a PHP
  *                card: the packages and whether each php-fpm runs the installed binary (check_status, agent 1.88.0)
  *                (fleet_security_patching WP1), with Install security updates now on a site container (WP3)
@@ -391,7 +393,7 @@
 			if (JobCommandBuilder::has_primitive($node, 'host_converge')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did.', function(){ document.getElementById('host_converge_form').submit(); }); return false;">Run Host Housekeeping</a></li>
 			<?php endif; ?>
-			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key')):
+			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key') && $node->agent_moved_away() === null):
 				$overview_pending_joins = class_exists('AgentJoinRequest') ? count(AgentJoinRequest::pending()) : 0; ?>
 				<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=api_keys"><?php
 					echo $overview_pending_joins > 0
@@ -2561,7 +2563,9 @@
 
 	// ── Reverse DNS panel (cloud-born nodes only) ──
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
-	$rdns_provision = NodeReverseDns::provisionForNode($node);
+	// A machine managed elsewhere has its reverse DNS (and its DNS: the shell
+	// builds no box for it) set from there.
+	$rdns_provision = $node->agent_moved_away() !== null ? null : NodeReverseDns::provisionForNode($node);
 	if ($rdns_provision) {
 		$rdns_ip = (string)$rdns_provision->get('cvp_instance_ip');
 		try {

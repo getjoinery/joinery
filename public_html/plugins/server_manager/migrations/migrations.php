@@ -730,4 +730,24 @@ return [
 			error_log('sm_023: ' . $n . ' provision(s) now hold their instance addresses canonical.');
 		},
 	],
+	[
+		// A node whose agent moved to another management node before the
+		// goodbye was recorded (managed_nodes 1.61) reads as a dead agent. The
+		// move this plane asked for, followed by the agent's last check-in and
+		// no key since, is that goodbye: it is recorded as one.
+		'id' => 'sm_024_record_agents_that_moved_away',
+		'version' => '1.30.98',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$n = $dblink->exec("UPDATE mgn_managed_nodes n SET mgn_agent_left_time = n.mgn_agent_last_poll, mgn_agent_left_to = j.management_node
+				FROM (SELECT DISTINCT ON (mjb_mgn_managed_node_id) mjb_mgn_managed_node_id AS node_id, mjb_create_time AS asked,
+						mjb_parameters->>'management_node' AS management_node
+					FROM mjb_management_jobs WHERE mjb_job_type = 'move_to_plane' AND mjb_status = 'completed' AND mjb_delete_time IS NULL
+					ORDER BY mjb_mgn_managed_node_id, mjb_management_job_id DESC) j
+				WHERE n.mgn_managed_node_id = j.node_id AND n.mgn_agent_public_key IS NULL AND n.mgn_agent_left_time IS NULL
+					AND n.mgn_agent_last_poll >= j.asked AND n.mgn_agent_last_poll <= j.asked + interval '7 days'
+					AND j.management_node LIKE 'https://%'");
+			error_log('sm_024: ' . (int)$n . ' node(s) whose agent moved to another management node now say so.');
+		},
+	],
 ];
