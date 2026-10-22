@@ -947,6 +947,9 @@ function print_human_line($r, $root, $tag = '') {
 	$mark = $r['status'] === 'pass' ? 'PASS' : 'FAIL';
 	$s = $r['stats'];
 	$counts = $s['total'] > 0 ? "{$s['passed']}/{$s['total']}" . ($s['failed'] ? " ({$s['failed']} failed)" : '') : '—';
+	// A skipped check is a proof that did not run; the line says so rather
+	// than leaving it to the totals at the bottom.
+	if (!empty($s['skipped'])) $counts .= " ({$s['skipped']} skipped)";
 	$line = sprintf("  %-4s %-28s %-9s %6dms  %s", $mark, $r['name'], $counts, $r['duration_ms'], $r['path']);
 	if ($tag !== '') $line .= "  [$tag]";
 	echo $line . "\n";

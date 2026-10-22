@@ -2,6 +2,7 @@
 /**
  * Drive — member file storage page.
  *
+ * @version 1.5 - loads zip-writer.js for a Fortress folder's Download as zip
  * @version 1.4 - unlock and setup are the core vault ceremony; no dialog of its own
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -327,6 +328,7 @@ window.DRIVE_INITIAL = <?php echo json_encode($initial, JSON_UNESCAPED_SLASHES);
 window.DRIVE_CONFIG = <?php echo json_encode($config, JSON_UNESCAPED_SLASHES); ?>;
 </script>
 <script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/zip-writer.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/zip-writer.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/drive.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive.js')) ?: '1'; ?>"></script>
 

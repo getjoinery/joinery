@@ -1,6 +1,6 @@
 # Export Mail, Contacts, Calendar and Drive
 
-**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`. WP3 (calendar) built and reviewed 2026-10-22, live check passed on dev; the check after release is in the live verification queue. WP4 and WP1 are not built. No questions are open.
+**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`, released in 0.8.520. WP3 (calendar) built and reviewed 2026-10-22, released in 0.8.521 and checked on getjoinery; the Google Calendar import is in the live verification queue. WP4 (Drive folder zip) built and reviewed 2026-10-22, live walk on dev passed; the checks after release are in the live verification queue. WP1 is not built. No questions are open.
 
 Everything else from the first draft (member data download, closing an account, admin list exports, member import, backup download and restore from a file) is in `DEFERRED_data_portability.md`.
 
@@ -137,6 +137,8 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 
 ### WP4. Download a Drive folder as a zip
 
+**Built and reviewed 2026-10-22.** The `drive_folder_zip` test covers the round trip, names, missing bytes, the route's statuses for owner, grantee, stranger, signed out, Fortress and locked Private, and a Private folder in the window; `zip_stream_writer` and `zip_writer_js` put both writers through every reader at hand in the classic and ZIP64 forms. A one-off run wrote two 4.4 GB files and one past the 4 GiB mark, and unzip, Python and PHP read them back. The dev walk downloaded a Standard tree, a Private folder through the unlock, and a Fortress folder both through the save dialog and held in the tab; every file matched byte for byte, and macOS's own unzip extracted all three.
+
 **What the member gets.** On a Drive folder, **Download as zip**.
 
 **How it's built:**
@@ -155,6 +157,15 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 - **ZIP64** handles sets over 4 GB.
 
 **The sync client** remains the answer for whole copies of very large Drives.
+
+**How it was built:**
+
+- **The server side** is `DriveZip` (`includes/DriveZip.php`) behind a route, `/drive/zip/{folder_id}` (`includes/drive_zip_route.php`), not an API action: the answer is the file itself, streamed as it is built. `plan()` resolves read access, the owner's window and every sealed file's key before the first byte, so a refusal is a status (`404`, `409` Fortress, `423` locked) and the page can `HEAD` first, unlock on `423`, then download. The request releases the session before it streams, so the vault heartbeat and the member's other pages do not wait on a long download.
+- **Fortress** is zipped in the tab: the tree is listed from `drive_list` pages and named first, then each file is fetched by its signed link and decrypted with the member's own key. A link that has run out on a long zip is replaced by listing its folder again. `showSaveFilePicker` writes one file to disk where the browser has it (Chrome, Edge). Elsewhere the tab holds one part of about 500 MB at a time, and each finished part waits for a **Save** press, since Safari and Firefox save a file for a page only from a click. Listing first is what lets a folder bigger than one part be named in parts from the start without holding part 1 back.
+- **Offloaded files** are fetched to the server's temp space one at a time before they go into the zip, as a single download is; the cloud driver has no streaming read. A streaming read would let large offloaded folders skip that copy; it is not needed for this WP.
+- **Names.** Characters that would move a file out of its folder are replaced, and siblings that differ only in case are numbered, since a Mac or Windows disk would overwrite one with the other. Windows-only reserved characters (`:` `?` and the like) are kept: replacing them would change names on every system for the sake of one.
+- **A file whose bytes are gone** is left out and named in `Files not included.txt`, rather than failing the whole zip or vanishing silently.
+- **Not in the zip:** versions other than the current one, trashed items, and the share settings.
 
 ## Bugs found while scoping
 
@@ -191,6 +202,21 @@ Found in review of WP3, both fixed with it:
 - **B19.** A repeat the member switched off could come back in the download. An Outlook monthly rule (`BYMONTHDAY=15`) imports as a native repeat with the rule kept. The member turned the repeat off and moved the entry to the 16th; the rule no longer matched the start, so the export took it for one the calendar cannot express and wrote it. Nothing in the form cleared the kept rule. `_calendar_set_recurrence()` now drops it whenever the repeat changes, and the export writes a kept rule only on an entry that does not repeat.
 - **B20.** A timed row with a zone and no stored wall clock would have been written with its UTC clock labelled as the zone's. Its UTC instant is now read in the zone. No such rows exist on dev.
 
+Found while checking WP3 on dev, fixed:
+
+- **B21.** The dev walk script (`maintenance_scripts/dev_tools/walk_vault.js`) still switched users with a link after 0.8.521 made the admin's log in as user a button. In a browser already signed in as the admin the switch did nothing, and the script went on to the admin's own security page and tried to add a passkey there (refused for the wrong password; nothing changed). It now switches with a POST and stops unless it is signed in as the walk user.
+
+Found while building WP4, fixed with it:
+
+- **B22.** A Fortress file showed its encrypted size in the Drive listing (a 12-byte file read 44 B). The plaintext size travels in the file's encrypted metadata, and the page now shows it once it decrypts the name.
+- **B23.** Drive's messages sat at the bottom centre of the window, under the cookie banner on a narrow window (every phone), so a member who had not answered the banner never saw them. They now sit at the top.
+
+Found in review of WP4, all fixed with it:
+
+- **B24.** A deflate step that failed was skipped, leaving a short entry and a broken archive with no error. It now throws.
+- **B25.** A Fortress zip held in the tab saved its parts with clicks the page made itself, long after the member's; Safari blocks those and Firefox may ask for each. Each part now waits for the member's own Save press, and the tree is listed first so only one part is held at a time.
+- **B26.** A member's own file named `Files not included.txt` in the top folder would have shared its name with the note. The note now takes the next free name.
+
 ## Decided
 
 - **Q1 (owner, 2026-10-21 and 2026-10-22).** This spec covers email, contacts, calendar and Drive. Everything else from the first draft is in `DEFERRED_data_portability.md`. Posts and pages, and exports for boards and mail filters, are not in either spec.
@@ -205,7 +231,7 @@ None.
 
 **New:**
 
-- includes/ZipStreamWriter.php, assets/js/zip-writer.js
+- includes/ZipStreamWriter.php, assets/js/zip-writer.js, includes/DriveZip.php, includes/drive_zip_route.php (built with WP4)
 - includes/CsvWriter.php, includes/CsvReader.php (built with WP2), plugins/mailbox/logic/contacts_export_logic.php (built)
 - includes/calendar/IcsExporter.php, logic/calendar_export_logic.php (built with WP3)
 - plugins/mailbox/includes/MessageRebuild.php (moved from mail_apps)
@@ -222,7 +248,9 @@ None.
 - plugins/mail_apps (calls `MessageRebuild`)
 - includes/IcsHelper.php, includes/calendar/IcsImporter.php (inverse rule; B16-B18) (built)
 - views/profile/calendar.php, logic/calendar_logic.php (B19) (built)
-- views/drive.php, assets/js/drive.js
+- views/drive.php, assets/js/drive.js, serve.php (the `/drive/zip/{folder_id}` route) (built)
+- tests/lib/http.php (a HEAD request waits for no body; built with WP4)
+- maintenance_scripts/dev_tools/walk_vault.js, specs/dev_walk_fixtures.md (B21)
 - settings.json (`export_retention_days`)
 
 ## Docs

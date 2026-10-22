@@ -64,9 +64,13 @@
 	// err: the rejected call, when the notice reports one. A recorded server
 	// error adds a "Report a problem" link and keeps the notice up long enough
 	// to reach it.
+	// Drive's messages sit at the top of the window: the cookie banner holds the
+	// bottom corner, and on a narrow window it would cover them.
+	var TOAST_CSS = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:.6rem 1rem;border-radius:8px;z-index:1000;font-size:.9rem;max-width:calc(100vw - 32px)';
+
 	function toast(msg, err) {
 		var t = el('div', 'drv-toast', msg);
-		t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:.6rem 1rem;border-radius:8px;z-index:1000;font-size:.9rem';
+		t.style.cssText = TOAST_CSS;
 		var link = api.reportLink(err);
 		if (link) {
 			link.style.cssText = 'color:#fff;text-decoration:underline;margin-left:.5rem';
@@ -218,6 +222,12 @@
 				it._mime = entry.meta.mime || '';
 				var nameEl = row.querySelector('.drv-item-name');
 				if (nameEl) nameEl.textContent = it._name;
+				// The listing's size is the ciphertext the server holds; the
+				// file's own size travels in its encrypted metadata.
+				var metaEl = row.querySelector('.drv-item-meta');
+				if (metaEl && typeof entry.meta.size === 'number') {
+					metaEl.textContent = humanBytes(entry.meta.size) + ' · ' + fmtDate(it.create_time);
+				}
 				// Type-aware icon + optional decrypted thumbnail.
 				var icon = row.querySelector('.drv-item-icon');
 				if (icon) {
@@ -454,6 +464,236 @@
 		} catch (e) { toast(e.message || 'Could not decrypt file.', e); }
 	}
 
+	// ---- folder download ---------------------------------------------------
+	// A Standard or Private folder is zipped by the server as it streams
+	// (/drive/zip/{id}). A HEAD first turns a locked Private folder into the
+	// shared unlock, and any other refusal into a message rather than a
+	// downloaded error page. A Fortress folder can only be read in this tab, so
+	// it is decrypted and zipped here (assets/js/zip-writer.js).
+	function downloadFolder(it) {
+		if (it.encrypted) { zipEncryptedFolder(it); return; }
+		var url = '/drive/zip/' + encodeURIComponent(it.id);
+		var follow = function () {
+			var a = document.createElement('a');
+			a.href = url; a.download = '';
+			document.body.appendChild(a); a.click(); a.remove();
+			toast('Your zip is downloading.');
+		};
+		fetch(url, { method: 'HEAD', credentials: 'same-origin' }).then(function (r) {
+			if (r.ok) { follow(); return; }
+			if (r.status === 423) {
+				if (!window.JoinerySealed) { toast('Unlock your vault to download this folder.'); return; }
+				return JoinerySealed.open({ content_locked: true }, follow).catch(function (e) {
+					if (!/cancel/i.test(e.message || '')) toast(e.message || 'Unlock your vault to download this folder.', e);
+				});
+			}
+			toast(r.status === 404 ? 'That folder was not found.' : 'The folder could not be downloaded.');
+		}, function () {
+			// A HEAD that cannot be made is not a reason to refuse; the download
+			// itself shows whatever comes back.
+			follow();
+		});
+	}
+
+	var NOTE_NAME = 'Files not included.txt';
+	var NOTE_TEXT = 'These files are in the folder but their contents could not be read, so they are not in this zip:\n\n';
+
+	async function zipEncryptedFolder(it) {
+		var Z = window.JoineryZip;
+		if (!Z) { toast('Zip download is unavailable on this page.'); return; }
+		var base = Z.cleanName(it.name || 'Folder');
+		// Chrome and Edge write one file straight to disk as it is built. The
+		// save dialog comes first, while the click still counts as the
+		// member's: a browser offers it only then.
+		var writable = null;
+		if (window.showSaveFilePicker) {
+			try {
+				var handle = await window.showSaveFilePicker({ suggestedName: base + '.zip',
+					types: [{ description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }] });
+				writable = await handle.createWritable();
+			} catch (e) {
+				if (e && e.name === 'AbortError') return; // they closed the save dialog
+				toast(e.message || 'Could not start the download.', e);
+				return;
+			}
+		}
+		var progress = progressNote('Preparing your zip…');
+		try {
+			await ensureUnlocked();
+			var plan = await planEncryptedTree(it, base, progress);
+			var parts = new Z.Parts({
+				partBytes: writable ? Infinity : Z.PART_BYTES,
+				openPart: writable ? writableSink(writable) : heldPart(base, plan.bytes > Z.PART_BYTES, progress)
+			});
+			var count = await writeEncryptedTree(parts, plan, progress);
+			var n = await parts.finish();
+			progress.done();
+			toast(count.files + (count.files === 1 ? ' file' : ' files') + ' zipped'
+				+ (n > 1 ? ', saved as ' + n + ' parts.' : '.')
+				+ (count.missing ? ' ' + count.missing + ' could not be read; the zip names them in ' + NOTE_NAME + '.' : ''));
+		} catch (e) {
+			if (writable) { try { writable.abort(); } catch (x) { /* already closed */ } }
+			progress.done();
+			toast(e.message || 'Could not zip this folder.', e);
+		}
+	}
+
+	// The whole tree, listed and named before a byte is written: one folder,
+	// then its files, then each subfolder, the order the server's zip uses,
+	// with names made unique the same way (folders claim theirs first, and the
+	// note takes a name no real file in the top folder has). Its size decides
+	// whether a zip held in the tab is saved whole or in parts.
+	async function planEncryptedTree(root, base, progress) {
+		var plan = { entries: [], bytes: 0, missing: [], notePath: null };
+		var walk = async function (folderId, path, createTime, isTop) {
+			plan.entries.push({ dir: true, path: path, date: toDate(createTime) });
+			progress.set('Listing ' + path + '…');
+			var items = await listWholeFolder(folderId);
+			var taken = {};
+			var subs = [];
+			items.forEach(function (x) {
+				if (x.entity_type === 'folder') subs.push({ it: x, path: path + '/' + JoineryZip.uniqueName(JoineryZip.cleanName(x.name), taken) });
+			});
+			for (var i = 0; i < items.length; i++) {
+				var f = items[i];
+				if (f.entity_type !== 'file') continue;
+				var key;
+				try {
+					key = f.encrypted ? await fileKeyFor(f) : { meta: { name: f.name, mime: f.mime } };
+				} catch (e) {
+					// No key this member holds: left out and named in the note,
+					// as the server's zip does with a file it cannot read.
+					plan.missing.push(path + '/' + JoineryZip.cleanName(f.name || ('file ' + f.id)));
+					continue;
+				}
+				var name = JoineryZip.uniqueName(JoineryZip.cleanName(key.meta.name || f.name), taken);
+				plan.entries.push({ dir: false, path: path + '/' + name, item: f, folderId: folderId, key: key, date: toDate(f.create_time) });
+				plan.bytes += Number(f.size) || 0;
+			}
+			if (isTop) plan.notePath = path + '/' + JoineryZip.uniqueName(NOTE_NAME, taken);
+			for (var j = 0; j < subs.length; j++) {
+				await walk(subs[j].it.id, subs[j].path, subs[j].it.create_time, false);
+			}
+		};
+		await walk(root.id, base, root.create_time, true);
+		return plan;
+	}
+
+	async function writeEncryptedTree(parts, plan, progress) {
+		var files = 0;
+		var missing = plan.missing.slice();
+		for (var i = 0; i < plan.entries.length; i++) {
+			var e = plan.entries[i];
+			if (e.dir) { await parts.addDirectory(e.path + '/', e.date); continue; }
+			progress.set('Zipping ' + e.path.split('/').pop() + '… (' + (files + 1) + ')');
+			var plain;
+			try {
+				var buf = await fetchFileBytes(e.item, e.folderId);
+				plain = e.item.encrypted ? await DC.decryptContent(buf, e.key.fkKey, e.key.meta.cid) : buf;
+			} catch (x) {
+				// One file that will not come down or open does not cost the rest.
+				missing.push(e.path);
+				continue;
+			}
+			await parts.addFile(e.path, new Uint8Array(plain), { date: e.date, mime: e.key.meta.mime });
+			files++;
+		}
+		if (missing.length) {
+			await parts.addFile(plan.notePath, NOTE_TEXT + missing.join('\n') + '\n');
+		}
+		return { files: files, missing: missing.length };
+	}
+
+	async function listWholeFolder(folderId) {
+		var out = [], offset = 0, more = true;
+		while (more) {
+			var r = await api.post('drive_list', { view: 'mine', folder_id: folderId, offset: offset });
+			var items = r.items || [];
+			out = out.concat(items);
+			more = !!r.truncated;
+			if (more && !items.length) throw new Error('Could not list the whole folder.');
+			offset += items.length;
+		}
+		return out;
+	}
+
+	// A file's bytes by its signed link. The links last an hour, so a link that
+	// has run out on a long zip is replaced by listing its folder again.
+	async function fetchFileBytes(f, folderId) {
+		var resp = f.download_url ? await fetch(f.download_url) : null;
+		if (!resp || !resp.ok) {
+			var fresh = (await listWholeFolder(folderId)).filter(function (x) { return x.entity_type === 'file' && x.id === f.id; })[0];
+			resp = fresh && fresh.download_url ? await fetch(fresh.download_url) : null;
+			if (!resp || !resp.ok) throw new Error('Could not download ' + (f.name || 'a file') + '.');
+		}
+		return resp.arrayBuffer();
+	}
+
+	function writableSink(writable) {
+		return function () {
+			return { write: function (u8) { return writable.write(u8); }, close: function () { return writable.close(); } };
+		};
+	}
+
+	// Held in the tab, one part at a time. A browser saves a file for a page
+	// only from a click, so each finished part waits for the member to press
+	// Save, and the next part is built after. A folder bigger than one part is
+	// named in parts from the first ({folder}-part-01.zip, …).
+	function heldPart(base, inParts, progress) {
+		return function (n) {
+			var chunks = [];
+			return {
+				write: function (u8) { chunks.push(u8); },
+				close: function () {
+					var blob = new Blob(chunks, { type: 'application/zip' });
+					chunks = [];
+					var name = inParts ? base + '-part-' + (n < 10 ? '0' : '') + n + '.zip' : base + '.zip';
+					return new Promise(function (resolve) {
+						progress.offer(name + ' is ready (' + humanBytes(blob.size) + ').', 'Save', function () {
+							var url = URL.createObjectURL(blob);
+							var a = document.createElement('a');
+							a.href = url; a.download = name;
+							document.body.appendChild(a); a.click(); a.remove();
+							setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+							resolve();
+						});
+					});
+				}
+			};
+		};
+	}
+
+	// The zip's running note. offer() adds a button the member presses to go on.
+	function progressNote(first) {
+		var t = el('div', 'drv-toast');
+		t.setAttribute('role', 'status');
+		t.style.cssText = TOAST_CSS + ';display:flex;gap:.75rem;align-items:center';
+		var text = el('span', '', first || '');
+		text.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0';
+		var btn = el('button', 'btn btn-primary btn-sm', '');
+		btn.type = 'button';
+		btn.hidden = true;
+		t.appendChild(text);
+		t.appendChild(btn);
+		document.body.appendChild(t);
+		return {
+			set: function (msg) { text.textContent = msg; btn.hidden = true; },
+			offer: function (msg, label, onPress) {
+				text.textContent = msg;
+				btn.textContent = label;
+				btn.hidden = false;
+				btn.onclick = function () { btn.hidden = true; btn.onclick = null; onPress(); };
+				btn.focus();
+			},
+			done: function () { t.remove(); }
+		};
+	}
+
+	function toDate(s) {
+		var d = s ? new Date((s + '').replace(' ', 'T') + 'Z') : new Date();
+		return isNaN(d) ? new Date() : d;
+	}
+
 	function toggleStar(it, btn) {
 		api.post('reaction_toggle', { entity_type: 'file', entity_id: it.id, reaction_type: 'like' })
 			.then(function (r) {
@@ -477,6 +717,7 @@
 			opts.push(['Download', function () { downloadItem(it); }]);
 		} else {
 			if (it.entity_type === 'file') opts.push(['Download', function () { downloadItem(it); }]);
+			if (it.entity_type === 'folder') opts.push(['Download as zip', function () { downloadFolder(it); }]);
 			opts.push(['Rename', function () { openRename(it); }]);
 			opts.push(['Move to…', function () { openMove(it); }]);
 			if (it.entity_type === 'file') opts.push([it.starred ? 'Unstar' : 'Star', function () { toggleStar(it, {classList:{toggle:function(){}}}); }]);

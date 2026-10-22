@@ -7,14 +7,16 @@
  * It signs the browser in as the handoff's user at /login with the handoff
  * password (the MCP browser runs --isolated, so it starts signed out; a
  * browser that is already signed in, from a shared profile, switches with the
- * admin's login-as instead), adds a CDP virtual authenticator (one per
- * browser: an existing one is reused), adds a passkey with the same password,
- * and sets up the vault. The recovery codes are shown by the page
+ * admin's login-as button instead), confirms the browser is now the fixture
+ * user and stops if it is anyone else, adds a CDP virtual authenticator (one
+ * per browser: an existing one is reused), adds a passkey with the same
+ * password, and sets up the vault. The recovery codes are shown by the page
  * and never read back. Returns the user id and the vault's status line.
  *
  * Delete the handoff file afterwards (walk_fixture.php also drops one older
  * than five minutes).
  *
+ * @version 1.2 - login-as is a POST; stops unless signed in as the fixture user
  * @version 1.1 - signs in at /login with the fixture's own password
  * @version 1.0
  */
@@ -44,12 +46,26 @@ async (page) => {
 		await email.locator('xpath=ancestor::form').locator('[type=submit]').first().click();
 		await page.waitForTimeout(3000);
 	} else {
+		// The admin page's button is a form POST; the context's request shares
+		// the browser's cookies, so the switched session lands in the browser.
 		signin = 'login_as';
-		await page.goto(base + '/admin/admin_user_login_as?usr_user_id=' + encodeURIComponent(handoff.user_id));
+		await page.context().request.post(base + '/admin/admin_user_login_as',
+			{ form: { usr_user_id: String(handoff.user_id) } });
+		await page.goto(base + '/');
 		await page.waitForTimeout(1500);
 	}
 	if (/\/login|verify-totp/.test(page.url())) {
 		return { ok: false, step: signin, error: 'sign-in did not complete', url: page.url() };
+	}
+
+	// Everything below changes the signed-in account's security settings, so
+	// it runs only as the fixture user (named Claude / Walk <purpose>).
+	const purpose = (handoff.email.match(/^claude-walk-(.+)@example\.com$/) || [])[1];
+	await page.goto(base + '/profile/account_edit');
+	await page.waitForTimeout(1500);
+	const last = await page.locator('input[name="usr_last_name"]').inputValue().catch(() => null);
+	if (!purpose || last !== 'Walk ' + purpose) {
+		return { ok: false, step: 'identity', error: 'the browser is not signed in as the fixture user; stopped before touching any security setting', signin };
 	}
 
 	// One internal virtual authenticator per browser.

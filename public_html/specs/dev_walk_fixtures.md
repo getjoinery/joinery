@@ -52,8 +52,10 @@ with an in-memory profile, and it goes when that session's MCP server does. Noth
 register or clean: any number of sessions, all new after a reboot. A walk user's passkey lives
 as long as its session, and no other session can end it.
 - *Sign-in:* an isolated browser starts signed out, so `walk_vault.js` signs in at `/login`
-  with the fixture's own handoff password (falling back to the admin's login-as only when a
-  browser is already signed in). A session that needs superadmin pages makes its fixture with
+  with the fixture's own handoff password (falling back to the admin's login-as button, a POST,
+  only when a browser is already signed in). Before it adds a passkey or a vault it reads the
+  signed-in account's name back and stops unless it is the fixture user, so a sign-in that
+  silently failed never lands those on the admin's own account. A session that needs superadmin pages makes its fixture with
   `--permission=10`. The admin's remember-me cookie is not copied between browsers: it can
   rotate on use, and browsers sharing it would sign each other out.
 - *Names:* a session uses its own name as the fixture purpose (`create public-html-d7`), so no

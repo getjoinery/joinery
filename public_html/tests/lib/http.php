@@ -245,6 +245,10 @@ function harness_request($method, $url, array $opts = array()) {
 		CURLOPT_TIMEOUT        => isset($opts['timeout']) ? $opts['timeout'] : 30,
 		CURLOPT_CONNECTTIMEOUT => isset($opts['connect_timeout']) ? $opts['connect_timeout'] : 10,
 	));
+	if (strtoupper($method) === 'HEAD') {
+		// A HEAD answer has headers only; told so, curl does not wait for a body.
+		curl_setopt($ch, CURLOPT_NOBODY, true);
+	}
 
 	// ---- cookies ----------------------------------------------------------
 	if (!empty($opts['jar'])) {

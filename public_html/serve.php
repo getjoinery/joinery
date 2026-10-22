@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.15.0 — /drive/zip/{folder_id}: a Drive folder as a zip (includes/drive_zip_route.php).
 // @version 1.14.0 — /manifest.webmanifest: the site's web app manifest (views/manifest.php).
 // @version 1.13.0 — Thunderbird autoconfig paths route to the mail_apps plugin while it is active.
 // @version 1.12.0 — an offloaded file streams from the file store its record names (specs/storage_targets.md WP6).
@@ -124,6 +125,8 @@ $routes = [
         '/page/{slug}'         => ['view' => 'views/page', 'check_setting' => 'page_contents_active'],
         // Drive public share links (anonymous-safe; the link is the grant).
         '/s/{token}'           => ['view' => 'views/share', 'check_setting' => 'drive_active'],
+        // A Drive folder as a zip, streamed as it is built (includes/DriveZip.php).
+        '/drive/zip/{folder_id}' => ['handler' => 'includes/drive_zip_route', 'check_setting' => 'drive_active', 'valid_page' => false],
         // event_manager: ICS handler routes — MUST precede '/event/{slug}' (which
         // would otherwise capture the '.ics' URLs with the suffix in {slug}).
         '/event/{slug}/{date}.ics' => ['handler' => 'includes/ics_event_route',    'plugin' => 'event_manager', 'check_setting' => 'events_active'],
