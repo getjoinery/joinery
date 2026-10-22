@@ -80,6 +80,15 @@ check($r['ipv4_public'] === array($S4) && $r['network_helper'] === true && $r['i
 	'a legacy instance reports its public IPv4, its IPv6 and Network Helper from its configuration profiles', json_encode($r));
 $r = $d->addressReport('12');
 check($r['network_helper'] === false, 'a Linode-interfaces instance reports Network Helper from its interface settings', json_encode($r));
+check($r['interface_generation'] === 'linode' && $d->addressReport('11')['interface_generation'] === 'legacy_config',
+	'each instance reports its interface generation, which a swap reads (B8)', json_encode($r));
+$seen = array();
+$routes['POST linode/instances'] = array(200, array('id' => 13, 'status' => 'provisioning', 'region' => 'us-east', 'label' => 'n'));
+$d->createInstance(array('label' => 'n', 'region' => 'us-east', 'type' => 'g6-nanode-1', 'image' => 'linode/ubuntu26.04', 'root_pass' => 'x-Aa1-long-enough-pass'));
+$create = null;
+foreach ($seen as $call) { if ($call['key'] === 'POST linode/instances') { $create = $call['body']; } }
+check(is_array($create) && ($create['interface_generation'] ?? '') === 'legacy_config',
+	'a new instance asks for configuration-profile interfaces, never the account\'s default (B8)', json_encode($create));
 $a = $d->ipAddress($S4);
 check($a['instance_id'] === '11' && $a['rdns'] === 'mail.example.org', 'an address reports the instance holding it and its reverse DNS');
 check($d->instanceFirewalls('11') === array('7' => 'web-only'), 'the firewalls attached to an instance, by id');
@@ -105,6 +114,7 @@ class IpSwapTestDriver implements CloudComputeProvider, CloudAddressSwap {
 	public $helper = array();
 	public $firewalls = array();
 	public $v6 = array();
+	public $generation = array();   // instance => interface generation (B8)
 	public $calls = array();
 	public $drop_rdns = false;
 	private $pending = array();  // instance => status it reaches on the next read
@@ -141,7 +151,8 @@ class IpSwapTestDriver implements CloudComputeProvider, CloudAddressSwap {
 			}
 		}
 		return array('id' => $id, 'status' => $this->status[$id], 'region' => $this->region[$id], 'label' => '',
-			'ipv4_public' => $v4, 'ipv6' => $this->v6[$id] ?? '', 'network_helper' => $this->helper[$id] ?? true);
+			'ipv4_public' => $v4, 'ipv6' => $this->v6[$id] ?? '', 'network_helper' => $this->helper[$id] ?? true,
+			'interface_generation' => $this->generation[$id] ?? 'legacy_config');
 	}
 	public function ipAddress(string $address): array {
 		return array('address' => $address, 'instance_id' => (string)($this->owner[$address] ?? ''), 'rdns' => $this->rdns[$address] ?? '');
@@ -190,6 +201,7 @@ $fake_reset = function () use ($fake, $S4, $T4) {
 	$fake->helper = array('11' => true, '12' => true);
 	$fake->firewalls = array('11' => array('7' => 'web-only'), '12' => array('7' => 'web-only'));
 	$fake->v6 = array('11' => '2600:3c03::1', '12' => '2600:3c03::2');
+	$fake->generation = array();
 	$fake->calls = array();
 	$fake->drop_rdns = false;
 };
@@ -371,6 +383,7 @@ $refuse = function (string $what, callable $set, string $needle) use ($copy, $sr
 		&& trim((string)$src->get('mgn_install_state')) === '', $what . ': refused, and nothing is frozen', $threw);
 };
 $refuse('Network Helper off on the copy', function () use ($fake) { $fake->helper['12'] = false; }, 'Network Helper is off for the copy');
+$refuse('the copy\'s server on Linode Interfaces (B8)', function () use ($fake) { $fake->generation['12'] = 'linode'; }, 'The copy\'s server uses Linode Interfaces');
 $refuse('a second public IPv4 on the site\'s server', function () use ($fake) { $fake->owner['192.0.2.99'] = '11'; }, 'exactly one');
 $refuse('a firewall on the site\'s server the copy lacks', function () use ($fake) { $fake->firewalls['12'] = array(); }, 'web-only');
 $refuse('an AAAA record naming the site\'s server\'s IPv6', function () use (&$aaaa) { $aaaa = array('2600:3c03::1'); }, 'IPv6 addresses do not move');

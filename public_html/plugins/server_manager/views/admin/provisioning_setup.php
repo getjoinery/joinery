@@ -15,6 +15,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.4 - The Cleanup tab lists the address records a run removed with its servers (fleet_security_patching WP10)
  * @version 2.3 - Add an account asks its provider, and a Hetzner project's name (specs/site_copy_anything_to_anything.md D2)
  * @version 2.2 - Remove names the encrypted servers it drops to Tier 1 (B77 N1)
  * @version 2.1 - an API key's expiry on its account's row, and Expires soon within a week of it (B77)
@@ -712,7 +713,7 @@ at the provider to spare it. A server at a managed node's address is never delet
 				<?php if ($cs['outcome'] === 'ran'): ?>
 					<?= htmlspecialchars($cs['time']) ?> UTC, company <strong><?= htmlspecialchars($cs['account']) ?></strong>:
 					deleted <?= count($cs['deleted_instances']) ?> server(s)<?= $cs['deleted_instances'] ? ' (' . htmlspecialchars(implode(', ', $cs['deleted_instances'])) . ')' : '' ?>
-					and <?= count($cs['deleted_volumes']) ?> volume(s)<?= $cs['deleted_volumes'] ? ' (' . htmlspecialchars(implode(', ', $cs['deleted_volumes'])) . ')' : '' ?>;
+					and <?= count($cs['deleted_volumes']) ?> volume(s)<?= $cs['deleted_volumes'] ? ' (' . htmlspecialchars(implode(', ', $cs['deleted_volumes'])) . ')' : '' ?><?= !empty($cs['deleted_records']) ? ', and their address records (' . htmlspecialchars(implode(', ', $cs['deleted_records'])) . ')' : '' ?>;
 					<?= (int)$cs['kept'] ?> kept by tag.
 					<?php if ($cs['held']): ?><br>Held, at a managed node's address: <?= htmlspecialchars(implode('; ', $cs['held'])) ?>.<?php endif; ?>
 					<?php if ($cs['failures']): ?><br><span class="text-danger">Failed: <?= htmlspecialchars(implode('; ', $cs['failures'])) ?></span><?php endif; ?>

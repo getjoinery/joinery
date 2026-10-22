@@ -4,6 +4,10 @@
 # automatic-update policy allows, and say what changed as ONE JSON object on
 # stdout.
 #
+# Version: 1.3 - After an install that changed something, the downloaded packages are cleared with
+#                apt-get clean, which waits for no lock and takes apt's own: a site container's image
+#                no longer deletes them after every apt run (Dockerfile.template 6.4), so they would
+#                otherwise stay in the container until it is made again.
 # Version: 1.2 - After the updater, every php-fpm master still running a binary an update replaced
 #                (/proc/PID/exe "(deleted)") is reloaded with USR2, which re-executes it with no
 #                request dropped: a site container has no systemd, so nothing restarted its php-fpm on
@@ -251,5 +255,10 @@ elif (( UPGRADED_COUNT > 0 )); then
     OUTCOME="installed"
 else
     OUTCOME="nothing_to_install"
+fi
+# The downloads are spent. apt-get clean takes apt's archive lock, so it never
+# clears another run's; a run holding it is left to finish, and this is skipped.
+if (( UPGRADED_COUNT > 0 )); then
+    timeout 60 apt-get -q -o DPkg::Lock::Timeout=0 clean >/dev/null 2>&1 || true
 fi
 emit

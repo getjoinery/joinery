@@ -2,9 +2,9 @@
 
 **Status:** Draft, 2026-10-21. Written after the PHP2Shell patch day by oldmigration at the
 owner's request ("write all of these up in a spec and we'll start working through it").
-Q1–Q6 are decided (2026-10-21). Q1 and Q4 went to their own specs. WP1–WP6 are built, and WP7
-except its automated live test (2026-10-22, not released); see "Progress" below. WP8–WP10 are not
-built yet.
+Q1–Q6 are decided (2026-10-21). Q1 and Q4 went to their own specs. WP1–WP6 and WP7's warning
+were released in 0.8.519 (2026-10-22). WP8–WP10 and WP3's lost-.deb fix are built (not released).
+Open: Q7, and Q8 before WP7's automated live test can be built. See "Progress" below.
 
 ## The owner's goal in plain terms
 
@@ -196,7 +196,7 @@ owner's local `~/work-tool` repository.
   pointing at what it deletes. `maintenance_scripts/dev_tools/test_server.php` 1.1 already does
   this for manual deletes and adds `dns-list` / `dns-delete --stale` (uncommitted).
 
-## Open question
+## Open questions
 
 - **Q7 — On a container host, should "Install security updates everywhere" replace the
   containers instead of patching each one in place?**
@@ -206,6 +206,27 @@ owner's local `~/work-tool` repository.
   - Replace: the host's Refresh now, once per host. A fresh base, then each site down about
     12 s. The fix lasts, and it is what Q2 already does for a critical fix.
   - **Recommend replace,** as Q2 does. Its catch is the 12 s per site in the daytime.
+
+- **Q8 — How does WP7's live test put the release being prepared on its test server?**
+  The test can make the server, join it to dev's plane, run each changed word as a plane job,
+  check the result and clean up, all from existing code. The hard part is the install. Dev is
+  the publishing box: its `agent_dist` is what the last release shipped, and the changed-word
+  list is measured against it, so the test must not rebuild it. A script word's script reaches
+  a machine only in a support bundle, and the agent installs a bundle only with a release
+  statement signed by a key it trusts.
+  - Sign the candidate with the release key: the test builds the agent and bundle into a side
+    directory and signs them as a release would. The bytes tested are the bytes shipped. Catch:
+    the fleet's own release key signs builds that are not releases, and any agent would accept
+    one.
+  - A throwaway key per run: the test builds the agent with a key it just made baked in, in
+    place of the release keys, and signs its bundle with that key. Nothing the fleet trusts
+    signs anything, and the key is gone after the run. Catch: the tested binary differs from
+    the shipped one in its baked keys. Same commit, same code.
+  - Prove after publishing, before the rollout: the test installs dev's published release, and
+    the staged rollout, not the publish page, waits on the proofs. Catch: the warning comes
+    after the release exists, and a release is fixed by publishing another.
+  - **Recommend the throwaway key.** It tests the code being shipped without the release key
+    signing anything new.
 
 ## Progress (2026-10-22)
 
@@ -233,8 +254,38 @@ reviewed WP4 (A–E, F1–F4, all taken).
     on a replaced binary and reports `reloaded` and `still_on_old_code`.
   - Box-proven: a container's replaced php-fpm was reloaded, and the site answered 200.
   - The container-node button is in the PHP card.
-  - **Not done:** the lost-`.deb` repro. Nothing in a container's start, supervisor or
-    scheduled tasks clears `/tmp`. It needs a real repro.
+  - **The lost `.deb`, found and fixed (built 2026-10-22, not released).**
+    - Cause: the host converger's every-minute tick checks the site's declared PHP extensions
+      (`_plugin_installers_start.sh`) and counted one as missing unless dpkg said "install ok
+      installed". Mid-upgrade, an extension apt has already unpacked reads "unpacked" or
+      "half-configured", so the tick ran `apt-get update`. Ubuntu's Docker image carries
+      `docker-clean`, which deletes every downloaded `.deb` after any update, with no lock. dpkg
+      then lost the packages it had not reached; on 10-21 that was package 14, php8.5-common.
+    - Reproduced on wp4dock (container wp4b, Ubuntu 26.04): one tick, run while php8.5-apcu read
+      "half-configured", took the cache from 16 `.deb`s to 0, and the reinstall failed with the
+      10-21 error (`failed to read archive '/tmp/apt-dpkg-install-…/03-php8.5-common…'`).
+    - Fix 1: a package dpkg wants installed (or held) is present unless absent (not-installed,
+      config-files), one pattern in all three places that check (`_plugin_installers_start.sh`
+      2.43, `_install_declared_dependencies.sh` 1.4, `utils/upgrade.php` 1.26), pinned by
+      installer_contract. The same tick at the same moment then left all 16, and the install
+      finished.
+    - Fix 2: `Dockerfile.template` 6.4 drops docker-clean from the finished image (the build steps
+      keep it), so an update beside an install is harmless, as on any Ubuntu server. Proven alone:
+      with the old tick and docker-clean removed, an `apt-get update` mid-install left all 16.
+      It reaches each site at its next replacement. `install_security_updates.sh` 1.3 runs
+      `apt-get clean` after an install that changed something, so the downloads do not stay.
+    - The image also turns apt's daily job off by our own setting (`99joinery-no-periodic`).
+      Ubuntu's image ships `20auto-upgrades` switched on, and only its own
+      `docker-disable-periodic-update` keeps cron's `apt-compat` from refreshing lists and
+      upgrading in every container at 06:25. Checked in wp4b: the job has never run there.
+    - **B17, not built: a package run left half done is invisible.** dpkg leaves packages
+      "unpacked" or "half-installed" when a run dies, as on 10-21. Nothing reports it until the
+      next `install_security_updates` run repairs it, and inside a container no hourly check
+      runs at all. Plan: the agent's `check_status` already reads dpkg's status file for `php`.
+      It reports the packages a run left half done (wanted, in any state but installed,
+      not-installed and config-files), and the fleet page shows the node amber with
+      "Install security updates finishes it". It is an agent change, so it waits for the agent
+      work in progress (1.89.0, the hung-agent fix) to land.
 - **WP4.**
   - Housekeeping 1.26 installs the timer on Docker hosts.
   - `recreate_site.sh` 1.5 records a run spec for a site Docker made before run specs
@@ -298,6 +349,57 @@ reviewed WP4 (A–E, F1–F4, all taken).
     words and refuses until "Publish these without a live run" is ticked (Q5).
   - **Not built:** the automated live-tier test that makes the server and runs each word
     through an agent. Proofs are recorded by hand until it exists.
+
+- **WP8.** `/admin/server_manager/machines` (`MachineInventory`) lists three kinds of machine:
+  - **Managed machines,** in any install state (a dormant copy and a retired source are paid
+    for), with their release from their host reports.
+  - **Every server in our own cloud accounts** (not the test account, not a customer's Connect
+    grant), matched to nodes by address as the transfer watch matches them. A server no node
+    runs on is listed as not managed, with what a note on it says it runs, or else the release
+    of the image it was made from. Both drivers' listings now carry the image.
+  - **Machines written down by hand** (`FleetHandMachine`, `/admin/server_manager/machine_edit`):
+    for accounts no key here reads (Q6), or a note on a listed server.
+
+  Red is a release past standard support, or a retire-by date passed. Amber is a server nothing
+  explains, a written-down row not confirmed for 90 days, one serving nothing written with no
+  retire-by date, a retired source, or a node whose install failed. Support ends are the first
+  day of the earliest month Canonical's pages give. Test machine_inventory 21/21.
+  - **Change from the text above:** "nothing serves from it" cannot be seen from here. A
+    written-down row says what it serves, and one that says nothing and has no retire-by date
+    is asked about.
+- **WP9.** `work` 1.16 (`~/work-tool`, uncommitted, the owner's local repo): `work --held` puts a
+  file under the session whose prepared commit holds it as it is in the tree, before falling
+  back to the edit log's guess. A stale prepared copy, changed since, does not count.
+- **WP10.**
+  - **B8.** `LinodeComputeDriver::createInstance` asks for `interface_generation` =
+    `legacy_config`. Box-proven on the test account: Linode accepted it, and the server came up on
+    configuration-profile interfaces with Network Helper on. `addressReport` reports the
+    generation. `IpSwapMove` 1.9's plan refuses a server on Linode Interfaces, with the remedy.
+    Test site_copy_ip_swap 52/52.
+  - **A site that cannot send mail.** Core's own entry in the fleet report,
+    `core/outbound_mail` (`PluginProvisioning::outboundMailCheck`), checks that a mail service is
+    set and its provider's `validateConfiguration()` passes. A failure fails the node's health
+    like a failing plugin check, so no new incident type is needed. It fails with no mail service
+    set whether or not other users exist: every site has its admin, whose password reset is mail.
+    The cost: a fresh site's node shows danger until its setup's mail step sets `email_service`.
+    The check is first in the report, so the 50-check cap never drops it. Test
+    outbound_mail_check 6/6.
+  - **Theme CSS.** New safe-tier test `theme_compiled_classes`: a theme whose CSS carries
+    Tailwind's variables must define every utility class its views use.
+  - **B16.** It found galactictribune.net's post and blog views using 19 utilities its compiled
+    CSS lacked (gap-2, flex-wrap, bg-indigo-50, text-2xl, leading-relaxed, border-l-4, the hover colours and others).
+    They are now appended with Tailwind v3 values (theme 1.0.11), as xandy's were.
+  - **Test DNS.** `TestCloudCleanup` 1.3 removes a deleted server's A and AAAA records in the test
+    zone (joinerytest.com) with it, whichever test account the server was in. The zone's Linode
+    test account removes them with its own token (`zone_holder()`, `domains:read_write`, added to
+    the scopes a run needs). With no such account held, the run says the records were left. Test
+    test_cloud_cleanup 31/31. The test token already
+    holds the scope. On 2026-10-22 the zone held six leftover records (gva, gvb, gvc) from the
+    gVisor trial's server, deleted by hand on 10-13. Linode had since given its IPv4 to se1, so
+    those names reached se1 by accident. They were removed with `test_server.php dns-delete`.
+- **docker-prod, 2026-10-22 02:56 UTC.** Refresh now (job 7049) built base 2.2 and replaced all
+  six sites, 11.8 to 15.8 s down each. The public probes agree: one 502 burst per site. There
+  were no forced stops and no PostgreSQL recovery.
 
 Bugs the box proof found and fixed:
 

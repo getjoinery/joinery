@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.26 - a declared extension a package run is upgrading (dpkg reads it "unpacked" for a moment),
+	 *                or one held, is present, not missing (fleet_security_patching WP3, the lost .deb)
 	 * @version 1.25 - serve-release-notes: the notes of every release in a version range, for a republishing
 	 *                site's auto-notes
 	 * @version 1.24 - update_database runs without --verbose: its debug output overran the transcript the
@@ -1977,10 +1979,13 @@
 				// "deinstall ok config-files" with its files deleted. Reading that
 				// as installed strands the node: the extension is never reinstalled,
 				// ComposerValidator then fails on the missing ext-*, and the
-				// deployment rolls back on every subsequent attempt.
+				// deployment rolls back on every subsequent attempt. A package
+				// dpkg wants installed (or held) and that a package run is
+				// changing (unpacked, half-configured) is present: reading it as
+				// missing ran apt-get mid-upgrade (the lost .deb).
 				$status_test = function ($pkg) {
 					return 'dpkg-query -W -f=\'${Status}\' ' . escapeshellarg($pkg)
-						. ' 2>/dev/null | grep -q \'^install ok installed$\'';
+						. ' 2>/dev/null | grep -Eq \'^(install|hold) [a-z]+ (installed|unpacked|half-configured|half-installed|triggers-awaited|triggers-pending)$\'';
 				};
 				$check_cmd = $status_test($apt_primary)
 					. ($apt_fallback ? ' || ' . $status_test($apt_fallback) : '');

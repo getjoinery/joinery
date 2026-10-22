@@ -6,6 +6,11 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.22 - a new instance asks for configuration-profile interfaces (interface_generation legacy_config), and
+ *                addressReport says which generation an instance is on: an address a Linode-generation interface
+ *                holds cannot be swapped (fleet_security_patching B8)
+ * @version 1.21 - listInstances carries each instance's image, for the list of every machine we pay for
+ *                (fleet_security_patching WP8)
  * @version 1.20 - instanceTypes and defaultInstanceType take a region, which changes nothing here (B31)
  * @version 1.19 - CloudInstanceTypes (its plans; us-east, g6-nanode-1 and Ubuntu 26.04 as the defaults) and CloudTokenScopes
  *                (specs/site_copy_anything_to_anything.md D2)
@@ -102,6 +107,13 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			'image'     => $opts['image'],
 			'root_pass' => self::rootPassword($opts),
 			'booted'    => true,
+			// Configuration-profile interfaces, never the account's default: an
+			// address held by a Linode-generation interface cannot be swapped
+			// (Linode: "IP Address X is used by an interface"), and a site copy
+			// keeps its address by a swap (fleet_security_patching B8). The
+			// upgrade to Linode interfaces is one-way, so a machine made on them
+			// could never be swapped.
+			'interface_generation' => 'legacy_config',
 		);
 		if (!empty($opts['authorized_keys'])) {
 			$body['authorized_keys'] = array_values($opts['authorized_keys']);
@@ -330,6 +342,9 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 					}
 				}
 				$row['created'] = self::utc((string)($instance['created'] ?? ''));
+				// The image it was made from (linode/ubuntu24.04): the machine
+				// list reads its release from it where no report says better.
+				$row['image'] = (string)($instance['image'] ?? '');
 				$row['tags'] = array_values(array_map('strval', (array)($instance['tags'] ?? array())));
 				unset($row['ip']);
 				$out[] = $row;
@@ -378,6 +393,8 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			}
 		}
 		$out['ipv4_public'] = $public;
+		// legacy_config or linode: a swap refuses the second (B8).
+		$out['interface_generation'] = (string)($instance['interface_generation'] ?? '');
 		if (!empty($ips['ipv6']['slaac']['address'])) {
 			$out['ipv6'] = strtolower((string)$ips['ipv6']['slaac']['address']);
 		}

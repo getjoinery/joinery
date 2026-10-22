@@ -3,6 +3,11 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.43 - A declared package that a package run is upgrading (dpkg reads it "unpacked" for a
+#           moment) is not missing: the every-minute tick read it as missing and ran apt-get update
+#           mid-upgrade, and in a site container Ubuntu's docker-clean rule then deleted the upgrade's
+#           downloaded packages (fleet_security_patching WP3, the lost .deb). A held package is present.
+#           After installing one, the downloads are cleared.
 # Version: 2.42 - Every --when-changed tick holds the agent running where its switch is on: an agent
 #           stopped by hand, or a unit disabled and the machine rebooted, is started (and enabled)
 #           within the minute instead of at the daily converge (agent restart audit H5).
@@ -1310,12 +1315,17 @@ converge_hash() {
 # requires.extensions the image-build resolver never saw. Cheap when nothing
 # is missing: dpkg checks only, no apt update.
 #
-# The check is the package's Status, not whether dpkg has heard of it: `dpkg -s`
-# exits 0 for a removed-but-not-purged package whose files are gone, so a
-# name-only test silently skips reinstalling an extension that is not there.
+# A package dpkg wants installed is present unless it is absent: installed, or
+# in the middle of a package run that is changing it (unpacked, half-configured,
+# half-installed, triggers-*), or held. One being upgraded reads "unpacked" for
+# a moment and is not missing; reading it as missing ran apt-get update in the
+# middle of that upgrade (fleet_security_patching WP3, the lost .deb). Absent is
+# not-installed, or removed with its config left (config-files): `dpkg -s` exits
+# 0 for that one though its files are gone.
 pkg_installed() {
     [[ -n "${1:-}" ]] || return 1
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null \
+        | grep -Eq '^(install|hold) [a-z]+ (installed|unpacked|half-configured|half-installed|triggers-awaited|triggers-pending)$'
 }
 
 RESOLVER="${PUBLIC_HTML}/utils/list_dependencies.php"
@@ -1341,6 +1351,9 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
             echo "plugin installers: WARNING - could not install ${PRIMARY} (or ${FALLBACK})" >&2
         fi
     done < <(php "${RESOLVER}" --apt 2>/dev/null || true)
+    # The downloads are spent; nothing else clears them in a site container,
+    # whose image runs no daily apt job (Dockerfile.template).
+    [[ "${APT_UPDATED}" == "0" ]] || apt-get -q clean >/dev/null 2>&1 || true
 fi
 
 # --- Converge only when something changed (--when-changed) -------------------

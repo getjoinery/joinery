@@ -23,6 +23,9 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.4 - the fleet report carries core's own check that the site can send mail (outboundMailCheck: a mail
+ *                service set, and its provider's settings complete), so a site that cannot fails its node's health
+ *                (fleet_security_patching WP10)
  * @version 1.3 - host-gateway in a container with no default route is unmet, not Docker's default
  *                bridge gateway: a site runs on a network of its own (node_outbound_and_transfer WP2)
  * @version 1.2 - fleet reporting: recordFleetReport() / recordedFleetReport()
@@ -92,7 +95,9 @@ class PluginProvisioning {
      *                 ['plugin', 'key', 'label', 'state', 'reason'], ...]]
      */
     public static function runFleetReport() {
-        $checks = [];
+        // Core's own first: the site can send mail. Not a plugin's, so it is
+        // listed under the name core, and first so the cap never drops it.
+        $checks = [self::outboundMailCheck()];
         foreach (self::getProvisioners() as $plugin => $provisioners) {
             foreach ($provisioners as $declaration) {
                 if (!is_array($declaration) || empty($declaration['key'])
@@ -113,6 +118,38 @@ class PluginProvisioning {
             }
         }
         return ['checked' => gmdate('Y-m-d H:i:s'), 'checks' => $checks];
+    }
+
+    /**
+     * Whether this site can send mail: a mail service is set, and that
+     * provider says its own settings are complete (validateConfiguration). A
+     * site with none sends nothing at all: no password reset, no notice, no
+     * receipt (xandyliberato.com after its conversion, 2026-10-21;
+     * fleet_security_patching WP10). Reported to a management node with the
+     * plugin checks, where a failure fails the node's health.
+     */
+    public static function outboundMailCheck(?string $service = null): array {
+        $out = ['plugin' => 'core', 'key' => 'outbound_mail', 'label' => 'This site can send mail', 'state' => 'verified', 'reason' => ''];
+        // $service names the service instead of the site's setting (a test).
+        $key = $service ?? EmailSender::activeServiceKey();
+        if ($key === '') {
+            $out['state'] = 'error';
+            $out['reason'] = 'No mail service is set (email_service), so nothing this site sends leaves it: password resets, notices, receipts. Choose one in the email settings.';
+            return $out;
+        }
+        $provider = EmailSender::providerFor($key);
+        if (!$provider) {
+            $out['state'] = 'error';
+            $out['reason'] = "The mail service '{$key}' is not one this release carries. Choose one in the email settings.";
+            return $out;
+        }
+        $class = get_class($provider);
+        $v = $class::validateConfiguration();
+        if (empty($v['valid'])) {
+            $out['state'] = 'error';
+            $out['reason'] = mb_substr($class::getLabel() . ' is not set up: ' . implode('; ', array_map('strval', (array)($v['errors'] ?? array()))), 0, self::FLEET_REASON_MAX);
+        }
+        return $out;
     }
 
     /**
