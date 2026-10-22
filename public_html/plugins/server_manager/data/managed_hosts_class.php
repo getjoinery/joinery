@@ -6,6 +6,9 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.8 - link_host_node() also links the host record the machine is itself placed in, and runs on each host
+ *                report too: getjoinery's docker-prod was never named its own host, so its six sites read 'host not
+ *                known' and Install security updates everywhere could not replace them (fleet_security_patching B26)
  * @version 1.7 - retire_if_empty($id, true): a host whose own agent node was removed for good is retired even
  *                with Enable automated provisioning checked: with no agent, no site can be installed on it
  *                (site_container_engine B34, owner 2026-10-16)
@@ -269,7 +272,10 @@ class ManagedHost extends SystemBase {
 	}
 
 	/**
-	 * At agent-join approval, name the joining machine as a host's own agent.
+	 * Name a machine as a host's own agent: at agent-join approval, and again
+	 * on each host report the machine sends (JobResultProcessor), so a host
+	 * whose record appeared after its machine joined, or whose linked node was
+	 * removed, is linked without a person.
 	 *
 	 * A host-scope primitive (decommission_site today; certificates and
 	 * container install through the same door) is routed from a container
@@ -280,10 +286,13 @@ class ManagedHost extends SystemBase {
 	 *
 	 * Conservative by design: it links only a machine-posture node (no
 	 * container name, no web root — a container node is a site on a host, not a
-	 * host) to a ManagedHost that ALREADY EXISTS for its address and has no
-	 * host node yet. A container provisioned on this host already minted that
-	 * record (ensure_for_node); an arbitrary bare node with no host record mints
-	 * nothing here. Returns the linked host, or null when nothing matched.
+	 * host) to a ManagedHost that ALREADY EXISTS and has no live host node yet:
+	 * the one for its address, or the one it is itself placed in
+	 * (mgn_mgh_managed_host_id). Both are this plane's own records; nothing the
+	 * machine reports about itself links it. A container provisioned on this
+	 * host already minted that record (ensure_for_node); an arbitrary bare node
+	 * with no host record mints nothing here. Returns the linked host, or null
+	 * when nothing matched.
 	 */
 	public static function link_host_node($node) {
 		// A host is a machine, not a site on one. A node carrying a container
@@ -297,11 +306,33 @@ class ManagedHost extends SystemBase {
 			return null;
 		}
 
-		$candidates = new MultiManagedHost(['host' => $addr, 'deleted' => false], ['mgh_managed_host_id' => 'ASC']);
-		foreach ($candidates as $host) {
-			// Already linked to a live node? Leave it — first host node wins,
-			// and re-pointing it on a second join is exactly the takeover the
-			// approval ceremony exists to prevent.
+		// The record it is placed in first: that is this plane's own word that
+		// the machine is that host. docker-prod joined over IPv6 while its
+		// record was keyed by IPv4, approval minted a second, empty record for
+		// it, and the record its sites are in never had a host node (B26).
+		$placed = (int)$node->get('mgn_mgh_managed_host_id');
+		if ($placed > 0) {
+			try {
+				$own = new ManagedHost($placed, TRUE);
+			} catch (Exception $e) {
+				$own = null;
+			}
+			if ($own && $own->key && !$own->get('mgh_delete_time') && !$own->host_node()) {
+				$own->set('mgh_mgn_managed_node_id', (int)$node->key);
+				$own->save();
+				return $own;
+			}
+		}
+		// The record for its address, only while it is no record's agent yet,
+		// and only the first: one already linked to a live node is left, and
+		// nothing further is tried (first host node wins; re-pointing it, or
+		// linking a later record at that address, on a second machine's join is
+		// the takeover the approval ceremony exists to prevent: a server rebuilt
+		// on the same address while its old node still lives, reviewer2 R1).
+		foreach (new MultiManagedHost(['mgh_mgn_managed_node_id' => (int)$node->key, 'deleted' => false]) as $mine) {
+			return null;
+		}
+		foreach (new MultiManagedHost(['host' => $addr, 'deleted' => false], ['mgh_managed_host_id' => 'ASC']) as $host) {
 			if ($host->host_node()) {
 				return null;
 			}

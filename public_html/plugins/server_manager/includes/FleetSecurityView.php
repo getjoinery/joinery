@@ -13,13 +13,15 @@
  * ones the host's base check found (site_refresh).
  *
  * The verdict, most serious first:
- *   red    old code is serving (a php-fpm on a replaced binary, or a service
- *          needrestart names), or a critical fix waits (PHP, Apache, OpenSSL,
+ *   red    old code is serving (a php-fpm on a replaced binary, or PHP-FPM,
+ *          Apache or PostgreSQL among what needrestart names: the incident's
+ *          own rule), or a critical fix waits (PHP, Apache, OpenSSL,
  *          PostgreSQL: one a machine installs at once, Q2), or one was left
  *          half done
  *   amber  other fixes wait (they go in with the next run: the night's, or an
  *          at-once install's), a kernel fix waits (the night installs it, a
- *          person chooses the reboot), a reboot is owed over a day, the
+ *          person chooses the reboot), a reboot is owed over a day, another
+ *          service runs replaced code until it restarts, the
  *          check has not passed for two hours, or a package run was left half
  *          done (its own status check: what dpkg --audit lists, which the next
  *          install finishes). Packages half done under a run that holds its
@@ -31,6 +33,9 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.4 - a node with no agent says so, not 'nothing reported yet' (B27); old code serving is red only for what serves the sites (PHP-FPM, Apache, PostgreSQL), as the
+ *                incident counts it; any other service needrestart names is amber until it restarts: getjoinery was
+ *                red for networkd-dispatcher (B25)
  * @version 1.3 - a package run left half done is amber, red where a critical package is among them, from the node's
  *                own status check (agent 1.90.0, B17); not while a run holds its lock, for two hours (reviewer2)
  * @version 1.2 - a node whose agent moved away is not listed: it is patched from where it is managed now
@@ -104,6 +109,7 @@ class FleetSecurityView {
 				'host_report' => is_array($hr) ? JobResultProcessor::sanitise_host_report($hr) : null,
 				'php'         => (is_array($sd) && is_array($sd['php'] ?? null)) ? JobResultProcessor::status_php($sd['php']) : null,
 				'unfinished'  => is_array($sd) ? JobResultProcessor::status_dpkg_unfinished($sd['dpkg_unfinished'] ?? null) : null,
+				'agent'       => trim((string)$node->get('mgn_agent_public_key')) !== '',
 			);
 		}
 		return $out;
@@ -188,10 +194,24 @@ class FleetSecurityView {
 					$amber[] = 'a reboot owed for over a day';
 				}
 			}
+			// What serves the sites on replaced code is old code serving;
+			// any other service waits for its own restart (B25).
 			$snr = $hr['services_needing_restart'] ?? null;
 			if (is_array($snr) && $snr['services']) {
-				foreach ($snr['services'] as $svc) { $row['old_code'][] = $svc; }
-				$row['code'] = 'old';
+				$others = array();
+				foreach ($snr['services'] as $svc) {
+					if (preg_match(IncidentSourceOldCodeServing::SITE_SERVICES, $svc) || preg_match(IncidentSourceOldCodeServing::SITE_BINARIES, $svc)) {
+						$row['old_code'][] = $svc;
+						$row['code'] = 'old';
+					} else {
+						$others[] = $svc;
+					}
+				}
+				if ($others) {
+					$amber[] = count($others) . ' other service' . (count($others) === 1 ? ' runs' : 's run') . ' replaced code until '
+						. (count($others) === 1 ? 'it restarts' : 'they restart') . ' (' . implode(', ', array_slice($others, 0, 4))
+						. (count($others) > 4 ? ', and ' . (count($others) - 4) . ' more' : '') . ')';
+				}
 			}
 			$sp = $hr['security_pending'] ?? null;
 			if (is_array($sp) && $sp['check'] !== '') {
@@ -296,7 +316,9 @@ class FleetSecurityView {
 		}
 		$row['reasons'] = array_merge($red, $amber);
 		if (!$known && !$row['reasons']) {
-			$row['reasons'][] = 'nothing reported yet';
+			// A node with no agent (the relay, the DNS servers: watched from
+			// here, never given one) never reports; it is not waiting (B27).
+			$row['reasons'][] = (($s['agent'] ?? true) === false) ? 'no agent reports from it, so its patching cannot be seen here' : 'nothing reported yet';
 		}
 		return $row;
 	}

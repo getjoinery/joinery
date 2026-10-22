@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.64 - adopt_reported_container() places a container node named before placement existed, with no live
+ *                placement, on the record for its address (fleet_security_patching B26)
  * @version 1.63 - hiding a container site keeps its server on record on its Docker host's node (an adopted record is
  *                a whole machine, so on the site's it was refused and hiding failed); soft_delete() is one transaction
  * @version 1.62 - mgn_agent_test_build: the node runs a live-proof test build, trusting only its run's throwaway key,
@@ -784,15 +786,30 @@ class ManagedNode extends SystemBase {
 	 * container) and place it on its Docker host's record, the way a node made
 	 * by the add form or a provision is. An agent's claim, not a proof: it only
 	 * decides how the node is grouped, and only for a node that has a web root
-	 * and no container name yet. Sets and saves through place_node(); returns
-	 * true when it named the container.
+	 * and no container name yet. A container node named before placement
+	 * existed, with no live placement, is placed now on the record for its
+	 * own address (this plane's mgn_host), as the edit form would: getjoinery's
+	 * docker-prod sites never were, so nothing could find their host (B26).
+	 * Sets and saves through place_node(); returns true when it named or
+	 * placed the container.
 	 */
 	public static function adopt_reported_container($node, $reported): bool {
 		if ($reported !== true && $reported !== 1 && $reported !== '1') {
 			return false;
 		}
 		if (trim((string)$node->get('mgn_container_name')) !== '') {
-			return false;
+			$placed = (int)$node->get('mgn_mgh_managed_host_id');
+			if ($placed > 0) {
+				try {
+					$record = new ManagedHost($placed, TRUE);
+					if ($record->key && !$record->get('mgh_delete_time')) {
+						return false;
+					}
+				} catch (Exception $e) {
+					// The record is gone: placed anew below.
+				}
+			}
+			return ManagedHost::place_node($node) !== null;
 		}
 		$root = self::valid_web_root($node->get('mgn_web_root'));
 		if ($root === null) {
