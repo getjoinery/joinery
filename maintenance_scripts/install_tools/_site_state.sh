@@ -3,6 +3,8 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.13 - forward: a request the host's proxy marks X-Forwarded-Proto https is not sent to https again; in
+#                a container HTTPS is never on, so every visitor looped on a 301 to itself (C7's B48)
 # Version: 1.12 - forward: the copy's whole certificate chain is checked (SSLProxyVerifyDepth 10); Apache's depth
 #               of 1 refused every forwarded request with a 500 (B17). Clearing removes a copy's backup history
 #               with its vouched record (B20)
@@ -327,7 +329,9 @@ EOF
         # issued the site's certificate through this forward). Any other
         # request over http is sent to https first, as the site's own vhost
         # would: a proxied path is never rewritten, and a visitor's secure
-        # cookies go only over https. retry=0, so the first request after the
+        # cookies go only over https. In a container the visitor's https ends at
+        # the host's proxy, which says so in X-Forwarded-Proto: without it every
+        # request was sent back to itself. retry=0, so the first request after the
         # copy has its certificate is proxied, not refused for a minute. The
         # chain is checked to its root: a site's chain is several certificates
         # long, and Apache's own depth (1) refuses every one of them.
@@ -345,7 +349,7 @@ SSLProxyVerifyDepth 10
     ProxyPreserveHost On
     ProxyPass "https://${url}/" retry=0
     ProxyPassReverse "https://${url}/"
-    <If "%{HTTPS} != 'on' && ! %{REQUEST_URI} =~ m#^/\\.well-known/acme-challenge/#">
+    <If "%{HTTPS} != 'on' && %{HTTP:X-Forwarded-Proto} != 'https' && ! %{REQUEST_URI} =~ m#^/\\.well-known/acme-challenge/#">
         Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"
     </If>
 </Location>

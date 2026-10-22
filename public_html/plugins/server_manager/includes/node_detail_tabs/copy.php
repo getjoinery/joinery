@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.30 - a container source's certificate staged by its host for the export, and cleared, are named
  * @version 1.29 - the ended note and the 'current as of' line give their times in UTC, as the rest of the tab does (B35)
  * @version 1.28 - a new server's plans are those the region shown sells (B31)
  * @version 1.27 - a manual switch's way back names each record to point back at the DNS host, before going back and
@@ -78,7 +79,9 @@ $copy_h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8
 $copy_step_labels = array(
 	'host_report/copy'   => 'Check the new server has room',
 	'backup_run:run/source' => 'Back up this site now, so the copy is of it as it is, at its release',
+	'site_certificate_stage:stage/site_host' => 'Its host hands the site its certificate, for the export to carry to the copy',
 	'copy_export/source' => 'Export from this site (its owner approves it here, on the site\'s own Backups page)',
+	'site_certificate_stage:clear/site_host' => 'Its host takes the certificate back out of the site',
 	'copy_import/copy'   => 'Hand the export to the copy',
 	'copy_stage/copy'    => 'Download the backup onto the copy',
 	'copy_restore/copy'  => 'Restore it on the copy',

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.27 - provision_origin_cert adopts a certificate a copy carried from its old Docker host (no ACME account
+#               travels) under this machine's own account, so it keeps serving and renews here (C7's B49)
 #VERSION 3.26 - build-base --memory=SIZE bounds the build's steps (the nightly replacement passes it on a
 #               host whose memory is the sites'). site on a site recreate_site.sh is replacing (its lock
 #               held, or its mark under an hour old) is refused before anything stops, and site holds
@@ -1692,8 +1694,52 @@ name_reaches_here() {
 # armed by the install asks again every five minutes at no cost until the name
 # reaches here. Re-run
 # `sysadmin_tools/setup_ssl.sh <domain>` by hand whenever you want it.
+# A lineage handed over with a copy from the site's old Docker host comes
+# without its ACME account: that account is the host's, shared by every site
+# there, and never leaves it (site_certificate_stage.sh). The certificate is
+# valid as it is and keeps serving; it is adopted under this machine's own
+# account, registered here when there is none, so its renewals run here as any
+# lineage's do. A lineage issued over DNS-01 whose credentials did not travel
+# renews over HTTP-01 instead. A lineage whose account is here is left alone.
+adopt_carried_lineage() {
+    local domain="$1"
+    local le="${CARRIED_LE_DIR:-/etc/letsencrypt}"
+    local conf="${le}/renewal/${domain}.conf" acct server dir id auth cred
+    [ -f "$conf" ] || return 0
+    acct="$(sed -n 's/^[[:space:]]*account[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' "$conf" | head -1)"
+    server="$(sed -n 's/^[[:space:]]*server[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' "$conf" | head -1)"
+    [ -n "$server" ] || server="https://acme-v02.api.letsencrypt.org/directory"
+    dir="${le}/accounts/${server#https://}"
+    if [ -n "$acct" ] && [ -d "${dir}/${acct}" ]; then
+        return 0
+    fi
+    if ! ls -d "${dir}"/*/ >/dev/null 2>&1; then
+        certbot register --non-interactive --agree-tos --register-unsafely-without-email --server "$server" >/dev/null 2>&1 || true
+    fi
+    id="$(ls -1 "$dir" 2>/dev/null | head -1)"
+    if [ -z "$id" ]; then
+        print_warning "${domain}'s certificate came without an ACME account, and none could be registered here; it serves until it expires unless issued again."
+        return 0
+    fi
+    if grep -qE '^[[:space:]]*account[[:space:]]*=' "$conf"; then
+        sed -i -E "s|^[[:space:]]*account[[:space:]]*=.*|account = ${id}|" "$conf"
+    else
+        sed -i -E "s|^\[renewalparams\][[:space:]]*$|[renewalparams]\naccount = ${id}|" "$conf"
+    fi
+    auth="$(sed -n 's/^[[:space:]]*authenticator[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' "$conf" | head -1)"
+    if [[ "$auth" == dns-* ]]; then
+        cred="$(sed -n "s/^[[:space:]]*${auth//-/_}_credentials[[:space:]]*=[[:space:]]*\\([^[:space:]]*\\).*/\\1/p" "$conf" | head -1)"
+        if [ -z "$cred" ] || [ ! -r "$cred" ]; then
+            sed -i -E "/^[[:space:]]*${auth//-/_}_/d; s|^[[:space:]]*authenticator[[:space:]]*=.*|authenticator = apache|" "$conf"
+        fi
+    fi
+    print_info "${domain}'s certificate came from its old host; it renews here under this machine's own ACME account."
+}
+
 provision_origin_cert() {
     local domain="$1"
+    # A certificate a copy carried over renews under this machine's account.
+    adopt_carried_lineage "$domain"
 
     # Ensure certbot is available (HTTP-01 path needs it; DNS-01 plugins extend it).
     if ! command -v certbot &> /dev/null; then

@@ -190,8 +190,9 @@ chk "every request is proxied to the copy over https" "$(grep -c 'ProxyPass "htt
 chk "its certificate checked against the site's own name" "$(grep -c -e '^SSLProxyVerify require$' -e '^SSLProxyCheckPeerName on$' -e '^SSLProxyCheckPeerExpire on$' "$CONF")" "3"
 chk "its whole chain checked, not refused past the first certificate" "$(grep -c '^SSLProxyVerifyDepth 10$' "$CONF")" "1"
 chk "the ACME challenge goes over http, so the copy can be issued one" "$(grep -c 'ProxyPass "http://198.51.100.9/.well-known/acme-challenge/"' "$CONF")" "1"
-chk "any other http request goes to https first, and a refused request does not hold the copy off" "$(grep -c "If \"%{HTTPS} != 'on' && ! %{REQUEST_URI} =~ m#^/\\\\.well-known/acme-challenge/#\"" "$CONF"):$(grep -c 'Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"' "$CONF"):$(grep -c 'retry=0$' "$CONF")" "1:1:2"
+chk "any other http request goes to https first (unless the host's proxy says it came over https), and a refused request does not hold the copy off" "$(grep -c "If \"%{HTTPS} != 'on' && %{HTTP:X-Forwarded-Proto} != 'https' && ! %{REQUEST_URI} =~ m#^/\\\\.well-known/acme-challenge/#\"" "$CONF"):$(grep -c 'Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"' "$CONF"):$(grep -c 'retry=0$' "$CONF")" "1:1:2"
 chk "no maintenance page while forwarding" "$(grep -c 'Redirect 503' "$CONF")" "0"
+cp "$CONF" "$T/forward.conf"
 chk "the proxy modules are enabled, and Apache reloaded" "$(grep -c -e 'a2enmod -q proxy$' -e 'a2enmod -q proxy_http$' -e 'a2enmod -q ssl$' "$ST/calls"):$(grep -c 'systemctl reload apache2' "$ST/calls")" "3:1"
 out="$(bash "$Q" forward '198.51.100.9;reboot' 2>&1)"; rc=$?
 chk "anything but an address is refused, the forward unchanged" "$rc:$(cat "$SD/forward")" "2:198.51.100.9"
@@ -261,14 +262,17 @@ EOF
     /usr/sbin/apache2 -k start -f "$AP/main.conf" 2>"$AP/start.err"
     for _ in $(seq 50); do [ -s "$AP/logs/pid" ] && python3 -c "import socket; socket.create_connection(('127.0.0.1',$APORT),1)" 2>/dev/null && break; sleep 0.1; done
     # STATUS|every Location, joined by a space|cookie set or not
-    answer() {  # HOST PATH [COOKIE]
-        python3 - "$APORT" "$1" "$2" "${3:-}" <<'PY'
+    answer() {  # HOST PATH [COOKIE] [HEADER]
+        python3 - "$APORT" "$1" "$2" "${3:-}" "${4:-}" <<'PY'
 import socket, sys
 port, host, path, cookie = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+extra = sys.argv[5] if len(sys.argv) > 5 else ""
 s = socket.create_connection(("127.0.0.1", port), 5)
 req = "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n" % (path, host)
 if cookie:
     req += "Cookie: %s\r\n" % cookie
+if extra:
+    req += "%s\r\n" % extra
 s.sendall((req + "\r\n").encode())
 raw = b""
 while True:
@@ -296,6 +300,28 @@ PY
     chk "with the cookie, the site answers (404 here: no page)" "$(answer qsite.example /copy-key "joinery_look=${secret}" | cut -d'|' -f1)" "404"
     /usr/sbin/apache2 -k stop -f "$AP/main.conf" >/dev/null 2>&1
     for _ in $(seq 50); do [ -e "$AP/logs/pid" ] || break; sleep 0.1; done
+
+    # The forward, served: its copy is a closed port here, so a proxied
+    # request is answered 503 at once (the proxy cannot connect), and only a
+    # redirect is a 301 (B48).
+    if [ -f /usr/lib/apache2/modules/mod_proxy_http.so ] && [ -f /usr/lib/apache2/modules/mod_ssl.so ]; then
+        sed 's#198\.51\.100\.9/#127.0.0.1:9/#g' "$T/forward.conf" > "$AP/forward.conf"
+        FMODS="$AMODS"
+        for m in proxy proxy_http ssl socache_shmcb; do
+            FMODS+="LoadModule ${m}_module /usr/lib/apache2/modules/mod_${m}.so"$'\n'
+        done
+        sed -e "s#^Include .*#Include $AP/forward.conf#" -e "/^LoadModule /d" "$AP/main.conf" | { printf '%s' "$FMODS"; cat; } > "$AP/fwd_main.conf"
+        chk "Apache takes the forward" "$(/usr/sbin/apache2 -t -f "$AP/fwd_main.conf" >/dev/null 2>&1; echo $?)" "0"
+        /usr/sbin/apache2 -k start -f "$AP/fwd_main.conf" 2>"$AP/start.err"
+        for _ in $(seq 50); do [ -s "$AP/logs/pid" ] && python3 -c "import socket; socket.create_connection(('127.0.0.1',$APORT),1)" 2>/dev/null && break; sleep 0.1; done
+        chk "a visitor over http is sent to https" "$(answer qsite.example /x)" "301|https://qsite.example/x|-"
+        chk "a visitor the host's proxy took over https is forwarded, not sent back to itself (a container: B48)" "$(answer qsite.example /x '' 'X-Forwarded-Proto: https' | cut -d'|' -f1)" "503"
+        chk "the ACME challenge is forwarded over http" "$(answer qsite.example /.well-known/acme-challenge/t | cut -d'|' -f1)" "503"
+        /usr/sbin/apache2 -k stop -f "$AP/fwd_main.conf" >/dev/null 2>&1
+        for _ in $(seq 50); do [ -e "$AP/logs/pid" ] || break; sleep 0.1; done
+    else
+        chk "the forward's live check needs mod_proxy_http and mod_ssl" "missing" "present"
+    fi
 fi
 chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2>&1; echo $?)" "2"
 # The runs its source vouched for (WP2), and the last export it took (WP4), go

@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.32 - carries site_certificate_stage.sh, a site container's certificate staged for its copy's export
+ *                 (specs/site_copy_anything_to_anything.md D4)
  * @version 1.31 - a leftover partial bundle is removed only when there is one (an unlink of none left a
  *                warning that a test's crash report named as its cause)
  * @version 1.30 - carries security_check.sh, the hourly look for security fixes, which host housekeeping installs on
@@ -248,6 +250,10 @@ class SupportBundlePublisher {
 		// by host_housekeeping.sh (install and assert) and, as its installed
 		// copy, by the site container engine's hook. Sources _site_engine.sh.
 		'maintenance_scripts/sysadmin_tools/site_quiet_host.sh',
+		// site_certificate_stage: a site container's own certificate lineage
+		// staged inside it for its copy's export, and cleared after. Sources
+		// _site_engine.sh, as site_quiet_host does.
+		'maintenance_scripts/sysadmin_tools/site_certificate_stage.sh',
 		// discard_copy: a dormant copy removed from its host, only while the
 		// host records it as a copy. Runs remove_account.sh beside it.
 		'maintenance_scripts/sysadmin_tools/discard_copy.sh',

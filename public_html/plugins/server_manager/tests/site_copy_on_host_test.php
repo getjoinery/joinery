@@ -102,7 +102,7 @@ $install_output = function (int $port, string $fpr) {
 // The site's own host (Docker, its agent able to freeze it and hold its old
 // container), the copy's host (the site container engine), and the site.
 $src_host_agent = $mk_node('srchost', array('mgn_host' => $H_SRC, 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
-	'mgn_agent_version' => '1.78.0', 'mgn_agent_primitives' => 'host_report,hold_container,site_quiet_host,provision_certificate',
+	'mgn_agent_version' => '1.78.0', 'mgn_agent_primitives' => 'host_report,hold_container,site_certificate_stage,site_quiet_host,provision_certificate',
 	'mgn_last_host_report' => json_encode(array('site_engine' => 'docker', 'containers' => array(
 		array('name' => 'schsite', 'memory' => array('limit_bytes' => 402653184)))))));
 $src_host = $mk_host('s', $H_SRC, $src_host_agent);
@@ -160,7 +160,7 @@ $src_host_agent->save();
 $why = implode(' | ', SiteCopyRunner::source_refusals($src, true, SiteCopy::FROM_SOURCE, true));
 check(strpos($why, 'Its host') !== false && strpos($why, 'site_quiet_host') !== false,
 	'the site\'s own host must be able to freeze it from outside', $why);
-$src_host_agent->set('mgn_agent_primitives', 'host_report,hold_container,site_quiet_host,provision_certificate');
+$src_host_agent->set('mgn_agent_primitives', 'host_report,hold_container,site_certificate_stage,site_quiet_host,provision_certificate');
 $src_host_agent->save();
 $src->set('mgn_last_status_data', json_encode(array('backup_recovery_state' => 'unknown')));
 $src->set('mgn_backup_recovery_fpr', null);

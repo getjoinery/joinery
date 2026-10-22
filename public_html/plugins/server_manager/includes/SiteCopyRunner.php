@@ -98,6 +98,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.37 - a container source's host stages the site's own certificate inside it for the export and clears it
+ *                 after (site_certificate_stage), so its copy starts on the site's certificate, as a bare-metal one
+ *                 does (C7's B49)
  * @version 1.36 - a settled move by DNS names the copy's IPv6 in reverse DNS too, from the AAAA it moved (B33)
  * @version 1.35 - a copy onto a new server takes its plan from those its region sells, and refuses one it does not
  *                 sell before anything is made (B31)
@@ -201,11 +204,12 @@ class SiteCopyRunner {
 	const HOST_COPY_WORDS = array('site_install', 'site_quiet_host', 'provision_certificate', 'discard_copy');
 
 	/**
-	 * The words a copy onto a host asks of a container source's own host: the
+	 * The words a copy asks of a container source's own host: the site's
+	 * certificate staged inside it for each export (the host ends its TLS), the
 	 * source held quiet from outside for its final copy, and its old container
 	 * held stopped once the copy has taken the site.
 	 */
-	const SOURCE_HOST_WORDS = array('site_quiet_host', 'hold_container');
+	const SOURCE_HOST_WORDS = array('site_certificate_stage', 'site_quiet_host', 'hold_container');
 
 	/**
 	 * A release can be copied onto a host when it carries this: the host's half
@@ -260,6 +264,8 @@ class SiteCopyRunner {
 		// host holding a site quiet from outside, or letting it go.
 		'site_install'    => 90,
 		'site_quiet_host' => 10,
+		// A container source's certificate, staged for the export and cleared.
+		'site_certificate_stage' => 10,
 		// The copy's machine believing the old server's forwarded addresses.
 		'trust_forwarder' => 10,
 	);
@@ -1427,6 +1433,7 @@ class SiteCopyRunner {
 			// owner to approve the export asks whether the job is still wanted,
 			// and takes the approval request off its page when it is not.
 			self::cancel_open_steps($copy->steps());
+			self::clear_staged_certificate($copy);
 			$node = self::copy_row($copy, false);
 			if ($node && !$node->get('mgn_delete_time')) {
 				DataRootEscrowSync::let_go($node);
@@ -1437,6 +1444,35 @@ class SiteCopyRunner {
 			$copy->save();
 		} finally {
 			self::unlock();
+		}
+	}
+
+	/**
+	 * A container source's certificate staged inside it for an export that
+	 * never reached its clear (a declined or failed export halts the run there)
+	 * is taken back out when the copy is discarded: the source runs on, and the
+	 * key is not left in its container's layer. Best effort: a later stage
+	 * clears first, and the host keeps the record of what it staged.
+	 */
+	private static function clear_staged_certificate(SiteCopy $copy): void {
+		$staged = false;
+		foreach ($copy->steps() as $s) {
+			if (($s['op'] ?? '') === 'site_certificate_stage') {
+				$staged = ($s['arg'] ?? '') === 'stage' ? ($staged || ($s['verdict'] ?? '') === 'passed')
+					: ($staged && ($s['verdict'] ?? '') !== 'passed');
+			}
+		}
+		if (!$staged) {
+			return;
+		}
+		try {
+			$source = self::source_row($copy);
+			$host = JobCommandBuilder::decommission_host_node_for($source);
+			$built = JobCommandBuilder::build_site_certificate_stage($host, trim((string)$source->get('mgn_container_name')), 'clear');
+			ManagementJob::createFromBuild($host->key, 'site_certificate_stage', $built,
+				array('site_copy_id' => (int)$copy->key), $copy->get('scp_created_by'));
+		} catch (Exception $e) {
+			error_log('SiteCopyRunner: copy ' . (int)$copy->key . ': the staged certificate was not cleared: ' . $e->getMessage());
 		}
 	}
 
@@ -1727,7 +1763,7 @@ class SiteCopyRunner {
 			return;
 		}
 		$steps = array();
-		foreach ($copy->runs_from_backups() ? self::BACKUPS_RUN_STEPS : self::RUN_STEPS as $s) {
+		foreach ($copy->runs_from_backups() ? self::BACKUPS_RUN_STEPS : self::run_steps($source) as $s) {
 			$steps[] = array('op' => $s['op'], 'on' => $s['on'], 'arg' => $s['arg'] ?? '', 'job_id' => null,
 				'verdict' => 'pending', 'reason' => '');
 		}
@@ -1775,6 +1811,9 @@ class SiteCopyRunner {
 				$target = self::hold_host($copy);
 			} elseif ($step['on'] === 'source_host' || $step['on'] === 'copy_host') {
 				$target = self::switch_host($copy, $step['on']);
+			} elseif ($step['on'] === 'site_host') {
+				// A container source's host as it stands, before any switch-over.
+				$target = JobCommandBuilder::decommission_host_node_for($source);
 			} else {
 				$target = $step['on'] === 'source' ? $source : $node;
 			}
@@ -1916,6 +1955,10 @@ class SiteCopyRunner {
 				}
 				return JobCommandBuilder::build_hold_container(self::hold_host($copy),
 					(string)($copy->switch_record()['hold']['name'] ?? ''), (string)($step['arg'] ?? ''));
+			case 'site_certificate_stage':
+				return JobCommandBuilder::build_site_certificate_stage(JobCommandBuilder::decommission_host_node_for($source),
+					trim((string)$source->get('mgn_container_name')), (string)($step['arg'] ?? ''),
+					($step['arg'] ?? '') === 'stage' ? self::site_domain($source) : '');
 			case 'site_quiet_host':
 				$on = (string)$step['on'];
 				$entry = $copy->switch_record()['hosts'][$on === 'source_host' ? 'source' : 'copy'] ?? array();
@@ -2624,6 +2667,27 @@ class SiteCopyRunner {
 			self::unlock();
 		}
 		self::start_worker_for($copy, $template);
+	}
+
+	/**
+	 * A copy's run of a living site: RUN_STEPS, and for a site in a container
+	 * its host's certificate staged inside it just before the export and
+	 * cleared just after. The host ends the site's TLS, so its lineage is on the
+	 * host, where the export (made inside the container) cannot see it.
+	 */
+	private static function run_steps(ManagedNode $source): array {
+		$steps = array();
+		$container = trim((string)$source->get('mgn_container_name')) !== '';
+		foreach (self::RUN_STEPS as $s) {
+			if ($container && $s['op'] === 'copy_export') {
+				$steps[] = array('op' => 'site_certificate_stage', 'on' => 'site_host', 'arg' => 'stage');
+				$steps[] = $s;
+				$steps[] = array('op' => 'site_certificate_stage', 'on' => 'site_host', 'arg' => 'clear');
+				continue;
+			}
+			$steps[] = $s;
+		}
+		return $steps;
 	}
 
 	/**

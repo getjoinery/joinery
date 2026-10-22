@@ -274,6 +274,19 @@ a host reboot triggers one. After the census, `hold_container stop` sets
 `restart=no` and stops the source, so from then until Keep no restart can happen at
 all. Podman hosts need the hold only at Keep.
 
+**The certificate travels as a bare-metal site's does** (owner, 2026-10-22, from the
+final test's C7). A container site's lineage is on its host, which ends its TLS, so an
+export made inside the container carried none and its copy started on a self-signed
+certificate. Around each export the source's host stages the site's own lineage inside
+the container (`site_certificate_stage stage`, agent 1.91.0) and clears it after; the
+export carries it sealed to the copy and approved by the site's owner, as it carries a
+bare-metal site's. Only a lineage naming the site's domain or its `www.` and nothing
+else is staged, only for the domain the host serves that container at, and never the
+host's ACME account, which every site there shares: the copy adopts the lineage under
+its own (`provision_origin_cert`'s `adopt_carried_lineage`). The preflight requires
+the word of the source's host. A copy onto a host still has its certificate issued by
+that host (`provision_certificate`).
+
 This is not a question for the owner. The alternative, leaving Docker-host sources
 with only their engine-host path, carries the same window once per site (that path
 freezes through the host today) and gives those sites no other target.
