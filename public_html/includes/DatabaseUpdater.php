@@ -6,6 +6,12 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.6 - a new table whose serial column does not say is_nullable is created: its DEFAULT
+ *   followed the type with no space between them ('int8DEFAULT nextval(...)'), a syntax error.
+ *   The same rule for primary keys, unique constraints, indexes and foreign keys:
+ *   what a verbose run looked at and left alone ('already exists', 'already correct',
+ *   'Checking') is a note, so every message those steps return is a change update_database
+ *   can record. A primary key added to a site that lacked one never reached the apply result.
  * @version 1.5 - a note that changes nothing (a table that already exists, a primary key's
  *   nullability left alone, the count of classes loaded) goes in `notes`, not `messages`:
  *   `messages` is what changed, and update_database records each one as a schema change.
@@ -215,7 +221,7 @@ class DatabaseUpdater {
                 }
                 
                 if (isset($field_specs['serial']) && $field_specs['serial']) {
-                    $sql .= "DEFAULT nextval('{$sequence_name}'::regclass)";
+                    $sql .= " DEFAULT nextval('{$sequence_name}'::regclass)";
                 } elseif (isset($field_specs['default'])) {
                     // Declared defaults live in the schema too, not only in
                     // SystemBase::save()'s client-side application — raw-SQL
@@ -957,12 +963,13 @@ class DatabaseUpdater {
             'constraints_added' => [],
             'constraints_removed' => [],
             'errors' => [],
-            'messages' => []
+            'messages' => [],
+            'notes' => []
         ];
-        
+
         try {
             $dblink = $this->dbconnector->get_db_link();
-            
+
             foreach ($classes as $class) {
                 $table = $class::$tablename;
 
@@ -1052,7 +1059,7 @@ class DatabaseUpdater {
                     $existing_constraint = $this->findExistingConstraintByColumns($table, [$field], $dblink, 'UNIQUE');
                     if ($existing_constraint) {
                         if ($this->verbose) {
-                            $results['messages'][] = "Unique constraint already exists with different name: $existing_constraint";
+                            $results['notes'][] = "Unique constraint already exists with different name: $existing_constraint";
                         }
                         // Don't add - constraint already exists with different name
                     } else {
@@ -1066,7 +1073,7 @@ class DatabaseUpdater {
                         }
                     }
                 } elseif ($this->verbose) {
-                    $results['messages'][] = "Unique constraint already exists: $constraint_name";
+                    $results['notes'][] = "Unique constraint already exists: $constraint_name";
                 }
             }
             
@@ -1081,7 +1088,7 @@ class DatabaseUpdater {
                     $existing_constraint = $this->findExistingConstraintByColumns($table, $fields, $dblink, 'UNIQUE');
                     if ($existing_constraint) {
                         if ($this->verbose) {
-                            $results['messages'][] = "Composite unique constraint already exists with different name: $existing_constraint";
+                            $results['notes'][] = "Composite unique constraint already exists with different name: $existing_constraint";
                         }
                         // Don't add - constraint already exists with different name
                     } else {
@@ -1096,7 +1103,7 @@ class DatabaseUpdater {
                         }
                     }
                 } elseif ($this->verbose) {
-                    $results['messages'][] = "Composite unique constraint already exists: $constraint_name";
+                    $results['notes'][] = "Composite unique constraint already exists: $constraint_name";
                 }
             }
         }
@@ -1434,7 +1441,8 @@ class DatabaseUpdater {
             'indexes_removed' => [],
             'warnings' => [],
             'errors' => [],
-            'messages' => []
+            'messages' => [],
+            'notes' => []
         ];
 
         try {
@@ -1467,7 +1475,7 @@ class DatabaseUpdater {
             // The fingerprinted name is the primary idempotency guard.
             if ($this->indexExists($idx['name'], $dblink)) {
                 if ($this->verbose) {
-                    $results['messages'][] = "Index already exists: {$idx['name']}";
+                    $results['notes'][] = "Index already exists: {$idx['name']}";
                 }
                 continue;
             }
@@ -1480,7 +1488,7 @@ class DatabaseUpdater {
                 $existing = $this->findExistingIndexByColumns($table, $idx['columns'], $idx['unique'], $dblink);
                 if ($existing) {
                     if ($this->verbose) {
-                        $results['messages'][] = "Equivalent index already exists under different name: $existing";
+                        $results['notes'][] = "Equivalent index already exists under different name: $existing";
                     }
                     continue;
                 }
@@ -1823,7 +1831,8 @@ class DatabaseUpdater {
             'constraints_replaced' => [],
             'errors' => [],
             'warnings' => [],
-            'messages' => []
+            'messages' => [],
+            'notes' => []
         ];
 
         try {
@@ -1874,7 +1883,7 @@ class DatabaseUpdater {
                 && ($existing['on_delete'] === $on_delete);
             if ($matches) {
                 if ($this->verbose) {
-                    $results['messages'][] = "Foreign key already correct: {$existing['name']} on {$table}.{$field}";
+                    $results['notes'][] = "Foreign key already correct: {$existing['name']} on {$table}.{$field}";
                 }
                 return;
             }
@@ -2102,7 +2111,8 @@ class DatabaseUpdater {
             'fixed' => [],
             'warnings' => [],
             'errors' => [],
-            'messages' => []
+            'messages' => [],
+            'notes' => []
         ];
         
         $dblink = $this->dbconnector->get_db_link();
@@ -2116,7 +2126,7 @@ class DatabaseUpdater {
                 $expected_pkey = $class::$pkey_column;
                 
                 if ($this->verbose) {
-                    $results['messages'][] = "Checking primary key for {$class} ({$table_name}.{$expected_pkey})";
+                    $results['notes'][] = "Checking primary key for {$class} ({$table_name}.{$expected_pkey})";
                 }
                 
                 // Check if table exists (using existing pattern)
@@ -2161,7 +2171,7 @@ class DatabaseUpdater {
                     }
                 } else {
                     if ($this->verbose) {
-                        $results['messages'][] = "OK: {$table_name}.{$expected_pkey} already has primary key constraint";
+                        $results['notes'][] = "OK: {$table_name}.{$expected_pkey} already has primary key constraint";
                     }
                 }
                 

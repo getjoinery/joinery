@@ -34,6 +34,9 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.28 - the staged release's missing tables and columns are added before its code goes live
+	 *                (DeploymentHelper::schemaAhead), and the staged tree is given the modes fix_permissions.sh
+	 *                gives the executable set (not 770) before the swap, so it is readable the moment it serves
 	 * @version 1.27 - the plugin migrations the post-swap sync ran enter the structured apply result with
 	 *                their own outcome (sync_extensions 1.3.0 migrations_run); a deferred one is left out
 	 * @version 1.26 - a declared extension a package run is upgrading (dpkg reads it "unpacked" for a moment),
@@ -219,6 +222,9 @@
 
 	/** Record where a rollback happened and whether the schema was already migrated. */
 	function apply_result_rolled_back($step, $schema_ahead) {
+		// Tables or columns added before the swap are ahead of the code a
+		// rollback puts back, whichever step it rolled back from.
+		$schema_ahead = $schema_ahead || !empty($GLOBALS['APPLY_RESULT']['schema_changes']);
 		$GLOBALS['APPLY_RESULT']['rolled_back'] = array(
 			'rolled_back' => true, 'step' => $step, 'schema_ahead_of_code' => (bool)$schema_ahead);
 	}
@@ -1682,6 +1688,28 @@
 		}
 
 		// ============================================
+		// SCHEMA AHEAD OF THE CODE
+		// ============================================
+		// The new release's missing tables and columns, added while the old code
+		// still serves (additive only: the old code never asks for what it does
+		// not know about). Without this the new code served for the seconds
+		// between the swap and the full update below with what it writes not yet
+		// there. A failure costs only that head start: the full update adds the
+		// same, as it always has.
+		out_step('Adding the new tables and columns');
+		$schema_ahead = DeploymentHelper::schemaAhead($stage_location, $full_site_dir);
+		if (!$schema_ahead['ran'] || !$schema_ahead['ok']) {
+			out_alert('warning', 'The new tables and columns were not all added ahead of the code',
+				htmlspecialchars($schema_ahead['reason']) . '. The update after the swap adds them.<br>'
+				. nl2br(htmlspecialchars(implode("\n", array_slice($schema_ahead['output'], -10)))));
+		} else {
+			upgrade_echo(empty($schema_ahead['changes'])
+				? 'Nothing to add<br>'
+				: nl2br(htmlspecialchars(implode("\n", $schema_ahead['changes']))) . '<br>');
+		}
+		$GLOBALS['APPLY_RESULT']['schema_changes'] = array_slice($schema_ahead['changes'], 0, 300);
+
+		// ============================================
 		// DEPLOYMENT
 		// ============================================
 		out_step('Deploying Upgrade');
@@ -1717,10 +1745,17 @@
 				exit;
 			}
 
-			//SET PERMISSIONS FOR NEW FILES
-			if($verbose) echo 'Setting '.$stage_location.' to 770<br>';
-			exec("chmod -R 770 $stage_location");
-			if($verbose) echo 'Permissions of '.$stage_location.': '.substr(sprintf('%o', fileperms($stage_location)), -4).'<br>';
+			// The staged tree takes the modes fix_permissions.sh gives the
+			// executable set (directories and shell scripts 755, every other file
+			// 644) before it is moved in: it serves from that moment, and the PHP
+			// pool has to be able to read it. At 770, every request between the
+			// swap and fix_permissions.sh below failed opening serve.php
+			// (Permission denied). Only the owner is left to fix_permissions.sh.
+			if($verbose) echo 'Setting the modes of '.$stage_location.' for serving<br>';
+			$stage_q = escapeshellarg($stage_location);
+			exec('find ' . $stage_q . ' -mindepth 1 -type d -exec chmod 755 {} + 2>&1; '
+				. 'find ' . $stage_q . " -type f -name '*.sh' -exec chmod 755 {} + 2>&1; "
+				. 'find ' . $stage_q . " -type f ! -name '*.sh' -exec chmod 644 {} + 2>&1");
 
 			if($verbose) echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
 			if($verbose) echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
@@ -2142,7 +2177,8 @@
 					$facts = json_decode(substr($line, strlen('UPDATE_DATABASE_RESULT: ')), true);
 					if (is_array($facts)) {
 						$GLOBALS['APPLY_RESULT']['migrations'] = array_slice((array)($facts['migrations'] ?? array()), 0, 200);
-						$GLOBALS['APPLY_RESULT']['schema_changes'] = array_slice((array)($facts['schema_changes'] ?? array()), 0, 300);
+						$GLOBALS['APPLY_RESULT']['schema_changes'] = array_slice(array_merge(
+							$GLOBALS['APPLY_RESULT']['schema_changes'], (array)($facts['schema_changes'] ?? array())), 0, 300);
 					}
 				}
 			}

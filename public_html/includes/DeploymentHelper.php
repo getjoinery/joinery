@@ -5,6 +5,9 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.11 - schemaAhead(): the staged release's missing tables and columns are added before its
+ *                 code goes live, by its own update_database.php --schema-ahead with the site's config/ and
+ *                 vendor/ lent beside it
  * @version 1.10 - a rollback puts the whole previous release back: public_html from public_html_last, and the
  *                 maintenance_scripts and RELEASE_MANIFEST(.sig) the deploy replaced from public_html_last/.release_last,
  *                 which upgrade.php keeps there before it touches either (keepPreviousRelease / restorePreviousRelease)
@@ -784,6 +787,92 @@ class DeploymentHelper {
         $site_dir = rtrim((string)$site_dir, '/');
         $deploy = $site_dir . '/deploy';
         return (is_dir($deploy) && is_writable($deploy)) ? $deploy : $site_dir;
+    }
+
+    /** What a staged tree is lent from its site for schemaAhead(): its settings and its packages. */
+    const SCHEMA_AHEAD_LENT = array('config', 'vendor');
+
+    /**
+     * Add the staged release's missing tables and columns while the old code
+     * still serves: the staged tree's own update_database.php --schema-ahead,
+     * run against this site's database.
+     *
+     * A tree finds its site's settings and Composer packages beside it, in
+     * SITE/config and SITE/vendor. Staged, beside it is the staging directory,
+     * so the site's are lent there as links for this one run and taken back
+     * after it (the packages are the running release's: the new release's
+     * arrive after the swap, and schema code needs only what its classes
+     * load). The staged tree's own cache/ and logs/ do not exist and are not
+     * lent: nothing it builds (its class map names staged paths) can reach the
+     * live site.
+     *
+     * Returns ['ran' => bool, 'ok' => bool, 'changes' => [schema change lines],
+     * 'output' => [transcript lines], 'reason' => why it did not run or failed].
+     * Not running, or not succeeding, costs only the head start: the full run
+     * after the swap adds whatever this did not, as it always has.
+     */
+    public static function schemaAhead($stage_location, $site_dir) {
+        $stage_location = rtrim((string)$stage_location, '/');
+        $site_dir = rtrim((string)$site_dir, '/');
+        $result = array('ran' => false, 'ok' => false, 'changes' => array(), 'output' => array(), 'reason' => '');
+        $script = $stage_location . '/public_html/utils/update_database.php';
+        if (!is_file($script)) {
+            $result['reason'] = 'the staged release has no utils/update_database.php';
+            return $result;
+        }
+        // An update_database that does not know the flag ignores it and runs in
+        // full: migrations and all, against the old code. Never before the swap.
+        if (strpos((string)@file_get_contents($script), "'--schema-ahead'") === false) {
+            $result['reason'] = 'the staged update_database.php has no --schema-ahead';
+            return $result;
+        }
+        $lent = array();
+        $give_back = function () use (&$lent) {
+            foreach ($lent as $link) {
+                @unlink($link);
+            }
+        };
+        foreach (self::SCHEMA_AHEAD_LENT as $name) {
+            $link = $stage_location . '/' . $name;
+            if (is_link($link)) {
+                @unlink($link);
+            }
+            if (file_exists($link)) {
+                $give_back();
+                $result['reason'] = $link . ' exists and is not a link this step made';
+                return $result;
+            }
+            if (!is_dir($site_dir . '/' . $name)) {
+                continue;
+            }
+            if (!@symlink($site_dir . '/' . $name, $link)) {
+                $give_back();
+                $result['reason'] = 'could not lend the site\'s ' . $name . ' to the staged tree at ' . $link;
+                return $result;
+            }
+            $lent[] = $link;
+        }
+        $output = array();
+        $exit = 0;
+        try {
+            exec('/usr/bin/php ' . escapeshellarg($script) . ' --schema-ahead 2>&1', $output, $exit);
+        } finally {
+            $give_back();
+        }
+        $result['ran'] = true;
+        $result['ok'] = ($exit === 0);
+        foreach ($output as $line) {
+            if (strpos($line, 'UPDATE_DATABASE_RESULT: ') === 0) {
+                $facts = json_decode(substr($line, strlen('UPDATE_DATABASE_RESULT: ')), true);
+                $result['changes'] = is_array($facts) ? array_values((array)($facts['schema_changes'] ?? array())) : array();
+                continue;
+            }
+            $result['output'][] = $line;
+        }
+        if (!$result['ok']) {
+            $result['reason'] = 'update_database --schema-ahead exited ' . $exit;
+        }
+        return $result;
     }
 
     /**
