@@ -36,6 +36,24 @@
             "where": "test server wp7-proof-342943 (Linode 108908362), Ubuntu, agent built for the run from 5c3f2c1a1cc4 and uncommitted changes",
             "what": "job 164071 through the agent: outcome installed, 45 packages changed (agent_live_proofs_live)",
             "date": "2026-10-22"
+        },
+        {
+            "word": "apply_update",
+            "agent_version": "1.90.0",
+            "script": "public_html/utils/upgrade.php",
+            "script_sha256": "df0de1fee3d26229fa29a023c0cf422af46229cfc14f88cfce653dc9b59894fc",
+            "where": "test server wp7-proof-264d2a (Linode 108918770), site wp7proof264d2a installed at 0.8.523, agent built for the run from 0568e140e14b",
+            "what": "job 166570: upgraded 0.8.523 to 0.8.524, deploy tier passed, no rollback onto candidate 0.8.524 built from this tree (agent_live_proofs_site_live)",
+            "date": "2026-10-22"
+        },
+        {
+            "word": "upgrade_preflight",
+            "agent_version": "1.90.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "test server wp7-proof-264d2a (Linode 108918770), site wp7proof264d2a installed at 0.8.523, agent built for the run from 0568e140e14b",
+            "what": "jobs 166569 and 166573: ready before and after the upgrade (agent_live_proofs_site_live)",
+            "date": "2026-10-22"
         }
     ]
 }
