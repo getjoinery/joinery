@@ -349,9 +349,11 @@
 				. 'Set its Host to the machine\'s IP address in Connection Settings.';
 		}
 	}
-	$remove_message = 'Remove this site permanently? Every record of it goes: its jobs and history, its incidents, its provisioning record and its backup storage records. This cannot be undone.';
+	// A machine with no site (a Docker host, a relay) is a machine, not a site (B94).
+	$remove_what = trim((string)$node->get('mgn_web_root')) !== '' ? 'site' : 'machine';
+	$remove_message = 'Remove this ' . $remove_what . ' permanently? Every record of it goes: its jobs and history, its incidents, its provisioning record and its backup storage records. This cannot be undone.';
 	if ($remove_kind === NodeRemoval::MACHINE_NONE) {
-		$remove_message .= ' It is hosted at ' . $remove_hosted_at . ': the site keeps running there and is no longer managed from here.';
+		$remove_message .= ' It is hosted at ' . $remove_hosted_at . ': the ' . $remove_what . ' keeps running there and is no longer managed from here.';
 	} elseif ($remove_kind === NodeRemoval::MACHINE_PROVIDER) {
 		$remove_message .= ' Its machine at ' . $remove_hosted_at . ' must already be deleted: the provider is asked first, and nothing is removed while the machine is still there.';
 	} elseif ($remove_kind === NodeRemoval::MACHINE_ATTEST) {
@@ -361,7 +363,13 @@
 	}
 	$attest_message = $attest_host
 		? 'Nothing here can remove its container: its host has no node on this management node. Confirm you deleted the host machine at ' . $remove_hosted_at . '. Your confirmation is logged.'
-		: 'This management node cannot ask ' . $remove_hosted_at . ' about its machines. Confirm you deleted this machine there.'
+		: (HeldCloudAccounts::node_account($node) === null
+			// B93: no provision record names the account (a machine joined by
+			// hand), so which of our accounts holds it is not known here, even
+			// when this management node holds that account's key.
+			? 'No record here says which of our cloud accounts this machine is in, so none can be asked whether it is gone.'
+				. ' Confirm you deleted it at ' . $remove_hosted_at . '.'
+			: 'This management node cannot ask ' . $remove_hosted_at . ' about its machines. Confirm you deleted this machine there.')
 			. ' Your confirmation is logged.';
 	$attest_is_id = !$attest_host && NodeRemoval::instance_id($node) !== '';
 	$attest_machine = $attest_host ? 'its host machine' : 'this machine';

@@ -20,9 +20,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$user = new User($session->get_user_id(), TRUE);	
 
-	// Photo management actions — may be triggered via GET links; these are
-	// intentional mutations, so opt in to the GET-is-read-only tripwire.
-	if (isset($input['action']) && $input['action'] == 'set_primary_photo') {
+	// Photo actions are buttons (POST): a link is a GET any site can make the
+	// browser follow.
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'set_primary_photo') {
 		$user = new User($session->get_user_id(), TRUE);
 		$user->set_primary_photo((int)$input['photo_id']);
 
@@ -33,7 +33,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::redirect('/profile/account_edit');
 	}
 
-	if (isset($input['action']) && $input['action'] == 'clear_primary_photo') {
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'clear_primary_photo') {
 		$user = new User($session->get_user_id(), TRUE);
 		$user->clear_primary_photo();
 

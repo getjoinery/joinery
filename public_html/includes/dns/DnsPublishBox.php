@@ -24,6 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
+ * @version 1.7
+ * @changelog 1.7 - handle() acts only on a POST: a link could carry the OAuth client dns_oauth_config saves
  * @version 1.6
  * @changelog 1.6 - The move offer is gated on DnsRelocation::foreignUse (move_veto var): a lived-in domain gets the gate note without the offer, and dns_move refuses server-side too
  * @version 1.5
@@ -61,11 +63,11 @@ class DnsPublishBox {
 	 *                                so a page pays nothing for the box it does not use.
 	 */
 	public static function handle(array $input, callable $plan_factory, string $return_url): ?LogicResult {
-		// Cross-site forgery has nothing to gain here: the only action that
-		// changes anything needs either a consent the operator completes at the
-		// provider, or a credential typed into this form. A forged POST can at
-		// most render a diff. The permission gate below still applies.
-		$action = trim((string)($input['dns_action'] ?? ''));
+		// The box's actions are its buttons (POST). A GET is a link any site can
+		// make the browser follow, and one could carry the 'typed' OAuth client
+		// that dns_oauth_config saves, so a page view acts on none of them. A
+		// cross-site POST carries no session cookie (SameSite=Lax).
+		$action = LibraryFunctions::isFormSubmission() ? trim((string)($input['dns_action'] ?? '')) : '';
 		if ($action === '') {
 			return null;
 		}

@@ -21,7 +21,7 @@
  *
  * USAGE:
  * - Command line: php fix_duplicate_keys.php --table=tablename [--dry-run] [--verbose]
- * - Web interface: Access via browser with ?table=tablename parameter (requires permission level 10)
+ * - Web interface: ?table=tablename previews (permission level 10); its Apply Fixes button (a POST) applies
  *
  * SAFETY:
  * - Requires explicit table name to prevent accidental operations
@@ -30,6 +30,7 @@
  * - Creates detailed log of all changes made
  *
  * @author Generated with Claude Code
+ * @version 1.1 - on the web a GET only previews; Apply Fixes is a POST button (it renumbers primary keys)
  * @version 1.0
  * @since 2025-09-26
  */
@@ -93,10 +94,13 @@ if ($is_cli) {
         }
     }
 } else {
-    // Parse web parameters
-    $table_name = $_GET['table'] ?? null;
-    $dry_run = isset($_GET['dry_run']) && $_GET['dry_run'] === '1';
-    $verbose = isset($_GET['verbose']) && $_GET['verbose'] === '1';
+    // Parse web parameters. A GET only ever previews: applying renumbers
+    // primary keys, so it is the Apply Fixes button (POST), never a link any
+    // other site could send a signed-in superadmin's browser to.
+    $table_name = $_REQUEST['table'] ?? null;
+    $is_post = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
+    $dry_run = !$is_post || (isset($_POST['dry_run']) && $_POST['dry_run'] === '1');
+    $verbose = isset($_REQUEST['verbose']) && $_REQUEST['verbose'] === '1';
 }
 
 // Validate table name is provided
@@ -105,7 +109,7 @@ if (empty($table_name)) {
         echo "<h1>Error: Table name required</h1>";
         echo "<p>Please specify a table name using the <code>?table=tablename</code> parameter.</p>";
         echo "<p>Example: <code>" . htmlspecialchars($_SERVER['REQUEST_URI']) . "?table=usr_users</code></p>";
-        echo "<p>Add <code>&dry_run=1</code> to preview changes without applying them.</p>";
+        echo "<p>Opening it previews the changes; the Apply Fixes button applies them.</p>";
         echo "<p>Add <code>&verbose=1</code> for detailed output.</p>";
     } else {
         echo "Error: Table name required\n";
@@ -484,8 +488,12 @@ try {
             if ($is_cli) {
                 echo "<code style='background: #f8f9fa; padding: 4px 8px; border-radius: 3px; font-family: monospace;'>php " . basename(__FILE__) . " --table=$table_name</code>";
             } else {
-                $url = strtok($_SERVER["REQUEST_URI"], '?') . "?table=$table_name";
-                echo "<a href='" . htmlspecialchars($url) . "' style='background: #007bff; color: white; padding: 8px 16px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;'>Apply Fixes</a>";
+                $url = strtok($_SERVER["REQUEST_URI"], '?');
+                echo "<form method='POST' action='" . htmlspecialchars($url) . "' style='display: inline-block; margin-top: 10px;'>"
+                    . "<input type='hidden' name='table' value='" . htmlspecialchars($table_name) . "'>"
+                    . ($verbose ? "<input type='hidden' name='verbose' value='1'>" : '')
+                    . "<button type='submit' style='background: #007bff; color: white; padding: 8px 16px; border: 0; border-radius: 5px;'"
+                    . " onclick=\"return confirm('Renumber the duplicate keys in this table?');\">Apply Fixes</button></form>";
             }
             echo "</div>";
         }

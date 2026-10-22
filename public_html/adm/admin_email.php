@@ -24,10 +24,11 @@
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
 		$altlinks = array(
 		'Edit'=>'/admin/admin_email_edit?eml_email_id='.$email->key,
-		'Send test'=> '/admin/admin_emails_send?send_test=1&eml_email_id='.$email->key);
+		'Send test'=> array('post' => '/admin/admin_emails_send', 'hidden' => array('send_test' => 1, 'eml_email_id' => $email->key)));
 
 		if($email->get('eml_status') >= 3){
-			$altlinks['Add to Send Queue'] = '/admin/admin_emails_queue?eml_email_id='.$email->key;
+			$altlinks['Add to Send Queue'] = array('post' => '/admin/admin_emails_queue', 'hidden' => array('eml_email_id' => $email->key),
+				'confirm' => 'Queue this email to every recipient?');
 		}
 
 		if(!$email->get('eml_delete_time') && $_SESSION['permission'] >= 8) {

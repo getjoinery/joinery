@@ -147,7 +147,8 @@ function conversation_thread_logic(array $input): LogicResult {
 	if ($participants->count() > 0) {
 		$my_participant = $participants->get(0);
 		$my_participant->set('cnp_last_read_time', gmdate('Y-m-d H:i:s'));
-		$my_participant->save();
+		// Observation: that it was read, on the view that read it.
+		SystemBase::server_initiated_write(function () use ($my_participant) { $my_participant->save(); });
 		$is_muted = (bool)$my_participant->get('cnp_is_muted');
 	}
 	$_SESSION['message_unread_count'] = null;

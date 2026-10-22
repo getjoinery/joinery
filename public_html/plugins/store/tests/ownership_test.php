@@ -130,7 +130,7 @@ function own_create_version($product_id, $version_name, $price, $price_type = 's
 			'version_price' => $price,
 			'prv_price_type' => $price_type,
 			'prv_trial_period_days' => '0',
-		), 'GET');
+		), 'POST');
 
 	$versions = new MultiProductVersion(
 		array('product_id' => $product_id, 'version_name' => $version_name),
@@ -694,7 +694,7 @@ $new_version_refused = harness_call_logic('plugins/store/admin/logic/admin_produ
 		'version_price' => '5.00',
 		'prv_price_type' => 'month',
 		'prv_trial_period_days' => '0',
-	), 'GET');
+	), 'POST');
 check((bool)$new_version_refused->error && stripos($new_version_refused->error, 'one-time') !== false,
 	'a tagged product refuses a new subscription version', (string)$new_version_refused->error);
 

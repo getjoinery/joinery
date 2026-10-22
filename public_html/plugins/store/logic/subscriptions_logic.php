@@ -31,9 +31,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
 
-	//SUBSCRIPTIONS
+	// Subscriptions the buyer still has: active, or cancelled to end at a
+	// period end still to come (billed through it, and shown with that date).
 	$active_subscriptions = new MultiOrderItem(
-	array('user_id' => $user->key, 'is_active_subscription' => true), //SEARCH CRITERIA
+	array('user_id' => $user->key, 'is_current_subscription' => true), //SEARCH CRITERIA
 	array('order_item_id' => 'DESC'),  // SORT, SORT DIRECTION
 	15, //NUMBER PER PAGE
 	NULL //OFFSET

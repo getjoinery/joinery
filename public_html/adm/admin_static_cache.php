@@ -13,7 +13,8 @@ $page = new AdminPage();
 $settings = Globalvars::get_instance();
 
 // Handle form actions
-$action = $_POST['action'] ?? $_GET['action'] ?? null;
+// Actions are buttons (POST): a link is a GET any other site can make the browser follow.
+$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? null) : null;
 
 if ($action) {
     $redirect_needed = false;
@@ -364,11 +365,11 @@ $page->admin_header(array(
 // Prepare options for the built-in admin dropdown
 $altlinks = array();
 if ($stats['enabled']) {
-    $altlinks['Disable Cache'] = '/admin/admin_static_cache?action=disable';
+    $altlinks['Disable Cache'] = array('post' => '/admin/admin_static_cache', 'hidden' => array('action' => 'disable'));
 } else {
-    $altlinks['Enable Cache'] = '/admin/admin_static_cache?action=enable';
+    $altlinks['Enable Cache'] = array('post' => '/admin/admin_static_cache', 'hidden' => array('action' => 'enable'));
 }
-$altlinks['Clear All Cache'] = '/admin/admin_static_cache?action=clear_all';
+$altlinks['Clear All Cache'] = array('post' => '/admin/admin_static_cache', 'hidden' => array('action' => 'clear_all'), 'confirm' => 'Clear every cached page?');
 
 $page->begin_box(array('altlinks' => $altlinks));
 ?>

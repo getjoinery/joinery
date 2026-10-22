@@ -60,7 +60,8 @@
 	$headers = array('Email', 'Subject', 'Author', 'Status', 'Details');
 	$altlinks = array('New Email'=>'/admin/admin_email_edit');
 	if($numqueued){
-		$altlinks += array('Send Queued Emails'=>'/admin/admin_emails_send');
+		$altlinks += array('Send Queued Emails'=> array('post' => '/admin/admin_emails_send', 'hidden' => array(),
+			'confirm' => 'Send every queued email now?'));
 	}
 	if($searchterm){
 		$title = 'Emails matching "'.$searchterm.'"';

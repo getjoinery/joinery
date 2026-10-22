@@ -113,7 +113,11 @@ class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 			   AND abt_delete_time IS NULL
 			   AND abt_expires_time > now()
 			 RETURNING abt_app_bridge_token_id");
-		$q->execute([hash('sha256', $token_plaintext)]);
+		// The token is the authority, not a session cookie, and the app opens the
+		// bridge with a GET: claiming it is the server's own write.
+		SystemBase::server_initiated_write(function () use ($q, $token_plaintext) {
+			$q->execute([hash('sha256', $token_plaintext)]);
+		});
 		$row = $q->fetch(PDO::FETCH_ASSOC);
 
 		if (!$row) {

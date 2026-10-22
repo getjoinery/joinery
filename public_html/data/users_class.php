@@ -387,9 +387,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				throw new SystemDisplayablePermanentError("Missing first name in create user.");
 			}
 			
-			if(!$last_name = $data['usr_last_name']){
-				throw new SystemDisplayablePermanentError("Missing last name in create user.");
-			}
+			// A last name is optional: one name is a whole name for many people,
+			// and an address alone (bob@example.com) gives only one.
+			$last_name = (string)($data['usr_last_name'] ?? '');
 				
 			if(!$email = $data['usr_email']){
 				throw new SystemDisplayablePermanentError("Missing email in create user.");
@@ -427,7 +427,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			$user = new User(NULL);
 			$user->set('usr_email', strip_tags(trim(strtolower($email))));
 			$user->set('usr_first_name', strip_tags(trim($first_name)));
-			$user->set('usr_last_name', strip_tags(trim($last_name)));	
+			$last_name = strip_tags(trim($last_name));
+			$user->set('usr_last_name', $last_name !== '' ? $last_name : null);
 			$user->set('usr_password', $temp_password_hashed);	
 			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR']);
 			if(!empty($data['usr_nickname'])){
@@ -488,7 +489,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			if(!$user){
 				$tdata = array(
 					'usr_first_name' => $data['usr_first_name'],
-					'usr_last_name' => $data['usr_last_name'],
+					'usr_last_name' => $data['usr_last_name'] ?? '',
 					'usr_email' => $data['usr_email'],
 					'send_emails' => $send_emails
 				);
@@ -1012,7 +1013,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	function display_name() {
 
 		if($this->get('usr_first_name') || $this->get('usr_last_name')){		
-			$returnval = $this->get('usr_first_name') . ' ' . $this->get('usr_last_name');
+			$returnval = trim($this->get('usr_first_name') . ' ' . $this->get('usr_last_name'));
 			if($this->get('usr_nickname')){
 				$returnval .= ' ('. $this->get('usr_nickname').')';
 			}
@@ -1560,7 +1561,8 @@ class MultiUser extends SystemMultiBase {
             $fsearch = preg_replace('/[^A-Za-z0-9\s]/', ' ', $this->options['user_name_fulltext']);
             $fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
             $fsearch = str_replace(' ', ' | ', $fsearch);
-            $filters['to_tsvector(\'english\', usr_first_name || \' \' || usr_last_name)'] = '@@ to_tsquery(\'english\', \''.$fsearch.'\')';
+            // COALESCE: a person with no last name is still found by their first.
+            $filters['to_tsvector(\'english\', COALESCE(usr_first_name, \'\') || \' \' || COALESCE(usr_last_name, \'\'))'] = '@@ to_tsquery(\'english\', \''.$fsearch.'\')';
         }
 
         return $this->_get_resultsv2('usr_users', $filters, $this->order_by, $only_count, $debug);

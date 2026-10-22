@@ -26,7 +26,9 @@
  * so it is not the SSRF surface SafeHttpClient addresses — the concern here is
  * the VOLUME of attacker-driven lookups.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - the cache row is the server's own write (server_initiated_write): a page view that
+ *   looks a domain up may record what DNS just said
  * @changelog 1.3 - the peer lookup cap is 240 a minute, not 60: a multi-tenant host's sites share
  *   one address, and 100 of them each sending for the first time, or after a key rotation, is
  *   200 lookups (specs/multi_tenant_docker_hosts.md S23)
@@ -277,7 +279,9 @@ class DirectCapability {
 			$row->set('jdc_keys', $resolved !== null ? json_encode($resolved['keys']) : null);
 			$row->set('jdc_expires_time', $expires);
 			$row->set('jdc_update_time', gmdate('Y-m-d H:i:s'));
-			$row->save();
+			// Reconciliation: what DNS just said, kept for the next lookup, on
+			// whatever request asked, page views included.
+			\SystemBase::server_initiated_write(function () use ($row) { $row->save(); });
 		} catch (\Throwable $e) {
 			// A cache that cannot be written must not take down the delivery it was
 			// only meant to speed up.

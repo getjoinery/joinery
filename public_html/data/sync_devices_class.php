@@ -133,12 +133,13 @@ class SyncDevice extends SystemBase {
 				$q = $dblink->prepare(
 					"UPDATE sde_sync_devices SET sde_last_seen_time = ?, sde_last_cursor = ?
 					  WHERE sde_sync_device_id = ?");
-				$q->execute(array($now, (int)$cursor, (int)$this->key));
+				// Observation: the device checked in, on whatever request it rode.
+				SystemBase::server_initiated_write(function () use ($q, $now, $cursor) { $q->execute(array($now, (int)$cursor, (int)$this->key)); });
 				$this->set_as_stored('sde_last_cursor', (int)$cursor);
 			} else {
 				$q = $dblink->prepare(
 					"UPDATE sde_sync_devices SET sde_last_seen_time = ? WHERE sde_sync_device_id = ?");
-				$q->execute(array($now, (int)$this->key));
+				SystemBase::server_initiated_write(function () use ($q, $now) { $q->execute(array($now, (int)$this->key)); });
 			}
 			$this->set_as_stored('sde_last_seen_time', $now);
 		} catch (Exception $e) {

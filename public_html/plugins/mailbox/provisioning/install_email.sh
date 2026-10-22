@@ -2,6 +2,8 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.29 - STARTTLS serves the Let's Encrypt certificate that names the mail hostname, not the
+#                snakeoil one senders refuse (then resend in plain text); a renewal reloads Postfix
 # Version: 2.28 - Mail this box sends leaves over IPv4 (smtp_address_preference = ipv4), as
 #                from the relay: its IPv6 address has no reverse DNS and no SPF entry
 #                (specs/ipv6_address_handling.md D6).
@@ -707,6 +709,35 @@ else
     fi
 fi
 echo "rspamd: verdicts are stamped under ${AUTHSERV_ID}"
+
+# STARTTLS certificate. Left alone, Postfix offers the snakeoil certificate,
+# a sending server refuses it ("bad certificate") and resends in plain text.
+# The Let's Encrypt certificate on this box that names the mail hostname is
+# used instead, and a renewal reloads Postfix so it never serves an expired
+# one. With none naming it, Postfix is left as it is and this says so: the
+# mail hostname needs a certificate first.
+TLS_CERT=""
+if [[ -n "${AUTHSERV_ID}" && -d /etc/letsencrypt/live ]]; then
+    for lineage in /etc/letsencrypt/live/*/; do
+        [[ -f "${lineage}fullchain.pem" && -f "${lineage}privkey.pem" ]] || continue
+        if openssl x509 -in "${lineage}fullchain.pem" -noout -checkhost "${AUTHSERV_ID}" 2>/dev/null | grep -q 'does match'; then
+            TLS_CERT="${lineage}fullchain.pem"
+            TLS_KEY="${lineage}privkey.pem"
+            break
+        fi
+    done
+fi
+if [[ -n "${TLS_CERT}" ]]; then
+    postconf -e "smtpd_tls_cert_file = ${TLS_CERT}" "smtpd_tls_key_file = ${TLS_KEY}"
+    install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+    printf '#!/bin/sh\n# Written by install_email.sh: Postfix rereads its STARTTLS certificate after a renewal.\nsystemctl reload postfix 2>/dev/null || postfix reload 2>/dev/null || true\n' \
+        > /etc/letsencrypt/renewal-hooks/deploy/joinery-postfix-reload
+    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/joinery-postfix-reload
+    echo "main.cf: STARTTLS uses ${TLS_CERT} (names ${AUTHSERV_ID}); a renewal reloads Postfix."
+else
+    echo "main.cf: no Let's Encrypt certificate on this box names ${AUTHSERV_ID:-the mail hostname}; Postfix keeps $(postconf -h smtpd_tls_cert_file 2>/dev/null || echo 'its current certificate')." >&2
+    echo "         Senders refuse a certificate that does not name the host and send in plain text until one does." >&2
+fi
 
 # A stopped rspamd must never block or defer mail: it arrives unchecked, and
 # the health check reports the scanner down.

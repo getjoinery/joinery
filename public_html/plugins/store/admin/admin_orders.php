@@ -89,7 +89,10 @@
 	$formwriter->end_form();	
 	
 	$headers = array('Order ID', 'User', 'Order Time', 'Products', 'Total');
-	$altlinks = array('Sync Invoices' => '/utils/admin_stripe_invoices_synchronize?html-format=1', 'Sync Orders' => '/utils/stripe_charges_synchronize?html-format=1', 'New Order' => '/plugins/store/admin/admin_order_edit');
+	$altlinks = array(
+		'Sync Invoices' => array('post' => '/utils/admin_stripe_invoices_synchronize', 'hidden' => array('html-format' => 1)),
+		'Sync Orders' => array('post' => '/utils/stripe_charges_synchronize', 'hidden' => array('html-format' => 1)),
+		'New Order' => '/plugins/store/admin/admin_order_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),

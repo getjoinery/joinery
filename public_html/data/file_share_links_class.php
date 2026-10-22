@@ -99,10 +99,11 @@ class FileShareLink extends SystemBase {
 		$this->save();
 	}
 
+	/** Observation: one more opening of the link, counted on the page view that opened it. */
 	public function record_access() {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$q = $dblink->prepare("UPDATE fsl_file_share_links SET fsl_access_count = fsl_access_count + 1 WHERE fsl_file_share_link_id = ?");
-		$q->execute(array((int)$this->key));
+		SystemBase::server_initiated_write(function () use ($q) { $q->execute(array((int)$this->key)); });
 	}
 }
 

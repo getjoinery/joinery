@@ -19,6 +19,11 @@
 	
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
+	// A button on the Orders page (POST), never a link: a link is a GET any
+	// other site can make the browser follow.
+	if (PHP_SAPI !== 'cli' && !LibraryFunctions::isFormSubmission()) {
+		throw new SystemDisplayableError('Run this with the Sync Orders button on the Orders page.');
+	}
 
 	$stripe_helper = new StripeHelper();
 
@@ -45,7 +50,7 @@
 	}
 	else{
 		//DEFAULT
-		if($_GET['html-format']){
+		if(!empty($_REQUEST['html-format'])){
 			$startdate = strtotime('-1 month',time());
 		}
 		else{
@@ -82,7 +87,7 @@
 
 	
 
-	if($_GET['html-format']){
+	if(!empty($_REQUEST['html-format'])){
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
@@ -100,8 +105,9 @@
 		
 
 	
-		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/stripe_charges_synchronize', 'method' => 'GET']);
+		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/stripe_charges_synchronize']);
 		$formwriter->begin_form();
+		$formwriter->hiddeninput('html-format', '', ['value' => 1]);
 		$formwriter->dateinput("startdate", "Start Date", ['value' => $display_startdate]);
 		$formwriter->dateinput("enddate", "End Date", ['value' => $display_enddate]);
 		$formwriter->hiddeninput('source', 'form');
@@ -408,7 +414,7 @@
 				}
 						
 
-				if($_GET['html-format']){
+				if(!empty($_REQUEST['html-format'])){
 					$page->disprow($rowvalues);
 					if($verbose){
 						echo '<br><br>';
@@ -436,7 +442,7 @@
 		}	
 	}
 	
-	if($_GET['html-format']){
+	if(!empty($_REQUEST['html-format'])){
 		if($verbose){
 			$page->endtable();	
 		}

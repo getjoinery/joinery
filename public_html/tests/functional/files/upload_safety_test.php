@@ -25,15 +25,16 @@
  *      RouteHelper::serveStaticFile that serves public uploads without the
  *      File model).
  *
- * Plus the invariant the whole thing quietly rests on: neither directory that
- * receives uploaded bytes is inside the document root, so a name ending in
- * .php is inert wherever it lands.
+ * Plus two invariants beneath them: neither directory that receives uploaded
+ * bytes is inside the document root, and no stored name ends in an executable
+ * extension (File::_mint_unique_name), whichever path the bytes came by.
  *
  * The blob/refcount layer underneath is covered by blob_layer_test.php; this
  * test does not re-cover it.
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.2 - the minted name is inert: an allowlisted extension or .bin, one extension only, sanitized before the check
  * @version 1.1 - the unrecognized-bytes check uses fixed signature-free bytes (random ones
  *   sometimes carried a real signature)
  * @version 1.0
@@ -284,8 +285,8 @@ section('Uploaded bytes never land inside the document root');
 // This is the invariant that makes a .php name harmless: an extension the
 // allowlist rejects can still reach disk through a non-upload ingestion path
 // (an inbound email attachment, say), so the directories themselves must be
-// unservable by Apache. If either ever moved under public_html, a name the
-// minter preserves verbatim would become executable.
+// unservable by Apache. The minter's names are inert as well (below); this
+// placement is the layer under them.
 $docroot = realpath(PathHelper::getBasePath());
 check($docroot !== false, 'document root resolves', 'PathHelper::getBasePath()');
 foreach (array('upload_dir' => $upload_dir, 'fast-serve dir' => $fast_dir) as $label => $dir) {
@@ -297,12 +298,28 @@ foreach (array('upload_dir' => $upload_dir, 'fast-serve dir' => $fast_dir) as $l
     check(strpos($real . '/', $docroot . '/') !== 0, "$label is outside the document root", "$real vs $docroot");
 }
 
-// The minter preserves whatever extension it is handed, which is exactly why
-// the directory placement above has to hold. Pin it so the assumption is
-// visible rather than implied.
+// And the name itself is inert: whatever a stranger's bytes are called, the
+// minted name has one extension and never an executable one, so even a
+// directory that someday moved under the document root, or a handler that
+// matches any of a name's extensions, would find nothing to run.
 $mint = new ReflectionMethod('File', '_mint_unique_name');
 $minted = $mint->invoke(null, '../../evil.php');
-check(substr($minted, -4) === '.php', 'the minter preserves a .php extension verbatim', 'got: ' . $minted);
+check(substr($minted, -4) === '.bin' && strpos($minted, 'evil_php') !== false, 'a .php name lands as .bin, keeping its words', 'got: ' . $minted);
+// Hostile spellings: characters the sanitizer strips must not turn an
+// extension the check never saw into .php (sanitize first, then split), and
+// executable shapes nobody listed are inert because the check is an allowlist.
+$hostile = array('x.PHTML', 'shell.phar', 'hook.cgi', '.htaccess', 'run.php.', 'run.php!', 'run.php;', 'run.php~',
+    "run.ph\x00p", "run.p\x00hp", "run.ph\u{200B}p", '.php;', 'x.php1', 'x.inc', 'x.phpt', 'x.exe');
+foreach ($hostile as $exe) {
+    $m = $mint->invoke(null, $exe);
+    check(substr($m, -4) === '.bin', 'an executable name (' . json_encode($exe) . ') lands as .bin', 'got: ' . $m);
+}
+$m = $mint->invoke(null, 'quote.txt');
+check(substr($m, -4) === '.txt', 'an inert extension beyond the upload allowlist is kept', 'got: ' . $m);
+$m = $mint->invoke(null, 'a.php.jpg');
+check(substr_count($m, '.') === 1 && substr($m, -4) === '.jpg', 'an inner dot becomes an underscore: one extension only', 'got: ' . $m);
+$m = $mint->invoke(null, 'Report Q3.pdf');
+check(preg_match('/^Report_Q3_[a-z0-9]{8}\.pdf$/', $m) === 1, 'an ordinary name keeps its extension', 'got: ' . $m);
 check(strpos($minted, '/') === false, 'the minter strips path separators', 'got: ' . $minted);
 check(preg_match('/^[A-Za-z0-9._\-]+$/', $minted) === 1, 'the minted name is limited to safe characters', 'got: ' . $minted);
 check(strpos($mint->invoke(null, "evil\x00.png"), "\x00") === false, 'the minter strips NUL');

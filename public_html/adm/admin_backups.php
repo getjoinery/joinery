@@ -2,6 +2,9 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.26 - a build that had to step up through /verify-stepup (authenticator codes, no passkey) resumes on return
+ *                 instead of being forgotten; remembered in sessionStorage (which no other site can set) for 3 minutes,
+ *                 only on the #download return, and never sent round the step-up twice
  * @version 1.25 - Download a backup: a whole-site backup sealed to the recovery key, built here in the background
  *                and downloaded as one file, on every site with a proven recovery key, managed or not
  * @version 1.24 - A recovery key never proven says so, not 'was last proven never' (B21)
@@ -495,23 +498,45 @@ document.addEventListener('DOMContentLoaded', function () {
 		JoineryModal.alert((e && e.message) || 'That did not work.');
 	}
 	var start = document.getElementById('btn_download_start');
+	// A build confirmed here that had to step up on /verify-stepup (codes, no
+	// passkey) is remembered for the trip and resumed on return. sessionStorage
+	// is this site's own: a link from elsewhere cannot set it, as a URL could.
+	var RESUME = 'joinery_backup_download_resume';
+	function remembered() {
+		// Only the trip just made, landing where the step-up returns (#download):
+		// a step-up abandoned and a visit later starts nothing unconfirmed.
+		try {
+			var v = parseInt(sessionStorage.getItem(RESUME) || '0', 10);
+			sessionStorage.removeItem(RESUME);
+			return v > 0 && Date.now() - v < 180000 && location.hash === '#download';
+		} catch (x) { return false; }
+	}
+	// resumed: the build the person confirmed before stepping up. If it still
+	// asks for a step-up, it says so instead of sending them round again.
+	function build(resumed) {
+		start.disabled = true;
+		var call = function () { return joineryApi.post('backup_download_start', {}); };
+		var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call, '/admin/admin_backups#download') : call();
+		run.then(function () { window.location.reload(); })
+			.catch(function (e) {
+				start.disabled = false;
+				if (e && e.data && e.data.requires_stepup && !resumed) {
+					try { sessionStorage.setItem(RESUME, String(Date.now())); } catch (x) {}
+					window.location = '/verify-stepup?return=' + encodeURIComponent('/admin/admin_backups#download');
+					return;
+				}
+				fail(e);
+			});
+	}
 	if (start) {
 		start.addEventListener('click', function () {
-			JoineryModal.confirm(start.getAttribute('data-confirm'), function () {
-				start.disabled = true;
-				var call = function () { return joineryApi.post('backup_download_start', {}); };
-				var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call, '/admin/admin_backups#download') : call();
-				run.then(function () { window.location.reload(); })
-					.catch(function (e) {
-						start.disabled = false;
-						if (e && e.data && e.data.requires_stepup) {
-							window.location = '/verify-stepup?return=' + encodeURIComponent('/admin/admin_backups#download');
-							return;
-						}
-						fail(e);
-					});
-			}, { confirmLabel: 'Build the backup', confirmStyle: 'primary' });
+			JoineryModal.confirm(start.getAttribute('data-confirm'), function () { build(false); }, { confirmLabel: 'Build the backup', confirmStyle: 'primary' });
 		});
+		if (remembered()) {
+			build(true);
+		}
+	} else {
+		remembered();
 	}
 	var del = document.getElementById('btn_download_delete');
 	if (del) {

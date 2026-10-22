@@ -64,7 +64,22 @@ function mailbox_purge_domains(string $domain_like, ?string $user_email_like = n
 				WHERE iem_ied_inbound_email_domain_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
 			if ($mids) {
 				$min = implode(',', array_map('intval', $mids));
+				// Each attachment's File goes through the model, which drops its
+				// blob reference and, at the last one, the bytes on disk. A row
+				// deleted alone left the file behind in uploads/ on every run.
+				$fids = $db->query("SELECT ima_fil_file_id FROM ima_inbound_message_attachments
+					WHERE ima_iem_inbound_email_message_id IN ($min) AND ima_fil_file_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
 				$db->exec("DELETE FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id IN ($min)");
+				foreach ($fids as $fid) {
+					try {
+						$file = new File((int)$fid, TRUE);
+						if ($file->key) {
+							$file->permanent_delete();
+						}
+					} catch (\Throwable $e) {
+						// another fixture's file, already gone, or still referenced
+					}
+				}
 			}
 
 			$aids = $db->query("SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases

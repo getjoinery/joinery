@@ -266,35 +266,47 @@ function admin_item_edit_logic(array $input): LogicResult {
 `$_SERVER['REQUEST_METHOD'] === 'POST'`. The meaning of "submitted" lives in one
 place; never re-derive it from `if($input)` / `if(!empty($input))`.
 
-#### GET-is-read-only invariant (enforced at the write boundary)
+#### GET-is-read-only invariant (enforced at the database layer)
 
-A GET request must never persist data. `SystemBase`'s write methods —
-`save()`, `soft_delete()`, `permanent_delete()` — assert this at the single
-chokepoint every mutation passes through: a GET-request write is logged
-(`[GET_MUTATION]`), and once the rollout flips the dev gate on it also throws in
-dev (the `debug` setting). This catches the whole bug class — including plugin,
-dynamic, and non-`if($input)` code a text lint can't see.
+A page view never persists what a person asked for. A link is a GET, and a
+browser follows one whenever it is told to, from any site, carrying the session
+cookie (`SameSite=Lax` lets a top-level GET through). So everything a person
+does is a POST button — an `altlinks` entry describing a `post`, or
+`AdminPage::action_button()` — and a handler acts only when
+`LibraryFunctions::isFormSubmission()` says so. Opening a page with
+`?action=delete` on it changes nothing.
 
-**Intentional GET-action links** legitimately mutate on GET — a `?action=delete`
-admin link or a payment-gateway return URL. Opt each one in, and **always reset
-the flag in a `finally`**:
+The rule is checked below every model and every raw query, in `GuardedPdo`
+(`includes/GuardedPdo.php`): on a web GET, HEAD or OPTIONS, a statement that
+writes is caught wherever it comes from — a model's `save()`, a raw `INSERT`, a
+plugin, a helper. `GuardedPdo::PAGE_VIEW_WRITES` says what it meets: `'log'`
+writes one `[GET_WRITE]` line per place per request to the error log, naming the
+request, the statement's verb and table (never its values) and the file:line
+that wrote; `'refuse'` throws, naming the same.
+
+**The server's own writes during a page view** go through
+`SystemBase::server_initiated_write()`, the one way past the check:
 
 ```php
-SystemBase::$allow_get_mutation = true;
-try { $item->soft_delete(); }
-finally { SystemBase::$allow_get_mutation = false; }
-return LogicResult::redirect('/admin/admin_items');
+SystemBase::server_initiated_write(function () use ($row) { $row->save(); });
 ```
 
-**Maintenance and reconciliation never belong in page logic.** Work that mutates
-state as a side effect of *displaying* a page — subscription reconciliation,
-audit-log writes, external-API sweeps — must run on the cron runner as a
-[scheduled task](scheduled_tasks.md), never via `include()` into a logic file.
-A page render is read-only; opting it into `$allow_get_mutation` to silence the
-tripwire is a marker of misplaced work, not a fix.
+They are writes no person asked for: an observation (a visitor event, a request
+log row, an error), a reconciliation (a local row brought into line with a
+remote fact just fetched), a third-party redirect landing back here (an OAuth or
+payment return, where persisting the result is the request), a mailed one-time
+link (its secret, not the session, is the authority, so no other site can make
+it), or lazy processing a scheduled task would otherwise do. Every caller is
+listed in `tests/unit/core_api_mechanical_test.php`, which fails on a new one. A
+refused save is almost never one of these: the fix is to make the thing doing
+the saving a POST.
 
-CLI / cron / scheduled-task contexts (no `REQUEST_METHOD`) are exempt
-automatically. See also [Admin Pages](admin_pages.md) and [Routing](routing.md#the-__route-parameter).
+**Maintenance never belongs in page logic.** Work that changes state as a side
+effect of *displaying* a page — external-API sweeps, bulk reconciliation — runs
+on the cron runner as a [scheduled task](scheduled_tasks.md), never via
+`include()` into a logic file.
+
+The CLI (cron, scheduled tasks, scripts) is exempt automatically. See also [Admin Pages](admin_pages.md) and [Routing](routing.md#the-__route-parameter).
 
 ### Error Handling Pattern
 

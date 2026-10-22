@@ -264,9 +264,10 @@
 		}
 	}
 
-	// Handle delete request - process before rendering page
-	if(isset($_REQUEST['delete']) && is_numeric($_REQUEST['delete'])){
-		$delete_id = intval($_REQUEST['delete']);
+	// Handle delete request - process before rendering page. A button (POST):
+	// a link is a GET any other site can make the browser follow.
+	if(($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['delete']) && is_numeric($_POST['delete'])){
+		$delete_id = intval($_POST['delete']);
 		$upgrade_to_delete = new Upgrade($delete_id, TRUE);
 
 		if($upgrade_to_delete->key){
@@ -1677,10 +1678,13 @@
 				}
 			}
 
-			// Add delete link
-			$delete_url = '/admin/server_manager/publish?delete=' . $upgrade->key;
+			// Add delete button
 			$version_label = $upgrade->get('upg_major_version') . '.' . $upgrade->get('upg_minor_version') . '.' . $upgrade->get('upg_patch_version');
-			$version_string .= ' <a href="#" onclick="JoineryModal.confirm(\'Delete version ' . $version_label . '? This will delete both the archive file and database record.\', function(){ window.location=\'' . htmlspecialchars($delete_url, ENT_QUOTES) . '\'; })" class="svm-delete-link"><i class="fas fa-trash-alt"></i> Delete</a>';
+			$version_string .= ' ' . AdminPage::action_button('Delete', '/admin/server_manager/publish', array(
+				'hidden'  => array('delete' => $upgrade->key),
+				'confirm' => 'Delete version ' . $version_label . '? This will delete both the archive file and database record.',
+				'class'   => 'btn btn-link btn-sm svm-delete-link',
+			));
 
 			echo $version_string.'<br />';
 		}

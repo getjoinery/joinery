@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.14 - a visitor event and its A/B counters, and logout's cleanup (this device's remember-me token, its push
+ *                 destination), are the server's own writes (server_initiated_write), so a page view may make them
  * @version 1.13 - the session's network check covers IPv6 (a /32) beside IPv4 (a /16), keeping one
  *                 address per family (the first use of the other family is let through), and the address it reads is the auth-grade one, so a
  *                 forged forwarding header cannot pass it; the Cloudflare edge check uses
@@ -603,6 +605,9 @@ class SessionControl{
 			$referer = $_SESSION['HTTP_REFERER'];
 		}
 
+		// Observation: what was viewed, recorded on whatever request it was,
+		// views included. So are the A/B counters below.
+		SystemBase::server_initiated_write(function () use ($dbhelper, $dblink, $sql, $type, $referer, $source, $campaign, $medium, $content, $is_404, $ref_type, $ref_id, $meta) {
 		try{
 			$q = $dblink->prepare($sql);
 			$q->bindValue(':vse_visitor_id', $_SESSION['uniqid'], PDO::PARAM_STR);
@@ -631,6 +636,7 @@ class SessionControl{
 		if (class_exists('AbTest', false)) {
 			AbTest::flush_request_accounting($type);
 		}
+		});
 	}
 
 	public function get_user_from_cookie() {
@@ -817,6 +823,12 @@ class SessionControl{
 		return(self::$instance);
 	}
 
+	/**
+	 * Ends the session. The sign-out link is a GET, and logout() also runs when
+	 * the server ends a session itself (a revoked app key, a disabled account),
+	 * so the cleanup writes below are the server's own: a session that has ended
+	 * forgets this device and stops its pushes, whoever ended it.
+	 */
 	function logout() {
 		if($this->get_user_id()) {
 			Login::record_logout($this->get_user_id());
@@ -834,7 +846,9 @@ class SessionControl{
 					if (is_string($tokens)) $tokens = json_decode($tokens, true);
 					if (is_array($tokens)) {
 						$tokens = array_values(array_filter($tokens, fn($t) => ($t['hash'] ?? '') !== $token_hash));
-						User::updateColumns((int)$user->key, array('usr_remember_tokens' => json_encode($tokens)));
+						SystemBase::server_initiated_write(function () use ($user, $tokens) {
+							User::updateColumns((int)$user->key, array('usr_remember_tokens' => json_encode($tokens)));
+						});
 					}
 				} catch (Exception $e) {
 					// Non-fatal — session is being destroyed anyway
@@ -858,7 +872,9 @@ class SessionControl{
 		// at it must not get this member's alerts.
 		if ($this->get_user_id() && PushSender::device_token() !== null) {
 			try {
-				PushSender::retire_device((int)$this->get_user_id(), PushSender::device_token());
+				SystemBase::server_initiated_write(function () {
+					PushSender::retire_device((int)$this->get_user_id(), PushSender::device_token());
+				});
 			} catch (\Throwable $e) {
 				error_log('logout: push destination retire failed: ' . $e->getMessage());
 			}

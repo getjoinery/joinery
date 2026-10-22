@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.19.0 - the head blob and the encrypted metadata blob are insert_only: a save through a copy
+ * @version 1.20.0 - a stored name has one extension, and only an allowed one (allowed_upload_extensions or INERT_EXTENSIONS),
+ *                   checked after sanitizing; any other ends .bin (run.php -> run_php_<rand>.bin): an inbound attachment never meets the upload allowlist
+ * @changelog 1.19.0 - the head blob and the encrypted metadata blob are insert_only: a save through a copy
  *                   loaded before a new version leaves the version in place (FileVersion moves them)
  * @changelog 1.18.0 - bytes_present(): whether this file's bytes are anywhere to serve; a thumbnail of a
  *                   file without them is its type icon, never a broken image
@@ -602,12 +604,53 @@ public static function get_by_name($name, $search_deleted = false) {
 		return $file;
 	}
 
+	/**
+	 * Extensions a stored name may keep beyond the site's allowed upload
+	 * extensions: data no server executes. Every other extension (php, php1,
+	 * phtml, inc, cgi, exe and whatever comes next) is kept as a word and the
+	 * name ends in .bin, since bytes from an inbound attachment never meet the
+	 * upload allowlist. An allowlist, so a new executable shape is inert by
+	 * default rather than by someone remembering to list it.
+	 */
+	const INERT_EXTENSIONS = array('txt', 'csv', 'tsv', 'md', 'json', 'xml', 'ics', 'vcf', 'eml', 'msg', 'rtf', 'odt', 'ods',
+		'odp', 'ppt', 'pptx', 'pages', 'numbers', 'key', 'epub', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar',
+		'heic', 'heif', 'tif', 'tiff', 'bmp', 'ico', 'svg', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'wav', 'ogg', 'flac',
+		'aac', 'opus', 'jpe', 'bin');
+
+	/** Whether a stored name may end in this (already sanitized, lowercase) extension. */
+	public static function stored_extension_allowed(string $ext): bool {
+		if ($ext === '' || !preg_match('/^[a-z0-9]{1,10}$/', $ext)) {
+			return false;
+		}
+		if (in_array($ext, self::INERT_EXTENSIONS, true)) {
+			return true;
+		}
+		$allowed = array_map('trim', explode(',', strtolower((string)Globalvars::get_instance()->get_setting('allowed_upload_extensions'))));
+		return in_array($ext, $allowed, true);
+	}
+
 	private static function _mint_unique_name($display_name) {
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-		$base = ($display_name !== null && $display_name !== '') ? $display_name : 'attachment';
-		if (strpos($base, '.') === false) {
-			$base .= '.bin';
+		$base = ($display_name !== null && $display_name !== '') ? (string)$display_name : 'attachment';
+		// Sanitize FIRST, then split: a character stripped after the check
+		// (run.php!, run.ph\0p, a zero-width space) would otherwise turn an
+		// extension the check never saw into .php.
+		$base = str_replace(' ', '_', $base);
+		$base = preg_replace('/[^A-Za-z0-9\.\-\_]/', '', $base);
+		$base = preg_replace('/_+/', '_', $base);
+		$dotpos = strrpos($base, '.');
+		$stem = $dotpos === false ? $base : substr($base, 0, $dotpos);
+		$ext = $dotpos === false ? '' : strtolower(substr($base, $dotpos + 1));
+		// One extension only: an inner dot becomes an underscore, so a name
+		// like a.php.jpg cannot meet a handler that matches any of a file's
+		// extensions.
+		$stem = str_replace('.', '_', $stem);
+		if (!self::stored_extension_allowed($ext)) {
+			$stem .= ($ext === '' ? '' : '_' . $ext);
+			$ext = 'bin';
 		}
+		$stem = trim(preg_replace('/_+/', '_', $stem));
+		$base = ($stem === '' || $stem === '_' ? 'file' : $stem) . '.' . $ext;
 		for ($i = 0; $i < 12; $i++) {
 			$rand = '_' . LibraryFunctions::random_string(8) . '.';
 			$dotpos = strrpos($base, '.');

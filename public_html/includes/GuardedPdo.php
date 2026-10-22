@@ -19,6 +19,9 @@ require_once(__DIR__ . '/SealedEgressGuard.php');
  * Cost when the process is cold, which is nearly always: one static boolean
  * check per executed statement.
  *
+ * @version 1.3 - a page view does not write: on a web GET, HEAD or OPTIONS a statement that writes, and
+ *                is not the server's own (SystemBase::server_initiated_write), is logged as [GET_WRITE]
+ *                with the place that wrote it (PAGE_VIEW_WRITES 'log'; 'refuse' throws, as a probe does)
  * @version 1.2 - $read_only: while a page_probe request runs (PageProbe::claim_request), a statement
  *                that writes throws unless it is the server's own (SystemBase::server_initiated_write),
  *                so the probe session is view-only in fact, not by a log line (review B3).
@@ -38,12 +41,76 @@ class GuardedPdo extends PDO {
 	 */
 	public static $read_only = false;
 
-	/** Throw when this process is read-only and the statement would write. */
+	/**
+	 * What a page view's write meets. A page view (a web GET, HEAD or OPTIONS)
+	 * persists nothing a user asked for: a link is a GET, and a browser follows
+	 * one whenever it is told to, from any site, with the session cookie
+	 * (SameSite=Lax). Anything a person does is a POST button (CLAUDE.md rule 7).
+	 * The server's own writes during a view go through
+	 * SystemBase::server_initiated_write. 'log' names each other write in the
+	 * error log as [GET_WRITE]; 'refuse' throws, once the log has none.
+	 */
+	const PAGE_VIEW_WRITES = 'log';
+
+	/** The SAPI, a property so a test can stand in a web request. */
+	public static $sapi = PHP_SAPI;
+
+	/** Places already logged this request: one line each, not one per statement. */
+	private static $logged = array();
+
+	/** A web request whose method only reads. The CLI (cron, tasks, scripts) never is. */
+	public static function isPageView(): bool {
+		if (self::$sapi === 'cli') {
+			return false;
+		}
+		$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? ''));
+		return $method === 'GET' || $method === 'HEAD' || $method === 'OPTIONS';
+	}
+
+	/**
+	 * Whether a statement writes. A read, nearly every statement, is let go on
+	 * its first word. Leading comments and parentheses are looked past; a WITH
+	 * writes when any of its parts does (WITH x AS (DELETE ... RETURNING ...)
+	 * SELECT ...), and so does EXPLAIN ANALYZE of a write, which runs it.
+	 * String literals are taken out first, so a word inside one never counts.
+	 */
+	public static function writes(string $sql): bool {
+		$t = ltrim($sql);
+		if (strncasecmp($t, 'SELECT', 6) === 0) {
+			return false;
+		}
+		while (preg_match('#^(?:--[^\n]*(?:\n|$)|/\*.*?\*/|\(|\s+)#s', $t, $m) && $m[0] !== '') {
+			$t = substr($t, strlen($m[0]));
+		}
+		$dml = '/\b(INSERT|UPDATE|DELETE|MERGE)\b/i';
+		if (preg_match('/^WITH\b/i', $t)) {
+			return (bool)preg_match($dml, self::withoutLiterals($t));
+		}
+		if (preg_match('/^EXPLAIN\b/i', $t)) {
+			$body = self::withoutLiterals($t);
+			return (bool)preg_match('/\bANALY[SZ]E\b/i', $body) && (bool)preg_match($dml, $body);
+		}
+		return (bool)preg_match('/^(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE|COPY)\b/i', $t);
+	}
+
+	/** A statement with its quoted literals emptied ('it''s' -> ''). */
+	private static function withoutLiterals(string $sql): string {
+		return (string)preg_replace("/'(?:[^']|'')*'/", "''", $sql);
+	}
+
+	/** Throw when this process is read-only and the statement would write; on a page view, log or refuse it. */
 	public static function assertMayRun(string $sql): void {
-		if (!self::$read_only || SystemBase::$allow_get_mutation) {
+		if (!self::$read_only && !self::isPageView()) {
 			return;
 		}
-		if (preg_match('/^\s*(?:WITH\b.*?\)\s*)?(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE|COPY)\b/is', $sql)) {
+		if (!self::writes($sql)) {
+			return;
+		}
+		// Not loaded yet means nothing has said this write is the server's own.
+		if (class_exists('SystemBase', false) && SystemBase::$allow_get_mutation) {
+			return;
+		}
+		if (self::$read_only) {
 			// Named in the probe's report at the caller's file:line before the
 			// throw, so a refused write is visible even when something catches it.
 			if (class_exists('PageProbe', false)) {
@@ -51,6 +118,59 @@ class GuardedPdo extends PDO {
 			}
 			throw new RuntimeException('page_probe: this request is view-only, and a statement tried to write');
 		}
+		$trail = self::writer(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 16));
+		$what = self::statementName($sql);
+		if (self::PAGE_VIEW_WRITES === 'refuse') {
+			throw new RuntimeException('A page view may not write to the database (' . $what . ' at ' . ($trail[0] ?? '?')
+				. '). Make the action a POST button; a write the server makes on its own goes through SystemBase::server_initiated_write.');
+		}
+		$where = $trail[0] ?? '?';
+		if (isset(self::$logged[$where])) {
+			return;
+		}
+		self::$logged[$where] = true;
+		error_log('[GET_WRITE] ' . strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) . ' '
+			. self::pathShown((string)($_SERVER['REQUEST_URI'] ?? '?')) . ' wrote (' . $what . ') at ' . implode(' < ', $trail)
+			. ' - a page view must not write: make the action a POST button, or wrap a write the server makes on its own in SystemBase::server_initiated_write');
+	}
+
+	/**
+	 * The request's path for the log: no query string, and a segment that looks
+	 * like a token (24 or more characters, digits among them: a share link's
+	 * /s/{token}) shown as '…', since a path can
+	 * carry a secret as well as a query can.
+	 */
+	public static function pathShown(string $uri): string {
+		$path = (string)strtok($uri, '?');
+		return (string)preg_replace('#/(?=[A-Za-z_\-]*[0-9])[A-Za-z0-9_\-]{24,}(?=/|$)#', '/…', $path);
+	}
+
+	/** The verb and table of a statement, never its values: 'INSERT INTO rql_request_logs'. */
+	public static function statementName(string $sql): string {
+		if (preg_match('/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(?:\s+TABLE)?|ALTER\s+TABLE|CREATE\s+\w+|DROP\s+\w+|GRANT|REVOKE|COPY)\s+("?[\w.]+"?)/i', $sql, $m)) {
+			return strtoupper(preg_replace('/\s+/', ' ', $m[1])) . ' ' . $m[2];
+		}
+		return 'a write';
+	}
+
+	/**
+	 * Where a write came from, nearest first, as path:line under the site root:
+	 * the frames past this layer and the model plumbing every save crosses.
+	 */
+	public static function writer(array $frames): array {
+		$plumbing = array('GuardedPdo.php', 'SystemBase.php', 'DbConnector.php');
+		$root = dirname(__DIR__) . '/';
+		$trail = array();
+		foreach ($frames as $frame) {
+			if (empty($frame['file']) || in_array(basename($frame['file']), $plumbing, true)) {
+				continue;
+			}
+			$trail[] = str_replace($root, '', $frame['file']) . ':' . ($frame['line'] ?? 0);
+			if (count($trail) === 4) {
+				break;
+			}
+		}
+		return $trail;
 	}
 
 	public function __construct($dsn, $username = null, $password = null, $options = null) {

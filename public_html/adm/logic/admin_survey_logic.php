@@ -46,9 +46,9 @@ function admin_survey_logic(array $input): LogicResult {
         }
     }
 
-    // Handle GET actions.
-    // Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-    if (isset($input['action'])) {
+    // Delete and undelete are buttons (POST): a link is a GET any site can make
+    // the browser follow.
+    if (LibraryFunctions::isFormSubmission() && isset($input['action'])) {
         $svy_survey_id = $input['svy_survey_id'] ?? 0;
         $survey = new Survey($svy_survey_id, TRUE);
 

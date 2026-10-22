@@ -417,7 +417,8 @@ class LibraryFunctions {
 			$stmt = $db->prepare(
 				"UPDATE stg_settings SET stg_value = ?
 				 WHERE stg_name = 'protocol_observed_scheme' AND stg_value IS DISTINCT FROM ?");
-			$stmt->execute(array($observed, $observed));
+			// Observation, on whatever request saw it, page views included.
+			SystemBase::server_initiated_write(function () use ($stmt, $observed) { $stmt->execute(array($observed, $observed)); });
 		} catch (Throwable $e) {
 			error_log('LibraryFunctions: could not record the observed protocol — ' . $e->getMessage());
 		}

@@ -1,4 +1,6 @@
 <?php
+	// @version 1.2 - a subscription cancelled to end at the period end stays listed, 'Cancelled — active until <date>' (B91);
+	//                the price shows the plan's own period and the site's currency, not '$X/month' (B92)
 	// @version 1.1 - Cancel is a POST button with a confirm (it was a link any site could send a buyer to);
 	//                an app-store subscription shows where its buyer cancels it
 
@@ -62,7 +64,10 @@
                         <?php foreach($page_vars['active_subscriptions'] as $subscription): ?>
                         <?php
                         if($subscription->get('odi_subscription_cancelled_time')){
-                            $status = 'Canceled on ' . LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $page_vars['session']->get_timezone());
+                            // The time it ends: still to come for a cancel at period end.
+                            $ends = (string)$subscription->get('odi_subscription_cancelled_time');
+                            $status = (strtotime($ends . ' UTC') > time() ? 'Cancelled — active until ' : 'Canceled on ')
+                                . LibraryFunctions::convert_time($ends, 'UTC', $page_vars['session']->get_timezone());
                             $action = '';
                         } else {
                             $status = $subscription->get('odi_subscription_status') ?: 'Active';
@@ -87,7 +92,7 @@
                         ?>
                         <div class="jy-subs-row">
                             <div>
-                                <p class="jy-subs-amt">$<?php echo htmlspecialchars($subscription->get('odi_price')); ?>/month</p>
+                                <p class="jy-subs-amt"><?php echo htmlspecialchars($subscription->subscription_price_label()); ?></p>
                                 <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($status); ?></p>
                             </div>
                             <?php if($action): ?>

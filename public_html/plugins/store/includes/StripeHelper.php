@@ -896,17 +896,38 @@ class StripeHelper {
 	 * @return void
 	 */
 	public function apply_subscription_to_order_item($order_item, $stripe_subscription){
-		if($stripe_subscription['canceled_at']){
-			$canceled_at = gmdate("c", $stripe_subscription['canceled_at']);
-
-			//IF SUBSCRIPTION ENDED, REMOVE
-			$order_item->set('odi_subscription_cancelled_time', $canceled_at);
+		// odi_subscription_cancelled_time is when the subscription ENDS, as the
+		// change-tier page writes it: a cancel at period end ends at the end of
+		// the paid period (Stripe's cancel_at), not at canceled_at, which is the
+		// moment the cancel was asked for. Read as the end, a buyer still billed
+		// through the period was shown nothing and could not reactivate.
+		// A scheduled end (cancel_at: at the period end, or on a chosen date)
+		// wins over canceled_at, which is only when it was asked for.
+		$at_period_end = !empty($stripe_subscription['cancel_at_period_end']);
+		$order_item->set('odi_subscription_cancel_at_period_end', $at_period_end);
+		$ends = (int)($stripe_subscription['cancel_at'] ?? 0);
+		if (!$ends && $at_period_end) {
+			$ends = (int)($stripe_subscription['current_period_end'] ?? 0);
 		}
-		$order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $stripe_subscription['current_period_end']));
+		if ($ends) {
+			$order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s', $ends));
+		} elseif (!empty($stripe_subscription['canceled_at'])) {
+			$order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s', (int)$stripe_subscription['canceled_at']));
+		} elseif (in_array($stripe_subscription['status'], array('active', 'trialing', 'past_due'), true)) {
+			// Neither ending nor ended: a cancel taken back.
+			$order_item->set('odi_subscription_cancelled_time', null);
+		}
+		// No period end in the answer (an API version without the top-level
+		// field) leaves the stored one, never 1970.
+		if (!empty($stripe_subscription['current_period_end'])) {
+			$order_item->set('odi_subscription_period_end', gmdate('Y-m-d H:i:s', (int)$stripe_subscription['current_period_end']));
+		}
 
 		//if($stripe_subscription['status'] == 'canceled' || $stripe_subscription['status'] == 'incomplete_expired'){
 		$order_item->set('odi_subscription_status', $stripe_subscription['status']);
-		$order_item->save();
+		// Reconciliation: the row brought into line with what Stripe just said,
+		// often while a page that shows the subscription is being viewed.
+		SystemBase::server_initiated_write(function () use ($order_item) { $order_item->save(); });
 	}
 
 	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){

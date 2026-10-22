@@ -16,7 +16,9 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.8
+ * @version 1.9
+ * @changelog 1.9 - log() no longer forces SystemBase::$allow_get_mutation off afterwards: server_initiated_write
+ *   restores the previous value, and the forced reset ended a caller's own wrapped region early
  * @changelog 1.8 - the per-person key types are read from ApiKey::PER_PERSON_TYPES; this file
  *   names no credential kind
  * @changelog 1.7 - address_rate_limit_state(): an address's count leaves out the rows of
@@ -104,8 +106,6 @@ class RequestLogger {
 			// real error with a failure to record it. Say so where saying so is
 			// free, and let the caller carry on.
 			error_log('RequestLogger: could not write ' . $feature . ' log row: ' . $e->getMessage());
-		} finally {
-			SystemBase::$allow_get_mutation = false;
 		}
 	}
 

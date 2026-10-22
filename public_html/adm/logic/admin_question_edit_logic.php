@@ -26,7 +26,11 @@ function admin_question_edit_logic(array $input): LogicResult {
 		$question = new Question(NULL);
 	}
 
-	if(isset($input['action']) && $input['action'] == 'add_question_option'){
+	// Every action here is a form submit (POST). Opening the page is a GET and
+	// changes nothing: the main save below used to run on it with empty fields.
+	$submitted = LibraryFunctions::isFormSubmission();
+
+	if($submitted && isset($input['action']) && $input['action'] == 'add_question_option'){
 		if(!isset($question->key)){
 			return LogicResult::error("You cannot add a question option when there is no question.  Submit your question first.");
 		}
@@ -41,7 +45,7 @@ function admin_question_edit_logic(array $input): LogicResult {
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_question_edit?qst_question_id=".$question->key);
 	}
-	if(isset($input['action']) && $input['action'] == 'remove_question_option'){
+	if($submitted && isset($input['action']) && $input['action'] == 'remove_question_option'){
 		$question_option = new QuestionOption($input['qop_question_option_id'], TRUE);
 		$question_option->assert_can_write($session);
 		$question_option->permanent_delete();
@@ -51,7 +55,7 @@ function admin_question_edit_logic(array $input): LogicResult {
 	}
 
 	// Main form submission - exclude if this is an option action
-	if($input && !isset($input['action'])){
+	if($submitted && !isset($input['action'])){
 
 		// Add-only logic - set defaults for new questions
 		if (!$question->key) {

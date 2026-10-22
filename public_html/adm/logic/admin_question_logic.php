@@ -16,14 +16,16 @@ function admin_question_logic(array $input): LogicResult {
 	$question_id = $input['qst_question_id'] ?? $input['qst_question_id'] ?? null;
 	$question = new Question($question_id, TRUE);
 
-	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
-	if(($input['action'] ?? '') == 'delete'){
+	// Delete and undelete are buttons (POST): a link is a GET any site can make
+	// the browser follow.
+	$action = LibraryFunctions::isFormSubmission() ? ($input['action'] ?? '') : '';
+	if($action == 'delete'){
 		$question->assert_can_write($session);
 		$question->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}
-	else if(($input['action'] ?? '') == 'undelete'){
+	else if($action == 'undelete'){
 		$question->assert_can_write($session);
 		$question->undelete();
 
