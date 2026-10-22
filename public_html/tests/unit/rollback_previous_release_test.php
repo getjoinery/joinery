@@ -111,7 +111,7 @@ $src = file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 $keep_at = strpos($src, 'DeploymentHelper::keepPreviousRelease(');
 $scripts_at = strpos($src, "Deploying maintenance_scripts/");
 $manifest_at = strpos($src, "foreach (array('RELEASE_MANIFEST', 'RELEASE_MANIFEST.sig') as \$mf)");
-$swap_at = strpos($src, 'Move CONTENTS of stage');
+$swap_at = strpos($src, 'DeploymentHelper::swapLiveTree($live_directory');
 ok('the previous release is kept after the code swap and before maintenance_scripts or the manifest are replaced',
 	$swap_at !== false && $keep_at !== false && $scripts_at !== false && $manifest_at !== false
 	&& $swap_at < $keep_at && $keep_at < $scripts_at && $keep_at < $manifest_at);
@@ -128,6 +128,13 @@ $restore_at = strpos($dh, 'self::restorePreviousRelease(', $rollback_fn);
 $perms_at = strpos($dh, 'self::fixPermissions($target_site)', $rollback_fn);
 ok('performRollback leaves the kept copy out of public_html and restores it before the permission pass',
 	$rsync_at !== false && $restore_at !== false && $perms_at !== false && $rsync_at < $restore_at && $restore_at < $perms_at);
+// A backup holding only the upgrade's holding script (a run killed mid-swap
+// and run again) is refused before anything is touched: restored with
+// --delete it would leave the site with no code.
+$guard_at = strpos($dh, 'if (!self::backupIsRelease($backup_dir))', $rollback_fn);
+$preserve_at = strpos($dh, 'Step 1 — best-effort preserve', $rollback_fn);
+ok('performRollback refuses a backup that holds no release before it touches public_html',
+	$guard_at !== false && $preserve_at !== false && $guard_at < $preserve_at && $guard_at < $rsync_at);
 
 // ---------------------------------------------------------------------------
 section('What composer installs is moded like the tree');
