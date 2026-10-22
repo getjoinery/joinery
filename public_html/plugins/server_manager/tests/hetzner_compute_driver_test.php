@@ -24,6 +24,7 @@
  *  - the account: added under the name typed, checked without losing it, its
  *    key replaced only by a token that reaches the same servers.
  *
+ * @version 1.4 - servers carry their location at the top, datacenter null, as the API answers now (B43)
  * @version 1.3 - root's password by runcmd from its hash, the plaintext nowhere in the user data (B32)
  * @version 1.2 - plans by location: one withdrawn from a location is not sold there, though its price list names it (B31)
  * @version 1.1 - the swap refuses a running server and waits on each address action
@@ -48,7 +49,9 @@ $api = array('seen' => array(), 'unauthorized' => false, 'status' => array(), 'a
 $server = function ($id, $status, $ip, $loc = 'fsn1', $out = 0) {
 	return array('id' => $id, 'name' => 'srv-' . $id, 'status' => $status, 'created' => '2026-10-01T10:00:00+00:00',
 		'public_net' => array('ipv4' => array('id' => $id * 10, 'ip' => $ip), 'ipv6' => array('ip' => '2a01:4f8:c17:' . $id . '::/64'),
-			'firewalls' => array(array('id' => 77))), 'datacenter' => array('location' => array('name' => $loc)),
+			'firewalls' => array(array('id' => 77))),
+		// As Hetzner answers since its datacenter field went: the location at the top, datacenter null.
+		'location' => array('name' => $loc), 'datacenter' => null,
 		'outgoing_traffic' => $out, 'included_traffic' => 20e12, 'labels' => array('joinery' => ''));
 };
 $handler = function (RequestInterface $req, array $opts) use (&$api, $server) {

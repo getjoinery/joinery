@@ -17,6 +17,7 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.4 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.3 - the key request carries a signed link to the manifest (specs/storage_targets.md F7); the sources'
  *               backups are on a test target of their own (lib/node_space_fixture.php): since a node backs up only
  *               through a storage space, the suite had been skipping
@@ -29,6 +30,11 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
+
+// The task that advances the live copies on this database takes the same lock
+// for each tick; held for the run, the tick skips while these copies are driven,
+// instead of an action here refusing ('being moved along right now').
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . SiteCopyRunner::LOCK_KEY . ')');
 
 $tag = bin2hex(random_bytes(3));
 $source_key = base64_encode(random_bytes(32));
@@ -508,4 +514,5 @@ IpSwapMove::$driver_for = null;
 ProxiedOriginMove::$asker = null;
 ProxiedOriginMove::$sleeper = null;
 JobCommandBuilder::set_shelf_listing_for_tests(null);
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();

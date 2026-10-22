@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.9 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.8 - a copy onto a new server takes a plan its region sells: an own plan withdrawn there is not carried,
  *               and one it does not sell is refused before anything is made (B31)
  * @version 1.7 - a kept switch-over names the old server Keep named, after its row is removed too (B22)
@@ -30,6 +31,11 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
+
+// The task that advances the live copies on this database takes the same lock
+// for each tick; held for the run, the tick skips while these copies are driven,
+// instead of an action here refusing ('being moved along right now').
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . SiteCopyRunner::LOCK_KEY . ')');
 
 $tag = bin2hex(random_bytes(3));
 $source_key = base64_encode(random_bytes(32));
@@ -732,4 +738,5 @@ check((string)$quiet->get('mgn_joinery_version') === '0.8.400', 'a site that doe
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;
 JobCommandBuilder::set_shelf_listing_for_tests(null);
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();

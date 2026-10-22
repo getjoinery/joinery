@@ -30,6 +30,7 @@
  *  - a manual switch's way back: the records the owner points back, named
  *    before going back and, after, while DNS still names the copy.
  *
+ * @version 1.5 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.4 - reverse DNS at settle names the copy's IPv6 too, each address checked against its own record (C5's B33)
  * @version 1.3 - a manual switch's way back names the records to point back (C4's B28)
  * @version 1.2 - a way back before the copy took the node asks it no untrust (B13)
@@ -43,6 +44,11 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
 require_once(__DIR__ . '/../../../tests/lib/dns_fixtures.php');
 harness_boot();
+
+// The task that advances the live copies on this database takes the same lock
+// for each tick; held for the run, the tick skips while these copies are driven,
+// instead of an action here refusing ('being moved along right now').
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . SiteCopyRunner::LOCK_KEY . ')');
 
 /** A DNS host: one zone, records in memory, every write logged. */
 class ScdFakeDns extends DnsDriverBase {
@@ -776,4 +782,5 @@ DnsResolver::setBackend(new FakeDnsBackend($zone));
 check(SiteCopyRunner::went_back_notes($went) === array(), 'a lookup that fails names nothing either way');
 DnsResolver::clearBackend();
 
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();

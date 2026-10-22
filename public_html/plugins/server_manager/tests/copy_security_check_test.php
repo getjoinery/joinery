@@ -16,6 +16,7 @@
  *  - a copy weaker than its source fails the run (weaker()), and a row that
  *    does not apply to the copy's kind of machine is not compared.
  *
+ * @version 1.1 - quiet on a server of its own is read from PHP-FPM's answer (B44)
  * @version 1.0
  */
 
@@ -148,6 +149,16 @@ $hnode->save();
 $weaker = CopySecurityCheck::weaker($baseline, CopySecurityCheck::rows($site));
 check(array_keys($weaker) === array('outbound_limits'), 'a copy weaker than its source is named, row by row', json_encode(array_keys($weaker)));
 check(!isset(CopySecurityCheck::weaker($baseline, $orows)['site_engine']), 'a row that does not apply to the copy\'s machine is not compared');
+// Quiet on a server of its own: Apache answers the quiet state's 503 as well,
+// so only PHP-FPM tells a quiet site from a live one (B44).
+$own->set('mgn_last_host_report', $host_report(array('site_engine' => 'none', 'answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'yes'))));
+$own->save();
+check(CopySecurityCheck::rows($own, true)['quiet']['pass'] === true && CopySecurityCheck::rows($own)['quiet']['pass'] === false,
+	'a dormant copy on its own server reads quiet, though Apache answers', CopySecurityCheck::rows($own, true)['quiet']['evidence']);
+$own->set('mgn_last_host_report', $host_report(array('site_engine' => 'none', 'answers' => array('apache2' => 'yes', 'php-fpm' => 'yes', 'postgresql' => 'yes'))));
+$own->save();
+check(CopySecurityCheck::rows($own)['quiet']['pass'] === true && CopySecurityCheck::rows($own, true)['quiet']['pass'] === false,
+	'and a live one reads live');
 $lines = CopySecurityCheck::lines($orows);
 check(strpos($lines[0], 'PASS') === 0 && (bool)array_filter($lines, function ($l) { return strpos($l, 'N/A') === 0; }),
 	'each row is one line: PASS, FAIL, UNKNOWN or N/A, with its evidence');

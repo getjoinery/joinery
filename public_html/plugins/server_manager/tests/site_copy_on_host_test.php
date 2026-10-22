@@ -17,6 +17,7 @@
  * before the node is taken unfreezes the site; discarding removes the copy
  * from its host.
  *
+ * @version 1.2 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.1 - the way back after take-over (specs/site_copy_anything_to_anything.md D7); a copy onto a host of a running
  *               site is alive, its runs from backups (D5)
  * @version 1.0
@@ -25,6 +26,11 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
+
+// The task that advances the live copies on this database takes the same lock
+// for each tick; held for the run, the tick skips while these copies are driven,
+// instead of an action here refusing ('being moved along right now').
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . SiteCopyRunner::LOCK_KEY . ')');
 
 $tag = bin2hex(random_bytes(3));
 $source_key = base64_encode(random_bytes(32));
@@ -432,4 +438,5 @@ check($copy2->status() === SiteCopy::STATUS_DISCARDED && (int)$removal->get('mjb
 	&& ($rcmd['primitive'] ?? '') === 'discard_copy' && ($rcmd['params'] ?? null) == array('name' => 'sch2site'),
 	'discarding it asks its host to remove the dormant copy', json_encode($rcmd));
 
+DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();
