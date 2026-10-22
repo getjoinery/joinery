@@ -15,8 +15,11 @@
  * (including the expressible-subset boundary), the format parser (unfolding,
  * params, text unescaping, all-day, EXDATE), and a round-trip that pins the
  * reader to IcsHelper's writer so the two stay on the same format contract.
+ * nativeToRrule() is translateRecurrence() backwards: every native rule reads
+ * back as itself. A UTC UNTIL counts in the series' zone, so a series ends on the
+ * day its last occurrence falls on there.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -60,13 +63,57 @@ ok('monthly BYMONTHDAY not matching start day → null',
 ok('unknown FREQ (SECONDLY) → null',
       IcsImporter::translateRecurrence(['FREQ'=>'SECONDLY'], '2026-06-01 09:00:00') === null);
 
-// End conditions
+// End conditions. UNTIL is the last instant an occurrence may start: a 09:00
+// series with UNTIL at midnight of the 31st has its last occurrence on the 30th.
 $r = IcsImporter::translateRecurrence(['FREQ'=>'DAILY','UNTIL'=>'20261231T000000Z'], '2026-06-01 09:00:00');
-ok('UNTIL → end_date 2026-12-31', $r && $r['end_date']==='2026-12-31');
+ok('UNTIL at midnight of the 31st, series at 09:00 → end_date 2026-12-30', $r && $r['end_date']==='2026-12-30');
+$r = IcsImporter::translateRecurrence(['FREQ'=>'DAILY','UNTIL'=>'20261231'], '2026-06-01 09:00:00');
+ok('UNTIL as a date → that date', $r && $r['end_date']==='2026-12-31');
+$r = IcsImporter::translateRecurrence(['FREQ'=>'DAILY','UNTIL'=>'20261231T045959Z'], '2026-06-01 09:00:00', 'America/New_York');
+ok('UNTIL at 04:59Z on the 31st is 23:59 on the 30th in New York → end_date 2026-12-30 (read as a UTC date it was the 31st)',
+      $r && $r['end_date']==='2026-12-30');
+$r = IcsImporter::translateRecurrence(['FREQ'=>'DAILY','UNTIL'=>'20261230T235959Z'], '2026-06-01 08:00:00', 'Asia/Tokyo');
+ok('UNTIL at 23:59Z on the 30th is 08:59 on the 31st in Tokyo, after an 08:00 start → end_date 2026-12-31',
+      $r && $r['end_date']==='2026-12-31');
 
 $r = IcsImporter::translateRecurrence(['FREQ'=>'WEEKLY','BYDAY'=>'MO,WE','COUNT'=>'4'], '2026-07-06 09:00:00');
 // Mon Jul 6, Wed Jul 8, Mon Jul 13, Wed Jul 15 → 4th = Jul 15 (matches nth_occurrence_date engine)
 ok('COUNT 4 weekly Mon/Wed → end_date 2026-07-15', $r && $r['end_date']==='2026-07-15');
+
+// =============================================================================
+// nativeToRrule() — translateRecurrence() backwards
+// =============================================================================
+section('nativeToRrule');
+
+$native_cases = [
+	['daily, every 3 days',               ['type'=>'daily',   'interval'=>3, 'days_of_week'=>null,  'week_of_month'=>null, 'end_date'=>null],         '2026-06-01 09:00:00', 'FREQ=DAILY;INTERVAL=3'],
+	['weekly Mon/Wed/Fri until a date',   ['type'=>'weekly',  'interval'=>1, 'days_of_week'=>'1,3,5','week_of_month'=>null, 'end_date'=>'2026-08-31'], '2026-06-01 09:00:00', null],
+	['weekly on the start\'s weekday',     ['type'=>'weekly',  'interval'=>2, 'days_of_week'=>null,  'week_of_month'=>null, 'end_date'=>null],         '2026-06-03 09:00:00', 'FREQ=WEEKLY;INTERVAL=2'],
+	['monthly on the 2nd Tuesday',        ['type'=>'monthly', 'interval'=>1, 'days_of_week'=>'2',   'week_of_month'=>2,    'end_date'=>null],         '2026-06-09 09:00:00', 'FREQ=MONTHLY;BYDAY=2TU'],
+	['monthly on the last Friday',        ['type'=>'monthly', 'interval'=>1, 'days_of_week'=>'5',   'week_of_month'=>-1,   'end_date'=>'2027-01-31'], '2026-06-26 18:30:00', null],
+	['monthly on the start\'s date',       ['type'=>'monthly', 'interval'=>6, 'days_of_week'=>null,  'week_of_month'=>null, 'end_date'=>null],         '2026-01-31 09:00:00', 'FREQ=MONTHLY;INTERVAL=6'],
+	['yearly',                            ['type'=>'yearly',  'interval'=>1, 'days_of_week'=>null,  'week_of_month'=>null, 'end_date'=>'2036-02-29'], '2024-02-29 00:00:00', null],
+];
+foreach ($native_cases as $c) {
+	list($label, $native, $start, $want) = $c;
+	foreach (['America/Los_Angeles', 'Asia/Tokyo', null] as $tz) {
+		$rule = IcsImporter::nativeToRrule($native, $start, $tz);
+		$back = IcsImporter::translateRecurrence(IcsImporter::parseRrule($rule), $start, $tz);
+		if ($native['type'] === 'monthly' && $native['week_of_month'] === null) { $native['days_of_week'] = null; }
+		ok($label . ' (' . ($tz ?? 'all day') . '): ' . $rule . ' reads back as the same fields',
+			$back !== null && $back['type'] === $native['type'] && $back['interval'] === $native['interval']
+			&& (string)$back['days_of_week'] === (string)$native['days_of_week'] && $back['week_of_month'] === $native['week_of_month']
+			&& $back['end_date'] === $native['end_date']);
+		if ($want !== null) { ok($label . ': written ' . $want, $rule === $want); }
+	}
+}
+ok('an end date is a date for an all-day series',
+	strpos(IcsImporter::nativeToRrule(['type'=>'daily','end_date'=>'2026-08-31'], '2026-06-01 00:00:00', null), 'UNTIL=20260831') !== false);
+ok('and the UTC instant of its last second beside a zone (23:59:59 in Los Angeles is 06:59:59Z the next day)',
+	strpos(IcsImporter::nativeToRrule(['type'=>'daily','end_date'=>'2026-08-31'], '2026-06-01 09:00:00', 'America/Los_Angeles'), 'UNTIL=20260901T065959Z') !== false);
+ok('a monthly rule by weekday with no stored weekday uses the start\'s',
+	IcsImporter::nativeToRrule(['type'=>'monthly','week_of_month'=>1,'days_of_week'=>null], '2026-06-03 09:00:00', 'UTC') === 'FREQ=MONTHLY;BYDAY=1WE');
+ok('a type the calendar does not have writes nothing', IcsImporter::nativeToRrule(['type'=>'hourly'], '2026-06-01 09:00:00', 'UTC') === '');
 
 // =============================================================================
 // parse() — unfolding, params, unescaping, all-day, EXDATE

@@ -1,6 +1,6 @@
 # Export Mail, Contacts, Calendar and Drive
 
-**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`. WP3, WP4 and WP1 are not built. No questions are open.
+**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`. WP3 (calendar) built and reviewed 2026-10-22, live check passed on dev; the check after release is in the live verification queue. WP4 and WP1 are not built. No questions are open.
 
 Everything else from the first draft (member data download, closing an account, admin list exports, member import, backup download and restore from a file) is in `DEFERRED_data_portability.md`.
 
@@ -111,6 +111,8 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 
 ### WP3. Personal calendar export
 
+**Built and reviewed 2026-10-22.** The `ics_export`, `ics_import` and `ics_vevent` tests cover the round trip through an empty calendar and back to the same file, re-import, a Private calendar, the inverse rule, the time zone parts, and B16-B20.
+
 **What the member gets.** On `/profile/calendar`, under Actions, **Download my calendar (.ics)**: a one-time file, not a feed.
 
 **What changes in the code:**
@@ -122,6 +124,16 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
 - Private entries (`cal_title`, `cal_location`, `cal_link`, `cal_notes`) are decrypted in the request while unlocked (`CalendarSealed`). The calendar has no Fortress level.
 
 **Scope.** The member's own entries only. Events and bookings already have their own `.ics`.
+
+**How it was built:**
+
+- **`IcsExporter`** (`includes/calendar/IcsExporter.php`) is the write-side mirror of `IcsImporter`. The `calendar_export` action returns `{filename, content_type, content, count}` and the page saves it as a download, like WP2. A calendar is small enough to build in the request.
+- **Times.** A timed entry is written in its own zone (`TZID`), so a repeating entry keeps its local time across a clock change, and the file carries a `VTIMEZONE` for each zone (`IcsHelper::vtimezone()`), which RFC 5545 requires and Outlook reads. It is the zone's current yearly rule, as Google, Apple and Outlook write theirs, taken only when the rule has held for 28 years running. Older changes, and every change of a zone with no weekday rule (Israel, Chile, Morocco), are listed one by one, at least 30 years ahead. The test checks the offsets against PHP's for every change of eleven zones over 30 years; a check of every zone on the box found the only misses past 30 years in those no-rule zones.
+- **The rule.** A native series writes `IcsImporter::nativeToRrule()`. An entry imported with a rule the calendar cannot express writes `cal_rrule_raw` back. `cal_rrule_raw` means the repeat as it came in, untouched: a save that changes the repeat drops it (B19), and a native series always writes its native fields.
+- **An occurrence edited on its own** is written as an override (the series' UID and `RECURRENCE-ID`), and its date is left out of `EXDATE`.
+- **UIDs.** An imported entry keeps its UID, so the calendar it came from still knows it. Any other entry is `cal-{id}@{site}`.
+- **Status** is written, and the import now reads it (B18), so tentative and cancelled survive the round trip.
+- **Not carried:** the per-entry reminder choice. It is how this calendar emails the member, not part of the entry. Skipped dates of a rule the calendar cannot express were never stored, so they cannot come back out.
 
 ### WP4. Download a Drive folder as a zip
 
@@ -168,6 +180,17 @@ Found in review of WP2, all fixed with it:
 - **B14.** A vCard or CSV in raw Windows-1252, which is what desktop Outlook saves, could not be stored: the database refuses bytes that are not UTF-8. The same happened with a vCard `CHARSET` PHP does not know, or a value that claims UTF-8 and is not. Text that is still not UTF-8 is now read as Windows-1252, which maps every byte. A UTF-16 CSV, which imported nothing, is read by its byte order mark.
 - **B15.** An import's counts were what it meant to store, not what it stored. One row whose write failed dropped every row after it while the import still reported them as imported. An import into a sealed store with the vault window shut reported every row imported and stored none. Each row now succeeds or fails on its own, the counts are what was stored, and the locked import is refused like the locked export.
 
+Found while building WP3, all fixed with it:
+
+- **B16.** Uploading a downloaded calendar back to the same calendar would have added a second copy of every entry made here. The import only recognised UIDs it had stored itself. It now also recognises `cal-{id}@{site}` for every entry on the calendar.
+- **B17.** The import read a UTC `UNTIL`, `EXDATE` or `RECURRENCE-ID` as a UTC date. A Monday 8 PM class in New York is a Tuesday in UTC, so its skipped and replaced dates landed on the Tuesday and the Monday still showed. A Google-style `UNTIL` at the end of the last day, in UTC, added one occurrence past the end. All three are now read in the series' zone, and an `UNTIL` earlier in the day than the series starts ends it the day before.
+- **B18.** The import ignored `STATUS`: a tentative or cancelled entry from another calendar came in as confirmed.
+
+Found in review of WP3, both fixed with it:
+
+- **B19.** A repeat the member switched off could come back in the download. An Outlook monthly rule (`BYMONTHDAY=15`) imports as a native repeat with the rule kept. The member turned the repeat off and moved the entry to the 16th; the rule no longer matched the start, so the export took it for one the calendar cannot express and wrote it. Nothing in the form cleared the kept rule. `_calendar_set_recurrence()` now drops it whenever the repeat changes, and the export writes a kept rule only on an entry that does not repeat.
+- **B20.** A timed row with a zone and no stored wall clock would have been written with its UTC clock labelled as the zone's. Its UTC instant is now read in the zone. No such rows exist on dev.
+
 ## Decided
 
 - **Q1 (owner, 2026-10-21 and 2026-10-22).** This spec covers email, contacts, calendar and Drive. Everything else from the first draft is in `DEFERRED_data_portability.md`. Posts and pages, and exports for boards and mail filters, are not in either spec.
@@ -184,6 +207,7 @@ None.
 
 - includes/ZipStreamWriter.php, assets/js/zip-writer.js
 - includes/CsvWriter.php, includes/CsvReader.php (built with WP2), plugins/mailbox/logic/contacts_export_logic.php (built)
+- includes/calendar/IcsExporter.php, logic/calendar_export_logic.php (built with WP3)
 - plugins/mailbox/includes/MessageRebuild.php (moved from mail_apps)
 - plugins/mailbox/tasks/RunMailExports.php
 - plugins/mailbox/assets/mailbox_mime_build.js (the browser message builder for Fortress export)
@@ -196,8 +220,8 @@ None.
 - plugins/mailbox/views/profile/contacts.php
 - plugins/mailbox/logic/contacts_import_logic.php (B15: true counts, a locked store refused; built)
 - plugins/mail_apps (calls `MessageRebuild`)
-- includes/IcsHelper.php, includes/calendar/IcsImporter.php (inverse rule)
-- views/profile/calendar.php, logic/calendar_logic.php
+- includes/IcsHelper.php, includes/calendar/IcsImporter.php (inverse rule; B16-B18) (built)
+- views/profile/calendar.php, logic/calendar_logic.php (B19) (built)
 - views/drive.php, assets/js/drive.js
 - settings.json (`export_retention_days`)
 

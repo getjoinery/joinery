@@ -21,7 +21,10 @@
  * from event handlers.
  *
  * Importing an .ics lives in the Actions menu, and is additionally offered as a
- * first-run prompt until the calendar holds an entry of its own.
+ * first-run prompt until the calendar holds an entry of its own. The menu's other
+ * item downloads the member's own entries as one .ics (calendar_export): the file
+ * comes back in the API response and is saved as a blob, so nothing is written on
+ * the server. A Private calendar with the window closed runs the unlock first.
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
@@ -112,11 +115,13 @@ $level_chip = '<a class="jy-ui cal-level-chip is-' . htmlspecialchars($protectio
     . htmlspecialchars(ProtectionLevelPicker::summary($protection_level)) . '</a>';
 $hoptions['header_action'] = $level_chip . '<details class="jy-ui jy-actions-dropdown">'
     . '<summary class="btn btn-secondary">Actions</summary>'
-    . '<div class="jy-actions-menu"><button type="button" data-cal-import>Import from another calendar (.ics)&hellip;</button></div>'
+    . '<div class="jy-actions-menu"><button type="button" data-cal-import>Import from another calendar (.ics)&hellip;</button>'
+    . '<button type="button" data-cal-export>Download my calendar (.ics)</button></div>'
     . '</details>';
 echo PublicPage::BeginPage('My Calendar', $hoptions);
 ?>
 <div class="jy-ui cal-wrap">
+<div class="cal-error" id="cal-export-error" hidden></div>
 <?php if (!empty($saved)):  ?><div class="cal-note">Entry saved.</div><?php endif; ?>
 <?php if (!empty($deleted)): ?><div class="cal-note">Entry deleted.</div><?php endif; ?>
 <?php if (!empty($errors) && !$show_full_form):  ?><div class="cal-error"><?php foreach ($errors as $e) { echo htmlspecialchars($e) . '<br>'; } ?></div><?php endif; ?>
@@ -522,6 +527,51 @@ $popwriter->checkboxinput('entry_blocks', 'Block this time (removes from booking
             buttons: [{ label: 'Cancel', style: 'secondary' }]
         });
     });
+
+    // =========================================================================
+    // Download (.ics) — the member's own entries as one file. A Private calendar
+    // read with the window closed answers locked: run the unlock, then ask again.
+    // =========================================================================
+    var exportBtn = document.querySelector('[data-cal-export]');
+    var exportErr = document.getElementById('cal-export-error');
+    function downloadCalendar(){
+        exportBtn.disabled = true;
+        exportErr.hidden = true;
+        joineryApi.post('calendar_export', {}).then(function(d){
+            exportBtn.disabled = false;
+            var url = URL.createObjectURL(new Blob([d.content], { type: d.content_type }));
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = d.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+        }).catch(function(err){
+            exportBtn.disabled = false;
+            var message = (err && err.message) || 'Your calendar could not be downloaded.';
+            if (err && err.data && err.data.locked && window.JoineryVaultLock) {
+                JoineryVaultLock.unlock().then(function(ok){
+                    if (ok) { downloadCalendar(); } else { showExportError(message, null); }
+                });
+                return;
+            }
+            showExportError(message, err);
+        });
+    }
+    function showExportError(message, err){
+        exportErr.textContent = message;
+        var link = err ? joineryApi.reportLink(err) : null;
+        if (link) { exportErr.appendChild(document.createTextNode(' ')); exportErr.appendChild(link); }
+        exportErr.hidden = false;
+    }
+    if (exportBtn && exportErr) {
+        exportBtn.addEventListener('click', function(){
+            var menu = exportBtn.closest('details');
+            if (menu) { menu.open = false; }
+            downloadCalendar();
+        });
+    }
 
     // =========================================================================
     // Scope choice — "this occurrence / this and future / all". One builder
