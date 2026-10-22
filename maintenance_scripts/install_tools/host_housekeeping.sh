@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.30 - The publishing box (its own release signing key and a tree that is not root's) does not
+#                install the hourly security check and says so, instead of failing every run: a security
+#                check refused there made every converge on dev read installer-failed (B24).
 # Version: 1.29 - On a virtual machine fwupd-refresh is masked and a failure it left is cleared: a VM has no
 #                firmware to refresh, and a slow LVFS failed the run on every VM at once, each opening an
 #                incident (B30)
@@ -1034,8 +1037,21 @@ fi
 # apt keeps are otherwise fetched twice a day, so a fix Ubuntu ships in the
 # afternoon was not known of until the next morning. Written where it
 # differs; a tree that is not root's alone is refused, as for 10c.
+#
+# The publishing box is the one machine whose tree is its developers', not
+# root's alone, and it holds the release signing key. The check is not
+# installed there, and that is said, not counted as a failure: failing every
+# run on it hid every other failure on that box (B24). Anywhere else a tree
+# that is not root's alone still fails: a site on a host that refuses unsigned
+# code has a root-owned tree, and a machine run from the bundle has no key.
 SCK="${SCRIPT_DIR}/../sysadmin_tools/security_check.sh"
-if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
+sck_publishing_box() {
+    [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] || return 1
+    [[ "$(stat -L -c %u "$(dirname "${SCK}")" 2>/dev/null)" != 0 ]]
+}
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]] && sck_publishing_box; then
+    say "the hourly security check is not installed: this is the publishing box, whose tree is its developers', and a root timer will not run from it"
+elif [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
     if SCK_OUT="$(bash "${SCK}" install 2>&1)"; then
         printf '%s\n' "${SCK_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
     else

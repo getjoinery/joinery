@@ -834,6 +834,48 @@ $made_nodes[] = $container->key;
 check(ManagedHost::link_host_node($container) === null,
 	'A node with a web root is a site, not a host — it links nothing');
 
+// docker-prod (B26, fleet_security_patching): its join came over IPv6, approval
+// minted a second, empty placement and linked the host node to that, and the
+// placement its sites are in (which the machine is itself placed in) never had
+// a host node. Its own placement is linked, from this plane's record, even
+// though it is already the agent of the empty one; each host report asks.
+$b26_v4 = agent_channel_free_v4();
+$b26_sites = new ManagedHost(NULL);
+$b26_sites->set('mgh_slug', 'agtest-b26a-' . substr(bin2hex(random_bytes(3)), 0, 6));
+$b26_sites->set('mgh_name', 'agtest b26 sites');
+$b26_sites->set('mgh_host', $b26_v4);
+$b26_sites->set('mgh_provisioning_enabled', false);
+$b26_sites->prepare();
+$b26_sites->save();
+$made_hosts[] = $b26_sites->key;
+$b26_machine = agent_channel_node('agtest-b26m-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$b26_machine->set('mgn_host', $b26_v4);
+$b26_machine->set('mgn_mgh_managed_host_id', (int)$b26_sites->key);
+$b26_machine->save();
+$made_nodes[] = $b26_machine->key;
+$b26_dup = new ManagedHost(NULL);
+$b26_dup->set('mgh_slug', 'agtest-b26b-' . substr(bin2hex(random_bytes(3)), 0, 6));
+$b26_dup->set('mgh_name', 'agtest b26 duplicate');
+$b26_dup->set('mgh_host', '2001:db8:b26::' . dechex(random_int(1, 65535)));
+$b26_dup->set('mgh_provisioning_enabled', false);
+$b26_dup->set('mgh_mgn_managed_node_id', (int)$b26_machine->key);
+$b26_dup->prepare();
+$b26_dup->save();
+$made_hosts[] = $b26_dup->key;
+$b26_linked = ManagedHost::link_host_node($b26_machine);
+$b26_sites->load();
+check($b26_linked !== null && (int)$b26_linked->key === (int)$b26_sites->key
+		&& (int)$b26_sites->get('mgh_mgn_managed_node_id') === (int)$b26_machine->key,
+	'A machine already the agent of an empty duplicate placement is linked to the placement it is itself in (B26)');
+check(ManagedHost::link_host_node($b26_machine) === null, '  and asking again changes nothing');
+$b26_other = agent_channel_node('agtest-b26o-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$b26_other->set('mgn_host', '203.0.113.' . random_int(10, 250));
+$b26_other->set('mgn_mgh_managed_host_id', (int)$b26_sites->key);
+$b26_other->save();
+$made_nodes[] = $b26_other->key;
+check(ManagedHost::link_host_node($b26_other) === null && (int)$b26_sites->get('mgh_mgn_managed_node_id') === (int)$b26_machine->key,
+	'  and another machine placed there later does not take it over');
+
 section('A dual-stack host joining over one family lands on the placement keyed by the other');
 
 // docker-prod, 2026-09-15: the join came from the host's IPv6 address, the
@@ -1015,7 +1057,30 @@ if ($ctr_host_id && !in_array($ctr_host_id, $hosts_before, true)) {
 }
 check($ctr_node->get('mgn_container_name') === 'agtest-ctr', 'The container is named for the site folder', (string)$ctr_node->get('mgn_container_name'));
 check($ctr_host_id > 0 && (new ManagedHost($ctr_host_id, TRUE))->get('mgh_host') === '203.0.113.79', 'and the node is placed on the host record for its address');
-check(ManagedNode::adopt_reported_container($ctr_node, true) === false, 'a node already named is left alone');
+check(ManagedNode::adopt_reported_container($ctr_node, true) === false, 'a node already named and placed is left alone');
+// Named before placement existed, and never placed (getjoinery's docker-prod
+// sites, B26): its agent's next claim places it on the record for its own
+// address, and the machine there is named that record's agent from its own
+// next host report.
+$b26_addr = agent_channel_free_v4();
+$b26_site = agent_channel_node('agtest-b26s-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$b26_site->set('mgn_host', $b26_addr);
+$b26_site->set('mgn_container_name', 'agtestb26site');
+$b26_site->set('mgn_web_root', '/var/www/html/agtestb26site/public_html');
+$b26_site->save();
+$made_nodes[] = $b26_site->key;
+check(ManagedNode::adopt_reported_container($b26_site, true) === true, 'a named container node with no placement is placed on its agent\'s claim (B26)');
+$b26_site->load();
+$b26_rec_id = (int)$b26_site->get('mgn_mgh_managed_host_id');
+if ($b26_rec_id) { $made_hosts[] = $b26_rec_id; }
+check($b26_rec_id > 0 && (new ManagedHost($b26_rec_id, TRUE))->get('mgh_host') === $b26_addr, '  on the host record for its own address');
+check(ManagedNode::adopt_reported_container($b26_site, true) === false, '  and the next claim changes nothing');
+$b26_box = agent_channel_node('agtest-b26h-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$b26_box->set('mgn_host', $b26_addr);
+$b26_box->save();
+$made_nodes[] = $b26_box->key;
+$b26_got = ManagedHost::link_host_node($b26_box);
+check($b26_got !== null && (int)$b26_got->key === $b26_rec_id, '  and the machine at that address, no record\'s agent yet, is linked as its host');
 check(ManagedNode::adopt_reported_container($ctr_adopted['node'], false) === false && ManagedNode::adopt_reported_container($ctr_adopted['node'], null) === false, 'a node that does not say container is never made one');
 // The last site off a Docker host takes the empty group with it, and
 // restoring the site puts it on a host record again.

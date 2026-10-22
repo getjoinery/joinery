@@ -467,6 +467,22 @@ check(is_array($stored) && $stored['os'] === $hr_object['os'],
 	'the operating system and the upgrade it is offered survive as sent', var_export($stored['os'] ?? null, true));
 check(!empty($hr_node->get('mgn_last_host_report_time')),
 	'and the read time is stamped');
+
+// A machine placed in a host record with no host node is named its agent by its
+// own report (fleet_security_patching B26: getjoinery's docker-prod never was).
+$hr_place = new ManagedHost(NULL);
+$hr_place->set('mgh_slug', 'harnessrp-b26-' . bin2hex(random_bytes(3)));
+$hr_place->set('mgh_name', 'HarnessTest RP b26 host');
+$hr_place->set('mgh_host', '198.51.100.' . random_int(10, 250));
+$hr_place->set('mgh_provisioning_enabled', false);
+$hr_place->prepare();
+$hr_place->save();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $hr_place->key);
+$hr_machine = jrp_node(array('mgn_host' => (string)$hr_place->get('mgh_host'), 'mgn_mgh_managed_host_id' => (int)$hr_place->key));
+JobResultProcessor::process(jrp_job($hr_machine, 'host_report', $hr_envelope));
+$hr_place->load();
+check((int)$hr_place->get('mgh_mgn_managed_node_id') === (int)$hr_machine->key,
+	'a host report from a machine placed in a host record with no host node names it that host\'s agent (B26)');
 $hr_status = $hr_node->get('mgn_last_status_data');
 if (is_string($hr_status)) { $hr_status = json_decode($hr_status, true); }
 check(empty($hr_status) || !isset($hr_status['failed_units']),

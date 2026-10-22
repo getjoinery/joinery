@@ -15,6 +15,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.3 - the key names the amber for a service that does not serve the sites (B25)
  * @version 1.2 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running run
  * @version 1.1 - a container host's step replaces its site containers and names them (Q7); the key says the kernel
  *                is amber, and a package run left half done (B17)
@@ -99,7 +100,7 @@ $page->begin_box(array());
 every hour; a site container's operating system is its host's base image, whose fixes the host looks for. <strong>Red</strong>:
 old code is still serving, or a critical fix waits (PHP, Apache, OpenSSL, PostgreSQL). <strong>Amber</strong>:
 other fixes wait for the next run, a kernel fix waits for the night and then a reboot, a reboot is owed for over a day, no check has passed in two hours,
-or a package run was left half done.</p>
+a package run was left half done, or a service that does not serve the sites runs replaced code until it restarts.</p>
 
 <p>
 	<span class="badge bg-danger"><?php echo (int)$counts['red']; ?> red</span>

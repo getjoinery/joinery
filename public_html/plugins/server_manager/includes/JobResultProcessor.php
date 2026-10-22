@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.103 - a host report names its machine its host record's own agent where none is (ManagedHost::link_host_node,
+ *                  fleet_security_patching B26)
  * @version 1.102 - check_status's dpkg_unfinished (agent 1.90.0): the packages a package run left half done
  *                  (fleet_security_patching B17)
  * @version 1.101 - security_pending carries each package's first_seen and the at-once install (WP6, Q2);
@@ -3982,6 +3984,11 @@ HTML;
 				// A reboot this plane asked for, seen to have happened: the boot
 				// id is not the one the reboot_machine job recorded.
 				self::reboot_seen($node, $report, $read_at);
+				// A machine not yet named its host record's own agent is named
+				// now, from this plane's own records (B26): the host card,
+				// holds, the fleet page and its replacement step all go through
+				// that link.
+				ManagedHost::link_host_node($node);
 				// Each site row's held state follows what its host says.
 				if (is_array($report['containers'] ?? null)) {
 					$held = [];

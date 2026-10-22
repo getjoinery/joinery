@@ -3493,14 +3493,23 @@ check(strpos($docker_fn, 'bundle_args+=(--statement="$dist_dir/RELEASE_STATEMENT
     'the bundle goes with the release statement beside it, so a machine held to the public log can install it');
 check(strpos($docker_fn, '&& systemctl is-active --quiet joinery-host-converger.timer; then') !== false,
     'the install says the host converger runs only when its timer is active');
+// One plane-side class runs it, and hands no node a job: the live proof of
+// agent words (fleet_security_patching WP7) installs its own throwaway build
+// over SSH on a test server it made, as install.sh's Docker step does.
+$siteless_allowed = ['AgentLiveProofRun.php'];
 $php_callers = [];
 foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PathHelper::getRootDir() . '/plugins/server_manager/includes')) as $f) {
-    if (substr((string)$f, -4) === '.php' && strpos((string)file_get_contents((string)$f), '--siteless') !== false) {
+    if (substr((string)$f, -4) === '.php' && strpos((string)file_get_contents((string)$f), '--siteless') !== false
+            && !in_array(basename((string)$f), $siteless_allowed, true)) {
         $php_callers[] = basename((string)$f);
     }
 }
 check(count($php_callers) === 0,
     'no plane-side job builder hands a node an install_agent.sh --siteless step', implode(', ', $php_callers));
+$alp = (string)@file_get_contents(PathHelper::getRootDir() . '/plugins/server_manager/includes/AgentLiveProofRun.php');
+check($alp !== '' && strpos($alp, 'createFromBuild') !== false && preg_match('/createFromBuild\([^;]*--siteless/s', $alp) !== 1
+        && strpos($alp, "self::ssh(\$server, 'bash /root/live-proof/install_agent.sh --siteless") !== false,
+    '  the one allowed, the live proof, runs it over SSH on its own test server and never as a node job');
 
 section('A machine with no site converges through the bundle (specs/agent_tier1_recipes.md item 6b)');
 

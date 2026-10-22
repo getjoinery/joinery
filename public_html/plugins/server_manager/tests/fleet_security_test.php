@@ -66,7 +66,12 @@ check($row['verdict'] === 'red' && $row['code'] === 'old' && strpos($row['reason
 
 $row = FleetSecurityView::row(fs_machine(3, 'svc', array_merge($clean_hr, array('services_needing_restart' => array('source' => 'needrestart', 'services' => array('apache2.service'))))), null, $NOW);
 check($row['verdict'] === 'red' && $row['code'] === 'old' && in_array('apache2.service', $row['old_code'], true),
-	'a service needrestart names: old code serving, red', json_encode($row));
+	'Apache among what needrestart names: old code serving, red', json_encode($row));
+$row = FleetSecurityView::row(fs_machine(3, 'sysd', array_merge($clean_hr, array('services_needing_restart' => array('source' => 'needrestart',
+	'services' => array('networkd-dispatcher.service', 'unattended-upgrades.service'))))), null, $NOW);
+check($row['verdict'] === 'amber' && $row['code'] !== 'old' && $row['old_code'] === array()
+		&& $row['reasons'] === array('2 other services run replaced code until they restart (networkd-dispatcher.service, unattended-upgrades.service)'),
+	'a service that does not serve the sites: amber until it restarts, not red (the incident\'s own rule; B25)', json_encode($row));
 
 $row = FleetSecurityView::row(fs_machine(4, 'crit', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('php8.3-fpm', true), fs_pkg('curl', false)))))), null, $NOW);
 check($row['verdict'] === 'red' && $row['pending'] === 2 && $row['critical'] === array('php8.3-fpm')
@@ -95,6 +100,9 @@ check($row['verdict'] === 'amber' && $row['pending'] === null && in_array('it do
 
 $row = FleetSecurityView::row(array('id' => 9, 'name' => 'silent', 'container' => '', 'host_id' => null, 'host_report' => null, 'php' => null), null, $NOW);
 check($row['verdict'] === 'grey' && $row['reasons'] === array('nothing reported yet'), 'nothing reported: grey', json_encode($row));
+$row = FleetSecurityView::row(array('id' => 9, 'name' => 'relay', 'container' => '', 'host_id' => null, 'host_report' => null, 'php' => null, 'agent' => false), null, $NOW);
+check($row['verdict'] === 'grey' && $row['reasons'] === array('no agent reports from it, so its patching cannot be seen here'),
+	'a node with no agent (the relay, the DNS servers): grey, saying it has no agent rather than that it has not reported yet (B27)', json_encode($row));
 
 // A package run left half done (B17): amber, from the node's own status check, on a machine or a container.
 $half = JobResultProcessor::status_dpkg_unfinished(array('count' => 7, 'packages' => array(
