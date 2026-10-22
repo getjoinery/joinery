@@ -15,6 +15,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.2 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running run
  * @version 1.1 - a container host's step replaces its site containers and names them (Q7); the key says the kernel
  *                is amber, and a package run left half done (B17)
  * @version 1.0
@@ -56,9 +57,11 @@ if ($_POST) {
 }
 
 // Loading the page is a tick: a run moves even if the scheduler is slow.
+// Lazy processing, the server's own write: it only moves a run a person
+// already started (a POST), as the AdvanceFleetSecurityRuns task would.
 $running = FleetSecurityRun::running();
 if ($running) {
-	FleetSecurityRunner::advance($running);
+	SystemBase::server_initiated_write(function () use ($running) { FleetSecurityRunner::advance($running); });
 }
 $latest = FleetSecurityRun::latest();
 

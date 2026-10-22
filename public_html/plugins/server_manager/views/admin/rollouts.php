@@ -10,6 +10,7 @@
  * is, and can be stopped between nodes. The AdvanceStagedRollouts task moves
  * it; loading this page moves it too.
  *
+ * @version 1.3 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running rollout
  * @version 1.2 - Pages to check on each node: the page_probe gate, before and after each node's apply
  * @version 1.1 - the release shown and rolled out is the newest published one (review B20)
  * @version 1.0
@@ -62,9 +63,11 @@ if ($_POST) {
 }
 
 // Loading the page is a tick: a rollout moves even if the scheduler is slow.
+// Lazy processing, the server's own write: it only moves a rollout a person
+// already started (a POST), as the AdvanceStagedRollouts task would.
 $running = StagedRollout::running();
 if ($running) {
-	StagedRolloutRunner::advance($running);
+	SystemBase::server_initiated_write(function () use ($running) { StagedRolloutRunner::advance($running); });
 	$running->load();
 	if (!$running->is_running()) {
 		$running = null;
