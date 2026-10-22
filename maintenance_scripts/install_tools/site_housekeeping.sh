@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.8 - The logrotate file rotates Apache's access.log too. Every logrotate file the platform
+#                wrote before (four versions since 03-28) is an earlier rendering and is rewritten, so
+#                every existing site gets it; an owner's edit is still never touched.
 # Version: 1.7 - Each log the site and its test site write is kept www-data's: Apache recreates a missing
 #                log as root, and rotation, which runs as www-data, then failed logrotate.service.
 # Version: 1.6 - (comment) the converger also runs this alone hourly for the code check (_plugin_installers_start.sh 2.39).
@@ -34,8 +37,8 @@
 # What it leaves behind:
 #   - /etc/logrotate.d/joinery-{site}, rendered from logrotate_joinery.conf,
 #     written when ABSENT and no other file there already rotates the site's
-#     logs (logrotate refuses a log named twice), and rewritten when it is the
-#     platform's earlier rendering that ran as group user1;
+#     logs (logrotate refuses a log named twice), and rewritten when it is one
+#     of the platform's earlier renderings (none rotated access.log);
 #   - /etc/cron.d/joinery-{site}, the every-minute scheduled-task runner,
 #     written when ABSENT, and rewritten when it is the platform's earlier
 #     rendering that ran every 15 or every 5 minutes - never inside a container, where the container's
@@ -109,16 +112,145 @@ LOGROTATE="${FS_ROOT}/etc/logrotate.d/joinery-${SITENAME}"
 # platform wrote its own) keeps doing so: logrotate refuses a log named in two
 # files, and would skip both.
 OTHER_ROTATION="$(grep -lF "${SITE_ROOT}/logs/" "$(dirname "${LOGROTATE}")"/* 2>/dev/null | grep -vxF "${LOGROTATE}" | head -1)"
-# The earlier rendering: the template's directives with the group user1,
-# comments and blank lines aside. Nobody chose that file, so it is not an
-# owner's edit, and on a machine with no user1 group it fails every night.
+# The platform's earlier renderings: every logrotate file it has written for a
+# site, compared by directives (comments and blank lines aside). Nobody chose
+# those files, so they are not an owner's edit, and each is worse than the
+# template: the ones run as group user1 fail every night on a machine with no
+# user1 group, and none of them rotates access.log, which then grows without
+# end. A version is added here whenever the template's directives change.
 directives() { grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$@"; }
-if [[ -f "${LOGROTATE}" && -f "${TEMPLATE}" ]] \
-    && [[ "$(directives "${LOGROTATE}")" == "$(sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" \
-            -e 's|^\([[:space:]]*su www-data\) www-data$|\1 user1|' "${TEMPLATE}" | directives)" ]] \
-    && ! grep -q '^[[:space:]]*su www-data user1$' "${TEMPLATE}"; then
-    sed "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}" > "${LOGROTATE}" && chmod 644 "${LOGROTATE}" \
-        && say "rewrote ${LOGROTATE}: it was the earlier rendering, which ran as group user1" \
+rendered() { sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}"; }
+earlier_renderings() {
+    cat <<'EARLIER'
+# from 2026-03-28
+{{SITE_ROOT}}/logs/error.log {
+    su www-data user1
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 100M
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data user1
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+----
+# from 2026-04-22
+{{SITE_ROOT}}/logs/error.log {
+    su www-data user1
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data user1
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+----
+# from 2026-09-23
+{{SITE_ROOT}}/logs/error.log {
+    su www-data user1
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data user1
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+{{SITE_ROOT}}/logs/host_converger.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
+----
+# from 2026-10-04
+{{SITE_ROOT}}/logs/error.log {
+    su www-data www-data
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+{{SITE_ROOT}}/logs/host_converger.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
+EARLIER
+}
+earlier_rendering() {
+    local have one
+    have="$(directives "${LOGROTATE}")"
+    while IFS= read -r -d $'\x1e' one; do
+        [[ "${have}" == "$(printf '%s\n' "${one}" | sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" | directives)" ]] && return 0
+    done < <(earlier_renderings | awk 'BEGIN { ORS = "" } /^----$/ { print "\036"; next } { print $0 "\n" } END { print "\036" }')
+    return 1
+}
+if [[ -f "${LOGROTATE}" && -f "${TEMPLATE}" ]] && earlier_rendering \
+    && [[ "$(directives "${LOGROTATE}")" != "$(rendered | directives)" ]]; then
+    rendered > "${LOGROTATE}" && chmod 644 "${LOGROTATE}" \
+        && say "rewrote ${LOGROTATE}: it was the platform's earlier rendering" \
         || { warn "could not rewrite ${LOGROTATE}"; FAILED=1; }
 elif [[ -e "${LOGROTATE}" ]]; then
     :

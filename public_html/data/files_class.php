@@ -45,6 +45,8 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.21.0 - a served body leaves the router's output buffers first, so a download larger than half
+ *                   of memory_limit is streamed instead of dying with the request
  * @version 1.20.0 - a stored name has one extension, and only an allowed one (allowed_upload_extensions or INERT_EXTENSIONS),
  *                   checked after sanitizing; any other ends .bin (run.php -> run_php_<rand>.bin): an inbound attachment never meets the upload allowlist
  * @changelog 1.19.0 - the head blob and the encrypted metadata blob are insert_only: a save through a copy
@@ -1185,6 +1187,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		if (!self::is_inline_safe_type($content_type)) {
 			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
 		}
+		self::leave_output_buffers();
 		if ($bytes !== null) {
 			// Served through a decrypt hook: the plaintext is produced in memory
 			// from the whole ciphertext, so there is nothing to seek into and no
@@ -1249,6 +1252,22 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * Write the body straight to the response from here on.
+	 *
+	 * The router buffers what a route handler writes (to catch one that writes
+	 * nothing, and for a signed-out GET to keep a copy for the page cache), and
+	 * a buffer keeps everything it is given in memory: a file read into it
+	 * counts against memory_limit, twice when both buffers are open, so a
+	 * download larger than about half the limit died with the request. A file
+	 * response is the whole body, so nothing buffered before it belongs in it.
+	 */
+	private static function leave_output_buffers() {
+		while (ob_get_level() > 0) {
+			ob_end_clean();
+		}
+	}
+
+	/**
 	 * Serve sealed bytes through a streaming decryptor, with real Range support.
 	 *
 	 * The order matters: everything that can fail — the unlock window, a corrupt
@@ -1299,6 +1318,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			header('Content-Range: bytes ' . $range['start'] . '-' . $range['end'] . '/' . $total);
 		}
 		header('Content-Length: ' . $length);
+		self::leave_output_buffers();
 
 		try {
 			$streamer->stream($path, function ($piece) { echo $piece; }, $offset, $length);

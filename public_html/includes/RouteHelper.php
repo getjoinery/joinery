@@ -109,6 +109,33 @@ class RouteHelper {
     }
     
     /**
+     * Whether a handler that returned true with an empty body meant to answer that way.
+     *
+     * An empty 200 that says nothing else is the silent failure the empty-output
+     * guard exists for (specs/homepage_route_blank_response_fix.md). A redirect,
+     * a status the handler set itself (304, 204, 416), a Content-Length it
+     * declared (a zero-byte file is 200 with Content-Length: 0) and an answer to
+     * HEAD are all answers.
+     *
+     * @param array $headers headers_list()
+     * @param int|false $status http_response_code()
+     */
+    public static function empty_response_is_deliberate(array $headers, $status, $method) {
+        if (strtoupper((string)$method) === 'HEAD') {
+            return true;
+        }
+        if ($status !== false && (int)$status !== 200) {
+            return true;
+        }
+        foreach ($headers as $hdr) {
+            if (stripos($hdr, 'Location:') === 0 || stripos($hdr, 'Content-Length:') === 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Debug logging method with level control
      * @param string $level Debug level (e.g., 'route_matching', 'parameter_extraction')
      * @param string $message Debug message
@@ -1152,6 +1179,9 @@ class RouteHelper {
             }
 
         }
+        // A handler that streams a file leaves every buffer (File::leave_output_buffers);
+        // below this level the cache buffer is gone and there is nothing to cache.
+        $cache_buffer_level = ob_get_level();
 
         // Detect current plugin based on route (now that PathHelper is available)
         self::$current_plugin = self::detectPluginByRoute($request_path);
@@ -1298,18 +1328,17 @@ class RouteHelper {
                     // so we can detect handlers that return true but produced no output
                     // and no redirect (a silent failure mode — see specs/homepage_route_blank_response_fix.md).
                     ob_start();
+                    $guard_level = ob_get_level();
                     $handler_returned = $handler($params, $settings, $session, $template_directory);
-                    $handler_output = ob_get_clean();
+                    // A handler that streamed a body left this buffer, and the cache's, behind it.
+                    $handler_output = (ob_get_level() >= $guard_level) ? ob_get_clean() : '';
+                    if ($cache_buffer_started && ob_get_level() < $cache_buffer_level) {
+                        $cache_buffer_started = false;
+                    }
 
                     if ($handler_returned) {
-                        $sent_redirect = false;
-                        foreach (headers_list() as $hdr) {
-                            if (stripos($hdr, 'Location:') === 0) {
-                                $sent_redirect = true;
-                                break;
-                            }
-                        }
-                        if (trim($handler_output) === '' && !$sent_redirect) {
+                        if (trim($handler_output) === ''
+                            && !self::empty_response_is_deliberate(headers_list(), http_response_code(), $_SERVER['REQUEST_METHOD'] ?? 'GET')) {
                             error_log("ROUTING ERROR: custom route handler for pattern '{$pattern}' returned true but produced no output and no redirect. Path: {$full_path}. Refusing to serve empty 200; falling back to 500.");
                             self::debugLog('handler_execution', "Handler returned true with empty output and no redirect — treating as bug", [
                                 'pattern' => $pattern,
