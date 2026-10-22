@@ -453,6 +453,17 @@ Whether a fallback service would still send their mail could not be read from he
 |---|---|---|
 | Which mail service a site names, and its fallback (`email_service`, `email_fallback_service`): the names only, never a key | Read-only SSH to docker-prod, `docker exec` and the site's own PHP (galactictribune: Mailgun with no key, fallback SMTP with no host). joinerydemo has no SSH, so it stays unknown | Covered by the fix instead: the check itself names the service and the fallback (PluginProvisioning 1.5). A general `site_settings` observe word would take a closed list of non-secret setting names |
 
+**2026-10-22, the site copy final test's C5 (a move by DNS onto a Hetzner server this
+management node made; root login off there).** The test asks that, while the old server
+forwards, a visitor sent to the old address reaches the copy and the copy records the
+visitor's own address. Reaching it was proven: a sign-in pinned to the old IPv4 landed in
+the copy's `log_logins`. The address it recorded could not be read, by design:
+`log_table_tail` leaves out `log_ip` and `site_log` masks every IP (`agent_log_access.md`).
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Whether a request sent through the old server reached the copy carrying the visitor's own address, not the old server's | Proven on brought servers over SSH (C4, C4b); on a plane-made copy, only that the request arrived | `copy_probes` takes a one-time path token and the address the plane sent it from, and answers whether the copy's access log holds a request for that token from that address: yes or no, no address leaving the machine |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.
