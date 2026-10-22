@@ -26123,3 +26123,228 @@ fn a_damaged_metadata_blob_does_not_hold_back_a_files_new_versions() {
     }
     assert!(world.server.upload_inits() > before, "the version was held back by the damaged blob");
 }
+
+/// A folder renamed twice while its first create is still waiting is one
+/// folder, under its last name (B9, encrypted-lane run 6, device-a 616038 /
+/// 616081: renamed `(95)` -> `(406)` -> `(764)` while device-a's queue was
+/// backed up; the server was sent both `(406)` and `(764)`, and two records
+/// held the one directory).
+///
+/// The laptop makes `Top/Sub` with a file in it. The server refuses folder
+/// creates for a while, so `Sub` waits behind `Top`. Meanwhile the user
+/// renames `Sub` twice, with a pass between. Each rename minted a new
+/// record for the directory and queued another create, so when the server
+/// answered it was sent `Sub`, `Sub (1)` and `Sub (2)`, and the two stale
+/// folders were trashed a pass later on every device. The folder is one
+/// record from first sight: renamed before it is sent, it is sent once,
+/// under the name it has then.
+#[test]
+fn a_folder_renamed_while_its_create_waits_is_sent_once() {
+    let world = World::new(9_990, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_mkdir("Top");
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_write("Top/Sub/f.txt", b"the file in the renamed folder");
+    world.pass(laptop);
+    assert!(world.server.folder_id_at("Top/Sub").is_none(), "the create was not held back: {:?}", world.server.tree());
+    laptop.fs.user_rename("Top/Sub", "Top/Sub (1)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub (1)", "Top/Sub (2)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    let creates: Vec<String> = laptop
+        .store
+        .queued_ops()
+        .unwrap()
+        .iter()
+        .filter(|o| o.kind == "create_remote_folder")
+        .map(|o| o.params.clone())
+        .collect();
+    assert_eq!(creates.len(), 2, "one create each for Top and the renamed folder: {creates:?}");
+    assert!(world.settle().is_some(), "never settled");
+
+    let made: Vec<_> = world.server.folders().into_iter().map(|f| (f.name, f.trashed)).collect();
+    assert_eq!(made.len(), 2, "the server was sent a folder for a name the folder no longer had: {made:?}");
+    assert!(made.contains(&("Sub (2)".to_string(), false)), "the renamed folder is not on the server: {made:?}");
+    let files = world.server.files();
+    let sub = world.server.folder_id_at("Top/Sub (2)");
+    assert!(files.iter().any(|f| f.name == "f.txt" && !f.trashed && f.folder == sub), "the file is not in its folder: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// As `a_folder_renamed_while_its_create_waits_is_sent_once`, with a folder
+/// inside the renamed one and the renamed folder then moved under another
+/// new folder: every folder is sent once, and each file lands where the user
+/// left it (B9: the run-6 doubles were whole subtrees, each subfolder minted
+/// again under its renamed parent).
+#[test]
+fn a_subtree_renamed_and_moved_while_its_creates_wait_is_sent_once() {
+    let world = World::new(9_991, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_mkdir("Top");
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_mkdir("Top/Sub/Inner");
+    laptop.fs.user_write("Top/Sub/f.txt", b"in the renamed folder");
+    laptop.fs.user_write("Top/Sub/Inner/g.txt", b"in the folder inside it");
+    laptop.fs.user_mkdir("Other");
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub", "Top/Sub (1)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub (1)", "Other/Sub (2)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    let creates = laptop.store.queued_ops().unwrap().iter().filter(|o| o.kind == "create_remote_folder").count();
+    assert_eq!(creates, 4, "one create each for Top, Other, Sub and Inner: {:?}", laptop.store.queued_ops().unwrap().iter().map(|o| o.params.clone()).collect::<Vec<_>>());
+    assert!(world.settle().is_some(), "never settled");
+
+    let made: Vec<_> = world.server.folders().into_iter().map(|f| (f.name, f.trashed)).collect();
+    assert_eq!(made.len(), 4, "the server was sent a folder for a place the folder had left: {made:?}");
+    let files = world.server.files();
+    let in_folder = |name: &str, at: &str| {
+        let folder = world.server.folder_id_at(at);
+        folder.is_some() && files.iter().any(|f| f.name == name && !f.trashed && f.folder == folder)
+    };
+    assert!(in_folder("f.txt", "Other/Sub (2)"), "f.txt is not where the user left it: {:?}", world.server.tree());
+    assert!(in_folder("g.txt", "Other/Sub (2)/Inner"), "g.txt is not where the user left it: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// Where the disk keeps no births, a directory's id alone is no proof of
+/// which directory it is (`rm -rf A; mkdir B` hands B A's id), so a folder
+/// renamed before it is sent is minted again under its new name, as it was.
+/// What this pins is that it still ends as one live folder holding its file.
+#[test]
+fn without_births_a_folder_renamed_while_its_create_waits_ends_as_one_folder() {
+    let world = World::new(9_992, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.hide_births(true);
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_mkdir("Top");
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_write("Top/Sub/f.txt", b"the file in the renamed folder");
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub", "Top/Sub (2)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.folders().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    assert_eq!(live.len(), 2, "{live:?}");
+    let sub = world.server.folder_id_at("Top/Sub (2)");
+    assert!(world.server.files().iter().any(|f| f.name == "f.txt" && !f.trashed && f.folder == sub), "{:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A plain folder the user puts into the vault before its create has run is
+/// sent in the vault, never in the clear (B9 review, reviewer1). The folder
+/// record was minted under a plain parent; matching the moved directory to it
+/// by identity would send the create, and the file after it, to the plain
+/// parent -- the plaintext of a file the user believes is private on the
+/// server -- and only then convert. Across a vault's edge the directory is a
+/// new folder, minted under the parent it stands in, as it was.
+#[test]
+fn an_unsent_plain_folder_moved_into_a_vault_is_sent_in_the_vault() {
+    let vault = SimVault::new(9_411);
+    let mut world = World::new(9_411, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    let laptop = world.device("laptop");
+    assert!(world.settle().is_some());
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    let body = b"plain memo moved into the vault before its folder is sent";
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/memo.txt", body);
+    world.pass(laptop);
+    assert!(world.server.folder_id_at("Work").is_none(), "the create was not held back");
+    laptop.fs.user_rename("Work", "Private/Work");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+        "the plaintext of a file the user put in the vault reached the server"
+    );
+    assert!(world.server.plaintext_inside_a_vault().is_empty());
+    let found: Vec<String> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| jd_sim::scenario::what_the_vault_really_holds(&world, f))
+        .map(|(name, _cid)| name)
+        .collect();
+    assert!(found.iter().any(|n| n == "memo.txt"), "the file did not arrive in the vault: {found:?}");
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+}
+
+/// An unsent folder moved out of an unsent parent that the user then deletes
+/// still lands where the user left it: the record keeps the create it was
+/// queued with, under the parent it was made in, and that parent's create is
+/// not dropped for its empty path. Green with and without the B9 match.
+#[test]
+fn an_unsent_folder_moved_out_of_an_unsent_parent_that_is_then_deleted_still_lands() {
+    let world = World::new(9_412, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_mkdir("Top");
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_write("Top/Sub/f.txt", b"the file in the moved folder");
+    laptop.fs.user_mkdir("Other");
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub", "Other/Sub");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    laptop.fs.user_remove("Top");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    let sub = world.server.folder_id_at("Other/Sub");
+    assert!(files.iter().any(|f| f.name == "f.txt" && !f.trashed && f.folder == sub), "f.txt is not in Other/Sub: {:?}", world.server.tree());
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+}
+
+/// A folder renamed before its create runs, and its old name then made again
+/// as a new folder, ends as two folders each holding its own file. The new
+/// directory is the record's by name, so the match by identity is not made
+/// while a directory stands at the record's own path. Green with and without
+/// the B9 match.
+#[test]
+fn an_unsent_folder_renamed_and_its_old_name_made_again_ends_as_two_folders() {
+    let world = World::new(9_415, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..40 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_mkdir("Top");
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_write("Top/Sub/f.txt", b"the first folder's file");
+    world.pass(laptop);
+    laptop.fs.user_rename("Top/Sub", "Top/Sub (1)");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    laptop.fs.user_mkdir("Top/Sub");
+    laptop.fs.user_write("Top/Sub/g.txt", b"the second folder's file");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Top/Sub (1)/f.txt") && tree.contains_key("Top/Sub/g.txt"), "{tree:?}");
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+}

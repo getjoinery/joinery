@@ -212,6 +212,15 @@ follows takes that directory as the vault's own.
   same breath, two folders that fit one directory, a vault) is read as deleted,
   its copy on the server going to the trash.
 
+A folder made on this device and not yet sent is one record from the moment
+its directory is first seen. On a strong volume, renamed or moved before its
+create runs, its directory, matched by id and birth, is still that record's:
+the create goes up once, under the name it was queued with, and the rename
+follows once the folder is on the server. Elsewhere (no births reported, FAT
+and exFAT) the renamed directory is a new folder: both are sent, and the one
+under the old name goes to the trash on the next pass. A directory that
+crosses a vault's edge before its create runs is a new folder in the same way.
+
 ---
 
 ## One pass

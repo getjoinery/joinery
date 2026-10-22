@@ -513,6 +513,37 @@ pub fn run_pass(
                 .or_insert(Some((path.clone(), *id)));
         }
     }
+    // The directory each folder record minted here and not yet sent was
+    // minted from, by its id AND birth, on a volume whose identities hold:
+    // there the pair names one directory and no other, as it does for a
+    // folder the server has (`proven_at`). Not on a FAT drive, whose cluster
+    // comes back to a later directory within the birth's coarse tick (kill2
+    // 75112 on a Mac FAT32 stick). A pair two such records claim names
+    // neither.
+    let pairs_hold = personality.stable_file_identity;
+    let mint_pair = |dir: &String| -> Option<(u64, u64)> {
+        dir_identity
+            .get(dir)
+            .copied()
+            .map(|id| (id, dir_births.get(dir).copied().unwrap_or(0)))
+            .filter(|(id, birth)| pairs_hold && *id != 0 && *birth != 0)
+    };
+    let on_disk: std::collections::HashSet<&String> = dirs_on_disk.iter().collect();
+    let mut unsent_by_directory: HashMap<(u64, u64), Option<i64>> = HashMap::new();
+    if pairs_hold {
+        for e in all_entries(env)? {
+            if e.id.entity_type != EntityType::Folder || !e.id.is_provisional() || e.remote_deleted {
+                continue;
+            }
+            let Some(fp) = e.synced_fingerprint.filter(|fp| fp.file_id != 0 && fp.birth_ns != 0) else {
+                continue;
+            };
+            unsent_by_directory
+                .entry((fp.file_id, fp.birth_ns))
+                .and_modify(|slot| *slot = None)
+                .or_insert(Some(e.id.server_id));
+        }
+    }
     for dir in &dirs_on_disk {
         // A tracked folder's own directory, standing apart from its files:
         // not a new folder, and not adopted as one while the disagreement is
@@ -567,6 +598,39 @@ pub fn run_pass(
             }
             continue;
         };
+        // A directory this device minted a record for and has not yet sent,
+        // renamed or moved before its create ran, is that record's still: a
+        // folder renamed in a backed-up queue was minted again under each
+        // name it wore, every create was sent, and two records held the one
+        // directory until the stale folders were trashed on every device
+        // (B9). Only while nothing stands at the record's own path: a
+        // directory there is the record's by name, and this one is new. The
+        // record keeps the name its create was queued under; once the create
+        // lands, the directory is found by identity and the rename is sent
+        // like any other.
+        if let Some(own) = mint_pair(dir)
+            .and_then(|pair| unsent_by_directory.get(&pair).copied().flatten())
+            .filter(|own| !folder_ids.iter().any(|(at, id)| id == own && on_disk.contains(at)))
+        {
+            // Never across a vault's edge. The record keeps the parent it was
+            // minted under, so a plain folder dragged into the vault would be
+            // created, and its files sent, under the plain parent first: the
+            // plaintext of a file the user put in the vault, on the server
+            // (B9 review). Across the edge the directory is a new folder,
+            // minted under the parent it stands in.
+            let same_side_of_a_vault = match env.store.get_entry(EntityId::folder(own))? {
+                Some(rec) => rec.is_encrypted == parent_is_encrypted(env, placement.parent)?,
+                None => false,
+            };
+            if same_side_of_a_vault {
+                folder_ids.retain(|_, id| *id != own);
+                folder_ids.insert(dir.clone(), own);
+                if let Some(t) = trace.as_mut() {
+                    t.skip_path(dir, line!(), "an unsent folder's own directory");
+                }
+                continue;
+            }
+        }
         let id = EntityId::folder(env.store.next_provisional_id()?);
         let mut entry = blank(id, &placement);
         // The record knows its directory from the moment it is minted from
