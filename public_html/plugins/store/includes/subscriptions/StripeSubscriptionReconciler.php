@@ -12,6 +12,8 @@
  * working set, and applies each via StripeHelper::apply_subscription_to_order_item()
  * — no per-item round-trip. One EventLog summary row is written per run.
  *
+ * @version 1.1 - the working set is every current subscription (is_current_subscription): one cancelled to end at a
+ *               period end still to come keeps reconciling, so a cancel taken back in Stripe reaches the row
  * @version 1.0
  */
 
@@ -140,13 +142,15 @@ class StripeSubscriptionReconciler {
 
     /**
      * Build the local working set: a map of Stripe subscription id => OrderItem
-     * for every paid, not-yet-cancelled subscription order item. Items without a
-     * Stripe subscription id are skipped (PayPal subscriptions, etc.).
+     * for every paid subscription order item that is still current: not
+     * cancelled, or cancelled to end at a time still to come, so a cancel taken
+     * back in Stripe reaches the row. Items without a Stripe subscription id
+     * are skipped (PayPal subscriptions, etc.).
      *
      * @return array<string,OrderItem>
      */
     private function load_wanted_items() {
-        $items = new MultiOrderItem(array('is_active_subscription' => true));
+        $items = new MultiOrderItem(array('is_current_subscription' => true));
         $items->load();
 
         $wanted = array();

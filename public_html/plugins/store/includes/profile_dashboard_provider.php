@@ -70,9 +70,13 @@ function store_dashboard_subscriptions($user) {
 	$items = array();
 	foreach ($subscriptions as $sub) {
 		$product = new Product($sub->get('odi_pro_product_id'), TRUE);
-		$status = $sub->get('odi_subscription_cancelled_time')
-			? 'cancelled'
-			: ($sub->get('odi_subscription_status') ?: 'active');
+		// A cancel at the period end leaves it running until then: cancelled
+		// time is when it ENDS, so one still to come reads as ending, not ended.
+		$ends = (string)$sub->get('odi_subscription_cancelled_time');
+		$ending = $ends !== '' && strtotime($ends . ' UTC') > time();
+		$status = $ends === ''
+			? ($sub->get('odi_subscription_status') ?: 'active')
+			: ($ending ? 'ending' : 'cancelled');
 		$data = array(
 			'order_item_id' => (int)$sub->key,
 			'product_name'  => $product ? $product->get('pro_name') : '',
@@ -82,14 +86,15 @@ function store_dashboard_subscriptions($user) {
 		$items[] = new ProfileDashboardItem(
 			$data,
 			$product ? $product->get('pro_name') : 'Subscription',
-			ucfirst($status),
+			$status === 'ending' ? 'Active until ' . $sub->get_local('odi_subscription_cancelled_time') : ucfirst($status),
 			$symbol . number_format((float)$sub->get('odi_price'), 2, '.', ','),
-			$status === 'cancelled' ? 'Cancelled' : null,
+			$status === 'cancelled' ? 'Cancelled' : ($status === 'ending' ? 'Cancelled' : null),
 			'/profile/subscriptions'
 		);
 	}
 
-	$active_subs = new MultiOrderItem(array('user_id' => $user->key, 'is_active_subscription' => true));
+	// Running subscriptions, including one cancelled to end at a period end still to come.
+	$active_subs = new MultiOrderItem(array('user_id' => $user->key, 'is_current_subscription' => true));
 	$stat = new ProfileDashboardStat('active_subscription_count', 'Active subscriptions',
 		$active_subs->count_all(), '/profile/subscriptions');
 
