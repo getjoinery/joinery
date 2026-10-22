@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.29 - the swap is DeploymentHelper::swapLiveTree(): a holding serve.php answers 503 while the code
+	 *                moves, where public_html used to be without serve.php for a moment (a 500 to whoever landed then)
 	 * @version 1.28 - the staged release's missing tables and columns are added before its code goes live
 	 *                (DeploymentHelper::schemaAhead), and the staged tree is given the modes fix_permissions.sh
 	 *                gives the executable set (not 770) before the swap, so it is readable the moment it serves
@@ -1760,41 +1762,17 @@
 			if($verbose) echo 'Moving '.$live_directory. ' to '. $backup_directory.'<br>';
 			if($verbose) echo 'Moving '.$stage_directory. ' to '. $live_directory.'<br>';
 
-			// Move CONTENTS of live → backup. Use find rather than a `mv glob`
-			// so dotfiles (.htaccess, .well-known, etc.) come along, and so
-			// the bind-mounted directory itself stays in place. mv handles
-			// cross-device fallback (copy+unlink) per file automatically.
-			$mv_output = [];
-			$mv_exit = 0;
-			exec(sprintf(
-				'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
-				escapeshellarg($live_directory),
-				escapeshellarg($backup_directory)
-			), $mv_output, $mv_exit);
-			if ($mv_exit !== 0) {
-				upgrade_abort('Backup Failed', 'Could not move live files to backup. Error: ' . htmlspecialchars(implode(' ', $mv_output)), false);
-			}
-
-			// Move CONTENTS of stage → live (same approach).
-			$mv_output = [];
-			$mv_exit = 0;
-			exec(sprintf(
-				'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
-				escapeshellarg($stage_directory),
-				escapeshellarg($live_directory)
-			), $mv_output, $mv_exit);
-			if ($mv_exit !== 0) {
-				// Attempt to restore from backup before aborting. Same find
-				// approach so dotfiles come back too. (The outer rollback path
-				// below also calls performRollback() if the deploy is judged
-				// failed; this inline restore is a fast in-place repair when
-				// only the second mv failed.)
-				exec(sprintf(
-					'find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
-					escapeshellarg($backup_directory),
-					escapeshellarg($live_directory)
-				));
-				upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . htmlspecialchars(implode(' ', $mv_output)) . '. Rollback attempted.', false);
+			// The contents move (dotfiles too), never the bind-mounted directory,
+			// behind a holding serve.php that answers 503 while they do, so no
+			// request finds public_html without its entry script.
+			$swap = DeploymentHelper::swapLiveTree($live_directory, $stage_directory, $backup_directory);
+			if (!$swap['swapped']) {
+				$swap_error = htmlspecialchars((string)$swap['error']);
+				if ($swap['step'] === 'deploy') {
+					upgrade_abort('Deployment Failed', 'Could not move staged files to live. Error: ' . $swap_error . '. '
+						. ($swap['restored'] ? 'The previous release is back in place.' : 'Putting the previous release back FAILED: check the site.'), false);
+				}
+				upgrade_abort('Backup Failed', 'Could not move live files to backup. Error: ' . $swap_error, false);
 			}
 
 			// Both the site-root sync below and fix_permissions.sh after it write

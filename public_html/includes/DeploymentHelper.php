@@ -5,6 +5,9 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.13 - swapLiveTree(): the staged tree moves in behind a holding serve.php that answers 503, and the
+ *                 release's serve.php replaces it by rename(), so public_html is never without its entry script;
+ *                 performRollback() refuses a backup with no real serve.php (backupIsRelease())
  * @version 1.12 - schemaAhead() sets the release's own config/ (it ships default_Globalvars_site.php) aside for
  *                 the run and puts it back; it refused to run beside it, so 0.8.523 added nothing ahead
  * @version 1.11 - schemaAhead(): the staged release's missing tables and columns are added before its
@@ -894,6 +897,201 @@ class DeploymentHelper {
         return $result;
     }
 
+    /** The live tree's one entry point: the vhost rewrites every request to it. */
+    const ENTRY_SCRIPT = 'serve.php';
+
+    /** Where swapLiveTree() keeps the live entry script while the holding one answers. */
+    const HELD_ENTRY_SCRIPT = '.serve.php.held';
+
+    /** A line only the holding script carries. */
+    const HOLDING_MARKER = 'joinery-holding-script';
+
+    /**
+     * Swap the staged tree into public_html with the site answering throughout.
+     *
+     * The contents move, not the directory (public_html is commonly a Docker
+     * bind mount): live to $backup_dir, then staged to live. Moved one by one,
+     * those left public_html with no serve.php for a moment, and a request
+     * landing then was a PHP fatal, a 500 (two of ten sites in the 0.8.523
+     * rollout). So the entry script is never moved out: a holding script
+     * takes its place by rename() first and answers 503 with Retry-After while
+     * the rest moves, and the release's own serve.php replaces it by rename()
+     * last. Every request reaches serve.php, so nothing reaches a half-moved
+     * tree.
+     *
+     * php-fpm's opcache looks at a changed file again only after
+     * opcache.revalidate_freq seconds, so the swap waits that long after the
+     * holding script is in, before the old code starts leaving, and again
+     * after the new entry script is in, before anything (the deploy tier)
+     * asks the site to serve the new code.
+     *
+     * A run killed while holding leaves the holding script in place and the
+     * real one beside it; the next run keeps that real one, never the holding
+     * script, as the previous release's. Killed after the old code had left,
+     * and run again, there is no previous release left to keep (the run
+     * clears the backup first): the backup then holds only the holding
+     * script, and performRollback() refuses it (backupIsRelease()).
+     *
+     * Returns ['swapped' => bool, 'step' => 'hold'|'backup'|'deploy'|null,
+     *          'restored' => bool (live put back after a failed deploy step),
+     *          'error' => string|null].
+     */
+    public static function swapLiveTree($live_dir, $stage_dir, $backup_dir, $settle_seconds = null) {
+        $live = rtrim((string)$live_dir, '/');
+        $stage = rtrim((string)$stage_dir, '/');
+        $backup = rtrim((string)$backup_dir, '/');
+        $settle = ($settle_seconds === null) ? self::opcacheSettleSeconds() : (int)$settle_seconds;
+        $entry = $live . '/' . self::ENTRY_SCRIPT;
+        $held = $live . '/' . self::HELD_ENTRY_SCRIPT;
+        $result = array('swapped' => false, 'step' => null, 'restored' => false, 'error' => null);
+
+        if (!is_file($stage . '/' . self::ENTRY_SCRIPT)) {
+            $result['step'] = 'hold';
+            $result['error'] = 'The staged tree has no ' . self::ENTRY_SCRIPT;
+            return $result;
+        }
+
+        // Hold. A run killed while holding left the real script aside: that
+        // one is kept, never the holding script now in its place.
+        if (!(self::isHoldingScript($entry) && is_file($held))) {
+            @unlink($held);
+            if (is_file($entry) && !@link($entry, $held) && !@copy($entry, $held)) {
+                $result['step'] = 'hold';
+                $result['error'] = 'Could not keep ' . $entry . ' aside';
+                return $result;
+            }
+        }
+        // opcache tells a replaced file by its modification time, to the
+        // second: the holding script is dated a second before both real
+        // scripts, so neither is ever taken for it (written in the same second
+        // as the release's serve.php, it went on answering after the swap).
+        $holding_tmp = $live . '/.serve.php.holding';
+        $holding_time = min(is_file($entry) ? (int)filemtime($entry) : time(), (int)filemtime($stage . '/' . self::ENTRY_SCRIPT)) - 1;
+        if (@file_put_contents($holding_tmp, self::holdingScript()) === false
+            || !@chmod($holding_tmp, 0644) || !@touch($holding_tmp, $holding_time) || !@rename($holding_tmp, $entry)) {
+            @unlink($holding_tmp);
+            if (!self::isHoldingScript($entry)) {
+                @unlink($held);
+            }
+            $result['step'] = 'hold';
+            $result['error'] = 'Could not put the holding script in place at ' . $entry;
+            return $result;
+        }
+        if ($settle > 0) {
+            sleep($settle);
+        }
+
+        // Live to backup, all but the holding script; the kept entry script
+        // goes with it under its own name.
+        $out = array();
+        $exit = 0;
+        exec(sprintf('find %s -mindepth 1 -maxdepth 1 ! -name %s -exec mv -t %s {} + 2>&1',
+            escapeshellarg($live), escapeshellarg(self::ENTRY_SCRIPT), escapeshellarg($backup)), $out, $exit);
+        if ($exit === 0 && file_exists($backup . '/' . self::HELD_ENTRY_SCRIPT)) {
+            if (!@rename($backup . '/' . self::HELD_ENTRY_SCRIPT, $backup . '/' . self::ENTRY_SCRIPT)) {
+                $exit = 1;
+                $out[] = 'could not name the kept entry script ' . self::ENTRY_SCRIPT . ' in ' . $backup;
+            }
+        }
+        if ($exit !== 0) {
+            // Whatever did move goes back, and the real entry script with it.
+            exec(sprintf('find %s -mindepth 1 -maxdepth 1 -exec mv -t %s {} + 2>&1',
+                escapeshellarg($backup), escapeshellarg($live)));
+            if (is_file($held)) {
+                @rename($held, $entry);
+            }
+            $result['step'] = 'backup';
+            $result['error'] = implode(' ', $out);
+            return $result;
+        }
+
+        // Staged to live, the entry script last and by rename(): it is moved
+        // in beside the holding script first (staging may be another
+        // filesystem), then over it.
+        $out = array();
+        $exit = 0;
+        exec(sprintf('find %s -mindepth 1 -maxdepth 1 ! -name %s -exec mv -t %s {} + 2>&1',
+            escapeshellarg($stage), escapeshellarg(self::ENTRY_SCRIPT), escapeshellarg($live)), $out, $exit);
+        $incoming = $live . '/.serve.php.incoming';
+        if ($exit === 0) {
+            exec(sprintf('mv %s %s 2>&1', escapeshellarg($stage . '/' . self::ENTRY_SCRIPT), escapeshellarg($incoming)), $out, $exit);
+        }
+        if ($exit === 0 && !@rename($incoming, $entry)) {
+            $exit = 1;
+            $out[] = 'could not put the release\'s ' . self::ENTRY_SCRIPT . ' in place';
+        }
+        if ($exit !== 0) {
+            // What arrived goes back to staging (a directory cannot be moved
+            // onto one of the same name), then the previous release comes
+            // back the way the release went in: its serve.php last, by
+            // rename() over the holding script, so the old entry script never
+            // answers in front of a tree that is not all back.
+            if (is_file($incoming)) {
+                @rename($incoming, $stage . '/' . self::ENTRY_SCRIPT) || @unlink($incoming);
+            }
+            $restore_out = array();
+            $restore_exit = 0;
+            exec(sprintf('find %s -mindepth 1 -maxdepth 1 ! -name %s -exec mv -t %s {} + 2>&1',
+                escapeshellarg($live), escapeshellarg(self::ENTRY_SCRIPT), escapeshellarg($stage)), $restore_out, $restore_exit);
+            if ($restore_exit === 0) {
+                exec(sprintf('find %s -mindepth 1 -maxdepth 1 ! -name %s -exec mv -t %s {} + 2>&1',
+                    escapeshellarg($backup), escapeshellarg(self::ENTRY_SCRIPT), escapeshellarg($live)), $restore_out, $restore_exit);
+            }
+            if ($restore_exit === 0 && is_file($backup . '/' . self::ENTRY_SCRIPT)) {
+                exec(sprintf('mv %s %s 2>&1', escapeshellarg($backup . '/' . self::ENTRY_SCRIPT), escapeshellarg($incoming)), $restore_out, $restore_exit);
+                if ($restore_exit === 0 && !@rename($incoming, $entry)) {
+                    $restore_exit = 1;
+                }
+            }
+            $result['restored'] = ($restore_exit === 0 && !self::isHoldingScript($entry));
+            $result['step'] = 'deploy';
+            $result['error'] = implode(' ', $out);
+            return $result;
+        }
+        if ($settle > 0) {
+            sleep($settle);
+        }
+        $result['swapped'] = true;
+        return $result;
+    }
+
+    /** True when $backup_dir holds a release a rollback can put back: a real serve.php, not the holding script. */
+    public static function backupIsRelease($backup_dir) {
+        $entry = rtrim((string)$backup_dir, '/') . '/' . self::ENTRY_SCRIPT;
+        return is_file($entry) && !self::isHoldingScript($entry);
+    }
+
+    /** True when $path is the holding script swapLiveTree() puts in front of a site. */
+    public static function isHoldingScript($path) {
+        if (!is_file($path)) {
+            return false;
+        }
+        $head = @file_get_contents($path, false, null, 0, 200);
+        return is_string($head) && strpos($head, self::HOLDING_MARKER) !== false;
+    }
+
+    /**
+     * What a site answers while its code is swapped: 503 with Retry-After, a
+     * page that reloads itself, and nothing it has to include.
+     */
+    public static function holdingScript() {
+        return "<?php\n"
+            . '// ' . self::HOLDING_MARKER . ": an upgrade put this in front of the site while it swaps the code\n"
+            . "// (DeploymentHelper::swapLiveTree), and replaces it with the release's serve.php within seconds.\n"
+            . "// Still here long after an upgrade means the run stopped mid-swap: run the upgrade again.\n"
+            . "http_response_code(503);\n"
+            . "header('Retry-After: 5');\n"
+            . "header('Cache-Control: no-store');\n"
+            . "header('Content-Type: text/html; charset=utf-8');\n"
+            . "echo '<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"5\">'\n"
+            . "\t. '<title>Updating</title></head><body><p>This site is being updated. It will be back in a few seconds.</p></body></html>';\n";
+    }
+
+    /** How long php-fpm may keep serving a replaced file from opcache, plus one second. */
+    public static function opcacheSettleSeconds() {
+        return max(2, (int)ini_get('opcache.revalidate_freq')) + 1;
+    }
+
     /**
      * Where a deploy keeps the parts of the previous release that live outside
      * public_html, inside the rollback backup so they share its lifecycle:
@@ -1038,6 +1236,19 @@ class DeploymentHelper {
         // can be rolled back to.
         if (!is_dir($backup_dir)) {
             $result['error'] = "Backup directory does not exist: $backup_dir";
+            if ($verbose) {
+                echo "  ERROR: " . $result['error'] . "\n";
+            }
+            return $result;
+        }
+
+        // A backup with no real entry script is not a release: a run killed
+        // mid-swap and run again cleared the previous code and kept only the
+        // holding script. Restored with --delete it would leave the site
+        // answering 'being updated', or with nothing at all; the new release
+        // stays live instead.
+        if (!self::backupIsRelease($backup_dir)) {
+            $result['error'] = "$backup_dir holds no previous release (no serve.php, or only the upgrade's holding script): the code now live is kept";
             if ($verbose) {
                 echo "  ERROR: " . $result['error'] . "\n";
             }
