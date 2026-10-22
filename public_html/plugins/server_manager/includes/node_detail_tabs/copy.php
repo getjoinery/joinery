@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.29 - the ended note and the 'current as of' line give their times in UTC, as the rest of the tab does (B35)
  * @version 1.28 - a new server's plans are those the region shown sells (B31)
  * @version 1.27 - a manual switch's way back names each record to point back at the DNS host, before going back and
  *                  (in the notes) after, while DNS still names the copy (B28)
@@ -175,7 +176,7 @@ if (!$site_copy) {
 	}
 	if ($ended_server !== '') {
 		echo '<div class="alert alert-light border">The last copy of this site ended ('
-			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h($ended_copy->get_local('scp_update_time', 'M j, g:i A'))
+			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h(LibraryFunctions::convert_time($ended_copy->get('scp_update_time'), 'UTC', 'UTC', 'M j, H:i')) . ' UTC'
 			. '). If you have not yet, delete its server at the provider: <strong>' . $copy_h($ended_server) . '</strong>.</div>';
 	}
 	// What going back noted outlasts the copy: an AAAA record the owner
@@ -516,8 +517,8 @@ if ($copy_node) {
 }
 echo '</p>';
 if ($site_copy->get('scp_last_copied_time')) {
-	echo '<p>Current as of the backup taken at <strong>' . $copy_h($site_copy->get('scp_chain_time')) . '</strong> ('
-		. $copy_h($site_copy->get('scp_chain_id')) . '), copied ' . $copy_h($site_copy->get_local('scp_last_copied_time', 'M j, g:i A')) . '.</p>';
+	echo '<p>Current as of the backup taken at <strong>' . $copy_h(LibraryFunctions::convert_time($site_copy->get('scp_chain_time'), 'UTC', 'UTC', 'M j, H:i')) . ' UTC</strong> ('
+		. $copy_h($site_copy->get('scp_chain_id')) . '), copied ' . $copy_h(LibraryFunctions::convert_time($site_copy->get('scp_last_copied_time'), 'UTC', 'UTC', 'M j, H:i')) . ' UTC.</p>';
 }
 if ($copy_status === SiteCopy::STATUS_HALTED && $site_copy->get('scp_halt_reason')) {
 	echo '<div class="alert alert-warning"><strong>Stopped.</strong> ' . $copy_h($site_copy->get('scp_halt_reason')) . '</div>';
