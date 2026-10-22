@@ -262,6 +262,73 @@ $left->execute(array($kept_node->key));
 check((int)$left->fetchColumn() === 0, 'removed for good, the kept record goes with the node');
 
 // ---------------------------------------------------------------------------
+section('A container site\'s server is its host\'s: hiding it keeps the record on the host\'s node');
+
+// An adopted record is a whole machine, so on the container site's own node
+// it was refused, and hiding any plane-made Docker site threw.
+$dock_host = nhr_node('dockhost', array('mgn_web_root' => ''));
+$dock_mgh = nhr_insert('mgh_managed_hosts', 'mgh_managed_host_id', array(
+	'mgh_name' => 'HarnessTest NHR dock ' . $suffix, 'mgh_slug' => 'nhr-dock-' . $suffix, 'mgh_host' => '198.51.100.75',
+	'mgh_mgn_managed_node_id' => $dock_host->key));
+$docker_server = array('cvp_oca_operator_cloud_account_id' => (int)$srv_oca->key, 'cvp_instance_id' => 'nhr-inst-d-' . $suffix,
+	'cvp_instance_ip' => '198.51.100.75', 'cvp_region' => 'us-east', 'cvp_docker_mode' => 'docker');
+$dock_site = nhr_node('docksite', array('mgn_mgh_managed_host_id' => $dock_mgh, 'mgn_container_name' => 'nhrdock'));
+$dock_order = nhr_provision($buyer, $dock_site, $docker_server);
+$threw = '';
+try { $dock_site->hide(); } catch (Exception $e) { $threw = $e->getMessage(); }
+$host_rows = $live_rows($dock_host->key);
+foreach ($host_rows as $p) { harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $p->key); }
+check($threw === '' && (new ManagedNode($dock_site->key, TRUE))->get('mgn_delete_time'), 'a plane-made Docker site hides', $threw);
+check($live_rows($dock_site->key) === array(), 'its own node keeps no server record: the server is not the site\'s');
+check(count($host_rows) === 1 && (string)$host_rows[0]->get('cvp_install_mode') === 'adopted'
+	&& (string)$host_rows[0]->get('cvp_docker_mode') === 'bare-metal'
+	&& (string)$host_rows[0]->get('cvp_instance_id') === $docker_server['cvp_instance_id']
+	&& (string)$host_rows[0]->get('cvp_slug') === (string)$dock_host->get('mgn_slug'),
+	'the host\'s node records the server, as an adoption there would: the same instance, a whole machine, named as the host',
+	json_encode(array_map(function ($p) { return array($p->get('cvp_install_mode'), $p->get('cvp_docker_mode'), $p->get('cvp_slug')); }, $host_rows)));
+check(strpos(implode(' ', $dock_site->removal_notes()), 'stays recorded on the host\'s node') !== false, 'and the page that hid it says so',
+	json_encode($dock_site->removal_notes()));
+$dock_host = new ManagedNode($dock_host->key, TRUE);
+check(HeldCloudAccounts::node_account($dock_host) !== null && IpSwapMove::provision_of($dock_host) !== null,
+	'the host now knows its account and its server');
+
+// A second site on the same host: the host's record stands, and no second one is made.
+$dock_site2 = nhr_node('docksite2', array('mgn_mgh_managed_host_id' => $dock_mgh, 'mgn_container_name' => 'nhrdock2'));
+nhr_provision($buyer, $dock_site2, $docker_server);
+$dock_site2->hide();
+check(count($live_rows($dock_host->key)) === 1 && strpos(implode(' ', $dock_site2->removal_notes()), 'on record with the host') !== false,
+	'a host already on record keeps its one record', json_encode($dock_site2->removal_notes()));
+
+// A container site whose host has no node here: nothing is kept, and the page says why.
+$orphan_mgh = nhr_insert('mgh_managed_hosts', 'mgh_managed_host_id', array(
+	'mgh_name' => 'HarnessTest NHR orphan ' . $suffix, 'mgh_slug' => 'nhr-orphan-' . $suffix, 'mgh_host' => '198.51.100.76'));
+$orphan_site = nhr_node('orphansite', array('mgn_mgh_managed_host_id' => $orphan_mgh, 'mgn_container_name' => 'nhrorphan'));
+nhr_provision($buyer, $orphan_site, array('cvp_instance_id' => 'nhr-inst-o-' . $suffix, 'cvp_instance_ip' => '198.51.100.76',
+	'cvp_docker_mode' => 'docker', 'cvp_oca_operator_cloud_account_id' => (int)$srv_oca->key));
+$orphan_site->hide();
+check($live_rows($orphan_site->key) === array() && strpos(implode(' ', $orphan_site->removal_notes()), 'host has no node here') !== false,
+	'a container site whose host has no node here hides, keeping nothing, and says so', json_encode($orphan_site->removal_notes()));
+
+// ---------------------------------------------------------------------------
+section('Hiding is one transaction');
+
+/** A node whose removal fails after its order's record has gone. */
+class NhrFailingNode extends ManagedNode {
+	public function withdraw_open_jobs(): int { throw new Exception('nhr: a later step failed'); }
+}
+$atomic = nhr_node('atomic');
+$atomic_order = nhr_provision($buyer, $atomic, array('cvp_instance_id' => 'nhr-inst-t-' . $suffix, 'cvp_instance_ip' => '198.51.100.77',
+	'cvp_docker_mode' => 'bare-metal', 'cvp_oca_operator_cloud_account_id' => (int)$srv_oca->key));
+$threw = '';
+try { (new NhrFailingNode($atomic->key, TRUE))->hide(); } catch (Exception $e) { $threw = $e->getMessage(); }
+$after = $live_rows($atomic->key);
+foreach ($after as $p) { if ((int)$p->key !== (int)$atomic_order->key) { harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $p->key); } }
+check($threw !== '' && count($after) === 1 && (int)$after[0]->key === (int)$atomic_order->key
+	&& !(new ManagedNode($atomic->key, TRUE))->get('mgn_delete_time'),
+	'a step that fails after the order\'s record went leaves the order\'s record live, no kept record, and the node shown',
+	json_encode(array($threw, array_map(function ($p) { return array($p->key, $p->get('cvp_install_mode')); }, $after))));
+
+// ---------------------------------------------------------------------------
 section('Remove Permanently takes every record the node owns');
 
 $victim = nhr_node('victim');

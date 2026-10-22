@@ -1865,12 +1865,12 @@ A site placed on a server is hosted where its server is (`CloudAccounts::hosted_
 
 ### Hide from Dashboard
 
-Soft-deletes the node record (`delete_node` → `ManagedNode::hide()`). The site keeps running on its host and every record is kept. Hiding ends the work on the site:
+Soft-deletes the node record (`delete_node` → `ManagedNode::hide()`), all in one transaction: a step that fails leaves the node shown and every record as it was. The site keeps running on its host and every record is kept. Hiding ends the work on the site:
 
 - Its unfinished jobs are cancelled: its agent is refused from then on, so nothing else would end them.
 - Its active backup storage space drains: it takes no new backups and keeps what it holds.
 - The hosting order's provisioning record and its hosted trial are removed, so nothing seeds, retires a password on, sends mail setup to, or powers off a site nobody tracks.
-- The server stays recorded, since the site goes on running there: an adopted record of it (no order, never billed, no trial; owned by whoever hid the node) takes the order record's place, and a record that was adopted already is kept. The escrow holder's Tier 2 check, reverse DNS and an address swap find the server through it while the node is hidden and after Restore. The other ways a node leaves the dashboard let its machine go (a discarded copy, the old server of a kept switch-over, a container its host removed) and keep no record of it.
+- The server stays recorded, since the site goes on running there: an adopted record of it (no order, never billed, no trial; owned by whoever hid the node) takes the order record's place, and a record that was adopted already is kept. The escrow holder's Tier 2 check, reverse DNS and an address swap find the server through it while the node is hidden and after Restore. A site in a container runs on its Docker host's server, so that record goes on the host's node (an adopted record is a whole machine), none goes on the site's, and a host already on record keeps its one record; a host with no node here keeps none, and the page says so. The other ways a node leaves the dashboard let its machine go (a discarded copy, the old server of a kept switch-over, a container its host removed) and keep no record of it.
 - A domain bought for the site is kept: the buyer is its registrant, and its record carries the renewals and the hand-over. One still being bought or wired up is parked on the Domains page with the reason (Retry parks it again while its site is still hidden). An active domain needs no server and is left as it is; the domain watch sends a hidden node no notice.
 - Billing is never touched. A subscription still charging for the hosting is named in the page's message, so whoever hid the site can cancel it from the buyer's user page (its Subscriptions panel).
 

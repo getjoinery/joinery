@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.63 - hiding a container site keeps its server on record on its Docker host's node (an adopted record is
+ *                a whole machine, so on the site's it was refused and hiding failed); soft_delete() is one transaction
  * @version 1.62 - mgn_agent_test_build: the node runs a live-proof test build, trusting only its run's throwaway key,
  *                and is offered none of this plane's agents or bundles (fleet_security_patching WP7, Q8)
  * @version 1.61 - mgn_agent_left_time / mgn_agent_left_to and agent_moved_away(): the node's agent said goodbye,
@@ -1041,26 +1043,31 @@ class ManagedNode extends SystemBase {
 	}
 
 	function soft_delete() {
-		$this->removal_notes = $this->key ? $this->release_site_records(!$this->keeps_server) : [];
-		if ($this->key) {
-			$withdrawn = $this->withdraw_open_jobs();
-			if ($withdrawn > 0) {
-				$this->removal_notes[] = $withdrawn . ' unfinished job' . ($withdrawn === 1 ? ' was' : 's were') . ' cancelled.';
+		// One transaction: a step that fails leaves the node on the dashboard
+		// with every record it had, never its order's record gone and the node
+		// still shown.
+		return DbConnector::transaction(function () {
+			$this->removal_notes = $this->key ? $this->release_site_records(!$this->keeps_server) : [];
+			if ($this->key) {
+				$withdrawn = $this->withdraw_open_jobs();
+				if ($withdrawn > 0) {
+					$this->removal_notes[] = $withdrawn . ' unfinished job' . ($withdrawn === 1 ? ' was' : 's were') . ' cancelled.';
+				}
+				// No new backups go anywhere for a node that is gone; what it has
+				// stays where it is until someone deletes it from the target.
+				$drained = StorageSpace::drain_owner(StorageSpace::OWNER_NODE, (int)$this->key);
+				if ($drained && ($t = $drained->target())) {
+					$this->removal_notes[] = 'Its backups stay on "' . $t->get('bkt_name') . '"; delete them from that target\'s Stored Backups when they are no longer wanted.';
+				}
 			}
-			// No new backups go anywhere for a node that is gone; what it has
-			// stays where it is until someone deletes it from the target.
-			$drained = StorageSpace::drain_owner(StorageSpace::OWNER_NODE, (int)$this->key);
-			if ($drained && ($t = $drained->target())) {
-				$this->removal_notes[] = 'Its backups stay on "' . $t->get('bkt_name') . '"; delete them from that target\'s Stored Backups when they are no longer wanted.';
+			$host_id = (int)$this->get('mgn_mgh_managed_host_id');
+			$done = parent::soft_delete();
+			// The last site or host agent to leave a Docker box leaves no group behind.
+			if ($host_id > 0 && ManagedHost::retire_if_empty($host_id)) {
+				$this->removal_notes[] = 'Its Docker host had nothing left on it and was removed from the dashboard too.';
 			}
-		}
-		$host_id = (int)$this->get('mgn_mgh_managed_host_id');
-		$done = parent::soft_delete();
-		// The last site or host agent to leave a Docker box leaves no group behind.
-		if ($host_id > 0 && ManagedHost::retire_if_empty($host_id)) {
-			$this->removal_notes[] = 'Its Docker host had nothing left on it and was removed from the dashboard too.';
-		}
-		return $done;
+			return $done;
+		});
 	}
 
 	/**
@@ -1238,6 +1245,8 @@ class ManagedNode extends SystemBase {
 	 *   (keep_server_link()), and one that was adopted already is kept. The
 	 *   escrow holder's Tier 2 check, reverse DNS and an address swap find
 	 *   the server through it, before and after Restore to Dashboard (B71).
+	 *   A site in a container runs on its Docker host's server, so that
+	 *   record goes on the host's node, and none on the site's.
 	 * - A domain bought for the site is kept: the buyer is its registrant,
 	 *   and the record carries its renewals and its hand-over. One still being
 	 *   bought or wired up is parked for a person on the Domains page, with
@@ -1264,8 +1273,8 @@ class ManagedNode extends SystemBase {
 			}
 			$provision->soft_delete();
 			$notes[] = 'The provisioning record for ' . $domain . ($trial !== null ? ' and its hosted trial were' : ' was') . ' removed.';
-			if (!$for_good && ($kept = $this->keep_server_link($provision)) !== null) {
-				$notes[] = 'Its cloud server stays recorded (provision #' . (int)$kept->key . '), so its escrow checks, reverse DNS and address swap work as before once it is restored.';
+			if (!$for_good && ($kept = $this->keep_server_link($provision)) !== '') {
+				$notes[] = $kept;
 			}
 
 			$item_id = (int)$provision->get('cvp_external_order_item_id');
@@ -1292,14 +1301,30 @@ class ManagedNode extends SystemBase {
 	 * account, instance, addresses and region, and no order, trial, buyer,
 	 * password or mail leg, so nothing is billed, seeded or powered off for
 	 * it. No provider is asked: this is the server this node already had.
-	 * It belongs to whoever is hiding the node, else to whoever added the
-	 * cloud account it is in. Null when the record named no server, or no
-	 * one can own the new record.
+	 *
+	 * The record is the machine's, so it goes on the machine's node: this
+	 * node for a site on its own server, its Docker host's node for a site in
+	 * a container (escrow, reverse DNS and an address swap are the host's).
+	 * A host already on record keeps its record. It belongs to whoever is
+	 * hiding the node, else to whoever added the cloud account it is in.
+	 *
+	 * @return string the sentence for the page that hid it, '' when the record
+	 *                named no server or no one can own the new record
 	 */
-	private function keep_server_link(CustomerCloudProvision $order): ?CustomerCloudProvision {
+	private function keep_server_link(CustomerCloudProvision $order): string {
 		$instance_id = trim((string)$order->get('cvp_instance_id'));
 		if ($instance_id === '') {
-			return null;
+			return '';
+		}
+		$machine = $this;
+		if ((string)($order->get('cvp_docker_mode') ?: 'docker') !== 'bare-metal') {
+			$machine = NodeRemoval::host_server($this);
+			if ($machine === null) {
+				return 'Its cloud server is its Docker host\'s, and the host has no node here, so the server is not kept on record.';
+			}
+			if (($held = CloudServerAdoption::existing($machine)) !== null) {
+				return 'Its cloud server is its Docker host\'s, on record with the host (provision #' . (int)$held->key . ').';
+			}
 		}
 		$user_id = (int)SessionControl::get_instance()->get_user_id();
 		$oca_id = (int)$order->get('cvp_oca_operator_cloud_account_id');
@@ -1307,22 +1332,32 @@ class ManagedNode extends SystemBase {
 			$user_id = (int)(new OperatorCloudAccount($oca_id, TRUE))->get('oca_added_by_usr_user_id');
 		}
 		if ($user_id <= 0) {
-			return null;
+			return '';
 		}
 		$link = new CustomerCloudProvision(NULL);
 		$link->set('cvp_origin', 'admin');
 		$link->set('cvp_usr_user_id', $user_id);
 		foreach (['cvp_hosting_mode', 'cvp_oca_operator_cloud_account_id', 'cvp_cca_customer_cloud_account_id', 'cvp_domain',
 				'cvp_slug', 'cvp_provider', 'cvp_instance_id', 'cvp_instance_ip', 'cvp_instance_ipv6', 'cvp_region',
-				'cvp_instance_type', 'cvp_docker_mode', 'cvp_provider_disk_encryption', 'cvp_data_root_encrypted'] as $field) {
+				'cvp_instance_type', 'cvp_provider_disk_encryption', 'cvp_data_root_encrypted'] as $field) {
 			$link->set($field, $order->get($field));
 		}
+		if ($machine !== $this) {
+			// Named as the host is, as an adoption on its node would be.
+			$link->set('cvp_domain', mb_substr((string)(parse_url((string)$machine->get('mgn_site_url'), PHP_URL_HOST)
+				?: $machine->get('mgn_host')), 0, 255));
+			$link->set('cvp_slug', mb_substr((string)$machine->get('mgn_slug'), 0, 50));
+		}
+		// An adopted record is a whole machine.
+		$link->set('cvp_docker_mode', 'bare-metal');
 		$link->set('cvp_status', 'done');
 		$link->set('cvp_install_mode', 'adopted');
-		$link->set('cvp_mgn_managed_node_id', (int)$this->key);
+		$link->set('cvp_mgn_managed_node_id', (int)$machine->key);
 		$link->save();
 		$link->load();
-		return $link;
+		return $machine === $this
+			? 'Its cloud server stays recorded (provision #' . (int)$link->key . '), so its escrow checks, reverse DNS and address swap work as before once it is restored.'
+			: 'Its cloud server is its Docker host\'s and stays recorded on the host\'s node (provision #' . (int)$link->key . '), so the host\'s escrow checks and reverse DNS work as before.';
 	}
 
 	function prepare() {
