@@ -54,6 +54,15 @@
             "where": "test server wp7-proof-264d2a (Linode 108918770), site wp7proof264d2a installed at 0.8.523, agent built for the run from 0568e140e14b",
             "what": "jobs 166569 and 166573: ready before and after the upgrade (agent_live_proofs_site_live)",
             "date": "2026-10-22"
+        },
+        {
+            "word": "publish_upgrade",
+            "agent_version": "1.91.0",
+            "script": "public_html/plugins/server_manager/includes/publish_upgrade.php",
+            "script_sha256": "301cc945447479491ebb94d8a0d3b9bee452c64bed3bb6b90f56da648f78d69d",
+            "where": "dev (publishing box), node 24776, job 168666",
+            "what": "Published release 0.8.525 through the dashboard's Publish Upgrade form: archives built, signed and listed; job completed in 43 s; fleet then rolled out onto it",
+            "date": "2026-10-22"
         }
     ]
 }
