@@ -164,7 +164,8 @@ root by the host converger once the plugin is active):
    `MemoryMax` at half the server's memory
    (at least 400 MB). Past the cap the editor's overflow goes to swap and opens
    slow down; the database and web server are untouched. The editor is not
-   started at boot.
+   started at boot, and is stopped again when the package first installs
+   (the package starts it).
 4. Adds `conf-available/joinery-office-editor.conf`: `/browser`,
    `/hosting/capabilities` and `/cool` (websocket included) proxied to the
    editor with the visitor's Host kept, its conversion endpoints, metrics and
