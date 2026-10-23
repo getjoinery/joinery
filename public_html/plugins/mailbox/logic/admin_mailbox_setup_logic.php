@@ -23,6 +23,7 @@
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.20 - its actions run only on a POST: a GET carrying action= changed the relay, domains or keys
  * @version 2.19 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
  * @version 2.18 - the Sending identity box and guided steps follow the add-ons
  *   (focus_relay_on, focus_send_requested)
@@ -118,11 +119,16 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	};
 	$redirect_url = $state_qs();
 
+	// Every action below is a form submit (POST). The page merges the query
+	// string into $input for its view state, so a GET must reach none of them:
+	// a link could otherwise enable the relay or destroy a signing key.
+	$posted = LibraryFunctions::isFormSubmission() ? $input : array();
+
 	// Relay section actions (lifecycle, provisioning, hosted-slot enrollment)
 	// post back to this tab. Must run before the mail-hostname save below —
 	// the provision form also carries a mail_hostname field.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
-	$relay_redirect = admin_mailbox_relay_tenant_actions($input, $session, $state_qs());
+	$relay_redirect = admin_mailbox_relay_tenant_actions($posted, $session, $state_qs());
 	if ($relay_redirect !== null) {
 		return $relay_redirect;
 	}
@@ -131,7 +137,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// drives them — there is no separate ceremony page — so every protect_*
 	// action lands here and redirects back to the focused domain.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
-	$protect_redirect = mailbox_protect_handle_action($input, $session, $state_qs());
+	$protect_redirect = mailbox_protect_handle_action($posted, $session, $state_qs());
 	if ($protect_redirect !== null) {
 		return $protect_redirect;
 	}
@@ -139,7 +145,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// DNS publish actions (specs/dns_record_management.md). Handled before the
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
-	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id,
+	$dns_redirect = DnsPublishBox::handle($posted, function () use ($selected_alias_id, $selected_domain_id,
 			$protect_setup, $machine_setup) {
 		// Inside the ceremony the records to publish are the SIGNING-STAGE ones —
 		// the same set its publish box rendered. Apply resolves the plan again
@@ -169,22 +175,22 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	};
 
 	// --- POST action: save mail hostname / public IP ---
-	if (isset($input['mail_hostname']) || isset($input['public_ip'])) {
-		mailbox_setup_write_setting('mailbox_mail_hostname', strtolower(trim($input['mail_hostname'] ?? '')));
-		mailbox_setup_write_setting('mailbox_public_ip', trim($input['public_ip'] ?? ''));
+	if (isset($posted['mail_hostname']) || isset($posted['public_ip'])) {
+		mailbox_setup_write_setting('mailbox_mail_hostname', strtolower(trim($posted['mail_hostname'] ?? '')));
+		mailbox_setup_write_setting('mailbox_public_ip', trim($posted['public_ip'] ?? ''));
 		$announce('Setup details saved.', 'Saved');
 		return LogicResult::redirect($state_qs(array('advanced' => true)));
 	}
 
 	// --- POST action: one-click fixes ---
-	if (isset($input['action'])) {
-		if ($input['action'] === 'enable_plugin') {
+	if (isset($posted['action'])) {
+		if ($posted['action'] === 'enable_plugin') {
 			mailbox_setup_write_setting('mailbox_enabled', '1');
 			$announce('Inbound email is now enabled.', 'Enabled');
 			return LogicResult::redirect($redirect_url);
 		}
 
-		if ($input['action'] === 'enable_srs') {
+		if ($posted['action'] === 'enable_srs') {
 			mailbox_setup_write_setting('mailbox_srs_enabled', '1');
 			// Generate a signing secret only if one is not already set, so
 			// re-running the fix never rotates a live secret.
@@ -195,8 +201,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			return LogicResult::redirect($redirect_url);
 		}
 
-		if ($input['action'] === 'add_domain') {
-			$domain_name = strtolower(trim($input['domain'] ?? ''));
+		if ($posted['action'] === 'add_domain') {
+			$domain_name = strtolower(trim($posted['domain'] ?? ''));
 			if ($domain_name !== '') {
 				try {
 					if (!InboundEmailDomain::GetByDomain($domain_name)) {
@@ -229,8 +235,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// re-pressing on a registered domain announces success and changes
 		// nothing. DKIM authority stays on the subdomain itself (the provider
 		// implementation guarantees it) so its keys align strictly.
-		if ($input['action'] === 'machine_register') {
-			$machine_domain = strtolower(trim($input['domain'] ?? ''));
+		if ($posted['action'] === 'machine_register') {
+			$machine_domain = strtolower(trim($posted['domain'] ?? ''));
 			$class = EmailSender::activeServiceKey() !== ''
 				? (EmailSender::getDiscoveredProviders()[EmailSender::activeServiceKey()] ?? null) : null;
 			if ($machine_domain === '' || !preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $machine_domain)) {
@@ -255,10 +261,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// Step 3: switch system mail to the machine identity. Offered by the
 		// view only once steps 1–2 verify, and re-checked here — a stale tab
 		// must not flip system mail onto an identity that stopped verifying.
-		if ($input['action'] === 'machine_switch') {
-			$parent = strtolower(trim($input['domain'] ?? ''));
-			$local  = strtolower(trim($input['machine_local'] ?? ''));
-			$replyto = trim($input['machine_replyto'] ?? '');
+		if ($posted['action'] === 'machine_switch') {
+			$parent = strtolower(trim($posted['domain'] ?? ''));
+			$local  = strtolower(trim($posted['machine_local'] ?? ''));
+			$replyto = trim($posted['machine_replyto'] ?? '');
 			$machine_domain = 'mail.' . $parent;
 			if ($parent === '' || !preg_match('/^[a-z0-9](?:[a-z0-9._+-]*[a-z0-9])?$/', $local)) {
 				$announce('Enter a valid address name (letters, digits, dots, dashes).', 'Error');
@@ -289,7 +295,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 		// Prove the whole ambient path — guard, provider, alignment — with one
 		// real send to the operator. The one sub-check that cannot be inferred.
-		if ($input['action'] === 'machine_test_send') {
+		if ($posted['action'] === 'machine_test_send') {
 			require_once(PathHelper::getIncludePath('data/users_class.php'));
 			$acting = new User((int)$session->get_user_id(), TRUE);
 			$to = $acting->key ? trim((string)$acting->get('usr_email')) : '';
@@ -322,8 +328,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// material and cannot be undone from a browser. The gates are the two
 		// facts that make it safe — sending is already locked to the sealed key,
 		// and the DNS shape that makes that stick is published and verified.
-		if ($input['action'] === 'destroy_local_key') {
-			$domain_name = strtolower(trim($input['domain'] ?? ''));
+		if ($posted['action'] === 'destroy_local_key') {
+			$domain_name = strtolower(trim($posted['domain'] ?? ''));
 			// GetByDomain() returns FALSE on a miss, never null.
 			$model = $domain_name !== '' ? InboundEmailDomain::GetByDomain($domain_name) : false;
 			if (!$model) {

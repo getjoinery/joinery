@@ -550,6 +550,11 @@ class ProtectOptinTest {
 			'the action refuses while send protection is off');
 		check(strpos($logic, 'protectedDomainChecks($model)') !== false,
 			'the action refuses until the protected DNS shape verifies');
+		// The page merges the query string into its input: a link carrying
+		// action=destroy_local_key must reach no action handler.
+		check(strpos($logic, '$posted = LibraryFunctions::isFormSubmission() ? $input : array();') !== false
+				&& strpos($logic, "\$input['action']") === false,
+			'every Setup tab action runs only on a POST');
 	}
 
 	// ------------------------------------------------------------------
