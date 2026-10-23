@@ -266,6 +266,7 @@ $permitted = array(
 	'includes/SecretReconciler.php'                           => 'sealed-secret reconciliation: dead secrets healed/flagged and the cached verdict written, on whatever cold request runs the reconciler',
 	'data/file_blobs_class.php'                               => 'a refused on-demand variant is recorded so the next view does not decode the same photo again',
 	'logic/oauth_callback_logic.php'                          => 'OAuth provider redirect — persisting the grant IS the request',
+	'plugins/office_editor/includes/OfficeEditorWopi.php'     => 'the document editor loading a file (WOPI GetFile) starts its editing span: the editor\'s signed request and token are the authority, not a page view',
 	'plugins/mailbox/includes/InboundEmailRouter.php'         => 'deferred report filing at unlock — lazy processing only the owner\'s in-window secret makes possible',
 	'plugins/mailbox/includes/InboundEmailSetupCheck.php'     => 'relay status folded into the row on a setup view',
 	'plugins/mailbox/includes/relay_admin.php'                => 'relay/shard reconciliation from node facts',

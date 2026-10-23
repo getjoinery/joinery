@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# office-editor-ctl - start, report on and idle-stop the document editor.
+# Version: 0.1.0
+#
+# Installed root-owned at /usr/local/sbin by install_office_editor.sh. The web
+# user may run `start` and `status` through sudo (opening a document starts the
+# editor); `stop` and `idle-check` are root's (the cron job).
+#
+#   start       start the editor if it is not running; returns at once
+#   status      print active or inactive; exit 0 either way
+#   stop        stop it
+#   idle-check  stop it once no document has been open for IDLE_MINUTES
+#
+# "Idle" is the editor's own count of open documents, from its metrics on
+# loopback: a document stays open while anyone has it in a tab.
+
+set -euo pipefail
+
+IDLE_MINUTES=30
+RUN_DIR="/run/joinery-office-editor"
+BUSY_MARK="${RUN_DIR}/last-busy"
+
+case "${1:-}" in
+    start)
+        if systemctl is-active --quiet coolwsd; then
+            echo "active"
+            exit 0
+        fi
+        install -d -m 755 "${RUN_DIR}"
+        touch "${BUSY_MARK}"
+        systemctl start --no-block coolwsd
+        echo "starting"
+        ;;
+    status)
+        if systemctl is-active --quiet coolwsd; then echo "active"; else echo "inactive"; fi
+        ;;
+    stop)
+        systemctl stop coolwsd
+        echo "stopped"
+        ;;
+    idle-check)
+        systemctl is-active --quiet coolwsd || exit 0
+        install -d -m 755 "${RUN_DIR}"
+        metrics="$(curl -s --max-time 5 http://127.0.0.1:9980/cool/getMetrics || true)"
+        open=$(printf '%s\n' "${metrics}" | awk '$1 == "kit_assigned_count" {print $2}')
+        # No answer counts as nothing open: a service just started has its
+        # mark from `start`, and one stuck past IDLE_MINUTES is stopped.
+        if (( ${open:-0} > 0 )) || [[ ! -f "${BUSY_MARK}" ]]; then
+            touch "${BUSY_MARK}"
+            exit 0
+        fi
+        if [[ -n "$(find "${BUSY_MARK}" -mmin +"${IDLE_MINUTES}" 2>/dev/null)" ]]; then
+            systemctl stop coolwsd
+            echo "stopped after ${IDLE_MINUTES} idle minutes"
+        fi
+        ;;
+    *)
+        echo "usage: office-editor-ctl start|status|stop|idle-check" >&2
+        exit 2
+        ;;
+esac

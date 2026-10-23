@@ -2,8 +2,9 @@
 /**
  * Drive — member file storage page.
  *
- * @version 1.5 - loads zip-writer.js for a Fortress folder's Download as zip
- * @version 1.4 - unlock and setup are the core vault ceremony; no dialog of its own
+ * @version 1.6 - New file dialog for the New menu's plugin creators
+ * @changelog 1.5 - loads zip-writer.js for a Fortress folder's Download as zip
+ * @changelog 1.4 - unlock and setup are the core vault ceremony; no dialog of its own
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('drive_logic.php', 'logic'));
@@ -30,6 +31,7 @@ $new_folder_fw = $page->getFormWriter('drive_new_folder', array('action' => '/dr
 $rename_fw     = $page->getFormWriter('drive_rename', array('action' => '/drive', 'method' => 'POST'));
 $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 'method' => 'POST'));
 $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/drive', 'method' => 'POST'));
+$new_file_fw   = $page->getFormWriter('drive_new_file', array('action' => '/drive', 'method' => 'POST'));
 ?>
 <div class="jy-ui">
 <section class="jy-content-section">
@@ -127,6 +129,21 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 		<button type="submit" class="btn btn-primary">Create</button>
 	</div>
 	<?php $new_folder_fw->end_form(); ?>
+</dialog>
+
+<dialog id="drvNewFileDialog" class="jy-ui drv-dialog">
+	<h3 id="drvNewFileTitle">New file</h3>
+	<?php
+	// For the New menu's plugin creators (a document, a spreadsheet); drive.js
+	// posts the name to the creator's action and opens what it made.
+	$new_file_fw->begin_form();
+	$new_file_fw->textinput('drv_new_file_name', 'Name', array('id' => 'drvNewFileName', 'required' => true, 'maxlength' => 200));
+	?>
+	<div class="drv-dialog-actions">
+		<button type="button" class="btn btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="btn btn-primary">Create</button>
+	</div>
+	<?php $new_file_fw->end_form(); ?>
 </dialog>
 
 <dialog id="drvRenameDialog" class="jy-ui drv-dialog">
@@ -288,6 +305,9 @@ $protection_fw = $page->getFormWriter('drive_protection', array('action' => '/dr
 .drv-menu button{background:transparent;border:0;text-align:left;padding:.5rem .65rem;border-radius:6px;cursor:pointer;font:inherit;color:inherit}
 .drv-menu button:hover{background:rgba(127,127,127,.14)}
 .drv-menu button.danger{color:#e0533d}
+.drv-menu button.drv-menu-off{opacity:.55;cursor:default;display:flex;flex-direction:column;align-items:flex-start;max-width:260px}
+.drv-menu button.drv-menu-off:hover{background:transparent}
+.drv-menu-why{font-size:.78rem;margin-top:.15rem;white-space:normal}
 .drv-dialog{border:0;border-radius:14px;padding:1.4rem;max-width:420px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.3)}
 .drv-dialog::backdrop{background:rgba(0,0,0,.4)}
 .drv-dialog h3{margin:0 0 .8rem}

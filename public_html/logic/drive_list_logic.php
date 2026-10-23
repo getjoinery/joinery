@@ -240,6 +240,11 @@ function drive_list_logic(array $input): LogicResult {
 		// The rail's "Also in your account" entries, recounted on every load
 		// so a newly arrived attachment shows up without a page reload.
 		'other_sources' => DriveHelper::other_sources_for_user($user_id),
+		// What the New menu can make here besides a folder: the creators
+		// plugins registered. Only in a folder of the member's own tree, which
+		// is the only place the New menu shows.
+		'create_options' => ($view === 'mine' && $search === '')
+			? DriveHelper::create_options_for($current_folder, $user_id) : array(),
 	));
 }
 

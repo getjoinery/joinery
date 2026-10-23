@@ -50,7 +50,10 @@ class FileHeadMovedException extends Exception {
  * demotion transfers the head's reference to the new version (no count change),
  * and pruning / permanent delete release it.
  *
- * @version 1.2.1 - a write that meets a PHP Error part way through rolls its
+ * @version 1.3.0 - replace_head_content: a later save of one editing session
+ *                  replaces the head it wrote, adding no version
+ *                  (specs/cloud_drive_office_suite.md §4.3)
+ * @changelog 1.2.1 - a write that meets a PHP Error part way through rolls its
  *                  transaction back as it does on an Exception (B14)
  * @changelog 1.2.0 - save_new_metadata: an encrypted rename writes its blob
  *                  under the same row hold as a version, checked against the
@@ -193,6 +196,47 @@ class FileVersion extends SystemBase {
 		}
 
 		self::prune($file, (int)$file->get('fil_usr_user_id'));
+		return true;
+	}
+
+	/**
+	 * Replace the file's head content in place, adding no version: the later
+	 * saves of one editing session, whose first save already demoted the head
+	 * the session started from (save_new_content). The head being replaced was
+	 * written by that same session, so nobody's history is lost.
+	 *
+	 * $expected_head_blob_id is the head the caller's session wrote last. A
+	 * head holding anything else -- another device saved, a version was
+	 * restored -- is not this session's to overwrite: nothing is written and
+	 * false comes back, and the caller saves as a new version instead or
+	 * refuses. Read under the same row hold every version write takes.
+	 *
+	 * $new_blob already counts the reference the head is about to hold; the
+	 * replaced head blob's reference is released. On false the caller still
+	 * holds $new_blob's reference and gives it back.
+	 *
+	 * @return bool whether the head was replaced
+	 */
+	public static function replace_head_content($file, $new_blob, $expected_head_blob_id) {
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		DbConnector::BeginTransaction();
+		try {
+			self::_lock_file((int)$file->key);
+			$head_blob_id = self::_head_blob_id((int)$file->key);
+			if ($head_blob_id !== (int)$expected_head_blob_id || $head_blob_id === (int)$new_blob->key) {
+				DbConnector::Commit();
+				return false;
+			}
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$q = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
+			$q->execute(array((int)$new_blob->key, (int)$file->key));
+			$file->set_as_stored('fil_fbb_file_blob_id', (int)$new_blob->key);
+			FileBlob::release($head_blob_id);
+			DbConnector::Commit();
+		} catch (Throwable $e) {
+			DbConnector::Rollback();
+			throw $e;
+		}
 		return true;
 	}
 

@@ -586,6 +586,151 @@ class DriveHelper {
 		} else {
 			$out['encrypted'] = false;
 		}
+		// What a plugin can open this file with, for a browser session's
+		// listing only: a sync client or the app has no page to send anyone to.
+		if ($with_urls && (!class_exists('ApiAuth', false) || ApiAuth::isBrowserSessionPrincipal())) {
+			$open_with = self::open_with_for($file, (int)SessionControl::get_instance()->get_user_id());
+			if (!empty($open_with)) {
+				$out['open_with'] = $open_with;
+			}
+		}
+		return $out;
+	}
+
+	// ------------------------------------------------------------------
+	// Openers and creators — where a plugin says "I can open these files"
+	// ------------------------------------------------------------------
+
+	/** @var array<string,array> registered openers, by key */
+	private static $openers = array();
+
+	/** @var array<string,array> registered creators, by key */
+	private static $creators = array();
+
+	/**
+	 * Register something that opens files of the given extensions — called from
+	 * a plugin's bootstrap. $spec:
+	 *   - label:      the menu text, e.g. "Open in editor"
+	 *   - extensions: lowercase extensions it opens, e.g. ['docx', 'xlsx']
+	 *   - url:        callable($file, $user_id) => the page that opens this file
+	 *                 for this member, or null when it cannot right now
+	 *   - explain:    optional callable($file, $user_id) => one line saying why
+	 *                 url() gave null, for a reason the member should see; null
+	 *                 or '' when there is nothing to say
+	 */
+	public static function registerOpener($key, array $spec) {
+		$exts = array();
+		foreach ((array)($spec['extensions'] ?? array()) as $ext) {
+			$exts[] = strtolower(ltrim((string)$ext, '.'));
+		}
+		self::$openers[(string)$key] = array(
+			'label'      => (string)($spec['label'] ?? ''),
+			'extensions' => $exts,
+			'url'        => $spec['url'],
+			'explain'    => isset($spec['explain']) ? $spec['explain'] : null,
+		);
+	}
+
+	/**
+	 * Register something that makes a new file in a folder — called from a
+	 * plugin's bootstrap. $spec:
+	 *   - label:     the New menu text, e.g. "Document"
+	 *   - action:    the API action that creates the file and returns
+	 *                `{url}`, the page that opens it; it is posted
+	 *                {folder_id, name} plus params
+	 *   - params:    optional fixed fields posted with every call
+	 *   - available: optional callable($folder_or_null, $user_id) => true, or a
+	 *                one-line reason it cannot create here
+	 */
+	public static function registerCreator($key, array $spec) {
+		self::$creators[(string)$key] = array(
+			'label'     => (string)($spec['label'] ?? ''),
+			'action'    => (string)($spec['action'] ?? ''),
+			'params'    => (array)($spec['params'] ?? array()),
+			'available' => isset($spec['available']) ? $spec['available'] : null,
+		);
+	}
+
+	/** Forget every registration (tests). */
+	public static function resetOpenersForTest() {
+		self::$openers = array();
+		self::$creators = array();
+	}
+
+	/** Plugin bootstraps register openers; make sure they have run. */
+	private static function load_registrations() {
+		if (class_exists('PluginBootstraps')) {
+			try {
+				PluginBootstraps::load();
+			} catch (Throwable $e) {
+				error_log('DriveHelper: plugin bootstraps failed to load: ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
+	 * The openers that apply to $file for $user_id, as
+	 * [{key, label, url}] or [{key, label, explain}]. Only Drive's own live
+	 * files get openers; a file another feature stored stays download-only.
+	 */
+	public static function open_with_for($file, $user_id) {
+		if ($file->get('fil_source') !== File::SOURCE_DRIVE) {
+			return array();
+		}
+		if ($file->get('fil_delete_time') !== null && $file->get('fil_delete_time') !== '') {
+			return array();
+		}
+		self::load_registrations();
+		if (empty(self::$openers)) {
+			return array();
+		}
+		$ext = strtolower(pathinfo((string)$file->get('fil_title'), PATHINFO_EXTENSION));
+		if ($ext === '') {
+			return array();
+		}
+		$out = array();
+		foreach (self::$openers as $key => $op) {
+			if (!in_array($ext, $op['extensions'], true)) {
+				continue;
+			}
+			try {
+				$url = call_user_func($op['url'], $file, (int)$user_id);
+				if (is_string($url) && $url !== '') {
+					$out[] = array('key' => $key, 'label' => $op['label'], 'url' => $url);
+					continue;
+				}
+				$why = $op['explain'] ? call_user_func($op['explain'], $file, (int)$user_id) : null;
+				if (is_string($why) && $why !== '') {
+					$out[] = array('key' => $key, 'label' => $op['label'], 'explain' => $why);
+				}
+			} catch (Throwable $e) {
+				error_log('DriveHelper: opener ' . $key . ' failed for file ' . (int)$file->key . ': ' . $e->getMessage());
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The creators available in $folder (null = the member's root), as
+	 * [{key, label, action, params}] or [{key, label, explain}] where a
+	 * creator says it cannot make anything here.
+	 */
+	public static function create_options_for($folder, $user_id) {
+		self::load_registrations();
+		$out = array();
+		foreach (self::$creators as $key => $cr) {
+			try {
+				$ok = $cr['available'] ? call_user_func($cr['available'], $folder, (int)$user_id) : true;
+			} catch (Throwable $e) {
+				error_log('DriveHelper: creator ' . $key . ' failed: ' . $e->getMessage());
+				continue;
+			}
+			if ($ok === true) {
+				$out[] = array('key' => $key, 'label' => $cr['label'], 'action' => $cr['action'], 'params' => (object)$cr['params']);
+			} elseif (is_string($ok) && $ok !== '') {
+				$out[] = array('key' => $key, 'label' => $cr['label'], 'explain' => $ok);
+			}
+		}
 		return $out;
 	}
 
