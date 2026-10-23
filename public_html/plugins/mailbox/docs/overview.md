@@ -1382,10 +1382,13 @@ attachment manifest — while every non-text MIME part (real attachments *and* i
 in exactly one place — the `File` — so nothing is stored twice, and each attachment
 inherits the `File` layer's bucket offload, small-VPS drain, and gated serving for free.
 On the happy path **no raw RFC822 is retained** — except its **header block**,
-kept byte-for-byte in `iem_raw_headers` (capped at 64 KB, sealed like the body on
+kept in `iem_raw_headers` (capped at 64 KB, sealed like the body on
 a sealing mailbox): the wire truth (Received chain, `Content-Type`/charset, DKIM
 as sent) that no parsed column preserves, and what the reader's Show original
-renders for a lean record (`specs/mailbox_show_original_coverage.md`).
+renders for a lean record (`specs/mailbox_show_original_coverage.md`). It is kept
+as text, so it is UTF-8: every line that arrived as UTF-8 or ASCII is byte for byte,
+and a line an old client wrote in raw Latin-1 is read as Windows-1252
+(`MailHeaderText::block`). Address-list names come out UTF-8 the same way.
 
 **The manifest is the glue.** Each `ima_` row keeps the email-specific MIME metadata
 (filename, content-type, size, MIME section, encoding, content-id, inline flag) and, for

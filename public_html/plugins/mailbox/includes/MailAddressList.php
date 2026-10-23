@@ -22,6 +22,7 @@
  * name that itself contains angle brackets (the last angle-addr is the address,
  * exactly as InboundEmailRouter::parseEmail treats From).
  *
+ * @version 1.2 - every name and address comes out UTF-8: a raw Latin-1 name reads as Windows-1252 (B66)
  * @version 1.1 - an encoded-word name decodes through MailHeaderText, which keeps raw UTF-8 beside it (B30)
  */
 class MailAddressList {
@@ -239,10 +240,9 @@ class MailAddressList {
 		if (strlen($name) >= 2 && $name[0] === '"' && substr($name, -1) === '"') {
 			$name = stripcslashes(substr($name, 1, -1));
 		}
-		if (strpos($name, '=?') !== false) {
-			$name = MailHeaderText::decode($name);
-		}
-		return array('name' => self::cleanName($name), 'email' => $email);
+		// Encoded words, raw UTF-8 and an old client's raw Latin-1 all come out UTF-8.
+		$name = MailHeaderText::decode($name);
+		return array('name' => self::cleanName($name), 'email' => MailHeaderText::block($email));
 	}
 
 	/** Remove RFC 5322 comments — parenthesised text outside quoted strings. */

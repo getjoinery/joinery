@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.18 - A config kept from an earlier run gets this run's database password when that one
+#                 reaches the database (_set_site_config_password.php); a run after a failed first
+#                 one built the database against a stale password and the site answered 500 (B65).
 # VERSION: 3.17 - A theme that could not be installed signed is said truly: the site serves core's own
 #                 pages until it is, and a copy's restore brings the site's own themes (B56 made that so)
 # VERSION: 3.16 - A companion test site (install.sh site --with-test-site's <site>_test) makes no
@@ -334,6 +337,20 @@ create_config_file() {
     if [ -f "$SITE_ROOT/config/Globalvars_site.php" ]; then
         log "Config already exists at $SITE_ROOT/config/Globalvars_site.php - leaving it."
         log "  (it carries this site's secret_box_key; regenerating it would orphan every encrypted secret)"
+        # Its database password may be stale: a first run that stopped part way
+        # wrote the password it was given. When this run's password reaches the
+        # database, that one goes in, and nothing else in the file changes.
+        if [ -n "$PASSWORD" ] && PGPASSWORD="$PASSWORD" psql -U postgres -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then
+            local pw_result
+            if ! pw_result=$(JOINERY_CFG_PASSWORD="$PASSWORD" \
+                    php "${SCRIPT_DIR}/_set_site_config_password.php" "$SITE_ROOT/config/Globalvars_site.php"); then
+                log_error "Could not put this run's database password into $SITE_ROOT/config/Globalvars_site.php"
+                exit 1
+            fi
+            if [ "$pw_result" = "updated" ]; then
+                log "  Its database password did not match this run's; set it to this run's."
+            fi
+        fi
         return 0
     fi
 

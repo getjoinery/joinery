@@ -83,6 +83,8 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.58 - the kept header block is UTF-8: a Latin-1 header line reads as Windows-1252, so its
+ *               message is stored instead of failing the insert and deferring until it expired (B66)
  * @version 1.57 - a header keeps its raw UTF-8: Subject and names decode through MailHeaderText (B30)
  * @version 1.56 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.55 - a part inside an attached message (message/*, forward as attachment) is never this message's body: extractBodies() and enumerateNonTextParts() skip it as a body and still list it as a part
@@ -2588,11 +2590,16 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * The RFC822 header block of a raw message, byte-for-byte as it arrived —
-	 * everything up to the first blank line, original line endings kept
+	 * The RFC822 header block of a raw message as it arrived — everything up to
+	 * the first blank line, original line endings kept
 	 * (specs/mailbox_show_original_coverage.md). This is what iem_raw_headers
 	 * retains when the lean record discards the raw: the wire truth (Received
 	 * chain, Content-Type/charset, DKIM as sent) no parsed column preserves.
+	 *
+	 * Kept as text, so it is UTF-8: a line an old client wrote in Latin-1 is
+	 * read as Windows-1252 (MailHeaderText::block), every other byte is as it
+	 * came. The database refuses any other bytes, and the message with them
+	 * would never be stored.
 	 *
 	 * Capped at 64 KB — real header blocks are a few KB, and past the cap the
 	 * value is a hostile message, not headers. A message with no blank line at
@@ -2604,7 +2611,7 @@ class InboundEmailRouter {
 			$pos = strpos($raw_email, "\n\n");
 		}
 		$block = ($pos === false) ? $raw_email : substr($raw_email, 0, $pos);
-		return substr($block, 0, 65536);
+		return MailHeaderText::block(substr($block, 0, 65536), strlen($block) > 65536);
 	}
 
 	/**

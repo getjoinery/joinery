@@ -14,10 +14,12 @@
  *    Windows-1252; a folded value unfolded; an unreadable word left as written.
  *  - A message stored with a raw UTF-8 Subject and sender name keeps them.
  *  - MailAddressList reads an encoded name with raw UTF-8 beside it.
+ *  - A message with raw Latin-1 header bytes is stored (B66): Subject, names,
+ *    To/Cc and the kept header block all come out UTF-8 (MailHeaderText::block).
  *
  * Run: php plugins/mailbox/tests/mail_header_text_test.php
  *
- * @version 1.0
+ * @version 1.1 - raw Latin-1 header bytes (B66)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -72,6 +74,36 @@ $res = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain, $
 $msg = new InboundEmailMessage((int)$res['message']->key, TRUE);
 check((string)$msg->get('iem_subject') === 'Grüße aus Köln', 'the Subject is stored as written', (string)$msg->get('iem_subject'));
 check(strpos((string)$msg->get('iem_sender'), 'Zoë Ünïcode') !== false, 'and so is the sender\'s name', (string)$msg->get('iem_sender'));
+
+section('Stored mail with raw Latin-1 header bytes (B66)');
+// An old client writes Latin-1 straight into its headers. The header block is
+// kept as text, and the database refuses bytes that are not UTF-8: the store
+// failed and the message was deferred until its queue lifetime ran out.
+$raw = "From: \"Ren\xE9 M\xFCller\" <rene@sender.example>\r\nTo: \"J\xF6rg\" <" . $to . ">\r\nCc: \"Fran\xE7oise\" <fr@sender.example>\r\n"
+	. "Subject: Gr\xFC\xDFe aus K\xF6ln\r\nX-Note: Caf\xC3\xA9 stays UTF-8\r\n"
+	. "Message-ID: <ht-l1-" . $suffix . "@sender.example>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=ISO-8859-1\r\n\r\nHall\xF6\r\n";
+$res = null;
+try {
+	$res = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain, $to);
+} catch (Throwable $e) {
+	check(false, 'a message with Latin-1 header bytes is stored', $e->getMessage());
+}
+if ($res !== null && !empty($res['message'])) {
+	$msg = new InboundEmailMessage((int)$res['message']->key, TRUE);
+	check((string)$msg->get('iem_subject') === 'Grüße aus Köln', 'a message with Latin-1 header bytes is stored, its Subject readable',
+		(string)$msg->get('iem_subject'));
+	check(strpos((string)$msg->get('iem_sender'), 'René Müller') !== false, 'and the sender\'s name', (string)$msg->get('iem_sender'));
+	$block = (string)$msg->get('iem_raw_headers');
+	check(mb_check_encoding($block, 'UTF-8') && strpos($block, 'Subject: Grüße aus Köln') !== false
+		&& strpos($block, 'Cc: "Françoise"') !== false && strpos($block, 'X-Note: Café stays UTF-8') !== false,
+		'the kept header block reads each Latin-1 line as Windows-1252 and leaves a UTF-8 line as it was', $block);
+	check(strpos((string)$msg->get('iem_to'), 'Jörg') !== false && strpos((string)$msg->get('iem_cc'), 'Françoise') !== false,
+		'the To and Cc names are readable', (string)$msg->get('iem_to') . ' / ' . (string)$msg->get('iem_cc'));
+}
+check(MailHeaderText::block("A: \xE9\r\nB: \xC3\xA9\r\n C\xE9") === "A: é\r\nB: é\r\n Cé",
+	'MailHeaderText::block works line by line, line endings kept');
+check(MailHeaderText::block(substr("S: " . str_repeat("\xC3\xA9", 3), 0, 8), true) === "S: éé",
+	'a block cut inside a character drops the broken tail');
 
 section('An address list with an encoded name');
 $list = MailAddressList::parse('=?UTF-8?B?' . base64_encode('Zoë') . '?= Ünïcode <z@x.example>, plain@x.example');
