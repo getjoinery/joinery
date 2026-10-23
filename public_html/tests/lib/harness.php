@@ -1090,7 +1090,8 @@ function harness_model_class_for_table($table) {
  * The flat DELETE remains the fallback, for a table no model claims and for a
  * model that refuses the delete (a 'prevent' rule, a ceremony a test cannot
  * perform). That is the old behaviour, so nothing a suite could clean before
- * stops being cleaned now — it just says so on the way past.
+ * stops being cleaned now — it just says so on the way past. Before it runs,
+ * the table's set_value and null rules are applied (harness_apply_reference_rules()).
  */
 function harness_register_row($table, $pkey_column, $id) {
 	harness_defer(function () use ($table, $pkey_column, $id) {
@@ -1109,12 +1110,44 @@ function harness_register_row($table, $pkey_column, $id) {
 		$db = DbConnector::get_instance()->get_db_link();
 		try {
 			if ($db->inTransaction()) { $db->rollBack(); }
+			harness_apply_reference_rules($table, (int)$id);
 			$q = $db->prepare("DELETE FROM $table WHERE $pkey_column = ?");
 			$q->execute(array($id));
 		} catch (\Throwable $e) {
 			echo "  WARNING: could not delete $table row $id: " . $e->getMessage() . "\n";
 		}
 	});
+}
+
+/**
+ * The flat DELETE's stand-in for the rules permanent_delete() would apply to
+ * rows that point at this one: every set_value and null rule recorded for the
+ * table re-points or clears those references first, so a fixture removed by
+ * SQL leaves no row naming an id that no longer exists (an event log row
+ * still naming a deleted user, say). Cascades are not followed; the
+ * referential-integrity gate names what they leave.
+ */
+function harness_apply_reference_rules($table, int $id): void {
+	$db = DbConnector::get_instance()->get_db_link();
+	try {
+		$q = $db->prepare("SELECT del_target_table, del_target_column, del_action, del_action_value
+			FROM del_deletion_rules WHERE del_source_table = ? AND del_action IN ('set_value', 'null')");
+		$q->execute(array($table));
+		$rules = $q->fetchAll(PDO::FETCH_ASSOC);
+	} catch (\Throwable $e) {
+		return; // no rules table on this install: nothing to apply
+	}
+	foreach ($rules as $rule) {
+		$target = $rule['del_target_table'];
+		$column = $rule['del_target_column'];
+		if (!preg_match('/^[a-z0-9_]+$/', $target . $column)) continue;
+		$value = $rule['del_action'] === 'null' ? null : $rule['del_action_value'];
+		try {
+			$db->prepare("UPDATE $target SET $column = ? WHERE $column = ?")->execute(array($value, $id));
+		} catch (\Throwable $e) {
+			echo "  WARNING: could not apply the $target.$column rule for $table row $id: " . $e->getMessage() . "\n";
+		}
+	}
 }
 
 /**
