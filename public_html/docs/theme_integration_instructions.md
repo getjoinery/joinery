@@ -27,6 +27,16 @@ setting off to render member pages through the active theme like any other
 page. Themes therefore do not need to design for app surfaces (calendar,
 mailbox, drive) — a content-column blog layout is fine.
 
+### When the theme's folder is missing
+
+`getActiveThemeDirectory()` also returns `null` when the active theme's
+directory (or a plugin theme's plugin directory) is not on disk, logging it
+once per request: every page then resolves through plugin and core paths,
+core's own views and `PublicPage`, as with no theme at all. A copy onto a
+host is built from the release tree alone and gets the site's themes with its
+restore, and its key page, which opens the backup for that restore, answers
+this way; so does a site whose theme folder was removed by hand.
+
 ## Default Theme CSS Kit & `.jy-ui` Namespace
 
 The `default` theme ships a scoped CSS component kit in `assets/css/joinery-styles.css`. This file is loaded by **every** theme (via `PublicPageBase::render_base_assets()`), making it safe to use the kit's classes in base views (`/views/*.php`) regardless of which theme is active.

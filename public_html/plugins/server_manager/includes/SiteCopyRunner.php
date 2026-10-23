@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.38 - a copy onto a host refuses, saying so, when this management node holds no archive of the site's
+ *                release (holds_release; UpgradeRetention keeps the ones it applies, B55)
  * @version 1.37 - a container source's host stages the site's own certificate inside it for the export and clears it
  *                 after (site_certificate_stage), so its copy starts on the site's certificate, as a bare-metal one
  *                 does (C7's B49)
@@ -986,9 +988,12 @@ class SiteCopyRunner {
 			}
 		}
 		$version = trim((string)$source->get('mgn_joinery_version'));
-		if ($version !== '' && !self::release_carries($version, self::HOST_COPY_RELEASE_FILE)) {
+		if ($version !== '' && !self::holds_release($version)) {
+			$why[] = "This management node holds no archive of release {$version}, the site's release, which a copy onto a host "
+				. 'installs. It keeps the archive of each release it upgrades to, so the copy can start once the site runs one of those.';
+		} elseif ($version !== '' && !self::release_carries($version, self::HOST_COPY_RELEASE_FILE)) {
 			$why[] = "The site runs release {$version}. A copy onto a host installs the site's own release, and needs one that "
-				. 'carries its host\'s half of the quiet state (and this management node must hold its archive). Update the site first.';
+				. 'carries its host\'s half of the quiet state. Update the site first.';
 		}
 		// A container source's own host is source_refusals()'.
 		if (!$alive) {
@@ -1009,6 +1014,14 @@ class SiteCopyRunner {
 	}
 
 	/** Whether this management node holds release $version's signed manifest, and it lists $file. */
+	/** Whether this management node holds the archive of that core release (published or kept, UpgradeRetention). */
+	public static function holds_release(string $version): bool {
+		if (self::$release_carrier) {
+			return true;
+		}
+		return ReleaseManifestSource::read('', $version) !== null;
+	}
+
 	public static function release_carries(string $version, string $file): bool {
 		if (self::$release_carrier) {
 			return (bool)(self::$release_carrier)($version, $file);

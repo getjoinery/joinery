@@ -149,6 +149,18 @@ $carries = false;
 $why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));
 check(strpos($why, 'Update the site first') !== false, 'a release without the host\'s half of the quiet state is refused', $why);
 $carries = true;
+// A release this management node holds no archive of (it does not publish, and
+// upgraded to it before it kept the archives it applies) is said so (B55).
+$carrier = SiteCopyRunner::$release_carrier;
+SiteCopyRunner::$release_carrier = null;
+$src_version = (string)$src->get('mgn_joinery_version');
+$src->set('mgn_joinery_version', '0.0.1');
+$why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));
+check(!SiteCopyRunner::holds_release('0.0.1') && strpos($why, 'holds no archive of release 0.0.1') !== false
+	&& strpos($why, 'Update the site first') === false,
+	'a release this management node holds no archive of is refused as that, not as one to update', $why);
+$src->set('mgn_joinery_version', $src_version);
+SiteCopyRunner::$release_carrier = $carrier;
 $copy_host_agent->set('mgn_last_host_report', json_encode(array('site_engine' => 'podman', 'containers' => array(array('name' => 'schsite')))));
 $copy_host_agent->save();
 $why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));

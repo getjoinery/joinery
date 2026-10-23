@@ -319,6 +319,24 @@ PY
         chk "the ACME challenge is forwarded over http" "$(answer qsite.example /.well-known/acme-challenge/t | cut -d'|' -f1)" "503"
         /usr/sbin/apache2 -k stop -f "$AP/fwd_main.conf" >/dev/null 2>&1
         for _ in $(seq 50); do [ -e "$AP/logs/pid" ] || break; sleep 0.1; done
+
+        # A copy that answers TLS with a placeholder certificate (a copy onto a
+        # host, before its host issues one at the switch): the proxy cannot
+        # finish TLS, Apache answers 500 itself, and the visitor sees the moving
+        # page, not a bare error (B57).
+        SPORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+        openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=qsite.example -keyout "$AP/ph.key" -out "$AP/ph.crt" >/dev/null 2>&1
+        openssl s_server -accept "$SPORT" -cert "$AP/ph.crt" -key "$AP/ph.key" -www -quiet >/dev/null 2>&1 &
+        SPID=$!
+        sed "s#127\.0\.0\.1:9/#127.0.0.1:${SPORT}/#g" "$AP/forward.conf" > "$AP/forward_ph.conf"
+        sed "s#Include $AP/forward.conf#Include $AP/forward_ph.conf#" "$AP/fwd_main.conf" > "$AP/fwd_ph_main.conf"
+        /usr/sbin/apache2 -k start -f "$AP/fwd_ph_main.conf" 2>"$AP/start.err"
+        for _ in $(seq 50); do [ -s "$AP/logs/pid" ] && python3 -c "import socket; socket.create_connection(('127.0.0.1',$APORT),1); socket.create_connection(('127.0.0.1',$SPORT),1)" 2>/dev/null && break; sleep 0.1; done
+        code="$(curl -s -o "$AP/ph.body" -w '%{http_code}' -H 'Host: qsite.example' -H 'X-Forwarded-Proto: https' "http://127.0.0.1:$APORT/x")"
+        chk "a copy still on its placeholder certificate: the moving page, not a bare error (B57)" "$code:$(grep -c 'Back in a few minutes' "$AP/ph.body")" "500:1"
+        /usr/sbin/apache2 -k stop -f "$AP/fwd_ph_main.conf" >/dev/null 2>&1
+        kill "$SPID" 2>/dev/null
+        for _ in $(seq 50); do [ -e "$AP/logs/pid" ] || break; sleep 0.1; done
     else
         chk "the forward's live check needs mod_proxy_http and mod_ssl" "missing" "present"
     fi

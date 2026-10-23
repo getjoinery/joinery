@@ -758,7 +758,9 @@ If ANY step fails → Automatic rollback of the whole previous release (public_h
 ├── public_html_failed_*/     # The most recent failed deployment (timestamped)
 ├── upgrades/                 # Staging: the downloaded release, extracted
 ├── upgrade_archives/         # The downloaded archives, emptied by a successful upgrade
-└── static_files/             # Published upgrade packages
+└── static_files/             # Published upgrade packages; on a management node, also the core archive of each
+                              # release it upgrades to, kept for copies of its sites onto a host and pruned by
+                              # the same retention (UpgradeRetention::keep_applied_archive, prune_kept)
     ├── joinery-core-X.X.X.tar.gz
     ├── themes/THEMENAME-X.X.X.tar.gz
     └── plugins/PLUGINNAME-X.X.X.tar.gz

@@ -145,6 +145,11 @@ chk "certbot kept a valid certificate: the line says kept" "$(rep "$T/kept.log")
 chk "certbot issued one: the line says issued" "$(rep "$T/issued.log")" "OK Issued LE certificate for site.example.org (HTTP-01)"
 chk "both ways of issuing report through it, and nothing claims an issue on its own" \
     "$(sed -n '/^provision_origin_cert() {/,/^}/p' "$INSTALL" | grep -c 'report_certbot_success "\$'):$(sed -n '/^provision_origin_cert() {/,/^}/p' "$INSTALL" | grep -c 'Issued LE certificate')" "2:0"
+pfn="$(sed -n '/^provision_origin_cert() {/,/^}/p' "$INSTALL")"
+chk "the lines it prints name the domains alone, never certbot's -d flags (B54)" \
+    "$(grep -c 'challenge for ${certnames\[\*\]}"$' <<<"$pfn"):$(grep -c 'report_certbot_success "$cb_log" "${certnames\[\*\]}"' <<<"$pfn"):$(grep -c '//-d' <<<"$pfn")" "1:1:0"
+chk "and certbot is asked for exactly those names" \
+    "$(grep -c 'for n in "${certnames\[@\]}"; do names+=(-d "$n"); done' <<<"$pfn")" "1"
 
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"
