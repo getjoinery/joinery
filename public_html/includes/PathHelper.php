@@ -276,37 +276,39 @@ class PathHelper {
 
         // Removed PHP-only restriction to allow CSS, JS, and other asset files
 
+        // A name of the wrong shape names no file. Routing asks with names
+        // taken from the URL (throw_on_fail false): a probe like /foo..bar or
+        // /a%5Cb is not found rather than a 500. Any other caller gets the
+        // refusal, which is a bug in the caller.
+        $refusal = null;
+
         // Filename cannot contain any directory separators
         if (strpos($filename, '/') !== false || strpos($filename, '\\') !== false) {
-            throw new Exception("Filename cannot contain slashes. Use subdirectory parameter for path. Given: '$filename'");
+            $refusal = "Filename cannot contain slashes. Use subdirectory parameter for path. Given: '$filename'";
         }
 
         // 2. Subdirectory validation
-        // Subdirectory cannot have leading or trailing slashes (none in current usage)
-        if (!empty($subdirectory)) {
-            if (substr($subdirectory, 0, 1) === '/' || substr($subdirectory, -1) === '/') {
-                throw new Exception("Subdirectory cannot have leading or trailing slashes. Given: '$subdirectory'. Use format: 'includes' or 'assets/css'");
-            }
-
-            // No double slashes allowed
-            if (strpos($subdirectory, '//') !== false) {
-                throw new Exception("Subdirectory cannot contain double slashes. Given: '$subdirectory'");
-            }
-
-            // No backslashes allowed (use forward slashes for nested paths)
-            if (strpos($subdirectory, '\\') !== false) {
-                throw new Exception("Subdirectory must use forward slashes. Given: '$subdirectory'");
-            }
+        elseif (!empty($subdirectory) && (substr($subdirectory, 0, 1) === '/' || substr($subdirectory, -1) === '/')) {
+            $refusal = "Subdirectory cannot have leading or trailing slashes. Given: '$subdirectory'. Use format: 'includes' or 'assets/css'";
+        }
+        elseif (!empty($subdirectory) && strpos($subdirectory, '//') !== false) {
+            $refusal = "Subdirectory cannot contain double slashes. Given: '$subdirectory'";
+        }
+        // No backslashes allowed (use forward slashes for nested paths)
+        elseif (!empty($subdirectory) && strpos($subdirectory, '\\') !== false) {
+            $refusal = "Subdirectory must use forward slashes. Given: '$subdirectory'";
         }
 
         // 3. Security validation - prevent path traversal
-        if (strpos($filename, '..') !== false || strpos($subdirectory, '..') !== false) {
-            // Routing asks with names taken from the URL: a probe like
-            // /foo..bar names no file, so it is not found rather than a 500.
+        elseif (strpos($filename, '..') !== false || strpos($subdirectory, '..') !== false) {
+            $refusal = "Path traversal attempt detected ('..') in filename or subdirectory";
+        }
+
+        if ($refusal !== null) {
             if (!$throw_on_fail) {
                 return false;
             }
-            throw new Exception("Path traversal attempt detected ('..') in filename or subdirectory");
+            throw new Exception($refusal);
         }
 
         // 4. Build clean path with exactly one slash between components

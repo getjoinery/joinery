@@ -326,13 +326,9 @@ class RouteHelper {
             return false;
         }
         
-        // Check for path traversal attempts
-        if (strpos($path, '../') !== false || strpos($path, '..\\') !== false) {
-            return false;
-        }
-        
-        // Check for paths starting with .. (relative parent access)
-        if (strpos($path, '..') === 0) {
+        // A '..' segment anywhere is a traversal: leading, trailing, or between
+        // separators of either kind. 'foo..bar' is a name, not a traversal.
+        if (self::hasParentSegment($path)) {
             return false;
         }
         
@@ -344,7 +340,7 @@ class RouteHelper {
         $decoded_path = $path;
         for ($i = 0; $i < 6; $i++) {
             $next = urldecode($decoded_path);
-            if (strpos($next, '../') !== false || strpos($next, '..\\') !== false || strpos($next, '..') === 0) {
+            if (self::hasParentSegment($next) || strpos($next, '\\') !== false || strpos($next, "\0") !== false) {
                 return false;
             }
             if ($next === $decoded_path) break; // fully decoded, stable
@@ -355,6 +351,14 @@ class RouteHelper {
         $path = preg_replace('#/+#', '/', $path);
         
         return $path;
+    }
+
+    /**
+     * True when $path holds a '..' segment: at either end, or between
+     * separators of either kind (/ or \).
+     */
+    private static function hasParentSegment($path) {
+        return preg_match('#(^|[/\\\\])\.\.($|[/\\\\])#', $path) === 1;
     }
 
     /**
@@ -435,6 +439,14 @@ class RouteHelper {
         
         // Handle the path - remove leading slash if present
         $clean_path = ltrim($path, '/');
+
+        // This handler serves files under public_html and nothing else. The
+        // door in processRoutes() refuses a malformed path before any route is
+        // matched; the same rule holds here so the promise does not depend on
+        // who called.
+        if (self::validatePath($clean_path) === false) {
+            return false;
+        }
         $file_path = $base_path . '/' . $clean_path;
         
         // Use basic file_exists instead of PathHelper
@@ -1034,6 +1046,25 @@ class RouteHelper {
             $request_path = '/';
         } elseif ($request_path[0] !== '/') {
             $request_path = '/' . $request_path;
+        }
+
+        // The door. Apache decodes the URL once and PHP decodes __route again,
+        // so a double-encoded /assets/%252e%252e/%252e%252e/logs/error.log
+        // arrives here as 'assets/../../logs/error.log', past Apache's own
+        // dot-segment removal; the static route below then served the error
+        // log from outside the web root. A malformed path (a '..' segment, a
+        // backslash, a NUL byte, an encoded traversal) is refused once, here,
+        // before any route is matched or any file is looked up. Every name
+        // check further in is then only ever catching programmer error.
+        if (self::validatePath($request_path) === false) {
+            if (self::$match_only_mode) {
+                self::$match_only_result = ['matched' => false, 'type' => 'malformed', 'path' => $request_path];
+                return;
+            }
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "404 Not Found\n";
+            exit();
         }
         
         // Parse request parameters internally

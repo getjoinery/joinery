@@ -40,6 +40,9 @@ reject('mid-path foo/../bar', 'foo/../bar');
 reject('leading ..', '..');
 reject('leading ../', '../');
 reject('windows ..\\ traversal', '..\\config');
+reject('trailing .. segment', 'assets/x/..');
+reject('encoded trailing %2e%2e', 'assets/%2e%2e');
+reject('encoded backslash %5c', 'a%5cb/c');
 
 section('separator / null-byte tricks rejected');
 reject('backslash path', 'config\\secrets');
@@ -63,12 +66,20 @@ accept('single segment', 'pricing');
 // A filename that merely contains dots but no traversal must NOT be rejected.
 accept('dotted filename app.min.css', 'assets/app.min.css');
 
-section('a path holding .. finds no view instead of throwing');
+section('a name of the wrong shape finds no view instead of throwing');
 // validatePath lets 'foo..bar' through (no traversal); routing then looks the
 // name up with throw_on_fail false, which must answer not found, not throw
-// (/foo..bar and /profile/x..y answered 500).
+// (/foo..bar, /profile/x..y and any URL holding %5C answered 500).
 accept('a segment holding .. is not a traversal', 'foo..bar');
-foreach (array(array('foo..bar.php', 'views'), array('y.php', 'views/profile/x..y')) as $ask) {
+$wrong_shapes = array(
+	array('foo..bar.php', 'views'),
+	array('y.php', 'views/profile/x..y'),
+	array('foo\\bar.php', 'views'),
+	array('..\\..\\windows\\win.ini.php', 'views'),
+	array('apache2.php', 'views/..\\..\\var/log'),
+	array('b.php', 'views/a\\b'),
+);
+foreach ($wrong_shapes as $ask) {
 	try {
 		$found = PathHelper::getThemeFilePath($ask[0], $ask[1], 'system', null, null, false, false);
 		ok('lookup of ' . $ask[1] . '/' . $ask[0] . ' is not found', $found === false);
@@ -83,6 +94,36 @@ try {
 	$threw = strpos($e->getMessage(), 'Path traversal') !== false;
 }
 ok('a caller that asks to throw still gets the traversal refusal', $threw);
+$threw = false;
+try {
+	PathHelper::getThemeFilePath('foo\\bar.php', 'views');
+} catch (Exception $e) {
+	$threw = strpos($e->getMessage(), 'cannot contain slashes') !== false;
+}
+ok('a caller that asks to throw still gets the slash refusal', $threw);
+
+section('the door: a malformed decoded path matches no route');
+// Apache decodes the URL once and PHP decodes __route again, so a request for
+// /assets/%252e%252e/%252e%252e/logs/error.log reaches processRoutes() as
+// 'assets/../../logs/error.log', past Apache's own dot-segment removal. The
+// static route then served the error log from outside the web root (200 on
+// production, 2026-10-23). processRoutes() refuses the path before any route
+// is matched, and the static handler refuses it again on its own.
+foreach (array('assets/../../logs/error.log', 'assets/../CLAUDE.md', 'a\\b/c', "assets/app.css\0") as $bad) {
+	RouteHelper::$match_only_mode = true;
+	RouteHelper::$match_only_result = null;
+	$_REQUEST['__route'] = $bad;
+	include(PathHelper::getIncludePath('serve.php'));
+	$match = RouteHelper::$match_only_result;
+	RouteHelper::$match_only_mode = false;
+	unset($_REQUEST['__route']);
+	ok('request ' . addcslashes($bad, "\0") . ' matches no route',
+		is_array($match) && empty($match['matched']) && ($match['type'] ?? '') === 'malformed', json_encode($match));
+}
+ob_start();
+$served = RouteHelper::handleStaticRoute(array('pattern' => '/assets/*', 'path' => '/assets/../CLAUDE.md', 'cache' => 0), array(), null);
+$leaked = ob_get_clean();
+ok('the static handler refuses a parent segment on its own', $served === false && $leaked === '', strlen($leaked) . ' bytes served');
 
 section('sanitization normalizes without weakening');
 $norm = RouteHelper::validatePath('foo//bar///baz');
