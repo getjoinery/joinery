@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.139 - build_site_log_count(): the site_log_count word (agent 1.92.0), counts of compiled problem
+ *                 markers in the error log since a time, with how far back the read reached
  * @version 1.138 - build_site_certificate_stage(): a container site's certificate staged inside it for its copy's export
  *                 (agent 1.91.0+, the site_certificate_stage word), and cleared after
  * @version 1.137 - build_refresh_site_containers(): the refresh_site_containers word (agent 1.88.0+), a container
@@ -1934,6 +1936,52 @@ class JobCommandBuilder {
 			'previous' => (bool)$previous,
 			'lines'    => self::bounded_log_count($lines, 'lines'),
 		]];
+	}
+
+	/**
+	 * The markers site_log_count counts, in the agent's order, with how the
+	 * plane labels them. A mirror of primitives/observe_site_log_count.go: a
+	 * name the node sends that is not here is dropped on intake.
+	 */
+	const SITE_LOG_COUNT_MARKERS = [
+		'entry_script_missing'   => 'serve.php missing (Failed opening required)',
+		'primary_script_unknown' => 'Primary script unknown',
+		'permission_denied'      => 'Permission denied',
+		'php_fatal'              => 'PHP Fatal error',
+		'critical'               => 'CRITICAL logged',
+		'error_logged'           => 'ERROR logged',
+		'undefined_column'       => 'Undefined column',
+		'transaction_left_open'  => 'TRANSACTION_LEFT_OPEN',
+		'get_write'              => 'GET_WRITE',
+		'get_mutation'           => 'GET_MUTATION',
+	];
+
+	/**
+	 * How many times each known problem marker appears in the site's error log
+	 * since a time, read back through its rotations (site_log_count). The
+	 * answer says how far back the read reached, so a check after an upgrade
+	 * is answered whole or says it is not, where site_log's last 200 lines
+	 * stop short of the upgrade on a busy site. Behind the owner's log-access
+	 * switch, like site_log.
+	 *
+	 * @param int $since unix seconds, the window's start; its end is now
+	 */
+	public static function build_site_log_count($node, $since) {
+		if (!self::has_primitive($node, 'site_log_count')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot count its log lines. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_log_count']));
+		}
+		self::assert_log_access($node);
+		return self::build_site_log_count_primitive($node, $since);
+	}
+
+	public static function build_site_log_count_primitive($node, $since) {
+		$since = (int)$since;
+		if ($since <= 0 || $since > time()) {
+			throw new Exception('Give a start time in the past.');
+		}
+		return ['primitive' => 'site_log_count', 'params' => ['since' => $since]];
 	}
 
 	/**

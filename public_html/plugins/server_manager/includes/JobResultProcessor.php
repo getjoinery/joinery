@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.104 - process_site_log_count: marker counts, bounded samples and how far back the read reached
  * @version 1.103 - a host report names its machine its host record's own agent where none is (ManagedHost::link_host_node,
  *                  fleet_security_patching B26)
  * @version 1.102 - check_status's dpkg_unfinished (agent 1.90.0): the packages a package run left half done
@@ -2341,6 +2342,60 @@ HTML;
 			'lines_returned' => max(0, min((int)($data['lines_returned'] ?? 0), JobCommandBuilder::LOG_MAX_COUNT)),
 			'truncated'      => !empty($data['truncated']) || $truncated_here,
 			'text'           => $text,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A site_log_count job's result: per known marker its count, first and
+	 * last time and at most three redacted sample lines, and how far back the
+	 * read reached. Marker names not in JobCommandBuilder::SITE_LOG_COUNT_MARKERS
+	 * are dropped; covers_since is kept exactly as the node said it.
+	 */
+	private static function process_site_log_count($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !isset($data['markers']) || !is_array($data['markers'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$time = function ($v) {
+			return substr(preg_replace('/[^0-9TZ:\-+ ]/', '', (string)$v), 0, 32);
+		};
+		$markers = [];
+		foreach (JobCommandBuilder::SITE_LOG_COUNT_MARKERS as $name => $label) {
+			$m = is_array($data['markers'][$name] ?? null) ? $data['markers'][$name] : [];
+			$samples = [];
+			foreach (array_slice(is_array($m['samples'] ?? null) ? $m['samples'] : [], 0, 3) as $s) {
+				if (is_string($s)) {
+					$samples[] = substr($s, 0, 400);
+				}
+			}
+			$markers[$name] = [
+				'count'   => max(0, (int)($m['count'] ?? 0)),
+				'first'   => $time($m['first'] ?? ''),
+				'last'    => $time($m['last'] ?? ''),
+				'samples' => $samples,
+			];
+		}
+		$files = [];
+		foreach (array_slice(is_array($data['files_read'] ?? null) ? $data['files_read'] : [], 0, 15) as $f) {
+			// Only the names the node can read: error.log and its numbered rotations.
+			if (is_string($f) && preg_match('/^error\.log(\.[0-9]{1,2}(\.gz)?)?$/', $f)) {
+				$files[] = $f;
+			}
+		}
+		$job->set('mjb_result', json_encode([
+			'read'            => true,
+			'since'           => $time($data['since'] ?? ''),
+			'present'         => !empty($data['present']),
+			'covers_since'    => ($data['covers_since'] ?? false) === true,
+			'covered_from'    => $time($data['covered_from'] ?? ''),
+			'not_covered'     => substr((string)($data['not_covered'] ?? ''), 0, 300),
+			'files_read'      => $files,
+			'bytes_read'      => max(0, (int)($data['bytes_read'] ?? 0)),
+			'lines_in_window' => max(0, (int)($data['lines_in_window'] ?? 0)),
+			'markers'         => $markers,
 		]));
 		$job->save();
 	}
