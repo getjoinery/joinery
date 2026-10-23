@@ -294,6 +294,10 @@ class MessageRebuild {
 		}
 		$name = trim(str_replace(array("\r", "\n", "\t"), ' ', (string)$att->get('ima_filename')));
 		if ($name === '') {
+			// FORMAT 1 names a part that arrived nameless 'attachment' (no extension).
+			// The next FORMAT should leave it nameless, as it arrived, here and in
+			// mailbox_mime_build.js (B67); changing it alone is not worth restarting
+			// every mail program's folders.
 			$name = 'attachment';
 		}
 		$headers = 'Content-Type: ' . $type . '; ' . self::nameParam('name', $name)
