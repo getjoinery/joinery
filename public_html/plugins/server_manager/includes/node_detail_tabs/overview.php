@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.85 - Compare edge and direct (EdgeOriginProbe) beside Host Report; Network (net_health, host only) and
+ *                 Web workers (web_workers) beside Listening ports (agent 1.93.0); the kernel line names connections
+ *                 dropped (conntrack_full, syn_flood) (specs/slow_request_diagnosis_words.md)
  * @version 1.84 - the Logs box counts problem lines in the error log since a time (site_log_count)
  * @version 1.83 - Test releases here first (mgn_rollout_first) on a site's settings form
  * @version 1.82 - the Cloud server panel shows the daily watch's match on any provider's account, Hetzner's too (B40)
@@ -207,6 +210,10 @@
 	<input type="hidden" name="action" value="run_plugin_installers">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
+<form id="nodeActionEdgeOrigin" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="edge_vs_origin">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
 <form id="nodeActionDiskUsage" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="disk_usage">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -214,6 +221,7 @@
 <?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
 	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine',
 	'nodeActionSiteStateReport' => 'site_state_report',
+	'nodeActionNetHealth' => 'net_health', 'nodeActionWebWorkers' => 'web_workers',
 	'nodeActionInstallSecurityUpdates' => 'install_security_updates',
 	'nodeActionRefreshSiteContainers' => 'refresh_site_containers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -674,6 +682,14 @@
 	if (JobCommandBuilder::has_primitive($node, 'host_report')) {
 		echo ' <button type="submit" form="nodeActionHostReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Read the machine now: failed units, fail2ban jails, SSH auth failures, sshd posture, reboot-required">Host Report</button>';
 	}
+	// Is the site slow, or the path to it? The same requests timed through the
+	// site's public name and straight at the machine, side by side, from here
+	// (EdgeOriginProbe). Takes up to a minute; no agent involved.
+	if (EdgeOriginProbe::site($node) && EdgeOriginProbe::origins($node)) {
+		// Disabled on the first click: a run takes up to a minute, and a second
+		// click would start a second run beside it.
+		echo ' <button type="submit" form="nodeActionEdgeOrigin" onclick="var b=this;setTimeout(function(){b.disabled=true;b.textContent=\'Comparing…\';},0);" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Time the same requests through the site\'s public name (its edge, such as Cloudflare) and straight at this machine, side by side, and say which one stalls. Takes up to a minute.">Compare edge and direct</button>';
+	}
 	echo '</div>';
 
 	// The words this tab offers, declared once (AgentVocabulary). A paired
@@ -683,7 +699,7 @@
 		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
 			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
-			'install_security_updates'];
+			'install_security_updates', 'net_health', 'web_workers'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
@@ -1581,6 +1597,17 @@
 				$mb_buttons[] = '<button type="submit" form="nodeActionListeningSockets" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 					. ' title="The addresses and ports the machine listens on, with the program and unit holding each">Listening ports</button>';
 			}
+			// Is the machine dropping packets or connections, and is the web tier
+			// out of workers (agent 1.93.0)? Network health is the host's: a site
+			// container's own network is not where its edge connects.
+			if (JobCommandBuilder::has_primitive($node, 'net_health') && trim((string)$node->get('mgn_container_name')) === '') {
+				$mb_buttons[] = '<button type="submit" form="nodeActionNetHealth" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Whether the machine is dropping packets or connections: kernel counters read twice ten seconds apart, the connection table, the web listeners\' queues. Takes about fifteen seconds.">Network</button>';
+			}
+			if (JobCommandBuilder::has_primitive($node, 'web_workers')) {
+				$mb_buttons[] = '<button type="submit" form="nodeActionWebWorkers" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Whether Apache and PHP have free workers now, and how often PHP ran out in the last day">Web workers</button>';
+			}
 			if (JobCommandBuilder::has_primitive($node, 'site_state_report')) {
 				$mb_buttons[] = '<button type="submit" form="nodeActionSiteStateReport" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 					. ' title="What the machine records about its sites being quiet or copies: each record\'s name, size and time">Site state records</button>';
@@ -1660,7 +1687,7 @@
 			// warnings (a shared host's raise plane:kernel_warning): counts only.
 			if (is_array($hr['kernel_events_24h'])) {
 				$bits = array();
-				foreach (array('oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors', 'kernel_warning' => 'kernel warnings') as $k => $word) {
+				foreach (array('oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors', 'kernel_warning' => 'kernel warnings', 'conntrack_full' => 'connections dropped (connection table full)', 'syn_flood' => 'connections dropped (SYN queue full)') as $k => $word) {
 					if (is_int($hr['kernel_events_24h'][$k] ?? null) && $hr['kernel_events_24h'][$k] > 0) { $bits[] = $hr['kernel_events_24h'][$k] . ' ' . $word; }
 				}
 				echo $bits

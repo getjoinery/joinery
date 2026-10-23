@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.16 - crawlerDetect() names JoineryEdgeProbe, the management node timing a site through its edge and
+ *                direct (specs/slow_request_diagnosis_words.md WP5): a measurement, never a visitor
  * @version 1.15 - a session whose account no longer exists ends without writing a logout row, a vault audit
  *                 row or token cleanup against the missing user (logout(true))
  * @version 1.14 - a visitor event and its A/B counters, and logout's cleanup (this device's remember-me token, its push
@@ -470,6 +472,9 @@ class SessionControl{
 			'curl/', 'Wget', 'python-requests', 'python-urllib', 'Go-http-client', 'Java/',
 			'crawler', 'spider', 'bot/', 'bot ', 'Bot/', 'Bot ', 'archiver',
 			'W3C_Validator', 'feedparser',
+			// The management node timing this site through its edge and direct
+			// (EdgeOriginProbe): a measurement, never a visitor.
+			'JoineryEdgeProbe',
 		);
 
 		foreach ($crawlers as $pattern) {

@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.27 - net_health and web_workers results (agent 1.93.0): a verdict line, then the counts
  * @version 1.26 - starting a deploy-all rollout on a page view is the server's own write (server_initiated_write)
  * @version 1.25 - a site_log_count result renders as a marker table under a line saying whether the read covered the window
  * @version 1.24 - a deploy-all publish not yet done describes its rollout's two stages (StagedRolloutRunner::deploy_all_description)
@@ -684,6 +685,73 @@ if ($result) {
 			echo '<div class="small text-muted">The node cut this short: it lists at most 100 sites and 64 records each.</div>';
 		}
 		echo '<small class="text-muted">Values are shown for the plain records only (the state line, copy_of, forward, and a host\'s quiet record and id block). The look secret, run spec, source key, vouched runs and history are named and sized, never read.</small>';
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'net_health' && !empty($result_data['read'])) {
+		// Whether the machine drops packets or connections (agent 1.93.0): the
+		// verdict, then each counter's change over the interval and its total.
+		$secs = (int)($result_data['interval_seconds'] ?? 10);
+		echo '<div class="card mb-3"><div class="card-header"><strong>Network health</strong> <small class="text-muted">— counts only, read twice ' . $secs . ' s apart</small></div>';
+		echo '<div class="card-body"><p class="mb-2"><strong>' . htmlspecialchars((string)($result_data['verdict'] ?? '')) . '</strong></p>';
+		$ctr = $result_data['counters'] ?? 'unknown';
+		if (is_array($ctr) && $ctr) {
+			echo '<table class="table table-sm mb-2"><thead><tr><th>Counter</th><th class="text-end">In the last ' . $secs . ' s</th><th class="text-end">Since boot</th></tr></thead><tbody>';
+			foreach (JobResultProcessor::NET_HEALTH_COUNTERS as $k => $label) {
+				if (!isset($ctr[$k])) { continue; }
+				$drop = in_array($k, JobResultProcessor::NET_HEALTH_DROP_COUNTERS, true) && $ctr[$k]['per_interval'] > 0;
+				echo '<tr' . ($drop ? ' class="text-danger"' : '') . '><td>' . htmlspecialchars(ucfirst($label)) . '</td><td class="text-end">'
+					. (int)$ctr[$k]['per_interval'] . '</td><td class="text-end">' . number_format((int)$ctr[$k]['total']) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+		$ct = $result_data['conntrack'] ?? 'absent';
+		echo '<div class="small">Connection table: ' . (is_array($ct)
+			? number_format((int)$ct['count']) . ' of ' . number_format((int)$ct['max']) . ' (' . (int)$ct['percent'] . '%)'
+			: htmlspecialchars($ct === 'absent' ? 'not in use on this machine' : 'not read')) . '</div>';
+		$web = $result_data['web_connections'] ?? 'unknown';
+		if (is_array($web)) {
+			$bits = array();
+			foreach ($web as $state => $n) { $bits[] = htmlspecialchars($state) . ' ' . (int)$n; }
+			echo '<div class="small">Connections on ports 80 and 443: ' . ($bits ? implode(', ', $bits) : 'none') . '</div>';
+		}
+		$qs = $result_data['listen_queues'] ?? 'unknown';
+		if (is_array($qs)) {
+			foreach ($qs as $q) {
+				echo '<div class="small">Listener <code>' . htmlspecialchars((string)$q['address']) . ':' . (int)$q['port'] . '</code>: '
+					. (int)$q['queued'] . ' waiting to be accepted, room for ' . (int)$q['limit'] . '</div>';
+			}
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'web_workers' && !empty($result_data['read'])) {
+		// Whether the web tier is out of workers (agent 1.93.0).
+		echo '<div class="card mb-3"><div class="card-header"><strong>Web workers</strong> <small class="text-muted">— '
+			. htmlspecialchars((string)($result_data['site'] ?? '') ?: 'no site') . ', read over loopback; counts only</small></div>';
+		echo '<div class="card-body"><p class="mb-2"><strong>' . htmlspecialchars((string)($result_data['verdict'] ?? '')) . '</strong></p>';
+		$fpm = $result_data['fpm'] ?? 'unknown';
+		if (is_array($fpm)) {
+			$cell = function ($v) { return $v === null ? '—' : (string)(int)$v; };
+			echo '<table class="table table-sm mb-2"><tbody>'
+				. '<tr><th>PHP pool</th><td>' . htmlspecialchars($fpm['pool'] ?: '—') . ' (' . htmlspecialchars($fpm['process_manager'] ?: '—') . ')</td></tr>'
+				. '<tr><th>Busy / idle / ceiling</th><td>' . $cell($fpm['active']) . ' / ' . $cell($fpm['idle']) . ' / ' . $cell($fpm['max_children']) . '</td></tr>'
+				. '<tr><th>Waiting for a worker now / most ever</th><td>' . $cell($fpm['listen_queue']) . ' / ' . $cell($fpm['max_listen_queue']) . '</td></tr>'
+				. '<tr><th>Ceiling reached since PHP started</th><td>' . $cell($fpm['max_children_reached']) . ' time(s)</td></tr>'
+				. '<tr><th>Most busy at once</th><td>' . $cell($fpm['max_active']) . '</td></tr>'
+				. '</tbody></table>';
+		} else {
+			echo '<div class="small text-muted">PHP-FPM: ' . htmlspecialchars($fpm === 'not_reported' ? 'no site on this machine' : 'its status page did not answer') . '</div>';
+		}
+		$ap = $result_data['apache'] ?? 'unknown';
+		if (is_array($ap)) {
+			$sbits = array();
+			foreach ($ap['scoreboard'] as $k => $n) { if ($n > 0 && $k !== 'open_slot') { $sbits[] = str_replace('_', ' ', $k) . ' ' . (int)$n; } }
+			echo '<div class="small">Apache: ' . (int)$ap['busy'] . ' busy, ' . (int)$ap['idle'] . ' idle of ' . (int)$ap['slots'] . ' slots'
+				. ($sbits ? ' (' . htmlspecialchars(implode(', ', $sbits)) . ')' : '') . '</div>';
+		} else {
+			echo '<div class="small text-muted">Apache: ' . htmlspecialchars($ap === 'not_reported' ? 'no site on this machine' : 'its status page did not answer') . '</div>';
+		}
+		$ev = $result_data['fpm_max_children_events_24h'] ?? 'unknown';
+		echo '<div class="small">PHP hit its ceiling in the last day: ' . (is_int($ev) ? (int)$ev . ' time(s)' : 'not read') . '</div>';
 		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'listening_sockets' && !empty($result_data['read'])) {

@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.106 - net_health and web_workers results (agent 1.93.0, specs/slow_request_diagnosis_words.md): each
+ *                 held to its shape with a one-line verdict; kernel_events_24h keeps conntrack_full and syn_flood
+ *                 when the node reports them (host_report 1.38)
  * @version 1.105 - a certificate's first issuance sets reverse DNS only for a site on a machine of its own: a
  *                 site in a container answers at its host's shared address, whose reverse DNS is the host's
  * @version 1.104 - process_site_log_count: marker counts, bounded samples and how far back the read reached
@@ -3570,6 +3573,202 @@ HTML;
 		$job->save();
 	}
 
+	/** The counters net_health.sh reports, by name; any other name is dropped. */
+	const NET_HEALTH_COUNTERS = [
+		'listen_overflows'       => 'new connections dropped: accept queue full',
+		'listen_drops'           => 'new connections dropped at the listener',
+		'syn_queue_full_drops'   => 'connection attempts dropped: SYN queue full',
+		'syn_queue_full_cookies' => 'connection attempts answered with SYN cookies: SYN queue full',
+		'backlog_drops'          => 'packets dropped: socket backlog full',
+		'timeouts'               => 'TCP retransmission timeouts',
+		'abort_on_timeout'       => 'connections given up after timing out',
+		'retrans_segs'           => 'segments sent again',
+		'attempt_fails'          => 'connection attempts that failed',
+		'estab_resets'           => 'established connections reset',
+		'softnet_dropped'        => 'packets dropped before TCP saw them (no CPU time)',
+		'softnet_time_squeeze'   => 'times the kernel ran out of time taking packets in',
+		'rx_dropped'             => 'packets the network interface dropped',
+		'rx_missed'              => 'packets the network interface missed',
+	];
+
+	/** The counters whose growth means the machine is dropping connections or packets. */
+	const NET_HEALTH_DROP_COUNTERS = ['listen_overflows', 'listen_drops', 'syn_queue_full_drops', 'backlog_drops', 'softnet_dropped', 'rx_dropped', 'rx_missed'];
+
+	/**
+	 * A net_health job's result (agent 1.93.0): the counters, each a total and
+	 * its change over the interval, the connection table, the web ports'
+	 * connections by state and the web listeners' queues, held to their shape.
+	 * Pure; the processor test drives it.
+	 */
+	public static function sanitise_net_health($d) {
+		if (!is_array($d)) {
+			return ['read' => false];
+		}
+		if (($d['refused'] ?? '') === 'container') {
+			$out = ['read' => true, 'refused' => 'container'];
+			$out['verdict'] = self::net_health_verdict($out);
+			return $out;
+		}
+		if (!array_key_exists('counters', $d)) {
+			return ['read' => false];
+		}
+		$nat = function ($v) { return is_int($v) && $v >= 0 ? $v : null; };
+		$counters = 'unknown';
+		if (is_array($d['counters'])) {
+			$counters = [];
+			foreach (self::NET_HEALTH_COUNTERS as $k => $label) {
+				$c = $d['counters'][$k] ?? null;
+				if (is_array($c) && $nat($c['total'] ?? null) !== null && $nat($c['per_interval'] ?? null) !== null) {
+					$counters[$k] = ['total' => $c['total'], 'per_interval' => $c['per_interval']];
+				}
+			}
+		}
+		$conntrack = 'absent';
+		if (is_array($d['conntrack'] ?? null) && $nat($d['conntrack']['count'] ?? null) !== null && $nat($d['conntrack']['max'] ?? null)) {
+			$conntrack = ['count' => $d['conntrack']['count'], 'max' => $d['conntrack']['max'],
+				'percent' => (int)floor($d['conntrack']['count'] * 100 / $d['conntrack']['max'])];
+		} elseif (($d['conntrack'] ?? '') === 'unknown') {
+			$conntrack = 'unknown';
+		}
+		$web = 'unknown';
+		if (is_array($d['web_connections'] ?? null)) {
+			$web = [];
+			foreach ($d['web_connections'] as $state => $n) {
+				if (is_string($state) && preg_match('/^[a-z0-9-]{1,16}$/', $state) && $nat($n) !== null && count($web) < 16) {
+					$web[$state] = $n;
+				}
+			}
+		}
+		$queues = 'unknown';
+		if (is_array($d['listen_queues'] ?? null)) {
+			$queues = [];
+			foreach (array_slice(array_values($d['listen_queues']), 0, 16) as $q) {
+				if (!is_array($q) || !in_array($q['port'] ?? null, [80, 443], true) || $nat($q['queued'] ?? null) === null || $nat($q['limit'] ?? null) === null) {
+					continue;
+				}
+				$addr = preg_replace('/[^0-9A-Fa-f.:*\[\]]/', '', (string)($q['address'] ?? ''));
+				$queues[] = ['address' => substr($addr, 0, 47), 'port' => $q['port'], 'queued' => $q['queued'], 'limit' => $q['limit']];
+			}
+		}
+		$interval = $nat($d['interval_seconds'] ?? null);
+		$out = ['read' => true, 'counters' => $counters, 'conntrack' => $conntrack, 'web_connections' => $web,
+			'listen_queues' => $queues, 'interval_seconds' => $interval ?: 10, 'uptime_seconds' => $nat($d['uptime_seconds'] ?? null)];
+		$out['verdict'] = self::net_health_verdict($out);
+		return $out;
+	}
+
+	/** One line a person reads first, from a sanitised net_health result. */
+	public static function net_health_verdict(array $r) {
+		if (($r['refused'] ?? '') === 'container') {
+			return 'This is a site container; its network is not where its edge connects. Ask its host node.';
+		}
+		if (!is_array($r['counters'] ?? null)) {
+			return 'The machine could not read its network counters.';
+		}
+		$secs = (int)($r['interval_seconds'] ?? 10);
+		$bad = [];
+		foreach (self::NET_HEALTH_DROP_COUNTERS as $k) {
+			$n = $r['counters'][$k]['per_interval'] ?? 0;
+			if ($n > 0) {
+				$bad[] = $n . ' ' . self::NET_HEALTH_COUNTERS[$k];
+			}
+		}
+		if (is_array($r['conntrack'] ?? null) && $r['conntrack']['percent'] >= 90) {
+			$bad[] = 'connection table ' . $r['conntrack']['percent'] . '% full';
+		}
+		if (is_array($r['listen_queues'] ?? null)) {
+			foreach ($r['listen_queues'] as $q) {
+				if ($q['limit'] > 0 && $q['queued'] * 2 >= $q['limit']) {
+					$bad[] = 'port ' . $q['port'] . ' has ' . $q['queued'] . ' of ' . $q['limit'] . ' waiting to be accepted';
+				}
+			}
+		}
+		return $bad
+			? 'Dropping in the last ' . $secs . ' s: ' . implode('; ', $bad) . '.'
+			: 'No packets or connections dropped in the last ' . $secs . ' s.';
+	}
+
+	private static function process_net_health($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_net_health(self::script_json($job))));
+		$job->save();
+	}
+
+	/**
+	 * A web_workers job's result (agent 1.93.0): Apache's scoreboard and
+	 * PHP-FPM's pool, numbers held to their shape, and how often the pool hit
+	 * its ceiling in a day. Pure; the processor test drives it.
+	 */
+	public static function sanitise_web_workers($d) {
+		if (!is_array($d) || !array_key_exists('apache', $d) || !array_key_exists('fpm', $d)) {
+			return ['read' => false];
+		}
+		$nat = function ($v) { return is_int($v) && $v >= 0 ? $v : null; };
+		$apache = in_array($d['apache'], ['not_reported', 'unknown'], true) ? $d['apache'] : 'unknown';
+		if (is_array($d['apache']) && $nat($d['apache']['busy'] ?? null) !== null && $nat($d['apache']['idle'] ?? null) !== null) {
+			$sb = [];
+			foreach (['waiting', 'starting', 'reading', 'writing', 'keepalive', 'dns', 'closing', 'logging', 'finishing', 'idle_cleanup', 'open_slot'] as $k) {
+				$sb[$k] = $nat($d['apache']['scoreboard'][$k] ?? null) ?? 0;
+			}
+			$apache = ['busy' => $d['apache']['busy'], 'idle' => $d['apache']['idle'],
+				'slots' => $nat($d['apache']['slots'] ?? null) ?? 0, 'scoreboard' => $sb];
+		}
+		$fpm = in_array($d['fpm'], ['not_reported', 'unknown'], true) ? $d['fpm'] : 'unknown';
+		if (is_array($d['fpm']) && $nat($d['fpm']['active'] ?? null) !== null) {
+			$fpm = [
+				'pool'            => substr(preg_replace('/[^A-Za-z0-9._-]/', '', (string)($d['fpm']['pool'] ?? '')), 0, 64),
+				'process_manager' => substr(preg_replace('/[^a-z]/', '', (string)($d['fpm']['process_manager'] ?? '')), 0, 16),
+			];
+			foreach (['active', 'idle', 'total', 'max_active', 'listen_queue', 'max_listen_queue', 'max_children_reached', 'accepted', 'start_since_seconds', 'max_children'] as $k) {
+				$fpm[$k] = $nat($d['fpm'][$k] ?? null);
+			}
+		}
+		$events = $nat($d['fpm_max_children_events_24h'] ?? null);
+		$out = ['read' => true,
+			'site' => substr(preg_replace('/[^A-Za-z0-9.-]/', '', (string)($d['site'] ?? '')), 0, 253),
+			'apache' => $apache, 'fpm' => $fpm,
+			'fpm_max_children_events_24h' => $events !== null ? $events : 'unknown'];
+		$out['verdict'] = self::web_workers_verdict($out);
+		return $out;
+	}
+
+	/** One line a person reads first, from a sanitised web_workers result. */
+	public static function web_workers_verdict(array $r) {
+		$fpm = $r['fpm'] ?? 'unknown';
+		$apache = $r['apache'] ?? 'unknown';
+		if ($fpm === 'not_reported' && $apache === 'not_reported') {
+			return 'This machine has no site of its own, so it has no web workers to report.';
+		}
+		$parts = [];
+		$saturated = false;
+		if (is_array($fpm)) {
+			$cap = $fpm['max_children'];
+			$parts[] = 'PHP: ' . (int)$fpm['active'] . ($cap !== null ? ' of ' . $cap : '') . ' busy'
+				. ((int)$fpm['listen_queue'] > 0 ? ', ' . (int)$fpm['listen_queue'] . ' waiting' : '');
+			if ((int)$fpm['listen_queue'] > 0 || ($cap !== null && (int)$fpm['active'] >= $cap)) {
+				$saturated = true;
+			}
+		} else {
+			$parts[] = 'PHP: not read';
+		}
+		if (is_array($apache)) {
+			$parts[] = 'Apache: ' . $apache['busy'] . ' busy, ' . $apache['idle'] . ' idle';
+			if ($apache['idle'] === 0) {
+				$saturated = true;
+			}
+		}
+		$ev = $r['fpm_max_children_events_24h'] ?? 'unknown';
+		if (is_int($ev) && $ev > 0) {
+			$parts[] = 'PHP hit its ceiling ' . $ev . ' time' . ($ev === 1 ? '' : 's') . ' in the last day';
+		}
+		return ($saturated ? 'Out of workers now. ' : (is_int($ev) && $ev > 0 ? 'Free now, short at times. ' : 'Workers free. '))
+			. implode('; ', $parts) . '.';
+	}
+
+	private static function process_web_workers($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_web_workers(self::script_json($job))));
+		$job->save();
+	}
+
 	/** The mount types a container_inventory result names; any other is other. */
 	const CONTAINER_MOUNT_TYPES = ['volume', 'bind', 'tmpfs', 'npipe', 'cluster', 'image'];
 	/** Entries container_inventory.sh lists at most (its MAX_CONTAINERS), and mounts each (its MAX_MOUNTS). */
@@ -4670,7 +4869,7 @@ HTML;
 	}
 
 	/**
-	 * The three kernel-event counts, or the string unknown for the whole
+	 * The kernel-event counts, or the string unknown for the whole
 	 * object. COUNTS ONLY — the node counts the matching journal lines and
 	 * discards them, so there is no text here to bound, only three numbers.
 	 *
@@ -4682,6 +4881,13 @@ HTML;
 		$out = [];
 		foreach (['oom', 'enospc', 'io_error', 'kernel_warning'] as $k) {
 			$out[$k] = self::host_report_count($in[$k] ?? null);
+		}
+		// The kernel dropping connections (host_report 1.38). Not reported by an
+		// older script, and kept absent then: missing is "not reported", never 0.
+		foreach (['conntrack_full', 'syn_flood'] as $k) {
+			if (array_key_exists($k, $in)) {
+				$out[$k] = self::host_report_count($in[$k]);
+			}
 		}
 		return $out;
 	}

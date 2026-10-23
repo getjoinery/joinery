@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.43 - Re-run of a probe job (check_status by probe, edge_vs_origin) measures again and files a new completed
+ *                 job; it used to refuse as a job with no steps. edge_vs_origin is a filterable job type
  * @version 1.42 - site_log_count is a filterable job type, and its sample lines expire with the other log excerpts
  * @version 1.41 - claim budget for install_security_updates (the agent's 60 minutes: the wait for another package
  *                 run, the list refresh and the updater, each bounded by the script)
@@ -588,6 +590,16 @@ class ManagementJob extends SystemBase {
 		$node_id  = $this->get('mjb_mgn_managed_node_id');
 		$job_type = $this->get('mjb_job_type');
 
+		// A probe is not queued work: this management node measures the node
+		// again, inside this request, and files a new completed job.
+		$probe = is_array($commands) ? ($commands['probe'] ?? null) : null;
+		if ($probe === 'edge_vs_origin') {
+			return EdgeOriginProbe::run_and_record(new ManagedNode($node_id, TRUE), $created_by);
+		}
+		if ($probe === 'check_status') {
+			return NodeHealthProbe::run_and_record(new ManagedNode($node_id, TRUE), $created_by);
+		}
+
 		if ($this->isPrimitiveJob()) {
 			return self::createPrimitiveJob($node_id, $job_type, $commands['primitive'],
 				$commands['params'] ?? [], $created_by, $parameters ?: null);
@@ -781,7 +793,7 @@ class ManagementJob extends SystemBase {
 		// backup_project) are not offered: historical rows keep their type strings
 		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status', 'host_report', 'host_converge', 'site_log', 'site_log_count', 'log_table_tail',
+			'check_status', 'host_report', 'host_converge', 'site_log', 'site_log_count', 'log_table_tail', 'edge_vs_origin',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',

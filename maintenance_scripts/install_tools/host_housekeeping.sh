@@ -4,6 +4,12 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.31 - PHP-FPM answers its status page on a listener of its own (pm.status_listen at
+#                /run/php/joinery-fpm-status.sock, pm.status_path /fpm-status) in the PHP version Apache
+#                hands PHP to, and gives a request in flight 10 s to finish on a reload
+#                (process_control_timeout, which was 0: a reload cut every request). The site vhost
+#                (2.10) answers /fpm-status from it over loopback for the web_workers word
+#                (specs/slow_request_diagnosis_words.md WP3).
 # Version: 1.30 - The publishing box (its own release signing key and a tree that is not root's) does not
 #                install the hourly security check and says so, instead of failing every run: a security
 #                check refused there made every converge on dev read installer-failed (B24).
@@ -700,6 +706,72 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
 else
     warn "_host_files.sh is missing from ${SCRIPT_DIR} - host files not checked"
 fi
+
+# --- 4a. PHP-FPM answers its status page on a listener of its own ------------
+# The agent's web_workers word reads PHP-FPM's pool status (workers busy and
+# idle, the listen queue, max children reached) through the site vhost's
+# /fpm-status, which Apache proxies to this listener over loopback only. The
+# listener serves the status page and nothing else, at a fixed path whatever
+# the PHP version, so the vhost template names no version.
+#
+# Written for the one PHP version Apache hands PHP to (conf-enabled's
+# php<ver>-fpm.conf), and removed from any other: two versions cannot both
+# hold the one socket. The [global] line gives a request in flight 10 s to
+# finish when PHP-FPM reloads; the packaged 0 made a reload cut every request
+# in flight exactly as a restart does. Rewritten on every run (the file says
+# so); a change reloads PHP-FPM, which with that line is graceful.
+FPM_STATUS_DROPIN="zz-joinery-status.conf"
+FPM_STATUS_SOCK="/run/php/joinery-fpm-status.sock"
+active_php=""
+for php_conf in "${APACHE_DIR}"/conf-enabled/php*-fpm.conf; do
+    [[ -e "${php_conf}" ]] || continue
+    php_conf="$(basename "${php_conf}")"
+    if [[ "${php_conf}" =~ ^php([0-9]+\.[0-9]+)-fpm\.conf$ ]]; then
+        active_php="${BASH_REMATCH[1]}"
+    fi
+done
+fpm_status_tmp="$(mktemp)"
+cat > "${fpm_status_tmp}" <<FPMSTATUS
+; Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.
+; PHP-FPM's status page on a listener of its own, read over loopback through the
+; site vhost's /fpm-status (Require local) by the agent's web_workers word.
+[global]
+process_control_timeout = 10s
+
+[www]
+pm.status_path = /fpm-status
+pm.status_listen = ${FPM_STATUS_SOCK}
+FPMSTATUS
+for pool_dir in "${FS_ROOT}"/etc/php/*/fpm/pool.d; do
+    [[ -d "${pool_dir}" ]] || continue
+    php_ver="$(basename "$(dirname "$(dirname "${pool_dir}")")")"
+    [[ "${php_ver}" =~ ^[0-9]+\.[0-9]+$ ]] || continue
+    dropin="${pool_dir}/${FPM_STATUS_DROPIN}"
+    changed=0
+    # pm.status_listen is PHP 8.0's; an older PHP keeps no drop-in.
+    if [[ "${php_ver}" == "${active_php}" && "${php_ver%%.*}" -ge 8 ]]; then
+        if install_file "${dropin}" "${fpm_status_tmp}"; then
+            say "wrote ${dropin}: PHP-FPM's status page on ${FPM_STATUS_SOCK}"
+            changed=1
+        fi
+    elif [[ -e "${dropin}" ]]; then
+        rm -f "${dropin}"
+        say "removed ${dropin}: PHP ${php_ver} is not the version Apache uses"
+        changed=1
+    fi
+    if [[ "${changed}" == 1 && "${RUN_SYSTEM}" == 1 ]]; then
+        if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+            systemctl reload "php${php_ver}-fpm" >/dev/null 2>&1 \
+                || warn "php${php_ver}-fpm could not be reloaded - the status page answers at its next start"
+        elif [[ -s "/run/php/php${php_ver}-fpm.pid" ]]; then
+            # A site container: no systemd, the supervisor runs PHP-FPM.
+            # USR2 is PHP-FPM's own graceful reload.
+            kill -USR2 "$(cat "/run/php/php${php_ver}-fpm.pid")" 2>/dev/null \
+                || warn "php${php_ver}-fpm could not be reloaded - the status page answers at its next start"
+        fi
+    fi
+done
+rm -f "${fpm_status_tmp}"
 
 # --- 5. PostgreSQL answers only locally ----------------------------------------
 # A Joinery site's database is used by the site on the same machine and by

@@ -653,6 +653,12 @@ check($ke['kernel_events_24h'] === array('oom' => 2, 'enospc' => 1, 'io_error' =
 $ke_old = JobResultProcessor::sanitise_host_report(array('kernel_events_24h' => array('oom' => 0, 'enospc' => 0, 'io_error' => 0)));
 check($ke_old['kernel_events_24h']['kernel_warning'] === 'unknown',
 	'a report from before kernel_warning reads it as unknown, never 0');
+$ke_new = JobResultProcessor::sanitise_host_report(array('kernel_events_24h' => array('oom' => 0, 'enospc' => 0, 'io_error' => 0,
+	'kernel_warning' => 0, 'conntrack_full' => 4, 'syn_flood' => 'x')));
+check(($ke_new['kernel_events_24h']['conntrack_full'] ?? null) === 4 && ($ke_new['kernel_events_24h']['syn_flood'] ?? null) === 'unknown',
+	'host_report 1.38\'s two connection-drop counts are kept, each a number or unknown', var_export($ke_new['kernel_events_24h'], true));
+check(!array_key_exists('conntrack_full', $ke['kernel_events_24h']),
+	'an older report that does not carry them leaves them out: not reported, never 0');
 
 // The pinned kernel settings (host_report 1.29, multi_tenant_host_hardening D1).
 $hd = function ($h) { return JobResultProcessor::sanitise_host_report(array('hardening' => $h))['hardening']; };
@@ -2518,5 +2524,57 @@ $ss_r = json_decode((string)$ss_job->get('mjb_result'), true);
 check(($ss_r['read'] ?? null) === true && ($ss_r['reading']['site'] ?? null) === 'src3' && $ss_r['sites'] === array(),
 	'a site_state_report job keeps its report as its result, which the job page renders', var_export($ss_r, true));
 check(in_array('site_state_report', JobResultProcessor::processable_types(), true), 'site_state_report is a type this processor knows');
+
+section('net_health and web_workers (agent 1.93.0, specs/slow_request_diagnosis_words.md)');
+
+$nh = JobResultProcessor::sanitise_net_health(array(
+	'counters' => array(
+		'listen_overflows' => array('total' => 114, 'per_interval' => 14),
+		'retrans_segs'     => array('total' => 1030, 'per_interval' => 30),
+		'made_up'          => array('total' => 1, 'per_interval' => 1),
+		'rx_dropped'       => array('total' => -3, 'per_interval' => 1),
+	),
+	'conntrack' => array('count' => 190, 'max' => 200),
+	'web_connections' => array('estab' => 2, 'time-wait' => 1, '<script>' => 5),
+	'listen_queues' => array(array('address' => '*', 'port' => 443, 'queued' => 300, 'limit' => 511), array('address' => '*', 'port' => 22, 'queued' => 0, 'limit' => 128)),
+	'interval_seconds' => 10, 'uptime_seconds' => 99,
+));
+check(array_keys($nh['counters']) === array('listen_overflows', 'retrans_segs'),
+	'only the counters the node names, each a whole number: an unknown name and a negative are dropped', var_export($nh['counters'], true));
+check($nh['conntrack'] === array('count' => 190, 'max' => 200, 'percent' => 95), 'the connection table with its percent worked out here');
+check($nh['web_connections'] === array('estab' => 2, 'time-wait' => 1), 'connection states are short words; anything else is dropped');
+check(count($nh['listen_queues']) === 1 && $nh['listen_queues'][0]['port'] === 443, 'only the two web ports\' listeners');
+check(strpos($nh['verdict'], 'Dropping in the last 10 s') === 0 && strpos($nh['verdict'], '14 new connections dropped: accept queue full') !== false
+	&& strpos($nh['verdict'], 'connection table 95% full') !== false && strpos($nh['verdict'], 'port 443 has 300 of 511') !== false,
+	'the verdict names each drop, a nearly full table and a filling queue', $nh['verdict']);
+check(strpos($nh['verdict'], 'segments sent again') === false, 'retransmissions are shown, not called drops');
+$nh_ok = JobResultProcessor::sanitise_net_health(array('counters' => array('listen_overflows' => array('total' => 5, 'per_interval' => 0)),
+	'conntrack' => 'absent', 'web_connections' => 'unknown', 'listen_queues' => array(), 'interval_seconds' => 10));
+check($nh_ok['verdict'] === 'No packets or connections dropped in the last 10 s.', 'a quiet machine says so', $nh_ok['verdict']);
+check(JobResultProcessor::sanitise_net_health(array('refused' => 'container'))['verdict'] ?? '' ,
+	'a container refusal carries its own verdict');
+check(JobResultProcessor::sanitise_net_health('nonsense') === array('read' => false), 'an answer that is not an object is not read');
+
+$ww = JobResultProcessor::sanitise_web_workers(array(
+	'site' => 'mysite.example<b>',
+	'apache' => array('busy' => 7, 'idle' => 0, 'slots' => 10, 'scoreboard' => array('writing' => 2, 'bogus' => 9)),
+	'fpm' => array('pool' => 'www', 'process_manager' => 'ondemand', 'active' => 9, 'idle' => 0, 'total' => 9, 'max_active' => 9,
+		'listen_queue' => 4, 'max_listen_queue' => 12, 'max_children_reached' => 3, 'accepted' => 900, 'start_since_seconds' => 600,
+		'max_children' => 9, 'request uri' => '/secret?token=x'),
+	'fpm_max_children_events_24h' => 2,
+));
+check($ww['site'] === 'mysite.exampleb' && $ww['apache']['scoreboard']['writing'] === 2 && !isset($ww['apache']['scoreboard']['bogus']),
+	'names reduced to their safe set, the scoreboard to its known states', var_export($ww, true));
+check(!isset($ww['fpm']['request uri']) && strpos(json_encode($ww), 'secret') === false, 'nothing but the named numbers is kept');
+check(strpos($ww['verdict'], 'Out of workers now.') === 0 && strpos($ww['verdict'], 'PHP: 9 of 9 busy, 4 waiting') !== false
+	&& strpos($ww['verdict'], 'ceiling 2 times') !== false, 'a saturated tier says so first', $ww['verdict']);
+$ww_none = JobResultProcessor::sanitise_web_workers(array('site' => '', 'apache' => 'not_reported', 'fpm' => 'not_reported', 'fpm_max_children_events_24h' => 0));
+check(strpos($ww_none['verdict'], 'no site of its own') !== false, 'a machine with no site says it has nothing to report', $ww_none['verdict']);
+$ww_free = JobResultProcessor::sanitise_web_workers(array('site' => 's', 'apache' => array('busy' => 1, 'idle' => 40, 'slots' => 150, 'scoreboard' => array()),
+	'fpm' => array('active' => 1, 'listen_queue' => 0, 'max_children' => 8), 'fpm_max_children_events_24h' => 0));
+check(strpos($ww_free['verdict'], 'Workers free.') === 0, 'free workers say so', $ww_free['verdict']);
+foreach (array('net_health', 'web_workers') as $t) {
+	check(in_array($t, JobResultProcessor::processable_types(), true), "{$t} is a type this processor knows");
+}
 
 harness_finish();

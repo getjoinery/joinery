@@ -41,6 +41,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.55 - an approved join keeps the machine's reported addresses on its node (mgn_addresses);
+ *                 a declared body that is missing is RequestBodyIncomplete (400) unless it was over post_max_size
+ *                 (RequestBody), so a stalled agent connection is not reported as an oversized request
  * @version 1.54 - a node running a live-proof test build (mgn_agent_test_build) is offered none of this plane's agents
  *                 or bundles: it trusts only its run's throwaway key (fleet_security_patching WP7, Q8)
  * @version 1.53 - leave records the goodbye on the node (mgn_agent_left_time) and, after a move this plane asked
@@ -494,13 +497,14 @@ class AgentChannelEndpoint {
 		$raw = file_get_contents('php://input');
 		self::$raw_body = (string)$raw;
 
-		// A body over PHP's own post_max_size is DISCARDED before any code runs,
-		// while Content-Length still reports what was sent. Left alone, the
-		// request fails schema validation on whichever field is checked first
-		// and the sender is told a field is missing that they did supply.
+		// A declared body that is not there: over PHP's own post_max_size (it
+		// is DISCARDED before any code runs) or never received in full. Left
+		// alone, the request fails schema validation on whichever field is
+		// checked first and the sender is told a field is missing that they did
+		// supply. RequestBody says which of the two it was.
 		if ($declared > 0 && ($raw === '' || $raw === false)) {
-			api_error('That request was too large for this server to accept (limit '
-				. ini_get('post_max_size') . '). Nothing was received.', 'RequestTooLarge', 413);
+			$refusal = RequestBody::missing_body_refusal($declared);
+			api_error($refusal['message'], $refusal['error_type'], $refusal['status']);
 		}
 
 		if (strlen((string)$raw) > self::MAX_REQUEST_BODY) {
@@ -1017,6 +1021,7 @@ class AgentChannelEndpoint {
 	 */
 	public static function approveJoin($request, $node) {
 		$node->set('mgn_agent_public_key', (string)$request->get('ajr_public_key'));
+		$node->record_reported_addresses($request->addresses());
 		$node->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
 		$node->set('mgn_agent_last_poll', null);
 		$node->set('mgn_agent_left_time', null);
