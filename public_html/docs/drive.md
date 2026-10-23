@@ -454,6 +454,46 @@ Encrypted files rename via their re-encrypted metadata (`drive_rename` with
 in the URL fragment and are single-file only (encrypted folders can't use them).
 See [Drive Encryption](drive_encryption.md).
 
+## Opening files with a plugin
+
+Drive never names an editor or viewer. A plugin that can open some kinds of
+file registers itself from its bootstrap, and Drive asks it about each file:
+
+```php
+DriveHelper::registerOpener('office_editor', array(
+	'label'      => 'Open in editor',
+	'extensions' => array('docx', 'xlsx'),
+	'url'        => array('OfficeEditor', 'openerUrl'),     // ($file, $user_id) => page URL, or null
+	'explain'    => array('OfficeEditor', 'openerExplain'), // optional: why url() said null
+));
+DriveHelper::registerCreator('office_document', array(
+	'label'     => 'Document',
+	'action'    => 'office_editor/office_editor_create',   // posted {folder_id, name} + params, answers {url}
+	'params'    => array('kind' => 'document'),
+	'available' => array('OfficeEditor', 'creatorAvailable'), // optional: ($folder|null, $user_id) => true or a reason
+));
+```
+
+`DriveHelper::file_export()` adds `open_with` to a file — a list of
+`{key, label, url}`, or `{key, label, explain}` when the opener cannot open it
+now and says why — when the listing is for a browser session (never for a sync
+client or the app, which hold an API key, and never for the bulk sync exports
+that mint no URLs). Only Drive's own live files are asked; a file another
+feature stored stays download-only, and nothing is offered in Trash. An opener
+that throws is logged and skipped.
+
+`drive_list` carries `create_options` for a folder of the member's own tree:
+each creator as `{key, label, action, params}`, or `{key, label, explain}` when
+it cannot create there; a creator whose `available` returns anything else is
+left out.
+
+In the page, clicking a file goes to its first opener's `url` in the same tab
+(a file with none downloads, as before); the ⋯ menu lists each opener above
+Download, an `explain` one greyed with its reason; and with any creator
+registered the toolbar's New folder button becomes a New menu — Folder, then
+each creator, which asks for a name, calls its action and goes to the `url` it
+returns. With no plugin registered, the page is unchanged.
+
 ## Downloading a folder
 
 **Download as zip** on a folder's menu gives the member the folder, everything
@@ -604,6 +644,13 @@ file's `fvr_fil_file_id` rule is `permanent_delete` so deleting a file releases
 every version's bytes. `drive_versions` lists a file's history; `drive_version_restore`
 promotes one back to head. The web UI uploads a new version by sending `file_id`
 to `drive_upload_init`.
+
+`FileVersion::replace_head_content($file, $new_blob, $expected_head_blob_id)`
+replaces the head in place and adds no version: for the later saves of one
+editing session, whose first save already demoted the head it started from. It
+takes the same row hold, replaces only while the head is still
+`$expected_head_blob_id` (the blob that session wrote), releases the replaced
+blob's reference, and returns false — writing nothing — for any other head.
 
 ## Quota accounting
 

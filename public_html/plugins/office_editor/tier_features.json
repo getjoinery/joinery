@@ -1,0 +1,8 @@
+{
+  "office_editing": {
+    "label": "Edit Documents in Drive",
+    "type": "boolean",
+    "default": false,
+    "description": "Open Word and Excel files in Drive in the browser, edit them and save them back."
+  }
+}

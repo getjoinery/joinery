@@ -21,7 +21,8 @@
 		viewMode: 'list',
 		items: [],
 		breadcrumb: [],
-		usage: null
+		usage: null,
+		createOptions: []      // what the New menu can make besides a folder
 	};
 
 	// The unlocked drive vault session is held by JoinerySealed (one per scope
@@ -126,6 +127,7 @@
 		if (typeof data.site_storage !== 'undefined') renderSiteMeter(data.site_storage);
 		if (typeof data.folder_id !== 'undefined') state.folderId = data.folder_id || 0;
 		if (data.other_sources) { state.otherSources = data.other_sources; }
+		if (data.create_options) { state.createOptions = data.create_options; }
 		if (state.view === 'source') {
 			state.otherSources.forEach(function (src) { if (src.key === state.source) state.sourceLabel = src.label; });
 		}
@@ -180,6 +182,8 @@
 	function renderToolbar() {
 		var isSource = state.view === 'source';
 		$('drvNewFolderBtn').hidden = isSource;
+		// With something a plugin can create, the button opens a New menu.
+		$('drvNewFolderBtn').textContent = state.createOptions.length ? 'New' : 'New folder';
 		$('drvUploadBtn').hidden = isSource;
 		var note = $('drvSourceNote');
 		if (note) {
@@ -408,6 +412,10 @@
 		if (it.entity_type === 'folder') {
 			if (state.view === 'trash') return; // trashed folders are not browsable
 			openFolder(it.id);
+		} else if (state.view !== 'trash' && openerUrl(it)) {
+			// Something can open it here: go there, the way a document opens in
+			// any online drive. Download stays in the menu.
+			window.location.href = openerUrl(it);
 		} else if (it.encrypted) {
 			downloadEncrypted(it);
 		} else if (it.protection_level === 'private' || it.requires_window) {
@@ -415,6 +423,15 @@
 		} else {
 			if (it.download_url) window.open(it.download_url, '_blank');
 		}
+	}
+
+	// The first opener that can open this file now, or null.
+	function openerUrl(it) {
+		var list = it.open_with || [];
+		for (var i = 0; i < list.length; i++) {
+			if (list[i].url) return list[i].url;
+		}
+		return null;
 	}
 
 	// The one action every file has, whatever custody it is under.
@@ -706,8 +723,6 @@
 
 	// ---- context menu ------------------------------------------------------
 	function openMenu(e, it) {
-		var menu = $('drvMenu');
-		menu.innerHTML = '';
 		var opts = [];
 		if (state.view === 'trash') {
 			opts.push(['Restore', function () { doRestore(it); }]);
@@ -716,6 +731,12 @@
 			// Another feature's file: Drive can hand it over, nothing more.
 			opts.push(['Download', function () { downloadItem(it); }]);
 		} else {
+			// What can open it, above Download. One that cannot right now shows
+			// greyed, with its reason underneath.
+			(it.open_with || []).forEach(function (op) {
+				if (op.url) opts.push([op.label, function () { window.location.href = op.url; }]);
+				else opts.push([op.label, null, false, op.explain]);
+			});
 			if (it.entity_type === 'file') opts.push(['Download', function () { downloadItem(it); }]);
 			if (it.entity_type === 'folder') opts.push(['Download as zip', function () { downloadFolder(it); }]);
 			opts.push(['Rename', function () { openRename(it); }]);
@@ -732,14 +753,27 @@
 			if (it.entity_type === 'file') opts.push(['Version history', function () { openVersions(it); }]);
 			opts.push(['Delete', function () { doTrash(it); }, true]);
 		}
+		showMenu(e.clientX, e.clientY, opts);
+	}
+
+	// opts: [label, onPick, danger, explain]; an entry with no onPick is shown
+	// greyed with its explanation underneath.
+	function showMenu(x, y, opts) {
+		var menu = $('drvMenu');
+		menu.innerHTML = '';
 		opts.forEach(function (o) {
 			var b = el('button', o[2] ? 'danger' : '', o[0]);
 			b.type = 'button';
-			b.onclick = function () { hideMenu(); o[1](); };
+			if (o[1]) {
+				b.onclick = function () { hideMenu(); o[1](); };
+			} else {
+				b.disabled = true;
+				b.className = 'drv-menu-off';
+				if (o[3]) b.appendChild(el('span', 'drv-menu-why', o[3]));
+			}
 			menu.appendChild(b);
 		});
 		menu.hidden = false;
-		var x = e.clientX, y = e.clientY;
 		var r = menu.getBoundingClientRect();
 		if (x + r.width > window.innerWidth) x = window.innerWidth - r.width - 8;
 		if (y + r.height > window.innerHeight) y = window.innerHeight - r.height - 8;
@@ -798,6 +832,44 @@
 		// native-submits right past it.
 		if (form.joineryValidator || document.readyState === 'complete') attach();
 		else document.addEventListener('DOMContentLoaded', attach);
+	}
+
+	// The New button: straight to the folder dialog, or with plugin creators
+	// registered, a menu of Folder and each creator.
+	function onNewButton(e) {
+		if (!state.createOptions.length) { openNewFolder(); return; }
+		e.stopPropagation();
+		var opts = [['Folder', openNewFolder]];
+		state.createOptions.forEach(function (c) {
+			if (c.action) opts.push([c.label, function () { openNewFile(c); }]);
+			else opts.push([c.label, null, false, c.explain]);
+		});
+		var r = e.currentTarget.getBoundingClientRect();
+		showMenu(r.left, r.bottom + 4, opts);
+	}
+
+	var newFileCreator = null;
+	function openNewFile(creator) {
+		newFileCreator = creator;
+		$('drvNewFileTitle').textContent = 'New ' + creator.label.toLowerCase();
+		$('drvNewFileName').value = '';
+		$('drvNewFileDialog').showModal();
+		setTimeout(function () { $('drvNewFileName').focus(); }, 30);
+	}
+	function submitNewFile(e) {
+		e.preventDefault();
+		var name = $('drvNewFileName').value.trim();
+		if (!name || !newFileCreator) return;
+		var body = { name: name };
+		var params = newFileCreator.params || {};
+		Object.keys(params).forEach(function (k) { body[k] = params[k]; });
+		if (state.view === 'mine' && state.folderId) body.folder_id = state.folderId;
+		api.post(newFileCreator.action, body)
+			.then(function (r) {
+				$('drvNewFileDialog').close();
+				if (r && r.url) window.location.href = r.url; else load();
+			})
+			.catch(function (err) { toast(err.message || 'Could not create the file.', err); });
 	}
 
 	function openNewFolder() {
@@ -1394,13 +1466,14 @@
 		document.querySelectorAll('#drvNav .drv-nav-item').forEach(function (b) {
 			b.onclick = function () { switchView(b.dataset.view); };
 		});
-		$('drvNewFolderBtn').onclick = openNewFolder;
+		$('drvNewFolderBtn').onclick = onNewButton;
 		$('drvUploadBtn').onclick = function () { $('drvFileInput').click(); };
 		$('drvFileInput').onchange = function () { uploadFiles(this.files); this.value = ''; };
 		$('drvViewToggle').onclick = toggleViewMode;
 		$('drvSearch').oninput = onSearch;
 
 		interceptSubmit(dialogForm($('drvNewFolderDialog')), submitNewFolder);
+		interceptSubmit(dialogForm($('drvNewFileDialog')), submitNewFile);
 		interceptSubmit(dialogForm($('drvRenameDialog')), submitRename);
 		interceptSubmit(dialogForm($('drvMoveDialog')), submitMove);
 		interceptSubmit(dialogForm($('drvProtectionDialog')), submitProtection);

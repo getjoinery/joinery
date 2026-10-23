@@ -1,0 +1,47 @@
+{
+    "name": "Office Editor",
+    "version": "0.1.0",
+    "description": "Open Word and Excel files from Drive in the browser, edit them and save them back, alone or together. The editor runs on this server, so the files never leave it. Standard-level files only.",
+    "author": "Joinery",
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "status": "experimental",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "bootstrap": "includes/bootstrap.php",
+    "host_installer": "provisioning/install_office_editor.sh",
+    "tags": [
+        "drive",
+        "documents",
+        "spreadsheets"
+    ],
+    "provisioners": [
+        {
+            "key": "editor_installed",
+            "label": "Document editor installed on this server",
+            "details": "The installer puts the editor on this server and lets the site start it. It refuses a server with under 2 GB of memory and no swap.",
+            "check": { "type": "code", "call": "OfficeEditorHealth::checkInstalled" },
+            "script": "provisioning/install_office_editor.sh"
+        }
+    ],
+    "settings": [
+        {
+            "name": "office_editor_token_key",
+            "default": "",
+            "managed": true,
+            "secret": true,
+            "helptext": "HMAC key for the tokens the document editor carries when it reads and saves a file. Minted on first use by OfficeEditorToken. Never entered by hand; replacing it ends every open editing session."
+        }
+    ],
+    "sealed_secrets": [
+        {
+            "label": "Document editor token key",
+            "feature": "Office editing on Drive",
+            "kind": "regenerable",
+            "locator": "office_editor_token_key",
+            "reprovision": "OfficeEditorToken::provisionKey"
+        }
+    ]
+}

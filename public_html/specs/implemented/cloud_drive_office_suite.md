@@ -2,7 +2,7 @@
 
 **Purpose:** Members open a Word or Excel file in their Drive, edit it in the browser and save it back, without the file getting damaged. The target is everyday files: school papers, letters, resumes, to-do lists and household budgets.
 
-**Status:** Active. **Phase 0 (measure and test) ran 2026-10-10 and passed G1–G4.** Results are in §6, and Phases 1–3 below already reflect them. G5 (licensing) was decided the same day: the free edition in home mode (§1). Phase 1 can start.
+**Status:** Implemented 2026-10-22. Phase 0 (measure and test) ran 2026-10-10 and passed G1–G4 (§6); G5 decided the same day (§1). Phases 1–3 built and run end to end on a test-Linode box: the db suites (office_editor_wopi, drive_openers), the live suite (office_editor_live) and browser checks passed, and the db gate passed; build notes in §7. Testing still owed after a release is in the live verification queue.
 
 **Plugin name:** `office_editor`.
 
@@ -19,8 +19,8 @@
 | Where does it run? | **On the node, next to the site.** | Files never leave the user's own server. |
 | Formats | **.docx and .xlsx** (plus .odt/.ods, which come free). Blank new documents of both types. | This matches the target users. PowerPoint is out of scope for v1. |
 | Protection levels | **Standard files only.** Private and Fortress files show "Download to edit" instead. | The editor has to read the file's plaintext. For Fortress that breaks the promise outright. For Private it would put plaintext in the editor's memory and temp files outside the vault window. Private files could be added later in their own spec. |
-| Licensing | **Free Collabora edition (CODE) in home mode, from the MPL-licensed packages only.** A paid license waits until there is money for one. | Home mode shows users no Collabora popups. It caps each server at 10 open files and 20 connected people, about what a 1 GB node can hold anyway (§6.2). Default CODE has no cap, but it shows a welcome popup and feedback prompts that can't be switched off. The editor server and office engine are MPL 2.0, which allows commercial and production use; Collabora's "not for production" is advice about support, not a license term (§6.5). Three rules keep us inside the licenses: skip the EULA-licensed `code-brand` package, let each node download from Collabora's repository rather than us hosting the packages, and never put "Collabora" in a product or feature name. Moving to a paid license later swaps the package in installer step 1 and drops the home-mode setting; nothing else in the plugin changes. |
-| Multi-tenant Docker hosts | **Out of scope for v1.** | Those hosts give each site a fixed memory budget that starts at 256 MB, and the editor alone needs several times that. A shared, host-level editor for those hosts would be its own spec. |
+| Licensing | **Free Collabora edition (CODE) in home mode, from the MPL-licensed packages only.** A paid license waits until there is money for one. | Home mode shows users no Collabora popups while at most 10 files are open and fewer than 20 people are connected, about what a 1 GB node can hold anyway (§6.2). Past those numbers it does not refuse anyone; it shows everyone an "unsupported version" banner instead (§7), so the site enforces the limits itself and says "the editor is busy". Default CODE has no cap, but it shows a welcome popup and feedback prompts that can't be switched off. The editor server and office engine are MPL 2.0, which allows commercial and production use; Collabora's "not for production" is advice about support, not a license term (§6.5). Three rules keep us inside the licenses: skip the EULA-licensed `code-brand` package, let each node download from Collabora's repository rather than us hosting the packages, and never put "Collabora" in a product or feature name. Moving to a paid license later swaps the package in installer step 1 and drops the home-mode setting; nothing else in the plugin changes. |
+| Multi-tenant Docker hosts | **Out of scope for v1: the editor is offered on bare-metal sites only.** The installer exits 0 "not applicable" inside a site container. | Those hosts give each site a fixed memory budget that starts at 256 MB, and the editor alone needs several times that. A site container also strips every setuid bit at start (`_site_supervisor.sh`), so the web user has no way to ask root to start the editor there. A shared, host-level editor for those hosts would be its own spec. |
 
 ### What the editor does and doesn't preserve
 
@@ -144,18 +144,16 @@ The installer:
 2. Writes `coolwsd.xml`:
    - listen on loopback only (`127.0.0.1` and `::1`);
    - TLS terminated by Apache, not coolwsd;
-   - the WOPI host allowlist set to this site only;
+   - the WOPI host allowlist set to the loopback listener only (`http://127.0.0.1:9981`, §4.1), which is the only address the editor reaches the site on;
    - `num_prespawn_children` = 1. Idle memory was the same at 1 and 4, and 1 means fewer processes.
-   - `home_mode.enable` = true: no Collabora popups, and at most 10 open documents and 20 connections per server (§1, §6.5).
-   - no added capabilities. Inside a site container, Collabora isolates each document with its Landlock jail (§6.3); on bare metal it uses namespaces.
+   - `home_mode.enable` = true: no Collabora popups while at most 10 documents are open and fewer than 20 connections (§1, §7). The site holds those limits itself, reading the editor's own counts from its metrics on loopback (`security.enable_metrics_unauthenticated`, which needs the admin console on; with no admin user configured it admits nobody).
+   - no added capabilities; on bare metal Collabora isolates each document with namespaces.
 3. **Memory guard.**
    - On bare metal: a systemd drop-in sets `MemoryMax` on `coolwsd.service`. When Collabora hits the cap, its overflow goes to swap and opens slow down, while Postgres and Apache stay untouched (§6.2).
    - `memproportion` is only a soft limit: above it Collabora unloads idle documents, but it never refuses a new one.
-   - Inside a container there is no systemd, so `memproportion` and the site's own memory limit are the only guards.
 4. **Proxy.**
-   - The container Apache (or the bare-metal vhost) gets a drop-in, `conf-available/joinery-office-editor.conf`. It proxies `/browser`, `/hosting/discovery` and `/hosting/capabilities`, plus `/cool` with `upgrade=websocket`.
-   - On Docker hosts, the host proxy template's `ProxyPass / http://127.0.0.1:{{PORT}}/` line (in both the :80 and :443 blocks) gains `upgrade=websocket`. Without it the editor never connects (§6.3).
-   - This is a template change, because `render_vhost.sh` refuses operator edits. `mod_proxy_http` handles the upgrade itself, so `proxy_wstunnel` is not needed.
+   - Apache gets a drop-in, `conf-available/joinery-office-editor.conf`. It proxies `/browser` and `/hosting/capabilities`, plus `/cool` with `upgrade=websocket`, keeping the visitor's Host. `mod_proxy_http` handles the upgrade itself, so `proxy_wstunnel` is not needed. The editor's conversion and admin endpoints are refused.
+   - The same drop-in adds the loopback listener the editor reaches the site on (§4.1).
 5. Refuses to install on a node with under 2 GB of RAM **and no swap**, and logs why. A 1 GB node with 1 GB of swap handled 10 simultaneous editors (§6.2).
 
 ### 3.2 Starting and stopping
@@ -165,7 +163,6 @@ The installer:
 - A web request has no root, so the installer adds a narrow `sudoers` rule that lets the web user run only `office-editor-ctl start|status`.
 - Opening a document calls `start` and waits for discovery to answer. The page shows "Starting the editor…" meanwhile.
 - A cron job stops the service after 30 minutes with no open documents.
-- In a container, `office-editor-ctl` starts coolwsd directly as the `cool` user, the same command its systemd unit runs.
 
 ---
 
@@ -183,7 +180,7 @@ The editor never touches the database or the disk. It asks the site over WOPI: "
 
 These are a protocol surface whose paths, verbs and headers Collabora dictates, the same standing exception as payment webhooks. They're not `/api/v1` actions. Everything the **browser** calls goes through API actions (§4.4).
 
-**Who may call them:** requests from loopback only (`127.0.0.1` or `::1`, compared as addresses). They must also carry a valid WOPI proof-key signature, checked against the key published by the local discovery endpoint.
+**Who may call them:** only requests that came in on a listener bound to `127.0.0.1:9981`, which the installer's Apache drop-in adds and which serves these paths and nothing else. That vhost sets `JOINERY_OFFICE_WOPI`, and the handler also requires a loopback local address (`127.0.0.1` or `::1`, compared as addresses). Nothing off the machine can connect to that listener, so it admits exactly what a loopback client check would; the client address itself is not used. Requests must also carry a valid WOPI proof-key signature, checked against the key published by the local discovery endpoint. WOPISrc is `http://127.0.0.1:9981/office_editor/wopi/files/{id}`.
 
 ### 4.2 The access token
 
@@ -202,13 +199,13 @@ PutFile follows the same steps as a Drive upload:
 3. `FileBlob::createFromPath()`, then `FileVersion::save_new_content()`. If that fails, release the blob.
 4. Run `DriveUsage::recompute`, `FileChange::record(KIND_CONTENT)` and `DriveHelper::forget_sync_meta`, so sync clients pick the change up.
 
-**Conflicts:** Collabora sends the file's last-modified time with each save (`X-COOL-WOPI-Timestamp`). If the file changed underneath, for example a sync client uploaded a newer copy, the save is refused with Collabora's "document changed" status code. The user then chooses which copy to keep. No WOPI lock table is needed: one editor server per node already coordinates everyone editing the same file.
+**Conflicts:** Collabora sends the file's last-modified time with each save (`X-COOL-WOPI-Timestamp`): the `LastModifiedTime` the site last gave it, which is the head blob's `fbb_create_time`. If the file changed underneath, for example a sync client uploaded a newer copy, the save is refused with Collabora's "document changed" status code. The user then chooses which copy to keep; keeping theirs resends without the timestamp and saves as a new version. The timestamp compare is only the first answer: the real check is made where the head is written, under the file's row hold (the first save is guarded by the content the editor loaded, later saves replace only the head the session wrote), because a sync upload can land between the compare and the write. No WOPI lock table is needed: one editor server per node already coordinates everyone editing the same file.
 
 **Version churn:** autosaves arrive every few minutes. If each one became a Drive version, a single afternoon of typing would push the real history past the `drive_versioning_depth` limit. So **one editing session produces one version**:
 
 - The first save of a session demotes the old head to a version, as normal.
 - Later autosaves in the same session replace the head blob in place, adding no new version.
-- The session is identified from the token and the editor's own session headers.
+- The session is the file's **editing span**, one per file: it starts when the editor loads the file (GetFile) and ends with the save made as the last person leaves (`X-COOL-WOPI-IsExitSave`) or the next load. It is not keyed on a token: the editor saves with whichever participant's token it picks, so a per-token session would turn every change of saver into a new version.
 
 This needs one new method beside `save_new_content`, with its own test.
 
@@ -264,7 +261,7 @@ The folder listing carries the registered creators the same way, as `create_opti
 4. **New → Document / Spreadsheet** asks for a name, creates the blank file in the current folder and opens it.
 5. **Shared files:** people with Editor access edit together and see each other's cursors.
 6. **Private and Fortress files** still download when clicked. The menu shows **Download to edit** with one line explaining why.
-7. **Server full.** When the home-mode cap is reached, the member sees "The editor is busy: too many documents are open on this site right now. Try again in a few minutes, or download the file." with a Download button, not Collabora's own error. Phase 1 records exactly what Collabora returns for the 11th file and the 21st connection, so the page can recognise it.
+7. **Server full.** When opening would pass the home-mode limits (an 11th document, or a 20th connection), the member sees "The editor is busy: too many documents are open on this site right now. Try again in a few minutes, or download the file." with a Download button. The site decides this before the editor is asked (§7): Collabora itself never refuses in the free edition.
 8. **Changed elsewhere.** A save refused for a timestamp conflict (§4.3) says the file was changed somewhere else, and offers to keep this version or reopen the other.
 9. **Phones:** the editor's own phone layout is used, with no extra work.
 
@@ -277,7 +274,7 @@ The folder listing carries the registered creators the same way, as `create_opti
 
 - **WOPI host suite** (`db` tier): token mint/verify, expiry, wrong-file and wrong-user refusal, non-loopback refusal, proof-key failure, permission revoked mid-session, level changed mid-session, quota exceeded, timestamp conflict, and one version per session.
 - **Live test** (`live` tier): on a node with the editor installed, open corpus file #1, change a word, save, and confirm a new version exists and the PDF page count is unchanged.
-- **Cap test** (`live` tier): open 11 different files; the 11th gets the "editor is busy" page, and the first 10 still save.
+- **Cap test** (`live` tier): hold 10 different files open; the 11th gets the "editor is busy" answer, and joining one of the 10 still opens.
 
 ---
 
@@ -377,7 +374,7 @@ On box A the kernel made room by moving the idle spam filter (rspamd) into swap 
 ### 6.5 Licensing facts
 
 - **CODE, default mode:** free, and showed no document or connection cap: 22 documents were open at once. Every open shows an "Explore the New 26.04.5.1 — Collabora Online Development Edition" popup over the document, and its configuration says the welcome and feedback popups cannot be switched off in this mode.
-- **CODE, `home_mode`:** no popups (verified), but caps each server at **10 open documents and 20 connections**.
+- **CODE, `home_mode`:** no popups (verified) up to **10 open documents and 20 connections**. *Corrected 2026-10-22 (§7): it does not cap at those numbers; past them it shows an "unsupported version" banner to everyone connected.*
 - Collabora describes CODE as being for testing, home use and small teams, "not recommended for production": a rolling release with no SLA.
 - **What the packages say** (read 2026-10-10 from the 26.04.5 debs in Collabora's repository):
   - `coolwsd` (the editor server): `License: MPL-2`.
@@ -400,3 +397,25 @@ On box A the kernel made room by moving the idle spam filter (rspamd) into swap 
 | G4 | **Pass.** No added capabilities; Landlock jail in containers. |
 | G5 | **Decided 2026-10-10:** CODE in home mode, MPL packages only (§1). A paid license waits until there is money. |
 | Box A | **1 GB nodes can offer editing when they have swap.** It handled 10 simultaneous editors with no kills, and the site stayed within ~1 s. The installer floor is therefore "2 GB, or 1 GB plus swap" (§3.1 step 5). |
+
+---
+
+## 7. Build notes (2026-10-22)
+
+Phases 1–3 were built and run end to end on a 2 GB test-Linode box (bare metal, release 0.8.525 plus this tree; CODE 26.04.5.1). What the build settled, beyond the sections above:
+
+- **Home mode does not cap.** With 10 documents held open, an 11th opened normally and every connected user got a dismissable banner: "This is an unsupported version of Collabora Online Development Edition (unbranded). To avoid the impression that it is suitable for deployment in enterprises, this message appears when more than 10 documents or 20 connections are in use concurrently." The source agrees: the hard refusal (`hardlimitreached`) exists only in builds with a support key (`wsd/ClientRequestDispatcher.cpp`); the free edition sends the soft `limitreached` notice (`COOLWSD::checkSessionLimitsAndWarnClients`). Phase 0 never pushed past the limit in home mode, which is how §6.5 came to say "caps". The site therefore enforces the limits itself (§5.2 item 7), from the editor's metrics: `kit_assigned_count` (documents), `document_active_views_all_count_total` (connections), and `doc_info` (which files, by WOPISrc).
+- **The idle stop counts documents, not connections.** It reads `kit_assigned_count` from the same metrics; after the last tab closed it reached 0 within 3 s, and a busy mark aged past 30 minutes stopped the service.
+- **The editor reaches the site on a listener of its own.** `127.0.0.1:9981`, which only processes on the machine can connect to and which passes only the WOPI paths. Its check reads `THE_REQUEST`: the site's `<Directory>` rewrite hands the request to serve.php internally, and a check on the rewritten path refused everything.
+- **The vendor branding package is not needed.** Without `code-brand` the editor opens, edits and saves; the only difference is two 404s for branding files in the browser console.
+- **`--o:` overrides work for plain keys and for the WOPI alias group** (`storage.wopi.alias_groups.group[0].host[0]`). `lok_allow` and `post_allow` are emptied in the editor's own copy of the packaged configuration; in 26.04 `post_allow` gates only the conversion endpoints, so copy and paste between documents (`/cool/clipboard`) is unaffected.
+- **The editor's own saves send no `Action_Save_Resp`.** The page reads "Saved" from `Doc_ModifiedStatus` going false.
+- **Cold start**, stopped to document on screen: 4.9 s on the 2 GB box.
+- **Live suite** (`office_editor_live`, 14 checks) passed on the box: a 3-page document loaded through the signed WOPI path, edited and saved; a new version; the word in the file; 3 pages before and after; the capacity limit.
+
+- **A refused save looks like a save to the page.** Over quota, Collabora showed its own "Save failed because the document is too large or exceeds the remaining storage space…" dialog with a download, switched to read-only, and posted `Doc_ModifiedStatus` false exactly as after a good save. The WOPI host therefore records each refusal on the file's span, and the page asks `office_editor_save_state` a moment after each "saved"; the bar then read "Not saved: there is no room left in this Drive.", and "Saved" again after the quota was lifted.
+
+- **Close waits for the site, not the editor.** On the box, with a sync upload landed while the document had unsaved edits, Close stayed on the page with "Not saved: the file was changed somewhere else." and Collabora's "Document has been changed — Discard / Overwrite" dialog; Overwrite saved the editor's copy as a new version (the laptop's kept as the version before it), the bar went back to "Saved", and Close then left. A plain Close after an edit saved and left in 1.4 s.
+
+Not repeated after Phase 0: opening on a 1 GB node with swap (the installer allows it).
+
