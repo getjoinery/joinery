@@ -2,7 +2,11 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.29
+ * @version 2.30
+ * @changelog 2.30 - A person's budget is kept per kind of credential: their browser
+ *   (api_session_rate_limit_*), their devices together (api_device_rate_limit_requests) and their
+ *   app credentials together (ApiAuth::APP_REQUEST_LIMIT at least). A desktop's first sync of a
+ *   large folder slows that sync and no longer locks its person out of the site.
  * @changelog 2.29 - A keyed action request is metered after authentication: a session key
  *   (a person's own device: a linked desktop, a phone app) on that person's own budget,
  *   like their browser, any other key on the address as before. Several people's
@@ -590,46 +594,42 @@ $api_entry = $principal['api_entry'];
 $api_user  = $principal['api_user'];
 $auth_data = $principal['auth_data'];
 
-// Rate limiting for the browser-session credential, now that it has a name:
-// a signed-in user is metered on their own requests (api_session_rate_limit_*,
-// default 5000/hour), whoever else shares their address; a principal with no
-// user (the anonymous browser principal, a guest) is metered by address like
-// any other keyless caller, whatever headers it came with. A session key is
-// metered here per person on every route; any other key on an action request
-// is metered here by address; every other key request was metered by address
-// before authentication.
-if ($api_entry === null || $api_entry->is_app_credential()) {
-	if ($api_user !== null) {
-		$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+// Rate limiting by person, now that the caller has a name. A signed-in person
+// has one budget per kind of credential, counted on the rows logged under that
+// kind (RequestLogger::person_rate_limit_state), whoever else shares their
+// address: their browser (api_session_rate_limit_*, default 5000/hour), their
+// devices together (session keys: a linked desktop, a phone app;
+// api_device_rate_limit_requests, default 20000/hour) and their app
+// credentials together (a mail program; at least ApiAuth::APP_REQUEST_LIMIT).
+// Kept apart so a desktop's first sync of a large folder, or a mail program's
+// first download of a mailbox, slows itself and never locks its person out of
+// the site. Per kind, never per key: another linked device buys no more
+// requests. A principal with no user (the anonymous browser principal, a
+// guest) is metered by address like any other keyless caller, whatever headers
+// it came with; any other key on an action request is metered here by
+// address; every other key request was metered by address before
+// authentication.
+$person_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
+if ($api_user !== null && ($api_entry === null || $api_entry->is_app_credential() || $api_entry->is_session())) {
+	$person_limit = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+	$person_who = 'Your account';
+	if ($api_entry !== null && $api_entry->is_session()) {
+		$person_limit = (int)($settings->get_setting('api_device_rate_limit_requests') ?: 20000);
+		$person_who = 'Your linked devices';
+	} elseif ($api_entry !== null) {
 		// A mail program's first sync of a large mailbox downloads it whole,
 		// a few dozen messages a request: give it room.
-		if ($api_entry !== null) {
-			$session_limit = max($session_limit, ApiAuth::APP_REQUEST_LIMIT);
-		}
-		$session_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
-		$session_state = RequestLogger::rate_limit_state('api', $session_limit, $session_window, null, intval($api_user->key));
-		if (!$session_state['allowed']) {
-			api_rate_limited($session_state, 'Your account', $session_limit, $session_window);
-		}
-	} else {
-		$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
-		if (!$api_state['allowed']) {
-			api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
-		}
+		$person_limit = max($person_limit, ApiAuth::APP_REQUEST_LIMIT);
+		$person_who = 'Your mail and app connections';
 	}
-} elseif ($api_entry->is_session()) {
-	// A session key is a person's own device: their budget, shared with their
-	// browser, on every route. Its rows are left out of the address count, so
-	// this is the limit that bounds it (a keyed action request skipped the
-	// address check above; any other route also passed it).
-	$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
-	$session_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
-	$session_state = RequestLogger::rate_limit_state('api', $session_limit, $session_window, null, intval($api_user->key));
-	if (!$session_state['allowed']) {
-		api_rate_limited($session_state, 'Your account', $session_limit, $session_window);
+	$person_state = RequestLogger::person_rate_limit_state('api', $person_limit, $person_window,
+		intval($api_user->key), (string)RequestLogger::api_key_type());
+	if (!$person_state['allowed']) {
+		api_rate_limited($person_state, $person_who, $person_limit, $person_window);
 	}
-} elseif ($key_shaped) {
-	// Any other key on an action request skipped the address check above.
+} elseif ($api_entry === null || $api_entry->is_app_credential() || $key_shaped) {
+	// No user, or any other key on an action request (which skipped the
+	// address check above).
 	$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
 	if (!$api_state['allowed']) {
 		api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);

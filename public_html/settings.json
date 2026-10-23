@@ -906,7 +906,7 @@
       "validation": {
         "min": 1
       },
-      "helptext": "Counted per user, not per IP: a person's own pages, the mail reader, the vault beacon and its background catch-up work all count here, and several people behind one address are several callers. Keyless and key-based traffic is counted by the per-IP limit above."
+      "helptext": "Counted per user, not per IP: a person's own pages, the mail reader, the vault beacon and its background catch-up work all count here, and several people behind one address are several callers. A person's linked devices have a budget of their own (below), so a big sync never uses up this one. Keyless traffic and machine keys are counted by the per-IP limit above."
     },
     {
       "name": "api_session_rate_limit_window",
@@ -917,7 +917,18 @@
       "validation": {
         "min": 1
       },
-      "helptext": "3600 is one hour."
+      "helptext": "3600 is one hour. A person's linked devices are counted over the same window."
+    },
+    {
+      "name": "api_device_rate_limit_requests",
+      "default": "20000",
+      "group": "api_rate_limits",
+      "label": "Max API requests per window from a person's linked devices",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per user across all their linked desktops and phone apps together, apart from their browser: a first sync of a large folder makes about two requests a file, and when it reaches this limit the sync waits while the person's website keeps working. Linking another device does not add to it."
     },
     {
       "name": "max_entity_photos",
