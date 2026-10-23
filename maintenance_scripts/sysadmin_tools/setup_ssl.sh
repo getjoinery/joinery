@@ -8,6 +8,11 @@
 #
 # It never fails the caller. If neither challenge path is available it issues
 # nothing and the site stays on HTTP, which is the same state the install left.
+# Whenever it ends with no CA-signed certificate, it arms the retry timer
+# (arm_ssl_retry.sh) to run it again once the name reaches this box.
+#
+# Version: 1.1 - arms the retry timer when no CA-signed certificate is in place
+#                after it runs (B67)
 #
 # Usage:
 #   sudo ./setup_ssl.sh <domain>
@@ -35,6 +40,8 @@ fi
 #   maintenance_scripts/sysadmin_tools/setup_ssl.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_SH="${SCRIPT_DIR}/../install_tools/install.sh"
+# Sourcing install.sh sets SCRIPT_DIR to its own folder; the retry timer runs this file.
+SETUP_SSL_SELF="${SCRIPT_DIR}/setup_ssl.sh"
 
 if [ ! -f "$INSTALL_SH" ]; then
     echo "ERROR: could not find install.sh at $INSTALL_SH"
@@ -48,6 +55,7 @@ fi
 . "$INSTALL_SH"
 
 provision_origin_cert "$DOMAIN"
+arm_ssl_retry_unless_issued "$DOMAIN" "$SETUP_SSL_SELF"
 
 # Reload Apache so the :443 vhost picks up whatever cert just got written.
 if apache2ctl configtest > /dev/null 2>&1; then

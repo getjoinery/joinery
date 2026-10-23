@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.30 - arm_ssl_retry_unless_issued: setup_ssl.sh arms the retry timer whenever no CA-signed
+#               certificate is in place after it runs, as its message says; a copy's switch ran it once,
+#               before the name reached the copy, and nothing asked again (B67)
 #VERSION 3.29 - provision_origin_cert names the certificate's domains without certbot's -d flags in what it
 #               prints (B54)
 #VERSION 3.28 - provision_origin_cert says it kept a certificate certbot found valid and not yet due, rather
@@ -1177,10 +1180,39 @@ should_setup_ssl() {
 install_ssl_retry_timer() {
     local domain="$1"
     local ssl_script="$2"
-    local armer="${SCRIPT_DIR}/../sysadmin_tools/arm_ssl_retry.sh"
+    # SSL_RETRY_ARMER is the gate's fixture; nothing in production sets it.
+    local armer="${SSL_RETRY_ARMER:-${SCRIPT_DIR}/../sysadmin_tools/arm_ssl_retry.sh}"
 
     [ -f "$armer" ] || return 1
     bash "$armer" "$domain" --setup-ssl "$ssl_script" > /dev/null 2>&1
+}
+
+# A certificate a CA signed is in place for $1. A self-signed one (issuer equal
+# to subject: the placeholder, or one an operator dropped in) is not.
+# SSL_LIVE_DIR is the gate's fixture; nothing in production sets it.
+ca_cert_in_place() {
+    local pem="${SSL_LIVE_DIR:-/etc/letsencrypt/live}/$1/fullchain.pem" issuer subject
+    [ -f "$pem" ] || return 1
+    issuer="$(openssl x509 -in "$pem" -noout -issuer 2>/dev/null | sed 's/^issuer=//')"
+    subject="$(openssl x509 -in "$pem" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+    [ -n "$issuer" ] && [ "$issuer" != "$subject" ]
+}
+
+# setup_ssl.sh's last step: with no CA-signed certificate in place for $1, the
+# retry timer is armed to run $2 (that setup_ssl.sh) once the name reaches this
+# box, which is what provision_origin_cert says will happen. A copy's switch
+# runs setup_ssl.sh once, seconds after the record moves, while this box's own
+# resolver can still name the old server; a dormant copy was installed with no
+# timer, since its name was its source's until then.
+arm_ssl_retry_unless_issued() {
+    local domain="$1"
+    ca_cert_in_place "$domain" && return 0
+    if install_ssl_retry_timer "$domain" "$2"; then
+        print_info "A retry timer asks every five minutes whether ${domain} reaches this box, and issues its certificate when it does."
+    else
+        print_warning "No retry timer could be armed for ${domain}: run setup_ssl.sh ${domain} again once ${domain} reaches this box."
+    fi
+    return 0
 }
 
 

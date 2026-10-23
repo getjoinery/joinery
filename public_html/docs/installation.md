@@ -684,7 +684,7 @@ The same steps run for both modes. A Docker site's certificate lives on the host
 
 #### The retry timer
 
-An install that could not issue a certificate leaves behind a systemd timer, `joinery-ssl-retry@{domain}`, that finishes the job whenever the name reaches the box — minutes later or a week later. Nothing needs to be run by hand.
+An install that could not issue a certificate leaves behind a systemd timer, `joinery-ssl-retry@{domain}`, that finishes the job whenever the name reaches the box — minutes later or a week later. Nothing needs to be run by hand. `sysadmin_tools/setup_ssl.sh` arms the same timer whenever it ends with no CA-signed certificate in place, so a run that came too early, such as a site copy's switch-over running it seconds after the record moved, is followed up on its own.
 
 Each run fetches a one-time value through the domain first and only invokes Certbot when that request landed here. That is what makes an open-ended retry safe: Let's Encrypt allows five *failed validations* per hostname per hour, and a probe that does not reach here costs nothing against that budget. On a CA-issued certificate the timer disables itself and removes its config.
 
