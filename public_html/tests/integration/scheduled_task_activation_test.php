@@ -22,6 +22,7 @@
  *
  * Run: php tests/integration/scheduled_task_activation_test.php
  *
+ * @version 1.1 - the site's own task rows are restored as found, so a run leaves the daily sweep not due
  * @version 1.0
  */
 
@@ -50,6 +51,23 @@ $wipe = function () use ($db, $subject) {
 	$q = $db->prepare("DELETE FROM sct_scheduled_tasks WHERE sct_task_class = ?");
 	$q->execute(array($subject));
 };
+
+// These are the site's own rows, so put them back exactly as found, run time
+// and config included. A row recreated with no last run is due at once, and
+// the cron runner ran the daily sweep again after every run of this test.
+$touched = array($subject, 'DriveUsageReconcile');
+$snap = $db->prepare("SELECT * FROM sct_scheduled_tasks WHERE sct_task_class IN (?, ?)");
+$snap->execute($touched);
+$original_rows = $snap->fetchAll(PDO::FETCH_ASSOC);
+harness_defer(function () use ($db, $touched, $original_rows) {
+	$db->prepare("DELETE FROM sct_scheduled_tasks WHERE sct_task_class IN (?, ?)")->execute($touched);
+	foreach ($original_rows as $row) {
+		$cols = array_keys($row);
+		$db->prepare("INSERT INTO sct_scheduled_tasks (" . implode(', ', $cols) . ")
+			VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")
+			->execute(array_map(function ($v) { return is_bool($v) ? ($v ? 't' : 'f') : $v; }, array_values($row)));
+	}
+});
 
 // ---------------------------------------------------------------------------
 section('A. A flagged task with no row is created');
@@ -127,10 +145,5 @@ foreach ($discovered as $class => $info) {
 $from_mailbox = ScheduledTaskRegistry::activateDeclared('mailbox');
 $leaked = array_intersect($from_mailbox, $core_flagged_names);
 check(empty($leaked), 'activating a plugin scope never touches core tasks', json_encode($leaked));
-
-// Restore a working state: the platform expects this task active.
-$wipe();
-ScheduledTaskRegistry::activateDeclared('core');
-check($row_count(false) === 1, 'the sweep is left activated for the rest of the estate');
 
 harness_finish();
