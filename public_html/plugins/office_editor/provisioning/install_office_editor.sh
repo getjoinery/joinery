@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # install_office_editor.sh - host installer for the office_editor plugin.
+# Version: 0.1.1 - stops the editor the package starts on a fresh install; a container
+#                site's refusal is recorded for the Plugins page like any other.
 # Version: 0.1.0 - first version (specs/cloud_drive_office_suite.md § 3).
 #
 # Puts the document editor on this server, stopped: the site starts it when
@@ -79,8 +81,7 @@ read_site_setting() {
 # Docker marks its containers with /.dockerenv, the site container engine with
 # /run/.containerenv.
 if [[ "$(read_site_setting deployment_environment)" == "docker" || -f /.dockerenv || -f /run/.containerenv ]]; then
-    say "this site runs in a container; the editor is offered on servers of their own only. Nothing to install here."
-    exit 0
+    refuse "This site runs in a container; the editor is offered on servers of their own only"
 fi
 if ! command -v systemctl >/dev/null 2>&1 || ! command -v apt-get >/dev/null 2>&1; then
     refuse "This server has no systemd or apt; the editor needs both"
@@ -128,6 +129,7 @@ if [[ "${APT_UPDATE:-0}" == "1" ]]; then
     # not ours to install (spec § 1, licensing).
     apt-get install -y -qq --no-install-recommends coolwsd \
         || refuse "The editor's packages could not be installed; see the installer log"
+    FRESH_INSTALL=1
 fi
 if dpkg-query -W -f='${Status}' code-brand 2>/dev/null | grep -q "install ok installed"; then
     apt-get remove -y -qq code-brand || true
@@ -183,7 +185,11 @@ if [[ ! -f "${DROPIN}" ]] || [[ "$(cat "${DROPIN}")" != "${WANT_DROPIN}" ]]; the
     systemctl daemon-reload
     RESTART=1
 fi
-if [[ "${RESTART:-0}" == "1" ]] && systemctl is-active --quiet coolwsd; then
+if [[ "${FRESH_INSTALL:-0}" == "1" ]]; then
+    # The package starts the editor as it installs; nobody has opened a
+    # document yet, so it stops until someone does.
+    systemctl stop coolwsd || true
+elif [[ "${RESTART:-0}" == "1" ]] && systemctl is-active --quiet coolwsd; then
     systemctl restart coolwsd || true
 fi
 
