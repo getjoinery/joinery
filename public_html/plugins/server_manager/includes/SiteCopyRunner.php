@@ -98,6 +98,11 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.40 - a way back after a copy onto a host took over keeps the copy's row, retired and named for its
+ *                container held stopped on its host, so Permanently Delete Site can remove it; the row was removed and
+ *                nothing on the plane could reach the container
+ * @version 1.39 - the certificate step's job names the site it is for (for_node_id): issued on a copy's host,
+ *                its result was stamped on the host's row, which took the site's name as its reverse DNS
  * @version 1.38 - a copy onto a host refuses, saying so, when this management node holds no archive of the site's
  *                release (holds_release; UpgradeRetention keeps the ones it applies, B55)
  * @version 1.37 - a container source's host stages the site's own certificate inside it for the export and clears it
@@ -1819,6 +1824,7 @@ class SiteCopyRunner {
 			self::fail_step($copy, $steps, $pos, $e->getMessage());
 			return false;
 		}
+		$cert_for = null;
 		try {
 			if ($step['on'] === 'host') {
 				$target = self::hold_host($copy);
@@ -1831,8 +1837,11 @@ class SiteCopyRunner {
 				$target = $step['on'] === 'source' ? $source : $node;
 			}
 			// A container's certificate is issued on its host: a copy onto a
-			// host is a container from the moment it takes the site.
+			// host is a container from the moment it takes the site. The job
+			// names the site it is for, whose row its result is stamped on,
+			// never the host's (JobResultProcessor).
 			if ($step['op'] === 'provision_certificate') {
+				$cert_for = $target;
 				$target = JobCommandBuilder::certificate_issuer_for($target);
 			}
 		} catch (Exception $e) {
@@ -1850,7 +1859,8 @@ class SiteCopyRunner {
 			try {
 				$built = self::build_step($copy, $steps, $step, $source, $node);
 				$job = ManagementJob::createFromBuild($target->key, $step['op'], $built,
-					array('site_copy_id' => (int)$copy->key), $copy->get('scp_created_by'));
+					array('site_copy_id' => (int)$copy->key) + ($cert_for ? array('for_node_id' => (int)$cert_for->key) : array()),
+					$copy->get('scp_created_by'));
 			} catch (Exception $e) {
 				self::fail_step($copy, $steps, $pos, 'it could not be queued: ' . $e->getMessage());
 				return false;
@@ -3432,21 +3442,34 @@ class SiteCopyRunner {
 		$switch['returned_time'] = gmdate('Y-m-d H:i:s');
 		$copy->set_switch_record($switch);
 		if (!empty($switch['swapped_back_time'])) {
-			if ($copy->on_host()) {
-				try {
-					$switch['moved_back_notes'] = array_merge((array)($switch['moved_back_notes'] ?? array()), array(
-						'The copy\'s container ' . self::site_name($source) . ' is held stopped on ' . self::switch_host($copy, 'copy_host')->get('mgn_name')
-						. ', with what was written on it while it was the site. Remove it there once nothing of it is wanted.'));
-					$copy->set_switch_record($switch);
-				} catch (Exception $e) {
-					// The note only names where it is.
-				}
-			}
 			// The copy's agent took the site's node id; its row holds its own
 			// key again, so it can no longer reach this management node.
 			$node = self::copy_row($copy, true);
 			if ($node) {
 				DataRootEscrowSync::let_go($node);
+			}
+			if ($copy->on_host() && $node) {
+				// Its container is held stopped on its host with what was written
+				// on it while it was the site. The row stays, retired as an old
+				// container is: Permanently Delete Site removes it there on the
+				// host's proof that the domain has left it, which a container
+				// held stopped needs (it cannot approve its own removal).
+				$node->set('mgn_install_state', 'retired');
+				$node->set('mgn_name', $source->get('mgn_name') . ' (copy\'s container)');
+				if (trim((string)$node->get('mgn_joinery_version')) === '') {
+					$node->set('mgn_joinery_version', $source->get('mgn_joinery_version'));
+				}
+				$node->save();
+				try {
+					$switch['moved_back_notes'] = array_merge((array)($switch['moved_back_notes'] ?? array()), array(
+						'The copy\'s container ' . self::site_name($source) . ' is held stopped on ' . self::switch_host($copy, 'copy_host')->get('mgn_name')
+						. ', with what was written on it while it was the site. Once nothing of it is wanted, Permanently Delete Site on '
+						. $node->get('mgn_name') . ' removes it there.'));
+					$copy->set_switch_record($switch);
+				} catch (Exception $e) {
+					// The note only names where it is.
+				}
+			} elseif ($node) {
 				$node->soft_delete();
 			}
 			$copy->set('scp_status', SiteCopy::STATUS_DISCARDED);

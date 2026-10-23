@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.17 - A theme that could not be installed signed is said truly: the site serves core's own
+#                 pages until it is, and a copy's restore brings the site's own themes (B56 made that so)
 # VERSION: 3.16 - A companion test site (install.sh site --with-test-site's <site>_test) makes no
 #                 test site of its own: its vhost is rendered by _vhost_render.sh without the
 #                 template's test-site host, and no <site>_test_test folders or logs bind are made
@@ -861,12 +863,13 @@ fi
 # THE ACTIVE THEME IS ON DISK
 # =============================================================================
 #
-# Routing refuses to serve a site whose active theme has no folder
-# (RouteHelper). A site built from its release tree alone (install.sh
-# --release-tree-only) has none: nothing the upgrade server serves unsigned
-# was laid into it. Its active theme comes here, from the upgrade source,
-# through install_extension.php, which writes only a package that verifies
-# against the release keys this tree carries. As root, at first boot.
+# A site whose active theme has no folder serves core's own views and page
+# layout, not its theme's (PathHelper). A site built from its release tree alone
+# (install.sh --release-tree-only) has none: nothing the upgrade server serves
+# unsigned was laid into it. Its active theme comes here, from the upgrade
+# source, through install_extension.php, which writes only a package that
+# verifies against the release keys this tree carries. As root, at first boot.
+# A copy's restore then brings the site's own themes, whether or not this did.
 
 if [ "$DB_EXISTS" = false ]; then
     ACTIVE_THEME="$(psql -U postgres -d "$SITENAME" -tAc \
@@ -881,7 +884,7 @@ if [ "$DB_EXISTS" = false ]; then
         if php "$SITE_ROOT/public_html/utils/install_extension.php" theme "$ACTIVE_THEME"; then
             log "Theme $ACTIVE_THEME installed"
         else
-            log_error "Warning: the active theme $ACTIVE_THEME could not be installed signed; the site serves no page until it is. A dormant copy's install then finds no page behind its look cookie and is removed whole; install it again once the upgrade source answers."
+            log_error "Warning: the active theme $ACTIVE_THEME could not be installed signed; the site serves core's own pages, not its theme's, until it is. A copy's restore brings the site's own themes; any other site installs it again once the upgrade source answers."
         fi
     fi
 fi

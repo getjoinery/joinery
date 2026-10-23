@@ -281,7 +281,9 @@ $drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, 
 		harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 		$key = $current['op'] . (!empty($current['arg']) ? ':' . $current['arg'] : '') . '@' . $current['on'];
 		$ops[] = $key;
-		$jobs_on[$key] = array((int)$job->get('mjb_mgn_managed_node_id'), json_decode((string)$job->get('mjb_commands'), true));
+		$params = $job->get('mjb_parameters');
+		$jobs_on[$key] = array((int)$job->get('mjb_mgn_managed_node_id'), json_decode((string)$job->get('mjb_commands'), true),
+			is_string($params) ? json_decode($params, true) : $params, (int)$job->key);
 		$r = $by_op[$key] ?? array('completed', array('done' => true));
 		if ($current['op'] === 'take_node_id' && $r[0] === 'completed') {
 			$job->set('mjb_status', 'completed');
@@ -399,6 +401,24 @@ check($jobs_on['site_quiet_host:off@copy_host'][0] === (int)$copy_host_agent->ke
 	'the copy\'s host lifts its quiet', json_encode($jobs_on['site_quiet_host:off@copy_host']));
 check($jobs_on['provision_certificate@source'][0] === (int)$copy_host_agent->key,
 	'its certificate is issued on its host, not inside it', (string)$jobs_on['provision_certificate@source'][0]);
+// Issued, its result is the site's: the site's row goes active and the host's
+// is untouched, and the host's shared address takes no site's reverse DNS.
+check((int)($jobs_on['provision_certificate@source'][2]['for_node_id'] ?? 0) === (int)$src->key,
+	'the job names the site it is for', json_encode($jobs_on['provision_certificate@source'][2]));
+$cert_job = new ManagementJob($jobs_on['provision_certificate@source'][3], TRUE);
+$cert_job->set('mjb_status', 'completed');
+$cert_job->set('mjb_output', "[OK] Issued LE certificate for sch.example.org (HTTP-01)\nApache reloaded.\n");
+$cert_job->set('mjb_result', null);
+$cert_job->save();
+$copy_host_agent->set('mgn_ssl_state', null);
+$copy_host_agent->save();
+JobResultProcessor::process($cert_job);
+$cert_job->load(); $src->load(); $copy_host_agent->load();
+$cert_result = json_decode((string)$cert_job->get('mjb_result'), true);
+check($src->get('mgn_ssl_state') === 'active' && $copy_host_agent->get('mgn_ssl_state') !== 'active'
+	&& !array_key_exists('rdns_attempt', (array)$cert_result),
+	'issued: the site\'s row is active, the host\'s untouched, and no reverse DNS is set for one site on a shared host',
+	var_export($src->get('mgn_ssl_state'), true) . ' / ' . var_export($copy_host_agent->get('mgn_ssl_state'), true) . ' ' . $cert_job->get('mjb_result'));
 check($jobs_on['hold_container:stop@host'][0] === (int)$src_host_agent->key, 'the old container is held on the site\'s old host');
 $src->load();
 check($copy->status() === SiteCopy::STATUS_SWITCHED && $src->get('mgn_agent_public_key') === $copy_key
@@ -413,6 +433,21 @@ check($copy->status() === SiteCopy::STATUS_RETURNING && $back === array('site_qu
 	'go_back@source', 'hold_container:start@host', 'site_quiet_host:off@source_host', 'site_quiet:off@source', 'hold_container:stop@copy_host'),
 	'once it has taken the node, the way back is still open: the copy quieted inside and out, the rows back, the old container '
 	. 'started, the site let go of its freeze, and the copy\'s container held stopped on its host', json_encode($back));
+$drive($copy, array(SiteCopy::STATUS_RETURNING), array(
+	'hold_container:start@host' => array('completed', array('output' => json_encode(array('container' => 'schsite', 'action' => 'start',
+		'done' => true, 'held' => false, 'state' => 'running', 'restart' => 'unless-stopped')))),
+	'hold_container:stop@copy_host' => array('completed', array('output' => json_encode(array('container' => 'schsite', 'action' => 'stop',
+		'done' => true, 'held' => true, 'state' => 'exited', 'restart' => 'no')))),
+));
+$copy->load();
+$held_row = SiteCopyRunner::copy_row($copy, true);
+check($copy->status() === SiteCopy::STATUS_DISCARDED && $held_row
+	&& $held_row->get('mgn_install_state') === 'retired' && JobCommandBuilder::decommission_is_moved($held_row)
+	&& (int)$held_row->get('mgn_copy_of_node_id') === (int)$src->key && (int)$held_row->get('mgn_mgh_managed_host_id') === (int)$copy_host->key,
+	'back: the copy\'s container, held on its host with what was written on it, keeps a row Permanently Delete Site can remove it by',
+	$copy->status() . ' ' . $copy->get('scp_halt_reason') . ' ' . ($held_row ? $held_row->get('mgn_install_state') . ' ' . $held_row->get('mgn_name') : 'no row'));
+check(strpos(implode(' ', SiteCopyRunner::went_back_notes($copy->switch_record())), 'Permanently Delete Site on ' . $held_row->get('mgn_name')) !== false,
+	'and the page says so, naming it', json_encode(SiteCopyRunner::went_back_notes($copy->switch_record())));
 
 // ---------------------------------------------------------------------------
 section('Discard: the copy removed from its host');

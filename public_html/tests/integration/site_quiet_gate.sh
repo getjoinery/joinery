@@ -374,6 +374,14 @@ echo "* * * * * www-data php csite" > "$R/etc/cron.d/joinery-csite"
 : > "$ST/calls"
 out="$(bash "$RUNNER" --when-changed --site-root="$C" 2>&1)"; rc=$?
 chk "quiet: exit 0, and not one installer runs" "$rc:$(printf '%s' "$out" | grep -c 'core installers: running')" "0:0"
+# Born quiet, as a dormant copy in a container is: nothing ticks for it yet,
+# so its converger's entry is installed (it skips here, not root) and only that.
+chk "quiet with nothing ticking for it: its converger is installed, and nothing else" \
+    "$(printf '%s' "$out" | grep -c 'nothing ticks for it - installing its converger'):$(printf '%s' "$out" | grep -c '^host converger: not root - skipping')" "1:1"
+echo "* * * * * root /bin/bash /usr/local/sbin/joinery-host-converger --when-changed csite" > "$R/etc/cron.d/joinery-host-converger"
+out="$(bash "$RUNNER" --when-changed --site-root="$C" 2>&1)"
+chk "with its tick in place, a quiet run installs nothing" "$(printf '%s' "$out" | grep -c -e 'nothing ticks for it' -e 'not root - skipping' -e 'core installers: running')" "0"
+rm -f "$R/etc/cron.d/joinery-host-converger"
 chk "the measures are asserted" "$([ -f "$CD/quiet.nft" ] && echo nft):$([ -L "$R/etc/apache2/conf-enabled/joinery-quiet-csite.conf" ] && echo web):$([ -e "$R/etc/cron.d/joinery-csite" ] && echo cron || echo held)" "nft:web:held"
 chk "the run is recorded as quiet" "$(cut -d' ' -f2 "$C/cache/host_converger.last")" "quiet-copy"
 chk "no converge stamp is kept while quiet" "$([ -e "$C/cache/host_converger.stamp" ] && echo kept || echo none)" "none"

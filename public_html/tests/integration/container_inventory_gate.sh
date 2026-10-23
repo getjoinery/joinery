@@ -147,18 +147,40 @@ chk "an inspect that answers nothing: unknown, never an empty host" "$(jv "$T/un
 echo "=== A host whose sites run on the site container engine (Podman) ==="
 # Podman names a container without the slash, and reads an image built here
 # back as localhost/NAME; a stopped one may say stopped.
+# Each field of the format is answered as Podman answers it (read from a real
+# site on an engine host): it names no capability as added, records the
+# defaults it dropped (never ALL), and states the set kept as BoundingCaps.
 cat > "$T/bin/podman" <<'STUB'
 #!/bin/bash
 echo "podman $1" >> "$GATE_LOG"
 case "$1 $2" in
     "ps -a") printf 'siteone\nhelper\n' ;;
     "inspect -f")
-        shift 3
+        fmt="$3"; shift 3
+        IFS='|' read -r -a fields <<< "$fmt"
         for c in "$@"; do
-            case "$c" in
-                siteone) echo "siteone|SITENAME=siteone|running|localhost/joinery-siteone:latest|volume:siteone_data " ;;
-                *)       echo "$c||stopped|docker.io/library/redis:7|" ;;
-            esac
+            line=""; sep=""
+            for f in "${fields[@]}"; do
+                case "$c|$f" in
+                    *'|{{.Name}}')                v="$c" ;;
+                    siteone'|'*SITENAME*)         v="SITENAME=siteone" ;;
+                    siteone'|{{.State.Status}}')  v="running" ;;
+                    *'|{{.State.Status}}')        v="stopped" ;;
+                    siteone'|{{.Config.Image}}')  v="localhost/joinery-siteone:latest" ;;
+                    *'|{{.Config.Image}}')        v="docker.io/library/redis:7" ;;
+                    siteone'|{{range .Mounts}}'*) v="volume:siteone_data " ;;
+                    siteone'|'*joinery.seccomp*)  v="$(printf 'b%.0s' $(seq 1 64))" ;;
+                    siteone'|'*.HostConfig.CapAdd*)  v="" ;;
+                    siteone'|'*.HostConfig.CapDrop*) v="CAP_FSETID CAP_NET_BIND_SERVICE CAP_SETFCAP CAP_SETPCAP CAP_SYS_CHROOT " ;;
+                    siteone'|'*.BoundingCaps*)    v="CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL CAP_SETGID CAP_SETUID " ;;
+                    siteone'|{{.State.Pid}}')     v="0" ;;
+                    siteone'|{{.Image}}')         v="sha256:def" ;;
+                    *'|{{'*)                      v="" ;;
+                    *)                            v="$f" ;;  # a literal the format carries
+                esac
+                line+="$sep$v"; sep="|"
+            done
+            echo "$line"
         done ;;
 esac
 STUB
@@ -169,6 +191,9 @@ chk "the engine is podman, and only podman is asked" "$(jv "$T/pod.json" engine)
 chk "a Podman site: install.sh's, its image as install.sh named it, its run spec" \
     "$(jv "$T/pod.json" containers.0.name)/$(jv "$T/pod.json" containers.0.install_sh)/$(jv "$T/pod.json" containers.0.image)/$(jv "$T/pod.json" containers.0.run_spec)" \
     "siteone/true/joinery-siteone:latest/true"
+chk "a Podman site: the set it keeps, from Podman's own BoundingCaps, and every other dropped" \
+    "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1]))['containers'][0]['security']; print(d['filter'][:4], ','.join(d['caps']), d['drop_all'])" "$T/pod.json")" \
+    "bbbb CHOWN,DAC_OVERRIDE,FOWNER,KILL,SETGID,SETUID True"
 chk "another container on it: not install.sh's, stopped" "$(jv "$T/pod.json" containers.1.install_sh)/$(jv "$T/pod.json" containers.1.state)/$(jv "$T/pod.json" containers.1.image)" "false/stopped/docker.io/library/redis:7"
 
 echo "=== Static pins ==="

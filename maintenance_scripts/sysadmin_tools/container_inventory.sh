@@ -4,6 +4,9 @@
 # made it, its image, its state, its mounts and whether its run spec exists,
 # as ONE JSON object on stdout.
 #
+# Version: 1.4 - security on the site container engine (Podman) reads the set a container keeps from Podman's
+#                own BoundingCaps: Podman records the defaults it dropped, never ALL, and nothing as added, so
+#                every Podman site read as adding nothing and dropping not all (site_copy_final_test C9)
 # Version: 1.3 - security: for each container install.sh made, the system call filter it was made under (its
 #                joinery.seccomp label), the capabilities it adds, whether it drops every other, and the
 #                setuid-root files in its image, read from the host through the running container's root
@@ -43,8 +46,9 @@
 #   - run_spec says whether /etc/joinery/sites/{name}/run_spec exists: the
 #     record install.sh keeps of how it ran the container.
 #   - security, for a container install.sh made: filter (the sha256 its
-#     joinery.seccomp label names, or null), caps (what it adds, as X, never
-#     CAP_X), drop_all, and setuid (the count of setuid-root files its image
+#     joinery.seccomp label names, or null), caps (what it holds, as X, never
+#     CAP_X: on Docker what it adds, on Podman the set it keeps), drop_all,
+#     and setuid (the count of setuid-root files its image
 #     ships, found through /proc/PID/root the first time a container of that
 #     image runs and kept per image under /run, so a file made setuid later in
 #     a running container's own layer or in a volume is not counted; unknown
@@ -90,7 +94,16 @@ json_image() { local drop='[^A-Za-z0-9._@:/-]' s; s="${1//$drop/}"; printf '"%s"
 # state, its image, and each mount's type and name ("type:name ", a bind's
 # name empty). Every part reads the engine's typed container; Docker names it
 # with a leading slash, Podman without.
-INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{.Config.Image}}|{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}|{{index .Config.Labels "joinery.seccomp"}}|{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}|{{.State.Pid}}|{{.Image}}'
+# The capabilities a site holds, as its engine states them. Docker records what
+# was added and that ALL was dropped. Podman records instead the defaults it
+# dropped (never ALL) and nothing as added, and states the set a container keeps
+# as BoundingCaps, beyond which it can hold none: every other is dropped.
+if [[ "$ENGINE_KIND" == "podman" ]]; then
+    CAPS_FORMAT='{{range .BoundingCaps}}{{.}} {{end}}|ALL'
+else
+    CAPS_FORMAT='{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}'
+fi
+INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{.Config.Image}}|{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}|{{index .Config.Labels "joinery.seccomp"}}|'"$CAPS_FORMAT"'|{{.State.Pid}}|{{.Image}}'
 
 # The setuid-root files on a running container's own filesystem, read from the
 # host through its root (/proc/PID/root), counted once per image and kept.
