@@ -120,6 +120,17 @@ foreach ($broken as $key => $over) {
 	$r = CopySecurityCheck::rows($site)[$key];
 	check($r['pass'] === false, 'broken: ' . $key, $r['evidence']);
 }
+$hnode->set('mgn_last_host_report', $host_report(array('site_refresh' => array('check' => ''))));
+$hnode->save();
+$r = CopySecurityCheck::rows($site)['site_refresh'];
+check($r['pass'] === null && strpos($r['evidence'], 'not checked yet') !== false,
+	'a host that has not run its nightly check yet (made within the hour) is unknown, not failed', $r['evidence']);
+$hnode->set('mgn_last_host_report', $host_report(array('site_refresh' => array('check' => 'failed'))));
+$hnode->save();
+check(CopySecurityCheck::rows($site)['site_refresh']['pass'] === false, 'broken: a nightly check that failed');
+$hnode->set('mgn_last_host_report', $host_report(array('site_refresh' => array('check' => '', 'holds' => array(array('site' => 'cscsite'))))));
+$hnode->save();
+check(CopySecurityCheck::rows($site)['site_refresh']['pass'] === false, 'and a held site fails before any check');
 $hnode->set('mgn_last_host_report', $host_report());
 $hnode->save();
 foreach (array(

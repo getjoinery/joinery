@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.31 - the re-run after a self-update knows where its parent downloaded the core archive, so a
+	 *                management node keeps it on that run too (B55 live: every release that self-updates kept none)
 	 * @version 1.30 - a management node keeps the core archive it applied (UpgradeRetention::keep_applied_archive), so
 	 *                a copy of one of its sites onto a host can install that release (B55)
 	 * @version 1.29 - the swap is DeploymentHelper::swapLiveTree(): a holding serve.php answers 503 while the code
@@ -1218,6 +1220,11 @@
 		$all_themes_info  = get_installed_extension_info($live_directory . '/theme',   'theme', $source_published_theme_names);
 		$all_plugins_info = get_installed_extension_info($live_directory . '/plugins', 'plugin', $source_published_plugin_names);
 
+		// Where the core archive is downloaded. The re-run after a self-update
+		// skips the download and finds its parent's archive here, still in place
+		// until the purge after the deploy; a management node keeps it then.
+		$file_download_location = $archive_location . basename((string)$sourceFile);
+
 		if (!$resuming_after_self_update) {
 
 		out_step('Downloading Upgrade Components');
@@ -1257,7 +1264,6 @@
 			upgrade_abort('File Error', 'Cannot create the archive directory ' . htmlspecialchars($archive_location), false);
 		}
 		upgrade_stage_dir_match_parent($archive_location);
-		$file_download_location = $archive_location . basename($sourceFile);
 
 		// Download core archive
 		$new_file = fopen($file_download_location, "w");

@@ -89,6 +89,12 @@ $up = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'))
 $keep_at = strpos($up, 'UpgradeRetention::keep_applied_archive($file_download_location');
 $purge_at = strpos($up, '// Empty the archive directory.');
 check($keep_at !== false && $purge_at !== false && $keep_at < $purge_at, 'the applied archive is kept before the download folder is emptied');
+// The re-run a self-update re-execs skips the download, so the path is set
+// before that branch: the archive its parent downloaded is the one it keeps.
+$path_at = strpos($up, '$file_download_location = $archive_location . basename(');
+$branch_at = strpos($up, 'if (!$resuming_after_self_update) {');
+check($path_at !== false && $branch_at !== false && $path_at < $branch_at,
+	'the re-run after a self-update knows where the archive was downloaded, so it keeps it too');
 check(strpos($up, "if (isset(\$file_download_location) && class_exists('UpgradeRetention')) {") !== false,
 	'only where server_manager\'s classes resolve: a site that is not a management node keeps nothing');
 

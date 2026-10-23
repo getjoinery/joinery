@@ -997,6 +997,27 @@ JobResultProcessor::process(jrp_job($self_node, 'provision_certificate', $issued
 $self_node->load();
 check($self_node->get('mgn_ssl_state') === 'active', 'a node issuing for itself is stamped');
 
+// The first status check that finds the site's certificate is the reverse-DNS
+// moment for a site on a machine of its own. A site in a container answers at
+// its host's address, which every site there shares: none is attempted.
+$status_with_cert = json_encode(array('api_version' => '1', 'data' => array('joinery_version' => '2.14.3',
+	'ssl_certificate_count' => 1, 'ssl_certificates' => array(array('domains' => array('rd.example.org'),
+	'not_after' => gmdate('Y-m-d H:i:s', time() + 60 * 86400) . ' UTC')))));
+$own = jrp_node(array('mgn_ssl_state' => 'pending', 'mgn_site_url' => 'https://rd.example.org'));
+$own_job = jrp_job($own, 'check_status', $status_with_cert);
+JobResultProcessor::process($own_job);
+$own_job->load();
+$own_result = json_decode((string)$own_job->get('mjb_result'), true);
+check(($own_result['ssl_state'] ?? null) === 'active' && array_key_exists('rdns_attempt', (array)$own_result),
+	'a site on its own machine: its first active certificate is the reverse-DNS moment', (string)$own_job->get('mjb_result'));
+$boxed = jrp_node(array('mgn_ssl_state' => 'pending', 'mgn_site_url' => 'https://rd.example.org', 'mgn_container_name' => 'rdsite'));
+$boxed_job = jrp_job($boxed, 'check_status', $status_with_cert);
+JobResultProcessor::process($boxed_job);
+$boxed_job->load();
+$boxed_result = json_decode((string)$boxed_job->get('mjb_result'), true);
+check(($boxed_result['ssl_state'] ?? null) === 'active' && !array_key_exists('rdns_attempt', (array)$boxed_result),
+	'a site in a container: active, and no reverse DNS set on its host\'s shared address', (string)$boxed_job->get('mjb_result'));
+
 // ---------------------------------------------------------------------------
 section('The secret a compiled-names job carried does not outlive the job');
 

@@ -3,6 +3,11 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.44 - The quiet gate holds by the converger's tick, so a quiet site with none (a dormant copy
+#                in a container: its first start is its first run, and the gate kept every installer
+#                from it) has its converger's entry installed first, and nothing else. Without it the
+#                copy's measures were asserted only at its start, and once its state was cleared at the
+#                switch nothing converged it (no parser jail) until a restart (site_copy_final_test C9).
 # Version: 2.43 - A declared package that a package run is upgrading (dpkg reads it "unpacked" for a
 #           moment) is not missing: the every-minute tick read it as missing and ran apt-get update
 #           mid-upgrade, and in a site container Ubuntu's docker-clean rule then deleted the upgrade's
@@ -716,6 +721,12 @@ record_last() {
 # run that finds its measures still in place clears them and converges as on
 # any site. A machine has no site to be quiet.
 #
+# The tick is the converger's own entry, which install_host_converger.sh writes
+# on a converging run. A site born quiet has never had one: a dormant copy in a
+# container, whose first start is its first run (a machine's timer is made with
+# the machine, before any site). So a quiet run that finds no entry installs it,
+# from a root-owned file, and runs nothing else.
+#
 # The state file is looked for before the helper, and a quiet site whose tree
 # lacks the helper (a copy restored from an older release, a damaged tree) runs
 # nothing: the gate fails closed. Its home is the tree a copy's restore
@@ -738,6 +749,12 @@ if [[ "${MACHINE}" == "0" && -f "${TOOLS_DIR}/_site_state.sh" ]]; then
             # No stamp while quiet: the first run after the state clears then
             # converges in full, with nothing about the release having changed.
             rm -f "${STAMP_FILE}" 2>/dev/null
+            if [[ ! -e "${QUIET_ETC}/cron.d/joinery-host-converger" && ! -e "${QUIET_ETC}/systemd/system/joinery-host-converger.timer" ]]; then
+                echo "host converger: ${SITENAME} is quiet and nothing ticks for it - installing its converger, and nothing else"
+                if [[ "$(id -u)" != "0" ]] || { . "${TOOLS_DIR}/_tree_trust.sh" && joinery_file_is_trusted "${TOOLS_DIR}/install_host_converger.sh" root; }; then
+                    bash "${TOOLS_DIR}/install_host_converger.sh" "${SITENAME}" "${SITE_ROOT}" || true
+                fi
+            fi
             if site_state_assert "${QUIET_REASON}"; then
                 record_last "quiet-${QUIET_REASON}"
             else

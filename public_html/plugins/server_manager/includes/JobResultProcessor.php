@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.105 - a certificate's first issuance sets reverse DNS only for a site on a machine of its own: a
+ *                 site in a container answers at its host's shared address, whose reverse DNS is the host's
  * @version 1.104 - process_site_log_count: marker counts, bounded samples and how far back the read reached
  * @version 1.103 - a host report names its machine its host record's own agent where none is (ManagedHost::link_host_node,
  *                  fleet_security_patching B26)
@@ -786,7 +788,9 @@ class JobResultProcessor {
 			// transition-only — a stale grant or manual node leaves the PTR
 			// to the mailbox Setup tab checklist, and a later custom PTR is
 			// never overwritten by routine status checks.
-			if ($ssl_new_state === 'active' && $prev_ssl_state !== 'active') {
+			// Not for a site in a container: its address is its host's, shared.
+			if ($ssl_new_state === 'active' && $prev_ssl_state !== 'active'
+					&& trim((string)$node->get('mgn_container_name')) === '') {
 				$rdns_domain = $folded['ssl_domain']
 					?? (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
 				if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
@@ -2038,7 +2042,10 @@ HTML;
 		// records are Cloudflare's, which is what the provider would reject.
 		// Best-effort: a stale grant leaves the PTR to the Setup tab checklist,
 		// and a later custom PTR is never overwritten by a renewal.
-		if (!$was_active && $outcome['challenge'] === SslProvisionOutcome::CHALLENGE_HTTP_01) {
+		// A site in a container answers at its host's address, which every site
+		// there shares: that address's reverse DNS is the host's, never one site's.
+		if (!$was_active && $outcome['challenge'] === SslProvisionOutcome::CHALLENGE_HTTP_01
+				&& trim((string)$node->get('mgn_container_name')) === '') {
 			$rdns_domain = is_array($params) && !empty($params['domain'])
 				? $params['domain']
 				: (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');

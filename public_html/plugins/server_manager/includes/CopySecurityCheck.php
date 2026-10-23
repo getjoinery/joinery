@@ -14,6 +14,8 @@
  * machine), pass (true, false, or null when the report does not say), and
  * evidence.
  *
+ * @version 1.4 - the nightly replacement row is unknown on a host that has not run its check yet (a host
+ *                made within the hour), not failed (site_copy_final_test C9)
  * @version 1.3 - a site on its own server is quiet when its host report says PHP-FPM is: Apache answered 'yes' to
  *               the quiet state's 503 too, so a dormant copy always failed its quiet row (B44)
  * @version 1.2 - the rows that act as the site are the copy_probes word's
@@ -68,9 +70,12 @@ class CopySecurityCheck {
 		foreach (is_array($refresh) ? (array)$refresh['holds'] : array() as $hold) {
 			$held = $held || ($hold['site'] ?? '') === (string)$node->get('mgn_container_name');
 		}
+		// A host made since its last check time has not checked yet: unknown.
+		$checked = is_array($refresh) && (string)($refresh['check'] ?? '') !== '';
 		$add('site_refresh', 'Nightly replacement on, its last check ok, the site not held', $container,
-			is_array($refresh) ? ($refresh['scheduled'] && $refresh['check'] === 'ok' && !$held) : null,
-			is_array($refresh) ? 'scheduled ' . json_encode($refresh['scheduled']) . ', check ' . $refresh['check'] . ($held ? ', held' : '')
+			is_array($refresh) && ($checked || !$refresh['scheduled'] || $held) ? ($refresh['scheduled'] && $refresh['check'] === 'ok' && !$held) : null,
+			is_array($refresh) ? 'scheduled ' . json_encode($refresh['scheduled'])
+				. ($checked ? ', check ' . $refresh['check'] : ', not checked yet') . ($held ? ', held' : '')
 				: 'site_refresh ' . json_encode($refresh));
 		$limits = $report['outbound_limits'] ?? null;
 		$add('outbound_limits', 'Outbound limits in force', true, is_array($limits) ? $limits['state'] === 'on' : null,
