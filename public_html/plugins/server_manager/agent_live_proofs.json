@@ -63,6 +63,15 @@
             "where": "dev (publishing box), node 24776, job 168666",
             "what": "Published release 0.8.525 through the dashboard's Publish Upgrade form: archives built, signed and listed; job completed in 43 s; fleet then rolled out onto it",
             "date": "2026-10-22"
+        },
+        {
+            "word": "site_log_count",
+            "agent_version": "1.92.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "getjoinery plane, 10 fleet sites on 0.8.527 (jobs 7915-7925)",
+            "what": "counted error.log markers since the upgrade on all 10 and since 2026-10-22 23:00 on jeremytunnell-vps; every read covered its window; job page table rendered",
+            "date": "2026-10-23"
         }
     ]
 }
