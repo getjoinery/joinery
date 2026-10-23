@@ -6,6 +6,8 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.7 - a new NOT NULL column's 'will be set to NOT NULL' line is a note: it was counted as a schema
+ *   change beside the column it describes (0.8.525's apply said Schema changes (2) for one column)
  * @version 1.6 - a new table whose serial column does not say is_nullable is created: its DEFAULT
  *   followed the type with no space between them ('int8DEFAULT nextval(...)'), a syntax error.
  *   The same rule for primary keys, unique constraints, indexes and foreign keys:
@@ -707,7 +709,8 @@ class DatabaseUpdater {
             'sequences_created' => [],
             'warnings' => [],
             'errors' => [],
-            'messages' => []
+            'messages' => [],
+            'notes' => []
         ];
         
         $table_name = $class::$tablename;
@@ -823,9 +826,10 @@ class DatabaseUpdater {
             $results['columns_added'][] = "{$table_name}.{$field_name}";
             $results['messages'][] = "Added column: {$table_name}.{$field_name}";
             
-            // Note about NOT NULL constraints
+            // What happens to it later is a note, not a change: the NOT NULL is
+            // recorded as a change when processAdvancedColumnOperations() sets it.
             if (isset($field_specs['is_nullable']) && !$field_specs['is_nullable']) {
-                $results['messages'][] = "Note: {$table_name}.{$field_name} will be set to NOT NULL during advanced operations (use --upgrade flag)";
+                $results['notes'][] = "Note: {$table_name}.{$field_name} will be set to NOT NULL during advanced operations (use --upgrade flag)";
             }
             
         } catch (PDOException $e) {

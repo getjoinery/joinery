@@ -20,6 +20,9 @@
  * class-loading debug output (about 250 KB a run) that pushed the rest of the
  * upgrade's transcript past the agent's output cap (B81, 2026-10-17).
  *
+ * A new NOT NULL column is one change: that its NOT NULL is set later is a
+ * note (0.8.525's apply counted two schema changes for one column).
+ *
  * The same holds for the primary-key, unique-constraint, index and foreign-key
  * steps: a key added to a table that lacked one is a change, and it reaches the
  * apply result (a site that gained its grm_group_members key on 0.8.521 showed
@@ -83,6 +86,17 @@ try {
 	$quiet = new DatabaseUpdater(false, true, false);
 	$r = $create->invoke($quiet, 'SchemaFactsStub', LibraryFunctions::get_tables_and_columns(), $dblink);
 	check(empty($r['notes']) && empty($r['messages']), 'a run that is not verbose has nothing to note');
+
+	section('A column added is a message; that its NOT NULL comes later is a note');
+	$dblink->exec("ALTER TABLE zz_schema_facts_test DROP COLUMN zsf_name");
+	$add = new ReflectionMethod('DatabaseUpdater', 'addMissingColumns');
+	$add->setAccessible(true);
+	$r = $add->invoke($updater, 'SchemaFactsStub', LibraryFunctions::get_tables_and_columns(), $dblink);
+	$messages = implode("\n", $r['messages'] ?? array());
+	check(strpos($messages, 'Added column: zz_schema_facts_test.zsf_name') !== false, 'the column added is a message', $messages);
+	check(strpos($messages, 'will be set to NOT NULL') === false
+		&& strpos(implode("\n", $r['notes'] ?? array()), 'zz_schema_facts_test.zsf_name will be set to NOT NULL') !== false,
+		'and its NOT NULL to come is a note, not a second change', json_encode($r));
 
 	section('A primary key or unique constraint added is a message; one already there is a note');
 	$dblink->exec("DROP TABLE IF EXISTS zz_schema_facts_keys CASCADE");
