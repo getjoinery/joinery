@@ -9,6 +9,7 @@
  * acquisition exception (a PDOException, an SMTP error) and rethrow it as
  * ProvisioningCheckFailed with a clean, human-readable message.
  *
+ * @version 1.2 - ProvisioningCheckRefused, the cannot-be-met-here grade
  * @version 1.1 - ProvisioningCheckPending, the converging-not-broken grade
  */
 
@@ -26,4 +27,14 @@ class ProvisioningCheckFailed extends Exception {
  * instanceof-check for it and show a warning instead of a red failure.
  */
 class ProvisioningCheckPending extends ProvisioningCheckFailed {
+}
+
+/**
+ * A check that is unmet and CANNOT BE MET on this site: the dependency does
+ * not apply here (a host service a container site is never given), so the
+ * provisioner's fix script would only refuse again. The message says why.
+ *
+ * Still unmet, like Pending; PluginProvisioning offers no fix command for it.
+ */
+class ProvisioningCheckRefused extends ProvisioningCheckFailed {
 }
