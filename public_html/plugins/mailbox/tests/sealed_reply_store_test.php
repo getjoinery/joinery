@@ -31,7 +31,7 @@
  *
  * Run: php tests/run.php db --only=plugins/mailbox/tests/sealed_reply_store_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -64,12 +64,15 @@ $suffix = substr(md5(uniqid('srs', true)), 0, 8);
 // Long enough that the Sent copy's own Message-ID passes 64 characters too.
 $domain_name = 'sealed-reply-store-' . $suffix . '.example';
 mailbox_purge_domains('sealed-reply-store-%');
-harness_defer(function () { mailbox_purge_domains('sealed-reply-store-%'); });
 
 // ---- Fixtures ------------------------------------------------------------
 
 $uid = mailbox_make_user('srs-' . $suffix . '@' . $domain_name);
 harness_register_row('usr_users', 'usr_user_id', $uid);
+// Registered after the user so it runs before the user's delete (teardown is
+// LIFO): the user is the protected mailbox's only member, and the model
+// refuses to delete it while that mailbox stands.
+harness_defer(function () { mailbox_purge_domains('sealed-reply-store-%'); });
 
 $kp = $box->generateKeypair();
 $vault = new UserEncryptionVault(NULL);
