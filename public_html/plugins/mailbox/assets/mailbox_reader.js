@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -2851,13 +2851,14 @@
 	// Gmail-style per-message kebab (⋮) menu — the per-message actions that are
 	// not worth a button, kept out of the way until asked for.
 	//
-	// Show original and Download .eml follow original_source (specs/
+	// Show original follows original_source (specs/
 	// mailbox_show_original_coverage.md): 'stored' and 'imap' answer with the
-	// true RFC822 bytes (stored, or fetched live from the source mailbox), so
-	// both items show; 'headers' is a lean record whose retained header block
-	// supports only a labeled reconstruction, so Show original shows without
-	// the .eml; 'none' hides both rather than offering dead ends. Print works
-	// from the parsed body, so it is always available.
+	// true RFC822 bytes (stored, or fetched live from the source mailbox);
+	// 'headers' is a lean record whose retained header block it shows,
+	// labeled; 'none' hides it rather than offering a dead end. Download .eml
+	// is on every message the server can read: what it cannot find whole it
+	// rebuilds from what is kept. Print works from the parsed body, so it is
+	// always available.
 	function kebabMenu(m) {
 		var wrap = el('div', 'mbx-kebab-wrap');
 		var btn = el('button', 'mbx-kebab', '⋮');
@@ -2878,7 +2879,7 @@
 			});
 			menu.appendChild(original);
 		}
-		if (src === 'stored' || src === 'imap') {
+		if (!m.sealed) {
 			var download = el('a', 'mbx-kebab-item', 'Download .eml');
 			download.href = CFG.exportUrlBase + '?message_id=' + encodeURIComponent(m.id);
 			download.addEventListener('click', function () { closeAllKebabs(); });

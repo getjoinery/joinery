@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php safe --filter=mail_archive_readers
  *
+ * @version 1.2 - a quoted X-Gmail-Labels name
  * @version 1.1
  */
 
@@ -183,6 +184,13 @@ class MailArchiveReadersTest {
 			MailArchiveReader::parseHeaders('X-Gmail-Labels: Inbox,Category Promotions'));
 		check($cat['labels'] === array(), 'gmail: category tabs are not imported as labels',
 			implode(',', $cat['labels']));
+
+		// A name holding a comma or a quote is quoted, its quotes doubled.
+		$quoted = MailArchiveReader::gmailLabels(MailArchiveReader::parseHeaders(
+			'X-Gmail-Labels: Archived,"Bills, 2026","Say ""hi""",Plain'));
+		check($quoted['labels'] === array('Bills, 2026', 'Say "hi"', 'Plain'),
+			'gmail: a quoted label name keeps its comma and quotes', implode('|', $quoted['labels']));
+		check($quoted['folder'] === 'Archived', 'gmail: and the folder is still read');
 	}
 
 	private function testProtonMetadata() {

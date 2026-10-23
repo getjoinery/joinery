@@ -53,6 +53,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.27 - a carried-over header keeps its raw UTF-8 (MailHeaderText, B30)
  * @version 1.26 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.25 - sendRaw(): send what a mail program composed (whole MIME + envelope) through
  *   the same pipeline, carried over part for part; storeRawOutbound(): store one as Sent
@@ -620,8 +621,7 @@ class MailboxSender {
 			return trim((string)(is_array($v) ? ($v[0] ?? '') : $v));
 		};
 		$decode = function (string $value): string {
-			$decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-			return $decoded === false ? $value : $decoded;
+			return MailHeaderText::decode($value);
 		};
 
 		try {

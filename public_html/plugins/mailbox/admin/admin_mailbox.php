@@ -2,6 +2,7 @@
 /**
  * Inbound Email - Aliases List
  *
+ * @version 1.2 - Download: a superadmin's link to the mailbox download page
  * @version 1.1
  */
 
@@ -99,6 +100,12 @@ foreach ($aliases as $alias) {
 		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'
 		. '</form>';
+	// A superadmin reads every mailbox, so can download any it may read (the
+	// export page and its API decide what that is: a protected mailbox only
+	// by its owner).
+	if ($session->get_permission() >= 10) {
+		$actions .= ' <a class="btn btn-sm btn-outline-secondary" href="/profile/mailbox/export?mailbox=' . intval($alias->key) . '">Download</a>';
+	}
 	array_push($rowvalues, $actions);
 
 	$page->disprow($rowvalues);

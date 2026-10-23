@@ -1,6 +1,6 @@
 # Export Mail, Contacts, Calendar and Drive
 
-**Status:** In progress. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`, released in 0.8.520. WP3 (calendar) built and reviewed 2026-10-22, released in 0.8.521 and checked on getjoinery; the Google Calendar import is in the live verification queue. WP4 (Drive folder zip) built and reviewed 2026-10-22, released in 0.8.524, live walk on dev passed; the checks after release are in the live verification queue (getjoinery has Drive off). WP1 is not built. No questions are open.
+**Status:** All four work packages built. WP2 (contacts) built 2026-10-22, with core `CsvWriter` and `CsvReader`, released in 0.8.520. WP3 (calendar) built and reviewed 2026-10-22, released in 0.8.521 and checked on getjoinery; the Google Calendar import is in the live verification queue. WP4 (Drive folder zip) built and reviewed 2026-10-22, released in 0.8.524, live walk on dev passed; the checks after release are in the live verification queue (getjoinery has Drive off). WP1 (mailbox) built 2026-10-23 on the owner's go-ahead, with B1 and B30, and reviewed by reviewer2 (READY; R1-R3 taken). Tests pass on dev (db --changed 718/718), and the Standard and Private walks on dev passed. The Fortress browser walk and the checks after release are in the live verification queue. No questions are open.
 
 Everything else from the first draft (member data download, closing an account, admin list exports, member import, backup download and restore from a file) is in `DEFERRED_data_portability.md`.
 
@@ -88,6 +88,16 @@ The rebuild is `MailAppRebuild`, which already produces a complete multipart mes
   - **Building each message.** A new browser message builder (today there is only a parser, `mailbox_mime.js`) assembles each message from the decrypted header block, bodies and attachments. It produces the same structure as the server's `MessageRebuild`, so one test can compare the two. Every Fortress message is marked `X-Joinery-Rebuilt: yes`, since no original is kept.
   - **Packing.** The browser zip writer from WP4 packs the messages.
   - **Size.** A tab can't hold a large mailbox in memory; Fortress Drive downloads today are held whole as one blob. The export comes in parts of about 500 MB (`{mailbox}-part-01.zip`, …). Where the browser can write straight to a file (`showSaveFilePicker`, Chrome and Edge), it streams one file to disk instead.
+
+**As built (2026-10-23):**
+
+- **Folders.** Each message goes once into the view it sits in: Inbox, Archive, Sent, Spam, Trash, decided Trash, then Spam, then Sent, then Archive or Inbox. Drafts are left out, because they are unsent work and our import would file them as mail. One label can also be downloaded on its own. `X-Gmail-Labels` carries the view word, the labels and Unread/Starred, and a label name with a comma is quoted the way Takeout writes it. The importer now reads quoted names.
+- **The marker.** `X-Joinery-Rebuilt: yes` is on a downloaded or exported rebuild. Mail programs still get FORMAT 1 unmarked, because marking them would change bytes every program has cached.
+- **Where the zip is made.** A Standard or Private build writes mbox pieces (sealed ones for Private, using `SealedFileContainer::sealIterable`). The zip is put together as it downloads, so the server holds the mail once and no zip state crosses build passes.
+- **The ready email.** It goes from the `RunMailExports` task. A Private build runs in a request that opened sealed mail, and the egress guard refuses the email-queue write there, so the email cannot be sent from the build itself (found in testing).
+- **Who may ask.** A Private or Fortress mailbox can be downloaded only by its owner; a superadmin gets Standard mailboxes only. A Fortress run's paging is covered by its start's second factor for 12 hours.
+- **What the note names.** A Private run's left-out note names a message by folder, date and id, never by its subject.
+- **Fortress parts.** In a Fortress download, one mbox never crosses a part: a folder past 64 MB continues in `Inbox (2).mbox`.
 
 ### WP2. Contacts export
 
@@ -222,6 +232,10 @@ Found while checking WP4 after its release, fixed:
 - **B27.** On a site with Drive off, `/drive` answered a 500 error page with an error reference ('Drive is not available.'), because the page had no route of its own and its logic's refusal was rendered as a failure. Every other Drive URL was gated on `drive_active`; `/drive` now is too (serve.php 1.16.0), so it is a 404.
 - **B28.** A WP4 walk left a `log_logins` row (a logout) and a vault-closed audit row naming its walk user after the user was deleted, failing `referential_integrity`. The browser still held that user's session; its next request found the account gone and signed it out, and `logout()` wrote both rows against the missing id. A session whose account no longer exists now ends without writing anything in its name (`SessionControl::logout(true)`, `VaultUnlock::close(..., $audit = false)`); the window's keys are still wiped.
 
+Found while building WP1, fixed with it:
+
+- **B30.** A header written in plain UTF-8 lost its non-ASCII text. RFC 6532 allows this, and modern mail sends it. Arrival decoded Subject and sender names with `mb_decode_mimeheader()`, which turns every raw non-ASCII byte into "?" ("H??llo"). The sending and mail-apps paths used `iconv_mime_decode()`, which drops those bytes instead. All of them now use `MailHeaderText::decode()`. It decodes encoded words, keeps raw UTF-8, and reads other 8-bit text as Windows-1252 (B14's rule). Messages already stored keep their "?" marks.
+
 ## Decided
 
 - **Q1 (owner, 2026-10-21 and 2026-10-22).** This spec covers email, contacts, calendar and Drive. Everything else from the first draft is in `DEFERRED_data_portability.md`. Posts and pages, and exports for boards and mail filters, are not in either spec.
@@ -239,24 +253,30 @@ None.
 - includes/ZipStreamWriter.php, assets/js/zip-writer.js, includes/DriveZip.php, includes/drive_zip_route.php (built with WP4)
 - includes/CsvWriter.php, includes/CsvReader.php (built with WP2), plugins/mailbox/logic/contacts_export_logic.php (built)
 - includes/calendar/IcsExporter.php, logic/calendar_export_logic.php (built with WP3)
-- plugins/mailbox/includes/MessageRebuild.php (moved from mail_apps)
-- plugins/mailbox/tasks/RunMailExports.php
-- plugins/mailbox/assets/mailbox_mime_build.js (the browser message builder for Fortress export)
+- plugins/mailbox/includes/MessageRebuild.php (moved from mail_apps), MailExport.php, MailHeaderText.php (B30) (built with WP1)
+- plugins/mailbox/data/mail_export_runs_class.php (MailExportRun, mxr_mail_export_runs)
+- plugins/mailbox/tasks/RunMailExports.php (+ .json)
+- plugins/mailbox/logic/mail_export_start / mail_export_list / mail_export_delete / mail_export_fortress_page _logic.php, mailbox_export_page_logic.php, profile_export_download_logic.php
+- plugins/mailbox/views/profile/export.php, export_download.php
+- plugins/mailbox/assets/mailbox_mime_build.js (the browser message builder for Fortress export), mailbox_export.js, mailbox_export.css
 
 **Changed:**
 
-- plugins/mailbox/includes/message_export.php
-- the mailbox reader menu and the admin mailbox page (**Download this mailbox**)
+- plugins/mailbox/includes/message_export.php, logic/profile_original_logic.php (B1; built)
+- the mailbox reader's Settings menu (views/profile/mailbox.php), the reader's kebab (assets/mailbox_reader.js), and the admin mailbox list (admin/admin_mailbox.php) (built)
+- plugins/mailbox/includes/MailboxService.php (fortressExportMessages), import/MailArchiveReader.php (quoted label names), bootstrap.php (the `mailbox_export` deferred-work consumer), plugin.json (`mail_export.ready`) (built)
+- includes/SealedFileContainer.php (sealIterable) (built)
+- InboundEmailRouter, MailAddressList, MailboxSender, mail_apps MailAppMutations and mail_submit_logic (B30) (built)
 - plugins/mailbox/includes/MailboxContacts.php (export; whole-record CSV parsing)
 - plugins/mailbox/views/profile/contacts.php
 - plugins/mailbox/logic/contacts_import_logic.php (B15: true counts, a locked store refused; built)
-- plugins/mail_apps (calls `MessageRebuild`)
+- plugins/mail_apps (calls `MessageRebuild`) (built)
 - includes/IcsHelper.php, includes/calendar/IcsImporter.php (inverse rule; B16-B18) (built)
 - views/profile/calendar.php, logic/calendar_logic.php (B19) (built)
 - views/drive.php, assets/js/drive.js, serve.php (the `/drive/zip/{folder_id}` route) (built)
 - tests/lib/http.php (a HEAD request waits for no body; built with WP4)
 - maintenance_scripts/dev_tools/walk_vault.js, specs/dev_walk_fixtures.md (B21)
-- settings.json (`export_retention_days`)
+- settings.json (`export_retention_days`) (built)
 
 ## Docs
 

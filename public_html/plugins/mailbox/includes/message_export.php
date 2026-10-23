@@ -17,6 +17,7 @@
  * network fetch beyond images. The sanitizer and the policy are independent —
  * a miss in one is still not an execution.
  *
+ * @version 1.3.0 - mailbox_message_bytes(): stored, fetched, else rebuilt, for every download (B1)
  * @version 1.2.0 - a Fortress message has no original and no server print sheet
  * @version 1.1.0
  * @changelog 1.1.0 - mailbox_resolve_original(): one resolver for "the
@@ -129,7 +130,45 @@ function mailbox_resolve_original(InboundEmailMessage $message, ?ImapIngestor $i
 }
 
 /**
- * Stream the stored original as a .eml download and exit(). message/rfc822 with
+ * The whole RFC822 bytes of one message for a download or an export: the
+ * stored original, else the original fetched live from a connected source,
+ * else a full rebuild from the stored header block, bodies and attachments
+ * (MessageRebuild), marked X-Joinery-Rebuilt: yes. Does NOT authorize, like
+ * everything in this file.
+ *
+ * A reference-backed row whose source cannot answer is rebuilt from what is
+ * kept here, so a source that has gone away still leaves the message
+ * downloadable. A Fortress row has no bytes the server can produce; the
+ * owner's browser builds those (mailbox_mime_build.js).
+ *
+ * @return array{ok:bool, raw:?string, kind:?string, reason:?string, locked:bool}
+ *   kind: 'stored' | 'imap' | 'rebuilt'
+ */
+function mailbox_message_bytes(InboundEmailMessage $message, ?ImapIngestor $ingestor = null): array {
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+	if (InboundEmailMessage::isBrowserSealed($message)) {
+		return array('ok' => false, 'raw' => null, 'kind' => null,
+			'reason' => 'This message is end-to-end encrypted, so only your browser can build its file.', 'locked' => false);
+	}
+	$kind = MessageRebuild::kindOf($message);
+	if ($kind !== 'rebuilt') {
+		$resolved = mailbox_resolve_original($message, $ingestor);
+		if ($resolved['locked'] || ($resolved['ok'] && $resolved['kind'] !== 'reconstructed')) {
+			return $resolved;
+		}
+	}
+	try {
+		$built = MessageRebuild::build($message, true);
+	} catch (VaultLockedException $e) {
+		return array('ok' => false, 'raw' => null, 'kind' => null,
+			'reason' => 'Unlock your vault to read this message.', 'locked' => true);
+	}
+	return array('ok' => true, 'raw' => MessageRebuild::marked($built['bytes']), 'kind' => 'rebuilt',
+		'reason' => null, 'locked' => false);
+}
+
+/**
+ * Stream a message's bytes as a .eml download and exit(). message/rfc822 with
  * an attachment disposition and nosniff: the bytes are attacker-controlled, so
  * they are handed to the user's mail client, never rendered in our origin.
  */

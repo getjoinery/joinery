@@ -1,0 +1,13 @@
+{
+  "name": "Build mailbox exports",
+  "description": "Builds the mailbox downloads members ask for (Standard mailboxes), one bounded slice of one export per pass, and emails the member when theirs is ready. A Private mailbox's export is built in its owner's unlocked window instead, never here.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "slice_seconds": {
+      "type": "number",
+      "label": "Seconds spent building per pass (default 120)",
+      "required": false
+    }
+  }
+}

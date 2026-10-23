@@ -5,6 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.17.0 - the gear links Download a mailbox
  * @version 1.16.0 - the gear lists Contacts
  * @version 1.15.0 - the panel section no longer offers the site's own model (Email settings does)
  * @version 1.14.0 - hands the panel the site's own model to offer
@@ -53,7 +54,8 @@ $hoptions['app'] = true;
 // Contacts are managed on their own page; Filters are rules the member sets
 // for their own mailboxes; Email settings is the same section the settings rail lists, where the signature is written; and
 // importing old mail is a LINK rather than a modal because it is a multi-step
-// run — pick an archive, wait for it to be read, then choose what to bring.
+// run — pick an archive, wait for it to be read, then choose what to bring;
+// downloading a mailbox is a link for the same reason.
 $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear">'
 	. '<summary class="btn btn-secondary" aria-label="Settings" title="Settings">'
 	. '<span class="jy-btn-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
@@ -66,6 +68,7 @@ $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear
 	. '<a href="/profile/mailbox/filters">Filters</a>'
 	. '<a href="/profile/mailbox/settings">Email settings</a>'
 	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
+	. '<a href="/profile/mailbox/export">Download a mailbox&hellip;</a>'
 	. '</div></details>';
 
 // The area AI panel (joinery_ai's general component): an AI button beside

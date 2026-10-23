@@ -26,7 +26,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_rebuild_test.php
  *
- * @version 1.0
+ * @version 1.1 - the encoders and kindOf() are the mailbox plugin's MessageRebuild
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -40,14 +40,14 @@ require_once(__DIR__ . '/lib/mail_apps_fixtures.php');
 section('The pure pieces');
 foreach (array(0, 1, 2, 3, 56, 57, 58, 113, 114, 1000, 65536) as $n) {
 	$bytes = $n ? random_bytes($n) : '';
-	check(strlen(MailAppRebuild::base64Lines($bytes)) === MailAppRebuild::base64Length($n), "base64 length for $n bytes");
+	check(strlen(MessageRebuild::base64Lines($bytes)) === MessageRebuild::base64Length($n), "base64 length for $n bytes");
 }
 $text = "Grüße — 100% sure = yes\n" . str_repeat('long line ', 30) . " \n\ttab\n.\nend ";
-$qp = MailAppRebuild::qp($text);
+$qp = MessageRebuild::qp($text);
 $long = array_filter(explode("\r\n", $qp), function ($l) { return strlen($l) > 76; });
 check(!$long, 'No quoted-printable line is over 76 characters');
 check(quoted_printable_decode($qp) === str_replace("\n", "\r\n", $text), 'Quoted-printable round-trips');
-check(MailAppRebuild::qp($text) === $qp, 'And encodes the same way twice');
+check(MessageRebuild::qp($text) === $qp, 'And encodes the same way twice');
 
 $user = make_user('MailAppsRebuild', 0);
 $uid = (int)$user->key;
@@ -79,7 +79,7 @@ foreach ($corpus as $label => $raw) {
 	section('Rebuilt: ' . $label);
 	$id = mafx_deliver($alias, $domain, $raw);
 	$msg = new InboundEmailMessage($id, TRUE);
-	check(MailAppRebuild::kindOf($msg) === 'rebuilt', 'Stored as a lean record, so it is rebuilt');
+	check(MessageRebuild::kindOf($msg) === 'rebuilt', 'Stored as a lean record, so it is rebuilt');
 
 	$head = MailAppRebuild::header($ctx, $id);
 	$one = MailAppRebuild::bytes($ctx, $id);
@@ -143,7 +143,7 @@ $id = mafx_deliver($alias, $domain, mafx_raw($address, 'Kept whole', 'original')
 $raw = "From: <a@sender.example>\r\nTo: <$address>\r\nSubject: Kept\r\nMessage-ID: <kept-" . bin2hex(random_bytes(4)) . "@sender.example>\r\n\r\nexact bytes\r\n";
 InboundEmailMessage::updateColumns($id, array('iem_raw_message' => $raw, 'iem_raw_storage_driver' => 'inline'));
 $msg = new InboundEmailMessage($id, TRUE);
-check(MailAppRebuild::kindOf($msg) === 'stored', 'A row with its original is "stored"');
+check(MessageRebuild::kindOf($msg) === 'stored', 'A row with its original is "stored"');
 $served = MailAppRebuild::bytes($ctx, $id);
 check($served['ok'] && $served['bytes'] === $raw, 'The original bytes are served unchanged');
 

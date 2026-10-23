@@ -974,6 +974,17 @@
       "helptext": "The daily retention sweep deletes anything older. 0 keeps them indefinitely."
     },
     {
+      "name": "export_retention_days",
+      "default": "7",
+      "group": "files",
+      "label": "Days to keep a finished mailbox download",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "A mailbox download a member asks for waits on the server for them for this many days, and one that never finished is deleted the same many days after it was asked for. 0 keeps them until the member deletes them."
+    },
+    {
       "name": "error_log_retention_days",
       "default": "30",
       "group": "logging",

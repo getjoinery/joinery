@@ -32,6 +32,7 @@
  * it by comparing the truth with what programs were told, the same as a
  * change made in the web reader.
  *
+ * @version 1.0.2 - a draft's header keeps its raw UTF-8 (MailHeaderText, B30)
  * @version 1.0.1 - APPEND always answers its number (APPENDUID)
  */
 
@@ -423,8 +424,7 @@ class MailAppMutations {
 	private static function appendDraft(MailAppContext $ctx, string $raw, string $message_id_header): int {
 		require_once(PathHelper::getIncludePath('includes/MimeParse.php'));
 		$decode = function (string $v): string {
-			$d = @iconv_mime_decode($v, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-			return $d === false ? $v : $d;
+			return MailHeaderText::decode($v);
 		};
 		try {
 			$mime = MimeParse::parseMessage($raw);

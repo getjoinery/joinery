@@ -21,6 +21,8 @@
  * groups ("Team: a@x, b@x;"), encoded words in display names, and a display
  * name that itself contains angle brackets (the last angle-addr is the address,
  * exactly as InboundEmailRouter::parseEmail treats From).
+ *
+ * @version 1.1 - an encoded-word name decodes through MailHeaderText, which keeps raw UTF-8 beside it (B30)
  */
 class MailAddressList {
 
@@ -237,8 +239,8 @@ class MailAddressList {
 		if (strlen($name) >= 2 && $name[0] === '"' && substr($name, -1) === '"') {
 			$name = stripcslashes(substr($name, 1, -1));
 		}
-		if (function_exists('mb_decode_mimeheader') && strpos($name, '=?') !== false) {
-			$name = mb_decode_mimeheader($name);
+		if (strpos($name, '=?') !== false) {
+			$name = MailHeaderText::decode($name);
 		}
 		return array('name' => self::cleanName($name), 'email' => $email);
 	}

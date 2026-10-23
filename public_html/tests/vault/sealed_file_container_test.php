@@ -71,6 +71,29 @@ foreach ($sizes as $label => $size) {
 	unset($plain, $back);
 }
 
+// ---------------------------------------------------------------------------
+section('sealing bytes made on the fly');
+
+// sealIterable() takes the plaintext in pieces of any size and writes the
+// container sealStream() writes for the same bytes and content id.
+foreach (array('empty' => 0, 'small' => 5000, 'exact_chunk' => $CHUNK, 'two_and_a_bit' => (2 * $CHUNK) + 12345) as $label => $size) {
+	$plain = sfc_pattern($size, 17);
+	$pieces = (function () use ($plain) {
+		for ($i = 0; $i < strlen($plain); $i += 777777) {
+			yield substr($plain, $i, 777777);
+		}
+	})();
+	$it = $work . '/iter_' . $label;
+	$info = SealedFileContainer::sealIterable($pieces, $it, $fk);
+	$stream = $work . '/iter_stream_' . $label;
+	SealedFileContainer::sealStream(sfc_write($work, 'iter_plain_' . $label, $plain), $stream, $fk, $info['content_id']);
+	check($info['plain_size'] === $size && filesize($it) === $info['cipher_size'], "$label: sealIterable reports its sizes");
+	check(filesize($it) === filesize($stream) && SealedFileContainer::plainSize($it) === $size,
+		"$label: the same framing as sealStream");
+	check(SealedFileContainer::openString($it, $fk) === $plain, "$label: and it opens to the exact plaintext");
+	unset($plain);
+}
+
 section('header');
 
 $h = SealedFileContainer::readHeader($sealed_paths['small']);

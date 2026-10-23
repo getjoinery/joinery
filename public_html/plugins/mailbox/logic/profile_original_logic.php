@@ -4,11 +4,10 @@
  *
  * Two renderings of one message, chosen by `format`:
  *
- *   eml   (default) — the RFC822 original (stored, or fetched live from the
- *                     source mailbox for a reference-backed row), streamed as a
- *                     .eml download. A lean record's header-block
- *                     reconstruction is refused here — a .eml must be the
- *                     original — and offered in Show original instead.
+ *   eml   (default) — the message as a .eml download: the stored original,
+ *                     the original fetched live from the source mailbox for a
+ *                     reference-backed row, or a full rebuild from what is
+ *                     kept (mailbox_message_bytes), marked X-Joinery-Rebuilt.
  *   print           — a standalone print sheet: an addressed header block, the
  *                     message body, and its attachment names, styled for paper
  *                     and printed on load.
@@ -21,6 +20,7 @@
  * emits its bytes and exit()s, so anything that returns from here is a refusal
  * — a LogicResult the view turns into an honest message.
  *
+ * @version 1.2.0 - a lean record downloads as a full rebuild instead of being refused (B1)
  * @version 1.1.0
  */
 
@@ -56,11 +56,7 @@ function profile_original_logic(array $input): LogicResult {
 		if ($format === 'print') {
 			mailbox_print_message($message);   // emits and exits
 		}
-		// Stored raw, or a live IMAP fetch for a reference-backed row
-		// (specs/mailbox_show_original_coverage.md). A reconstruction is
-		// refused below: a downloaded .eml claims to BE the original, and a
-		// headers-plus-decoded-body rebuild is not one.
-		$resolved = mailbox_resolve_original($message);
+		$resolved = mailbox_message_bytes($message);
 	} catch (Throwable $e) {
 		error_log('profile_original (' . $format . ', message ' . $id . '): ' . $e->getMessage());
 		return _profile_original_error($session, $settings, 'The message could not be read.', $reader_url);
@@ -74,12 +70,6 @@ function profile_original_logic(array $input): LogicResult {
 		return _profile_original_error($session, $settings,
 			$resolved['reason'] . ' There is no file to download.', $reader_url);
 	}
-	if ($resolved['kind'] === 'reconstructed') {
-		return _profile_original_error($session, $settings,
-			'The raw bytes of this message were not retained, so there is no original file to '
-			. 'download. Show original in the reader displays its stored headers.', $reader_url);
-	}
-
 	mailbox_stream_eml($message, $resolved['raw']);   // emits and exits
 }
 

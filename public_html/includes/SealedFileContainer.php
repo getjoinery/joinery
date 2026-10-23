@@ -48,6 +48,7 @@
  * owner's vault public key by the caller. This class never sees a vault, a
  * window, or a user — it takes raw key bytes and moves bytes.
  *
+ * @version 1.1.0 - sealIterable(): seal bytes made on the fly, a chunk at a time
  * @version 1.0.0
  */
 class SealedFileContainerException extends RuntimeException {}
@@ -133,6 +134,65 @@ class SealedFileContainer {
 			fclose($out);
 		}
 
+		return array(
+			'content_id'  => $content_id,
+			'plain_size'  => $plain_size,
+			'cipher_size' => (int)$cipher_size,
+			'chunk_bytes' => self::CHUNK_BYTES,
+		);
+	}
+
+	/**
+	 * Seal bytes handed over in pieces (an iterable of strings — a generator
+	 * producing a file as it goes) into $dest_path, one chunk at a time. For
+	 * content made on the fly that must never sit on disk in the clear, such
+	 * as a Private mailbox export: at most one chunk of plaintext is held,
+	 * plus the piece in hand. The container is the one sealStream() writes.
+	 *
+	 * @return array{content_id:string, plain_size:int, cipher_size:int, chunk_bytes:int}
+	 * @throws SealedFileContainerException
+	 */
+	public static function sealIterable(iterable $pieces, $dest_path, $fk, $content_id = null) {
+		self::assertKey($fk);
+		$content_id = ($content_id === null) ? bin2hex(random_bytes(16)) : (string)$content_id;
+		self::assertContentId($content_id);
+
+		$out = @fopen($dest_path, 'wb');
+		if ($out === false) {
+			throw new SealedFileContainerException('sealIterable: cannot write ' . $dest_path);
+		}
+		try {
+			$header = self::buildHeader($content_id, self::CHUNK_BYTES);
+			if (fwrite($out, $header) !== strlen($header)) {
+				throw new SealedFileContainerException('sealIterable: short write on the header.');
+			}
+			$buffer = '';
+			$plain_size = 0;
+			$index = 0;
+			$flush = function (string $plain) use ($out, $fk, $content_id, &$index, &$plain_size) {
+				$block = self::sealChunk($plain, $fk, $content_id, $index);
+				if (fwrite($out, $block) !== strlen($block)) {
+					throw new SealedFileContainerException('sealIterable: short write on chunk ' . $index . '.');
+				}
+				$plain_size += strlen($plain);
+				$index++;
+			};
+			foreach ($pieces as $piece) {
+				$buffer .= (string)$piece;
+				while (strlen($buffer) >= self::CHUNK_BYTES) {
+					$flush(substr($buffer, 0, self::CHUNK_BYTES));
+					$buffer = (string)substr($buffer, self::CHUNK_BYTES);
+				}
+			}
+			// The last chunk is short (or empty, for an empty file or one that
+			// ended on a chunk boundary with nothing sealed yet).
+			if ($buffer !== '' || $index === 0) {
+				$flush($buffer);
+			}
+			$cipher_size = ftell($out);
+		} finally {
+			fclose($out);
+		}
 		return array(
 			'content_id'  => $content_id,
 			'plain_size'  => $plain_size,
