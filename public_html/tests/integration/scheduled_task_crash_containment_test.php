@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/scheduled_task_crash_containment_test.php
  *
+ * @version 1.2 - E: a daily task another pass ran after this pass began is not run again
  * @version 1.1 - D: a 'retry' result is recorded but not counted as a run
  * @version 1.0
  */
@@ -44,7 +45,7 @@ $db = DbConnector::get_instance()->get_db_link();
 $tasks_dir = PathHelper::getIncludePath('tasks');
 $runner = PathHelper::getIncludePath('utils/process_scheduled_tasks.php');
 
-$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry');
+$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry', 'CrashTestOtherPass');
 
 // ---- fixture lifecycle ----------------------------------------------------
 $write_task = function ($class, $body) use ($tasks_dir) {
@@ -236,6 +237,43 @@ PHP
 		'the row says retry, with the task\'s message', json_encode($retried));
 	check(strpos($last_run, '2026-01-01') === 0, 'its last run time is not moved: it did not run', $last_run);
 	check((new ScheduledTask($retry_id, TRUE))->is_due(), 'so a daily task is still due, and the next tick runs it');
+
+	// -----------------------------------------------------------------------
+	section('E. A daily task another pass ran after this pass began is not run again');
+
+	// The first fixture records the daily one as run, as a second, overlapping
+	// pass would while this one is held up; the daily one is due when the pass
+	// loads its rows and must not run once its turn comes.
+	$db->exec("DELETE FROM sct_scheduled_tasks WHERE sct_task_class LIKE 'CrashTest%'");
+	@unlink("$tasks_dir/CrashTestRetry.php");
+	@unlink("$tasks_dir/CrashTestRetry.json");
+	$write_task('CrashTestOtherPass', <<<'PHP'
+<?php
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+class CrashTestOtherPass implements ScheduledTaskInterface {
+	public function run(array $config) {
+		DbConnector::get_instance()->get_db_link()->exec("UPDATE sct_scheduled_tasks
+			SET sct_last_run_time = now(), sct_last_run_message = 'run by the other pass'
+			WHERE sct_task_class = 'CrashTestCanary'");
+		return array('status' => 'success', 'message' => 'other pass done');
+	}
+}
+PHP
+	);
+	$activate('CrashTestOtherPass');
+	$daily_id = $activate('CrashTestCanary');
+	$db->prepare("UPDATE sct_scheduled_tasks SET sct_frequency = 'daily', sct_schedule_time = '00:00:00',
+		sct_last_run_time = '2026-01-01 00:00:00' WHERE sct_scheduled_task_id = ?")->execute(array($daily_id));
+
+	$output = array();
+	exec('php ' . escapeshellarg($runner) . ' 2>&1', $output, $exit_code);
+	$log = implode("\n", $output);
+
+	$daily = $status_of('CrashTestCanary');
+	check($daily['sct_last_run_message'] === 'run by the other pass',
+		'the daily task did not run a second time', json_encode($daily));
+	check(strpos($log, 'skipped: another pass ran it since this one began') !== false,
+		'the log says why it was skipped', $log);
 
 } finally {
 	$remove_fixtures();

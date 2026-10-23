@@ -525,6 +525,12 @@ lock cannot be acquired the task is skipped with `skipped: already running`
 and the runner moves on to the next task. The lock auto-releases when the
 PHP connection closes, so a crashed process self-recovers on the next tick.
 
+A pass reads the task rows once, when it begins, and a slow task can hold it
+up past the next tick. So once a task's lock is held the runner reads its row
+again and asks `is_due()` afresh: a task a later pass has run in the meantime
+is skipped with `skipped: another pass ran it since this one began`, and a
+daily task never runs twice in a night.
+
 This is transparent to task implementations — no `run()` code needs to
 know about the lock — but it means tasks that legitimately want to run
 in parallel across ticks would be serialized. The cron tick is every
