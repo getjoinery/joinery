@@ -363,7 +363,7 @@ $reach_at = $pfn !== '' ? strpos($pfn, 'name_reaches_here "$domain"') : false;
 $issue_at = $pfn !== '' ? strpos($pfn, 'certbot certonly --apache') : false;
 check($reach_at !== false && $issue_at !== false && $reach_at < $issue_at,
     'the HTTP-01 line is reached from a branch guarded by name_reaches_here');
-check($pfn !== '' && strpos($pfn, '-d "www.${domain}"') !== false
+check($pfn !== '' && strpos($pfn, 'certnames+=("www.${domain}")') !== false
     && strpos($pfn, 'name_resolves "www.${domain}"') !== false
     && strpos($pfn, 'name_reaches_here "www.${domain}"') !== false,
     'www joins the issue line behind a resolve check and its own reach probe');

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.29 - provision_origin_cert names the certificate's domains without certbot's -d flags in what it
+#               prints (B54)
 #VERSION 3.28 - provision_origin_cert says it kept a certificate certbot found valid and not yet due, rather
 #               than that it issued one (C7's B51)
 #VERSION 3.27 - provision_origin_cert adopts a certificate a copy carried from its old Docker host (no ACME account
@@ -1767,7 +1769,7 @@ provision_origin_cert() {
     local reach=0
     name_reaches_here "$domain" || reach=$?
     if [ "$reach" -eq 0 ]; then
-        local -a names=(-d "$domain")
+        local -a certnames=("$domain")
         # www is covered by the same lineage whenever it resolves and reaches
         # here: every zone's www is proxied to the origin, and an edge in
         # Full (Strict) rejects a www the certificate does not name. A www that
@@ -1776,14 +1778,17 @@ provision_origin_cert() {
         www_ip="$(name_resolves "www.${domain}")"
         if [ -n "$www_ip" ]; then
             if name_reaches_here "www.${domain}"; then
-                names+=(-d "www.${domain}")
+                certnames+=("www.${domain}")
             else
                 print_info "www.${domain} resolves (${www_ip}) but does not reach this box; issuing for ${domain} only."
             fi
         else
             print_info "www.${domain} does not resolve; issuing for ${domain} only."
         fi
-        print_step "${domain} reaches this box (${REACH_STATE:-?}) — using LE HTTP-01 challenge for ${names[*]//-d /}"
+        local -a names=()
+        local n
+        for n in "${certnames[@]}"; do names+=(-d "$n"); done
+        print_step "${domain} reaches this box (${REACH_STATE:-?}) — using LE HTTP-01 challenge for ${certnames[*]}"
         # --apache answers the challenge through the running vhost; certonly
         # keeps it from also editing that vhost, which the renderer owns
         # (render_vhost.sh refuses to re-render a file it did not write). The
@@ -1795,7 +1800,7 @@ provision_origin_cert() {
         if certbot certonly --apache "${names[@]}" --non-interactive --agree-tos --expand \
                 --register-unsafely-without-email --deploy-hook 'systemctl reload apache2' >"$cb_log" 2>&1; then
             cat "$cb_log"
-            report_certbot_success "$cb_log" "${names[*]//-d /}" "HTTP-01"
+            report_certbot_success "$cb_log" "${certnames[*]}" "HTTP-01"
             rm -f "$cb_log"
             systemctl reload apache2 2>/dev/null || true
             return 0

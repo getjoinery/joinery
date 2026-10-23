@@ -111,6 +111,23 @@ class PathHelper {
      * @return string Theme directory relative path (e.g., 'theme/falcon' or 'plugins/controld')
      * @throws Exception if plugin theme is active but plugin not found
      */
+    /** Whether this request has logged its missing theme directory. */
+    private static $missing_theme_noted = false;
+
+    /**
+     * The active theme's directory is not on disk: a copy onto a host before
+     * its restore brings the site's themes, or a theme folder removed by hand.
+     * Its pages resolve through plugin and core paths, core's own views and
+     * page class, as with no theme at all, rather than every request failing.
+     * Logged once per request.
+     */
+    private static function noteMissingTheme(string $dir): void {
+        if (!self::$missing_theme_noted) {
+            self::$missing_theme_noted = true;
+            error_log("Theme directory {$dir} not found; pages resolve through core's own views.");
+        }
+    }
+
     public static function getActiveThemeDirectory() {
         $settings = Globalvars::get_instance();
 
@@ -162,7 +179,8 @@ class PathHelper {
             self::assertThemeName($active_plugin);
             $plugin_dir = self::getIncludePath("plugins/$active_plugin");
             if (!is_dir($plugin_dir)) {
-                throw new Exception("Plugin theme is active but plugin '$active_plugin' not found. Please contact administrator.");
+                self::noteMissingTheme("plugins/$active_plugin");
+                return null;
             }
             
             return "plugins/$active_plugin";
@@ -172,7 +190,8 @@ class PathHelper {
         self::assertThemeName($theme_template);
         $theme_dir = self::getIncludePath("theme/$theme_template");
         if (!is_dir($theme_dir)) {
-            throw new Exception("Theme '$theme_template' directory not found. Please contact administrator.");
+            self::noteMissingTheme("theme/$theme_template");
+            return null;
         }
         
         return "theme/$theme_template";

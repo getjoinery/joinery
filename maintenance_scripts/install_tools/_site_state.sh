@@ -3,6 +3,8 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.14 - forward: a 500 Apache answers itself (the copy's placeholder certificate, before its host issues one
+#                at the switch) shows the moving page, as a refused connection does (C8's B57)
 # Version: 1.13 - forward: a request the host's proxy marks X-Forwarded-Proto https is not sent to https again; in
 #                a container HTTPS is never on, so every visitor looped on a 301 to itself (C7's B48)
 # Version: 1.12 - forward: the copy's whole certificate chain is checked (SSLProxyVerifyDepth 10); Apache's depth
@@ -332,7 +334,11 @@ EOF
         # cookies go only over https. In a container the visitor's https ends at
         # the host's proxy, which says so in X-Forwarded-Proto: without it every
         # request was sent back to itself. retry=0, so the first request after the
-        # copy has its certificate is proxied, not refused for a minute. The
+        # copy has its certificate is proxied, not refused for a minute. Until it
+        # has one (a copy onto a host holds a placeholder until its host issues
+        # the certificate at the switch) the proxy cannot finish TLS with it, and
+        # Apache answers 500 itself: that, like a refused connection (502), shows
+        # the moving page. A 500 the copy answers passes through untouched. The
         # chain is checked to its root: a site's chain is several certificates
         # long, and Apache's own depth (1) refuses every one of them.
         local addr="$3" url
@@ -358,6 +364,7 @@ SSLProxyVerifyDepth 10
     ProxyPass "http://${url}/.well-known/acme-challenge/" retry=0
 </Location>
 ErrorDocument 502 "<!doctype html><title>Moving</title><h1>Back in a few minutes</h1><p>This site is moving to a new server. Please try again in a few minutes.</p>"
+ErrorDocument 500 "<!doctype html><title>Moving</title><h1>Back in a few minutes</h1><p>This site is moving to a new server. Please try again in a few minutes.</p>"
 EOF
     else
         cat <<EOF

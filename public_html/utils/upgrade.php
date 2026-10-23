@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.30 - a management node keeps the core archive it applied (UpgradeRetention::keep_applied_archive), so
+	 *                a copy of one of its sites onto a host can install that release (B55)
 	 * @version 1.29 - the swap is DeploymentHelper::swapLiveTree(): a holding serve.php answers 503 while the code
 	 *                moves, where public_html used to be without serve.php for a moment (a 500 to whoever landed then)
 	 * @version 1.28 - the staged release's missing tables and columns are added before its code goes live
@@ -1928,6 +1930,23 @@
 					@mkdir($stage_location, 0770, true);
 					upgrade_stage_dir_match_parent($stage_location);
 					if($verbose) echo 'Staging area cleared<br>';
+				}
+			}
+
+			// A management node keeps the core archive it just applied, signed as
+			// received, for copies of its sites onto a host (UpgradeRetention).
+			// Its classes resolve only where server_manager is active.
+			if (isset($file_download_location) && class_exists('UpgradeRetention')) {
+				try {
+					$kept_archive = UpgradeRetention::keep_applied_archive($file_download_location,
+						(string)upgrade_read_version(__DIR__ . '/../VERSION'));
+					if ($kept_archive !== '') {
+						if ($verbose) upgrade_echo('Kept the release archive ' . htmlspecialchars(basename($kept_archive))
+							. ' for copies of its sites onto a host<br>');
+						UpgradeRetention::prune_kept();
+					}
+				} catch (Throwable $e) {
+					if ($verbose) upgrade_echo('Could not keep the release archive: ' . htmlspecialchars($e->getMessage()) . '<br>');
 				}
 			}
 

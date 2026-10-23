@@ -14,6 +14,11 @@
  *     rollback target, so removing it would strand the node
  *   - it is the version this management node is itself running
  *
+ * A management node also keeps the archive of each release it upgrades to
+ * (keep_applied_archive), pruned by the same rules (prune_kept).
+ *
+ * @version 1.1 - keep_applied_archive and prune_kept: a management node keeps the release archives it
+ *                applies, so a copy of one of its sites onto a host can install that release (B55)
  * @version 1.0
  */
 
@@ -34,8 +39,14 @@ class UpgradeRetention {
 		return $n > 0 ? $n : 0;
 	}
 
+	/** A test's own archive directory in place of the site's. */
+	public static $archive_dir = null;
+
 	/** Directory holding the published archives ({site root}/static_files). */
 	public static function getArchiveDir() {
+		if (self::$archive_dir !== null) {
+			return self::$archive_dir;
+		}
 		return rtrim(dirname(PathHelper::getIncludePath('')), '/') . '/static_files';
 	}
 
@@ -177,6 +188,73 @@ class UpgradeRetention {
 			}
 		}
 
+		return $report;
+	}
+
+	/**
+	 * A management node keeps the signed core archive of each release it
+	 * upgrades to, as received, where it keeps the ones it publishes: a copy
+	 * of one of its sites onto a host installs that site's own release from
+	 * here (SiteCopyRunner::release_carries, ReleaseManifestSource), and a
+	 * management node that does not publish holds no other. A publisher holds
+	 * the archive under that name already and keeps its own.
+	 *
+	 * @return string the path kept, or '' when nothing was kept
+	 */
+	public static function keep_applied_archive(string $downloaded, string $version): string {
+		if (!preg_match('/^\d+\.\d+\.\d+$/', $version) || !is_file($downloaded) || is_link($downloaded)) {
+			return '';
+		}
+		$dir = self::getArchiveDir();
+		$dest = $dir . '/joinery-core-' . $version . '.tar.gz';
+		if (file_exists($dest) || (!is_dir($dir) && !@mkdir($dir, 0755, true))) {
+			return '';
+		}
+		$part = $dest . '.part';
+		if (!@copy($downloaded, $part) || !@chmod($part, 0644) || !@rename($part, $dest)) {
+			@unlink($part);
+			return '';
+		}
+		return $dest;
+	}
+
+	/**
+	 * Remove kept archives (keep_applied_archive) by the rules published ones
+	 * follow: the newest N stay, and so does any release this management node
+	 * or one of its nodes runs. An archive a published release names is
+	 * prune()'s, never this.
+	 *
+	 * @return array ['removed' => [...versions], 'failed' => [...versions]]
+	 */
+	public static function prune_kept(?int $keep_count = null): array {
+		$report = ['removed' => [], 'failed' => []];
+		$keep_count = $keep_count ?? self::getKeepCount();
+		if ($keep_count === 0) {
+			return $report;
+		}
+		$published = [];
+		foreach (new MultiUpgrade([], ['upgrade_id' => 'DESC'], 5000, 0) as $u) {
+			$published[(string)$u->get('upg_name')] = true;
+		}
+		$in_use = self::getInUseVersions();
+		$kept = [];
+		foreach (glob(self::getArchiveDir() . '/joinery-core-*.tar.gz') ?: [] as $path) {
+			if (preg_match('/^joinery-core-(\d+\.\d+\.\d+)\.tar\.gz$/', basename($path), $m) && !isset($published[basename($path)])) {
+				$kept[$m[1]] = $path;
+			}
+		}
+		uksort($kept, function ($a, $b) { return version_compare($b, $a); });
+		$index = 0;
+		foreach ($kept as $version => $path) {
+			if ($index++ < $keep_count || isset($in_use[$version])) {
+				continue;
+			}
+			if (@unlink($path)) {
+				$report['removed'][] = $version;
+			} else {
+				$report['failed'][] = $version;
+			}
+		}
 		return $report;
 	}
 

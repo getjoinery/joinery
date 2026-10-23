@@ -1253,7 +1253,8 @@ class RouteHelper {
         try {
             // Use PathHelper's centralized method to get the active theme directory
             // This handles both regular themes and plugin themes automatically
-            // PathHelper::getActiveThemeDirectory() already validates directory exists
+            // PathHelper::getActiveThemeDirectory() answers null when the theme's
+            // directory is not on disk: core's own views then serve the request
             $theme_dir = PathHelper::getActiveThemeDirectory();
             $template_directory = PathHelper::getIncludePath($theme_dir);
         } catch (Exception $e) {
