@@ -750,4 +750,17 @@ return [
 			error_log('sm_024: ' . (int)$n . ' node(s) whose agent moved to another management node now say so.');
 		},
 	],
+	[
+		// mgn_uptime_check_type has defaulted to 'http_status' since 2026-07-24
+		// ('api' needs API keys on the node). A table made before kept DEFAULT
+		// 'api': the updater reports a string default that differs and never
+		// rewrites it. Set it; a node's chosen check type is left as it is.
+		'id' => 'sm_025_uptime_check_defaults_to_http_status',
+		'version' => '1.30.107',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("ALTER TABLE mgn_managed_nodes ALTER COLUMN mgn_uptime_check_type SET DEFAULT 'http_status'");
+			error_log('sm_025: mgn_uptime_check_type defaults to http_status.');
+		},
+	],
 ];

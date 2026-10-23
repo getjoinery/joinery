@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.30 - Refreshes Postfix's chroot copies of system files before 'postfix check': a box whose
+#                listener is decommissioned never starts Postfix, which is what refreshes them,
+#                and printed five 'differ' warnings on every apply after a libnss update
 # Version: 2.29 - STARTTLS serves the Let's Encrypt certificate that names the mail hostname, not the
 #                snakeoil one senders refuse (then resend in plain text); a renewal reloads Postfix
 # Version: 2.28 - Mail this box sends leaves over IPv4 (smtp_address_preference = ipv4), as
@@ -797,6 +800,12 @@ fi
 # --- 8. validate + restart ---------------------------------------------------
 # inet_interfaces changes need a full restart, not a reload. Prefer
 # systemd when present; fall back to the `postfix` command for containers.
+# Postfix's start refreshes the chroot's copies of system files (libnss,
+# resolv.conf); a box left down never starts it, so refresh them here, or
+# `postfix check` warns that each one differs after every package update.
+if [[ -x /usr/lib/postfix/configure-instance.sh ]]; then
+    /usr/lib/postfix/configure-instance.sh - >/dev/null 2>&1 || true
+fi
 if postfix check; then
     if [[ "${LISTENER_DECOMMISSIONED}" -eq 1 ]]; then
         # Validated, converged, and deliberately left down. `postfix check` is
