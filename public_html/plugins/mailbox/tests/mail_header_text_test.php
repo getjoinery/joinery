@@ -16,9 +16,14 @@
  *  - MailAddressList reads an encoded name with raw UTF-8 beside it.
  *  - A message with raw Latin-1 header bytes is stored (B66): Subject, names,
  *    To/Cc and the kept header block all come out UTF-8 (MailHeaderText::block).
+ *  - The whole route (processEmail) with a Latin-1 sender name, Message-ID and
+ *    References: stored once, logged, thread key text; a log line cut at its
+ *    column width cuts between characters; an IMAP-supplied thread key is text.
  *
  * Run: php plugins/mailbox/tests/mail_header_text_test.php
  *
+ * @version 1.3 - NUL bytes (reviewer2 R1)
+ * @version 1.2 - the whole route, the log line and the thread key (B66)
  * @version 1.1 - raw Latin-1 header bytes (B66)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -100,6 +105,59 @@ if ($res !== null && !empty($res['message'])) {
 	check(strpos((string)$msg->get('iem_to'), 'Jörg') !== false && strpos((string)$msg->get('iem_cc'), 'Françoise') !== false,
 		'the To and Cc names are readable', (string)$msg->get('iem_to') . ' / ' . (string)$msg->get('iem_cc'));
 }
+section('The whole route with a Latin-1 sender name (B66)');
+// The routing log is written from the parsed From line, the thread key from
+// References and the dedup lookups from the Message-ID: each must be text,
+// or the message is stored and then deferred again on every retry.
+$route_mid = 'ht-route-' . $suffix . "-caf\xE9@sender.example";
+$raw = "From: \"Ren\xE9 Route\" <rene@sender.example>\r\nTo: " . $to . "\r\nSubject: Route " . $suffix . "\r\n"
+	. "Message-ID: <" . $route_mid . ">\r\nReferences: <earlier-caf\xE9@sender.example>\r\n"
+	. "X-Odd: before\0after\r\nX-Last: kept-" . $suffix . "\r\n"
+	. "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=ISO-8859-1\r\n\r\nHall\xF6\r\n";
+$code = null;
+try {
+	$code = $router->processEmail($raw, $to);
+} catch (Throwable $e) {
+	check(false, 'the routed message does not throw', $e->getMessage());
+}
+$db = DbConnector::get_instance()->get_db_link();
+$stmt = $db->prepare("SELECT iem_inbound_email_message_id, iem_message_id_header, iem_thread_key FROM iem_inbound_email_messages
+	WHERE iem_iea_inbound_email_alias_id = ? AND iem_subject = ?");
+$stmt->execute(array((int)$alias->key, 'Route ' . $suffix));
+$stored = $stmt->fetchAll(PDO::FETCH_ASSOC);
+check($code === 0 && count($stored) === 1, 'it is accepted (exit 0) and stored once', 'exit ' . var_export($code, true) . ', rows ' . count($stored));
+if ($stored) {
+	check($stored[0]['iem_message_id_header'] === '<ht-route-' . $suffix . '-café@sender.example>'
+		&& $stored[0]['iem_thread_key'] === '<earlier-café@sender.example>',
+		'its Message-ID and thread key are text', json_encode($stored[0], JSON_UNESCAPED_UNICODE));
+	$stmt = $db->prepare('SELECT iel_from_address FROM iel_inbound_email_logs WHERE iel_iem_inbound_email_message_id = ?');
+	$stmt->execute(array((int)$stored[0]['iem_inbound_email_message_id']));
+	$from_logged = (string)$stmt->fetchColumn();
+	check(strpos($from_logged, 'René Route') !== false, 'and the routing log has its line, the sender readable', $from_logged);
+	$kept = (string)(new InboundEmailMessage((int)$stored[0]['iem_inbound_email_message_id'], TRUE))->get('iem_raw_headers');
+	check(strpos($kept, 'X-Odd: beforeafter') !== false && strpos($kept, 'X-Last: kept-' . $suffix) !== false,
+		'a NUL in one header costs neither that header nor the ones after it');
+}
+check($router->computeThreadKey(array('headers' => array('references' => "<imap-caf\xE9@x>")), null) === '<imap-café@x>'
+	&& mb_check_encoding((string)$router->computeThreadKey(array('headers' => array('in-reply-to' => str_repeat('é', 200))), null), 'UTF-8'),
+	'a thread key from headers the IMAP path hands in is text, cut between characters');
+// A Subject past the column's 4000 bytes, a two-byte character astride the cut.
+$long_subject = str_repeat('a', 3999) . 'é tail ' . $suffix;
+$raw = "From: long@sender.example\r\nTo: " . $to . "\r\nSubject: " . $long_subject . "\r\n"
+	. "Message-ID: <ht-long-" . $suffix . "@sender.example>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nx\r\n";
+$res = null;
+try { $res = $router->storeMessage($raw, $router->parseEmail($raw), $alias, $domain, $to); } catch (Throwable $e) { $res = $e->getMessage(); }
+check(is_array($res) && !empty($res['message']) && strlen((string)(new InboundEmailMessage((int)$res['message']->key, TRUE))->get('iem_subject')) === 3999,
+	'a Subject longer than its column is cut between characters and stored', is_string($res) ? $res : '');
+$log = InboundEmailLog::CreateEntry(str_repeat('a', 499) . 'é', 'x@y.example', str_repeat('s', 999) . 'ü', '', 'stored',
+	(int)$alias->key, "error caf\xE9", (int)$domain->key);
+check($log->key && mb_check_encoding((string)$log->get('iel_subject'), 'UTF-8') && strlen((string)$log->get('iel_subject')) === 999
+	&& strlen((string)$log->get('iel_from_address')) === 499 && (string)$log->get('iel_error_message') === 'error café',
+	'a log line cut at its column width cuts between characters');
+$log->permanent_delete();
+
+check(MailHeaderText::block("X-A: a\0b\r\nX-B: c") === "X-A: ab\r\nX-B: c" && MailHeaderText::decode("Hi\0 there") === 'Hi there',
+	'a NUL byte is dropped, so nothing after it is lost');
 check(MailHeaderText::block("A: \xE9\r\nB: \xC3\xA9\r\n C\xE9") === "A: é\r\nB: é\r\n Cé",
 	'MailHeaderText::block works line by line, line endings kept');
 check(MailHeaderText::block(substr("S: " . str_repeat("\xC3\xA9", 3), 0, 8), true) === "S: éé",

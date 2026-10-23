@@ -29,6 +29,7 @@
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.12 - the run's counters are recounted from the entries after each batch (B68)
  * @version 1.11 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.10 - labels are the run's mailbox's (mailbox_per_mailbox_labels.md)
  * @version 1.9
@@ -352,10 +353,7 @@ class MailArchiveImporter {
 		$this->run->writeColumns(array('mir_selection' => json_encode($sel)));
 
 		$skipped = MailImportEntry::applySelection(intval($this->run->key), $folders, $includeSpam, $includeTrash);
-		if ($skipped > 0) {
-			MailImportRun::addCounts(intval($this->run->key),
-				array('mir_skipped' => $skipped, 'mir_processed' => $skipped));
-		}
+		MailImportRun::recount(intval($this->run->key));
 		$this->run->moveTo(MailImportRun::STATE_IMPORTING);
 		return $skipped;
 	}
@@ -440,13 +438,11 @@ class MailArchiveImporter {
 			pcntl_signal(SIGALRM, SIG_DFL);
 		}
 
-		MailImportRun::addCounts(intval($this->run->key), array(
-			'mir_processed' => $counts['seen'],
-			'mir_stored'    => $counts['stored'],
-			'mir_dedup'     => $counts['dedup'],
-			'mir_failed'    => $counts['failed'],
-		));
-		// addCounts advances the row directly, so this copy is now behind it.
+		// The counters are recounted from the entries, not added to: every outcome
+		// above was written to its entry as it was decided, so a batch that died
+		// part way left its stored messages on record, and this count finds them.
+		MailImportRun::recount(intval($this->run->key));
+		// The recount wrote the row directly, so this copy is now behind it.
 		// Re-read, or anything reporting on the run — the task's own summary
 		// included — describes it as it was before this batch.
 		$this->run->load();

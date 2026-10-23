@@ -83,6 +83,9 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.59 - parseEmail makes every header value text (MailHeaderText::block), so the routing log's
+ *               From, the Message-ID and the thread key carry no raw Latin-1; those two cut between
+ *               characters (B66)
  * @version 1.58 - the kept header block is UTF-8: a Latin-1 header line reads as Windows-1252, so its
  *               message is stored instead of failing the insert and deferring until it expired (B66)
  * @version 1.57 - a header keeps its raw UTF-8: Subject and names decode through MailHeaderText (B30)
@@ -583,8 +586,8 @@ class InboundEmailRouter {
 				'mst_kind'                     => MailboxSendAttempt::KIND_FORWARD,
 				'mst_iea_inbound_email_alias_id' => ($alias && $alias->key) ? intval($alias->key) : null,
 				'mst_source_iem_inbound_email_message_id' => $message_id,
-				'mst_message_id_header'        => substr(trim((string)($parsed['headers']['message-id'] ?? '')), 0, 255),
-				'mst_from_address'             => substr($from_address, 0, 255),
+				'mst_message_id_header'        => DocumentText::clip((string)(trim((string)($parsed['headers']['message-id'] ?? ''))), 255),
+				'mst_from_address'             => DocumentText::clip((string)($from_address), 255),
 				'mst_recipients'               => $recipients,
 				'mst_transport'                => $transport,
 				'mst_transport_label'          => $this->relayTransportLabel($transport),
@@ -763,7 +766,7 @@ class InboundEmailRouter {
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: handler "' . $key . '" threw on message ' . $msg->key . ': ' . $e->getMessage());
 			try {
-				$log('error', substr($e->getMessage(), 0, 500));
+				$log('error', DocumentText::clip((string)($e->getMessage()), 500));
 			} catch (\Throwable $ignored) {
 			}
 		}
@@ -819,7 +822,7 @@ class InboundEmailRouter {
 		if ($message_id_header === '') {
 			$message_id_header = null;
 		} else {
-			$message_id_header = substr($message_id_header, 0, 255);
+			$message_id_header = DocumentText::clip($message_id_header, 255);
 		}
 
 		// A message this mailbox sent to ITSELF comes back through MX as an ordinary
@@ -843,7 +846,7 @@ class InboundEmailRouter {
 		}
 
 		$subject_raw = $parsed['subject'] ?? '';
-		$subject = substr($this->decodeMimeHeader($subject_raw), 0, 4000);
+		$subject = DocumentText::clip((string)($this->decodeMimeHeader($subject_raw)), 4000);
 		$sender = $this->senderDisplayString($parsed);
 
 		// The verdict. The live forward path decided it already; store-only,
@@ -895,7 +898,7 @@ class InboundEmailRouter {
 		// the body. Live delivery never hits this: its rows are always inbound.
 		// ($direction was resolved above, where the self-addressed reconcile needs it.)
 		$seal_recipient = ($sealing && InboundEmailMessage::isComposedDirection($direction));
-		$recipient_value = substr((string)$envelope_recipient, 0, 500);
+		$recipient_value = DocumentText::clip((string)((string)$envelope_recipient), 500);
 
 		// The wire header block survives the lean record
 		// (specs/mailbox_show_original_coverage.md). Content like the body:
@@ -1151,7 +1154,7 @@ class InboundEmailRouter {
 		}
 
 		$bodies = $this->extractBodies($raw, $parsed);
-		$subject = substr($this->decodeMimeHeader($parsed['subject'] ?? ''), 0, 4000);
+		$subject = DocumentText::clip((string)($this->decodeMimeHeader($parsed['subject'] ?? '')), 4000);
 		$sender  = $this->senderDisplayString($parsed);
 
 		$owner_id = intval($msg->get('iem_sealed_owner_user_id'));
@@ -1259,7 +1262,7 @@ class InboundEmailRouter {
 			?array $client = null): array {
 		$recipient = strtolower(trim((string)($meta['recipient'] ?? '')));
 		$message_id_header = trim((string)($meta['message_id'] ?? ''));
-		$message_id_header = ($message_id_header !== '') ? substr($message_id_header, 0, 255) : null;
+		$message_id_header = ($message_id_header !== '') ? DocumentText::clip((string)($message_id_header), 255) : null;
 
 		$parsed = array('headers' => array(
 			'references'  => (string)($meta['references'] ?? ''),
@@ -1281,7 +1284,7 @@ class InboundEmailRouter {
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
 			'iem_sender'      => '',
-			'iem_recipient'   => substr($recipient, 0, 500),
+			'iem_recipient'   => DocumentText::clip((string)($recipient), 500),
 			'iem_subject'     => '',
 			'iem_body_plain'  => '',
 			'iem_body_html'   => '',
@@ -1362,14 +1365,14 @@ class InboundEmailRouter {
 	 */
 	public function storeDirectMessage(array $meta, array $parts, $alias, $domain, string $envelope_recipient,
 			bool $verified_direct): array {
-		$sender = substr(trim((string)($meta['sender'] ?? '')), 0, 500);
-		$subject = substr((string)($meta['subject'] ?? ''), 0, 4000);
+		$sender = DocumentText::clip((string)(trim((string)($meta['sender'] ?? ''))), 500);
+		$subject = DocumentText::clip((string)((string)($meta['subject'] ?? '')), 4000);
 		$body_plain = (string)($parts['body_plain'] ?? '');
 		$body_html  = (string)($parts['body_html'] ?? '');
 		$attachments = is_array($parts['attachments'] ?? null) ? $parts['attachments'] : array();
 
 		$message_id_header = trim((string)($meta['message_id'] ?? ''));
-		$message_id_header = ($message_id_header === '') ? null : substr($message_id_header, 0, 255);
+		$message_id_header = ($message_id_header === '') ? null : DocumentText::clip($message_id_header, 255);
 		$thread_key = $this->computeThreadKey(array('headers' => array(
 			'references'  => (string)($meta['references'] ?? ''),
 			'in-reply-to' => (string)($meta['in_reply_to'] ?? ''),
@@ -1434,7 +1437,7 @@ class InboundEmailRouter {
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
 			'iem_sender'      => $sealing ? '' : $sender,
-			'iem_recipient'   => substr(strtolower($envelope_recipient), 0, 500),
+			'iem_recipient'   => DocumentText::clip((string)(strtolower($envelope_recipient)), 500),
 			'iem_subject'     => $sealing ? '' : $subject,
 			'iem_body_plain'  => $sealing ? '' : $body_plain,
 			'iem_body_html'   => $sealing ? '' : $body_html,
@@ -1572,7 +1575,7 @@ class InboundEmailRouter {
 			foreach (array_values($attachments) as $index => $attachment) {
 				$bytes = (string)($attachment['bytes'] ?? '');
 				$name  = trim((string)($attachment['filename'] ?? ''));
-				$name  = $name !== '' ? substr($name, 0, 500) : null;
+				$name  = $name !== '' ? DocumentText::clip((string)($name), 500) : null;
 				$type  = trim((string)($attachment['content_type'] ?? '')) ?: 'application/octet-stream';
 				$cid   = trim((string)($attachment['content_id'] ?? ''));
 				// The manifest carries a part index rather than a MIME section
@@ -1601,11 +1604,11 @@ class InboundEmailRouter {
 				}
 				$created_files[] = $file;
 
-				$content_id = $cid !== '' ? substr(trim($cid, '<>'), 0, 255) : null;
+				$content_id = $cid !== '' ? DocumentText::clip((string)(trim($cid, '<>')), 255) : null;
 				$rows[] = array(
 					'ima_iem_inbound_email_message_id' => $message_id,
 					'ima_filename'     => $for_browser ? '' : $name,
-					'ima_content_type' => $for_browser ? '' : substr($type, 0, 255),
+					'ima_content_type' => $for_browser ? '' : DocumentText::clip((string)($type), 255),
 					'ima_size_bytes'   => $original_size,
 					'ima_mime_part'    => substr($mime_part, 0, 40),
 					'ima_encoding'     => 'binary', // no base64: parts transfer as bytes
@@ -1614,7 +1617,7 @@ class InboundEmailRouter {
 					'ima_fil_file_id'  => intval($file->key),
 					'ima_is_sealed'    => $sealing,
 				);
-				$manifest[] = array('filename' => $name, 'content_type' => substr($type, 0, 255),
+				$manifest[] = array('filename' => $name, 'content_type' => DocumentText::clip((string)($type), 255),
 					'content_id' => $content_id);
 			}
 
@@ -1946,7 +1949,7 @@ class InboundEmailRouter {
 				$cid   = $part->getContentId();
 				$disp  = $part->getDisposition();
 				$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
-				$name = $part->getName() ? substr($part->getName(), 0, 500) : null;
+				$name = $part->getName() ? DocumentText::clip((string)($part->getName()), 500) : null;
 				$type = (string)$part->getType() ?: 'application/octet-stream';
 				$mime_part = (string)$part->getMimeId();
 
@@ -1980,11 +1983,11 @@ class InboundEmailRouter {
 				}
 				$created_files[] = $file;
 
-				$content_id = $cid ? substr(trim($cid, '<>'), 0, 255) : null;
+				$content_id = $cid ? DocumentText::clip((string)(trim($cid, '<>')), 255) : null;
 				$rows[] = array(
 					'ima_iem_inbound_email_message_id' => $message_id,
 					'ima_filename'     => $for_browser ? '' : $name,
-					'ima_content_type' => $for_browser ? '' : substr($type, 0, 255),
+					'ima_content_type' => $for_browser ? '' : DocumentText::clip((string)($type), 255),
 					'ima_size_bytes'   => $original_size,
 					'ima_mime_part'    => substr((string)$part->getMimeId(), 0, 40),
 					'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
@@ -1995,7 +1998,7 @@ class InboundEmailRouter {
 					// on this (InboundEmailMessage::openSealedAttachment).
 					'ima_is_sealed'    => $sealing,
 				);
-				$manifest[] = array('filename' => $name, 'content_type' => substr($type, 0, 255),
+				$manifest[] = array('filename' => $name, 'content_type' => DocumentText::clip((string)($type), 255),
 					'content_id' => $content_id);
 			}
 
@@ -2423,7 +2426,7 @@ class InboundEmailRouter {
 			 ORDER BY CASE iem_direction WHEN 'outbound' THEN 0 ELSE 1 END,
 			   iem_inbound_email_message_id ASC
 			 LIMIT 1");
-		$stmt->execute(array($alias_id, substr(trim($message_id_header), 0, 255)));
+		$stmt->execute(array($alias_id, DocumentText::clip((string)(trim($message_id_header)), 255)));
 		$id = $stmt->fetchColumn();
 		return $id ? intval($id) : 0;
 	}
@@ -2522,18 +2525,21 @@ class InboundEmailRouter {
 	 */
 	public function computeThreadKey(array $parsed, ?string $message_id_header): ?string {
 		$headers = $parsed['headers'] ?? array();
+		// The IMAP path hands its own fetched headers in, so the value is made
+		// text here too, and every cut lands between characters (B66).
+		$cut = function ($value) { return DocumentText::clip(MailHeaderText::block((string)$value), 255); };
 
 		$references = $headers['references'] ?? '';
 		if (is_array($references)) { $references = $references[0] ?? ''; }
 		$references = trim((string)$references);
 		if ($references !== '') {
 			if (preg_match('/<[^>]+>/', $references, $m)) {
-				return substr($m[0], 0, 255);
+				return $cut($m[0]);
 			}
 			// References with no angle-bracketed token — fall back to first whitespace token.
 			$first = preg_split('/\s+/', $references)[0] ?? '';
 			if ($first !== '') {
-				return substr($first, 0, 255);
+				return $cut($first);
 			}
 		}
 
@@ -2542,13 +2548,13 @@ class InboundEmailRouter {
 		$in_reply_to = trim((string)$in_reply_to);
 		if ($in_reply_to !== '') {
 			if (preg_match('/<[^>]+>/', $in_reply_to, $m)) {
-				return substr($m[0], 0, 255);
+				return $cut($m[0]);
 			}
-			return substr($in_reply_to, 0, 255);
+			return $cut($in_reply_to);
 		}
 
 		if ($message_id_header !== null && $message_id_header !== '') {
-			return substr($message_id_header, 0, 255);
+			return $cut($message_id_header);
 		}
 
 		return null;
@@ -2657,6 +2663,13 @@ class InboundEmailRouter {
 					$headers[$current_key] = trim($m[2]);
 				}
 			}
+		}
+
+		// Every value is text from here on: a line an old client wrote in raw
+		// Latin-1 reads as Windows-1252, so no column, log line or query built
+		// from a header can carry bytes the database refuses (B66).
+		foreach ($headers as $key => $value) {
+			$headers[$key] = is_array($value) ? array_map(array('MailHeaderText', 'block'), $value) : MailHeaderText::block($value);
 		}
 
 		$from = is_array($headers['from'] ?? '') ? ($headers['from'][0] ?? '') : ($headers['from'] ?? '');
@@ -4156,9 +4169,9 @@ class InboundEmailRouter {
 		$address = trim((string)($parsed['from_email'] ?? ''));
 		$from    = trim((string)($parsed['from'] ?? ''));
 		if ($address === '') {
-			return substr($from, 0, 500);
+			return DocumentText::clip((string)($from), 500);
 		}
-		$address = substr($address, 0, 500);
+		$address = DocumentText::clip((string)($address), 500);
 
 		$name = $this->decodeMimeHeader($this->extractName($from));
 		$name = preg_replace('/[\r\n\t"<>]+/', ' ', (string)$name);

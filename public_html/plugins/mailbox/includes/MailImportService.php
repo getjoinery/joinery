@@ -14,7 +14,9 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - attention(): 'unaccounted' is a finished run's entries never decided
+ *   (the counters are recounted from the entries, so the old sum check could not fire) (B68)
  * @changelog 1.5 - FILE_SOURCE: the mail_import_archive origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.4
@@ -507,9 +509,11 @@ class MailImportService {
 	/**
 	 * What on this run wants a human's eye.
 	 *
-	 * Two things qualify. UNACCOUNTED is the reconciliation tripwire: every entry
-	 * should have landed in exactly one bucket, so a shortfall means messages went
-	 * missing with nothing reporting it. FLAGGED counts the duplicates whose own
+	 * Two things qualify. UNACCOUNTED is the reconciliation tripwire: a finished
+	 * run whose entries are not all decided left messages behind with nothing
+	 * reporting it (the counters are recounted from the entries, so they cannot
+	 * disagree with each other; a pending entry under a DONE run is the gap).
+	 * FLAGGED counts the duplicates whose own
 	 * recorded reason says they may not be in this mailbox at all — a copy that
 	 * collided with another mailbox's, one that could not be identified, or one
 	 * whose stored copy lists no attachments.
@@ -520,11 +524,11 @@ class MailImportService {
 	private static function attention(MailImportRun $run): array {
 		$out = array();
 
-		$processed = intval($run->get('mir_processed'));
-		$accounted = intval($run->get('mir_stored')) + intval($run->get('mir_dedup'))
-			+ intval($run->get('mir_skipped')) + intval($run->get('mir_failed'));
-		if ($processed !== $accounted) {
-			$out['unaccounted'] = $processed - $accounted;
+		if ((string)$run->get('mir_state') === MailImportRun::STATE_DONE) {
+			$left = intval($run->get('mir_total_entries')) - intval($run->get('mir_processed'));
+			if ($left !== 0) {
+				$out['unaccounted'] = $left;
+			}
 		}
 
 		$flagged = 0;

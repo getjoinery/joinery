@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
+ * @version 1.5 - a batch that died part way leaves no message uncounted (B68)
  * @version 1.4
  * @changelog 1.4 - Teardown matches labels on an id floor rather than getByName(),
  *   so the labels undo soft-deleted no longer survive as tombstones.
@@ -79,6 +80,7 @@ class MailArchiveImportTest {
 			$this->testReimportDedups();
 			$this->testCrossMailboxDedupIsNotAFailure();
 			$this->testCorruptEntryFailsAlone();
+			$this->testDeadBatchLosesNoCounts();
 			$this->testUndoRemovesOnlyWhatItCreated();
 			$this->testArchiveRetention();
 			$this->testOneImportAtATime();
@@ -635,6 +637,49 @@ class MailArchiveImportTest {
 		$stmt->execute(array(intval($run->key)));
 		$reason = (string)$stmt->fetchColumn();
 		check($reason !== '', 'failure: the entry records WHY it failed, not just that it did', $reason);
+	}
+
+	/**
+	 * B68. A batch writes each entry's outcome as it decides it, but used to add
+	 * the batch's counts only at its end; a batch that died part way left messages
+	 * stored and uncounted, and the run finished short (98,296 found, 97,914
+	 * processed, nothing failed). The counters are now recounted from the
+	 * entries, so the run that follows the dead batch counts its work too.
+	 */
+	private function testDeadBatchLosesNoCounts() {
+		$run = $this->makeRun('takeout.mbox', 'dead-batch.mbox');
+		$importer = new MailArchiveImporter($run);
+		$this->scanToEnd($importer);
+		$run->moveTo(MailImportRun::STATE_SCANNED);
+		$importer->applySelection(array('*'), true, true);
+
+		// The dead batch: one entry decided and written, its count never added.
+		$stmt = $this->db->prepare("SELECT mie_mail_import_entry_id FROM mie_mail_import_entries
+			WHERE mie_mir_mail_import_run_id = ? AND mie_state = 'pending' ORDER BY mie_ordinal LIMIT 1");
+		$stmt->execute(array(intval($run->key)));
+		MailImportEntry::recordOutcome(intval($stmt->fetchColumn()), MailImportEntry::STATE_FAILED, 'the batch died here');
+
+		$this->importToEnd($importer);
+		$importer->finish();
+		$run->load();
+		$counts = MailImportEntry::stateCounts(intval($run->key));
+		check(intval($run->get('mir_processed')) === intval($run->get('mir_total_entries'))
+			&& intval($run->get('mir_total_entries')) === array_sum($counts)
+			&& intval($run->get('mir_failed')) === intval($counts['failed'] ?? 0) && intval($run->get('mir_failed')) >= 1,
+			'dead batch: the run counts the entry the dead batch decided, and processed reaches total',
+			'run ' . json_encode(array($run->get('mir_processed'), $run->get('mir_total_entries'), $run->get('mir_failed'))) . ' entries ' . json_encode($counts));
+		check(!isset(MailImportService::describe($run)['attention']['unaccounted']),
+			'dead batch: a finished run whose every entry is decided reports nothing unaccounted');
+
+		// And the tripwire still fires on a real gap: an entry left undecided under DONE.
+		$this->db->prepare("UPDATE mie_mail_import_entries SET mie_state = 'pending'
+			WHERE mie_mail_import_entry_id = (SELECT mie_mail_import_entry_id FROM mie_mail_import_entries
+				WHERE mie_mir_mail_import_run_id = ? AND mie_state = 'stored' LIMIT 1)")->execute(array(intval($run->key)));
+		MailImportRun::recount(intval($run->key));
+		$run->load();
+		$attention = MailImportService::describe($run)['attention'] ?? array();
+		check(($attention['unaccounted'] ?? 0) === 1, 'dead batch: an entry never decided under a finished run is unaccounted for',
+			json_encode($attention));
 	}
 
 	private function testUndoRemovesOnlyWhatItCreated() {

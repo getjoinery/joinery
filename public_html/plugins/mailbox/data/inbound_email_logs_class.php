@@ -3,6 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
+ * @version 2.1 - every text column is cut between characters and made UTF-8 (DocumentText::clip, B66)
  * @version 2.0 - STATUS_HANDLER: the outcome of handing a stored message to a plugin handler
  * @version 1.9 - STATUS_UNCONFIRMED; iel_relay_spool_id marks the relay spool entry a line
  *   came from, so a re-pulled entry is not routed twice
@@ -116,9 +117,11 @@ class InboundEmailLog extends SystemBase {
 		if ($message_id) {
 			$log->set('iel_iem_inbound_email_message_id', intval($message_id));
 		}
-		$log->set('iel_from_address', substr($from, 0, 500));
-		$log->set('iel_to_address', substr($to, 0, 500));
-		$log->set('iel_subject', substr($subject, 0, 1000));
+		// Cut between characters, never inside one: a byte cut through a UTF-8
+		// character is a value the database refuses, and the line is lost (B66).
+		$log->set('iel_from_address', DocumentText::clip((string)$from, 500));
+		$log->set('iel_to_address', DocumentText::clip((string)$to, 500));
+		$log->set('iel_subject', DocumentText::clip((string)$subject, 1000));
 		$log->set('iel_destinations', $destinations);
 		$log->set('iel_status', $status);
 		if ($alias_id) {
@@ -128,7 +131,7 @@ class InboundEmailLog extends SystemBase {
 			$log->set('iel_ied_inbound_email_domain_id', $domain_id);
 		}
 		if ($error) {
-			$log->set('iel_error_message', $error);
+			$log->set('iel_error_message', DocumentText::clip((string)$error, 65536));
 		}
 		$log->save();
 		return $log;
