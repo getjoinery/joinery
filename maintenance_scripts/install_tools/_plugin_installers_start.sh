@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.45 - A plugin switched off while a run works through the installers before its own is
+#                skipped: the active list is read when the run begins, and an installer can take
+#                minutes, so the one switched off in between was set up again after its
+#                deactivate hook took it down (office_editor, 0.8.529 post-release check).
 # Version: 2.44 - The quiet gate holds by the converger's tick, so a quiet site with none (a dormant copy
 #                in a container: its first start is its first run, and the gate kept every installer
 #                from it) has its converger's entry installed first, and nothing else. Without it the
@@ -990,7 +994,7 @@ run_core_installer() {
 # and the database's answer, whatever the environment says. Root says once
 # that it ignored a hook, so a stray one is visible rather than silent.
 if [[ "$(id -u)" == "0" ]]; then
-    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS; do
+    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS JOINERY_ACTIVE_PLUGINS_NOW; do
         if [[ -n "${!_hook:-}" ]]; then
             echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
             unset "${_hook}"
@@ -1083,6 +1087,23 @@ read_host_switches() {
 # refused when the path escapes the plugin directory, when root did not put it
 # there, or when we did not build the package. The one body the full run and
 # --only-plugin share, so the two cannot drift.
+# Is PLUGIN still active? Asked just before its installer runs, since the list
+# the run works through was read when it began. A gate's fixture tree has no
+# database: it names what is active now in JOINERY_ACTIVE_PLUGINS_NOW, or
+# leaves the run's list standing. A database that cannot be read now leaves
+# the run's list standing too.
+plugin_still_active() {
+    local now
+    if [[ -n "${JOINERY_ACTIVE_PLUGINS_NOW:-}" ]]; then
+        now="${JOINERY_ACTIVE_PLUGINS_NOW}"
+    elif [[ -n "${JOINERY_ACTIVE_PLUGINS:-}" ]]; then
+        return 0
+    elif ! now="$(read_active_plugins)"; then
+        return 0
+    fi
+    grep -qxF -- "$1" <<< "${now}"
+}
+
 run_one_plugin_installer() {
     local PLUGIN="$1" MANIFEST INSTALLER_REL INSTALLER
     MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
@@ -1121,6 +1142,11 @@ run_one_plugin_installer() {
     # did. An unsigned plugin (installed on the owner's acknowledgement) keeps
     # its files and its row, and never gets a script run as root out of it.
     if ! plugin_package_verified "${PLUGIN}"; then
+        return 0
+    fi
+
+    if ! plugin_still_active "${PLUGIN}"; then
+        echo "plugin installers: ${PLUGIN}: switched off since this run began - skipped"
         return 0
     fi
 

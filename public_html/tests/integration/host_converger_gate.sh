@@ -11,7 +11,8 @@
 # skip without root (each says so), which is exactly what lets the stamp logic
 # be exercised here. What is pinned: a fresh stamp costs nothing, a changed
 # release converges, a day-old stamp converges, an unreachable database is
-# retried next tick, and every run records cache/host_converger.last.
+# retried next tick, every run records cache/host_converger.last, and a plugin
+# switched off while a run is under way is not set up again by it.
 #
 # The installer's unit text is rendered and parsed too, without installing it.
 # The certificate summary the runner writes for the admin notice is pinned from
@@ -420,6 +421,13 @@ out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS=$'signedp\nunsign
 chk "the signed plugin's installer runs" "$(echo "$out" | grep -c '^ran-signedp$')" "1"
 chk "the unsigned plugin's installer does not" "$(echo "$out" | grep -c '^ran-unsignedp$')" "0"
 chk "and the log says why" "$(echo "$out" | grep -c 'unsignedp: not a package we built - host installer skipped (verdict: unsigned')" "1"
+# Switched off while the run worked through the installers before it: the
+# list the run began with names it, what is active now does not.
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' JOINERY_ACTIVE_PLUGINS_NOW='otherp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "a plugin switched off since the run began is not set up again" "$(echo "$out" | grep -c '^ran-signedp$')" "0"
+chk "and the log says so" "$(echo "$out" | grep -c '^plugin installers: signedp: switched off since this run began - skipped$')" "1"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' JOINERY_ACTIVE_PLUGINS_NOW=$'otherp\nsignedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "one still active runs" "$(echo "$out" | grep -c '^ran-signedp$')" "1"
 # One byte changed in a signed plugin, and its installer no longer runs.
 echo '# edited' >> "$PH/plugins/signedp/install/host.sh"
 out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='signedp' bash "$T/nogate.sh" --site-root="$T" 2>&1)
