@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.31 - a kept IP swap whose copy's IPv6 was not named in reverse DNS says what to do (B45)
  * @version 1.30 - a container source's certificate staged by its host for the export, and cleared, are named
  * @version 1.29 - the ended note and the 'current as of' line give their times in UTC, as the rest of the tab does (B35)
  * @version 1.28 - a new server's plans are those the region shown sells (B31)
@@ -186,6 +187,12 @@ if (!$site_copy) {
 	// pointed at the copy still sends IPv6 visitors to that server (B63).
 	foreach ($ended_copy ? SiteCopyRunner::went_back_notes($ended_copy->switch_record()) : array() as $note) {
 		echo '<div class="alert alert-warning small">When it went back: ' . $copy_h($note) . '</div>';
+	}
+	// A kept swap whose copy's IPv6 is not named in reverse DNS says what to do (B45).
+	$ended_rdns = $ended_copy && $ended_copy->status() === SiteCopy::STATUS_FINISHED
+		? (string)($ended_copy->switch_record()['rdns_note'] ?? '') : '';
+	if ($ended_rdns !== '' && !IpSwapMove::copy_ipv6_named($ended_rdns)) {
+		echo '<div class="alert alert-warning small">When it was kept: ' . $copy_h($ended_rdns) . '</div>';
 	}
 	$page->begin_box(['title' => 'Copy this site to a new server']);
 	// Two places a copy can come from: the running site, or its backups

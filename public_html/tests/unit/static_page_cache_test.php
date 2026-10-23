@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/utils/upgrade.php, public_html/serve.php]
  */
 /**
  * What the page cache must refuse to remember.
@@ -136,6 +137,17 @@ check(StaticPageCache::createCache('/verify-totp', [], $html) !== false, 'an ent
 check(StaticPageCache::checkCache('/verify-totp', []) === 'nostatic', 'is never served');
 check(StaticPageCache::getCacheMetadata('/verify-totp', []) === null, 'and is dropped from the index');
 
+section('a copy\'s key page is never cached or served');
+
+// It shows the request this machine's agent has staged. Cached a moment before
+// the agent asked, it said "not waiting" to every later visit, and a copy from
+// backups waited an hour for a key nobody could give it (site copy C11, C11b).
+check(StaticPageCache::shouldCache('/copy-key', [], $html) === false && StaticPageCache::shouldIgnore('/copy-key', []),
+    '/copy-key is not cached, and no verdict is written down for it');
+check(StaticPageCache::createCache('/copy-key', [], $html) !== false, 'an entry made before the path was excluded');
+check(StaticPageCache::checkCache('/copy-key', []) === 'nostatic', 'is never served');
+check(StaticPageCache::getCacheMetadata('/copy-key', []) === null, 'and is dropped from the index');
+
 section('/_config cannot reach the config entry');
 
 check(StaticPageCache::CONFIG_KEY !== '_config' && strpos(StaticPageCache::CONFIG_KEY, '.') !== false,
@@ -215,6 +227,26 @@ check($removed >= 1 && !file_exists($dir . '/about.html'), 'the cached files are
 check((string)file_get_contents($dir . '/index.json') === $before, 'the index file is byte-for-byte what it was');
 check(StaticPageCache::checkCache('/about', []) === false, 'the stale entry drops out on the next request for it');
 
+section('an upgrade\'s flush keeps the index, so a cache turned off stays off');
+
+// upgrade.php flushes the cache with find, as the root it often runs as. It
+// deleted index.json with the pages, and a missing index reads as "on": a cache
+// its operator had turned off came back on at every upgrade. Its own command is
+// run here against a cache that is off.
+$upgrade_src = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
+$flush = preg_match('/exec\(\'find \' \. escapeshellarg\(\$cache_dir\) \. \'([^\']*)\'/', $upgrade_src, $m) ? $m[1] : '';
+check($flush !== '', 'upgrade.php flushes the cache directory with find', $flush);
+$up_dir = $dir . '/upgrade_flush';
+@mkdir($up_dir, 0775, true);
+$off = json_encode([StaticPageCache::CONFIG_KEY => ['enabled' => false]]);
+file_put_contents($up_dir . '/index.json', $off);
+file_put_contents($up_dir . '/about.html', $html);
+exec('find ' . escapeshellarg($up_dir) . $flush, $flush_out, $flush_rc);
+check($flush_rc === 0 && !file_exists($up_dir . '/about.html'), 'its command deletes the saved pages', implode("\n", $flush_out));
+check((string)@file_get_contents($up_dir . '/index.json') === $off, 'and keeps the index that says the cache is off');
+array_map('unlink', glob($up_dir . '/*') ?: array());
+@rmdir($up_dir);
+
 
 section('Writers saving at once never collide');
 
@@ -247,5 +279,21 @@ check($done === 6 && $errors === '', 'six writers finish with no error between t
 check(!glob($race_dir . '/*.tmp'), 'and leave no temporary behind');
 array_map('unlink', glob($race_dir . '/*') ?: array());
 @rmdir($race_dir);
+
+section('a forwarding confirmation is never cached');
+
+// Its token is ?t=, which the signed-link rule does not see, and a confirmed
+// page carries no form: the route itself says so, or each link's page, naming
+// both addresses, would be saved under its own key.
+RouteHelper::$match_only_mode = true;
+RouteHelper::$match_only_result = null;
+$_REQUEST['__route'] = 'mail/forward-confirm';
+include(PathHelper::getIncludePath('serve.php'));
+$fc_match = RouteHelper::$match_only_result;
+RouteHelper::$match_only_mode = false;
+unset($_REQUEST['__route']);
+check(is_array($fc_match) && !empty($fc_match['matched']) && is_array($fc_match['config'] ?? null)
+	&& ($fc_match['config']['static_cache'] ?? null) === false,
+	'/mail/forward-confirm is a route that is never cached', json_encode($fc_match));
 
 harness_finish();

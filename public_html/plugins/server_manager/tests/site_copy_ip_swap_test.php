@@ -16,6 +16,8 @@
  * file, whose machines take a call or two to change state, as real ones do.
  * Agent jobs are finished by hand, as site_copy_switch does.
  *
+ * @version 1.4 - B45: the copy's IPv6 is named in reverse DNS when the AAAA gives it, at the switch or at Keep, and
+ *                the Copy tab says what to do when it is not; the AAAA refusal leads with pointing it at the copy
  * @version 1.3 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.2 - B58/B62: a copy enrolled here is offered the swap before its next host report names the holder;
  *               a row for another machine's identity, or one not yet enrolled, is not proof
@@ -392,7 +394,8 @@ $refuse('Network Helper off on the copy', function () use ($fake) { $fake->helpe
 $refuse('the copy\'s server on Linode Interfaces (B8)', function () use ($fake) { $fake->generation['12'] = 'linode'; }, 'The copy\'s server uses Linode Interfaces');
 $refuse('a second public IPv4 on the site\'s server', function () use ($fake) { $fake->owner['192.0.2.99'] = '11'; }, 'exactly one');
 $refuse('a firewall on the site\'s server the copy lacks', function () use ($fake) { $fake->firewalls['12'] = array(); }, 'web-only');
-$refuse('an AAAA record naming the site\'s server\'s IPv6', function () use (&$aaaa) { $aaaa = array('2600:3c03::1'); }, 'IPv6 addresses do not move');
+$refuse('an AAAA record naming the site\'s server\'s IPv6', function () use (&$aaaa) { $aaaa = array('2600:3c03::1'); },
+	'IPv6 addresses do not move. Point it at the copy\'s IPv6 (2600:3c03::2) before switching, or remove it');
 // B58: the swap restarts the copy, and an encrypted data root no escrow holder
 // opens would wait there for its recovery key.
 $cnode_report = function (string $holder) use ($cnode) {
@@ -459,6 +462,11 @@ check($copy->status() === SiteCopy::STATUS_SWITCHED, 'the copy takes the address
 check($fake->owner[$S4] === '12' && $fake->owner[$T4] === '11', 'the site\'s address is on the copy\'s machine, and the copy\'s on the old one');
 check($fake->status['11'] === 'offline' && $fake->status['12'] === 'running', 'the old server is off, and the copy\'s runs');
 check($fake->rdns[$S4] === 'mail.example.org', 'the site\'s address kept its reverse DNS');
+check(!preg_grep('/^rdns 2600:/', $fake->calls) && (string)($copy->switch_record()['rdns_note'] ?? '')
+	=== 'Reverse DNS for 2600:3c03::2 was not set: no AAAA record of sci.example.org names it. Point the AAAA at it, then '
+	. 'keep the switch-over, which tries again.',
+	'with no AAAA record giving the copy\'s IPv6, its reverse DNS is left alone, and the Copy tab says what to do (B45)',
+	json_encode($fake->calls) . ' ' . ($copy->switch_record()['rdns_note'] ?? ''));
 check(array_slice($fake->calls, 0, 3) === array('shutdown 11', 'assign {"' . $S4 . '":"12","' . $T4 . '":"11"}', 'reboot 12'),
 	'in order: the old server off, the swap, the copy restarted on its new address', json_encode($fake->calls));
 check($cprov->get('cvp_instance_ip') === $S4 && $sprov->get('cvp_instance_ip') === $T4,
@@ -600,6 +608,9 @@ $cnode3 = $mk_node('copy3', array('mgn_web_root' => '/var/www/html/scisite/publi
 	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$src->key));
 $mk_prov('c3', $cnode3, '12', $T4);
 $copy3 = $mk_copy($cnode3);
+// The owner points the site's AAAA at the copy's IPv6 before switching, as
+// the plan asks: the one address no swap moves (B45, found on Hetzner).
+$aaaa = array('2600:3c03::2');
 SiteCopyRunner::begin_switch($copy3, SiteCopyRunner::METHOD_IP_SWAP, null, null);
 $copy3->load();
 check(!empty($copy3->switch_record()['swap']['both_off']), 'the plan says the copy is powered off for the swap too');
@@ -610,6 +621,13 @@ $drive($copy3, array(SiteCopy::STATUS_STARTING));
 check($copy3->status() === SiteCopy::STATUS_SWITCHED && array_slice($stopped->calls, 0, 4) === array('shutdown 11', 'shutdown 12',
 	'assign {"' . $S4 . '":"12","' . $T4 . '":"11"}', 'boot 12'),
 	'both servers off, the swap, then the copy on again at its new address', $copy3->status() . ' ' . json_encode($stopped->calls));
+check(($stopped->rdns['2600:3c03::2'] ?? '') === 'sci.example.org' && in_array('rdns 2600:3c03::2 sci.example.org', $stopped->calls, true),
+	'switched, the copy\'s IPv6, which the AAAA gives, answers the site\'s name in reverse DNS (B45)', json_encode($stopped->calls));
+check($stopped->rdns[$S4] === 'mail.example.org' && !preg_grep('/^rdns ' . preg_quote($S4, '/') . ' /', $stopped->calls),
+	'and the moved IPv4 keeps the reverse DNS it brought with it', json_encode($stopped->calls));
+check((string)($copy3->switch_record()['rdns_note'] ?? '') === 'Reverse DNS: 2600:3c03::2 now answers sci.example.org.',
+	'the Copy tab says so', (string)($copy3->switch_record()['rdns_note'] ?? ''));
+$aaaa = array();
 $stopped->calls = array();
 SiteCopyRunner::go_back($copy3, null);
 $copy3->load();
@@ -617,6 +635,47 @@ $drive($copy3, array(SiteCopy::STATUS_RETURNING));
 check($stopped->owner[$S4] === '11' && in_array('shutdown 12', $stopped->calls, true)
 	&& array_search('shutdown 12', $stopped->calls) < array_search('assign {"' . $S4 . '":"11","' . $T4 . '":"12"}', $stopped->calls),
 	'the way back powers the copy off before swapping back', json_encode($stopped->calls));
+
+// ---------------------------------------------------------------------------
+section('An AAAA pointed at the copy after the switch: Keep names the IPv6');
+
+$fake_reset();
+foreach (get_object_vars($fake) as $k => $v) {
+	$stopped->$k = $v;
+}
+$cnode4 = $mk_node('copy4', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
+	'mgn_host' => $T4, 'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.54.0',
+	'mgn_agent_primitives' => 'host_report,copy_import,copy_take_vouch,copy_stage,copy_restore,site_census,take_node_id,site_quiet',
+	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$src->key));
+$mk_prov('c4', $cnode4, '12', $T4);
+$copy4 = $mk_copy($cnode4);
+// The owner removed the site's AAAA to get past the plan's refusal.
+$aaaa = array();
+SiteCopyRunner::begin_switch($copy4, SiteCopyRunner::METHOD_IP_SWAP, null, null);
+$copy4->load();
+$drive($copy4, array(SiteCopy::STATUS_FREEZING));
+SiteCopyRunner::move_address($copy4, null, null);
+$copy4->load();
+$drive($copy4, array(SiteCopy::STATUS_STARTING));
+$note4 = (string)($copy4->switch_record()['rdns_note'] ?? '');
+check($copy4->status() === SiteCopy::STATUS_SWITCHED && !preg_grep('/^rdns 2600:/', $stopped->calls)
+	&& strpos($note4, 'keep the switch-over, which tries again') !== false,
+	'switched with no AAAA, the copy\'s IPv6 is not named, and the Copy tab says Keep tries again',
+	$copy4->status() . ' ' . $copy4->get('scp_halt_reason') . ' ' . $note4);
+check(strpos(IpSwapMove::name_copy_ipv6((array)$copy4->switch_record()['swap'], true),
+	'set reverse DNS for 2600:3c03::2 to sci.example.org in the provider\'s panel') !== false,
+	'kept with still no AAAA naming it, the line says to name the IPv6 alone at the provider');
+// Then the owner points the AAAA at the copy's IPv6, and keeps the switch-over.
+$aaaa = array('2600:3c03::2');
+SiteCopyRunner::finish($copy4);
+$copy4->load();
+$note4 = (string)($copy4->switch_record()['rdns_note'] ?? '');
+check($copy4->status() === SiteCopy::STATUS_FINISHED && ($stopped->rdns['2600:3c03::2'] ?? '') === 'sci.example.org'
+	&& $note4 === 'Reverse DNS: 2600:3c03::2 now answers sci.example.org.' && IpSwapMove::copy_ipv6_named($note4),
+	'keeping it names the copy\'s IPv6 then, and says so', $copy4->status() . ' ' . $note4 . ' ' . json_encode($stopped->calls));
+check($stopped->rdns[$S4] === 'mail.example.org' && !preg_grep('/^rdns ' . preg_quote($S4, '/') . ' /', $stopped->calls),
+	'and the moved IPv4 keeps its reverse DNS', json_encode($stopped->calls));
+$aaaa = array();
 
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;

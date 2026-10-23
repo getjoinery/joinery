@@ -6,6 +6,8 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 1.6 - /copy-key is an excluded path: it shows what this machine's agent is waiting for, so a
+ *                copy saved a moment before the agent asked said "not waiting" for the whole wait
  * @version 1.5 - the sign-in and password-reset steps are excluded paths: a visitor halfway through
  *                one is not signed in, so /verify-totp was cached with one account's factor choices
  *                and served to every later sign-in
@@ -333,6 +335,11 @@ class StaticPageCache {
             '/password-reset-totp',
             '/password-set',
             '/recovery-verify',
+            // A copy's key page shows the request this machine's agent has
+            // staged, which comes and goes with no edit to the site. One
+            // saved a moment before the agent asked says "not waiting" to
+            // every later visit, and the copy waits for a key nobody can give.
+            '/copy-key',
             '/ajax',
             '/api',
             '/admin',
@@ -830,7 +837,10 @@ class StaticPageCache {
             $reasons[] = '✅ No query parameters to check';
         }
 
-        // 6. Check headers for disqualifiers
+        // 6. Check headers for disqualifiers. Cache-Control is not one: PHP's
+        // session start sends 'no-store, no-cache, must-revalidate' on every
+        // page. A page that must never be cached says so with its route's
+        // 'static_cache' => false or skipThisRequest().
         $headers = headers_list();
 
         foreach ($headers as $header) {

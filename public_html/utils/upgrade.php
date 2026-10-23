@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.32 - the static page cache flush keeps the cache's index, which holds whether the cache is on:
+	 *                deleting it turned a cache its operator had turned off back on at every upgrade
 	 * @version 1.31 - the re-run after a self-update knows where its parent downloaded the core archive, so a
 	 *                management node keeps it on that run too (B55 live: every release that self-updates kept none)
 	 * @version 1.30 - a management node keeps the core archive it applied (UpgradeRetention::keep_applied_archive), so
@@ -2501,10 +2503,12 @@
 
 		// Flush static page cache so new code's renders aren't masked by
 		// pre-deploy cached pages. See specs/upgrade_pipeline_rename_gap.md.
+		// The index stays: it holds whether the cache is on, and an entry
+		// whose file is gone drops out on the next request for it.
 		$cache_dir = $full_site_dir . '/cache/static_pages';
 		if (is_dir($cache_dir)) {
 			$cleared = 0;
-			exec('find ' . escapeshellarg($cache_dir) . ' -mindepth 1 -delete 2>&1', $cache_out, $cache_exit);
+			exec('find ' . escapeshellarg($cache_dir) . ' -mindepth 1 ! -name index.json -delete 2>&1', $cache_out, $cache_exit);
 			if ($cache_exit === 0) {
 				if ($verbose) upgrade_echo("✓ Static page cache flushed<br>");
 			} else {

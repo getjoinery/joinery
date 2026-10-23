@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.4.0 - the pages the static page cache saved before the restore are deleted (its index, which
+#                  holds whether the cache is on, is kept): a copy's next restore served the pages saved
+#                  while its owner looked at it before, with the content from before
 # Version: 1.3.0 - a bare-metal restore's virtualhost is vhost_install's render (_vhost_install.sh),
 #                  recorded as the site's last, so render_vhost.sh keeps converging it after a
 #                  domain change; virtualhost_update_script.sh's copy was read as an operator's
@@ -46,6 +49,7 @@
 #                                        copied out of the backup)
 #     * when its certificate arrives    (arms the DNS-gated retry for the new
 #                                        domain, disarms the old one)
+#     * what its page cache serves      (nothing saved before the restore)
 #
 #   What it deliberately never touches: database credentials. Those belong to
 #   the machine, they are already correct in the target's own config, and taking
@@ -517,6 +521,25 @@ else
             print_warning "Could not arm the certificate retry. Once ${DOMAIN} resolves here, run:"
             print_warning "  sudo ${SETUP_SSL} ${DOMAIN}"
         fi
+    fi
+fi
+
+# ── 6. No page saved before the restore is served after it ─────────────────
+#
+# The static page cache serves a saved render of a public page to visitors who
+# are not signed in, and backups never carry cache/. So the pages saved here are
+# this machine's renders of what it held BEFORE the restore: a copy's pages,
+# saved while its owner looked at it, would be served over its next restore's
+# content. The index stays: it is where the cache holds whether it is on, and an
+# entry whose file is gone drops out on the next request for it.
+
+CACHE_DIR="${SITE_DIR}/cache/static_pages"
+if [ -d "$CACHE_DIR" ]; then
+    if $SUDO find "$CACHE_DIR" -mindepth 1 -maxdepth 1 -type f ! -name index.json -delete 2>/dev/null; then
+        echo "RECONCILE_PAGE_CACHE cleared"
+    else
+        echo "RECONCILE_PAGE_CACHE not_cleared"
+        print_warning "Could not clear the saved pages in ${CACHE_DIR}; clear them on the admin Static Cache page."
     fi
 fi
 

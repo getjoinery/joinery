@@ -36,6 +36,9 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.10 - name_copy_ipv6(): once a swap is over, the copy's IPv6 answers the site's name in reverse DNS when
+ *                 the site's AAAA gives it, and says so when it does not (Keep tries again); nothing named it. The
+ *                 AAAA refusal leads with pointing the record at the copy's IPv6 (site copy B45)
  * @version 1.9 - the plan refuses a server on Linode Interfaces, whose address Linode will not swap
  *                (fleet_security_patching B8)
  * @version 1.8 - the plan says whether the copy is powered off for the swap too (both_off, CloudSwapWhileStopped)
@@ -274,8 +277,12 @@ class IpSwapMove {
 		if ($s_v6 !== '') {
 			foreach (self::aaaa($domain) as $a) {
 				if (@inet_pton($a) === @inet_pton($s_v6)) {
+					// Removing the record leaves the site with no IPv6 at all:
+					// pointing it at the copy comes first.
 					$why[] = "{$domain} has an AAAA record for the site's server's IPv6 address {$s_v6}, and IPv6 addresses do "
-						. 'not move. Remove it, or point it at the copy\'s IPv6 (' . ($c['ipv6'] ?: 'none') . '), before switching; '
+						. 'not move. ' . ($c['ipv6'] !== ''
+							? 'Point it at the copy\'s IPv6 (' . $c['ipv6'] . ') before switching, or remove it; '
+							: 'The copy has no IPv6 address: remove the record before switching; ')
 						. 'if the site goes back, point it back.';
 				}
 			}
@@ -295,6 +302,51 @@ class IpSwapMove {
 			'copy'     => array('provision_id' => (int)$cp->key, 'instance_id' => (string)$cp->get('cvp_instance_id'),
 				'ip' => $c_ip, 'ipv6' => (string)$c['ipv6'], 'rdns' => (string)$c_addr['rdns']),
 		);
+	}
+
+	/** How name_copy_ipv6() begins a line that named the copy's IPv6. */
+	const COPY_IPV6_NAMED = 'Reverse DNS: ';
+
+	/**
+	 * Once the swap is over, the copy's IPv6 answers the site's name in
+	 * reverse DNS when the site's AAAA gives it. The IPv4 took its reverse DNS
+	 * with it; the IPv6 is the one address no swap moves, and plan() has the
+	 * owner point the AAAA at the copy's before switching, so nothing else
+	 * names it. A provider takes only a name that resolves to the address:
+	 * the AAAA is read as plan() reads it. Never throws: what happened is a
+	 * line for the Copy tab, '' only when the copy has no IPv6. An AAAA the
+	 * owner removed to get past plan() names nothing yet, so the line says
+	 * what to do; keeping the switch-over ($kept) asks again.
+	 */
+	public static function name_copy_ipv6(array $plan, bool $kept = false): string {
+		$domain = (string)($plan['domain'] ?? '');
+		$v6 = (string)($plan['copy']['ipv6'] ?? '');
+		if ($domain === '' || @inet_pton($v6) === false) {
+			return '';
+		}
+		$given = false;
+		foreach (self::aaaa($domain) as $a) {
+			$given = $given || @inet_pton($a) === @inet_pton($v6);
+		}
+		if (!$given) {
+			// Not Set Reverse DNS once kept: it names the node's IPv4 too, the
+			// moved address whose reverse DNS stays as it came.
+			return "Reverse DNS for {$v6} was not set: no AAAA record of {$domain} names it. Point the AAAA at it, then "
+				. ($kept ? "set reverse DNS for {$v6} to {$domain} in the provider's panel." : 'keep the switch-over, which tries again.');
+		}
+		try {
+			$p = self::plan_provision($plan, 'copy');
+			$driver = self::$driver_for ? (self::$driver_for)($p) : NodeReverseDns::driverForProvision($p);
+			$driver->setReverseDns((string)$plan['copy']['instance_id'], $v6, $domain);
+			return self::COPY_IPV6_NAMED . "{$v6} now answers {$domain}.";
+		} catch (Exception $e) {
+			return "Reverse DNS was not set for {$v6}: " . $e->getMessage();
+		}
+	}
+
+	/** Whether name_copy_ipv6() named the copy's IPv6. */
+	public static function copy_ipv6_named(string $note): bool {
+		return strpos($note, self::COPY_IPV6_NAMED) === 0;
 	}
 
 	/** What stays behind at the site's server's IPv6 address, for the page. */
