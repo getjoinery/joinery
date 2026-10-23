@@ -16,7 +16,10 @@
  *    that is not public are refused here, before any job exists;
  *  - an agent older than the word, or of no known version, is refused with
  *    the version it needs.
+ *  - a container site's own node is refused, pointing at its host: inside
+ *    the container the probes see no engine.
  *
+ * @version 1.1 - a container site's own node is refused, pointing at its host
  * @version 1.0
  */
 
@@ -65,5 +68,15 @@ check(strpos($msg, '1.84.1') !== false && strpos($msg, JobCommandBuilder::COPY_P
 check($refused(function () use ($node) { JobCommandBuilder::build_copy_probes($node(''), 'src1'); }) !== '', 'an agent of no known version is refused');
 $b = JobCommandBuilder::build_copy_probes($node(JobCommandBuilder::COPY_PROBES_MIN_AGENT_VERSION), 'src1');
 check(($b['primitive'] ?? '') === 'copy_probes', 'an agent that knows it gets the job', json_encode($b));
+
+section('A container site is probed from its host');
+// Inside the container the probes see no engine, and read its database as
+// listening nowhere (C10, 2026-10-23).
+$in = $node(JobCommandBuilder::COPY_PROBES_MIN_AGENT_VERSION);
+$in->set('mgn_name', 'HarnessTest probes');
+$in->set('mgn_container_name', 'src1');
+$msg = $refused(function () use ($in) { JobCommandBuilder::build_copy_probes($in, 'src1'); });
+check(strpos($msg, 'runs in a container') !== false && strpos($msg, 'from its host') !== false,
+	'a container site\'s own node is refused, pointing at its host', $msg);
 
 harness_finish();

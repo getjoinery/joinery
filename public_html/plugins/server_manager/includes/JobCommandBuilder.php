@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.140 - build_copy_probes() refuses a container site's own node and names its host: inside the
+ *                 container the probes see no engine and misread its database as listening nowhere
  * @version 1.139 - build_site_log_count(): the site_log_count word (agent 1.92.0), counts of compiled problem
  *                 markers in the error log since a time, with how far back the read reached
  * @version 1.138 - build_site_certificate_stage(): a container site's certificate staged inside it for its copy's export
@@ -2798,8 +2800,20 @@ class JobCommandBuilder {
 	 * agent runs it (the site's own server, or the host of its container);
 	 * $neighbour another site on that host, $old_address the site's old
 	 * server. Its output is one PASS, FAIL or SKIP line per row, then RESULT:.
+	 * A container site's own node is refused: its agent runs inside the
+	 * container, which has no engine to ask what it publishes.
 	 */
 	public static function build_copy_probes($node, string $site, string $neighbour = '', string $old_address = '') {
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			$host = '';
+			try {
+				$host = (string)self::decommission_host_node_for($node)->get('mgn_name');
+			} catch (Exception $e) {
+				// The host only names where to run it.
+			}
+			throw new Exception("'{$node->get('mgn_name')}' runs in a container: probe it from its host"
+				. ($host !== '' ? ", {$host}" : '') . ', the machine that holds it.');
+		}
 		$agent = (string)AgentVocabulary::version($node);
 		if ($agent === '' || version_compare($agent, self::COPY_PROBES_MIN_AGENT_VERSION, '<')) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' cannot probe a site's walls: its agent is " . ($agent !== '' ? $agent : 'of an unknown version')
