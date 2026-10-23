@@ -1584,4 +1584,36 @@ return [
 			return true;
 		},
 	],
+	[
+		// An archive import's counters were added up at the end of each batch, so
+		// a batch that died part way left messages stored and uncounted, and the
+		// run finished short with nothing failed (B68). The counters are now
+		// recounted from the entries; recount every run once, and name each one
+		// whose numbers move. 'never decided' on a finished run is a real gap.
+		'id' => 'mir_001_recount_import_counters',
+		'version' => '1.144.4',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			if (!$db->query("SELECT to_regclass('mir_mail_import_runs')")->fetchColumn()
+					|| !$db->query("SELECT to_regclass('mie_mail_import_entries')")->fetchColumn()) {
+				return true;
+			}
+			$runs = $db->query("SELECT mir_mail_import_run_id, mir_state, mir_total_entries, mir_processed
+				FROM mir_mail_import_runs WHERE mir_state NOT IN ('queued', 'scanning') ORDER BY 1")->fetchAll(PDO::FETCH_ASSOC);
+			$moved = 0;
+			foreach ($runs as $run) {
+				$id = intval($run['mir_mail_import_run_id']);
+				$c = MailImportRun::recount($id);
+				if ($c['total'] - $c['pending'] === intval($run['mir_processed']) && $c['total'] === intval($run['mir_total_entries'])) {
+					continue;
+				}
+				$moved++;
+				echo "mir_001: run $id ({$run['mir_state']}): processed {$run['mir_processed']} -> " . ($c['total'] - $c['pending'])
+					. " of {$run['mir_total_entries']} -> {$c['total']} (stored {$c['stored']}, already here {$c['dedup']},"
+					. " failed {$c['failed']}, excluded {$c['skipped']}, never decided {$c['pending']})\n";
+			}
+			echo "mir_001: " . count($runs) . " import run(s) recounted from their entries, $moved changed.\n";
+			return true;
+		},
+	],
 ];

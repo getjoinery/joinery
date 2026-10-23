@@ -16,6 +16,7 @@
  *     are not UTF-8;
  *   - folded lines unfolded.
  *
+ * @version 1.2 - decode() and block() drop NUL bytes, which end a database value early (B66)
  * @version 1.1 - block(): a raw header block as UTF-8, line by line, for keeping as text (B66)
  */
 
@@ -44,7 +45,9 @@ class MailHeaderText {
 				$last_was_word = true;
 			}
 		}
-		return $out . self::plain(substr($value, $at));
+		// A NUL is valid UTF-8 but no text: the database driver ends a value at
+		// the first one, so whatever followed it would be lost without a word.
+		return str_replace("\0", '', $out . self::plain(substr($value, $at)));
 	}
 
 	/**
@@ -52,7 +55,7 @@ class MailHeaderText {
 	 * encoded words are left as written, each line that is UTF-8 is kept, and a
 	 * line that is not is read as Windows-1252. Line by line, because one old
 	 * client's Latin-1 name and another's UTF-8 subject meet in the same block.
-	 * Line endings are kept. $cut says the caller shortened the block to a
+	 * Line endings are kept and NUL bytes dropped. $cut says the caller shortened the block to a
 	 * length cap: then a last line ending part way through a character loses
 	 * the broken tail, not the whole line (uncut, those bytes are Latin-1).
 	 */
@@ -75,7 +78,7 @@ class MailHeaderText {
 			}
 			$pieces[$i] = self::plain($piece);
 		}
-		return implode('', $pieces);
+		return str_replace("\0", '', implode('', $pieces));
 	}
 
 	/** Text outside the encoded words: UTF-8 kept, anything else read as Windows-1252. */

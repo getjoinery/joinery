@@ -18,13 +18,17 @@
  * mir_error; `undone` follows a reversal and keeps its entries, so the report of
  * what happened survives the undo.
  *
- * Counters are advanced by the importer as it goes, so mir_processed against
- * mir_total_entries is a live progress bar with no extra bookkeeping. They are
- * also the reconciliation tripwire: stored + dedup + failed + skipped must equal
- * processed, and a shortfall means a message went missing without a reason.
+ * Counters are a copy of what the entries say (recount()): each entry's own
+ * state is written as it is decided, and after every batch the run's counters
+ * are recounted from those states, so mir_processed against mir_total_entries is
+ * a live progress bar that a batch dying part way cannot leave short. Every
+ * processed entry is in exactly one of stored, dedup, failed or skipped; an
+ * entry still pending once the run is done is the one a human must look at.
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.2 - recount() replaces addCounts(): counters are recounted from the entries' states,
+ *   so a batch that died after storing messages no longer leaves them uncounted (B68)
  * @version 1.1
  */
 
@@ -182,7 +186,7 @@ class MailImportRun extends SystemBase {
 	 * Move the run to a new state, stamping the matching timestamp.
 	 *
 	 * A TARGETED update, not a full model save. The counters on this row are
-	 * advanced by addCounts() as the import goes, so a save() would write back
+	 * recounted from the entries after every batch (recount()), so a save() would write back
 	 * whatever this in-memory copy was holding when it was loaded and silently
 	 * undo a batch's worth of progress. Writing only the columns a state change
 	 * owns makes that impossible rather than merely unlikely.
@@ -251,28 +255,37 @@ class MailImportRun extends SystemBase {
 	}
 
 	/**
-	 * Add to the run's counters with one atomic UPDATE. The importer calls this per
-	 * batch rather than read-modify-writing the model, so a concurrent reader of the
-	 * progress bar can never see counters that disagree with each other.
+	 * Set the run's counters from its entries' states, in one UPDATE, and return
+	 * them. The importer calls this after every batch and after the selection:
+	 * the entries are the record (each one's outcome is written the moment it is
+	 * decided), so counting them is right even when an earlier batch died after
+	 * storing messages and before it could add them up. One statement, so a
+	 * reader of the progress bar never sees counters that disagree.
+	 *
+	 * @return array{total:int,pending:int,stored:int,dedup:int,failed:int,skipped:int}
 	 */
-	static function addCounts(int $runId, array $deltas): void {
-		$allowed = array('mir_processed', 'mir_stored', 'mir_dedup', 'mir_failed', 'mir_skipped');
-		$sets = array();
-		$params = array();
-		foreach ($allowed as $col) {
-			if (!empty($deltas[$col])) {
-				$sets[] = $col . ' = ' . $col . ' + ?';
-				$params[] = intval($deltas[$col]);
-			}
-		}
-		if (!$sets) {
-			return;
-		}
-		$sets[] = 'mir_update_time = now()';
-		$params[] = $runId;
+	static function recount(int $runId): array {
 		$db = DbConnector::get_instance()->get_db_link();
-		$db->prepare('UPDATE mir_mail_import_runs SET ' . implode(', ', $sets)
-			. ' WHERE mir_mail_import_run_id = ?')->execute($params);
+		$stmt = $db->prepare("UPDATE mir_mail_import_runs r SET
+				mir_total_entries = c.total, mir_processed = c.total - c.pending,
+				mir_stored = c.stored, mir_dedup = c.dedup, mir_failed = c.failed, mir_skipped = c.skipped,
+				mir_update_time = now()
+			FROM (SELECT COUNT(*) AS total,
+					COUNT(*) FILTER (WHERE mie_state = 'pending') AS pending,
+					COUNT(*) FILTER (WHERE mie_state = 'stored')  AS stored,
+					COUNT(*) FILTER (WHERE mie_state = 'dedup')   AS dedup,
+					COUNT(*) FILTER (WHERE mie_state = 'failed')  AS failed,
+					COUNT(*) FILTER (WHERE mie_state = 'skipped') AS skipped
+				FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ?) c
+			WHERE r.mir_mail_import_run_id = ?
+			RETURNING c.total, c.pending, c.stored, c.dedup, c.failed, c.skipped");
+		$stmt->execute(array($runId, $runId));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+		$out = array();
+		foreach (array('total', 'pending', 'stored', 'dedup', 'failed', 'skipped') as $k) {
+			$out[$k] = intval($row[$k] ?? 0);
+		}
+		return $out;
 	}
 
 	/** States where the run is over and its archive is no longer working material. */

@@ -1388,7 +1388,9 @@ as sent) that no parsed column preserves, and what the reader's Show original
 renders for a lean record (`specs/mailbox_show_original_coverage.md`). It is kept
 as text, so it is UTF-8: every line that arrived as UTF-8 or ASCII is byte for byte,
 and a line an old client wrote in raw Latin-1 is read as Windows-1252
-(`MailHeaderText::block`). Address-list names come out UTF-8 the same way.
+(`MailHeaderText::block`). Every header value the parser hands on is made text the same
+way, so the routing log's From, the Message-ID, the thread key and the address-list names
+are UTF-8, and each is cut to its column width between characters.
 
 **The manifest is the glue.** Each `ima_` row keeps the email-specific MIME metadata
 (filename, content-type, size, MIME section, encoding, content-id, inline flag) and, for
@@ -5964,10 +5966,13 @@ offset for an mbox, a member index for a container. Storing gets
 `mailbox_import_batch_size` entries. `mailbox_import_max_concurrent` caps how many runs
 are underway deployment-wide so one enthusiastic user cannot starve the mail stack.
 
-Progress is `mir_processed` against `mir_total_entries`, advanced by the importer with
-one atomic `UPDATE` per batch. Every write to a live run is a targeted column update
-rather than a model save, because the counters move underneath any model instance held
-for more than an instant.
+Progress is `mir_processed` against `mir_total_entries`. The counters are a count of
+the entries, not a running sum: each entry's outcome is written the moment it is
+decided, and after every batch `MailImportRun::recount()` sets the run's counters from
+the entries' states in one atomic `UPDATE`, so a batch that dies part way leaves no
+stored message uncounted. Every write to a live run is a targeted column update rather
+than a model save, because the counters move underneath any model instance held for
+more than an instant.
 
 **Every entry is time-boxed.** `importBatch()` arms a SIGALRM watchdog
 (`MailArchiveImporter::ENTRY_TIMEOUT_SECONDS`, 300s) around each entry, so a message
@@ -6002,7 +6007,8 @@ bucket for what the user chose to leave out.
 The reconciliation tripwire applies here too: `stored + duplicates + skipped + failed`
 must equal what was seen. A shortfall is reported as `unaccounted` and marks the batch
 unsuccessful, because a message that vanishes without a reason is exactly the failure a
-set of counters alone hides.
+set of counters alone hides. For the run as a whole, a finished run with any entry
+still undecided shows that many as `unaccounted for` on the import panel.
 
 **Every duplicate names what it duplicated.** A duplicate is not one outcome, and
 the differences decide whether the message is actually in the mailbox:

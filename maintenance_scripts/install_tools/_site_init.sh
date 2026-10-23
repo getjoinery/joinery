@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.19 - Says so when a kept config's password could not be checked (reviewer2)
 # VERSION: 3.18 - A config kept from an earlier run gets this run's database password when that one
 #                 reaches the database (_set_site_config_password.php); a run after a failed first
 #                 one built the database against a stale password and the site answered 500 (B65).
@@ -350,6 +351,8 @@ create_config_file() {
             if [ "$pw_result" = "updated" ]; then
                 log "  Its database password did not match this run's; set it to this run's."
             fi
+        else
+            log "  This run's database password could not be checked against PostgreSQL; the config's is left as it is."
         fi
         return 0
     fi
