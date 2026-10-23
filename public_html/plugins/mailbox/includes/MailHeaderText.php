@@ -16,7 +16,7 @@
  *     are not UTF-8;
  *   - folded lines unfolded.
  *
- * @version 1.0
+ * @version 1.1 - block(): a raw header block as UTF-8, line by line, for keeping as text (B66)
  */
 
 class MailHeaderText {
@@ -45,6 +45,37 @@ class MailHeaderText {
 			}
 		}
 		return $out . self::plain(substr($value, $at));
+	}
+
+	/**
+	 * A raw header block (or one header line) as UTF-8, for keeping as text:
+	 * encoded words are left as written, each line that is UTF-8 is kept, and a
+	 * line that is not is read as Windows-1252. Line by line, because one old
+	 * client's Latin-1 name and another's UTF-8 subject meet in the same block.
+	 * Line endings are kept. $cut says the caller shortened the block to a
+	 * length cap: then a last line ending part way through a character loses
+	 * the broken tail, not the whole line (uncut, those bytes are Latin-1).
+	 */
+	public static function block(string $value, bool $cut = false): string {
+		$pieces = preg_split('/(\r\n|\n)/', $value, -1, PREG_SPLIT_DELIM_CAPTURE);
+		$last = count($pieces) - 1;
+		foreach ($pieces as $i => $piece) {
+			if ($piece === '' || $piece === "\r\n" || $piece === "\n" || mb_check_encoding($piece, 'UTF-8')) {
+				continue;
+			}
+			if ($cut && $i === $last) {
+				for ($k = 1; $k <= 3 && $k < strlen($piece); $k++) {
+					$tail = substr($piece, -$k);
+					if (ord($tail[0]) >= 0xC2 && mb_check_encoding(substr($piece, 0, -$k), 'UTF-8')
+							&& strspn(substr($tail, 1), implode('', array_map('chr', range(0x80, 0xBF)))) === $k - 1) {
+						$pieces[$i] = substr($piece, 0, -$k);
+						continue 2;
+					}
+				}
+			}
+			$pieces[$i] = self::plain($piece);
+		}
+		return implode('', $pieces);
 	}
 
 	/** Text outside the encoded words: UTF-8 kept, anything else read as Windows-1252. */
