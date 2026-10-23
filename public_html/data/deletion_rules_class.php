@@ -8,6 +8,8 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * when a parent record is permanently deleted. Rules are auto-registered during
  * database updates by scanning all model classes for foreign key patterns.
  *
+ * @version 1.3 - registerModelRules() registers no rule whose source table is not in this
+ *   database: sync pruned it again a moment later, and printed that on every apply
  * @version 1.2 - pruneOrphanedRules() also drops a rule whose table is declared by a model
  *   on disk but is not in this database (an inactive or uninstalled plugin's): the engine
  *   counts rows in every rule's table before a delete, and a table that is not there
@@ -102,6 +104,7 @@ class DeletionRule extends SystemBase {
         }
 
         $warnings = [];
+        $pending = [];
 
         foreach ($field_specs as $column => $spec) {
             // The primary key is never itself a foreign key
@@ -161,7 +164,18 @@ class DeletionRule extends SystemBase {
                 continue;
             }
 
-            // Store in database
+            $pending[] = [$column, $source_table, $rule];
+        }
+
+        // A rule about a table this database does not have (another plugin's,
+        // not active or not installed here) has no row to act on, and
+        // pruneOrphanedRules() would delete it again. The first sync after
+        // that table exists registers it.
+        $absent = self::tablesAbsentFromDatabase(array_unique(array_column($pending, 1)));
+        foreach ($pending as list($column, $source_table, $rule)) {
+            if (isset($absent[$source_table])) {
+                continue;
+            }
             $deletion_rule = new DeletionRule(NULL);
             $deletion_rule->set('del_source_table', $source_table);
             $deletion_rule->set('del_target_table', $table);

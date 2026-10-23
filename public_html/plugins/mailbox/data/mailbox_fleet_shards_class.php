@@ -26,7 +26,9 @@ class MailboxFleetShard extends SystemBase {
 	public static $pkey_column = 'mfs_mailbox_fleet_shard_id';
 
 	protected static $foreign_key_actions = [
-		'mfs_mgn_managed_node_id' => ['action' => 'null'],
+		// server_manager's table, named: a site without that plugin has no
+		// model to find it by.
+		'mfs_mgn_managed_node_id' => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
 	];
 
 	// Slots reference the shard; retire() refuses a shard with live slots
