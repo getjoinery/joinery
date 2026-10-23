@@ -75,11 +75,11 @@ check($row['verdict'] === 'amber' && $row['code'] !== 'old' && $row['old_code'] 
 
 $row = FleetSecurityView::row(fs_machine(4, 'crit', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('php8.3-fpm', true), fs_pkg('curl', false)))))), null, $NOW);
 check($row['verdict'] === 'red' && $row['pending'] === 2 && $row['critical'] === array('php8.3-fpm')
-		&& in_array('a critical fix waits (php8.3-fpm)', $row['reasons'], true) && in_array('1 other fix wait for the next run', $row['reasons'], true),
+		&& in_array('a critical fix waits (php8.3-fpm)', $row['reasons'], true) && in_array('1 other fix waits for the next run', $row['reasons'], true),
 	'a critical fix waiting: red, and the other fix is named as waiting for the next run', json_encode($row));
 $row = FleetSecurityView::row(fs_machine(4, 'kernel', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('linux-image-6.8.0-90-generic', true), fs_pkg('curl', false)))))), null, $NOW);
 check($row['verdict'] === 'amber' && $row['critical'] === array() && $row['kernel'] === array('linux-image-6.8.0-90-generic')
-		&& $row['reasons'] === array('a kernel fix waits for the night, then a reboot', '1 other fix wait for the next run'),
+		&& $row['reasons'] === array('a kernel fix waits for the night, then a reboot', '1 other fix waits for the next run'),
 	'a kernel fix waiting: amber, not red (nothing installs it before the night; the reboot is a person\'s)', json_encode($row));
 
 $row = FleetSecurityView::row(fs_machine(5, 'night', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('curl', false), fs_pkg('tar', false)))))), null, $NOW);

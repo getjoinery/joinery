@@ -33,6 +33,7 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.5 - one waiting fix reads '1 other fix waits', not 'wait'
  * @version 1.4 - a node with no agent says so, not 'nothing reported yet' (B27); old code serving is red only for what serves the sites (PHP-FPM, Apache, PostgreSQL), as the
  *                incident counts it; any other service needrestart names is amber until it restarts: getjoinery was
  *                red for networkd-dispatcher (B25)
@@ -304,7 +305,7 @@ class FleetSecurityView {
 		}
 		$others = ($row['pending'] ?? 0) - count($row['critical']) - count($row['kernel']);
 		if ($row['pending'] !== null && $others > 0) {
-			$amber[] = $others . ' other fix' . ($others === 1 ? '' : 'es') . ' wait for the next run';
+			$amber[] = $others . ' other ' . ($others === 1 ? 'fix waits' : 'fixes wait') . ' for the next run';
 		}
 
 		if ($red) {
