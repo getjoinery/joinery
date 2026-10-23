@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.20 - site_quiet_host.sh's 'forward' and site_certificate_stage.sh's 'certificate-staged' go with the
+#               site's other marks: a switch-over's old container, removed, left its forward behind (C7's B53)
 #VERSION 2.19 - A bare-metal site's databases are dropped without a prompt: the site's own config gives the
 #               password (read before its folder goes), dropdb never asks (-w) and ends the site's open
 #               connections (--force), a failure is said, and the verdict checks them gone. dropdb waited
@@ -398,8 +400,10 @@ pg_databases() {
 
 # The marks other scripts leave for this site by exact path: hold_container.sh's
 # 'held' (a switch-over's old container held stopped), site_quiet_host.sh's
-# 'quiet' (the host's record of a dormant copy or a frozen source), suspended_page.sh's
-# 'suspended', and the run spec (_site_run_spec.sh's run_spec_path). Cleared on
+# 'quiet' (the host's record of a dormant copy or a frozen source) and 'forward'
+# (where it forwards a switched site's requests), site_certificate_stage.sh's
+# 'certificate-staged', suspended_page.sh's 'suspended', and the run spec
+# (_site_run_spec.sh's run_spec_path). Cleared on
 # every path through this script, so a new site given this name starts clean.
 # Only a plain file is a mark: on a bare-metal site held/ is _site_state.sh's
 # folder of the site's cron files while it is quiet, which is not this
@@ -407,7 +411,7 @@ pg_databases() {
 # directory is not this script's to remove.
 clear_site_marks() {
     local mark path f
-    for mark in held quiet suspended run_spec disk_allowance; do
+    for mark in held quiet forward certificate-staged suspended run_spec disk_allowance; do
         path="${SITES_STATE:?}/${SITE_NAME:?}/${mark}"
         if [ -f "$path" ] || [ -L "$path" ]; then
             rm -f "$path"

@@ -13,7 +13,8 @@
  * The record is the output, and it distinguishes states that matter very
  * differently to whoever has to fix them:
  *
- *   - a certificate was issued (HTTP-01, or DNS-01 after HTTP-01 was ruled out)
+ *   - a certificate was issued (HTTP-01, or DNS-01 after HTTP-01 was ruled out),
+ *     or one already there was valid and kept
  *   - the domain needs DNS-01 and the provider credentials are not on the node
  *     — one file away from working, and the script names the exact path
  *   - no challenge path exists at all — the domain resolves somewhere this
@@ -24,7 +25,7 @@
  * collapsing them into one "failed" is how a five-minute fix becomes an
  * afternoon. They are separated here so a dashboard can say which one it is.
  *
- * @version 1.0
+ * @version 1.1
  */
 class SslProvisionOutcome {
 
@@ -71,18 +72,27 @@ class SslProvisionOutcome {
 		// failed; trying DNS-01" and then succeeds via DNS-01 has issued a
 		// certificate, so the success line is asked about first — reading the
 		// warning first would report a working node as broken.
-		if (strpos($text, 'Issued LE certificate for') !== false) {
+		// A certificate certbot found valid and not yet due is kept, not issued
+		// again (one a copy carried in from its old server, or a run again on a
+		// node that has one): a certificate is on the node all the same.
+		$kept = strpos($text, 'Kept the LE certificate for') !== false;
+		if ($kept || strpos($text, 'Issued LE certificate for') !== false) {
 			// Which challenge answered matters beyond curiosity: HTTP-01 can
 			// only have succeeded if the domain resolves to this box, which is
 			// the precondition a reverse-DNS grant is checked against. DNS-01
 			// proves ownership of the zone and nothing about where the name
 			// points, so a certificate issued that way is not evidence for it.
+			// A kept certificate names the challenge that renews it, and the
+			// script chose HTTP-01 only after its own probe of the name came
+			// back from this box (name_reaches_here), the same evidence.
 			$challenge = (strpos($text, '(HTTP-01)') !== false) ? self::CHALLENGE_HTTP_01
 				: ((strpos($text, '(DNS-01') !== false) ? self::CHALLENGE_DNS_01 : '');
 			return [
 				'state'     => self::ISSUED,
 				'challenge' => $challenge,
-				'detail'    => 'A Let\'s Encrypt certificate was issued and Apache was reloaded.',
+				'detail'    => $kept
+					? 'The Let\'s Encrypt certificate already on the node is valid and not yet due for renewal, so it was kept; Apache was reloaded.'
+					: 'A Let\'s Encrypt certificate was issued and Apache was reloaded.',
 			];
 		}
 

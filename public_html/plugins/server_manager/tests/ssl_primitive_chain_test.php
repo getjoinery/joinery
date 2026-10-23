@@ -40,6 +40,12 @@ $issued_dns = "{$Y}[WARN]{$N} HTTP-01 failed; trying DNS-01\n"
             . "{$G}[OK]{$N} Issued LE certificate for a.example.com (DNS-01 via cloudflare)\n"
             . "Apache reloaded.\n";
 
+// A certificate certbot found valid and not yet due (one a copy carried in).
+$kept_http = "{$G}[STEP]{$N} a.example.com reaches this box (direct) — using LE HTTP-01 challenge for -d a.example.com\n"
+           . "Certificate not yet due for renewal; no action taken.\n"
+           . "{$G}[OK]{$N} Kept the LE certificate for a.example.com: valid here and not yet due for renewal (HTTP-01)\n"
+           . "Apache reloaded.\n";
+
 $no_creds = "{$B}[INFO]{$N} No origin cert issued for a.example.com.\n"
           . "{$B}[INFO]{$N}   Drop credentials at /etc/letsencrypt/cloudflare.ini and re-run "
           . "sysadmin_tools/setup_ssl.sh a.example.com to enable origin SSL via DNS-01.\n"
@@ -64,6 +70,13 @@ check($state($issued_http) === SslProvisionOutcome::ISSUED,
 check($state($issued_dns) === SslProvisionOutcome::ISSUED,
 	'a DNS-01 issue after a failed HTTP-01 is still issued',
 	'precedence matters: the run warns before it succeeds, and reading the warning first would call a working node broken');
+$kept = SslProvisionOutcome::classify($kept_http);
+check($kept['state'] === SslProvisionOutcome::ISSUED && $kept['challenge'] === SslProvisionOutcome::CHALLENGE_HTTP_01,
+	'a certificate kept because it is valid and not yet due is a certificate on the node, renewed over HTTP-01');
+check(strpos($kept['detail'], 'kept') !== false && strpos($kept['detail'], 'was issued') === false,
+	'and its record says it was kept, never that one was issued', $kept['detail']);
+check(strpos(SslProvisionOutcome::classify($issued_http)['detail'], 'was issued') !== false,
+	'an issue still says it was issued');
 check($state($no_creds) === SslProvisionOutcome::NO_DNS_CREDENTIALS,
 	'a missing provider credentials file is its own state, not a generic failure');
 check($state($no_path) === SslProvisionOutcome::NO_CHALLENGE_PATH,
