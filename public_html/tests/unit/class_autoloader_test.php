@@ -28,6 +28,8 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.6 - the timed miss runs after a priming one: another session's edit since the map was
+ *               cached made the measured miss pay a rebuild it was owed
  * @version 1.5 - a cached map is one site's and one plugin set's (B47): per-site APCu key, the plugin set
  *               stored and checked on read, a set that cannot be read never cached
  * @version 1.4 - no prefix lists two models (InboundEmailFilter took ief)
@@ -118,12 +120,15 @@ check(($prefixes['iem'] ?? null) === array('InboundEmailMessage') || !PluginHelp
 // A miss against an unchanged tree must not rebuild: it walks the tree once
 // (a few ms) and stops. Measured in a subprocess with a warm file cache, so the
 // probe is the only work — a rebuild tokenizes every file and takes hundreds
-// of milliseconds, a walk takes single digits.
+// of milliseconds, a walk takes single digits. A first probe primes: on a box
+// where other sessions edit the tree, the cached map is often older than the
+// last edit, and that miss rightly rebuilds. The second is the one timed.
 $probe = escapeshellarg(PHP_BINARY) . ' -r '
 	. escapeshellarg('require_once("' . PathHelper::getIncludePath('includes/PathHelper.php') . '");'
 		. ' class_exists("Product"); $t = microtime(true);'
 		. ' class_exists("NoSuchClassAnywhere_" . getmypid());'
 		. ' echo round((microtime(true) - $t) * 1000);');
+shell_exec($probe . ' 2>/dev/null');
 $miss_ms = (int)shell_exec($probe . ' 2>/dev/null');
 check($miss_ms < 100,
 	'a miss against an unchanged tree costs a stat walk, not a rebuild',

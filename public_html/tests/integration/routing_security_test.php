@@ -63,6 +63,27 @@ accept('single segment', 'pricing');
 // A filename that merely contains dots but no traversal must NOT be rejected.
 accept('dotted filename app.min.css', 'assets/app.min.css');
 
+section('a path holding .. finds no view instead of throwing');
+// validatePath lets 'foo..bar' through (no traversal); routing then looks the
+// name up with throw_on_fail false, which must answer not found, not throw
+// (/foo..bar and /profile/x..y answered 500).
+accept('a segment holding .. is not a traversal', 'foo..bar');
+foreach (array(array('foo..bar.php', 'views'), array('y.php', 'views/profile/x..y')) as $ask) {
+	try {
+		$found = PathHelper::getThemeFilePath($ask[0], $ask[1], 'system', null, null, false, false);
+		ok('lookup of ' . $ask[1] . '/' . $ask[0] . ' is not found', $found === false);
+	} catch (Exception $e) {
+		ok('lookup of ' . $ask[1] . '/' . $ask[0] . ' is not found', false, $e->getMessage());
+	}
+}
+$threw = false;
+try {
+	PathHelper::getThemeFilePath('foo..bar.php', 'views');
+} catch (Exception $e) {
+	$threw = strpos($e->getMessage(), 'Path traversal') !== false;
+}
+ok('a caller that asks to throw still gets the traversal refusal', $threw);
+
 section('sanitization normalizes without weakening');
 $norm = RouteHelper::validatePath('foo//bar///baz');
 ok('collapses repeated slashes', $norm === 'foo/bar/baz', var_export($norm, true));

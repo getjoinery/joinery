@@ -301,6 +301,11 @@ class PathHelper {
 
         // 3. Security validation - prevent path traversal
         if (strpos($filename, '..') !== false || strpos($subdirectory, '..') !== false) {
+            // Routing asks with names taken from the URL: a probe like
+            // /foo..bar names no file, so it is not found rather than a 500.
+            if (!$throw_on_fail) {
+                return false;
+            }
             throw new Exception("Path traversal attempt detected ('..') in filename or subdirectory");
         }
 
