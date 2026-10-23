@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.26 - starting a deploy-all rollout on a page view is the server's own write (server_initiated_write)
  * @version 1.25 - a site_log_count result renders as a marker table under a line saying whether the read covered the window
  * @version 1.24 - a deploy-all publish not yet done describes its rollout's two stages (StagedRolloutRunner::deploy_all_description)
  * @version 1.23 - that publish reads 'published' once its job completes, and warns when it failed
@@ -124,7 +125,9 @@ if (JobResultProcessor::process_if_due($job)) {
 }
 
 // A publish that asked to deploy to all managed nodes: loading the page is a
-// tick, so the rollout starts here as soon as the publish has completed.
+// tick, so the rollout starts here as soon as the publish has completed. The
+// server's own write: it starts only what the publish's POST asked for, as
+// the AdvanceStagedRollouts task would.
 $deploy_all = null;
 if ($job->get('mjb_job_type') === 'publish_upgrade') {
 	$deploy_all = StagedRolloutRunner::job_params($job);
@@ -132,7 +135,7 @@ if ($job->get('mjb_job_type') === 'publish_upgrade') {
 		$deploy_all = null;
 	} elseif (!isset($deploy_all['deploy_all_outcome']) && $job->get('mjb_status') === 'completed'
 		&& (int)$job->get('mjb_mgn_managed_node_id') === (int)(ManagedNode::self_node()?->key)) {
-		StagedRolloutRunner::deploy_all_for_publish($job);
+		SystemBase::server_initiated_write(function () use ($job) { StagedRolloutRunner::deploy_all_for_publish($job); });
 		$deploy_all = StagedRolloutRunner::job_params($job);
 	}
 }
