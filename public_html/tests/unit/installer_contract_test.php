@@ -553,7 +553,7 @@ check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history c
 // address — on a shared host, another site's certificate and content. So www
 // has its own :443 host under the same guard, on the same certificate,
 // answering only with a 308 to the apex.
-foreach (array('default_virtualhost.conf' => '2.08', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf' => '2.09', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
@@ -587,6 +587,19 @@ foreach (array('default_virtualhost.conf' => '2.08', 'default_proxy_vhost.conf' 
         "$tpl www :443 sits inside the certificate guard");
 }
 check(is_file($history_dir . '/default_virtualhost-2.06.conf'), 'vhost_history carries 2.06');
+check(is_file($history_dir . '/default_virtualhost-2.08.conf'), 'vhost_history carries 2.08');
+
+// B45: Apache reads a CONNECT's target as host:port, so the route rewrite never
+// saw /serve.php and ran until Apache gave up with a 500. Each site directory
+// answers CONNECT with 405 before that rewrite.
+$t = (string)file_get_contents($tools_dir . '/default_virtualhost.conf');
+preg_match_all('/<Directory \/var\/www\/html\/\{\{SITE_NAME\}\}(?:_test)?\/public_html>(.*?)<\/Directory>/s', $t, $site_dirs);
+$refusing = array_filter($site_dirs[1], function ($b) {
+    $refuse = strpos($b, "RewriteCond %{REQUEST_METHOD} =CONNECT\n    RewriteRule ^ - [R=405,L]");
+    $route = strpos($b, 'RewriteRule ^(.*)$ serve.php?__route=$1');
+    return $refuse !== false && $route !== false && $refuse < $route;
+});
+check(count($site_dirs[1]) === 2 && count($refusing) === 2, 'both site directories answer CONNECT with 405 before the route rewrite', count($refusing) . ' of ' . count($site_dirs[1]));
 
 // Executed: the helper mints, and both rendered templates parse under Apache
 // in all three states with the certificate directory each state calls for.
@@ -4287,10 +4300,10 @@ check(strpos($comp, '_test_test') === false && strpos($comp, 'ServerName test.te
 check(preg_match_all('/^\s*ServerName test\.example\.test$/m', $comp) === 2 && strpos($comp, 'ServerName www.test.example.test') !== false,
     'and keeps its own hosts: :80 and :443 for test.<domain>, and the www redirect');
 $removed = array_values(array_diff(preg_split('/\R/', $plain('site_test', 'test.example.test')), preg_split('/\R/', $comp)));
-check(count(preg_split('/\R/', $plain('site_test', 'test.example.test'))) - count(preg_split('/\R/', $comp)) === 20
+check(count(preg_split('/\R/', $plain('site_test', 'test.example.test'))) - count(preg_split('/\R/', $comp)) === 23
     && in_array('<Directory /var/www/html/site_test_test/public_html>', $removed, true)
     && in_array('        ServerName test.test.example.test', $removed, true),
-    'exactly the test-site <Directory> block and the test-site host are left out (20 lines)', implode(' | ', $removed));
+    'exactly the test-site <Directory> block and the test-site host are left out (23 lines)', implode(' | ', $removed));
 foreach (array('VirtualHost', 'Directory', 'IfFile') as $tag) {
     check(preg_match_all('/^\s*<' . $tag . '[\s>]/m', $comp) === preg_match_all('/^\s*<\/' . $tag . '>/m', $comp),
         "the companion render's <$tag> blocks are balanced");
