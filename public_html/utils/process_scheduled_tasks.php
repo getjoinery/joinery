@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.5 - a task's row is read again once its lock is held, and a task another pass ran
+ *   since this pass began is skipped: a pass held up by a slow task ran the daily tasks twice
  * @version 2.4 - the shutdown recorder rolls back a transaction the dying task left open before it
  *   writes the row, so the error status is not lost with that transaction
  * @version 2.3 - a 'retry' result records its status and message but not a run, so the task is
@@ -166,6 +168,16 @@ foreach ($tasks as $task) {
 	}
 
 	try {
+		// The row was read when this pass began. A pass held up by a slow task
+		// can reach this one after a later pass has already run it, so read the
+		// row again now the lock is held: a task run since is not due twice.
+		$task = new ScheduledTask($task->key, true);
+		if (!$task->is_due()) {
+			echo "[" . cron_stamp() . "]   skipped: another pass ran it since this one began\n";
+			$tasks_skipped++;
+			continue;
+		}
+
 		// Resolve the task class file
 		$task_file = $task->resolve_task_file();
 		if (!$task_file) {
