@@ -70,7 +70,13 @@ protected static $foreign_key_actions = [
 ```
 
 `source_class` (a model class name) works the same way and is resolved to
-that class's `$tablename` at registration time. A declared
+that class's `$tablename` at registration time. A column pointing at another
+plugin's table names it with `source_table`: on a site without that plugin no
+model declares the table, so the convention cannot find it.
+
+A rule whose source table is not in this database (another plugin's, not
+active or not installed here) is not registered: no row of that table can be
+deleted. The first sync after the table exists registers it. A declared
 `$foreign_key_actions` key that resolves neither by convention nor by an
 explicit `source_table`/`source_class` produces a warning during
 registration/sync rather than silently registering nothing — see

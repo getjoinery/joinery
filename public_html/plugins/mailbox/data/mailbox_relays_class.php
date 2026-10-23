@@ -64,7 +64,9 @@ class MailboxRelay extends SystemBase {
 	public static $pkey_column = 'mrl_mailbox_relay_id';
 
 	protected static $foreign_key_actions = [
-		'mrl_mgn_managed_node_id' => ['action' => 'null'],
+		// server_manager's table, named: a site without that plugin has no
+		// model to find it by.
+		'mrl_mgn_managed_node_id' => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
 	];
 
 	// A relay row owns no dependent rows (the message/spool link is by value, not

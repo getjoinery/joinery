@@ -1565,4 +1565,23 @@ return [
 			return true;
 		},
 	],
+	[
+		// imc_source has defaulted to 'manual' since the mailbox stopped filing
+		// contacts by itself (2026-08-03, 'sent' and 'received' retired). A table
+		// made before kept DEFAULT 'sent': the updater reports a string default
+		// that differs and never rewrites it. Set it, and say how many contacts
+		// the mailbox filed by itself before then, each still a contact.
+		'id' => 'imc_001_source_defaults_to_manual',
+		'version' => '1.144.1',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			if (!$db->query("SELECT to_regclass('imc_mailbox_contacts')")->fetchColumn()) {
+				return true;
+			}
+			$db->exec("ALTER TABLE imc_mailbox_contacts ALTER COLUMN imc_source SET DEFAULT 'manual'");
+			$filed = (int)$db->query("SELECT count(*) FROM imc_mailbox_contacts WHERE imc_source IN ('sent', 'received')")->fetchColumn();
+			echo "imc_001: imc_source defaults to 'manual'. Contacts the mailbox filed by itself (source sent or received): $filed\n";
+			return true;
+		},
+	],
 ];

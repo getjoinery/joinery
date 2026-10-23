@@ -4,7 +4,7 @@
  * tier: safe
  * env: dev-only
  * needs: []
- * covers: [public_html/utils/update_database.php, public_html/utils/upgrade.php]
+ * covers: [public_html/utils/update_database.php, public_html/utils/upgrade.php, public_html/includes/PluginManager.php]
  */
 /**
  * What an upgrade reports as a schema change is a change.
@@ -27,6 +27,13 @@
  * steps: a key added to a table that lacked one is a change, and it reaches the
  * apply result (a site that gained its grm_group_members key on 0.8.521 showed
  * no schema change at all); 'already exists' and 'Checking' are notes.
+ *
+ * And the plugin sync at the end of update_database records its changes too:
+ * a new plugin table's indexes are added there, after the swap (0.8.527 added
+ * three on xandy and jeremytunnell-vps and the apply counted one change, the
+ * table). Its table_messages are changes only; every table step's error and
+ * warning is a warning (a failed index create was dropped, so a missing index
+ * was invisible).
  *
  * Runs inside a transaction that is rolled back, so it persists nothing.
  *
@@ -52,6 +59,15 @@ class SchemaFactsKeyStub {
 	public static $field_specifications = array(
 		'zsk_id'   => array('type' => 'int8', 'serial' => true),
 		'zsk_code' => array('type' => 'varchar(32)', 'unique' => true),
+	);
+}
+
+class SchemaFactsBadIndexStub {
+	public static $tablename = 'zz_schema_facts_bad_index';
+	public static $pkey_column = 'zsb_id';
+	public static $field_specifications = array(
+		'zsb_id'   => array('type' => 'int8', 'serial' => true),
+		'zsb_code' => array('type' => 'varchar(16)', 'index' => true),
 	);
 }
 
@@ -120,6 +136,29 @@ try {
 	$r = $updater->manageUniqueConstraints(array('SchemaFactsKeyStub'));
 	check(empty($r['messages']) && strpos(implode("\n", $r['notes']), 'Unique constraint already exists') !== false,
 		'one already there is a note', json_encode($r));
+
+	section('The plugin sync files a step\'s changes as changes, and its errors and warnings as warnings');
+	$changes = array();
+	$warnings = array();
+	PluginManager::routeTableStep('zzplugin', 'index', array(
+		'messages' => array('Added index: zz_a_idx'),
+		'warnings' => array('Unique index skipped: zz_b_idx due to duplicate values'),
+		'errors'   => array(),
+	), $changes, $warnings);
+	check($changes === array('Added index: zz_a_idx'), 'what the step changed is a change', json_encode($changes));
+	check($warnings === array('zzplugin: Unique index skipped: zz_b_idx due to duplicate values'),
+		'what it skipped is a warning, named for the plugin', json_encode($warnings));
+	// Last in the transaction: the failed CREATE INDEX leaves it aborted.
+	$dblink->exec("CREATE TABLE zz_schema_facts_bad_index (zsb_id int8 PRIMARY KEY)");
+	ob_start();
+	$r = $quiet->manageIndexes(array('SchemaFactsBadIndexStub'));
+	ob_end_clean();
+	$changes = array();
+	$warnings = array();
+	PluginManager::routeTableStep('zzplugin', 'index', $r, $changes, $warnings);
+	check($changes === array() && count($warnings) === 1
+		&& strpos($warnings[0], 'zzplugin: index error - Failed to create index: zz_schema_facts_bad_index_zsb_code_idx') === 0,
+		'an index that could not be created is a warning, not a change', json_encode(array($r, $changes, $warnings)));
 } finally {
 	$dblink->rollBack();
 }
@@ -133,6 +172,16 @@ $recorded = implode(' ', $calls[1]);
 $steps = array('primary_key_result', 'constraint_result', 'index_result', 'fk_result');
 $missing = array_filter($steps, function ($v) use ($recorded) { return strpos($recorded, '$' . $v . "['messages']") === false; });
 check(!$missing, 'the key, constraint, index and foreign-key steps record their changes too', json_encode(array_values($missing)));
+check(preg_match('/update_database_schema_facts\([^\n]*\$plugin_sync_result\[\'table_messages\'\]/', $udb) === 1,
+	'so does the plugin sync at the end, which adds a new plugin table\'s indexes');
+$pm = (string)file_get_contents(PathHelper::getIncludePath('includes/PluginManager.php'));
+$from = strpos($pm, 'public function sync(array $options');
+$body = $from === false ? '' : substr($pm, $from, strpos($pm, "\n    }\n", $from) - $from);
+$routed = preg_match_all('/self::routeTableStep\(\$plugin_name, \'[a-z ]+\',\s*\$database_updater->(runPluginTablesOnly|processAdvancedColumnOperations|manageUniqueConstraints|manageIndexes|manageForeignKeys)\(/', $body, $steps);
+$direct = preg_match('/\$table_messages(\[\]\s*=|\s*=\s*array_merge)/', $body);
+check($body !== '' && count(array_unique($steps[1])) === 5 && $direct === 0,
+	'PluginManager::sync sends all five table steps through routeTableStep and adds to table_messages nowhere else',
+	json_encode($steps[1]));
 $up = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 $at = strpos($up, '$update_cmd = ');
 $line = $at === false ? '' : substr($up, $at, strpos($up, "\n", $at) - $at);

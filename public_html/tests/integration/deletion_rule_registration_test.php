@@ -32,6 +32,9 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.9 - and is never registered: a source table this database does not have
+ *   (another plugin's, not installed here) registers nothing and warns nothing, while
+ *   the model's other rules register
  * @version 1.8 - a rule about a table this database does not have is pruned too
  * @version 1.7 - no prefix has two owners (InboundEmailFilter took ief); the walk is pinned by the invariant
  * @version 1.6 - cnv is a single-owner prefix (ContentVersion took cvn); the shared case is fil
@@ -101,6 +104,21 @@ class ZZFixtureSkipModel {
     public static $field_specifications = [
         'zzs_id'              => ['type' => 'int8'],
         'zzs_owner_user_id'   => ['type' => 'int4'],
+    ];
+}
+
+class ZZFixtureAbsentSourceModel {
+    public static $tablename = 'zzfix_absent_source_target';
+    public static $prefix = 'zza';
+    public static $pkey_column = 'zza_id';
+    public static $field_specifications = [
+        'zza_id'             => ['type' => 'int8'],
+        'zza_node_id'        => ['type' => 'int8'],
+        'zza_owner_user_id'  => ['type' => 'int4'],
+    ];
+    protected static $foreign_key_actions = [
+        'zza_node_id'       => ['action' => 'null', 'source_table' => 'zzfix_not_in_this_database'],
+        'zza_owner_user_id' => ['action' => 'cascade', 'source_table' => 'usr_users'],
     ];
 }
 
@@ -201,6 +219,15 @@ try {
     $rows = rules_for_target($db, 'zzfix_skip_target');
     ok('undeclared unresolvable column: no warning (not a configuration bug)', empty($warnings));
     ok('undeclared unresolvable column: registers nothing', count($rows) === 0);
+
+    // --- A source table this database does not have (another plugin's) ------
+    $warnings = DeletionRule::registerModelRules('ZZFixtureAbsentSourceModel');
+    $rows = rules_for_target($db, 'zzfix_absent_source_target');
+    ok('source table not in this database: no warning', empty($warnings));
+    ok('source table not in this database: no rule about it is registered',
+        !in_array('zzfix_not_in_this_database', array_column($rows, 'del_source_table'), true));
+    ok('source table not in this database: the model\'s other rule still registers',
+        count($rows) === 1 && $rows[0]['del_source_table'] === 'usr_users');
 
     // --- Primary key is never treated as a foreign key ----------------------
     $warnings = DeletionRule::registerModelRules('ZZFixturePkeyModel');

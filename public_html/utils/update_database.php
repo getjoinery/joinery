@@ -971,6 +971,9 @@
 					]);
 				}
 			}
+			// So does each schema change it made: a new plugin table's indexes,
+			// keys and foreign keys are added here, after the swap.
+			update_database_schema_facts(array_map(function ($m) { return 'plugin: ' . $m; }, (array)($plugin_sync_result['table_messages'] ?? [])));
 			$plugin_parts = [];
 			if (!empty($plugin_sync_result['added'])) {
 				$plugin_parts[] = count($plugin_sync_result['added']) . " added";

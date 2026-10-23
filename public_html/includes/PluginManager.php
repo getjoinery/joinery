@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.16 - sync()'s table_messages are the schema changes it made, and nothing else: every table step's errors and warnings go to warnings (routeTableStep)
  * @version 1.15 - sync() reports each plugin migration it ran with its outcome (migrations_run: applied, failed or deferred), and words a deferred or failed one as such instead of 'applied'
  * @version 1.14 - sync() takes every plugin that is not active out of the menus (pruneInactivePluginMenus): the slugs it recorded and the slugs its manifest declares
  * @version 1.13 - uninstall() deletes the app credentials of the purposes the plugin declares (appAccess)
@@ -1555,8 +1556,10 @@ class PluginManager extends AbstractExtensionManager {
      * Overrides the base sync() so that every caller (upgrade.php, postInstall,
      * marketplace, admin UI) automatically gets the full behaviour.
      *
-     * @return array Sync result with keys: added, updated, total, table_messages, migration_messages,
-     *               migrations_run (each plugin migration run: plugin, id, outcome applied|failed|deferred)
+     * @return array Sync result with keys: added, updated, total, table_messages (the schema changes
+     *               made, each one a change), migration_messages, migrations_run (each plugin migration
+     *               run: plugin, id, outcome applied|failed|deferred), warnings (what needs attention,
+     *               a table step's errors among them)
      */
     /**
      * Fail the sync when two active participants (core or an active plugin) declare
@@ -1641,6 +1644,23 @@ class PluginManager extends AbstractExtensionManager {
         return array('messages' => $messages, 'errors' => $errors);
     }
 
+    /**
+     * One table step's result, split for sync(): what the step changed goes in
+     * table_messages, each one a schema change; what it could not do or wants
+     * looked at (an error, a warning) goes in warnings, named for the plugin.
+     */
+    public static function routeTableStep($plugin_name, $step, array $step_result, array &$table_messages, array &$warnings) {
+        foreach (($step_result['messages'] ?? []) as $message) {
+            $table_messages[] = $message;
+        }
+        foreach (($step_result['warnings'] ?? []) as $warning) {
+            $warnings[] = "$plugin_name: $warning";
+        }
+        foreach (($step_result['errors'] ?? []) as $error) {
+            $warnings[] = "$plugin_name: $step error - $error";
+        }
+    }
+
     public function sync(array $options = array()) {
         $result = parent::sync($options);
 
@@ -1686,14 +1706,13 @@ class PluginManager extends AbstractExtensionManager {
         $table_messages = [];
         $migration_messages = [];
         $migrations_run = [];
+        $result['warnings'] = $result['warnings'] ?? [];
         foreach ($active_plugins as $plugin) {
             $plugin_name = $plugin->get('plg_name');
 
             // Update tables (adds missing columns, creates new tables)
-            $table_result = $database_updater->runPluginTablesOnly($plugin_name);
-            if (!empty($table_result['messages'])) {
-                $table_messages = array_merge($table_messages, $table_result['messages']);
-            }
+            self::routeTableStep($plugin_name, 'table', $database_updater->runPluginTablesOnly($plugin_name),
+                $table_messages, $result['warnings']);
 
             // Add unique constraints declared via `unique` / `unique_with`
             // on plugin classes. Discover classes the same way
@@ -1710,37 +1729,27 @@ class PluginManager extends AbstractExtensionManager {
                 // plugin columns — the same pass core tables get from
                 // update_database --upgrade. upgrade=true / cleanup=false on this updater
                 // means specs are applied but columns are never dropped here.
-                $advanced_result = $database_updater->processAdvancedColumnOperations($plugin_classes);
-                if (!empty($advanced_result['messages'])) {
-                    $table_messages = array_merge($table_messages, $advanced_result['messages']);
-                }
-                foreach (($advanced_result['errors'] ?? []) as $error) {
-                    $table_messages[] = "$plugin_name: column modification error - $error";
-                }
+                self::routeTableStep($plugin_name, 'column modification',
+                    $database_updater->processAdvancedColumnOperations($plugin_classes),
+                    $table_messages, $result['warnings']);
 
-                $constraint_result = $database_updater->manageUniqueConstraints($plugin_classes);
-                if (!empty($constraint_result['messages'])) {
-                    $table_messages = array_merge($table_messages, $constraint_result['messages']);
-                }
+                self::routeTableStep($plugin_name, 'unique constraint',
+                    $database_updater->manageUniqueConstraints($plugin_classes),
+                    $table_messages, $result['warnings']);
 
                 // Apply declarative indexes (index / index_with / $index_specifications)
                 // on plugin classes, same gating as the core updater.
-                $index_result = $database_updater->manageIndexes($plugin_classes);
-                if (!empty($index_result['messages'])) {
-                    $table_messages = array_merge($table_messages, $index_result['messages']);
-                }
+                self::routeTableStep($plugin_name, 'index',
+                    $database_updater->manageIndexes($plugin_classes),
+                    $table_messages, $result['warnings']);
 
                 // Materialize declared foreign keys ('foreign_key' field-spec key)
                 // on plugin classes — same pass core tables get from update_database.
-                $fk_result = $database_updater->manageForeignKeys($plugin_classes);
-                if (!empty($fk_result['messages'])) {
-                    $table_messages = array_merge($table_messages, $fk_result['messages']);
-                }
-                foreach (($fk_result['errors'] ?? []) as $error) {
-                    $table_messages[] = "$plugin_name: foreign key error - $error";
-                }
+                self::routeTableStep($plugin_name, 'foreign key',
+                    $database_updater->manageForeignKeys($plugin_classes),
+                    $table_messages, $result['warnings']);
             } catch (Exception $e) {
-                $table_messages[] = "$plugin_name: constraint/index sync error - " . $e->getMessage();
+                $result['warnings'][] = "$plugin_name: constraint/index sync error - " . $e->getMessage();
             }
 
             // Run pending migrations
