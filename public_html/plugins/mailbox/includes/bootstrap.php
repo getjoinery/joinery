@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.28 - registers the mailbox_export deferred-work consumer (a Private mailbox export builds in its owner's window)
  * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.26 - registers the mailbox_spam_backfill deferred-work consumer (SpamSenderBackfill)
  * @version 1.25 - registers the mailbox_contact_level deferred-work consumer (MailboxContactConvergence)
@@ -473,6 +474,37 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return MailboxContactConvergence::drain($user_id, $deadline);
+	}
+);
+
+// A Private mailbox's export (MailExport) is built here, in its owner's window,
+// a slice at a time: its mail opens only there, and every piece it writes is
+// sealed to the owner's vault. After parsing, row repair and level moves (an
+// export reads settled rows), before the search fold.
+VaultDeferredWork::register(
+	'mailbox_export',
+	function (int $user_id): bool {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare("SELECT 1 FROM mxr_mail_export_runs
+			WHERE mxr_usr_user_id = ? AND mxr_level = 'private' AND mxr_state IN ('queued', 'building') LIMIT 1");
+		$stmt->execute(array($user_id));
+		return (bool)$stmt->fetchColumn();
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		$run = MailExport::claim(MailExportRun::LEVEL_PRIVATE, $user_id);
+		if ($run === null) {
+			return 0;
+		}
+		try {
+			return MailExport::build($run, $deadline)['written'];
+		} catch (MailExportCancelled $e) {
+			return 0; // the member deleted it while it was being built
+		} catch (Throwable $e) {
+			$run->moveTo(MailExportRun::STATE_FAILED, $e->getMessage());
+			error_log('mailbox_export: run ' . $run->key . ' failed: ' . $e->getMessage());
+			return 0;
+		} finally {
+			MailExport::release(intval($run->key));
+		}
 	}
 );
 

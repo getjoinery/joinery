@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.57 - a header keeps its raw UTF-8: Subject and names decode through MailHeaderText (B30)
  * @version 1.56 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.55 - a part inside an attached message (message/*, forward as attachment) is never this message's body: extractBodies() and enumerateNonTextParts() skip it as a body and still list it as a part
  * @version 1.54 - handler aliases: `base+tag` resolves to a handler alias and each newly stored message is handed to the plugin handler (handOver)
@@ -3891,18 +3892,14 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Decode an RFC 2047 encoded-word header value (Subject, display names)
-	 * to readable UTF-8. Returns the input unchanged if mb_decode_mimeheader
-	 * is unavailable.
+	 * A header value (Subject, display names) as readable UTF-8: encoded words
+	 * decoded, raw UTF-8 kept (MailHeaderText).
 	 */
 	private function decodeMimeHeader($value) {
 		if ($value === '' || $value === null) {
 			return '';
 		}
-		if (function_exists('mb_decode_mimeheader')) {
-			return mb_decode_mimeheader($value);
-		}
-		return $value;
+		return MailHeaderText::decode((string)$value);
 	}
 
 	/**

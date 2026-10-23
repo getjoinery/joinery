@@ -1415,8 +1415,9 @@ sign-in is withdrawn.
 ## Exports
 
 A member's downloads of their own data follow the level the data is kept at,
-and none of them leaves sealed content readable on disk: each file is built in
-the request that sends it.
+and none of them leaves sealed content readable on disk. Most are built in the
+request that sends them; a whole mailbox is built ahead, in pieces, and kept
+sealed until it is downloaded.
 
 - **Standard:** the server builds the file at any time.
 - **Private (server custody):** the server builds it only inside the owner's
@@ -1428,9 +1429,18 @@ the request that sends it.
   Drive folder's zip answers `423` and the Drive page unlocks and follows. The
   Drive zip resolves every sealed file's key when it starts, inside the window,
   and holds them only for that request ([Drive](drive.md) § Downloading a folder).
+  A Private mailbox's download is built as the owner's deferred work (consumer
+  `mailbox_export`), a slice at a time in their window; each piece is sealed as
+  it is written (`SealedFileContainer::sealIterable()`, plaintext never on disk)
+  under a key of the run's own, wrapped to the owner's vault on the run row
+  (`mxr_sealed_key`); the zip opens those pieces in the window as it streams.
+  The email saying it is ready goes from cron, not from the window's request,
+  which writes nothing long outside a seal (mailbox overview § Downloading a
+  mailbox).
 - **Fortress (client custody):** the browser builds it. A Fortress Drive folder
   is decrypted and zipped in the tab; the server sends only ciphertext and
-  refuses to zip it itself.
+  refuses to zip it itself. A Fortress mailbox is opened, rebuilt message by
+  message and zipped in the tab the same way.
 
 ## Tests
 

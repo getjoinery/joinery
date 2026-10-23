@@ -20,12 +20,15 @@
  *  - A reference-backed row resolves 'imap' through fetchFullRaw (stubbed) and
  *    reports original_source 'imap' while its account lives, 'none' after the
  *    account is gone.
- *  - A stored inline raw resolves 'stored' and wins over the header block. The
- *    .eml endpoint serves only kinds 'stored'/'imap'; kind 'reconstructed' is
- *    its refusal signal.
+ *  - A stored inline raw resolves 'stored' and wins over the header block.
+ *  - The .eml download (mailbox_message_bytes) serves the stored original, the
+ *    live-fetched one, or a full rebuild marked X-Joinery-Rebuilt: yes — for a
+ *    lean record, a legacy row with no header block, and a reference-backed
+ *    row whose source is gone; a sealed row with no window answers locked.
  *
  * Run: php tests/run.php db --filter=message_original
  *
+ * @version 1.1 - the .eml download's bytes (mailbox_message_bytes): stored, imap, or rebuilt (B1)
  * @version 1.0
  */
 
@@ -200,6 +203,13 @@ $thread = $thread_of($plain_alias, $m);
 check(count($thread) === 1 && $thread[0]['original_source'] === 'headers',
 	'thread payload reports original_source headers');
 
+$eml = mailbox_message_bytes($m);
+check($eml['ok'] && $eml['kind'] === 'rebuilt', 'Download .eml of a lean record is a full rebuild');
+check(strpos((string)$eml['raw'], "X-Joinery-Rebuilt: yes\r\nReceived: from mx.example") === 0,
+	'…marked as rebuilt, over the retained wire headers');
+check(strpos((string)$eml['raw'], 'Body of ' . $token) !== false && strpos((string)$eml['raw'], 'MIME-Version: 1.0') !== false,
+	'…with the body in a whole MIME message');
+
 // A row from before header retention: no headers, no raw → 'none'.
 $db->prepare('UPDATE iem_inbound_email_messages SET iem_raw_headers = NULL
 	WHERE iem_inbound_email_message_id = ?')->execute(array($plain_id));
@@ -208,6 +218,9 @@ $resolved = mailbox_resolve_original($legacy);
 check(!$resolved['ok'] && !$resolved['locked'], 'a legacy row (no headers, no raw) resolves to an honest nothing');
 $thread = $thread_of($plain_alias, $legacy);
 check($thread[0]['original_source'] === 'none', 'and reports original_source none');
+$eml = mailbox_message_bytes($legacy);
+check($eml['ok'] && $eml['kind'] === 'rebuilt' && strpos((string)$eml['raw'], "\r\nSubject: Original orig-plain-") !== false,
+	'Download .eml of a legacy row is rebuilt with headers made from its fields');
 
 // A stored inline raw wins over everything.
 $db->prepare('UPDATE iem_inbound_email_messages SET iem_raw_message = ?
@@ -217,6 +230,8 @@ check($resolved['ok'] && $resolved['kind'] === 'stored' && $resolved['raw'] === 
 	'a stored inline raw resolves as the stored original');
 $thread = $thread_of($plain_alias, $reload($plain_id));
 check($thread[0]['original_source'] === 'stored', 'and reports original_source stored');
+$eml = mailbox_message_bytes($reload($plain_id));
+check($eml['ok'] && $eml['kind'] === 'stored' && $eml['raw'] === $raw, 'Download .eml of a stored original is those bytes, unmarked');
 
 // ---- Sealed push ingest ----------------------------------------------------
 section('Sealed lean record: the header block seals like the body');
@@ -244,6 +259,8 @@ check($opened === $router->rawHeaderBlock($raw),
 // and never hand back ciphertext.
 $resolved = mailbox_resolve_original($reload($sealed_id));
 check(!$resolved['ok'] && $resolved['locked'], 'with no unlock window the resolver answers locked');
+$eml = mailbox_message_bytes($reload($sealed_id));
+check(!$eml['ok'] && $eml['locked'] && $eml['raw'] === null, 'and so does Download .eml: locked, never ciphertext');
 $thread = $svc->getThread((int)$sealed_alias->key, (string)$reload($sealed_id)->get('iem_thread_key'));
 check($thread[0]['original_source'] === 'headers',
 	'original_source still says headers — the vault, not the menu, gates the read');
@@ -281,6 +298,8 @@ check($m->getRawMessage() === null && (string)$reload($remote_id)->get('iem_raw_
 
 $thread = $thread_of($plain_alias, $m);
 check($thread[0]['original_source'] === 'imap', 'thread payload reports original_source imap');
+$eml = mailbox_message_bytes($m, $stub);
+check($eml['ok'] && $eml['kind'] === 'imap' && $eml['raw'] === $remote_raw, 'Download .eml of a remote row is the fetched original');
 
 // With the account reference gone there is nothing to fetch from.
 $db->prepare('UPDATE iem_inbound_email_messages SET iem_iia_inbound_imap_account_id = NULL
@@ -290,5 +309,8 @@ check(!$resolved['ok'] && !$resolved['locked'] && $resolved['reason'] !== null,
 	'a remote row with no account resolves to an honest failure');
 $thread = $thread_of($plain_alias, $reload($remote_id));
 check($thread[0]['original_source'] === 'none', 'and reports original_source none');
+$eml = mailbox_message_bytes($reload($remote_id));
+check($eml['ok'] && $eml['kind'] === 'rebuilt' && strpos((string)$eml['raw'], 'Body of ' . $token) !== false,
+	'Download .eml of a remote row whose source is gone is rebuilt from what is kept here');
 
 harness_finish();

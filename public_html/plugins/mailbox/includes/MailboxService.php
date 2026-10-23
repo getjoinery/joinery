@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.62 - fortressExportMessages(): a mailbox export pages through Fortress rows in the thread payload's shape
  * @version 1.61 - a label belongs to one mailbox: the no-feed rail lists the mailbox's own, setMembership()
  *   touches only messages of the label's mailbox, deleteLabel() and a listThreads() label refuse another
  *   mailbox's (mailbox_per_mailbox_labels.md)
@@ -1732,22 +1733,7 @@ class MailboxService {
 		}
 		$in = implode(',', array_map('intval', $ids));
 		$db = $this->db();
-		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
-					iem_sender, iem_recipient, iem_bcc, iem_to, iem_cc, iem_subject, iem_received_time,
-					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
-					iem_spf_result, iem_dmarc_result, iem_dmarc_policy, iem_auth_source, iem_spam_score,
-					iem_spam_verdict, iem_spam_reason, iem_spam_meta,
-					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
-					iem_size_bytes, iem_message_id_header, iem_direction,
-					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
-					iem_sealed_owner_user_id, iem_pending_parse, iem_key_generation, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
-					iem_ai_summary, iem_transport, iem_direct_verified,
-					iem_raw_storage_driver, iem_raw_storage_key, iem_source_gone_time,
-					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
-					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
-					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists,
-					CASE WHEN " . InboundEmailMessage::mailKeySql() . " THEN iem_raw_headers END AS iem_raw_headers,
-					iem_attachment_manifest
+		$sql = "SELECT " . self::threadColumnsSql() . "
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1855,6 +1841,52 @@ class MailboxService {
 				'source_gone'       => $r['iem_source_gone_time'] !== null,
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
+		}
+		return $out;
+	}
+
+	/** The columns a thread payload is built from (getThread, fortressExportMessages). */
+	private static function threadColumnsSql(): string {
+		return "iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
+					iem_sender, iem_recipient, iem_bcc, iem_to, iem_cc, iem_subject, iem_received_time,
+					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
+					iem_spf_result, iem_dmarc_result, iem_dmarc_policy, iem_auth_source, iem_spam_score,
+					iem_spam_verdict, iem_spam_reason, iem_spam_meta,
+					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
+					iem_size_bytes, iem_message_id_header, iem_direction,
+					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
+					iem_sealed_owner_user_id, iem_pending_parse, iem_key_generation, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
+					iem_ai_summary, iem_transport, iem_direct_verified,
+					iem_raw_storage_driver, iem_raw_storage_key, iem_source_gone_time,
+					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
+					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers,
+					CASE WHEN iem_to IS NULL AND iem_cc IS NULL THEN iem_raw_headers END AS iem_raw_headers_for_lists,
+					CASE WHEN " . InboundEmailMessage::mailKeySql() . " THEN iem_raw_headers END AS iem_raw_headers,
+					iem_attachment_manifest";
+	}
+
+	/**
+	 * Fortress rows for a mailbox export (MailExport::fortressPage), in the
+	 * thread payload's shape (fortressThreadMessage) so the owner's browser
+	 * opens them exactly as the reader does. Only rows this viewer may read
+	 * and that are sealed to a browser key; ids in, in id order.
+	 */
+	public function fortressExportMessages(array $ids): array {
+		$ids = array_values(array_filter(array_map('intval', $ids), function ($id) { return $id > 0; }));
+		$aliases = array_map('intval', $this->viewer->accessibleAliasIds());
+		if (!$ids || !$aliases) {
+			return array();
+		}
+		$sql = "SELECT " . self::threadColumnsSql() . "
+				FROM iem_inbound_email_messages
+				WHERE iem_inbound_email_message_id IN (" . implode(',', $ids) . ")
+				  AND iem_iea_inbound_email_alias_id IN (" . implode(',', $aliases) . ")
+				ORDER BY iem_inbound_email_message_id ASC";
+		$out = array();
+		foreach ($this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			if (InboundEmailMessage::isBrowserSealed($r)) {
+				$out[] = $this->fortressThreadMessage($r);
+			}
 		}
 		return $out;
 	}

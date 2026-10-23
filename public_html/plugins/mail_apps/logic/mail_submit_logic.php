@@ -20,6 +20,7 @@
  * this mailbox, 552 for size, 554 5.6.0 for a message signed or encrypted as
  * a whole, 451 4.3.0 for a send that could not go now.
  *
+ * @version 1.0.1 - From is read through MailHeaderText, which keeps raw UTF-8 (B30)
  * @version 1.0.0
  */
 
@@ -36,7 +37,7 @@ function mail_submit_logic(array $input): LogicResult {
 			throw new MailAppRefusal('This message is larger than the 25 MB this mailbox sends.', 'CANNOT', '552 5.3.4');
 		}
 		$from = MailAppMutations::headerValue($raw, 'from');
-		$from_list = MailAddressList::parse((string)@iconv_mime_decode($from, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8'));
+		$from_list = MailAddressList::parse(MailHeaderText::decode((string)$from));
 		if (count($from_list) !== 1 || strtolower($from_list[0]['email']) !== $ctx->address) {
 			throw new MailAppRefusal('This message is not from ' . $ctx->address . ', so it cannot be sent as this mailbox.',
 				'CANNOT', '550 5.7.1');

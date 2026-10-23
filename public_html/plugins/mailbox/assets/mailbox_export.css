@@ -1,0 +1,63 @@
+/*
+ * The "Download a mailbox" page (/profile/mailbox/export). jy-ui kit tokens, vanilla CSS.
+ * @version 1.0
+ */
+
+.jy-ui.mbx-ex { max-width: 760px; }
+
+/* One link per mailbox; the one in view is filled. */
+.mbx-ex-mailboxes {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .4rem;
+	margin: 0 0 1rem;
+}
+.mbx-ex-mailbox {
+	padding: .3rem .75rem;
+	border: 1px solid var(--jy-color-border, #dfe3e8);
+	border-radius: 999px;
+	font-size: .875rem;
+	color: var(--jy-color-text, #1f2933);
+	text-decoration: none;
+	overflow-wrap: anywhere;
+}
+.mbx-ex-mailbox:hover { border-color: var(--jy-color-primary, #2563eb); }
+.mbx-ex-mailbox.is-current {
+	background: var(--jy-color-primary, #2563eb);
+	border-color: var(--jy-color-primary, #2563eb);
+	color: #fff;
+}
+
+.mbx-ex-note { margin: .75rem 0 0; overflow-wrap: anywhere; }
+.mbx-ex-note .btn { margin-left: .5rem; }
+
+.mbx-ex-list { list-style: none; margin: 0; padding: 0; }
+.mbx-ex-row {
+	padding: .75rem 0;
+	border-top: 1px solid var(--jy-color-border, #dfe3e8);
+}
+.mbx-ex-row:first-child { border-top: 0; padding-top: 0; }
+.mbx-ex-row-head {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: .5rem;
+	overflow-wrap: anywhere;
+}
+.mbx-ex-state { font-size: .875rem; color: var(--jy-color-muted, #616e7c); }
+.mbx-ex-state-ready { color: var(--jy-color-success, #15803d); }
+.mbx-ex-state-failed { color: var(--jy-color-danger, #b91c1c); }
+.mbx-ex-facts { margin: .35rem 0; font-size: .875rem; }
+.mbx-ex-bar {
+	height: 6px;
+	margin: .5rem 0 .25rem;
+	border-radius: 3px;
+	background: var(--jy-color-border, #dfe3e8);
+	overflow: hidden;
+}
+.mbx-ex-bar span {
+	display: block;
+	height: 100%;
+	background: var(--jy-color-primary, #2563eb);
+}
+.mbx-ex-actions { display: flex; flex-wrap: wrap; gap: .5rem; }

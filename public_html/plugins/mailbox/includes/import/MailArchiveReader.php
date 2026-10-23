@@ -27,6 +27,7 @@
  *
  * See specs/mail_archive_import.md § 4.
  *
+ * @version 1.2 - X-Gmail-Labels reads a quoted name (one holding a comma), as Takeout and a mailbox export write it
  * @version 1.1
  */
 
@@ -221,7 +222,7 @@ abstract class MailArchiveReader {
 
 	/**
 	 * Gmail's X-Gmail-Labels, split into real labels and the pseudo-labels that
-	 * are state rather than labels. Takeout writes read state as the PRESENCE of
+	 * are state rather than labels. A mailbox export writes the same header. Takeout writes read state as the PRESENCE of
 	 * "Unread", so a message with no such label has been read.
 	 *
 	 * Returns ['labels'=>string[], 'is_read'=>bool, 'is_starred'=>bool,
@@ -242,8 +243,10 @@ abstract class MailArchiveReader {
 			'important' => null, 'opened' => null, 'archived' => 'Archived',
 			'chat' => null, 'unread' => null, 'starred' => null, 'spam' => 'Spam', 'trash' => 'Trash');
 
-		foreach (explode(',', $raw) as $piece) {
-			$label = trim($piece);
+		// Comma-separated, with a name that holds a comma or a quote written
+		// "in quotes" and its quotes doubled, as Takeout writes them.
+		foreach (str_getcsv($raw, ',', '"', '') as $piece) {
+			$label = trim((string)$piece);
 			if ($label === '') {
 				continue;
 			}

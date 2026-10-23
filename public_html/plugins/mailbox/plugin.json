@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.143.9",
+    "version": "1.144.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -710,6 +710,25 @@
                 "title_template": "{source_name} finished importing",
                 "body_template": "{stored} message(s) are now in {mailbox}.",
                 "link_template": "/profile/mailbox/import"
+            }
+        },
+        "mail_export.ready": {
+            "label": "Mailbox download ready",
+            "description": "A mailbox download the member asked for has been built and is waiting on the downloads page.",
+            "category": "Mailbox",
+            "payload": {
+                "run_id": "Export run id",
+                "mailbox": "Address of the mailbox",
+                "messages": "Messages in the download",
+                "recipients": "The person who asked for it"
+            },
+            "notify": {
+                "ntf_type": "mail_export",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "Your download of {mailbox} is ready",
+                "body_template": "{messages} message(s) are waiting for you on the downloads page.",
+                "link_template": "/profile/mailbox/export"
             }
         },
         "mailbox.relay_scanner_down": {

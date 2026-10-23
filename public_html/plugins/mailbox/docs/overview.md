@@ -1288,8 +1288,9 @@ rebuild the list from scratch. Each message
 shows the parsed plain-text body, a sandboxed iframe rendering of the HTML body
 (no scripts, no top-nav), and a per-attachment download. Each attachment is a
 private `File`, streamed through a single gated endpoint for every transport (see
-**Attachment & message storage** below); a `.eml` is never reassembled from those
-parts — the reader's Download .eml serves the stored original or nothing.
+**Attachment & message storage** below). The reader's Download .eml serves the
+stored original where there is one, and otherwise rebuilds the whole message from
+those parts (see **The message kebab**).
 
 Stored bodies are fully attacker-controlled — admins should never paste a
 captured token into a non-admin page or feed an untrusted body to an AI
@@ -1460,8 +1461,9 @@ reads its `File`; `remote` fetches the one part from IMAP; a legacy/fallback row
 extracts it from the stored raw. Retrieval and streaming (original `ima_filename`,
 attachment disposition, `nosniff`) are the shared helpers in
 `includes/attachment_retrieval.php`, used by both download endpoints — each endpoint
-gates first with its own authorization posture, then retrieves. A `.eml` is never
-reassembled from these parts; the export serves the stored original or nothing.
+gates first with its own authorization posture, then retrieves. A whole message is
+rebuilt from these parts where no original is stored (`MessageRebuild`; see **The
+message kebab**).
 
 **Preview reads an attachment without opening it.** Beside every attachment the platform
 can turn into text, the reader draws an eye button; it opens a modal containing the
@@ -3807,7 +3809,7 @@ Every message card carries a kebab (⋮) in its top-right corner, on both mounts
 | Item | What it does |
 |------|--------------|
 | **Show original** | the message exactly as it arrived, headers and all, in a modal with a Copy button (`mailbox/message_source`) |
-| **Download .eml** | the same bytes as a `message/rfc822` file, named from the subject |
+| **Download .eml** | the whole message as a `message/rfc822` file, named from the subject: the original where one is stored or can be fetched, otherwise a rebuild marked `X-Joinery-Rebuilt: yes` |
 | **Print** | a print sheet — addressed header block, body, attachment names — opened in a new tab and printed on load |
 | **Show logs** | the message timeline — every recorded event about the message, oldest first (`mailbox/message_timeline`); see [The message timeline](#the-message-timeline) |
 
@@ -3832,18 +3834,24 @@ dead ends (`specs/mailbox_show_original_coverage.md`):
 - **`headers`** — a lean record: push ingest splits attachments into Files and
   discards the raw, but retains the wire header block in `iem_raw_headers`
   (sealed like the body on a sealing mailbox). Show original renders the
-  headers plus the decoded text body and labels it a reconstruction; there is
-  no `.eml`, because a downloaded file claiming to be the original must be
-  one. Rows stored before header retention have no header block and answer
-  `none`. A mail program's copy of a message is a different contract: the
-  `mail_apps` plugin serves a faithful, byte-stable rebuild of what Joinery
-  holds (`plugins/mail_apps/docs/overview.md` § Whole messages), and never calls
-  it the original.
-- **`none`** — neither item; Print always appears — it works from the parsed
-  body.
+  headers plus the decoded text body and labels it a reconstruction. Rows
+  stored before header retention have no header block and answer `none`.
+- **`none`** — no Show original; Print always appears — it works from the
+  parsed body.
 
-Reaching either export by URL anyway gets an honest page saying so, never a
-broken file.
+**Download .eml is on every message the server can read**, whatever its
+`original_source` (`mailbox_message_bytes()` in `includes/message_export.php`):
+the stored original, else the original fetched live from a connected source,
+else a full rebuild from the retained header block (or headers made from the
+row's fields), the bodies and every attachment — `MessageRebuild`, the same
+bytes a mail program is served (`plugins/mail_apps/docs/overview.md` § Whole
+messages). A rebuild carries `X-Joinery-Rebuilt: yes` at the top, so it is never
+mistaken for the original; the sender's DKIM signature does not verify against
+it. A reference-backed row whose source can no longer answer is rebuilt from
+what is kept here. A sealed message with the vault shut gets an honest page
+asking for the unlock, and an end-to-end (Fortress) message has no server
+download — its owner's browser builds it in a mailbox download (**Downloading a
+mailbox**).
 
 Two more limits worth knowing: Show original cuts off past **1 MB** and names the
 full size (a message with attachments is mostly base64, and the whole of one
@@ -4318,6 +4326,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
 | `contacts` / `contact_delete` / `contacts_import` / `contact_save` / `contacts_export` | List (decrypted, ranked) / delete / import-or-add / change / download the caller's contacts for ONE mailbox — `contacts`, `contacts_import` and `contacts_export` require `alias_id`, since a contact belongs to a mailbox; `contacts_import` takes an optional `name` apart from the address; `contact_save` takes `contact_id`, `address`, `name`; `contacts_export` takes `format` (`vcard` or `csv`) and returns `{filename, content_type, content}` |
+| `mail_export_start` / `mail_export_list` / `mail_export_delete` / `mail_export_fortress_page` | Ask for a download of a mailbox or one folder (`alias_id`, optional `folder`; a fresh second factor first), list the caller's downloads with progress and links, delete one, and page a Fortress run's rows to the owner's browser as ciphertext — see **Downloading a mailbox** |
 | `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, list everyone else on the message with theirs, plus (admins only) the counterparty's member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with a `_logic_descriptor()` opt-in that
@@ -5430,7 +5439,7 @@ endpoint + reader list are **transport-agnostic**: the download dispatches on wh
 the bytes live — a `File` for push mail, an IMAP fetch for `remote` mail, a raw
 section for a legacy/fallback row (see **Attachment & message storage**) — through the
 same endpoint, same table, same UI. The whole-message *.eml* is a separate
-export, offered only where a stored original exists — see **The message kebab**.
+export, offered on every message the server can read — see **The message kebab**.
 
 **Deleting a feed with mirrored mail.** Because a `remote` message's attachments
 live on the source account, removing the IMAP feed — or permanently deleting the
@@ -6162,3 +6171,87 @@ list runs from the most specific sniff to the loosest. A reader answers three
 questions and no others — is this file mine, what messages are in it, and give me the
 bytes at this position. The locator it hands out is private to it; nothing else ever
 interprets one.
+
+## Downloading a mailbox
+
+A member takes a mailbox's mail out on **Download a mailbox**
+(`/profile/mailbox/export`, linked from the reader's Settings menu; a superadmin
+reaches any mailbox's from the **Download** button on the admin mailbox list). They
+choose the whole mailbox, one folder, or one label, and get a **zip with one mbox
+file per folder** — the format Thunderbird, Apple Mail and most providers import,
+and that this plugin's own archive import reads back.
+
+### What is in the zip
+
+| Entry | Holds |
+|---|---|
+| `Inbox.mbox`, `Archive.mbox`, `Sent.mbox`, `Spam.mbox`, `Trash.mbox` | each message once, in the view it sits in — decided Trash, then Spam, then Sent (what the member sent), then Archive or Inbox |
+| `{label}.mbox` | a single label's messages, when one label was chosen |
+| `Messages not included.txt` | each message that could not be read, by folder, date and why |
+
+Drafts are not exported: they are unsent work, and an import would file them as mail.
+**Labels and state travel in each message's `X-Gmail-Labels` header**, the way Google
+Takeout writes it: the view (`Inbox`, `Archived`, `Sent`, `Spam`, `Trash`), the
+message's labels (a name holding a comma or a quote is quoted, its quotes doubled),
+then `Unread` and `Starred`. The archive import reads that header, so a download
+imports back with its folders, labels and read and starred state.
+
+The mbox is mboxrd: a `From <sender> <asctime>` line before each message, and any line
+of the message starting with `>`s and `From ` gets one more `>`. Each message is
+`mailbox_message_bytes()`, as Download .eml serves it: the stored original byte for
+byte, the original fetched from a connected source, or a rebuild marked
+`X-Joinery-Rebuilt: yes`.
+
+### Asking, and who may
+
+`mailbox/mail_export_start` asks for a fresh second factor first
+(`SessionControl::step_up_outstanding()`): years of mail in one file is the most a
+stolen session could take. The caller exports what they can read — a mailbox they
+hold a grant on, or any Standard mailbox for an all-access reader. A Private or
+Fortress mailbox only its owner can download, since only their vault opens it.
+Asking again while the same mailbox and folder is still being built returns that
+build.
+
+### How it is built, by level
+
+| Level | Built by | Kept as |
+|---|---|---|
+| Standard | the `RunMailExports` task, one bounded slice per cron pass | plain mbox pieces under `{site root}/storage/mail_exports/{run id}/` |
+| Private | the vault's deferred work (`mailbox_export`), a slice at a time while the owner is signed in and unlocked anywhere on the site | pieces sealed to the run's own key (`SealedFileContainer`), the key wrapped to the owner's vault on the run row; nothing plain on disk |
+| Fortress | the owner's browser, on the download page | nothing on the server |
+
+A run (`MailExportRun`, `mxr_mail_export_runs`) moves `queued → building → ready`
+(or `failed`). A build writes whole pieces and records how far it got only once a
+piece is on disk, so a pass killed halfway costs that piece and nothing more. **The
+zip is put together as it downloads** (`/profile/mailbox/export_download?run_id=N`,
+`MailExport::streamZip()`), deflated on the way out, so the server holds the mail
+once; a Private download opens its pieces in the owner's window as they stream. Only
+the person who asked can download it. When a build is ready the `RunMailExports`
+task tells them (`mail_export.ready`, with their notification preferences; email by
+default) — from cron, because a Private build runs in a request that has opened
+sealed mail and writes nothing long outside a seal.
+
+A message a build cannot read is left out and named in the note: one sealed to
+another person's vault, one sealed with no window to open it, an end-to-end message
+in a mailbox no longer at Fortress. A Private run's note is stored on its row in the
+clear, so it names such a message by folder, date and number, never by subject.
+
+A **Fortress** download is built in the tab (`assets/mailbox_export.js`):
+`mailbox/mail_export_fortress_page` hands over each folder's rows as the reader's
+thread payload carries them, ciphertext untouched; `MailboxFortress` opens them;
+`MailboxMimeBuild` (`assets/mailbox_mime_build.js`) rebuilds each message exactly as
+`MessageRebuild` would (a test builds the same messages both ways and compares the
+bytes); `JoineryZip` writes the zip. Chrome and Edge write it straight to disk;
+other browsers hold it in parts of about 500 MB (`{name}-part-01.zip`, …), each
+saved with its own Save press. One mbox never crosses a part: a folder past 64 MB
+continues in `Inbox (2).mbox` and on, which import files under the same folder. The
+second factor given to start a Fortress run covers its paging for 12 hours.
+
+### Keeping and deleting
+
+A finished download waits for `export_retention_days` (default 7; 0 keeps it until
+the member deletes it), and one that never finished is deleted the same many days
+after it was asked for; the retention sweep removes the row and its pieces
+(`MailExportRun::purgeExpired`). The member can delete one, or stop one being
+built, from the page (`mailbox/mail_export_delete`). Deleting the mailbox or the
+person deletes their downloads with it.

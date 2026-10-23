@@ -25,7 +25,7 @@ mail program ──TLS 993/465──▶ mail gateway (Go, on the host) ──loo
 | Who and which mailbox | `includes/MailAppContext.php` |
 | Folders, numbering, change tracking | `includes/MailAppFolders.php` |
 | What a program's changes do | `includes/MailAppMutations.php` |
-| The bytes a program is served | `includes/MailAppRebuild.php` |
+| The bytes a program is served | `includes/MailAppRebuild.php`, over the mailbox plugin's `MessageRebuild` |
 | Text search | `includes/MailAppSearch.php` |
 | The Allow mail apps switch and health | `includes/MailAppGateway.php`, `admin/admin_mail_apps.php` |
 | The member's page | `views/profile/index.php` (`/profile/mail_apps`), `assets/mail_apps.js` |
@@ -114,11 +114,11 @@ Because step 3 compares against the current truth, not a log of events, a change
 
 `UIDVALIDITY` changes only when a folder's numbering starts over:
 - A label deleted and recreated is a new label, so a new folder.
-- A change to `MailAppRebuild::FORMAT` starts every folder over.
+- A change to `MessageRebuild::FORMAT` (which `MailAppRebuild::FORMAT` follows) starts every folder over.
 
 ## Whole messages
 
-Programs ask for whole messages, and most stored mail keeps no original. `MailAppRebuild` serves one of three things:
+Programs ask for whole messages, and most stored mail keeps no original. `MailAppRebuild` serves one of three things, as the mailbox plugin's `MessageRebuild` decides and builds them (the same bytes the reader's Download .eml and a mailbox download carry):
 
 - **stored** — the original, where one is stored whole.
 - **remote** — a message pulled in from a connected source and kept there: its original, fetched live from the source, as Show original does. A source that no longer has it answers unavailable.
@@ -126,15 +126,15 @@ Programs ask for whole messages, and most stored mail keeps no original. `MailAp
 
 A rebuilt message is **the same bytes every time**:
 - boundaries are derived from the message id and the format version;
-- bodies are UTF-8 quoted-printable by the class's own encoder;
+- bodies are UTF-8 quoted-printable by `MessageRebuild`'s own encoder;
 - attachments are base64 at 76 columns;
 - CRLF throughout.
 
-The output is versioned by `MailAppRebuild::FORMAT`. Changing a byte of it means a new FORMAT, which starts every folder's numbering over.
+The output is versioned by `MessageRebuild::FORMAT`. Changing a byte of it means a new FORMAT, which starts every folder's numbering over.
 
 A message's size is fixed the first time it is told (`mam_client_size`), because programs ask for sizes in bulk and read a message in pieces up to that size. A rebuilt message's size is known without reading an attachment: a file-backed part records its decoded length, and base64's length follows from it.
 
-A mail app's copy is a faithful rendering of what Joinery holds, not a claim to be the original. The reader's Download .eml still serves only a stored original. The sender's DKIM signature does not verify against a rebuilt body.
+A mail app's copy is a faithful rendering of what Joinery holds, not a claim to be the original. A program is served it unmarked; a Download .eml or a mailbox download of the same message carries `X-Joinery-Rebuilt: yes` at the top. A message a program submitted itself is rebuilt with the Message-ID the program gave it (`mam_submitted_message_id`). The sender's DKIM signature does not verify against a rebuilt body.
 
 ## Private mailboxes and the lock
 
