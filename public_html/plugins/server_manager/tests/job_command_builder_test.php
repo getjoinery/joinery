@@ -2528,6 +2528,39 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	check(count(JobCommandBuilder::SITE_LOG_FILES) === 6 && count(JobCommandBuilder::LOG_TABLES) === 5,
 		'the mirrored lists are the six files and five tables the spec names');
 
+	// site_log_count: a window question answered by counting, never by a tail.
+	$cnt_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,site_log,site_log_count',
+		'mgn_agent_log_access' => 'on',
+	));
+	$since = time() - 3600;
+	$built = JobCommandBuilder::build_site_log_count($cnt_node, $since);
+	check($built === array('primitive' => 'site_log_count', 'params' => array('since' => $since)),
+		'site_log_count travels as the name and the window start alone: no file, no pattern', var_export($built, true));
+	foreach (array(0, -5, time() + 3600) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_site_log_count($cnt_node, $bad); } catch (Exception $e) { $threw = true; }
+		check($threw, 'site_log_count refuses a start that is not in the past: ' . var_export($bad, true));
+	}
+	$threw = '';
+	try { JobCommandBuilder::build_site_log_count($log_node, $since); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'site_log_count') !== false, 'an agent without the word is told to update, naming it', $threw);
+	$off_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,site_log_count',
+		'mgn_agent_log_access' => 'off',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_site_log_count($off_node, $since); } catch (Exception $e) { $threw = true; }
+	check($threw, 'site_log_count is behind the owner\'s log-access switch, like site_log');
+	check(array_keys(JobCommandBuilder::SITE_LOG_COUNT_MARKERS) === array('entry_script_missing', 'primary_script_unknown',
+		'permission_denied', 'php_fatal', 'critical', 'error_logged', 'undefined_column', 'transaction_left_open', 'get_write', 'get_mutation'),
+		'the marker list mirrors the agent\'s, in its order');
+	check(in_array('site_log_count', ManagementJob::LOG_EXCERPT_TYPES, true), 'its sample lines age out with the other log excerpts');
+
 	// Every agent at the version floor has the PostgreSQL entry on its own
 	// list; the per-value floor it once needed is deleted with the rest.
 	$pg_node = jcb_node(array(

@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.25 - a site_log_count result renders as a marker table under a line saying whether the read covered the window
  * @version 1.24 - a deploy-all publish not yet done describes its rollout's two stages (StagedRolloutRunner::deploy_all_description)
  * @version 1.23 - that publish reads 'published' once its job completes, and warns when it failed
  * @version 1.22 - an apply that Apply and publish follows with a publish says where that publish stands
@@ -474,6 +475,38 @@ if ($result) {
 					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? '')))
 			. '</small></div>';
 		echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact((string)$result_data['text'])) . '</pre></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'site_log_count' && is_array($result_data['markers'] ?? null)) {
+		// Counts first, then whether they cover the whole window: a count from a
+		// read that stopped short of 'since' is a floor, not an answer.
+		$covers = !empty($result_data['covers_since']);
+		echo '<div class="card mb-3"><div class="card-header"><strong>Error log problem lines since '
+			. htmlspecialchars((string)($result_data['since'] ?? '')) . '</strong> <small class="text-muted">— '
+			. (empty($result_data['present']) ? 'no error log on the node'
+				: (int)($result_data['lines_in_window'] ?? 0) . ' line(s) in the window, read from '
+					. htmlspecialchars(implode(', ', (array)($result_data['files_read'] ?? []))))
+			. '</small></div><div class="card-body">';
+		if ($covers) {
+			echo '<div class="alert alert-success small py-1">The read reached back to '
+				. htmlspecialchars((string)$result_data['covered_from']) . ': these counts cover the whole window.</div>';
+		} else {
+			echo '<div class="alert alert-warning small py-1">The read did not reach back to the start of the window'
+				. ($result_data['covered_from'] !== '' ? ' (oldest line read: ' . htmlspecialchars((string)$result_data['covered_from']) . ')' : '')
+				. ': ' . htmlspecialchars((string)($result_data['not_covered'] ?? '')) . '. The counts are a floor.</div>';
+		}
+		echo '<table class="table table-sm small mb-0"><thead><tr><th>Marker</th><th>Count</th><th>First</th><th>Last</th><th>Sample</th></tr></thead><tbody>';
+		foreach (JobCommandBuilder::SITE_LOG_COUNT_MARKERS as $name => $label) {
+			$m = $result_data['markers'][$name] ?? ['count' => 0];
+			$count = (int)($m['count'] ?? 0);
+			$sample = '';
+			foreach ((array)($m['samples'] ?? []) as $line) {
+				$sample .= '<div class="text-break">' . htmlspecialchars(SmSecretRedactor::redact((string)$line)) . '</div>';
+			}
+			echo '<tr' . ($count ? ' class="table-warning"' : '') . '><td>' . htmlspecialchars($label) . '</td><td>' . $count
+				. '</td><td>' . htmlspecialchars((string)($m['first'] ?? '')) . '</td><td>' . htmlspecialchars((string)($m['last'] ?? ''))
+				. '</td><td><small>' . $sample . '</small></td></tr>';
+		}
+		echo '</tbody></table></div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'log_table_tail' && isset($result_data['rows']) && is_array($result_data['rows'])) {
 		$table   = (string)($result_data['table'] ?? '');

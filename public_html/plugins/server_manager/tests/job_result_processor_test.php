@@ -1680,6 +1680,33 @@ JobResultProcessor::process($nj);
 check((string)$nj->get('mjb_result') === json_encode(['read' => false]),
 	'output that is not a log envelope records read=false, never nothing', var_export($nj->get('mjb_result'), true));
 
+// site_log_count: counts, bounded samples, and the coverage flag exactly as sent.
+$cnt_env = json_encode(['api_version' => '1.0', 'data' => [
+	'file' => 'error', 'since' => '2026-10-22T23:07:00Z', 'present' => true, 'covers_since' => true,
+	'covered_from' => '2026-10-22T00:00:01Z', 'not_covered' => '', 'files_read' => ['error.log', 'error.log.1', '../x'],
+	'bytes_read' => 400000, 'lines_in_window' => 1200,
+	'markers' => [
+		'entry_script_missing' => ['count' => 2, 'first' => '2026-10-22T23:10:00Z', 'last' => '2026-10-22T23:10:01Z',
+			'samples' => ['one', 'two', 'three', 'four']],
+		'invented_marker' => ['count' => 9],
+	],
+]]);
+$cj = jrp_job($jrp_log_node, 'site_log_count', "=== [Step 1/1] site_log_count ===\n" . $cnt_env . "\n[Step 1/1 OK]");
+JobResultProcessor::process($cj);
+$cr = json_decode((string)$cj->get('mjb_result'), true);
+check(is_array($cr) && $cr['read'] === true && $cr['covers_since'] === true && $cr['markers']['entry_script_missing']['count'] === 2,
+	'a site_log_count envelope is recorded with its counts and whether it covered the window', json_encode($cr));
+check(count($cr['markers']['entry_script_missing']['samples']) === 3 && !isset($cr['markers']['invented_marker'])
+	&& array_keys($cr['markers']) === array_keys(JobCommandBuilder::SITE_LOG_COUNT_MARKERS),
+	'samples are capped at three and a marker the plane does not know is dropped');
+check($cr['files_read'] === ['error.log', 'error.log.1'], 'only error.log and its rotations are kept as file names', json_encode($cr['files_read']));
+$uj = jrp_job($jrp_log_node, 'site_log_count', json_encode(['api_version' => '1.0', 'data' => [
+	'covers_since' => 'yes', 'markers' => [], 'not_covered' => 'stopped after 8 files']]));
+JobResultProcessor::process($uj);
+$ur = json_decode((string)$uj->get('mjb_result'), true);
+check($ur['covers_since'] === false && $ur['not_covered'] === 'stopped after 8 files',
+	'covers_since is true only when the node said exactly true, and its reason is kept');
+
 $rows = [];
 for ($i = 0; $i < JobCommandBuilder::LOG_MAX_COUNT + 5; $i++) {
 	$rows[] = ['log_login_id' => $i, 'log_login_type' => 2, 'note' => str_repeat('y', JobResultProcessor::LOG_TABLE_MAX_CELL + 10), 'nested' => ['a' => 1]];

@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.42 - site_log_count is a filterable job type, and its sample lines expire with the other log excerpts
  * @version 1.41 - claim budget for install_security_updates (the agent's 60 minutes: the wait for another package
  *                 run, the list refresh and the updater, each bounded by the script)
  * @version 1.40 - claim budget for recreate_site, one site's container replaced on its host (the agent's 32 minutes:
@@ -108,7 +109,7 @@ class ManagementJob extends SystemBase {
 	);
 
 	/** The job types whose result is a log excerpt and is pruned on the window above. */
-	const LOG_EXCERPT_TYPES = array('site_log', 'log_table_tail', 'unit_journal', 'file_head');
+	const LOG_EXCERPT_TYPES = array('site_log', 'site_log_count', 'log_table_tail', 'unit_journal', 'file_head');
 
 	public static $field_specifications = array(
 		'mjb_management_job_id'                => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -780,7 +781,7 @@ class ManagementJob extends SystemBase {
 		// backup_project) are not offered: historical rows keep their type strings
 		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status', 'host_report', 'host_converge', 'site_log', 'log_table_tail',
+			'check_status', 'host_report', 'host_converge', 'site_log', 'site_log_count', 'log_table_tail',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',

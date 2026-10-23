@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.73 - site_log_count: the Logs box's 'Count problem lines since' form posts here; the time is UTC
  * @version 1.72 - the settings form saves mgn_rollout_first (Test releases here first) on a node that hosts a site
  * @version 1.71 - set_reverse_dns says every address it named, and any it left with why (NodeReverseDns::summary, B33)
  * @version 1.70 - set_reverse_dns is refused for a node whose agent moved away (ManagedNode::agent_moved_away())
@@ -186,6 +187,7 @@ class NodeDetailActions {
 		'host_report'              => 'overview',
 		'host_converge'            => 'overview',
 		'site_log'                 => 'overview',
+		'site_log_count'           => 'overview',
 		'log_table_tail'           => 'overview',
 		'unit_journal'             => 'overview',
 		'disk_usage'               => 'overview',
@@ -323,6 +325,18 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_site_log($node,
 					(string)($_POST['file'] ?? ''), !empty($_POST['previous']), (int)($_POST['lines'] ?? 100));
 				$job = ManagementJob::createFromBuild($node->key, 'site_log', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'site_log_count': {
+				$since_text = trim((string)($_POST['since'] ?? ''));
+				$since = preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/', $since_text)
+					? strtotime(str_replace('T', ' ', $since_text) . ' UTC') : false;
+				if ($since === false) {
+					throw new Exception('Give the start time as YYYY-MM-DD HH:MM, in UTC.');
+				}
+				$built = JobCommandBuilder::build_site_log_count($node, $since);
+				$job = ManagementJob::createFromBuild($node->key, 'site_log_count', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

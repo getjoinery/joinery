@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.84 - the Logs box counts problem lines in the error log since a time (site_log_count)
  * @version 1.83 - Test releases here first (mgn_rollout_first) on a site's settings form
  * @version 1.82 - the Cloud server panel shows the daily watch's match on any provider's account, Hetzner's too (B40)
  * @version 1.81 - the Reverse DNS panel shows what the node's IPv6 answers as well as its IPv4 (B33)
@@ -679,7 +680,7 @@
 	// node that lacks any of them gets the one standard state, naming what it
 	// lacks, where the buttons and forms for them would be - never a blank.
 	if ($node->get('mgn_agent_public_key')) {
-		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
+		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
 			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
 			'install_security_updates'];
@@ -687,7 +688,7 @@
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
 		if (!$node->hosts_site()) {
-			$tab_words = array_values(array_diff($tab_words, ['site_log', 'log_table_tail', 'schema_probe', 'page_probe', 'spam_learning_status']));
+			$tab_words = array_values(array_diff($tab_words, ['site_log', 'site_log_count', 'log_table_tail', 'schema_probe', 'page_probe', 'spam_learning_status']));
 		}
 		$tab_missing = AgentVocabulary::missing_words($node, $tab_words);
 		if ($tab_missing) {
@@ -702,7 +703,8 @@
 	$has_site_log  = JobCommandBuilder::has_primitive($node, 'site_log');
 	$has_log_table = JobCommandBuilder::has_primitive($node, 'log_table_tail');
 	$has_file_head = JobCommandBuilder::has_primitive($node, 'file_head');
-	if ($has_site_log || $has_log_table || $has_file_head) {
+	$has_log_count = JobCommandBuilder::has_primitive($node, 'site_log_count');
+	if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 		$log_refusal = JobCommandBuilder::log_access_refusal($node);
 		echo '<details class="mt-2"><summary class="small text-muted" style="cursor:pointer;">Logs</summary>';
 		if ($log_refusal !== null) {
@@ -728,6 +730,23 @@
 				$fw_log->numberinput('lines', 'Lines (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
 				$fw_log->submitbutton('btn_site_log', 'Read log file', ['class' => 'btn btn-sm btn-outline-secondary']);
 				$fw_log->end_form();
+				echo '</div>';
+			}
+			// A question about a window (did this appear since the upgrade?) is
+			// answered by counting, not by the last lines: on a busy site those
+			// stop short of the window, and the count says when it did.
+			if ($has_log_count) {
+				echo '<div>';
+				$fw_cnt = $page->getFormWriter('site_log_count_form', [
+					'action' => $base_url . '&tab=overview',
+					'values' => ['since' => gmdate('Y-m-d H:i', time() - 3600)],
+				]);
+				$fw_cnt->begin_form();
+				$fw_cnt->hiddeninput('action', '', ['id' => 'site_log_count_action', 'value' => 'site_log_count']);
+				$fw_cnt->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_log_count_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_cnt->textinput('since', 'Problem lines in the error log since (UTC, YYYY-MM-DD HH:MM)');
+				$fw_cnt->submitbutton('btn_site_log_count', 'Count problem lines', ['class' => 'btn btn-sm btn-outline-secondary']);
+				$fw_cnt->end_form();
 				echo '</div>';
 			}
 			if ($has_log_table) {
