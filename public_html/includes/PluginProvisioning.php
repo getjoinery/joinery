@@ -23,6 +23,7 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.6 - no fix command for a check that cannot be met on this site (ProvisioningCheckRefused)
  * @version 1.5 - the mail check passes when either the mail service or its fallback works, as the sender
  *                tries both; a failure names each
  * @version 1.4 - the fleet report carries core's own check that the site can send mail (outboundMailCheck: a mail
@@ -227,8 +228,9 @@ class PluginProvisioning {
         $result['reason'] = $outcome['reason'];
 
         // A fix command is only meaningful for an unmet provisioner that
-        // declares a script. Resolve it to an absolute path.
-        if ($result['state'] === 'unmet' && !empty($declaration['script'])) {
+        // declares a script, and that running it could fix. Resolve it to an
+        // absolute path.
+        if ($result['state'] === 'unmet' && empty($outcome['refused']) && !empty($declaration['script'])) {
             $rel = 'plugins/' . $plugin . '/' . ltrim($declaration['script'], '/');
             $result['script']         = $declaration['script'];
             $result['script_command'] = 'sudo bash ' . PathHelper::getAbsolutePath($rel);
@@ -241,7 +243,8 @@ class PluginProvisioning {
      * Code check: invoke the plugin's acquisition routine and catch the result.
      *
      * Returns normally               → verified
-     * Throws ProvisioningCheckFailed  → unmet (the expected dependency failure)
+     * Throws ProvisioningCheckFailed  → unmet (the expected dependency failure;
+ *                                   ProvisioningCheckRefused: no fix command)
      * Throws anything else / unloadable → error (the check itself is faulty)
      */
     private static function runCodeCheck($plugin, array $check) {
@@ -266,7 +269,7 @@ class PluginProvisioning {
             call_user_func([$class, $method]);
             return ['state' => 'verified', 'reason' => ''];
         } catch (ProvisioningCheckFailed $e) {
-            return ['state' => 'unmet', 'reason' => $e->getMessage()];
+            return ['state' => 'unmet', 'reason' => $e->getMessage(), 'refused' => $e instanceof ProvisioningCheckRefused];
         } catch (\Throwable $e) {
             return ['state' => 'error', 'reason' => 'Check method raised an unexpected error: ' . $e->getMessage()];
         }

@@ -145,7 +145,9 @@ root by the host converger once the plugin is active):
 1. Refuses a container site, a server without systemd or apt, an architecture
    other than amd64/arm64, and a server under 2 GB of memory with no swap
    (1 GB with swap is enough). A refusal is written to
-   `/etc/joinery/office_editor/refused`, which the Plugins page shows.
+   `/etc/joinery/office_editor/refused`, which the Plugins page shows. A
+   container site's check refuses too (`ProvisioningCheckRefused`), so the
+   page offers no installer command there.
 2. Adds the vendor's apt repository and installs `coolwsd` with
    `--no-install-recommends`. The server downloads it from the vendor; Joinery
    hosts nothing. The vendor's branding package (`code-brand`, under an

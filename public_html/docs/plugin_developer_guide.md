@@ -1649,6 +1649,7 @@ Outcomes:
 
 - **Returns normally** → `verified`.
 - **Throws `ProvisioningCheckFailed`** → `unmet`. This is the *expected* failure signal. Catch the underlying acquisition exception (a `PDOException`, an SMTP error) and rethrow it as `ProvisioningCheckFailed` with a clean, human-readable message — that message is shown to the admin.
+- **Throws `ProvisioningCheckRefused`** (a subclass) → `unmet` with no fix command. Use it when the dependency cannot be met on this site at all, so the fix script would only refuse again (a host service a container site is never given); the message says why.
 - **Throws any other `Throwable`, or the class/method cannot be loaded** → `error` (a broken check, reported distinctly from a missing dependency).
 
 > ⚠️ **A `code` check must set its own short connection timeout.** The provisioning system runs the check inside a request and **cannot forcibly interrupt blocked PHP I/O**. A check method that connects to a dead host without a timeout will hang its own badge indefinitely. Setting a short timeout (e.g. `$mailer->Timeout = 5`) is a convention, not something the system enforces — it is the only thing protecting against a stuck check.
@@ -1664,7 +1665,7 @@ Checks run asynchronously (via the `plugin_provisioning_check` API action) after
 | Any `unmet` | amber **Needs setup** |
 | Any `error` | red **Check failed** |
 
-The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for `unmet` provisioners that declare a `script` — the fix command as an absolute path.
+The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for `unmet` provisioners that declare a `script`, unless the check refused — the fix command as an absolute path.
 
 The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results and exits non-zero when anything is `unmet` or `error`.
 
