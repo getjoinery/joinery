@@ -272,6 +272,7 @@ $permitted = array(
 	'plugins/mailbox/includes/relay_admin.php'                => 'relay/shard reconciliation from node facts',
 	'plugins/server_manager/includes/JobResultProcessor.php'  => 'job results processed lazily on first view',
 	'plugins/server_manager/views/admin/rollouts.php'         => 'the page-load tick moves a rollout a person started, as the AdvanceStagedRollouts task would',
+	'plugins/server_manager/views/admin/job_detail.php'       => 'the page-load tick starts the rollout a deploy-all publish asked for, as the AdvanceStagedRollouts task would',
 	'plugins/server_manager/views/admin/fleet_security.php'   => 'the page-load tick moves a security run a person started, as the AdvanceFleetSecurityRuns task would',
 	'plugins/store/logic/cart_charge_logic.php'               => 'payment gateway return — persisting the order IS the request',
 	'plugins/store/includes/StripeHelper.php'                 => 'a subscription row reconciled with the status Stripe just returned, on a page that shows or checks it',

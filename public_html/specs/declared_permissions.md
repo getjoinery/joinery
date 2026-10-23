@@ -4,7 +4,9 @@
 2026-10-08, and again 2026-10-20 after the owner's level scheme and a code
 review: named data classes, a read level on models, raise-only column
 classes, page headers, one decision function, a generated inventory
-(sections 3 and 8). No code. Q1, Q2 and Q10 to Q14 are open.
+(sections 3 and 8). Every open question answered 2026-10-23. WP1 built and
+released in log mode (0.8.521); its flip is left (WP1). WP0 and WP2 to WP6
+not started.
 
 Running each model's own rules on every save is a separate spec,
 `model_rules_on_every_save`, because it carries its own breakage and testing.
@@ -34,8 +36,9 @@ allows. A developer adding a feature writes one word per model, one per page
 and one per action; the scaffolder writes all three from one field in its
 manifest (3.9).
 
-The first user is Server Manager: the dashboard at 7, node detail at 8, every
-change at 8, and every destructive or key-changing action at 10 (Q8, Q9).
+The first user is Server Manager: the dashboard and node detail at 7 with the
+read-only node checks (Q1, Q10), every change at 8, and every destructive or
+key-changing action at 10 (Q8, Q9).
 View-only comes from the model, column and action levels. There is no
 separate "viewer mode".
 
@@ -166,8 +169,8 @@ from the file at runtime and never seeded into an editable table.
 
 ```json
 {
-  "levels": { "0": "Regular User", "5": "Assistant", "6": "Editor", "7": "Archivist",
-              "8": "Admin", "9": "Operator", "10": "Master Admin" },
+  "levels": { "0": "Regular User", "5": "Assistant", "6": "Editor", "7": "Manager",
+              "8": "Admin", "9": "Senior Admin", "10": "Master Admin" },
   "classes": {
     "content":    { "read": 5,  "write": 6,  "soft_delete": 7,  "permanent_delete": 9 },
     "money":      { "read": 5,  "write": 7,  "soft_delete": 7,  "permanent_delete": 9 },
@@ -179,7 +182,7 @@ from the file at runtime and never seeded into an editable table.
 }
 ```
 
-The names for 6, 7 and 9 are placeholders (Q14). The user edit page's level
+The names for 6, 7 and 9 are the owner's (Q14). The user edit page's level
 dropdown reads this file instead of its own list
 (`adm/admin_users_edit.php:70`).
 
@@ -535,7 +538,7 @@ POST check in each of the ~60 handlers.
   for `refresh_list` and `list_status`.
 - Refresh, probe, run job and publish declare 8. Destructive and key-changing
   actions declare 10 (Q8).
-- Q1 decides the node "look" actions; Q11 decides job output.
+- The node "look" actions declare 7 (Q1); Q11 decides job output.
 - **Split `backup_actions`.** One action both lists and runs backups. Split the
   read sub-ops (`refresh_list`, `list_status`) into their own action at 7; the
   run and restore sub-ops stay at 8 (destructive restores at 10, Q8). Until the
@@ -543,14 +546,11 @@ POST check in each of the ~60 handlers.
 
 ## 6. Open questions
 
-- **Q1. Node "look" actions for viewers.** May a permission-7 user run the
-  read-only diagnostics on a node: check status, site log, log table tail,
-  unit journal, file head, page probe, disk usage, schema probe?
-  - Each creates a job record and asks the agent, but changes nothing on the
-    node. The owner has said agent output is fine for a viewer.
-  - Allowing it: these actions declare 7, and their job record is a server
-    write.
-  - Refusing it: a viewer sees only results someone else ran.
+- **Q1. Node "look" actions for viewers.** Answered 2026-10-23: all at 7.
+  Check status, site log, log table tail, unit journal, file head, page probe,
+  disk usage and schema probe declare 7; each creates a job record and asks the
+  agent, but changes nothing on the node. The raw-text results (site log, log
+  table tail, unit journal, file head) reach 7, so what 7 sees of them is Q11.
 - **Q2. Scope of WP1.** Answered 2026-10-22: the whole platform at once, by
   one guard at the database layer (WP1).
 - **Q4. Levels 6, 7 and 9.** Answered 2026-10-20: real levels (8.1). The UI
@@ -564,10 +564,11 @@ POST check in each of the ~60 handlers.
   key-changing system actions are 10 (3.1).
 - **Q9. Server Manager dashboard.** Answered 2026-10-20: dashboard at 7, node
   detail at 8, other actions 8.
-- **Q10. The dashboard shows addresses today.** Hosts are named by address,
-  machine rows show domain and IP, and join requests show addresses and
-  fingerprints (plugins/server_manager/views/admin/index.php). Q9 puts
-  addresses on node detail. Hide them at 7, or make the dashboard 8?
+- **Q10. The dashboard shows addresses today.** Answered 2026-10-23: show
+  them at 7. None is a secret (domains and site IPs are public, keys and
+  fingerprints are made to be shared), join-request source IPs included. Node
+  detail opens at 7 too, so a 7 can run the Q1 look actions; its 8 actions are
+  hidden from a 7 (3.7). This revises Q9's node detail at 8.
   - Facts (2026-10-20): the dashboard renders host and node names (`mgn_name`,
     `mgh_name`, `mgh_host`, `mgn_host`, `mgn_site_url`, `mgn_web_root`,
     `mgn_container_name`); domains (`cvp_domain`, `dre_hostname`); IP addresses
@@ -575,27 +576,24 @@ POST check in each of the ~60 handlers.
     (`ajr_fingerprint`, the escrow `fingerprint()`, the join-request fingerprint);
     the agent's public key (`mgn_agent_public_key`); and versions, heartbeats
     and status.
-- **Q11. Job output.** Q9 lets an 8 run a job; the inventory keeps
-  `job_detail` at 10 because file_head, unit_journal and log results can hold
-  secrets. Config at 8 with keys results masked, or look jobs at 10 with Q1?
-  - Facts (2026-10-20): `job_detail` renders these result kinds: `apply_update`
-    (versions, migrations, schema), `file_head`, `schema_probe`,
-    `reset_failed_unit` (unit state before and after), `unit_journal` (journal
-    lines), `disk_usage` (largest directories), `move_to_plane` (fingerprint),
-    `site_log` (log text), `log_table_tail` (table rows), `listening_sockets`,
-    `container_inventory`, `spam_learning_status`, `reboot_machine`. Results that
-    carry file or log text by their nature: `file_head`, `unit_journal`,
-    `site_log`, `log_table_tail`, `schema_probe`. The file's version note says
-    structured results are redacted for display (v1.3); the redaction was not
-    traced in this pass.
+- **Q11. Job output.** Answered 2026-10-23: `job_detail` and `jobs` at 7, for
+  every job. Output is redacted twice: the node redacts before it sends, and
+  the page runs `SmSecretRedactor` over the transcript, log text, samples,
+  tables and the raw result (job_detail 1.3, 2026-10-23 trace); file_head
+  refuses files that are secrets and returns a credential line as its key
+  only. What is left is personal data, which 7 reads.
 - **Q12. The sent-mail archive** (`admin_email`, `admin_emails`,
-  `admin_email_view`): personal at 6 as the inventory says, or restricted at 8
-  as a log?
+  `admin_email_view`). Answered 2026-10-23: personal at 6. It holds mail an
+  admin wrote (lists, newsletters, the events digest, a message from a user's
+  page) and its recipients (`erc_email`, `erc_name`, status); no system mail,
+  so no tokens.
 - **Q13. User-to-user conversations** (`admin_conversation`,
-  `admin_conversations`) are at 8 in the inventory while `admin_message` is
-  at 6; both read the same core messaging tables
-  (data/conversations_class.php). Which?
-- **Q14. Names for levels 6, 7 and 9.** 3.1 uses placeholders.
+  `admin_conversations`, `admin_message`). Answered 2026-10-23: 8, as D9 does
+  for AI chats. Conversation and Message stay personal, with reading another
+  person's raised to 8; soft delete stays at 8. A sealed conversation's bodies
+  are ciphertext to staff whatever the level.
+- **Q14. Names for levels 6, 7 and 9.** Answered 2026-10-23: Editor, Manager,
+  Senior Admin (3.1).
 - **Q15. Who may open another person's AI chats?** Answered 2026-10-21: admins
   only (D9). AiConversation is config; each person reaches their own chats
   through the owner rule.
@@ -772,10 +770,10 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/admin_contact_type_edit` | content | 8 | 5 |  | ContactType |  |
 | `/admin/admin_contact_types` | content | 8 | 5 |  | - |  |
 | `/admin/admin_content_reports` | personal | 5 | 6 |  | - | reporter identity |
-| `/admin/admin_conversation` | personal | 8 | 6 |  | Message, Conversation | private chats (Q13) |
-| `/admin/admin_conversations` | personal | 8 | 6 |  | - | private chats (Q13) |
+| `/admin/admin_conversation` | personal | 8 | 8 |  | Message, Conversation | private chats: 8 (Q13) |
+| `/admin/admin_conversations` | personal | 8 | 8 |  | - | private chats: 8 (Q13) |
 | `/admin/admin_debug_email_logs` | restricted | 8 | 8 |  | - |  |
-| `/admin/admin_email` | personal | 8 | 6 |  | Email, EmailRecipientGroup | sent-mail archive (Q12) |
+| `/admin/admin_email` | personal | 8 | 6 |  | Email, EmailRecipientGroup | sent-mail archive: personal (Q12) |
 | `/admin/admin_email_edit` | personal | 8 | 6 |  | Email |  |
 | `/admin/admin_email_preview` | content | 5 | 5 |  | - |  |
 | `/admin/admin_email_recipients_modify` | personal | 8 | 6 |  | EmailRecipientGroup |  |
@@ -784,8 +782,8 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/admin_email_template_permanent_delete` | content | 10 | 5 |  | EmailTemplate |  |
 | `/admin/admin_email_template_preview` | content | 10 | 5 |  | - |  |
 | `/admin/admin_email_templates` | content | 8 | 5 |  | - |  |
-| `/admin/admin_email_view` | personal | 8 | 6 |  | - | sent-mail archive (Q12) |
-| `/admin/admin_emails` | personal | 8 | 6 |  | - | sent-mail archive (Q12) |
+| `/admin/admin_email_view` | personal | 8 | 6 |  | - | sent-mail archive: personal (Q12) |
+| `/admin/admin_emails` | personal | 8 | 6 |  | - | sent-mail archive: personal (Q12) |
 | `/admin/admin_emails_queue` | personal | 8 | 6 |  | - |  |
 | `/admin/admin_emails_send` | personal | 8 | 6 |  | Email, EmailRecipient | sends mail to users |
 | `/admin/admin_errors` | restricted | 9 | 8 |  | - |  |
@@ -809,7 +807,7 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/admin_mailing_lists` | personal | 5 | 6 |  | - |  |
 | `/admin/admin_management_node` | keys | 10 | 10 |  | Setting | node credentials |
 | `/admin/admin_marketplace` | config | 10 | 8 |  | - | installs code (Q8) |
-| `/admin/admin_message` | personal | 8 | 6 |  | Message | user messages |
+| `/admin/admin_message` | personal | 8 | 8 |  | Message | private chats: 8 (Q13) |
 | `/admin/admin_notification_preferences` | content | 5 | 5 |  | - | own row: the owner rule applies |
 | `/admin/admin_oauth_providers` | keys | 10 | 10 |  | - | client secrets |
 | `/admin/admin_page` | content | 5 | 5 |  | Page |  |
@@ -979,10 +977,10 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/server_manager/incidents` | config | 10 | 8 |  | - |  |
 | `/admin/server_manager/index` | config | 10 | 8 |  | AgentJoinRequest, CustomerCloudProvision | dashboard: status and counts only (Q9); shows addresses today (Q10) |
 | `/admin/server_manager/install_node_form` | config | 10 | 8 |  | CustomerCloudProvision | installs with keys: credential columns are keys (Q8, 3.3) |
-| `/admin/server_manager/job_detail` | config | 10 | 8 |  | ManagementJob | job output can hold secrets (Q11) |
-| `/admin/server_manager/jobs` | config | 10 | 8 |  | - |  |
+| `/admin/server_manager/job_detail` | config | 10 | 7 |  | ManagementJob | output redacted twice (Q11) |
+| `/admin/server_manager/jobs` | config | 10 | 7 |  | - | Q11 |
 | `/admin/server_manager/node_add` | config | 10 | 8 |  | ManagedNode | stores node credentials (Q8) |
-| `/admin/server_manager/node_detail` | config | 10 | 8 |  | - | power, restore, decommission, keys: 10 (Q8) |
+| `/admin/server_manager/node_detail` | config | 10 | 7 |  | - | look actions 7 (Q1, Q10); changes 8; power, restore, decommission, keys: 10 (Q8) |
 | `/admin/server_manager/nodes` | config | 5 (router) | 8 | 8 | - | redirect stub to node detail |
 | `/admin/server_manager/nodes_edit` | config | 5 (router) | 8 | 8 | - | redirect stub to node detail |
 | `/admin/server_manager/provisioning_setup` | config | 10 | 8 |  | OperatorCloudAccount | provisioning credentials are keys columns (Q8, 3.3) |
@@ -1013,7 +1011,7 @@ One row per class extending `SystemBase` (249). Printed by
 - **REST** and **AI** are the `$api_*` and `$ai_readable` flags. A
   `public read` model cannot sit above `content`.
 - **Exceptions** are the numbers that differ from the class, with the reason.
-  Q12 and Q13 are open on two of them.
+  Q13 raises Conversation and Message reads to 8.
 - **Confidence**: `traced` = read the code at the line; `read` = the spec or
   the code's own wording; `instinct` = judgment. Every `instinct` row is listed
   for reviewer spot-checks.
@@ -1040,7 +1038,7 @@ One row per class extending `SystemBase` (249). Printed by
 | ConversationKeyGrant | data/conversation_key_grants_class.php | personal | ckg_usr_user_id | default: owner or 5 | - | - |  (wrapped key column is keys) | instinct |
 | ConversationParticipant | data/conversation_participants_class.php | personal | cnp_usr_user_id | owner only | read, write | read |  | instinct |
 | ConversationRemotePeer | data/conversation_remote_peers_class.php | personal | - | default: owner or 5 | - | - |  | instinct |
-| Conversation | data/conversations_class.php | personal | - | default: owner or 5 | read, write | read |  (Q13 open: same tables as messages) | read |
+| Conversation | data/conversations_class.php | personal | - | default: owner or 5 | read, write | read |  read 8 (Q13) | read |
 | DebugEmailLog | data/debug_email_logs_class.php | restricted | - | default: owner or 5 | - | - |  | read |
 | DeletionRule | data/deletion_rules_class.php | config | - | default: owner or 5 | - | - |  | instinct |
 | DeviceLink | data/device_links_class.php | personal | dlk_usr_user_id | default: owner or 5 | - | - |  (sealed vault key columns are keys) | instinct |
@@ -1054,7 +1052,7 @@ One row per class extending `SystemBase` (249). Printed by
 | EmailRecipientGroup | data/email_recipient_groups_class.php | personal | - | keep override | - | - |  | instinct |
 | EmailRecipient | data/email_recipients_class.php | personal | erc_usr_user_id | owner only | - | - |  | instinct |
 | EmailTemplate | data/email_templates_class.php | content | - | keep override | - | - |  | read |
-| Email | data/emails_class.php | personal | eml_usr_user_id | owner only | - | - |  (Q12 open: personal or restricted log) | read |
+| Email | data/emails_class.php | personal | eml_usr_user_id | owner only | - | - |  personal (Q12) | read |
 | EntityAttachment | data/entity_attachments_class.php | content | eat_usr_user_id | default: owner or 5 | - | - |  | instinct |
 | EntityPhoto | data/entity_photos_class.php | content | - | default: owner or 5 | - | read |  | instinct |
 | CalendarEntry | data/entries_class.php | personal | - | keep override | - | read |  | instinct |
@@ -1079,7 +1077,7 @@ One row per class extending `SystemBase` (249). Printed by
 | ManagedDnsRecord | data/managed_dns_records_class.php | config | - | keep override | - | - |  | instinct |
 | MessageAttachment | data/message_attachments_class.php | personal | - | default: owner or 5 | - | - |  | instinct |
 | MessageReaction | data/message_reactions_class.php | personal | msr_usr_user_id | default: owner or 5 | - | - |  | instinct |
-| Message | data/messages_class.php | personal | msg_usr_user_id_sender | owner only | read, write | read |  | read |
+| Message | data/messages_class.php | personal | msg_usr_user_id_sender | owner only | read, write | read | read 8 (Q13) | read |
 | Migration | data/migrations_class.php | config | - | keep override | - | - |  | instinct |
 | NotificationPreference | data/notification_preferences_class.php | personal | ntp_usr_user_id | owner only | read, write | - |  | instinct |
 | Notification | data/notifications_class.php | personal | ntf_usr_user_id | owner only | read, write | read |  | instinct |
