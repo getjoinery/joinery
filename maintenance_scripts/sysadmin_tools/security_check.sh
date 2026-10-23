@@ -3,7 +3,9 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
-# Version: 1.0
+# Version: 1.1 - a package new to the machine is not a fix waiting: an upgrade
+#   pulls it in, and that upgrade is counted where it is a fix (docker-prod's
+#   libdrm-amdgpu1, needed only by an fwupd from -updates, waited forever)
 #
 # Why it exists: on 2026-10-21 Ubuntu published a fix for a critical hole in
 # PHP at 13:41 UTC, and nothing on any machine said it was waiting for one.
@@ -214,7 +216,11 @@ done
 
 # What a full upgrade would install, as the simulation names it:
 #   Inst NAME [INSTALLED] (CANDIDATE ORIGIN:VERSION/SUITE, ... [ARCH]) ...
-# A package new to the machine has no [INSTALLED]. Sets the state's pending,
+# A package new to the machine has no [INSTALLED], and is not counted: an
+# upgrade pulls it in, and that upgrade is counted where it is a fix itself (a
+# kernel fix is the new linux-image-X with linux-image-generic's upgrade). One
+# needed only by an upgrade from -updates is never installed by the nightly
+# run, and would wait forever. Sets the state's pending,
 # critical and packages (each name|installed|candidate|critical|first_seen),
 # and AT_ONCE: the critical fixes Q2 installs now (the kernel waits for a
 # person's reboot).
@@ -229,6 +235,7 @@ simulate() {
     while IFS= read -r line; do
         [[ "$line" =~ $re ]] || continue
         name="${BASH_REMATCH[1]}" installed="${BASH_REMATCH[3]}" candidate="${BASH_REMATCH[4]}" origins="${BASH_REMATCH[5]}"
+        [ -n "$installed" ] || continue
         fix=0
         IFS=',' read -ra os <<< "$origins"
         for o in "${os[@]}"; do
@@ -243,7 +250,7 @@ simulate() {
         n=$((n + 1)); crit=$((crit + c))
         [ "$c" -eq 1 ] && [[ ! "$name" =~ ^linux-(image|modules) ]] && AT_ONCE+=("$(word "$name")")
         [ "${#entries[@]}" -lt "$MAX_PACKAGES" ] || continue
-        w="$(word "$name")|$(word "${installed:-none}")|$(word "$candidate")"
+        w="$(word "$name")|$(word "$installed")|$(word "$candidate")"
         f="${FIRST["$(word "$name")|$(word "$candidate")"]:-${S[checked_at]}}"
         entries+=("${w}|${c}|${f}")
     done <<< "$sim"

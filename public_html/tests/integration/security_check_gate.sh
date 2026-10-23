@@ -73,9 +73,11 @@ cat > "$STUB/sim.all" <<'EOF'
 NOTE: This is only a simulation!
 Inst php8.3-fpm [8.3.6-0ubuntu0.24.04.12] (8.3.6-0ubuntu0.24.04.13 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64]) []
 Inst tzdata [2026a-0ubuntu0.24.04] (2026c-0ubuntu0.24.04 Ubuntu:24.04/noble-updates [all])
+Inst libdrm-amdgpu1 (2.4.125-1ubuntu0.1~24.04.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
 Inst libfoo-security-dev [1.0] (1.1 Ubuntu:24.04/noble-updates [amd64])
 Inst curl [8.5.0-2ubuntu10.6] (8.5.0-2ubuntu10.7 Ubuntu:24.04/noble-security [amd64])
 Inst linux-image-6.8.0-90-generic (6.8.0-90.91 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst linux-image-generic [6.8.0.88.89] (6.8.0.90.91 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
 Inst libssl3t64 [3.0.13-0ubuntu3.5] (3.0.13-0ubuntu3.6 UbuntuESM:24.04/noble-infra-security [amd64])
 Inst php8.4-cli [8.4.11-1+ubuntu24.04.1+deb.sury.org+1] (8.4.12-1+ubuntu24.04.1+deb.sury.org+1 LP-PPA-ondrej-php:24.04/noble [amd64])
 Inst docker-ce [5:29.1.5-1~ubuntu.24.04~noble] (5:29.1.6-1~ubuntu.24.04~noble Docker CE:24.04/noble [amd64])
@@ -87,8 +89,8 @@ cp "$STUB/sim.all" "$STUB/sim"; touch "$STUB/install_fails"
 chk "the first run: exit 0, the lists refreshed (there were none)" "$(run run)|$(grep -c 'update -qq -o DPkg::Lock::Timeout=0' "$STUB/calls")" "0|1"
 chk "  a -security pocket counts (Ubuntu's and Pro's); -updates alone does not, nor a name holding the word; an outside repository not named does not" \
     "$(st pending)" "4"
-chk "  each with installed and candidate; a new package's installed is none" \
-    "$(pk)" "php8.3-fpm|8.3.6-0ubuntu0.24.04.12|8.3.6-0ubuntu0.24.04.13|1 curl|8.5.0-2ubuntu10.6|8.5.0-2ubuntu10.7|0 linux-image-6.8.0-90-generic|none|6.8.0-90.91|1 libssl3t64|3.0.13-0ubuntu3.5|3.0.13-0ubuntu3.6|1"
+chk "  each with installed and candidate; a package new to the machine is not a fix (an upgrade needs it: the kernel's is counted by linux-image-generic's, and one an fwupd from -updates needs is never installed by the nightly run)" \
+    "$(pk)" "php8.3-fpm|8.3.6-0ubuntu0.24.04.12|8.3.6-0ubuntu0.24.04.13|1 curl|8.5.0-2ubuntu10.6|8.5.0-2ubuntu10.7|0 linux-image-generic|6.8.0.88.89|6.8.0.90.91|1 libssl3t64|3.0.13-0ubuntu3.5|3.0.13-0ubuntu3.6|1"
 chk "  PHP, the kernel and OpenSSL are critical; curl is not" "$(st critical)" "3"
 chk "  the check and the lists' time recorded" "$(st check)|$([ -n "$(st checked_ok_at)" ] && echo t)|$([ -n "$(st lists_at)" ] && echo t)" "ok|t|t"
 FIRST_PHP="$(st packages | tr ' ' '\n' | grep '^php8.3-fpm|' | cut -d'|' -f5)"
@@ -113,7 +115,7 @@ chk "a simulation that fails: recorded as failed, the last good check's time kep
 rm "$STUB/sim_fails" "$STUB/install_fails"; : > "$STUB/calls"
 chk "an at-once install that works: the check is taken again after it, and only the kernel and the rest wait" \
     "$(run run)|$(grep -c '^install_security_updates$' "$STUB/calls")|$(st at_once_outcome)|$(pk | tr ' ' '\n' | cut -d'|' -f1 | paste -sd ' ')|$(st critical)" \
-    "0|1|installed|curl linux-image-6.8.0-90-generic|1"
+    "0|1|installed|curl linux-image-generic|1"
 : > "$STUB/calls"
 chk "  the kernel alone (a reboot is a person's): nothing installed at once" "$(run run)|$(grep -c '^install_security_updates$' "$STUB/calls")" "0|0"
 printf 'NOTE: This is only a simulation!\n' > "$STUB/sim"
