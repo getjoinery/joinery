@@ -16,7 +16,10 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.9
+ * @version 1.10
+ * @changelog 1.10 - person_rate_limit_state(): a person's count for one kind of credential (their
+ *   browser, their devices, their app credentials), so one kind cannot spend another's budget;
+ *   api_key_type() reads the kind this request's rows are stamped with
  * @changelog 1.9 - log() no longer forces SystemBase::$allow_get_mutation off afterwards: server_initiated_write
  *   restores the previous value, and the forced reset ended a caller's own wrapped region early
  * @changelog 1.8 - the per-person key types are read from ApiKey::PER_PERSON_TYPES; this file
@@ -51,6 +54,11 @@ class RequestLogger {
 	 */
 	public static function set_api_key_type($type) {
 		self::$api_key_type = $type;
+	}
+
+	/** The kind this request's rows are stamped with ('browser', 'session', ...), or null before authentication. */
+	public static function api_key_type(): ?string {
+		return self::$api_key_type;
 	}
 
 	/**
@@ -171,6 +179,21 @@ class RequestLogger {
 	}
 
 	/**
+	 * rate_limit_state() for one person's use of one kind of credential: the
+	 * rows logged for that user under that key type. A person's browser,
+	 * their devices together and their app credentials together are separate
+	 * budgets, so a desktop's first sync of a large folder slows the sync
+	 * without locking its person out of the site. It is one budget per kind,
+	 * never per key: linking another device buys no more requests.
+	 *
+	 * @return array{allowed:bool,count:int,retry_after:int}
+	 */
+	public static function person_rate_limit_state($feature, $max_requests, $window_seconds, $user_id, string $key_type) {
+		return self::count_state($feature, $max_requests, $window_seconds, null,
+			'rql_usr_user_id = ? AND rql_api_key_type = ?', array(intval($user_id), $key_type));
+	}
+
+	/**
 	 * Check if an attempt limit has been exceeded: the rows for this feature
 	 * from the caller's network (IpAddress::network()) within the window.
 	 * For limits that stop a stranger guessing a secret, making accounts or
@@ -212,7 +235,7 @@ class RequestLogger {
 		return 'user:' . substr(hash('sha256', strtolower(trim($username))), 0, 32);
 	}
 
-	/** The count behind every limit: rows for $feature matching $key_sql within the window. */
+	/** The count behind every limit: rows for $feature matching $key_sql (one ? per value in $key) within the window. */
 	private static function count_state($feature, $max_requests, $window_seconds, $success_filter, string $key_sql, $key): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window_seconds = max(1, intval($window_seconds));
@@ -220,7 +243,7 @@ class RequestLogger {
 
 		$where = "rql_feature = ? AND " . $key_sql
 			. " AND rql_create_time > NOW() - INTERVAL '" . $window_seconds . " seconds'";
-		$params = [$feature, $key];
+		$params = array_merge(array($feature), is_array($key) ? array_values($key) : array($key));
 		if ($success_filter !== null) {
 			$where .= " AND rql_was_success = ?";
 			$params[] = $success_filter ? 'true' : 'false';

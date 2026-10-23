@@ -24,9 +24,14 @@
  *    authentication too, and a principal with no user by address.
  *  - address_rate_limit_state() leaves per-person traffic (browser, session,
  *    app_password rows) out of an address's count.
+ *  - person_rate_limit_state() counts one person's rows of one kind: their
+ *    browser, devices and app credentials are separate budgets, and apiv1.php
+ *    meters each per-person kind on its own (devices on
+ *    api_device_rate_limit_requests).
  *
  * Run: php tests/run.php db --filter=rate_limit_state
  *
+ * @version 1.3 - person_rate_limit_state: one budget per kind of credential
  * @version 1.2 - address_rate_limit_state; keyed action requests
  */
 
@@ -92,6 +97,25 @@ $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u1);
 check(!$s['allowed'] && $s['count'] === 2, "a user's count spans addresses and excludes other users", json_encode($s));
 $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u2);
 check($s['allowed'] && $s['count'] === 1, 'the other user has their own count', json_encode($s));
+
+// ---------------------------------------------------------------------------
+section('A person has one budget per kind of credential');
+// ---------------------------------------------------------------------------
+
+$kind_feature = $feature . '_k';
+$row($ip, 10, $u1, $kind_feature, 'session');
+$row($other_ip, 20, $u1, $kind_feature, 'session');   // another device, another address: the same budget
+$row($ip, 30, $u1, $kind_feature, 'browser');
+$row($ip, 40, $u2, $kind_feature, 'session');         // another person's device does not count
+$s = RequestLogger::person_rate_limit_state($kind_feature, 2, 600, $u1, 'session');
+check(!$s['allowed'] && $s['count'] === 2 && $s['retry_after'] > 0,
+	"a person's devices share one count across addresses, and it says when", json_encode($s));
+$s = RequestLogger::person_rate_limit_state($kind_feature, 2, 600, $u1, 'browser');
+check($s['allowed'] && $s['count'] === 1, "the same person's browser has its own count", json_encode($s));
+$s = RequestLogger::person_rate_limit_state($kind_feature, 2, 600, $u1, 'app_password');
+check($s['allowed'] && $s['count'] === 0, 'and so do their app credentials', json_encode($s));
+$s = RequestLogger::rate_limit_state($kind_feature, 10, 600, null, $u1);
+check($s['count'] === 3, 'rate_limit_state() by user still counts every kind together', json_encode($s));
 
 // ---------------------------------------------------------------------------
 section('An address\'s count leaves out per-person traffic');
@@ -170,7 +194,7 @@ check(strpos($api, '$browser_shaped = empty($headers[\'public_key\'])') !== fals
 	'a browser-shaped request skips the per-address check before authentication');
 check(strpos($api, "\$key_shaped = \$action_route && !empty(\$headers['public_key']) && !empty(\$headers['secret_key']);") !== false,
 	'a keyed ACTION request is one with both key headers, as ApiAuth reads a key request');
-check(substr_count($api, "RequestLogger::address_rate_limit_state('api'") === 3
+check(substr_count($api, "RequestLogger::address_rate_limit_state('api'") === 2
 	&& strpos($api, "RequestLogger::rate_limit_state('api', \$api_rate_limit") === false,
 	'every general address check leaves per-person traffic out of the count');
 check(strpos($api, '$app_shaped = isset($headers[\'x_joinery_app_secret\'])') !== false
@@ -179,9 +203,14 @@ check(strpos($api, '$app_shaped = isset($headers[\'x_joinery_app_secret\'])') !=
 check(strpos($api, "\$action_route = strtolower(explode('/', trim((string)parse_url(\$_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'action';") !== false
 	&& strpos($api, "\$app_shaped = isset(\$headers['x_joinery_app_secret']) && \$action_route;") !== false,
 	'only an ACTION request can be app-shaped: the headers switch no limiter off on auth/login or forms');
-check(strpos($api, "rate_limit_state('api', \$session_limit, \$session_window, null, intval(\$api_user->key))") !== false,
-	'a signed-in browser session is metered per user after authentication');
+check(substr_count($api, "RequestLogger::person_rate_limit_state('api'") === 1
+	&& strpos($api, "RequestLogger::rate_limit_state('api', \$session_limit") === false
+	&& strpos($api, "intval(\$api_user->key), (string)RequestLogger::api_key_type())") !== false,
+	'a signed-in person is metered after authentication on the kind of credential the request is logged as');
 check(strpos($api, "get_setting('api_session_rate_limit_requests')") !== false, 'the session limit is its own setting');
+check(strpos($api, "get_setting('api_device_rate_limit_requests')") !== false
+	&& strpos($api, "'Your linked devices'") !== false,
+	'a session key is metered on the devices\' own limit, and its refusal names them');
 check(strpos($api, "api_error('Rate limit exceeded.") === false
 	&& strpos($api, "header('Retry-After: '") !== false
 	&& substr_count($api, 'api_rate_limited(') >= 6,
@@ -194,5 +223,6 @@ $settings_json = json_decode(file_get_contents(PathHelper::getIncludePath('setti
 $names = array_column($settings_json['settings'] ?? $settings_json, 'name');
 check(in_array('api_session_rate_limit_requests', $names, true) && in_array('api_session_rate_limit_window', $names, true),
 	'both session-limit settings are declared');
+check(in_array('api_device_rate_limit_requests', $names, true), 'the devices\' limit is declared');
 
 harness_finish();

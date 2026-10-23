@@ -1,7 +1,7 @@
 <?php
 /**
  * A person's own device is metered on that person's budget, not its address's
- * (api/apiv1.php 2.29, ApiLogicEndpoint 1.8.2).
+ * (api/apiv1.php 2.30, ApiLogicEndpoint 1.8.2, RequestLogger 1.10).
  *
  * The run's own loopback address is filled to the address limit first, as a
  * home or office whose other devices have spent it. Then:
@@ -11,9 +11,11 @@
  *     off: refused 429 'This address' (it runs before any key is checked);
  *   - a guest (cookie + X-Joinery-Csrf) adding a public-key header with no
  *     secret is still metered by address: 429 'This address' on a guest action;
- *   - the person's own budget still holds, on every route: filled, the
- *     session key is refused 429 'Your account' on an action, auth/session
- *     and a record read.
+ *   - a person's devices and their browser are separate budgets: with the
+ *     browser's spent, the device still gets through; with the devices'
+ *     spent (a first sync of a large folder), the session key is refused 429
+ *     'Your linked devices' on an action, auth/session and a record read,
+ *     and the same person's browser still gets through.
  * A second address is filled with per-person rows only (a household's own
  * devices): they do not count against it, so a machine key and a device's
  * non-action route still get through (RequestLogger 1.7).
@@ -61,6 +63,7 @@ try {
 	$suffix = strtoupper(LibraryFunctions::random_string(6));
 	$address_limit = (int)($settings->get_setting('api_rate_limit_requests') ?: 1000);
 	$person_limit = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+	$device_limit = (int)($settings->get_setting('api_device_rate_limit_requests') ?: 20000);
 
 	section('Setup: an address whose budget its other devices have spent');
 	$user = make_user($suffix . 'D');
@@ -109,19 +112,38 @@ try {
 	check($r['status'] === 200, 'a device\'s non-action route (auth/session) still gets through it', $r['status'] . ' ' . $r['raw']);
 	$db->prepare("DELETE FROM rql_request_logs WHERE rql_ip_address = ?")->execute([$households]);
 
-	section('The person\'s own budget still holds');
-	$fill($person_limit, '127.0.0.1', (int)$user->key);
+	section('A spent browser budget does not stop the person\'s devices');
+	$fill($person_limit, '127.0.0.1', (int)$user->key, 'browser');
 	$r = $call('/api/v1/action/vault_client_probe', $session);
-	check($r['status'] === 429 && stripos($who($r), 'Your account') !== false,
-		'with the person\'s budget spent, the device is refused 429 Your account', $r['status'] . ' ' . $r['raw']);
+	check($r['status'] === 200, 'with the browser\'s ' . $person_limit . ' spent, the device still reaches an action', $r['status'] . ' ' . $r['raw']);
+	$db->prepare("DELETE FROM rql_request_logs WHERE rql_usr_user_id = ? AND rql_api_key_type = 'browser'")->execute([(int)$user->key]);
+
+	section('A first sync spends the devices\' budget, not the browser\'s');
+	$fill($device_limit, '127.0.0.1', (int)$user->key, 'session');
+	$r = $call('/api/v1/action/vault_client_probe', $session);
+	check($r['status'] === 429 && stripos($who($r), 'Your linked devices') !== false,
+		'with the devices\' ' . $device_limit . ' spent, the device is refused 429 Your linked devices', $r['status'] . ' ' . $r['raw']);
 	// From an address nobody has spent: a non-action route checks the address
 	// before authentication, and only the person's budget may refuse these.
 	$fresh = harness_http_loopback_source();
 	foreach (array('/api/v1/auth/session', '/api/v1/User/' . (int)$user->key) as $route) {
 		$r = $call($route, $session, array(), $fresh, 'GET');
-		check($r['status'] === 429 && stripos($who($r), 'Your account') !== false,
-			'…and on a non-action route too: GET ' . $route . ' is refused 429 Your account', $r['status'] . ' ' . $r['raw']);
+		check($r['status'] === 429 && stripos($who($r), 'Your linked devices') !== false,
+			'…and on a non-action route too: GET ' . $route . ' is refused 429 Your linked devices', $r['status'] . ' ' . $r['raw']);
 	}
+	$second = ApiKey::CreateSessionKey($user->key, 'Laptop ' . $suffix);
+	harness_register_key_id($second['api_key']->key);
+	$r = $call('/api/v1/action/vault_client_probe', $second);
+	check($r['status'] === 429 && stripos($who($r), 'Your linked devices') !== false,
+		'linking another device buys no more requests: the new key is refused too', $r['status'] . ' ' . $r['raw']);
+	$jar = harness_jar_new('devkeyweb');
+	$csrf = harness_web_login($jar, $user->get('usr_email'), 'TestPassword_' . $suffix . 'D');
+	check($csrf !== null, 'the same person signs in on the website');
+	$r = harness_request('POST', '/api/v1/action/vault_client_probe', array(
+		'jar' => $jar, 'from' => $fresh, 'encode' => 'json', 'body' => new stdClass(),
+		'headers' => harness_csrf_header((string)$csrf),
+	));
+	check($r['status'] === 200, 'and their browser still gets through while the devices wait', $r['status'] . ' ' . $r['raw']);
 
 } catch (\Throwable $e) {
 	check(false, 'unhandled exception mid-suite', $e->getMessage());
