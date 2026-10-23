@@ -239,6 +239,14 @@ Redirects to login if not authenticated, shows 403 if insufficient permission.
   - Wrong: `<a href="/admin/admin_users.php?id=1">`
   - Right: `<a href="/admin/admin_users?id=1">`
 - Query parameters (`?key=value`) pass through routing unchanged and are available in `$_GET`.
+- **A malformed path is refused at the door.** `RouteHelper::processRoutes()` runs
+  the decoded request path through `RouteHelper::validatePath()` before any route is
+  matched or any file is looked up: a `..` segment, a backslash, a NUL byte or an
+  encoded traversal at any decoding depth answers a plain 404. Apache decodes the URL
+  once and PHP decodes `__route` again, so `%252e%252e` arrives as `..`, past Apache's
+  own dot-segment removal; the door is where that is caught. Every later name check
+  (`PathHelper::getThemeFilePath()`, the static handler's own `validatePath()` call)
+  only ever catches programmer error.
 
 ## The `__route` parameter
 
