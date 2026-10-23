@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.141 - net_health and web_workers (agent 1.93.0, specs/slow_request_diagnosis_words.md WP2/WP3):
+ *                 two reads that take nothing. net_health is asked of a container site's host, never of
+ *                 the container (its network is not where an edge connects). site_log offers the access
+ *                 log as the node's compiled shape (method, path with unsafe segments cut, status, bytes,
+ *                 duration), per value from agent 1.93.0 (SITE_LOG_ACCESS_MIN_AGENT_VERSION)
  * @version 1.140 - build_copy_probes() refuses a container site's own node and names its host: inside the
  *                 container the probes see no engine and misread its database as listening nowhere
  * @version 1.139 - build_site_log_count(): the site_log_count word (agent 1.92.0), counts of compiled problem
@@ -443,6 +448,7 @@ class JobCommandBuilder {
 	 */
 	const SITE_LOG_FILES = [
 		'error'                => 'Error log',
+		'access'               => 'Access log (method, path, status, duration)',
 		'cron_scheduled_tasks' => 'Scheduled tasks log',
 		'joinery_ai_worker'    => 'AI worker log',
 		'install_executor'     => 'Install executor log',
@@ -455,8 +461,20 @@ class JobCommandBuilder {
 	 * on every agent at the version floor (AgentVocabulary::FLOOR).
 	 */
 	public static function site_log_files_for($node) {
-		return self::SITE_LOG_FILES;
+		$files = self::SITE_LOG_FILES;
+		$agent = (string)AgentVocabulary::version($node);
+		if ($agent === '' || version_compare($agent, self::SITE_LOG_ACCESS_MIN_AGENT_VERSION, '<')) {
+			unset($files['access']);
+		}
+		return $files;
 	}
+
+	/**
+	 * The access log is a per-VALUE floor, as the PostgreSQL log once was: an
+	 * older agent refuses the value, not the word. It returns the node's
+	 * compiled shape of each line, never the line.
+	 */
+	const SITE_LOG_ACCESS_MIN_AGENT_VERSION = '1.93.0';
 
 	/** The log tables log_table_tail may name; same mirror discipline. */
 	const LOG_TABLES = [
@@ -1929,6 +1947,11 @@ class JobCommandBuilder {
 
 	public static function build_site_log_primitive($node, $file, $previous = false, $lines = 100) {
 		$file = (string)$file;
+		if ($file === 'access' && !array_key_exists('access', self::site_log_files_for($node))) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read its access log: its agent is "
+				. ((string)AgentVocabulary::version($node) ?: 'of an unknown version') . ', and this needs '
+				. self::SITE_LOG_ACCESS_MIN_AGENT_VERSION . ' or newer.');
+		}
 		if (!array_key_exists($file, self::SITE_LOG_FILES)) {
 			throw new Exception("'" . $file . "' is not a log file the node offers. Choose one of: "
 				. implode(', ', array_keys(self::SITE_LOG_FILES)) . '.');
@@ -3238,6 +3261,57 @@ class JobCommandBuilder {
 
 	public static function build_listening_sockets_primitive($node) {
 		return ['primitive' => 'listening_sockets', 'params' => []];
+	}
+
+	/**
+	 * Whether the machine is dropping packets or connections (agent 1.93.0,
+	 * specs/slow_request_diagnosis_words.md WP2): kernel counters read twice
+	 * ten seconds apart, the connection table, the web ports' connections by
+	 * state and their listeners' queues. Counts only, no log-access check.
+	 * HOST ONLY: a container site's own node is refused here and told to ask
+	 * its host, as the node itself would refuse inside the container.
+	 */
+	public static function build_net_health($node) {
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			$host = '';
+			try {
+				$host = (string)self::decommission_host_node_for($node)->get('mgn_name');
+			} catch (Exception $e) {
+				// The host only names where to ask.
+			}
+			throw new Exception("'{$node->get('mgn_name')}' runs in a container, whose network is not where its edge connects: ask its host"
+				. ($host !== '' ? ", {$host}" : '') . '.');
+		}
+		if (!self::has_primitive($node, 'net_health')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its network health. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['net_health']));
+		}
+		return self::build_net_health_primitive($node);
+	}
+
+	public static function build_net_health_primitive($node) {
+		return ['primitive' => 'net_health', 'params' => []];
+	}
+
+	/**
+	 * Whether the web tier is out of workers (agent 1.93.0, same spec WP3):
+	 * Apache's scoreboard and PHP-FPM's pool, read over loopback where the
+	 * site's PHP runs, and how often the pool hit its ceiling in a day.
+	 * Counts only, no log-access check, no parameters: the node passes its
+	 * own domain.
+	 */
+	public static function build_web_workers($node) {
+		if (!self::has_primitive($node, 'web_workers')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its web workers. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['web_workers']));
+		}
+		return self::build_web_workers_primitive($node);
+	}
+
+	public static function build_web_workers_primitive($node) {
+		return ['primitive' => 'web_workers', 'params' => []];
 	}
 
 	/**

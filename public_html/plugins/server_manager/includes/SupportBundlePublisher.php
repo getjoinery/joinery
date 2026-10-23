@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.33 - carries net_health.sh and web_workers.sh, the two machine words of agent 1.93.0
+ *                (specs/slow_request_diagnosis_words.md)
  * @version 1.32 - carries site_certificate_stage.sh, a site container's certificate staged for its copy's export
  *                 (specs/site_copy_anything_to_anything.md D4)
  * @version 1.31 - a leftover partial bundle is removed only when there is one (an unlink of none left a
@@ -208,6 +210,11 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/listening_sockets.sh',
 		'maintenance_scripts/sysadmin_tools/container_inventory.sh',
 		'maintenance_scripts/sysadmin_tools/reboot_machine.sh',
+		// net_health and web_workers (agent 1.93.0): whether a Docker host
+		// drops packets or connections, and its web tier's workers (none of
+		// its own: the word says so). Both source nothing.
+		'maintenance_scripts/sysadmin_tools/net_health.sh',
+		'maintenance_scripts/sysadmin_tools/web_workers.sh',
 		// install_security_updates (agent 1.87.0): a Docker host needs its
 		// fixes the day they ship as much as a site does. Sources nothing.
 		'maintenance_scripts/sysadmin_tools/install_security_updates.sh',

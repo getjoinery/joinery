@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.38 - kernel_events_24h counts conntrack_full ("nf_conntrack: table full, dropping packet") and
+#                syn_flood ("Possible SYN flooding on port"): the kernel dropping connections, which a site
+#                behind an edge sees as requests that hang (specs/slow_request_diagnosis_words.md WP4)
 # Version: 1.37 - security_pending: the security fixes this machine is waiting for, from its hourly check
 #                (security_check.sh), each with when it was first seen, and the check's at-once install
 #                (WP6, Q2); services_needing_restart: what still runs code an upgrade replaced
@@ -752,6 +755,11 @@ KERNEL_EVENT_IO='I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem 
 # at FILE:LINE": the boot notices about a CPU's mitigations ("Speculative Return
 # Stack Overflow: WARNING: See ...", "Spectre V2 : WARNING: Unprivileged eBPF
 # ...") say WARNING too, on every boot of every machine with that CPU.
+# The kernel dropping connections: its connection-tracking table full, or a
+# listener's SYN queue overflowing. A site behind an edge sees either as
+# requests that hang and then fail (specs/slow_request_diagnosis_words.md).
+KERNEL_EVENT_CONNTRACK='nf_conntrack: table full, dropping packet'
+KERNEL_EVENT_SYNFLOOD='Possible SYN flooding on port'
 KERNEL_EVENT_WARNING='WARNING: CPU:|BUG:|[Kk]ernel BUG at|Oops:|general protection fault|kernel NULL pointer'
 
 # Whether the system journal can be read here. journalctl -g exits 1 both when
@@ -786,16 +794,18 @@ journal_event_count() {  # PATTERN [MATCH...]
 }
 
 emit_kernel_events() {
-    local oom enospc io warning
+    local oom enospc io warning conntrack syn
     run systemctl show -p Version --value >/dev/null || { printf '"unknown"'; return; }
     journal_readable || { printf '"unknown"'; return; }
     oom="$(journal_event_count "$KERNEL_EVENT_OOM")"       || { printf '"unknown"'; return; }
     enospc="$(journal_event_count "$KERNEL_EVENT_ENOSPC")" || { printf '"unknown"'; return; }
     io="$(journal_event_count "$KERNEL_EVENT_IO")"         || { printf '"unknown"'; return; }
     warning="$(journal_event_count "$KERNEL_EVENT_WARNING" _TRANSPORT=kernel)" || { printf '"unknown"'; return; }
-    printf '{"oom":%s,"enospc":%s,"io_error":%s,"kernel_warning":%s}' \
+    conntrack="$(journal_event_count "$KERNEL_EVENT_CONNTRACK" _TRANSPORT=kernel)" || { printf '"unknown"'; return; }
+    syn="$(journal_event_count "$KERNEL_EVENT_SYNFLOOD" _TRANSPORT=kernel)" || { printf '"unknown"'; return; }
+    printf '{"oom":%s,"enospc":%s,"io_error":%s,"kernel_warning":%s,"conntrack_full":%s,"syn_flood":%s}' \
         "$(json_num_or_unknown "$oom")" "$(json_num_or_unknown "$enospc")" "$(json_num_or_unknown "$io")" \
-        "$(json_num_or_unknown "$warning")"
+        "$(json_num_or_unknown "$warning")" "$(json_num_or_unknown "$conntrack")" "$(json_num_or_unknown "$syn")"
 }
 
 # ---------------------------------------------------------------------------

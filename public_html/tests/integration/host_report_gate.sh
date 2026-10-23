@@ -78,7 +78,7 @@ chk "disk figures are integers" "$(jv "$T/real.json" disk.used_bytes type)/$(jv 
 chk "disk reports what a writer can use, not total minus used" "$(jv "$T/real.json" disk.avail_bytes type)" "integer"
 chk "avail is below total minus used (the root reserve is not free space)" "$( a=$(jv "$T/real.json" disk.avail_bytes); u=$(jv "$T/real.json" disk.used_bytes); t=$(jv "$T/real.json" disk.total_bytes); [ "$a" -le $((t-u)) ]; echo $? )" "0"
 chk "inode use is a percentage or unknown" "$( v=$(jv "$T/real.json" disk.inodes_used_pct); [ "$v" = unknown ] || { [ "$v" -ge 0 ] && [ "$v" -le 100 ]; }; echo $? )" "0"
-chk "kernel events are four counts or unknown" "$( t=$(jv "$T/real.json" kernel_events_24h type); [ "$t" = object ] && [ "$(jv "$T/real.json" kernel_events_24h keys)" = "oom,enospc,io_error,kernel_warning" ] || [ "$(jv "$T/real.json" kernel_events_24h)" = unknown ]; echo $? )" "0"
+chk "kernel events are six counts or unknown" "$( t=$(jv "$T/real.json" kernel_events_24h type); [ "$t" = object ] && [ "$(jv "$T/real.json" kernel_events_24h keys)" = "oom,enospc,io_error,kernel_warning,conntrack_full,syn_flood" ] || [ "$(jv "$T/real.json" kernel_events_24h)" = unknown ]; echo $? )" "0"
 chk "memory figures are integers" "$(jv "$T/real.json" memory.used_bytes type)/$(jv "$T/real.json" memory.total_bytes type)" "integer/integer"
 chk "swap figures are integers" "$(jv "$T/real.json" swap.used_bytes type)/$(jv "$T/real.json" swap.total_bytes type)" "integer/integer"
 chk "reboot_required is a boolean" "$(jv "$T/real.json" reboot_required type)" "boolean"
@@ -460,8 +460,8 @@ fn_src() { sed -n -e '/^safe_name() {/,/^}/p' -e '/^json_str() {.*}$/p' -e '/^js
 fn_src > "$T/fns.sh"
 fn() { (PATH="$T/bin:$PATH"; . "$T/fns.sh"; "$@") 2>/dev/null; }
 chk "the functions under test were each found once, and what they read" \
-    "$(grep -c -E '^(journal_readable|journal_event_count|emit_kernel_events|emit_hardening|run|json_str|json_num_or_unknown|safe_name|in_container)\(\)' "$T/fns.sh")|$(grep -c -E '^(CMD_TIMEOUT|MAX_LIST|MAX_NAME|KERNEL_EVENT_[A-Z]+)=' "$T/fns.sh")|$(bash -n "$T/fns.sh" && echo parses)" "9|7|parses"
-chk "  and they count from a readable journal" "$(fn emit_kernel_events)" '{"oom":1,"enospc":2,"io_error":0,"kernel_warning":3}'
+    "$(grep -c -E '^(journal_readable|journal_event_count|emit_kernel_events|emit_hardening|run|json_str|json_num_or_unknown|safe_name|in_container)\(\)' "$T/fns.sh")|$(grep -c -E '^(CMD_TIMEOUT|MAX_LIST|MAX_NAME|KERNEL_EVENT_[A-Z]+)=' "$T/fns.sh")|$(bash -n "$T/fns.sh" && echo parses)" "9|9|parses"
+chk "  and they count from a readable journal" "$(fn emit_kernel_events)" '{"oom":1,"enospc":2,"io_error":0,"kernel_warning":3,"conntrack_full":0,"syn_flood":0}'
 chk "a journal this run cannot read: unknown" "$(GATE_JOURNAL_UNREADABLE=1 fn emit_kernel_events)" '"unknown"'
 chk "a journalctl that says it cannot run the pattern (exit 1, a complaint): unknown, never 0 (R2)" "$(GATE_JOURNAL_GREP_BROKEN=1 fn emit_kernel_events)" '"unknown"'
 mkdir -p "$T/badgrep"; printf '#!/bin/sh\nexit 2\n' > "$T/badgrep/grep"; chmod 755 "$T/badgrep/grep"

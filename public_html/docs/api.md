@@ -64,7 +64,7 @@ Every response is a JSON object carrying `api_version: "1.0"`. Success and error
 | `validation_errors` | object: field name → message | `ValidationError` only |
 | `error_ref` | object `{id, hash, report_url}` | when the request recorded an error (see [Error references](#error-references)) |
 
-The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`, `ActionError`, `ValidationError`, `SecurityError`, `UpgradeRequired`, `RateLimitError`, `NotFound`. Clients branch on `errortype` plus HTTP status (tables under [Error Handling](#error-handling)); the `error` string is for display and logs, never for matching.
+The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`, `ActionError`, `ValidationError`, `SecurityError`, `UpgradeRequired`, `RateLimitError`, `NotFound`, `RequestTooLarge`, `RequestBodyIncomplete`. Clients branch on `errortype` plus HTTP status (tables under [Error Handling](#error-handling)); the `error` string is for display and logs, never for matching.
 
 ### Pagination
 
@@ -784,8 +784,10 @@ revoke are actions, not CRUD writes — see [Passkeys](passkeys.md).
 |--------|-----------|---------|
 | 400 | AuthenticationError | Missing headers, invalid key, deleted user, missing login fields |
 | 400 | TransactionError | Object not found, validation failure, save error, invalid object name |
+| 400 | RequestBodyIncomplete | The request declared a body (`Content-Length`) that did not arrive in full: the connection stalled or the sender went away. Nothing was changed; send it again |
 | 401 | AuthenticationError | Wrong secret, bad login credentials, IP restricted, inactive/expired/revoked key |
 | 403 | AuthenticationError | Insufficient permission; machine key on `auth/logout`; session key on `management/*` |
+| 413 | RequestTooLarge | The body is over the server's `post_max_size`, so PHP discarded it before any code ran. Nothing was changed |
 | 426 | SecurityError | HTTPS required |
 | 426 | UpgradeRequired | `client_version` below the configured minimum for this `client_app` |
 | 429 | RateLimitError | Rate limit exceeded |

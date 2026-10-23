@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.74 - edge_vs_origin (EdgeOriginProbe, run here, no agent), net_health and web_workers (agent 1.93.0)
  * @version 1.73 - site_log_count: the Logs box's 'Count problem lines since' form posts here; the time is UTC
  * @version 1.72 - the settings form saves mgn_rollout_first (Test releases here first) on a node that hosts a site
  * @version 1.71 - set_reverse_dns says every address it named, and any it left with why (NodeReverseDns::summary, B33)
@@ -221,6 +222,9 @@ class NodeDetailActions {
 		'restore_release_file'     => 'overview',
 		'repair_release_files'     => 'overview',
 		'page_probe'               => 'overview',
+		'net_health'               => 'overview',
+		'web_workers'              => 'overview',
+		'edge_vs_origin'           => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -477,6 +481,14 @@ class NodeDetailActions {
 				return self::jobUrl($job);
 			}
 
+			// Edge versus direct (specs/slow_request_diagnosis_words.md WP5): this
+			// management node times the site itself, inside this request, and
+			// files the completed job; no agent is involved.
+			case 'edge_vs_origin': {
+				$job = EdgeOriginProbe::run_and_record($node, $uid);
+				return self::jobUrl($job);
+			}
+
 			case 'disk_usage': {
 				$built = JobCommandBuilder::build_disk_usage($node);
 				$job = ManagementJob::createFromBuild($node->key, 'disk_usage', $built, null, $uid);
@@ -497,6 +509,8 @@ class NodeDetailActions {
 			case 'site_state_report':
 			case 'install_security_updates':
 			case 'refresh_site_containers':
+			case 'net_health':
+			case 'web_workers':
 			case 'reboot_machine': {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);

@@ -553,7 +553,22 @@ check(is_file($history_dir . '/default_virtualhost-2.05.conf'), 'vhost_history c
 // address — on a shared host, another site's certificate and content. So www
 // has its own :443 host under the same guard, on the same certificate,
 // answering only with a 308 to the apex.
-foreach (array('default_virtualhost.conf' => '2.09', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
+// 2.10 (specs/slow_request_diagnosis_words.md WP1, WP3): each request's
+// duration in the access log, with the user agent still the last field for
+// fail2ban's apache-badbots; the web tier's status pages answered over
+// loopback only and kept out of the route rewrite; 2.09 kept for adoption.
+$t210 = (string)file_get_contents($tools_dir . '/default_virtualhost.conf');
+check(strpos($t210, "\nLogFormat \"%a %l %u %t \\\"%r\\\" %>s %O %D \\\"%{Referer}i\\\" \\\"%{User-Agent}i\\\"\" joinery_timed\n") !== false,
+    'joinery_timed is combined with %D after the byte count: the user agent stays last');
+check(substr_count($t210, 'access.log joinery_timed') === 3 && strpos($t210, 'access.log combined') === false,
+    'every access log the template writes uses joinery_timed');
+check(preg_match_all('/<IfModule authz_host_module>\s*<Location \/fpm-status>\s*SetHandler "proxy:unix:\/run\/php\/joinery-fpm-status\.sock\|fcgi:\/\/joinery-fpm-status"\s*Require local\s*<\/Location>\s*<\/IfModule>/', $t210) === 2,
+    '/fpm-status on the main site\'s two hosts, Require local, and only where Require local can be said');
+check(strpos($t210, 'RewriteCond %{REQUEST_URI} !^/(server-status|fpm-status)$') !== false,
+    'the status pages are kept out of the route rewrite');
+check(is_file($history_dir . '/default_virtualhost-2.09.conf'), 'vhost_history carries 2.09');
+
+foreach (array('default_virtualhost.conf' => '2.10', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
@@ -2010,9 +2025,9 @@ check(strpos($fix_perms_wp1, '"$SITE_ROOT/config/release_verify_keys"') !== fals
 
 section('Root ignores the converger\'s test hooks (specs/package_signing.md review round 2, R1)');
 
-// JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS let the
-// gate point an unprivileged run at the real verifier, a throwaway key and a
-// fixture's plugin list. A root run - the timer, a container start, sudo -
+// JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS, JOINERY_ACTIVE_PLUGINS and
+// JOINERY_ACTIVE_PLUGINS_NOW let the gate point an unprivileged run at the real
+// verifier, a throwaway key and a fixture's plugin lists. A root run - the timer, a container start, sudo -
 // must use its own tool, its own key file and the database whatever the
 // environment says: an environment variable is not something root takes
 // orders from. The gate cannot run as root, so the refusal is pinned as text
@@ -2027,7 +2042,7 @@ if (preg_match_all('/^if \[\[ "\$\(id -u\)" == "0" \]\]; then\n(?:.*\n)*?^fi$/m'
     }
 }
 check($hook_block !== '', 'the runner has a block that runs only as root and mentions an ignored hook');
-foreach (array('JOINERY_VERIFY_PACKAGE', 'JOINERY_VERIFY_KEYS', 'JOINERY_ACTIVE_PLUGINS') as $hook) {
+foreach (array('JOINERY_VERIFY_PACKAGE', 'JOINERY_VERIFY_KEYS', 'JOINERY_ACTIVE_PLUGINS', 'JOINERY_ACTIVE_PLUGINS_NOW') as $hook) {
     check(strpos($hook_block, $hook) !== false, "it covers $hook");
 }
 check(strpos($hook_block, 'unset "${_hook}"') !== false, 'and unsets the hook rather than merely warning');
@@ -2040,9 +2055,9 @@ check($block_at !== false && $block_at < strpos($runner_r1, 'VERIFY_TOOL="${JOIN
 // so once each; with `id` answering 1000, keeps them and says nothing.
 $drive = function (string $uid) use ($hook_block): array {
     $script = 'id() { echo ' . escapeshellarg($uid) . '; }' . "\n"
-        . 'JOINERY_VERIFY_PACKAGE=/x JOINERY_VERIFY_KEYS=/y JOINERY_ACTIVE_PLUGINS=z' . "\n"
+        . 'JOINERY_VERIFY_PACKAGE=/x JOINERY_VERIFY_KEYS=/y JOINERY_ACTIVE_PLUGINS=z JOINERY_ACTIVE_PLUGINS_NOW=n' . "\n"
         . $hook_block . "\n"
-        . 'echo "P=${JOINERY_VERIFY_PACKAGE:-} K=${JOINERY_VERIFY_KEYS:-} A=${JOINERY_ACTIVE_PLUGINS:-}"' . "\n";
+        . 'echo "P=${JOINERY_VERIFY_PACKAGE:-} K=${JOINERY_VERIFY_KEYS:-} A=${JOINERY_ACTIVE_PLUGINS:-} N=${JOINERY_ACTIVE_PLUGINS_NOW:-}"' . "\n";
     $path = sys_get_temp_dir() . '/joinery_r1_' . getmypid() . '.sh';
     file_put_contents($path, $script);
     $out = (string)shell_exec('bash ' . escapeshellarg($path) . ' 2>&1');
@@ -2050,10 +2065,10 @@ $drive = function (string $uid) use ($hook_block): array {
     return array('out' => $out, 'ignored' => substr_count($out, 'hook ignored'));
 };
 $as_root = $drive('0');
-check(strpos($as_root['out'], 'P= K= A=') !== false, 'as root, every hook is dropped', $as_root['out']);
-check($as_root['ignored'] === 3, 'and each is reported ignored, once', $as_root['out']);
+check(strpos($as_root['out'], 'P= K= A= N=') !== false, 'as root, every hook is dropped', $as_root['out']);
+check($as_root['ignored'] === 4, 'and each is reported ignored, once', $as_root['out']);
 $as_user = $drive('1000');
-check(strpos($as_user['out'], 'P=/x K=/y A=z') !== false, 'unprivileged, every hook is kept', $as_user['out']);
+check(strpos($as_user['out'], 'P=/x K=/y A=z N=n') !== false, 'unprivileged, every hook is kept', $as_user['out']);
 check($as_user['ignored'] === 0, 'and nothing is reported', $as_user['out']);
 
 section('An upgrade verifies every archive before it deploys it (specs/package_signing.md WP2)');

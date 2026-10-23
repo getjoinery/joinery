@@ -30,7 +30,10 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.2
+ * @version 1.8.3
+ * @changelog 1.8.3 - A declared body that is missing is told apart by size (RequestBody): over
+ *   post_max_size stays RequestTooLarge 413, a body that never arrived is RequestBodyIncomplete 400.
+ *   Action rows carry RequestLogger::elapsed_ms(); the $GLOBALS start time never reached here.
  * @changelog 1.8.2 - A sessionless action presented with a key is metered by address here:
  *   apiv1.php defers a keyed action request's metering until its key authenticates,
  *   which a sessionless action never waits for.
@@ -376,24 +379,23 @@ class ApiLogicEndpoint {
 		$json_params = json_decode($raw_input, true);
 		$post_params = is_array($json_params) ? $json_params : $_POST;
 
-		// A request body over post_max_size is DISCARDED by PHP before any code
-		// runs: $_POST, $_FILES and php://input all arrive empty while
-		// Content-Length still reports what was sent. Left alone, the request then
-		// fails schema validation on whichever field happens to be checked first,
-		// and the caller is told a field is missing that they did in fact supply —
-		// which sends them looking in exactly the wrong place. Every action taking a
-		// file upload can hit this, so it is caught once, here.
+		// A declared body that is not there: either over post_max_size (PHP
+		// DISCARDS it before any code runs) or never received in full (Apache
+		// gave up waiting for it). Left alone, the request then fails schema
+		// validation on whichever field happens to be checked first, and the
+		// caller is told a field is missing that they did in fact supply —
+		// which sends them looking in exactly the wrong place. Caught once, here;
+		// RequestBody says which of the two it was.
 		$content_length = intval($_SERVER['CONTENT_LENGTH'] ?? 0);
 		if ($content_length > 0 && empty($_POST) && empty($_FILES) && $raw_input === '') {
-			$limit = ini_get('post_max_size');
+			$refusal = RequestBody::missing_body_refusal($content_length);
 			RequestLogger::log('api', 'action ' . $action_label, false, [
 				'user_id' => $user_id,
-				'status_code' => 413,
-				'error_type' => 'RequestTooLarge',
-				'note' => 'Content-Length ' . $content_length . ' exceeds post_max_size ' . $limit
+				'status_code' => $refusal['status'],
+				'error_type' => $refusal['error_type'],
+				'note' => $refusal['note']
 			]);
-			api_error('That request was too large for this server to accept (limit ' . $limit
-				. '). Nothing was received, so nothing was changed.', 'RequestTooLarge', 413);
+			api_error($refusal['message'], $refusal['error_type'], $refusal['status']);
 		}
 
 		// Idempotency, phase 1 (docs/api.md § Contract): resolve the key against
@@ -487,8 +489,7 @@ class ApiLogicEndpoint {
 
 		// Translate LogicResult to API response
 		$translated = api_translate_logic_result($result, $action_label);
-		$response_ms = isset($GLOBALS['api_start_time'])
-			? round((microtime(true) - $GLOBALS['api_start_time']) * 1000) : NULL;
+		$response_ms = RequestLogger::elapsed_ms();
 
 		if ($translated['status_code'] >= 400) {
 			RequestLogger::log('api', 'action ' . $action_label, false, [

@@ -2524,9 +2524,9 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		try { JobCommandBuilder::build_log_table_tail($log_node, $bad[0], $bad[1]); } catch (Exception $e) { $threw = true; }
 		check($threw, 'log_table_tail refuses on the plane: ' . var_export($bad, true));
 	}
-	check(!array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is not on the list (visitor addresses and URLs)');
-	check(count(JobCommandBuilder::SITE_LOG_FILES) === 6 && count(JobCommandBuilder::LOG_TABLES) === 5,
-		'the mirrored lists are the six files and five tables the spec names');
+	check(array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is on the list, as the node\'s compiled shape of each line');
+	check(count(JobCommandBuilder::SITE_LOG_FILES) === 7 && count(JobCommandBuilder::LOG_TABLES) === 5,
+		'the mirrored lists are the seven files and five tables the specs name');
 
 	// site_log_count: a window question answered by counting, never by a tail.
 	$cnt_node = jcb_node(array(
@@ -3082,6 +3082,53 @@ section('The running list\'s words: listening_sockets, container_inventory, spam
 	$said = '';
 	try { JobCommandBuilder::build_reboot_machine($rl_run); } catch (Exception $e) { $said = $e->getMessage(); }
 	check(strpos($said, 'encrypted, decrypted or re-keyed') !== false, 'a data root mid-run is not rebooted, even with a holder', $said);
+}
+
+section('net_health, web_workers and the access log (specs/slow_request_diagnosis_words.md)');
+{
+	$sr_words = 'check_status,site_log,net_health,web_workers';
+	$sr_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+		'mgn_agent_version'    => '1.93.0',
+		'mgn_agent_primitives' => $sr_words,
+		'mgn_agent_log_access' => 'on',
+	));
+	check(JobCommandBuilder::build_net_health($sr_node) === array('primitive' => 'net_health', 'params' => array()),
+		'net_health travels as its name alone');
+	check(JobCommandBuilder::build_web_workers($sr_node) === array('primitive' => 'web_workers', 'params' => array()),
+		'web_workers travels as its name alone: the node passes its own domain');
+	$sr_ctr = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+		'mgn_agent_version'    => '1.93.0',
+		'mgn_agent_primitives' => $sr_words,
+		'mgn_container_name'   => 'somesite',
+	));
+	$said = '';
+	try { JobCommandBuilder::build_net_health($sr_ctr); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'runs in a container') !== false && strpos($said, 'ask its host') !== false,
+		'net_health is refused for a container site and sends the operator to its host', $said);
+	check(JobCommandBuilder::build_web_workers($sr_ctr) === array('primitive' => 'web_workers', 'params' => array()),
+		'web_workers is asked of a container site: its PHP runs there');
+	$sr_old = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
+		'mgn_agent_version'    => '1.92.0',
+		'mgn_agent_primitives' => 'check_status,site_log',
+		'mgn_agent_log_access' => 'on',
+	));
+	foreach (array('build_net_health' => 'net_health', 'build_web_workers' => 'web_workers') as $fn => $word) {
+		$said = '';
+		try { JobCommandBuilder::$fn($sr_old); } catch (Exception $e) { $said = $e->getMessage(); }
+		check(strpos($said, $word) !== false, "an agent without {$word} is told to update, naming it", $said);
+	}
+	check(!array_key_exists('access', JobCommandBuilder::site_log_files_for($sr_old)),
+		'an agent before 1.93.0 is not offered the access log: it would refuse the value');
+	check(array_key_exists('access', JobCommandBuilder::site_log_files_for($sr_node)), 'an agent at 1.93.0 is');
+	$said = '';
+	try { JobCommandBuilder::build_site_log($sr_old, 'access'); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, '1.93.0') !== false, 'asking an older agent for the access log names the version it needs', $said);
+	$built = JobCommandBuilder::build_site_log($sr_node, 'access', false, 50);
+	check(($built['params']['file'] ?? '') === 'access' && ($built['params']['lines'] ?? 0) === 50,
+		'the access log travels as the enum value, like any other file');
 }
 
 harness_finish();

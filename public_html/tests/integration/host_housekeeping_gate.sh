@@ -602,6 +602,23 @@ rm -rf "$PQ/var/spool/postfix/maildrop" "$PQ/etc/postfix/main.cf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PQ" bash "$SCRIPT" x "$T/postfix-site" 2>&1)"
 chk "no Postfix configuration: nothing to create" "$(printf '%s\n' "$out" | grep -c "Postfix's queue")" "0"
 
+
+echo "=== PHP-FPM's status listener (specs/slow_request_diagnosis_words.md WP3) ==="
+PF="$T/fpmstatus"
+mkdir -p "$PF/etc/apache2/conf-enabled" "$PF/etc/php/8.3/fpm/pool.d" "$PF/etc/php/8.1/fpm/pool.d" "$PF/etc/php/7.4/fpm/pool.d"
+touch "$PF/etc/apache2/conf-enabled/php8.3-fpm.conf"
+printf 'stale\n' > "$PF/etc/php/8.1/fpm/pool.d/zz-joinery-status.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PF" bash "$SCRIPT" 2>&1)"
+chk "written for the version Apache hands PHP to" "$(grep -c '^pm.status_listen = /run/php/joinery-fpm-status.sock$' "$PF/etc/php/8.3/fpm/pool.d/zz-joinery-status.conf" 2>/dev/null)" "1"
+chk "with the status path and a graceful reload's 10 s" "$(grep -cE '^(pm.status_path = /fpm-status|process_control_timeout = 10s|\[global\]|\[www\])$' "$PF/etc/php/8.3/fpm/pool.d/zz-joinery-status.conf")" "4"
+chk "removed from a version Apache does not use: two cannot hold one socket" "$(test -e "$PF/etc/php/8.1/fpm/pool.d/zz-joinery-status.conf" && echo kept || echo removed)" "removed"
+chk "a PHP before 8.0 never gets one (no pm.status_listen)" "$(test -e "$PF/etc/php/7.4/fpm/pool.d/zz-joinery-status.conf" && echo written || echo none)" "none"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PF" bash "$SCRIPT" 2>&1)"
+chk "a second run writes nothing" "$(printf '%s\n' "$out" | grep -c 'zz-joinery-status.conf')" "0"
+rm -f "$PF/etc/apache2/conf-enabled/php8.3-fpm.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PF" bash "$SCRIPT" 2>&1)"
+chk "no PHP handed to by Apache: none kept anywhere" "$(ls "$PF"/etc/php/*/fpm/pool.d/zz-joinery-status.conf 2>/dev/null | wc -l)" "0"
+
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

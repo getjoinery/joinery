@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.66 - mgn_addresses: the machine's own addresses, IPv4 and IPv6, as its agent last reported them (its
+ *                 join, or an escrow state post), for the edge-versus-origin probe to time each one
+ *                 (specs/slow_request_diagnosis_words.md WP4)
  * @version 1.65 - mgn_rollout_first: Deploy to all managed nodes tests a release on the nodes marked so first
  * @version 1.64 - adopt_reported_container() places a container node named before placement existed, with no live
  *                placement, on the record for its address (fleet_security_patching B26)
@@ -170,6 +173,11 @@ class ManagedNode extends SystemBase {
 		'mgn_joinery_version'     => array('type'=>'varchar(20)'),
 		'mgn_last_status_check'   => array('type'=>'timestamp(6)'),
 		'mgn_last_status_data'    => array('type'=>'jsonb'),
+		// The machine's own global addresses, IPv4 and IPv6, as a JSON list:
+		// what its agent reported at its join and in each escrow state post
+		// (container bridges already dropped there). A probe target, never a
+		// trust decision. A node with no escrow keeps its join-time list.
+		'mgn_addresses'           => array('type'=>'text'),
 		// The machine, as the host_report observe word last described it, and
 		// when. Untrusted input from the node: JobResultProcessor caps every
 		// field on intake and the Host card escapes every field on render.
@@ -556,6 +564,45 @@ class ManagedNode extends SystemBase {
 	 * what runs on its own is held off. An install state this code does not
 	 * know is not a working node either.
 	 */
+	/** Most addresses kept; the agent sends at most 16. */
+	const MAX_ADDRESSES = 16;
+
+	/**
+	 * Keep the addresses the machine's agent reported: valid IPs only, each
+	 * once, at most MAX_ADDRESSES. Sets the field; the caller saves. Returns
+	 * whether the list changed. An empty or unreadable report changes nothing:
+	 * a report that says nothing is not a machine with no addresses.
+	 */
+	public function record_reported_addresses($list): bool {
+		if (!is_array($list)) {
+			return false;
+		}
+		$out = array();
+		foreach ($list as $a) {
+			if (!is_string($a) || IpAddress::binary(trim($a)) === null) {
+				continue;
+			}
+			$a = inet_ntop(IpAddress::binary(trim($a)));
+			if (!in_array($a, $out, true)) {
+				$out[] = $a;
+			}
+			if (count($out) >= self::MAX_ADDRESSES) {
+				break;
+			}
+		}
+		if (!$out || $out === $this->reported_addresses()) {
+			return false;
+		}
+		$this->set('mgn_addresses', json_encode($out));
+		return true;
+	}
+
+	/** The machine's reported addresses, or an empty list. */
+	public function reported_addresses(): array {
+		$list = json_decode((string)$this->get('mgn_addresses'), true);
+		return is_array($list) ? array_values(array_filter($list, 'is_string')) : array();
+	}
+
 	public function is_operational(): bool {
 		return self::is_operational_from($this);
 	}

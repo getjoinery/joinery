@@ -19,6 +19,9 @@
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.6 - a probe's job keeps its times and its failure in the columns the job has (mjb_started_time,
+ *                mjb_completed_time, mjb_error_message): the names it set were none of them, so each was
+ *                dropped and a failed probe's job said nothing about why
  * @version 1.5 - a 503 with X-Joinery-Locked is locked, not down: an encrypted data root waiting for its key
  *                (specs/hosted_data_promise_disk_encryption.md D2b)
  * @version 1.4 - comments: a relay answers /health (relay 3.7); tcp_port is for a service with no
@@ -304,10 +307,10 @@ class NodeHealthProbe {
 		$job->set('mjb_current_step', 1);
 		$job->set('mjb_created_by', $created_by);
 		$job->set('mjb_output', self::transcript($node, $result));
-		$job->set('mjb_start_time', $now);
-		$job->set('mjb_end_time', $now);
+		$job->set('mjb_started_time', $now);
+		$job->set('mjb_completed_time', $now);
 		if (!$result['ok']) {
-			$job->set('mjb_error', $result['message'] ?: 'The node did not answer.');
+			$job->set('mjb_error_message', $result['message'] ?: 'The node did not answer.');
 		}
 		$job->save();
 		return $job;

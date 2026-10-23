@@ -16,7 +16,10 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.10
+ * @version 1.11
+ * @changelog 1.11 - log() fills response_ms from REQUEST_TIME_FLOAT when the caller passes none (web requests
+ *   only, never the CLI): the API's action path read a start time that never reached it, so every action row
+ *   had no duration (specs/slow_request_diagnosis_words.md WP1 B5)
  * @changelog 1.10 - person_rate_limit_state(): a person's count for one kind of credential (their
  *   browser, their devices, their app credentials), so one kind cannot spend another's budget;
  *   api_key_type() reads the kind this request's rows are stamped with
@@ -62,12 +65,26 @@ class RequestLogger {
 	}
 
 	/**
+	 * Milliseconds since PHP began this request, or null from the CLI, where the
+	 * figure would be a scheduled task's whole lifetime rather than a request's.
+	 */
+	public static function elapsed_ms(): ?int {
+		if (PHP_SAPI === 'cli' || empty($_SERVER['REQUEST_TIME_FLOAT'])) {
+			return null;
+		}
+		return (int)round((microtime(true) - (float)$_SERVER['REQUEST_TIME_FLOAT']) * 1000);
+	}
+
+	/**
 	 * Log a request.
 	 *
 	 * @param string $feature   Feature name (e.g. 'api', 'login', 'register')
 	 * @param string $action    Specific operation (e.g. 'GET /api/v1/User/5', 'login_attempt')
 	 * @param bool   $success   Whether the request succeeded
-	 * @param array  $options   Optional fields: user_id, status_code, error_type, note, response_ms
+	 * @param array  $options   Optional fields: user_id, status_code, error_type, note, response_ms.
+	 *                          Without response_ms a web request's row carries elapsed_ms(): PHP's time on
+	 *                          the request, which starts once Apache has its body, so a visitor's wait
+	 *                          for a body that never came is in the access log's duration, not here.
 	 */
 	public static function log($feature, $action, $success = true, $options = array()) {
 		$log = new RequestLog(NULL);
@@ -81,7 +98,8 @@ class RequestLogger {
 		if (isset($options['user_id']))     $log->set('rql_usr_user_id', $options['user_id']);
 		if (isset($options['status_code'])) $log->set('rql_status_code', $options['status_code']);
 		if (isset($options['error_type']))  $log->set('rql_error_type', $options['error_type']);
-		if (isset($options['response_ms'])) $log->set('rql_response_ms', $options['response_ms']);
+		$response_ms = isset($options['response_ms']) ? $options['response_ms'] : self::elapsed_ms();
+		if ($response_ms !== null)          $log->set('rql_response_ms', $response_ms);
 		if (isset($options['key']))         $log->set('rql_key', substr((string)$options['key'], 0, 64));
 		if (self::$api_key_type !== null)   $log->set('rql_api_key_type', self::$api_key_type);
 		// A page_probe request is logged as a probe, never as the throwaway

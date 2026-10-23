@@ -38,6 +38,8 @@
  * volume is ciphertext, cannot make one, so it can neither move the address
  * check to its own address nor reset the one-answer rule.
  *
+ * @version 1.3 - an enrolment or state report that carries the machine's addresses keeps them on its node too
+ *                (mgn_addresses, specs/slow_request_diagnosis_words.md WP4)
  * @version 1.2 - a vouched enrolment is named by its node (B21); enrol refuses a new enrolment while this holder takes none (DataRootEscrow::takes_new_enrolments,
  *                D7); one approved or enrolled carries on
  * @version 1.1 - rekey (D8); Tier 2 (D3): the provider's activity log read before an unlock is answered,
@@ -249,6 +251,9 @@ class EscrowEndpoint {
 		}
 		if ($node) {
 			$row->set('dre_mgn_managed_node_id', $node->key);
+			if ($node->record_reported_addresses((array)($body['addresses'] ?? array()))) {
+				$node->save();
+			}
 			if ($status !== 'approved') {
 				$row->set('dre_status', 'approved');
 				$row->set('dre_approved_time', gmdate('Y-m-d H:i:s'));
@@ -444,6 +449,15 @@ class EscrowEndpoint {
 		}
 		if (isset($body['addresses'])) {
 			$row->set_stated_addresses((array)$body['addresses']);
+			// The node this enrolment belongs to keeps the machine's current
+			// addresses too (mgn_addresses), for the edge-versus-origin probe.
+			$node_id = (int)$row->get('dre_mgn_managed_node_id');
+			if ($node_id > 0) {
+				$addr_node = new ManagedNode($node_id, TRUE);
+				if ($addr_node->key && $addr_node->record_reported_addresses((array)$body['addresses'])) {
+					$addr_node->save();
+				}
+			}
 		}
 		$row->note_seen_address($addr);
 		$row->note_box((string)($body['box'] ?? ''));
