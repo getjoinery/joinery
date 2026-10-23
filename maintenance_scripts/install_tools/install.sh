@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.28 - provision_origin_cert says it kept a certificate certbot found valid and not yet due, rather
+#               than that it issued one (C7's B51)
 #VERSION 3.27 - provision_origin_cert adopts a certificate a copy carried from its old Docker host (no ACME account
 #               travels) under this machine's own account, so it keeps serving and renews here (C7's B49)
 #VERSION 3.26 - build-base --memory=SIZE bounds the build's steps (the nightly replacement passes it on a
@@ -1736,6 +1738,19 @@ adopt_carried_lineage() {
     print_info "${domain}'s certificate came from its old host; it renews here under this machine's own ACME account."
 }
 
+# certbot ends 0 both when it issued a certificate and when it found the
+# lineage valid and not yet due ("no action taken": a certificate a copy
+# carried in, or a run again on a box that has one). The line printed says
+# which happened; SslProvisionOutcome and the agent's install_report read it.
+# $1 = certbot's output, $2 = the names, $3 = the challenge that renews it.
+report_certbot_success() {
+    if grep -q 'no action taken' "$1"; then
+        print_success "Kept the LE certificate for $2: valid here and not yet due for renewal ($3)"
+    else
+        print_success "Issued LE certificate for $2 ($3)"
+    fi
+}
+
 provision_origin_cert() {
     local domain="$1"
     # A certificate a copy carried over renews under this machine's account.
@@ -1776,12 +1791,16 @@ provision_origin_cert() {
         # block already reads, so all a renewal has to do is reload Apache: the
         # deploy hook is recorded in the lineage's renewal conf as renew_hook.
         # --expand lets an existing apex-only lineage take on www.
+        local cb_log; cb_log="$(mktemp)"
         if certbot certonly --apache "${names[@]}" --non-interactive --agree-tos --expand \
-                --register-unsafely-without-email --deploy-hook 'systemctl reload apache2'; then
-            print_success "Issued LE certificate for ${names[*]//-d /} (HTTP-01)"
+                --register-unsafely-without-email --deploy-hook 'systemctl reload apache2' >"$cb_log" 2>&1; then
+            cat "$cb_log"
+            report_certbot_success "$cb_log" "${names[*]//-d /}" "HTTP-01"
+            rm -f "$cb_log"
             systemctl reload apache2 2>/dev/null || true
             return 0
         fi
+        cat "$cb_log"; rm -f "$cb_log"
         print_warning "HTTP-01 failed; trying DNS-01"
     fi
 
@@ -1802,14 +1821,18 @@ provision_origin_cert() {
                     || print_warning "Could not auto-install ${plugin}; skipping DNS-01"
             fi
             print_step "Domain ${domain} resolves to ${provider}; using DNS-01"
+            local dns_log; dns_log="$(mktemp)"
             if certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
                     "--dns-${provider}" "--dns-${provider}-credentials" "$cred" \
                     --deploy-hook 'systemctl reload apache2' \
-                    -d "$domain"; then
-                print_success "Issued LE certificate for ${domain} (DNS-01 via ${provider})"
+                    -d "$domain" >"$dns_log" 2>&1; then
+                cat "$dns_log"
+                report_certbot_success "$dns_log" "${domain}" "DNS-01 via ${provider}"
+                rm -f "$dns_log"
                 systemctl reload apache2 2>/dev/null || true
                 return 0
             fi
+            cat "$dns_log"; rm -f "$dns_log"
             print_warning "DNS-01 via ${provider} failed"
         else
             print_info "No origin cert issued for ${domain}."

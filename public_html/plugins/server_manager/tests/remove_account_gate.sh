@@ -183,7 +183,8 @@ for s in getjoinery_developers getjoinery_orgs getjoinery_test; do container_sit
 echo "getjoinery_postgres_pg16" >> "$D/volumes"
 echo "joinery-getjoinery:pre-rebase-pg16" >> "$D/images"
 mkdir -p "$T/fs/root/rebase/getjoinery" "$T/fs/root/rebase/getjoinery_orgs"
-touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended" "$T/fs/etc/joinery/sites/getjoinery/quiet"
+touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended" "$T/fs/etc/joinery/sites/getjoinery/quiet" \
+    "$T/fs/etc/joinery/sites/getjoinery/forward" "$T/fs/etc/joinery/sites/getjoinery/certificate-staged"
 # A certificate retry armed for its name, and one for a sibling's.
 mkdir -p "$T/fs/etc/joinery/ssl-retry"
 touch "$T/fs/etc/joinery/ssl-retry/getjoinery.example.conf" "$T/fs/etc/joinery/ssl-retry/getjoinery_orgs.example.conf"
@@ -214,7 +215,7 @@ chk "A: getjoinery's vhost and its backup gone" "$(ls "$T/fs/etc/apache2/sites-a
 chk "A: no database dropped on a Docker host" "$(logged '^dropdb')" "0"
 chk "A: rebase work dir gone" "$(there /root/rebase/getjoinery)" "no"
 chk "A: a sibling's rebase work dir kept" "$(there /root/rebase/getjoinery_orgs)" "yes"
-chk "A: held, quiet and suspended marks gone" "$(ls "$T/fs/etc/joinery/sites/getjoinery" | wc -l | tr -d ' ')" "0"
+chk "A: held, quiet, forward, certificate-staged and suspended marks gone" "$(ls "$T/fs/etc/joinery/sites/getjoinery" | wc -l | tr -d ' ')" "0"
 chk "A: and its state folder with them, once empty (B24)" "$(there /etc/joinery/sites/getjoinery)" "no"
 chk "A: its certificate retry stopped, the sibling's kept (B15)" \
     "$(there /etc/joinery/ssl-retry/getjoinery.example.conf):$(logged 'disable --now joinery-ssl-retry@getjoinery.example.timer'):$(there /etc/joinery/ssl-retry/getjoinery_orgs.example.conf):$(logged 'joinery-ssl-retry@getjoinery_orgs')" \

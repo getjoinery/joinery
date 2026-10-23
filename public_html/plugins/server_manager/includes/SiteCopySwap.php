@@ -29,6 +29,8 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.7 - at a take-over the old machine's row keeps the release both machines run, so Permanently Delete
+ *                Site can remove a switch-over's old container (C7's B52)
  * @version 1.6 - the container's published port moves with the machine: a copy onto a host is a container
  *                too, on a port of its own there (specs/site_container_engine.md D9)
  * @version 1.5 - an escrow row follows its machine: it stayed on the node, whose page then showed, and whose Stop
@@ -136,6 +138,15 @@ class SiteCopySwap {
 			foreach (self::MACHINE_COLUMNS as $col) {
 				$node->set($col, $b[$col]);
 				$other->set($col, $a[$col]);
+			}
+			// At a take-over both machines run the one release: a copy installs
+			// its site's exact release and is refused a switch once they differ
+			// (SiteCopyRunner::stale_release). The old machine's row keeps
+			// it, as no check can ask a container held stopped, and Permanently
+			// Delete Site needs it (build_decommission_node).
+			$release = trim((string)$node->get('mgn_joinery_version'));
+			if ($other_state === 'retired' && $release !== '') {
+				$other->set('mgn_joinery_version', $release);
 			}
 			$node->set('mgn_install_state', $node_state);
 			$other->set('mgn_install_state', $other_state);

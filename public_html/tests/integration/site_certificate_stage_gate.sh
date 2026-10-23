@@ -9,7 +9,8 @@
 #
 # A container site's certificate, handed to its copy (C7's B49): the host
 # stages the site's own lineage inside its container for the export, and the
-# copy adopts it under its own ACME account. Driven unprivileged: the host's
+# copy adopts it under its own ACME account, its certificate step saying it
+# kept that certificate rather than issued one. Driven unprivileged: the host's
 # /etc is a fixture (SITE_CERT_STAGE_ETC), the engine a stub on ENGINE whose
 # exec and cp act on a fixture container root, and certbot a stub on PATH.
 
@@ -133,6 +134,17 @@ chk "issued over DNS-01 and its credentials did not travel: renews over HTTP-01"
     "$(grep -c '^authenticator = apache$' "$CP/renewal/dns.example.org.conf"):$(grep -c '^dns_cloudflare' "$CP/renewal/dns.example.org.conf")" "1:0"
 adopt none.example.org
 chk "no lineage: nothing done" "$(ls "$CP/renewal" | wc -l)" "2"
+
+echo "=== the certificate step says it kept a valid certificate, never that it issued one ==="
+rfn="$(sed -n '/^report_certbot_success() {/,/^}/p' "$INSTALL")"
+rep() { ( print_success() { echo "OK $*"; }; eval "$rfn"; report_certbot_success "$1" "site.example.org" "HTTP-01" ); }
+printf 'Certificate not yet due for renewal; no action taken.\n' > "$T/kept.log"
+printf 'Successfully received certificate.\n' > "$T/issued.log"
+chk "certbot kept a valid certificate: the line says kept" "$(rep "$T/kept.log")" \
+    "OK Kept the LE certificate for site.example.org: valid here and not yet due for renewal (HTTP-01)"
+chk "certbot issued one: the line says issued" "$(rep "$T/issued.log")" "OK Issued LE certificate for site.example.org (HTTP-01)"
+chk "both ways of issuing report through it, and nothing claims an issue on its own" \
+    "$(sed -n '/^provision_origin_cert() {/,/^}/p' "$INSTALL" | grep -c 'report_certbot_success "\$'):$(sed -n '/^provision_origin_cert() {/,/^}/p' "$INSTALL" | grep -c 'Issued LE certificate')" "2:0"
 
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"

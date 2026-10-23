@@ -183,8 +183,12 @@ foreach (array('old' => $sw_src, 'copy' => $sw_copy) as $which => $on) {
 }
 
 // The source runs in a container: its container is part of the old machine.
+// Its release is on record; its copy's row, as a copy made here, has none.
 $sw_src->set('mgn_container_name', 'scpswapsite');
+$sw_src->set('mgn_joinery_version', '0.8.525');
 $sw_src->save();
+$sw_copy->set('mgn_joinery_version', null);
+$sw_copy->save();
 $tjob = ManagementJob::createFromBuild($sw_copy->key, 'take_node_id', $built, null, null);
 harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $tjob->key);
 $tjob->set('mjb_status', 'completed');
@@ -214,6 +218,9 @@ check((int)$sw_escrow['copy']->get('dre_mgn_managed_node_id') === (int)$sw_src->
 	'so does each machine\'s escrow row: the node\'s page shows the key of the machine it holds now (B56)');
 check((string)$sw_src->get('mgn_container_name') === '' && (string)$sw_copy->get('mgn_container_name') === 'scpswapsite',
 	'a container source\'s container stays with the old machine: the node is bare metal now');
+check((string)$sw_copy->get('mgn_joinery_version') === '0.8.525' && (string)$sw_src->get('mgn_joinery_version') === '0.8.525',
+	'the old machine\'s row keeps the release both machines run: its container, held stopped, can never say it again, '
+	. 'and Permanently Delete Site asks it (B52)', (string)$sw_copy->get('mgn_joinery_version'));
 check((string)$sw_copy->get('mgn_name') === $sw_src->get('mgn_name') . ' (old container)',
 	'the retired row is named for what it holds now: the site\'s old container, not its copy', (string)$sw_copy->get('mgn_name'));
 check(JobResultProcessor::complete_take_node_id($tjob) === 0, 'a result answered once is never swapped again');
