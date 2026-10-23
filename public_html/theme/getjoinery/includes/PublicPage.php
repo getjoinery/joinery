@@ -89,6 +89,7 @@ class PublicPage extends PublicPageBase {
     <?php echo $_head_inject; ?>
     <?php $this->global_includes_top($options); ?>
 
+    <link rel="icon" type="image/svg+xml" href="/theme/getjoinery/assets/img/favicon.svg?v=<?php echo $this->asset_mtime('theme/getjoinery/assets/img/favicon.svg'); ?>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
