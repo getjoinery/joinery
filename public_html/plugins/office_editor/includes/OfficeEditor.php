@@ -16,6 +16,7 @@
  *     or Fortress file would put its plaintext in the editor's memory and temp
  *     files, outside the promise those levels make.
  *
+ * @version 0.2.0 - hostCommand(): the plugin's deactivate and uninstall hooks switch the editor off and remove it
  * @version 0.1.0
  */
 class OfficeEditor {
@@ -32,7 +33,7 @@ class OfficeEditor {
 	/** Written by the installer when it finished, read here to know the editor exists. */
 	const INSTALLED_MARK = '/etc/joinery/office_editor/installed';
 
-	/** The one command the web user may run as root (sudoers, installer step 6). */
+	/** The one command the web user may run as root (sudoers, installer step 5). */
 	const CTL = '/usr/local/sbin/office-editor-ctl';
 
 	/** A parsed discovery the suite stands in for the service with. */
@@ -322,8 +323,8 @@ class OfficeEditor {
 
 	/**
 	 * Ask root to start the service (sudoers lets the web user run exactly
-	 * `office-editor-ctl start` and `status`). It returns at once; the caller
-	 * polls discovery.
+	 * `office-editor-ctl start`, `status`, `off` and `remove`). It returns at
+	 * once; the caller polls discovery.
 	 */
 	public static function requestStart() {
 		if (!self::installed()) {
@@ -336,5 +337,30 @@ class OfficeEditor {
 			error_log('[office_editor] start refused (' . $rc . '): ' . implode(' | ', $out));
 		}
 		return $rc === 0;
+	}
+
+	/**
+	 * Run `office-editor-ctl off` (the plugin is switched off) or `remove` (it is
+	 * uninstalled) as root. A server the editor was never put on has nothing to
+	 * do. Never throws.
+	 *
+	 * @return array ['ok' => bool, 'message' => string]
+	 */
+	public static function hostCommand($verb) {
+		if (!in_array($verb, array('off', 'remove'), true)) {
+			return array('ok' => false, 'message' => 'unknown verb ' . $verb);
+		}
+		if (!is_file(self::CTL)) {
+			return array('ok' => true, 'message' => 'the editor is not on this server');
+		}
+		$out = array();
+		$rc = 1;
+		@exec('sudo -n ' . escapeshellarg(self::CTL) . ' ' . $verb . ' 2>&1', $out, $rc);
+		$said = trim(implode(' ', $out));
+		if ($rc !== 0) {
+			return array('ok' => false, 'message' => 'office-editor-ctl ' . $verb . ' failed (' . $rc . '): ' . $said
+				. ' Run as root: sudo ' . self::CTL . ' ' . $verb);
+		}
+		return array('ok' => true, 'message' => $said);
 	}
 }

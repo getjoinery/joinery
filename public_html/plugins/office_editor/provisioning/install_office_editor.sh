@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # install_office_editor.sh - host installer for the office_editor plugin.
+# Version: 0.1.2 - the web user may also run office-editor-ctl off and remove (the
+#                plugin's deactivate and uninstall hooks). Every setting is written
+#                into the editor's configuration file: editor 26.04.5.2 ignores
+#                some command-line overrides (the WOPI host, the spare count, the
+#                log level), which left it refusing the site.
 # Version: 0.1.1 - stops the editor the package starts on a fresh install; a container
 #                site's refusal is recorded for the Plugins page like any other.
 # Version: 0.1.0 - first version (specs/cloud_drive_office_suite.md § 3).
@@ -15,9 +20,10 @@
 #     hosted or redistributed by Joinery. The vendor's branding package, under
 #     its own all-rights-reserved licence, is never installed;
 #   - /etc/joinery/office_editor/coolwsd.xml, the packaged configuration with
-#     every "fetch from this network" allowance removed (a document cannot make
-#     the editor reach into the private network), and a systemd drop-in that
-#     runs the editor with it and the settings below, and a memory cap;
+#     this server's settings written in and every "fetch from this network"
+#     allowance removed (a document cannot make the editor reach into the
+#     private network), and a systemd drop-in that runs the editor with it and
+#     a memory cap;
 #   - an Apache drop-in: /browser, /hosting/capabilities and /cool proxied to
 #     the editor (websockets included), its conversion endpoints refused, and a
 #     listener on 127.0.0.1:9981 only the editor can reach, which serves the
@@ -25,8 +31,9 @@
 #   - the editor's metrics on loopback (what it has open), which the site reads
 #     to hold it under home mode's limits and the idle stop reads to know it is
 #     idle;
-#   - /usr/local/sbin/office-editor-ctl start|status|stop|idle-check, the first
-#     two of which the web user may run as root (sudoers rule);
+#   - /usr/local/sbin/office-editor-ctl start|status|stop|idle-check|off|remove,
+#     of which the web user may run start, status, off and remove as root
+#     (sudoers rule);
 #   - /etc/cron.d/joinery-office-editor, the idle stop.
 #
 # A site container is not served in this version (spec § 1): said, and nothing
@@ -142,21 +149,64 @@ install -d -m 755 "${STATE_DIR}"
 PACKAGED_CONF="/etc/coolwsd/coolwsd.xml"
 CONF="${STATE_DIR}/coolwsd.xml"
 [[ -f "${PACKAGED_CONF}" ]] || refuse "The editor's packaged configuration is missing"
-# The packaged file with the inside of lok_allow and post_allow taken out: they
-# let a document pull data from (and REST callers reach) loopback and every
-# private range, which on a shared cloud network is other people's machines.
-# The WOPI host below is still allowed - storage entries always are.
+# The packaged file with this server's settings written in. They go in the
+# file, never on the command line: the editor's own releases have dropped
+# command-line overrides before (26.04.5.2 ignores the WOPI host, the spare
+# count and the log level there).
+#   - listening on loopback, IPv4, plain http (TLS is Apache's);
+#   - the one WOPI host it trusts, the loopback listener below;
+#   - one spare child, home mode, warnings only in the log (starting too:
+#     the packaged start-up level is trace, ~1,000 journal lines a start);
+#   - the metrics answered without a login (the admin console that serves them
+#     admits nobody: no admin user is configured);
+#   - the inside of lok_allow and post_allow taken out: they let a document
+#     pull data from (and REST callers reach) loopback and every private range,
+#     which on a shared cloud network is other people's machines. The WOPI host
+#     is still allowed - storage entries always are.
 CANDIDATE="$(mktemp)"
-sed -e '/<lok_allow\b/,/<\/lok_allow>/{/<lok_allow\b/!{/<\/lok_allow>/!d}}' \
-    -e '/<post_allow\b/,/<\/post_allow>/{/<post_allow\b/!{/<\/post_allow>/!d}}' \
-    "${PACKAGED_CONF}" > "${CANDIDATE}"
+CONF_ERROR="$("${PHP_BIN}" -r '
+    $doc = new DOMDocument();
+    if (!@$doc->load($argv[1])) { echo "it could not be read"; exit(1); }
+    $xp = new DOMXPath($doc);
+    $one = function ($path) use ($xp) {
+        $nodes = $xp->query($path);
+        if ($nodes->length !== 1) { echo "it has no single " . $path; exit(1); }
+        return $nodes->item(0);
+    };
+    $values = array(
+        "/config/net/listen" => "loopback",
+        "/config/net/proto" => "IPv4",
+        "/config/ssl/enable" => "false",
+        "/config/ssl/termination" => "true",
+        "/config/num_prespawn_children" => "1",
+        "/config/home_mode/enable" => "true",
+        "/config/admin_console/enable" => "true",
+        "/config/security/enable_metrics_unauthenticated" => "true",
+        "/config/logging/level" => "warning",
+        "/config/logging/level_startup" => "warning",
+    );
+    foreach ($values as $path => $value) {
+        $one($path)->textContent = $value;
+    }
+    foreach (array("/config/net/lok_allow", "/config/net/post_allow") as $path) {
+        $node = $one($path);
+        while ($node->firstChild) { $node->removeChild($node->firstChild); }
+    }
+    $groups = $one("/config/storage/wopi/alias_groups");
+    $groups->setAttribute("mode", "groups");
+    foreach (iterator_to_array($xp->query("group", $groups)) as $old) { $groups->removeChild($old); }
+    $group = $groups->appendChild($doc->createElement("group"));
+    $host = $group->appendChild($doc->createElement("host", "http://127.0.0.1:9981"));
+    $host->setAttribute("allow", "true");
+    if ($doc->save($argv[2]) === false) { echo "it could not be written"; exit(1); }
+' "${PACKAGED_CONF}" "${CANDIDATE}" 2>&1)" || { rm -f "${CANDIDATE}"; refuse "The editor's packaged configuration is not one this installer understands: ${CONF_ERROR}"; }
 if ! cmp -s "${CANDIDATE}" "${CONF}"; then
     install -m 640 -o root -g cool "${CANDIDATE}" "${CONF}"
     RESTART=1
 fi
 rm -f "${CANDIDATE}"
 
-# The packaged unit's command line, with this server's settings after it.
+# The packaged unit's command line, pointed at the configuration above.
 # Read from the package's own unit file, never `systemctl cat`, which also
 # prints this installer's drop-in. A package upgrade that changes the line is
 # picked up at the next converge.
@@ -175,7 +225,7 @@ DROPIN="${DROPIN_DIR}/joinery.conf"
 WANT_DROPIN="# Written by ${SCRIPT_DIR}/install_office_editor.sh - do not edit.
 [Service]
 ExecStart=
-ExecStart=${PACKAGED_EXEC} --config-file=${CONF} --o:net.listen=loopback --o:net.proto=IPv4 --o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.alias_groups[@mode]=groups --o:storage.wopi.alias_groups.group[0].host[0]=http://127.0.0.1:9981 --o:storage.wopi.alias_groups.group[0].host[0][@allow]=true --o:num_prespawn_children=1 --o:home_mode.enable=true --o:admin_console.enable=true --o:security.enable_metrics_unauthenticated=true --o:logging.level=warning
+ExecStart=${PACKAGED_EXEC} --config-file=${CONF}
 Restart=on-failure
 MemoryMax=${MEM_CAP_MB}M"
 install -d -m 755 "${DROPIN_DIR}"
@@ -289,7 +339,7 @@ if ! id -u "${WEB_USER}" >/dev/null 2>&1; then
 fi
 SUDOERS="/etc/sudoers.d/joinery-office-editor"
 CANDIDATE="$(mktemp)"
-echo "${WEB_USER} ALL=(root) NOPASSWD: ${CTL} start, ${CTL} status" > "${CANDIDATE}"
+echo "${WEB_USER} ALL=(root) NOPASSWD: ${CTL} start, ${CTL} status, ${CTL} off, ${CTL} remove" > "${CANDIDATE}"
 if visudo -cf "${CANDIDATE}" >/dev/null 2>&1; then
     if ! cmp -s "${CANDIDATE}" "${SUDOERS}"; then
         install -m 440 "${CANDIDATE}" "${SUDOERS}"

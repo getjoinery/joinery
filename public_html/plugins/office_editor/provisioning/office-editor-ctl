@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # office-editor-ctl - start, report on and idle-stop the document editor.
+# Version: 0.2.0 - off and remove, for switching the plugin off and uninstalling it
 # Version: 0.1.0
 #
 # Installed root-owned at /usr/local/sbin by install_office_editor.sh. The web
-# user may run `start` and `status` through sudo (opening a document starts the
-# editor); `stop` and `idle-check` are root's (the cron job).
+# user may run `start`, `status`, `off` and `remove` through sudo (opening a
+# document starts the editor; the plugin's deactivate and uninstall hooks run
+# the last two); `stop` and `idle-check` are root's (the cron job).
 #
 #   start       start the editor if it is not running; returns at once
 #   status      print active or inactive; exit 0 either way
 #   stop        stop it
 #   idle-check  stop it once no document has been open for IDLE_MINUTES
+#   off         the plugin is switched off: stop the editor and take its pages
+#               off this site's address. The installer puts them back when the
+#               plugin is next active.
+#   remove      the plugin is uninstalled: off, then everything the installer
+#               put on this server, this command last
 #
 # "Idle" is the editor's own count of open documents, from its metrics on
 # loopback: a document stays open while anyone has it in a tab.
@@ -19,6 +26,24 @@ set -euo pipefail
 IDLE_MINUTES=30
 RUN_DIR="/run/joinery-office-editor"
 BUSY_MARK="${RUN_DIR}/last-busy"
+STATE_DIR="/etc/joinery/office_editor"
+APACHE_CONF="joinery-office-editor"
+
+# Stop the editor, forget it is installed (the site then offers nothing to
+# open until the installer runs again), and take its Apache drop-in out.
+switch_off() {
+    systemctl stop coolwsd 2>/dev/null || true
+    rm -f "${STATE_DIR}/installed"
+    if [[ -e "/etc/apache2/conf-enabled/${APACHE_CONF}.conf" ]]; then
+        a2disconf -q "${APACHE_CONF}" >/dev/null
+        if apachectl configtest >/dev/null 2>&1; then
+            systemctl reload apache2
+        else
+            echo "Apache's configuration does not pass its test with the editor's drop-in out: $(apachectl configtest 2>&1 | tail -n 1)" >&2
+            exit 1
+        fi
+    fi
+}
 
 case "${1:-}" in
     start)
@@ -54,8 +79,38 @@ case "${1:-}" in
             echo "stopped after ${IDLE_MINUTES} idle minutes"
         fi
         ;;
+    off)
+        switch_off
+        echo "off"
+        ;;
+    remove)
+        switch_off
+        rm -f /etc/cron.d/joinery-office-editor "/etc/apache2/conf-available/${APACHE_CONF}.conf"
+        if [[ -d /etc/systemd/system/coolwsd.service.d ]]; then
+            rm -f /etc/systemd/system/coolwsd.service.d/joinery.conf
+            rmdir /etc/systemd/system/coolwsd.service.d 2>/dev/null || true
+            systemctl daemon-reload
+        fi
+        # The editor and the office engine it brought (the installer's own
+        # apt-get install pulled nothing else). A held dpkg lock is waited for.
+        mapfile -t packages < <(dpkg-query -W -f='${Package} ${Status}\n' 'coolwsd' 'collaboraoffice*' 'code-brand' 2>/dev/null \
+            | awk '$NF == "installed" {print $1}')
+        if (( ${#packages[@]} > 0 )); then
+            DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq -o DPkg::Lock::Timeout=120 "${packages[@]}" >/dev/null
+        fi
+        rm -f /etc/apt/sources.list.d/collaboraonline.sources /usr/share/keyrings/collaboraonline-release-keyring.gpg
+        # What the package's purge leaves: its signing key, its working tree
+        # and its system user. A later install makes all three afresh.
+        rm -rf /etc/coolwsd /opt/cool
+        if getent passwd cool >/dev/null; then userdel cool >/dev/null 2>&1 || true; fi
+        if getent group cool >/dev/null; then groupdel cool >/dev/null 2>&1 || true; fi
+        rm -rf "${STATE_DIR}" "${RUN_DIR}"
+        rm -f /etc/sudoers.d/joinery-office-editor
+        rm -f "$0"
+        echo "removed"
+        ;;
     *)
-        echo "usage: office-editor-ctl start|status|stop|idle-check" >&2
+        echo "usage: office-editor-ctl start|status|stop|idle-check|off|remove" >&2
         exit 2
         ;;
 esac

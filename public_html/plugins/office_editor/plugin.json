@@ -1,6 +1,6 @@
 {
     "name": "Office Editor",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "Open Word and Excel files from Drive in the browser, edit them and save them back, alone or together. The editor runs on this server, so the files never leave it. Standard-level files only.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",

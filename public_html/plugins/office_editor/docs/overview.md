@@ -154,16 +154,19 @@ root by the host converger once the plugin is active):
    all-rights-reserved licence) is never installed. The editor bundles metric
    twins of Times New Roman, Arial, Calibri and Cambria, so no font packages.
 3. Writes `/etc/joinery/office_editor/coolwsd.xml`: the packaged configuration
-   with `lok_allow` and `post_allow` emptied, so a document cannot make the
-   editor fetch from loopback or a private network. A systemd drop-in runs the
-   editor with it, listening on loopback only, TLS left to Apache, the WOPI host
-   allowlist holding the loopback listener alone, one pre-spawned child, home
-   mode, the metrics answered without a login (on loopback; the admin console
-   that serves them admits nobody, since no admin user is configured; any
-   process on the server can read them, open file names included, which is no
-   more than the same processes can already read of the editor's working
-   copies and the site), and
-   `MemoryMax` at half the server's memory
+   (edited as XML) with `lok_allow` and `post_allow` emptied, so a document
+   cannot make the editor fetch from loopback or a private network, and this
+   server's settings: listening on loopback only, TLS left to Apache, the WOPI
+   host allowlist holding the loopback listener alone, one pre-spawned child,
+   home mode, warnings only in the log, the metrics answered without a login
+   (on loopback; the admin console that serves them admits nobody, since no
+   admin user is configured; any process on the server can read them, open
+   file names included, which is no more than the same processes can already
+   read of the editor's working copies and the site). Every setting is in the
+   file, none on the command line, which the editor does not reliably honour
+   (26.04.5.2 ignores the WOPI host and the spare count there). A packaged file missing one of these settings
+   is refused with the reason. A systemd drop-in runs the editor with the file
+   and `MemoryMax` at half the server's memory
    (at least 400 MB). Past the cap the editor's overflow goes to swap and opens
    slow down; the database and web server are untouched. The editor is not
    started at boot, and is stopped again when the package first installs
@@ -177,7 +180,7 @@ root by the host converger once the plugin is active):
    connection while the editor was stopped must not hold Apache off for a
    minute) and `disablereuse=On` (no idle connection outlives its browser).
 5. Installs `/usr/local/sbin/office-editor-ctl` and a sudoers rule that lets the
-   web user run exactly `office-editor-ctl start` and `office-editor-ctl status`.
+   web user run exactly `office-editor-ctl start`, `status`, `off` and `remove`.
 6. Adds `/etc/cron.d/joinery-office-editor`: every minute, `idle-check` stops
    the editor once it has had no document open for 30 minutes (its own count,
    `kit_assigned_count`, from the metrics).
@@ -186,6 +189,21 @@ root by the host converger once the plugin is active):
 
 The provisioning check `OfficeEditorHealth::checkInstalled` passes when the mark
 is there and `sudo -n office-editor-ctl status` answers.
+
+### Switching off and uninstalling
+
+- **Switching the plugin off** (`deactivate.php`) runs `office-editor-ctl off`:
+  the editor stops, the installed mark goes, and the Apache drop-in is disabled,
+  so neither the editor's pages nor its loopback listener stay up. The package
+  stays. Activating the plugin again, the host converger runs the installer,
+  which puts it all back.
+- **Uninstalling** (`uninstall.php`) runs `office-editor-ctl remove`: off, then
+  the editor's packages (`coolwsd` and the `collaboraoffice*` engine), the apt
+  source and key, what the purge leaves (`/etc/coolwsd` with the editor's
+  signing key, `/opt/cool`, the `cool` user), the drop-ins, the cron job, `/etc/joinery/office_editor`, the
+  sudoers rule and the control command itself. If it fails the plugin stays
+  installed, so the uninstall can be run again.
+- A container site has none of it, so both are no-ops there.
 
 Moving to a paid licence later swaps the package in step 2 and drops home mode
 in step 3; nothing else changes. Never put the vendor's name in a product or
