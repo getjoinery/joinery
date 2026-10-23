@@ -1,6 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.17.0 — /mail/forward-confirm is never cached: each link is one recipient's, and a confirmed page names
+// both addresses (static_cache false).
 // @version 1.16.0 — /drive is gated on drive_active: 404 with Drive off, not an error page.
 // @version 1.15.0 — /drive/zip/{folder_id}: a Drive folder as a zip (includes/drive_zip_route.php).
 // @version 1.14.0 — /manifest.webmanifest: the site's web app manifest (views/manifest.php).
@@ -144,7 +146,8 @@ $routes = [
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
         '/book/{slug}'         => ['view' => 'plugins/bookings/views/book', 'check_setting' => 'bookings_active'],
         '/booking/manage'      => ['view' => 'plugins/bookings/views/booking_manage', 'check_setting' => 'bookings_active'],
-        '/mail/forward-confirm' => ['view' => 'views/forward_confirm', 'plugin' => 'mailbox'],
+        // One recipient's link: a confirmed page names both addresses.
+        '/mail/forward-confirm' => ['view' => 'views/forward_confirm', 'plugin' => 'mailbox', 'static_cache' => false],
         // mail_apps: Thunderbird autoconfig, at the two places a mail program
         // looks for it (the plugin answers only for mail domains this site hosts).
         '/mail/config-v1.1.xml'                         => ['view' => 'views/autoconfig', 'plugin' => 'mail_apps'],

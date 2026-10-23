@@ -121,7 +121,7 @@ URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array t
 | `handler` | Yes* | Alternative to `view`: a handler file (no `.php`) that fully serves the response itself (e.g. ICS downloads) — no view/theme resolution runs |
 | `plugin` | No | Plugin name that owns this route. View/handler and auto-loaded logic resolve from the plugin's directory; the route hard-404s while the plugin is inactive. See below |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
-| `static_cache` | No | `false` — the response is never written to the static page cache and leaves no index entry (a search page, where every query string is its own page). A view can do the same with `StaticPageCache::skipThisRequest()` |
+| `static_cache` | No | `false` — the response is never written to the static page cache and leaves no index entry (a search page, where every query string is its own page, or a link made for one recipient). A view can do the same with `StaticPageCache::skipThisRequest()` |
 | `min_permission` | No | Minimum permission level required (uses `SessionControl::check_permission()`). **See the ladder below — note `0` requires login; *omit* the key for a truly public page.** |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
 
@@ -275,6 +275,9 @@ The cache is managed by `includes/StaticPageCache.php` and checked inside `Route
 - 1% of cache hits are randomly invalidated so pages stay fresh without a TTL.
 - Pages that cannot be cached (login-required, POST responses, error pages) are marked `nostatic`
   in the index and skipped on future checks.
+- Some paths are never cached nor served from the cache, whatever the index holds
+  (`StaticPageCache::isExcludedPath()`): the sign-in and password-reset steps, the cart and
+  checkout, file downloads, and `/copy-key`, which shows what this machine's agent is waiting for.
 
 **Cache location:** `{site_root}/cache/static_pages/`
 - `index.json` — maps URL keys to `{status, url, time, extension}` entries
@@ -296,6 +299,9 @@ invalidation covers the common cases (see below), so manual clearing should rare
 **Automatic invalidation:**
 - `alternate_homepage` or `alternate_loggedin_homepage` settings saved → `/` invalidated
 - `active_theme` setting saved → entire cache flushed
+- An upgrade (`utils/upgrade.php`) or a restore (`reconcile_site.sh`) → every saved page deleted;
+  `index.json`, which holds whether the cache is on and which URLs are `nostatic`, is kept, and an
+  entry whose page is gone is dropped the next time it is asked for
 - A forum change → that topic's pages, its category, `/forum` and `/sitemap` (see the forum plugin's docs)
 
 **Invalidating from code:** `StaticPageCache::invalidateUrl($url, $params)` removes one exact URL.

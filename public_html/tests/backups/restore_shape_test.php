@@ -4,7 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
- * covers: [maintenance_scripts/sysadmin_tools/restore_project.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh]
+ * covers: [maintenance_scripts/sysadmin_tools/restore_project.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh, maintenance_scripts/sysadmin_tools/reconcile_site.sh]
  */
 /**
  * A backup is supposed to rebuild a site anywhere. It could not: put a backup
@@ -176,6 +176,30 @@ exec('bash ' . escapeshellarg($reconcile_sh) . ' targetsite --site-dir ' . escap
 check($rc === 0, 'an archive taken before shape.json existed does not fail the restore');
 check(strpos(implode("\n", $out), 'RECONCILE_SOURCE_SHAPE unknown') !== false,
 	'the source shape reads as unknown rather than being guessed at', implode("\n", $out));
+
+// ─────────────────────────────────────────────────────────────────────────────
+section('No page the cache saved before the restore is served after it');
+
+// Backups never carry cache/, so what is saved there is this machine's render
+// of what it held before: a copy's pages saved while its owner looked at it
+// were served over its next restore's content. The index holds whether the
+// cache is on, so it stays as it was.
+$cache = $tgt_dir . '/cache/static_pages';
+@mkdir($cache, 0777, true);
+$index = json_encode(['.config' => ['enabled' => false], 'about' => ['status' => 'cached', 'extension' => '.html']]);
+file_put_contents($cache . '/index.json', $index);
+file_put_contents($cache . '/about.html', '<html>before the restore</html>');
+file_put_contents($cache . '/feed.xml', '<rss/>');
+
+$out = []; $rc = 0;
+exec('bash ' . escapeshellarg($reconcile_sh) . ' targetsite --site-dir ' . escapeshellarg($tgt_dir)
+	. ' --domain new.example.com --skip-web-config --skip-ssl 2>/dev/null', $out, $rc);
+$cache_report = implode("\n", $out);
+check($rc === 0 && strpos($cache_report, 'RECONCILE_PAGE_CACHE cleared') !== false,
+	'the reconcile clears the saved pages and says so', $cache_report);
+check(!file_exists($cache . '/about.html') && !file_exists($cache . '/feed.xml'), 'every saved page is gone, whatever its kind');
+check((string)@file_get_contents($cache . '/index.json') === $index,
+	'the index is kept as it was, so a cache its operator turned off stays off');
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('A database that will not open is a failure, not a warning');

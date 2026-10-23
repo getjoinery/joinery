@@ -98,6 +98,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.41 - a switch by IP swap ends by naming the copy's IPv6 in reverse DNS when the site's AAAA gives it
+ *                (IpSwapMove::name_copy_ipv6), said on the Copy tab; keeping the switch-over asks again when it was
+ *                not named (B45)
  * @version 1.40 - a way back after a copy onto a host took over keeps the copy's row, retired and named for its
  *                container held stopped on its host, so Permanently Delete Site can remove it; the row was removed and
  *                nothing on the plane could reach the container
@@ -2288,6 +2291,11 @@ class SiteCopyRunner {
 		if ($copy->status() === SiteCopy::STATUS_STARTING) {
 			$switch = $copy->switch_record();
 			$switch['switched_time'] = gmdate('Y-m-d H:i:s');
+			// A swap's IPv4 took its reverse DNS with it; the copy's IPv6,
+			// which the owner pointed the AAAA at, is named now (B45).
+			if (($switch['method'] ?? '') === self::METHOD_IP_SWAP && !empty($switch['swap'])) {
+				$switch['rdns_note'] = IpSwapMove::name_copy_ipv6((array)$switch['swap']);
+			}
 			$copy->set_switch_record($switch);
 			$copy->set('scp_status', SiteCopy::STATUS_SWITCHED);
 			$copy->save();
@@ -3526,6 +3534,12 @@ class SiteCopyRunner {
 			}
 			$switch = $copy->switch_record();
 			$switch['server_to_delete'] = $server;
+			// An AAAA the owner pointed at the copy after the switch: its
+			// IPv6 is named now (B45).
+			if (($switch['method'] ?? '') === self::METHOD_IP_SWAP && !empty($switch['swap'])
+				&& !IpSwapMove::copy_ipv6_named((string)($switch['rdns_note'] ?? ''))) {
+				$switch['rdns_note'] = IpSwapMove::name_copy_ipv6((array)$switch['swap'], true);
+			}
 			$copy->set_switch_record($switch);
 			$copy->set('scp_status', SiteCopy::STATUS_FINISHED);
 			$copy->save();

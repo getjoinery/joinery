@@ -453,6 +453,12 @@ list, `MACHINE_CONFIG_FILES` in `install_tools/_restore_guard.sh`:
   On a host that runs only signed code it never is: the host converger writes
   what belongs there.
 
+**No page saved before the restore is served after it.** Backups never carry
+`cache/`, so the static page cache on the target holds that machine's renders of
+what it held before (a copy's pages, saved while its owner looked at it). The
+reconcile deletes every saved page and keeps the cache's `index.json`, which
+holds whether the cache is on (`RECONCILE_PAGE_CACHE cleared`).
+
 ### Restoring onto a host that runs only signed code
 
 A host whose restrictions refuse unsigned code (`unsigned_packages=refuse`,
