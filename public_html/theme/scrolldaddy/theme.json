@@ -2,7 +2,7 @@
     "name": "scrolldaddy",
     "display_name": "ScrollDaddy Theme",
     "description": "ScrollDaddy self-hosted DNS filtering service theme",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "status": "stable",
     "audience": [
         "scrolldaddy.app"
@@ -13,9 +13,24 @@
     "cssFramework": "html5",
     "publicPageBase": "PublicPageBase",
     "asset_fallback_theme": "default",
+    "brand_tokens": {
+        "jy_color_primary":       "#6B61FC",
+        "jy_color_primary_hover": "#1F1F1F",
+        "jy_color_primary_text":  "#ffffff",
+        "jy_color_link":          "#6B61FC",
+        "jy_color_text":          "#1F1F1F",
+        "jy_color_text_muted":    "#5C6574",
+        "jy_color_text_subtle":   "#72849B",
+        "jy_color_surface":       "#F9F8FF",
+        "jy_color_surface_alt":   "#F4F3FF",
+        "jy_color_border":        "#E0E0E0",
+        "jy_font_sans":           "'DM Sans', sans-serif",
+        "jy_font_display":        "'Poppins', sans-serif"
+    },
     "assets": {
         "css": [
-            "/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css"
+            "/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css",
+            "/theme/scrolldaddy/assets/css/scrolldaddy-kit.css"
         ],
         "js": [
             "/theme/scrolldaddy/assets/js/scrolldaddy-plugin.js"

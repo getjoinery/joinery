@@ -49,7 +49,7 @@
                     'model' => $phone_number
                 ]);
 
-                echo '<a href="/profile/account_edit">Cancel</a> ';
+                echo '<a class="btn btn-ghost" href="/profile/account_edit">Cancel</a> ';
                 $formwriter->submitbutton('btn_submit', 'Submit');
 
                 $formwriter->end_form();
