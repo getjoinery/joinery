@@ -6203,7 +6203,10 @@ Drafts are not exported: they are unsent work, and an import would file them as 
 Takeout writes it: the view (`Inbox`, `Archived`, `Sent`, `Spam`, `Trash`), the
 message's labels (a name holding a comma or a quote is quoted, its quotes doubled),
 then `Unread` and `Starred`. The archive import reads that header, so a download
-imports back with its folders, labels and read and starred state.
+imports back with its folders, labels and read and starred state. Read and starred
+also go in the headers mail programs read: `Status: RO` on a read message, and
+`X-Mozilla-Status` (`0001` read, `0004` starred), so Thunderbird shows them too
+(`MailExport::exportHeaders()`).
 
 The mbox is mboxrd: a `From <sender> <asctime>` line before each message, and any line
 of the message starting with `>`s and `From ` gets one more `>`. Each message is

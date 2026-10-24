@@ -9,13 +9,13 @@
  * Returns MailExport::fortressPage(): the run's folders, and up to a page of
  * this folder's messages — ciphertext as the reader's thread payload carries
  * it, or the bytes of mail the server can still read — with each one's
- * X-Gmail-Labels value.
+ * export header lines (MailExport::exportHeaders()).
  *
  * Only for the person who asked for the run, while it is fresh: the second
  * factor given to mail_export_start covers the export it started, not a
  * standing licence to page through the mailbox.
  *
- * @version 1.0
+ * @version 1.1 - items carry their export header lines, not only the X-Gmail-Labels value
  */
 
 function mail_export_fortress_page_logic(array $input): LogicResult {

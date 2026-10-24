@@ -16,7 +16,8 @@
  *    slice; nothing is recorded before its piece is on disk; a run deleted
  *    between slices stops with a cancel and leaves nothing behind.
  *  - The zip: one mbox per folder, mboxrd separators and From-escaping,
- *    X-Gmail-Labels with the view, quoted labels, Unread and Starred; a stored
+ *    X-Gmail-Labels with the view, quoted labels, Unread and Starred, and
+ *    read and starred again as Status and X-Mozilla-Status; a stored
  *    original travels byte for byte; a rebuilt message is marked; a message
  *    that cannot be read is named in Messages not included.txt.
  *  - Round trip (P2): the zip imports into an empty mailbox through our own
@@ -33,7 +34,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mailbox/tests/mail_export_test.php
  *
- * @version 1.0
+ * @version 1.1 - Status and X-Mozilla-Status carry read and starred for mail programs (B70)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -337,10 +338,14 @@ $first = $inbox_msgs[0];
 check(strpos($first, "From the start this line") !== false, 'and reading it back undoes exactly that');
 check(strpos($first, 'X-Gmail-Labels: Inbox,"Bills, 2026",Family,Unread,Starred') === 0,
 	'X-Gmail-Labels: the view, the labels (quoted where needed), Unread and Starred', substr($first, 0, 90));
+check(preg_match('/\AX-Gmail-Labels: [^\r\n]*\r?\nX-Mozilla-Status: 0004\r?\n/', $first) === 1,
+	'an unread starred message has no Status line and X-Mozilla-Status 0004 (Thunderbird: starred, unread)', substr($first, 0, 120));
+check(preg_match('/\AX-Gmail-Labels: Inbox\r?\nStatus: RO\r?\nX-Mozilla-Status: 0001\r?\n/', $inbox_msgs[1]) === 1,
+	'a read message carries Status: RO and X-Mozilla-Status 0001', substr($inbox_msgs[1], 0, 120));
 check(strpos($first, "\r\nX-Joinery-Rebuilt: yes\r\n") !== false || strpos($first, "\nX-Joinery-Rebuilt: yes") !== false,
 	'a message kept without its original is rebuilt, and says so');
 $stored_out = $inbox_msgs[1];
-$stored_body = preg_replace('/^X-Gmail-Labels: [^\r\n]*\r?\n/', '', $stored_out);
+$stored_body = preg_replace('/\A(?:(?:X-Gmail-Labels|Status|X-Mozilla-Status): [^\r\n]*\r?\n)+/', '', $stored_out);
 check(rtrim($stored_body, "\r\n") === rtrim($stored_raw, "\r\n") && strpos($stored_out, 'X-Joinery-Rebuilt') === false,
 	'a stored original travels byte for byte, unmarked');
 check(strpos($note, '1 message was left out') === 0 && strpos($note, 'Inbox: message ' . $msgs['sealed_other'] . ' (') !== false

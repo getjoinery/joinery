@@ -4,8 +4,9 @@
  *
  * Takes a mailbox's mail out: the whole mailbox, or one folder or label, as a
  * zip with one mbox file per folder, which mail programs and other providers
- * read and our own import reads back. Labels and read state travel in each
- * message's X-Gmail-Labels header.
+ * read and our own import reads back. Labels, read and starred travel in each
+ * message's X-Gmail-Labels header; read and starred also as Status and
+ * X-Mozilla-Status, which mail programs read.
  *
  * A Standard mailbox's download is built on the server and the member is
  * emailed when it is ready; a Private one is built while its owner is signed
@@ -14,7 +15,7 @@
  * factor. Linked from the mail page's Settings menu and the admin mailbox
  * list (?mailbox=).
  *
- * @version 1.0
+ * @version 1.1 - doc names the Status and X-Mozilla-Status headers
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

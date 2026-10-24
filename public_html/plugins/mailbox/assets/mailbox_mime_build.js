@@ -20,9 +20,9 @@
  *     parts: [{content_type, filename, content_id, inline, mime_part, bytes}]   // in id order
  *   });
  *   MailboxMimeBuild.marked(bytes)   // X-Joinery-Rebuilt: yes in front
- *   MailboxMimeBuild.mboxEntry(bytes, labels, envelopeOf(sender), unixTime)   // MailExport::mboxEntry's bytes
+ *   MailboxMimeBuild.mboxEntry(bytes, headers, envelopeOf(sender), unixTime)   // MailExport::mboxEntry's bytes
  *
- * Vanilla JS; runs under node too (module.exports). @version 1.1 - From-escaping starts lines after \n only, as the server does
+ * Vanilla JS; runs under node too (module.exports). @version 1.2 - mboxEntry takes the server's export header lines (B70)
  */
 (function (root) {
 	'use strict';
@@ -368,15 +368,16 @@
 	}
 
 	/**
-	 * One message as an mbox entry: the separator, the X-Gmail-Labels header,
-	 * the message with its From lines escaped (mboxrd), a blank line.
+	 * One message as an mbox entry: the separator, the export header lines
+	 * (MailExport::exportHeaders, handed over by the server), the message with
+	 * its From lines escaped (mboxrd), a blank line.
 	 */
-	function mboxEntry(raw, labels, envelope, time) {
+	function mboxEntry(raw, headers, envelope, time) {
 		var text = toBin(raw);
 		var crlf = text.indexOf('\r\n'), lf = text.indexOf('\n');
 		var eol = (crlf !== -1 && crlf <= lf) ? '\r\n' : '\n';
 		// Line starts as PHP's /m sees them: after \n only, never after a bare \r.
-		text = (toBin(utf8('X-Gmail-Labels: ' + labels)) + eol + text).replace(/(^|\n)(>*From )/g, '$1>$2');
+		text = (toBin(utf8(headers.join(eol))) + eol + text).replace(/(^|\n)(>*From )/g, '$1>$2');
 		if (text.slice(-1) !== '\n') text += eol;
 		return fromBin('From ' + envelope + ' ' + asctime(time) + '\n' + text + eol);
 	}

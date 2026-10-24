@@ -20,6 +20,7 @@
  *
  * Run: php plugins/mailbox/tests/mime_build_js_test.php
  *
+ * @version 1.2 - entries take the export header lines (B70)
  * @version 1.1 - raw mbox entries, a bare CR before From included
  * @version 1.0
  */
@@ -143,11 +144,11 @@ foreach ($ids as $label => $id) {
 		'body_html' => (string)$msg->get('iem_body_html'), 'parts' => $parts);
 	$bytes = MessageRebuild::build($msg, true)['bytes'];
 	$time = strtotime((string)$msg->get('iem_received_time') . ' UTC');
-	$labels = 'Inbox,"Bills, 2026",Unread';
+	$headers = MailExport::exportHeaders('inbox', array('Bills, 2026'), false, true);
 	$expected[$label] = array('bytes' => base64_encode($bytes),
-		'entry' => base64_encode(MailExport::mboxEntry(MessageRebuild::marked($bytes), $labels,
+		'entry' => base64_encode(MailExport::mboxEntry(MessageRebuild::marked($bytes), $headers,
 			MailExport::envelopeOf((string)$msg->get('iem_sender')), $time)),
-		'labels' => $labels, 'time' => $time);
+		'headers' => $headers, 'time' => $time);
 }
 
 $dir = sys_get_temp_dir() . '/mbjs_' . bin2hex(random_bytes(4));
@@ -162,9 +163,10 @@ $raw_cases = array("Subject: cr\r\n\r\nline one\rFrom here\r\nFrom a real line\r
 	"Subject: lf\n\nFrom lf start\n>>From deep\nno newline at the end");
 $raw_expected = array();
 foreach ($raw_cases as $i => $r) {
-	$raw_expected[$i] = base64_encode(MailExport::mboxEntry($r, 'Inbox', 'a@b.example', 1792700000));
+	$raw_expected[$i] = base64_encode(MailExport::mboxEntry($r, MailExport::exportHeaders('inbox', array(), true, false), 'a@b.example', 1792700000));
 }
 file_put_contents($dir . '/in.json', json_encode(array('inputs' => $inputs, 'expected' => $expected,
+	'raw_headers' => MailExport::exportHeaders('inbox', array(), true, false),
 	'raw' => array_map('base64_encode', $raw_cases))));
 $driver = <<<'JS'
 const fs = require('fs');
@@ -177,10 +179,10 @@ const data = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
     m.parts = m.parts.map(p => Object.assign({}, p, { bytes: new Uint8Array(Buffer.from(p.bytes, 'base64')) }));
     const bytes = await B.build(m);
     const e = data.expected[label];
-    const entry = B.mboxEntry(B.marked(bytes), e.labels, B.envelopeOf(m.sender), e.time);
+    const entry = B.mboxEntry(B.marked(bytes), e.headers, B.envelopeOf(m.sender), e.time);
     out[label] = { bytes: Buffer.from(bytes).toString('base64'), entry: Buffer.from(entry).toString('base64') };
   }
-  out.__raw = data.raw.map(r => Buffer.from(B.mboxEntry(new Uint8Array(Buffer.from(r, 'base64')), 'Inbox', 'a@b.example', 1792700000)).toString('base64'));
+  out.__raw = data.raw.map(r => Buffer.from(B.mboxEntry(new Uint8Array(Buffer.from(r, 'base64')), data.raw_headers, 'a@b.example', 1792700000)).toString('base64'));
   fs.writeFileSync(process.argv[4], JSON.stringify(out));
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 JS;

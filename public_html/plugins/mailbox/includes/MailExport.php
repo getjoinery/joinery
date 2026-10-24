@@ -44,7 +44,7 @@
  * slice stops at its next piece (MailExportCancelled), leaves no folder
  * behind, and nothing records a failure.
  *
- * @version 1.0
+ * @version 1.1 - read and starred also travel as Status and X-Mozilla-Status, which mail programs read (B70)
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/message_export.php'));
@@ -244,6 +244,23 @@ class MailExport {
 	}
 
 	/**
+	 * The headers put on top of an exported message: X-Gmail-Labels (labels,
+	 * view, read and starred, for Gmail and our own import), then read and
+	 * starred again the way mail programs read them: Status: RO (mutt, Dovecot,
+	 * Thunderbird) and X-Mozilla-Status (Thunderbird's flags: 1 read, 4 starred).
+	 *
+	 * @return string[] header lines, no line endings
+	 */
+	public static function exportHeaders(string $folder_key, array $labels, bool $is_read, bool $is_starred, ?string $view_key = null): array {
+		$lines = array('X-Gmail-Labels: ' . self::gmailLabels($folder_key, $labels, $is_read, $is_starred, $view_key));
+		if ($is_read) {
+			$lines[] = 'Status: RO';
+		}
+		$lines[] = sprintf('X-Mozilla-Status: %04x', ($is_read ? 1 : 0) | ($is_starred ? 4 : 0));
+		return $lines;
+	}
+
+	/**
 	 * Which of the five views a message sits in (the one a label folder's
 	 * messages are filed under on the way back in).
 	 */
@@ -261,14 +278,16 @@ class MailExport {
 	}
 
 	/**
-	 * One message as an mbox entry: the separator, the X-Gmail-Labels header,
-	 * the message with its From lines escaped, a blank line.
+	 * One message as an mbox entry: the separator, the export headers
+	 * (exportHeaders()), the message with its From lines escaped, a blank line.
+	 *
+	 * @param string[] $headers header lines, no line endings
 	 */
-	public static function mboxEntry(string $raw, string $labels_header, string $envelope, int $time): string {
+	public static function mboxEntry(string $raw, array $headers, string $envelope, int $time): string {
 		$crlf = strpos($raw, "\r\n");
 		$lf = strpos($raw, "\n");
 		$eol = ($crlf !== false && $crlf <= $lf) ? "\r\n" : "\n";
-		$raw = 'X-Gmail-Labels: ' . $labels_header . $eol . $raw;
+		$raw = implode($eol, $headers) . $eol . $raw;
 		$raw = preg_replace('/^(>*From )/m', '>$1', $raw);
 		if (substr($raw, -1) !== "\n") {
 			$raw .= $eol;
@@ -325,10 +344,10 @@ class MailExport {
 		if (!$bytes['ok']) {
 			return array('ok' => false, 'reason' => (string)$bytes['reason']);
 		}
-		$header = self::gmailLabels($folder_key, $labels, self::truthy($msg->get('iem_is_read')),
+		$headers = self::exportHeaders($folder_key, $labels, self::truthy($msg->get('iem_is_read')),
 			self::truthy($msg->get('iem_is_starred')), self::viewOf($msg));
 		$time = strtotime((string)$msg->get('iem_received_time') . ' UTC') ?: time();
-		return array('ok' => true, 'entry' => self::mboxEntry((string)$bytes['raw'], $header,
+		return array('ok' => true, 'entry' => self::mboxEntry((string)$bytes['raw'], $headers,
 			self::envelopeOf((string)$msg->get('iem_sender')), $time));
 	}
 
@@ -836,10 +855,10 @@ class MailExport {
 				continue;
 			}
 			$item = array(
-				'id'     => $id,
-				'labels' => self::gmailLabels($key, $labels[$id] ?? array(), self::truthy($msg->get('iem_is_read')),
+				'id'      => $id,
+				'headers' => self::exportHeaders($key, $labels[$id] ?? array(), self::truthy($msg->get('iem_is_read')),
 					self::truthy($msg->get('iem_is_starred')), self::viewOf($msg)),
-				'time'   => strtotime((string)$msg->get('iem_received_time') . ' UTC') ?: time(),
+				'time'    => strtotime((string)$msg->get('iem_received_time') . ' UTC') ?: time(),
 			);
 			if (isset($sealed[$id])) {
 				$item['message'] = $sealed[$id];
