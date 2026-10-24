@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh]
+# covers: [maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh, maintenance_scripts/sysadmin_tools/_memory_plan.sh]
 #
 # tune_postgres_memory.sh sizes PostgreSQL from the machine. This gate pins the
 # parallel-worker rule in dry-run mode (nothing is written or restarted):
@@ -68,6 +68,14 @@ echo "=== the memory lines are untouched by the CPU count ==="
 printf '#!/bin/sh\necho 1\n' > "$T/bin/nproc"
 chk "shared_buffers from --ram-mb" "$(PATH="$T/bin:$PATH" bash "$SCRIPT" --dry-run --ram-mb=2048 2>/dev/null | grep -c '^shared_buffers = 409MB$')" "1"
 chk "dry run writes nothing" "$(PATH="$T/bin:$PATH" bash "$SCRIPT" --dry-run --ram-mb=2048 2>/dev/null | grep -c 'Written\|restarted')" "0"
+
+echo "=== --reload writes, never restarts (the host converger's mode) ==="
+mkdir -p "$T/pg/16/main"
+printf "include_dir = 'conf.d'\n" > "$T/pg/16/main/postgresql.conf"
+out="$(PG_ETC="$T/pg" PATH="$T/bin:$PATH" bash "$SCRIPT" --reload --ram-mb=2048 2>&1)"
+chk "written under the stated directory" "$(grep -c '^shared_buffers = 409MB$' "$T/pg/16/main/conf.d/20-joinery-memory.conf" 2>/dev/null)" "1"
+chk "says a changed shared_buffers waits for a restart, and restarts nothing" "$(printf '%s\n' "$out" | grep -c 'waits for the next PostgreSQL restart')/$(printf '%s\n' "$out" | grep -c 'restarted')" "1/0"
+chk "a second run writes nothing" "$(PG_ETC="$T/pg" PATH="$T/bin:$PATH" bash "$SCRIPT" --reload --ram-mb=2048 2>&1 | tail -1)" "Already tuned; nothing written."
 
 echo
 echo "tune_postgres_memory gate: $passed passed, $failed failed"

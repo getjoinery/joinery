@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.87 - Health shows PHP's workers: how many at once, sized from what memory and CPUs, or PHP's
+ *                 packaged figure named as unsized; the host reserve beside what the rest of the machine
+ *                 holds; and a PostgreSQL restart pending (host_report 1.39, specs/php_fpm_sizing_bare_metal.md)
+ * @version 1.86 - Reverse DNS names both addresses, the IPv4 alone or the IPv6 alone, chosen on the form (B70)
  * @version 1.85 - Compare edge and direct (EdgeOriginProbe) beside Host Report; Network (net_health, host only) and
  *                 Web workers (web_workers) beside Listening ports (agent 1.93.0); the kernel line names connections
  *                 dropped (conntrack_full, syn_flood) (specs/slow_request_diagnosis_words.md)
@@ -1202,6 +1206,41 @@
 				? '<div class="small text-danger mt-1">The last read failed: ' . htmlspecialchars((string)$mtr->get('mtr_error')) . '</div>' : '';
 			$big = $current ? htmlspecialchars(number_format($used_gb, $used_gb >= 100 ? 0 : 1)) . ' GB' : '—';
 			$gauge('Transfer', $pct, $pct === null ? '' : $gauge_class($pct), $big, $line, $extra);
+		}
+		// PHP's workers: how many requests PHP works on at once, and where the
+		// figure came from (host_report 1.39, specs/php_fpm_sizing_bare_metal.md
+		// WP5). Ubuntu's packaged 5 is named: nothing sized it to this machine.
+		$pw = ($hr && is_array($hr['php_workers'] ?? null)) ? $hr['php_workers'] : null;
+		if ($pw && is_int($pw['max_children'])) {
+			$n = $pw['max_children'];
+			if ($pw['source'] === 'plan' && is_int($pw['budget_mb'])) {
+				$from = array('MemTotal' => 'the machine\'s memory', 'cgroup_limit' => 'its memory limit', '--ram-mb' => 'a stated budget');
+				$line = 'at once, sized from ' . number_format($pw['budget_mb']) . ' MB (' . ($from[$pw['plan_source']] ?? 'its memory')
+					. (is_int($pw['reserve_mb']) && $pw['reserve_mb'] > 0 ? ', less ' . number_format($pw['reserve_mb']) . ' MB kept for the host' : '')
+					. ')' . ($pw['cpus'] !== 'unknown' ? ' and ' . htmlspecialchars($pw['cpus']) . ' CPU' . ($pw['cpus'] === '1' ? '' : 's') : '');
+			} elseif ($pw['source'] === 'plan') {
+				$line = 'at once, sized to this machine';
+			} elseif ($pw['source'] === 'overridden') {
+				$line = '<span class="text-warning">at once: a pool file on the machine sets this over the figure sized for it.</span>';
+			} elseif (trim((string)$node->get('mgn_container_name')) !== '') {
+				// A container is sized at its start from its memory limit; one with
+				// none keeps PHP's packaged pool, and housekeeping never sizes it.
+				$line = '<span class="text-warning">at once: PHP\'s packaged figure.</span> A site container is sized from its memory limit; give it one (Change a site\'s limits on its host) and it is sized at its next start.';
+			} else {
+				$line = '<span class="text-warning">at once: PHP\'s packaged figure, not sized to this machine.</span> Host housekeeping sizes it on its next run.';
+			}
+			$extra = '';
+			if (is_int($pw['non_site_rss_mb']) && is_int($pw['reserve_mb']) && $pw['reserve_mb'] > 0) {
+				$over = $pw['non_site_rss_mb'] > $pw['reserve_mb'];
+				$extra .= '<div class="small mt-1 ' . ($over ? 'text-warning' : 'text-muted') . '">The rest of the machine holds '
+					. number_format($pw['non_site_rss_mb']) . ' MB of the ' . number_format($pw['reserve_mb']) . ' MB kept for it'
+					. ($over ? ': more than its reserve.' : '.') . '</div>';
+			}
+			if (is_array($pw['pg_pending_restart']) && $pw['pg_pending_restart']) {
+				$extra .= '<div class="small text-warning mt-1">PostgreSQL restart pending: '
+					. htmlspecialchars(implode(', ', $pw['pg_pending_restart'])) . ' changed and apply at its next restart.</div>';
+			}
+			$gauge('PHP workers', null, '', (string)$n, $line, $extra);
 		}
 		echo '</div>';
 
@@ -2653,8 +2692,12 @@
 			echo '<p class="text-muted small mb-0">' . htmlspecialchars(NodeReverseDns::TRANSFERRED_MESSAGE) . '</p>';
 			$page->end_box();
 		} else {
-			echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. The hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.'
-				. ($rdns_ip6 !== '' ? ' ' . htmlspecialchars($rdns_ip6) . ' is named too when the hostname\'s AAAA record points at it.' : '') . '</p>';
+			echo '<p class="text-muted small mb-2">Sets the PTR through the cloud account that provisioned this node. A provider takes '
+				. 'only a name that points at the address: ' . ($rdns_ip6 !== ''
+					? 'to name ' . htmlspecialchars($rdns_ip) . ', the hostname\'s A record must point at it; to name '
+						. htmlspecialchars($rdns_ip6) . ', its AAAA record. Naming both, ' . htmlspecialchars($rdns_ip6)
+						. ' is left as it is when there is no such AAAA record.'
+					: 'the hostname\'s A record must already point at ' . htmlspecialchars($rdns_ip) . '.') . '</p>';
 
 			$fw_rdns = $page->getFormWriter('rdns_form', [
 				'action' => $base_url . '&tab=overview',
@@ -2666,6 +2709,18 @@
 			$fw_rdns->textinput('rdns_hostname', 'Hostname', [
 				'placeholder' => 'mail.example.com',
 			]);
+			// One address alone: after an IP swap the IPv4 keeps the name it
+			// brought, and only the IPv6 is the site's to name.
+			if ($rdns_ip6 !== '') {
+				$fw_rdns->dropinput('rdns_addresses', 'Addresses', [
+					'options' => [
+						NodeReverseDns::ADDRESSES_BOTH => 'Both addresses',
+						NodeReverseDns::ADDRESSES_IPV4 => $rdns_ip . ' only',
+						NodeReverseDns::ADDRESSES_IPV6 => $rdns_ip6 . ' only',
+					],
+					'value' => NodeReverseDns::ADDRESSES_BOTH,
+				]);
+			}
 			$fw_rdns->submitbutton('btn_rdns_set', 'Set Reverse DNS', ['class' => 'btn btn-sm btn-primary']);
 			$fw_rdns->end_form();
 			$page->end_box();

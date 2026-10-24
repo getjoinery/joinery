@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # tune_postgres_memory.sh - size PostgreSQL's memory settings from the machine
+# Version: 1.5.0 - a machine sized from MemTotal keeps the host reserve back first (_memory_plan.sh
+#                  1.1.0), so shared_buffers is a share of what the site has, not of the whole
+#                  machine; max_connections stays the packaged 100 there, which already holds
+#                  the most PHP workers the plan ever gives (80) plus 20
+#                  (specs/php_fpm_sizing_bare_metal.md WP1). --reload writes and reloads: what
+#                  takes a reload applies, what takes a restart waits for the next one and
+#                  PostgreSQL reports it pending (pg_settings.pending_restart), which is how
+#                  the host converger runs it (WP4). Test hook PG_ETC.
 # Version: 1.4.0 - the budget and shared_buffers come from _memory_plan.sh, shared with
 #                  tune_php_fpm.sh; a budget from a cgroup limit or --ram-mb also sets
 #                  max_connections to the PHP pool plus 20 (specs/multi_tenant_docker_hosts.md WP2)
@@ -16,7 +24,9 @@
 #   2 GB VPS is smaller than one busy table: every page load on a 100k-message
 #   mailbox reads the table from the OS cache instead of Postgres's own. This
 #   writes the two settings that matter, sized from the RAM this machine
-#   actually owns, as a conf.d drop-in:
+#   actually owns (on a machine that is not a container, MemTotal less the
+#   host reserve _memory_plan.sh keeps for the agent, rspamd and the rest), as
+#   a conf.d drop-in:
 #
 #     shared_buffers        20% of RAM (floor 64MB, cap 2GB) — Postgres's own cache,
 #                           kept modest because Apache and PHP share the box
@@ -73,6 +83,8 @@
 # Usage:
 #   ./tune_postgres_memory.sh              Write the drop-in and restart PostgreSQL
 #   ./tune_postgres_memory.sh --no-restart Write only (the installer restarts itself)
+#   ./tune_postgres_memory.sh --reload     Write and reload, never restart: shared_buffers
+#                                          waits for the next restart, reported pending
 #   ./tune_postgres_memory.sh --dry-run    Print what would be written, change nothing
 #   ./tune_postgres_memory.sh --ram-mb=512 Size from a stated budget in MB
 #   ./tune_postgres_memory.sh --container  Assert this is a container, so an
@@ -83,16 +95,21 @@
 #   0  tuned (or already tuned, or dry run)
 #   1  PostgreSQL configuration directory not found, or a bad option
 #   3  skipped: this container's memory budget could not be determined
+#
+# Test hook, ignored for root: PG_ETC=<dir> reads and writes <dir>/<version>/main
+# instead of /etc/postgresql/<version>/main.
 
 set -euo pipefail
 
 RESTART=1
+RELOAD=0
 DRY_RUN=0
 RAM_MB_OVERRIDE=""
 IS_CONTAINER=0
 for arg in "$@"; do
     case "$arg" in
         --no-restart) RESTART=0 ;;
+        --reload)     RESTART=0; RELOAD=1 ;;
         --dry-run)    DRY_RUN=1 ;;
         --container)  IS_CONTAINER=1 ;;
         --ram-mb=*)
@@ -102,7 +119,7 @@ for arg in "$@"; do
                 exit 1
             fi
             ;;
-        -h|--help)    sed -n '2,85p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,105p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; exit 1 ;;
     esac
 done
@@ -145,17 +162,19 @@ if [ "$per_gather" -ne 2 ]; then
 fi
 
 # ---- where the cluster keeps its configuration -----------------------------
-PG_VERSION="${PG_VERSION:-$(ls /etc/postgresql 2>/dev/null | sort -n | tail -1)}"
-PG_CONFIG_DIR="/etc/postgresql/${PG_VERSION}/main"
+PG_ETC="${PG_ETC:-/etc/postgresql}"
+[ "$(id -u)" -eq 0 ] && PG_ETC=/etc/postgresql
+PG_VERSION="${PG_VERSION:-$(ls "$PG_ETC" 2>/dev/null | sort -n | tail -1)}"
+PG_CONFIG_DIR="${PG_ETC}/${PG_VERSION}/main"
 if [ -z "$PG_VERSION" ] || [ ! -d "$PG_CONFIG_DIR" ]; then
-    echo "PostgreSQL configuration directory not found under /etc/postgresql" >&2
+    echo "PostgreSQL configuration directory not found under ${PG_ETC}" >&2
     exit 1
 fi
 DROPIN="${PG_CONFIG_DIR}/conf.d/20-joinery-memory.conf"
 
 content=$(cat <<CONF
 # Managed by Joinery tune_postgres_memory.sh. Overwritten when re-run.
-# Sized from ${ram_mb} MB of RAM available to this machine (${ram_source}).
+# Sized from ${ram_mb} MB of RAM available to this machine (${ram_source}${MEMORY_PLAN_TOTAL_MB:+ of ${MEMORY_PLAN_TOTAL_MB} MB, less ${MEMORY_PLAN_RESERVE_MB} MB kept for the host}).
 shared_buffers = ${shared_mb}MB
 effective_cache_size = ${cache_mb}MB
 CONF
@@ -199,6 +218,20 @@ if ! grep -qE "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\.d'" "${PG
     echo "Added include_dir = 'conf.d' to postgresql.conf"
 fi
 
+if [ "$RELOAD" -eq 1 ]; then
+    # A reload, never a restart: a restart drops every connection the site
+    # holds. shared_buffers waits for the next restart someone chooses, and
+    # PostgreSQL marks it pending_restart, which the host report reads.
+    if [ "$(id -u)" -eq 0 ]; then
+        if [ -d /run/systemd/system ]; then
+            systemctl reload "postgresql@${PG_VERSION}-main" 2>/dev/null || true
+        else
+            pg_ctlcluster "$PG_VERSION" main reload 2>/dev/null || true
+        fi
+    fi
+    echo "Written and reloaded; a changed shared_buffers waits for the next PostgreSQL restart."
+    exit 0
+fi
 if [ "$RESTART" -eq 0 ]; then
     echo "Written; restart PostgreSQL to apply."
     exit 0

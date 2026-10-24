@@ -510,7 +510,7 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 34 && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
+check(!isset($capped['surprise']) && count($capped) === 35 && array_key_exists('php_workers', $capped) && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
 	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
@@ -2576,5 +2576,26 @@ check(strpos($ww_free['verdict'], 'Workers free.') === 0, 'free workers say so',
 foreach (array('net_health', 'web_workers') as $t) {
 	check(in_array($t, JobResultProcessor::processable_types(), true), "{$t} is a type this processor knows");
 }
+
+section('host_report 1.39: php_workers (specs/php_fpm_sizing_bare_metal.md WP5)');
+$pw = JobResultProcessor::sanitise_host_report(array('php_workers' => array(
+	'version' => '8.3', 'max_children' => 8, 'source' => 'plan', 'budget_mb' => 1369, 'plan_source' => 'MemTotal',
+	'reserve_mb' => 640, 'cpus' => '1', 'non_site_rss_mb' => 412, 'pg_pending_restart' => array('shared_buffers', '<b>x</b>'),
+	'env' => 'SECRET=hunter2')))['php_workers'];
+check($pw['max_children'] === 8 && $pw['source'] === 'plan' && $pw['budget_mb'] === 1369 && $pw['plan_source'] === 'MemTotal'
+	&& $pw['reserve_mb'] === 640 && $pw['cpus'] === '1' && $pw['non_site_rss_mb'] === 412,
+	'the plan\'s figures are kept', json_encode($pw));
+check($pw['pg_pending_restart'] === array('shared_buffers', 'bxb'), 'pending settings are names in the safe set', json_encode($pw['pg_pending_restart']));
+check(!array_key_exists('env', $pw) && strpos(json_encode($pw), 'hunter2') === false, 'nothing but the named fields is kept');
+$pw = JobResultProcessor::sanitise_host_report(array('php_workers' => array('max_children' => '5', 'source' => 'packaged',
+	'budget_mb' => 'unknown', 'plan_source' => 'evil', 'cpus' => '1; rm', 'non_site_rss_mb' => null, 'pg_pending_restart' => 'unknown')))['php_workers'];
+check($pw['max_children'] === 5 && $pw['source'] === 'packaged' && $pw['plan_source'] === 'unknown' && $pw['cpus'] === 'unknown'
+	&& $pw['non_site_rss_mb'] === null && $pw['pg_pending_restart'] === 'unknown',
+	'a packaged pool, and every field out of shape read as unknown', json_encode($pw));
+check(JobResultProcessor::sanitise_host_report(array('php_workers' => array('source' => 'overridden', 'max_children' => 12)))['php_workers']['source'] === 'overridden',
+	'a later pool file over the plan\'s figure is kept as overridden');
+check(JobResultProcessor::sanitise_host_report(array())['php_workers'] === null
+	&& JobResultProcessor::sanitise_host_report(array('php_workers' => 'x'))['php_workers'] === null,
+	'an older node, or no PHP-FPM: null');
 
 harness_finish();

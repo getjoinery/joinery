@@ -1289,29 +1289,55 @@ The distinction matters beyond the upgrade endpoint: any control that edits a fi
 
 `maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the RAM
 the machine actually owns and writes the result as `conf.d/20-joinery-memory.conf`:
-`shared_buffers` at 20% of RAM (floor 64MB, cap 2GB) and `effective_cache_size` at 50%. It
-is idempotent, writes nothing when the drop-in already matches, and restarts the cluster
+`shared_buffers` at 20% of the budget (floor 64MB, cap 2GB) and `effective_cache_size` at 50%.
+It is idempotent, writes nothing when the drop-in already matches, and restarts the cluster
 unit (`postgresql@{version}-main`) only when it wrote. `--dry-run` prints what it would
-write; `--no-restart` writes without restarting.
+write; `--no-restart` writes without restarting; `--reload` writes and reloads, so a changed
+`shared_buffers` waits for the next restart and PostgreSQL reports it `pending_restart`.
 
-In a container, `tune_php_fpm.sh` sizes PHP-FPM's worker pool from the same budget, and
-PostgreSQL's `max_connections` follows the pool. The split lives in one sourced file,
-`sysadmin_tools/_memory_plan.sh`, which both tuners read:
+`tune_php_fpm.sh` sizes PHP-FPM's worker pool from the same budget. The split lives in one
+sourced file, `sysadmin_tools/_memory_plan.sh`, which both tuners read:
 
 | Figure | Rule |
 |---|---|
-| PHP workers (`pm.max_children`) | (budget − `shared_buffers` − 128 MB) ÷ 40 MB, at least 2, at most 80 |
+| Budget | `--ram-mb`, the cgroup limit, or `MemTotal` less the host reserve (below) |
+| PHP workers (`pm.max_children`) | (budget − `shared_buffers` − 128 MB) ÷ 40 MB, at most 8 per CPU, at least 3, at most 80 |
 | Spare workers | start 2, keep 1 to 3 idle, never more than the pool |
-| `max_connections` | the workers plus 20 (scheduled tasks, the agent, a backup, maintenance) |
+| `max_connections` | the workers plus 20 (scheduled tasks, the agent, a backup, maintenance), written for a container's budget |
 
-The 128 MB is everything that is not a PHP worker: PostgreSQL's own processes, Apache,
-PHP's master and opcache, cron, and the kernel memory a container is charged for. The 40 MB
-is one worker with the database connection it holds. At 256 MB that is 2 workers and 22
-connections; at 512 MB, 7 and 27; at 1 GB, 17 and 37. The pool is written as
-`pool.d/zz-joinery-memory.conf` for every PHP version installed: a second `[www]` section,
-read after the packaged `www.conf`, overrides only the lines it names. `max_connections` is
-written only for a container's budget (a cgroup limit or `--ram-mb`); a bare-metal machine
-keeps PostgreSQL's own and PHP's packaged pool.
+The 128 MB is everything in a site that is not a PHP worker: PostgreSQL's own processes,
+Apache, PHP's master and opcache, cron, and the kernel memory a container is charged for. The
+40 MB is one worker with the database connection it holds. At 256 MB that is 3 workers and 23
+connections; at 512 MB, 7 and 27; at 1 GB, 17 and 37.
+
+**The CPU ceiling.** Most of a worker's time is a wait on the database, an IMAP server or an
+outside API, so more workers than CPUs is right; past 8 a CPU a burst of heavy pages queues in
+the CPU's run queue, holding memory, instead of in PHP-FPM's listen queue. The CPUs are
+`nproc`, lowered by a cgroup quota (`cpu.max`), which counts as it is: half a CPU allows 4. The
+minimum of 3 wins over the ceiling: an AI chat turn holds a worker for its whole run, so on two
+workers one chat is half the site.
+
+**The host reserve.** A machine that is its own site runs more than its site: the agent,
+sshd, fail2ban, journald, the mail filter, sometimes the office editor. Its budget is
+`MemTotal` less a reserve for those: 384 MB, 128 MB more when rspamd is installed, and the
+office editor's own `MemoryMax` when its unit is installed (`MEMORY_PLAN_RESERVE_*` in
+`_memory_plan.sh`). A 2 GB machine with the mail filter has 1,497 MB: `shared_buffers` 299 MB
+and, on one CPU, 8 workers. The host report shows the reserve beside what the machine's other
+processes actually hold, so a reserve that has drifted from the machine is seen.
+
+The pool is written as `pool.d/zz-joinery-memory.conf` for every PHP version installed: a
+second `[www]` section, read after the packaged `www.conf`, overrides only the lines it names.
+Its `; joinery-plan:` line names the budget, its source, the reserve and the CPUs; the host
+report reads it. Where `max_connections` was set by hand below the pool plus 20 (a `conf.d`
+file of its own), the pool is held to what that leaves. A change reloads PHP-FPM, never
+restarts it; with `process_control_timeout = 10s` (host housekeeping's
+`zz-joinery-status.conf`) a reload lets a request in flight finish, where PHP's packaged 0
+cuts it. A bare-metal machine keeps PostgreSQL's packaged 100 connections, which hold the most
+workers the plan gives (80) plus 20.
+
+**One site directly on a machine.** A machine runs one site directly (with its own test site,
+which shares its PHP workers); `install.sh site` refuses a second. Several sites share a
+machine as containers, each sized from a budget of its own.
 
 "RAM the machine owns" is the whole question, and on a shared host only the container knows
 the answer. The budget is resolved in one order, and the script skips rather than guesses:
@@ -1328,8 +1354,10 @@ which is not the container's to size from, and every container on that host read
 figure — eight containers each taking 20% of one host claim 160% of it. PostgreSQL keeps its
 packaged settings until the container is given a budget.
 
-**Where it runs.** On bare metal, `install.sh server` runs `tune_postgres_memory.sh` during the
-install: that host is the machine. On Docker both tuners run from the container start command
+**Where it runs.** On bare metal, `install.sh server` runs both tuners during the install: that
+host is the machine. Host housekeeping runs both again on every converger run, PHP-FPM with a
+reload and PostgreSQL with `--reload`, never a restart: it runs every minute, and a restart
+drops every connection the site holds. On Docker both tuners run from the container start command
 on every start, each before the service it sizes starts, so the values apply from the first
 process. It is deliberately not part
 of the base image — `install.sh server` is what `docker build` runs to bake that image, so a

@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,php_workers,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -324,6 +324,33 @@ chk "sshd posture as sshd -T prints it" "$(jv "$T/root.json" sshd.password_authe
 chk "answers: Apache and PHP answer through the site's own name" "$(jv "$T/root.json" answers.apache2)/$(jv "$T/root.json" answers.php-fpm)" "yes/yes"
 chk "answers: pg_isready saying no response is no" "$(jv "$T/root.json" answers.postgresql)" "no"
 chk "served certificates mark the vhost's ServerName as primary" "$( for i in 0 1 2; do [ "$(jv "$T/root.json" served_certificates.$i.primary)" = true ] && echo x; done | wc -l | tr -d ' ' )" "1"
+echo "=== PHP's workers (specs/php_fpm_sizing_bare_metal.md WP5) ==="
+mkdir -p "$T/etc/apache2/conf-enabled" "$T/etc/php/8.3/fpm/pool.d"
+touch "$T/etc/apache2/conf-enabled/php8.3-fpm.conf"
+printf '[www]\nenv[SECRET] = hunter2\npm.max_children = 5\n' > "$T/etc/php/8.3/fpm/pool.d/www.conf"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php1.json" 2>/dev/null
+chk "nothing sized it: the packaged 5" "$(jv "$T/php1.json" php_workers.source)/$(jv "$T/php1.json" php_workers.max_children)/$(jv "$T/php1.json" php_workers.version)" "packaged/5/8.3"
+chk "no pool file line is ever carried" "$(grep -c -E 'hunter2|SECRET' "$T/php1.json")" "0"
+printf '; joinery-plan: budget_mb=1369 source=MemTotal reserve_mb=640 cpus=1 children=8\n[www]\npm.max_children = 8\n' > "$T/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf"
+cat > "$T/bin/setpriv" <<'STUB'
+#!/bin/bash
+printf 'shared_buffers\n'
+STUB
+chmod 755 "$T/bin/setpriv"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php2.json" 2>/dev/null
+chk "the plan: its figure, budget, source, reserve and CPUs" \
+    "$(jv "$T/php2.json" php_workers.source)/$(jv "$T/php2.json" php_workers.max_children)/$(jv "$T/php2.json" php_workers.budget_mb)/$(jv "$T/php2.json" php_workers.plan_source)/$(jv "$T/php2.json" php_workers.reserve_mb)/$(jv "$T/php2.json" php_workers.cpus)" \
+    "plan/8/1369/MemTotal/640/1"
+chk "PostgreSQL's settings waiting for a restart, by name" "$(jv "$T/php2.json" php_workers.pg_pending_restart)" '["shared_buffers"]'
+chk "what the rest of the machine holds: root only, never a partial sum" "$(jv "$T/php2.json" php_workers.non_site_rss_mb)" "$([ "$(id -u)" = 0 ] && jv "$T/php2.json" php_workers.non_site_rss_mb || echo null)"
+printf '[www]\npm.max_children = 12\n' > "$T/etc/php/8.3/fpm/pool.d/zz-local.conf"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php4.json" 2>/dev/null
+chk "a later file overriding the plan's figure: overridden, with the figure in force" "$(jv "$T/php4.json" php_workers.source)/$(jv "$T/php4.json" php_workers.max_children)" "overridden/12"
+chk "never through PAM: runuser and su are not used" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c -E '\brunuser\b|\bsu -')" "0"
+rm -f "$T/bin/setpriv" "$T/etc/php/8.3/fpm/pool.d/zz-local.conf" "$T/etc/apache2/conf-enabled/php8.3-fpm.conf"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php3.json" 2>/dev/null
+chk "Apache hands PHP to no PHP-FPM: null" "$(jv "$T/php3.json" php_workers)" "null"
+rm -rf "$T/etc/php" "$T/etc/apache2"
 eval "$(sed -n '/^emit_answers() {/,/^}/p' "$SCRIPT")"
 site_is_quiet() { return 1; }
 for case in "502:no" "503:no" "301:unknown" "403:unknown" "200:unknown"; do

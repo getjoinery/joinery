@@ -1,6 +1,6 @@
 # PHP-FPM sizing on bare-metal hosts
 
-Status: DRAFT 2026-10-23, round 2 after reviewer2's review (H1-H9, all taken).
+Status: IMPLEMENTED 2026-10-24 (see As built: WP3's per-site pools were dropped for a one-site refusal, owner 2026-10-24). Verified: the tuner, PostgreSQL tuner, housekeeping, host report, processor and installer suites; live on dev (housekeeping 1.32 sized dev's pool, held to 5 by dev's own max_connections 25); a reload with process_control_timeout 10s finishes a request in flight and 0 cuts it (real php-fpm, in the tuner gate). The rest (the reserve measured on a 2 GB box with rspamd, the node page line on a released node) is in the live verification queue.
 Origin: the jeremytunnell.com stalls of 2026-10-23 (`slow_request_diagnosis_words.md`).
 Found while answering whether PHP's worker count should be sized: it already is
 in every site container, and nowhere else.
@@ -246,3 +246,50 @@ too.
   template test covers the new `FilesMatch`.
 - A live check on a test box: two sites, one held busy with slow requests,
   the other still answers.
+
+## As built (2026-10-24)
+
+- **Code review** (reviewer2, 2026-10-24): F1-F7 all taken. F1: a rebuild of a site already
+  on the machine is never refused, even on a machine that took two before the rule. F5:
+  `php_workers.source` is `overridden` when a later pool file sets another figure. F6: a
+  container on the packaged pool is told to get a memory limit, not to wait for housekeeping.
+- **WP3 reduced.** A machine runs one site directly: the vhost template (2.08) and the fleet's
+  layout already said so, and a shared machine runs each site in a container with its own
+  budget. So no per-site pools, no `{{PHP_FPM_SOCK}}`, no renderer changes; `install.sh site`
+  (3.31) refuses a second site directly on a machine, naming the one there
+  (`other_baremetal_site`). The test site is served from the main site's vhost through the one
+  `[www]` pool, so it shares the workers with nothing to build. The minimum of 3 workers is
+  kept, containers included. `install.sh site` and `remove_account.sh` run no tuner: the site
+  count on a machine no longer changes the plan.
+- **WP1** `_memory_plan.sh` 1.1.0: reserve 384 + 128 with rspamd (`/usr/bin/rspamd`) + the
+  office editor's `MemoryMax` from its drop-in. A machine smaller than its reserve keeps a
+  256 MB budget, so the floors still apply. The constants were not measured on a test box.
+  rspamd is 128, twice dev's measured 62 MB: at 256 a 1 GB mailbox box fell to the minimum 3
+  workers and a 64 MB shared_buffers (reviewer2 F2); at 128 it keeps 5 and 89 MB. On 2 GB
+  boxes the CPU ceiling binds first (memory gives 26, the ceiling 8). The host report shows
+  the measured figure, and a 1 GB mailbox box's reading is in the live queue.
+- **WP2** `memory_plan_cpu_milli`: `MEMORY_PLAN_CPUS`, else `nproc` lowered by `cpu.max` (or
+  cgroup v1's quota), in thousandths.
+- **max_connections on bare metal is not written** (the spec had sum + 20). The packaged 100
+  already holds the plan's most (80 + 20), and writing less only adds risk. Instead
+  `tune_php_fpm.sh` 1.1.0 holds the pool to the configured `max_connections` less 20 where a
+  hand set it lower: dev's own `50-minimal.conf` sets 25, and 32 workers would have run it
+  out of connections. The read uses `setpriv` (no PAM session, so no auth.log pair every
+  minute; reviewer2 F4), and a failed read leaves an existing drop-in as it is, warned by
+  housekeeping, rather than lifting the cap for a tick (F3).
+- **WP4** `tune_php_fpm.sh` reloads, never restarts. `tune_postgres_memory.sh` 1.5.0 gains
+  `--reload` (write, then reload; a changed `shared_buffers` is `pending_restart`), which
+  host housekeeping 1.32 (4b) uses on every run on a machine that is its own site, from the
+  site's own tree. `install.sh server` runs the PHP tuner beside the PostgreSQL one. The
+  `[global] process_control_timeout = 10s` stays in housekeeping's `zz-joinery-status.conf`
+  (written since 1.31); the tuner writes no `[global]`.
+- **WP5** `host_report` 1.39 `php_workers`: version, `max_children`, `plan` or `packaged`, the
+  plan's `budget_mb`, `plan_source`, `reserve_mb` and `cpus` (from the drop-in's
+  `; joinery-plan:` line), `non_site_rss_mb` by PSS (`smaps_rollup`, root only; RSS
+  double-counts shared pages), and `pg_pending_restart` names from `pg_settings` (read over
+  peer auth, no file date: a hand `conf.d` file can override the drop-in). JobResultProcessor
+  1.107 keeps it; the node page (overview 1.87) shows **PHP workers** in Health.
+- `ImageDecoder` still sizes its decode ceiling from `MemTotal` without the reserve: it is a
+  per-decode upper bound under the 160 MB setting, and the reserve would lower it only on
+  machines where the setting already binds.
+

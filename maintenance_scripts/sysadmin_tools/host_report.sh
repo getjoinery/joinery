@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.39 - php_workers: PHP-FPM's worker ceiling in the version Apache uses and where it came from
+#                (tune_php_fpm.sh's plan line, or packaged), the host reserve beside what the machine's
+#                other processes actually hold, and PostgreSQL's settings pending a restart
+#                (specs/php_fpm_sizing_bare_metal.md WP5)
 # Version: 1.38 - kernel_events_24h counts conntrack_full ("nf_conntrack: table full, dropping packet") and
 #                syn_flood ("Possible SYN flooding on port"): the kernel dropping connections, which a site
 #                behind an edge sees as requests that hang (specs/slow_request_diagnosis_words.md WP4)
@@ -709,6 +713,80 @@ emit_cpus() {
     local n
     n="$(run nproc)"
     if [[ "$n" =~ ^[0-9]{1,4}$ ]]; then printf '%s' "$n"; else printf '"unknown"'; fi
+}
+
+# ---------------------------------------------------------------------------
+# PHP's workers (specs/php_fpm_sizing_bare_metal.md WP5): how many requests
+# PHP-FPM may work on at once, in the version Apache hands PHP to, and where
+# that figure came from - "plan" when tune_php_fpm.sh sized it (its
+# joinery-plan line: the budget, its source, the host reserve kept back, the
+# CPUs), "overridden" when a later pool file set another figure, "packaged"
+# when nothing did. Beside the reserve, what the machine's
+# processes other than PHP, PostgreSQL and Apache actually hold, so a reserve
+# that has drifted from the machine is seen. And the PostgreSQL settings
+# changed in the files that wait for a restart (pg_settings.pending_restart):
+# the host converger writes them and never restarts PostgreSQL.
+#
+# Numbers and names only: a pool file's lines are never sent (a pool can
+# carry env[] values). null where Apache hands PHP to no PHP-FPM.
+# ---------------------------------------------------------------------------
+emit_php_workers() {
+    local etc="${HOST_REPORT_ETC:-/etc}" f ver="" max plan source budget="" src="" reserve="" cpus="" rss="" pending
+    for f in "$etc"/apache2/conf-enabled/php*-fpm.conf; do
+        [[ -e "$f" ]] || continue
+        [[ "$(basename "$f")" =~ ^php([0-9]+\.[0-9]+)-fpm\.conf$ ]] && ver="${BASH_REMATCH[1]}"
+    done
+    if [[ -z "$ver" ]]; then printf 'null'; return; fi
+    # The [www] pool's ceiling as php-fpm reads it: the last value in file order.
+    max="$(cat "$etc/php/${ver}/fpm/pool.d/"*.conf 2>/dev/null | awk '
+        /^[ \t]*\[/ { sec = $0; gsub(/[ \t\[\]]/, "", sec); next }
+        sec == "www" && /^[ \t]*pm\.max_children[ \t]*=/ { v = $0; sub(/.*=[ \t]*/, "", v); gsub(/[^0-9]/, "", v); if (v != "") m = v }
+        END { if (m != "") print m }')"
+    plan="$(grep -m1 '^; joinery-plan: ' "$etc/php/${ver}/fpm/pool.d/zz-joinery-memory.conf" 2>/dev/null)"
+    # "plan" only when the figure in force is the one the plan wrote: a later
+    # file overriding max_children is "overridden", never the plan's.
+    source=packaged
+    if [[ -f "$etc/php/${ver}/fpm/pool.d/zz-joinery-memory.conf" ]]; then
+        source=plan
+        [[ "$plan" =~ children=([0-9]+) ]] && [[ "${BASH_REMATCH[1]}" != "$max" ]] && source=overridden
+    fi
+    if [[ -n "$plan" ]]; then
+        [[ "$plan" =~ budget_mb=([0-9]+) ]] && budget="${BASH_REMATCH[1]}"
+        [[ "$plan" =~ source=([A-Za-z_-]+) ]] && src="${BASH_REMATCH[1]}"
+        [[ "$plan" =~ reserve_mb=([0-9]+) ]] && reserve="${BASH_REMATCH[1]}"
+        [[ "$plan" =~ cpus=([0-9.]+) ]] && cpus="${BASH_REMATCH[1]}"
+    fi
+    # What is not a site: every process but PHP-FPM's, PostgreSQL's and
+    # Apache's, by proportional set size (a shared page split between the
+    # processes sharing it, so the sum is the memory they hold). Root only:
+    # another user's smaps_rollup cannot be read, and a partial sum misleads.
+    if [[ "$src" == "MemTotal" && "$(id -u)" == 0 ]]; then
+        local d c k v kb=0
+        for d in /proc/[0-9]*; do
+            c=""; read -r c 2>/dev/null < "$d/comm" || continue
+            [[ "$c" =~ ^(php-fpm|postgres|apache2|httpd) ]] && continue
+            while read -r k v _; do
+                [[ "$k" == "Pss:" ]] && { kb=$(( kb + v )); break; }
+            done 2>/dev/null < "$d/smaps_rollup"
+        done
+        rss=$(( kb / 1024 ))
+    fi
+    pending='"unknown"'
+    local out
+    # setpriv, not runuser: no PAM session, so no auth.log pair on every report.
+    if out="$(run setpriv --reuid=postgres --regid=postgres --init-groups psql -XAtc "SELECT name FROM pg_settings WHERE pending_restart ORDER BY name")"; then
+        pending='['; local sep="" n
+        while IFS= read -r n; do
+            [[ -n "$n" ]] || continue
+            pending="${pending}${sep}$(json_str "$n")"; sep=","
+        done <<< "$out"
+        pending="${pending}]"
+    fi
+    printf '{"version":%s,"max_children":%s,"source":"%s","budget_mb":%s,"plan_source":%s,"reserve_mb":%s,"cpus":%s,"non_site_rss_mb":%s,"pg_pending_restart":%s}' \
+        "$(json_str "$ver")" "$(json_num_or_unknown "$max")" "$source" \
+        "$(json_num_or_unknown "$budget")" "$([[ -n "$src" ]] && json_str "$src" || printf '"unknown"')" \
+        "$(json_num_or_unknown "$reserve")" "$([[ -n "$cpus" ]] && json_str "$cpus" || printf '"unknown"')" \
+        "$([[ -n "$rss" ]] && json_num_or_unknown "$rss" || printf 'null')" "$pending"
 }
 
 # ---------------------------------------------------------------------------
@@ -1648,6 +1726,7 @@ printf '"data_root_stopped":%s,' "$(emit_data_root_stopped)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"
+printf '"php_workers":%s,' "$(emit_php_workers)"
 printf '"reboot_required":%s,' "$(emit_reboot_required)"
 printf '"reboot_required_since":%s,' "$(emit_reboot_required_since)"
 printf '"boot_id":%s,' "$(emit_boot_id)"
