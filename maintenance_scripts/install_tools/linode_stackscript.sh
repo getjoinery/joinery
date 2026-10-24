@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.1 - The closing summary says root SSH login is off (install.sh server's default), that Lish still
+#              logs in as root, and how to allow root SSH login again.
 #VERSION 2.0 - No SSH key is honoured any more (JOINERY_SSH_KEY is gone): a server this
 #              installs holds no key, and root keeps the password Linode set until the
 #              owner changes it.
@@ -460,6 +462,10 @@ esac
 echo "Sign in at: ${SITE_HOST}/login"
 echo "Email:      $ADMIN_EMAIL"
 echo "Password:   the one you entered on the deploy form"
+echo ""
+echo "Root SSH login is off. Linode's web console (Lish) still logs in as root with the"
+echo "root password you set. To allow root SSH login again, from Lish: remove"
+echo "/etc/ssh/sshd_config.d/00-joinery-root-login.conf, then systemctl restart ssh."
 echo ""
 case "$MAIL_OUTCOME" in
     done:*)

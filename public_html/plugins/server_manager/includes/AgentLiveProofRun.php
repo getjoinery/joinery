@@ -54,6 +54,7 @@
  * A changed word in neither list (publish_upgrade, which only the publishing
  * box runs) is proven by hand with record_live_proof.php.
  *
+ * @version 1.4 - install.sh server --keep-root-login: the run logs in with the root password after the install
  * @version 1.3 - net_health and web_workers are words a bare machine proves; site_log is proven on the upgraded site
  * @version 1.2 - a site run: the newest published release installed, upgraded through apply_update onto a candidate
  *                built from this tree, with upgrade_preflight before and after (Q9)
@@ -292,7 +293,8 @@ class AgentLiveProofRun {
 			'cd "$D/maintenance_scripts/install_tools" && chmod +x *.sh',
 			"POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)",
 			'echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password && export POSTGRES_PASSWORD',
-			'./install.sh -y -q server',
+			// --keep-root-login: the run logs in as root again after this.
+			'./install.sh -y -q server --keep-root-login',
 			'./install.sh -y -q site --bare-metal ' . escapeshellarg($site) . ' --password-file=/root/.joinery_postgres_password '
 				. escapeshellarg($domain) . ' --no-ssl --enable-agent --management-node=' . escapeshellarg($plane)
 				. ' --upgrade-server=' . escapeshellarg($plane),

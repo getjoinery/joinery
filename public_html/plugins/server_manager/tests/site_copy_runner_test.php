@@ -431,6 +431,8 @@ check(strpos($cmd, "/utils/latest_release?version=0.8.472'") !== false
 	&& strpos($cmd, "site --bare-metal 'scpsite' --password-file=/root/.joinery_postgres_password 'scp.example.org'") !== false
 	&& strpos($cmd, '--dormant --copy-of=' . (int)$src->key . " --copy-of-key='" . $source_key . "'") !== false,
 	'the owner\'s command installs the source\'s release, site name and domain, dormant, recording the source', $cmd);
+check(strpos($cmd, '--keep-root-login') === false,
+	'and leaves root SSH login to the self-hosted default: nothing logs in to the owner\'s server over SSH after it', $cmd);
 $threw = '';
 try { SiteCopyRunner::start_own_server($src, null); } catch (Exception $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'already has a copy') !== false, 'a site has one copy at a time', $threw);

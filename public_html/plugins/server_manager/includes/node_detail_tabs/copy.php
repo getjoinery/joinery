@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.33 - the owner's own-server command says it turns root SSH login off, and how to keep it
  * @version 1.32 - an old container whose host did not answer is said owed, before and after the switch-over is kept (B103)
  * @version 1.31 - a kept IP swap whose copy's IPv6 was not named in reverse DNS says what to do (B45)
  * @version 1.30 - a container source's certificate staged by its host for the export, and cleared, are named
@@ -572,6 +573,8 @@ if ($copy_status === SiteCopy::STATUS_WAITING) {
 		echo '<pre class="bg-light p-2" style="white-space: pre-wrap; word-break: break-all;">'
 			. $copy_h(SiteCopyRunner::owner_command($site_copy)) . '</pre>';
 		echo '<p>It installs this site\'s release under the same site name and domain, ends quiet, and asks to join here. '
+			. 'It turns root SSH login off (your provider\'s web console still logs in as root); to keep it, add '
+			. '<code>--keep-root-login</code> to the <code>install.sh -y -q server</code> line. '
 			. 'Then run <code>joinery-agent status</code> on that server and approve below only the request whose fingerprint is the same.</p>';
 	}
 	$joins = SiteCopyRunner::candidate_joins($site_copy);

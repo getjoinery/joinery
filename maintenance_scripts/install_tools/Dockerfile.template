@@ -1,4 +1,6 @@
 # Joinery Docker Template
+# VERSION 6.5 - BASE_IMAGE_VERSION's default follows install.sh 3.33 to 2.3 (sshd hardening moved out of
+#               do_server_setup, which the base hashes; spec beta_break_glass_root_access).
 # VERSION 6.4 - The finished image drops Ubuntu's docker-clean apt rule. It deletes every downloaded
 #               package after ANY apt-get update, with no lock, so an update run while another apt run
 #               was unpacking took that run's packages from under dpkg (fleet_security_patching WP3,
@@ -169,7 +171,7 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=2.2 \
+#     --build-arg BASE_IMAGE_VERSION=2.3 \
 #     --build-arg SITENAME=clientsite \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
@@ -199,7 +201,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=2.2
+ARG BASE_IMAGE_VERSION=2.3
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)

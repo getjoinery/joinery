@@ -98,17 +98,21 @@ check(stripos($quickstart_md, '## Step') === false,
 	'the quick start has one copy, on getjoinery.com');
 
 
-section('Server hardening keeps someone able to log in, and creates no account');
+section('Server hardening turns root SSH login off, keeps a sudo account in, and creates no account');
 
-// Nothing is created for access. Root that holds keys keeps key login; an
-// install run under sudo leaves that account the way in; root reached only by
-// password is left as it is (the management node retires that password itself).
-check(strpos($install_src, 'derive_ssh_access()') !== false,
-	'install.sh derives what root login may become');
+// Root SSH login is off by default, keys included; an install run under sudo
+// leaves that account the way in. --keep-root-login keeps the older rules:
+// root that holds keys keeps key login, root reached only by password is left
+// as it is (the management node retires that password itself). The behaviour
+// is root_ssh_login_gate.sh's; these pin the shape.
+check(strpos($install_src, 'derive_ssh_access()') !== false && strpos($install_src, 'configure_ssh_access()') !== false,
+	'install.sh derives what root login may become, and one function applies it');
 check(strpos($install_src, 'SUDO_USER') !== false,
 	'the sudo-from-a-normal-account branch is present');
+check(strpos($install_src, '--keep-root-login) KEEP_ROOT_LOGIN=1 ;;') !== false && strpos($install_src, 'if [ "$KEEP_ROOT_LOGIN" -eq 0 ]; then') !== false,
+	'--keep-root-login is an option, and without it root SSH login is turned off');
 check(strpos($install_src, '/root/.ssh/authorized_keys') !== false && strpos($install_src, 'SSH_ROOT_LOGIN="prohibit-password"') !== false,
-	'root that holds keys keeps key login and loses password login');
+	'with it, root that holds keys keeps key login and loses password login');
 check(preg_match('/^[^#\n]*(useradd[^\n]*user1|sudoers\.d\/user1|usermod[^\n]*user1)/m', $install_src) === 0,
 	'server setup creates no user1, grants it no sudo, and adds it to no group');
 

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.142 - build_install_node passes --keep-root-login to install.sh docker and server, which turn root SSH
+ *                 login off by default (specs/beta_break_glass_root_access.md section 2)
  * @version 1.141 - net_health and web_workers (agent 1.93.0, specs/slow_request_diagnosis_words.md WP2/WP3):
  *                 two reads that take nothing. net_health is asked of a container site's host, never of
  *                 the container (its network is not where an edge connects). site_log offers the access
@@ -5956,8 +5958,11 @@ class JobCommandBuilder {
 			// not "localhost"). A bare instance is exactly this and nothing
 			// more; the machine's node IS the host, so it takes the site name.
 			$host_name = ($mode === 'bare') ? $sitename : $sitename . '-host';
+			// --keep-root-login: install.sh docker turns root SSH login off
+			// by default, and this plane logs in with the root password
+			// again (the keep or retire job, probes, Retry Install).
 			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name)
-				. self::outbound_install_flags() . $encrypted_flags;
+				. ' --keep-root-login' . self::outbound_install_flags() . $encrypted_flags;
 			if ($mode !== 'bare') {
 				// No --no-ssl: install.sh writes the universal proxy vhost,
 				// tries for a certificate, and arms the host's retry timer when
@@ -5979,11 +5984,12 @@ class JobCommandBuilder {
 				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}";
 			}
 		} else {
-			// Bare metal: prerequisites, then the site. On a box whose root
-			// holds no SSH key, install.sh server leaves root password login on
-			// (derive_ssh_access): the password is the only way in, and this
-			// plane retires it itself once the machine's agents are admitted.
-			// retry_install is refused only after that (B37).
+			// Bare metal: prerequisites, then the site. install.sh server turns
+			// root SSH login off by default; --keep-root-login leaves root
+			// password login on a box whose root holds no SSH key
+			// (derive_ssh_access), because this plane logs in with that
+			// password again and retires it itself once the machine's agents
+			// are admitted. retry_install is refused only after that (B37).
 			//
 			// _site_init.sh uses the site's DB password as PGPASSWORD for the
 			// postgres role when it runs createdb, so the site's password MUST
@@ -5999,7 +6005,7 @@ class JobCommandBuilder {
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server' . self::outbound_install_flags() . $encrypted_flags . ';'
+			         . ' ./install.sh -y -q server --keep-root-login' . self::outbound_install_flags() . $encrypted_flags . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
 			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}";
