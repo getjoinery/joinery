@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.20 - An admin address the account refuses (a domain with no mail and no website) no longer leaves the
+#                 seeded default password: the password goes on alone under the seeded address, the refusal is said,
+#                 and the credentials file names the address to sign in with, a supplied password's too (B105)
 # VERSION: 3.19 - Says so when a kept config's password could not be checked (reviewer2)
 # VERSION: 3.18 - A config kept from an earlier run gets this run's database password when that one
 #                 reaches the database (_set_site_config_password.php); a run after a failed first
@@ -547,27 +550,51 @@ if [ "$DB_EXISTS" = false ]; then
         chmod 600 "$ADMIN_PW_FILE"
         printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
 
-        RESET_ARGS="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
+        RESET_BASE="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
         if [ "$ADMIN_PASSWORD_SUPPLIED" = true ] && [ "${JOINERY_ADMIN_PASSWORD_SHOWN:-}" != "1" ]; then
             # The owner chose it on the deploy form and nothing wrote it down,
             # so there is nothing to make them replace at first login. A
             # generated one is printed to a file and IS replaced, and so is
             # one a management node generated and shows the owner on a page
             # (JOINERY_ADMIN_PASSWORD_SHOWN=1).
-            RESET_ARGS="$RESET_ARGS --chosen"
+            RESET_BASE="$RESET_BASE --chosen"
         fi
+        RESET_ARGS="$RESET_BASE"
         if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
             RESET_ARGS="$RESET_ARGS --set-email=$ADMIN_EMAIL"
         fi
 
-        if php "$RESET_TOOL" $RESET_ARGS >/dev/null 2>&1; then
+        RESET_OK=false
+        RESET_OUT=""
+        ADMIN_EMAIL_REFUSED=""
+        if RESET_OUT=$(php "$RESET_TOOL" $RESET_ARGS 2>&1); then
+            RESET_OK=true
+        elif [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+            # The account's save refuses an address whose domain has no mail
+            # and no website, and the tool then writes nothing, which would
+            # leave the seeded default password: the password goes on alone,
+            # under the seeded address, and the refusal is said.
+            ADMIN_EMAIL_REFUSED="$(printf '%s\n' "$RESET_OUT" | grep -v '^\s*$' | tail -n 1)"
+            log_error "The admin address $ADMIN_EMAIL was not set: $ADMIN_EMAIL_REFUSED"
+            log_error "Sign in as admin@example.com and change the address on the account's profile."
+            ADMIN_EMAIL_REFUSED="$ADMIN_EMAIL: $ADMIN_EMAIL_REFUSED"
+            ADMIN_EMAIL="admin@example.com"
+            if RESET_OUT=$(php "$RESET_TOOL" $RESET_BASE 2>&1); then
+                RESET_OK=true
+            fi
+        fi
+
+        if [ "$RESET_OK" = true ]; then
             log "Per-site admin password applied"
             if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
                 log "Admin account address set to $ADMIN_EMAIL"
             fi
 
-            if [ "$ADMIN_PASSWORD_SUPPLIED" = false ]; then
-                # Nobody chose this password, so it has to be legible somewhere.
+            if [ "$ADMIN_PASSWORD_SUPPLIED" = false ] || [ -n "$ADMIN_EMAIL_REFUSED" ]; then
+                # Nobody chose this password, so it has to be legible somewhere;
+                # and a refused address leaves a login at another address than
+                # the one asked for, whoever chose the password. The install's
+                # summary reads the address from here.
                 CRED_FILE="${SITE_ROOT}/config/admin_credentials.txt"
                 : > "$CRED_FILE"
                 chmod 600 "$CRED_FILE"
@@ -576,8 +603,15 @@ if [ "$DB_EXISTS" = false ]; then
                     printf 'Joinery admin login for %s\n\n' "$SITENAME"
                     printf 'URL:      http://%s/login\n' "$DOMAIN"
                     printf 'Email:    %s\n' "$ADMIN_EMAIL"
-                    printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
-                    printf 'You are asked to choose a new password at first sign-in.\n'
+                    if [ "$ADMIN_PASSWORD_SUPPLIED" = false ]; then
+                        printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
+                        printf 'You are asked to choose a new password at first sign-in.\n'
+                    else
+                        printf '\nThe password is the one supplied at install time.\n'
+                    fi
+                    if [ -n "$ADMIN_EMAIL_REFUSED" ]; then
+                        printf 'The address asked for was not set (%s); change it on the account'"'"'s profile.\n' "$ADMIN_EMAIL_REFUSED"
+                    fi
                     printf 'Delete this file once you have signed in.\n\n'
                 } > "$CRED_FILE"
                 # The first-task paragraph is appended by the OPTIONAL SERVICES
@@ -585,7 +619,7 @@ if [ "$DB_EXISTS" = false ]; then
                 log "Admin credentials written to $CRED_FILE (mode 600)"
             fi
         else
-            log_error "Warning: could not apply a per-site admin password."
+            log_error "Warning: could not apply a per-site admin password: $(printf '%s\n' "$RESET_OUT" | grep -v '^\s*$' | tail -n 1)"
             log_error "The seeded default is still in place — run"
             log_error "  $RESET_TOOL"
             log_error "before exposing this site."

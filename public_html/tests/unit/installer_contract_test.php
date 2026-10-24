@@ -150,6 +150,21 @@ check(strpos($site_init_src, '--password-file=') !== false,
 	'the password is handed over in a file, not an argument',
 	'arguments are visible in ps');
 check(is_file($reset_tool), 'the reset tool exists where _site_init.sh calls it', $reset_tool);
+// The reset tool changes nothing when it refuses the new address (a domain
+// that takes no mail), so one call with both left the seeded default password
+// on a site about to be exposed (B105): the password goes on alone then.
+check(strpos($site_init_src, 'if RESET_OUT=$(php "$RESET_TOOL" $RESET_ARGS 2>&1); then') !== false
+	&& strpos($site_init_src, 'if RESET_OUT=$(php "$RESET_TOOL" $RESET_BASE 2>&1); then') !== false
+	&& strpos($site_init_src, 'RESET_ARGS="$RESET_BASE"') !== false,
+	'a refused admin address still gets the per-site password, without the address change');
+check(strpos($site_init_src, '"$RESET_TOOL" $RESET_ARGS >/dev/null') === false
+	&& strpos($site_init_src, 'The admin address $ADMIN_EMAIL was not set:') !== false,
+	'and the tool\'s reason is said, not discarded');
+// The install's summary reads the address from the credentials file, else
+// JOINERY_ADMIN_EMAIL: with a supplied password and a refused address, that
+// fallback names a login that does not exist, so the file is written then too.
+check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = false ] || [ -n "$ADMIN_EMAIL_REFUSED" ]; then') !== false,
+	'a refused address writes the credentials file, naming the address that signs in, whoever chose the password');
 
 // fix_permissions.sh sweeps the whole site root — 770 www-data:user1 in
 // production, 777 in dev. Without an explicit re-pin the credentials file
@@ -273,8 +288,8 @@ check(strpos($install_src, 'export UPGRADE_SERVER') !== false,
 
 // A password the owner chose on the deploy form is not replaced at first
 // login; only a generated one is. The distinction is made where the two
-// cases part ways, and handed to the reset tool as --chosen.
-check(strpos($site_init_src, 'RESET_ARGS="$RESET_ARGS --chosen"') !== false,
+// cases part ways, and handed to the reset tool as --chosen, on both calls (B105).
+check(strpos($site_init_src, 'RESET_BASE="$RESET_BASE --chosen"') !== false,
     '_site_init.sh passes --chosen to the reset tool for an owner-supplied password');
 check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = true ] && [ "${JOINERY_ADMIN_PASSWORD_SHOWN:-}" != "1" ]; then') !== false,
     'and only when JOINERY_ADMIN_PASSWORD supplied it and no management node shows it on a page');
@@ -301,6 +316,18 @@ check(preg_match('/Unsupported OS.*?exit 1/s', $install_src) === 1,
 check(substr_count($install_src, '--allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1') === 1,
     'the guard lives in exactly one subcommand');
 
+
+section('An install started without a login has a HOME (B104)');
+
+// A systemd unit, cron or cloud-init leaves HOME unset, and the Composer
+// installer then refuses ('The HOME or COMPOSER_HOME environment variable must
+// be set'), stopping `server` before Apache or PostgreSQL is installed.
+$home_at = strpos($install_src, 'if [ -z "${HOME:-}" ]; then');
+$composer_at = strpos($install_src, 'https://getcomposer.org/installer');
+check($home_at !== false && strpos($install_src, 'export HOME=', $home_at) !== false,
+    'install.sh sets HOME from the running account when it is unset');
+check($home_at !== false && $composer_at !== false && $home_at < $composer_at
+    && $home_at < strpos($install_src, 'case "$1" in'), 'before any subcommand runs, so Composer and every script it runs have one');
 
 section('A deferred certificate finishes on its own');
 
