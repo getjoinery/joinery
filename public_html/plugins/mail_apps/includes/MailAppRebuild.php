@@ -13,8 +13,8 @@
  *   - a message the program submitted itself is rebuilt with the Message-ID
  *     the program gave it (mam_submitted_message_id).
  *
- * A program is served the rebuilt bytes unmarked: FORMAT 1 has never carried
- * X-Joinery-Rebuilt, and adding it now would change bytes every program has
+ * A program is served the rebuilt bytes unmarked: they have never carried
+ * X-Joinery-Rebuilt, and adding it would change bytes every program has
  * already cached. The sender's DKIM signature does not verify against a
  * rebuilt body.
  *
@@ -22,6 +22,7 @@
  * closed one answers 'locked', and nothing is ever served in its place
  * (specs/mail_apps_plugin.md § Locked behaviour, rule 3).
  *
+ * @version 1.1.1 - doc no longer names a FORMAT number
  * @version 1.1.0 - the rebuild itself is the mailbox plugin's MessageRebuild
  * @version 1.0.0
  */

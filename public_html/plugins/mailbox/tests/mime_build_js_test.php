@@ -20,6 +20,7 @@
  *
  * Run: php plugins/mailbox/tests/mime_build_js_test.php
  *
+ * @version 1.3 - a nameless inline picture stays nameless (FORMAT 2, B67)
  * @version 1.2 - entries take the export header lines (B70)
  * @version 1.1 - raw mbox entries, a bare CR before From included
  * @version 1.0
@@ -70,9 +71,11 @@ function mb_part(array $p): string {
 		}
 		return $out . '--' . $b . "--\r\n";
 	}
-	$h = 'Content-Type: ' . $p['type'] . (isset($p['name']) ? '; name="' . $p['name'] . '"' : '; charset=UTF-8') . "\r\n";
+	$h = 'Content-Type: ' . $p['type'] . (isset($p['name']) ? '; name="' . $p['name'] . '"' : (isset($p['cid']) ? '' : '; charset=UTF-8')) . "\r\n";
 	if (isset($p['name'])) {
 		$h .= 'Content-Disposition: ' . (isset($p['cid']) ? 'inline' : 'attachment') . '; filename="' . $p['name'] . "\"\r\n";
+	} elseif (isset($p['cid'])) {
+		$h .= "Content-Disposition: inline\r\n";
 	}
 	if (isset($p['cid'])) {
 		$h .= 'Content-ID: <' . $p['cid'] . ">\r\n";
@@ -99,6 +102,9 @@ $corpus = array(
 	'inline picture' => array('multipart' => 'related', 'parts' => array(
 		array('type' => 'text/html', 'body' => '<p>See <img src="cid:dot@x"></p>'),
 		array('type' => 'image/png', 'name' => 'dot.png', 'body' => $png, 'cid' => 'dot@x'))),
+	'nameless picture' => array('multipart' => 'related', 'parts' => array(
+		array('type' => 'text/html', 'body' => '<p>See <img src="cid:anon@x"></p>'),
+		array('type' => 'image/png', 'body' => $png, 'cid' => 'anon@x'))),
 	'attachments'    => array('multipart' => 'mixed', 'parts' => array($plain,
 		array('type' => 'application/octet-stream', 'name' => 'blob.bin', 'body' => random_bytes(5000)),
 		array('type' => 'text/plain', 'name' => 'empty.txt', 'body' => ''),
@@ -197,6 +203,10 @@ check(count($inputs['attachments']['parts']) === 3 && count($inputs['inline pict
 $synth = base64_decode($expected['no header block, sent']['bytes']);
 check($inputs['no header block, sent']['raw_headers'] === '' && strpos($synth, "\r\nBcc: ") !== false
 	&& strpos($synth, '=?UTF-8?B?') !== false, 'the last message is built from its fields: Bcc, encoded words', substr($synth, 0, 700));
+$anon = base64_decode($expected['nameless picture']['bytes']);
+check(count($inputs['nameless picture']['parts']) === 1 && $inputs['nameless picture']['parts'][0]['filename'] === ''
+	&& strpos($anon, "Content-Type: image/png\r\nContent-Disposition: inline\r\n") !== false
+	&& strpos($anon, 'name=') === false, 'a picture that arrived with no name is rebuilt with none', substr($anon, 0, 900));
 $fwd = base64_decode($expected['forwarded']['bytes']);
 check(substr_count($fwd, 'Content-Disposition: attachment') === 1, 'a forwarded message travels whole, its insides not again beside it');
 

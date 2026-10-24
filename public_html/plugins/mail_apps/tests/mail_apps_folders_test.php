@@ -24,9 +24,12 @@
  *    message; EXPUNGE in Trash deletes for good
  *  - APPEND to Inbox stores the message and numbers it
  *  - UID sets: ranges, *, reversed ranges
+ *  - a new message format (MessageRebuild::FORMAT) starts a folder over: a
+ *    higher UIDVALIDITY, every message renumbered, told sizes forgotten
  *
  * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_folders_test.php
  *
+ * @version 1.2 - a new message format starts a folder over
  * @version 1.1 - APPEND to INBOX answers its number (APPENDUID)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -114,6 +117,27 @@ MailAppFolders::reconcile($ctx, $inbox);
 $restored = array_search($m3, mafx_live($ctx, 'inbox'), true);
 check($restored !== false && $restored >= $before, 'Restored, it is numbered again above the old UIDNEXT');
 check(MailAppFolders::reconcile($ctx, $inbox)['uidvalidity'] === $validity, 'UIDVALIDITY never changed');
+
+section('A new message format starts a folder over');
+$old = mafx_live($ctx, 'inbox');
+$db->prepare('UPDATE maf_mail_app_folders SET maf_format = ? WHERE maf_iea_inbound_email_alias_id = ? AND maf_folder = ?')
+	->execute(array(MailAppRebuild::FORMAT - 1, $ctx->alias_id, 'inbox'));
+$db->prepare('INSERT INTO mam_mail_app_messages (mam_iem_inbound_email_message_id, mam_client_size, mam_client_format) VALUES (?, 123, ?)
+	ON CONFLICT (mam_iem_inbound_email_message_id) DO UPDATE SET mam_client_size = 123, mam_client_format = EXCLUDED.mam_client_format')
+	->execute(array($m2, MailAppRebuild::FORMAT - 1));
+$state = MailAppFolders::reconcile($ctx, $inbox);
+$new = mafx_live($ctx, 'inbox');
+check($state['uidvalidity'] > $validity, 'UIDVALIDITY rises, so a program drops what it holds', $validity . ' -> ' . $state['uidvalidity']);
+$same = array_values($old);
+$again = array_values($new);
+sort($same);
+sort($again);
+check($again === $same && !array_intersect_key($new, $old), 'The same messages, every one under a new number', json_encode(array($old, $new)));
+$size = $db->prepare('SELECT mam_client_size FROM mam_mail_app_messages WHERE mam_iem_inbound_email_message_id = ?');
+$size->execute(array($m2));
+check($size->fetchColumn() === null, 'A size told under the old format is forgotten');
+$validity = $state['uidvalidity'];
+check(MailAppFolders::reconcile($ctx, $inbox)['uidvalidity'] === $validity, 'And the folder settles: the next look changes nothing');
 
 section('Changes are found by comparison');
 $mod = MailAppFolders::reconcile($ctx, $inbox)['highest_modseq'];

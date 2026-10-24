@@ -122,7 +122,7 @@ Programs ask for whole messages, and most stored mail keeps no original. `MailAp
 
 - **stored** — the original, where one is stored whole.
 - **remote** — a message pulled in from a connected source and kept there: its original, fetched live from the source, as Show original does. A source that no longer has it answers unavailable.
-- **rebuilt** — everything else: the retained header block (or headers made from the row's columns), then a rebuilt MIME tree. The tree is `multipart/mixed` over `multipart/related` (HTML and its inline parts by Content-ID) over `multipart/alternative` (plain and HTML), with attachments in manifest order.
+- **rebuilt** — everything else: the retained header block (or headers made from the row's columns), then a rebuilt MIME tree. The tree is `multipart/mixed` over `multipart/related` (HTML and its inline parts by Content-ID) over `multipart/alternative` (plain and HTML), with attachments in manifest order, each under the name it arrived with (a part that arrived with none has none).
 
 A rebuilt message is **the same bytes every time**:
 - boundaries are derived from the message id and the format version;
