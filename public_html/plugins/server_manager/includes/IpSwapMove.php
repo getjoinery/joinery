@@ -36,6 +36,9 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.11 - a kept swap whose copy's IPv6 is not named sends the owner to Set Reverse DNS for that address only,
+ *                 and a provider refusing it says what to fix (NodeReverseDns::refused), not only the provider's words
+ *                 (NodeReverseDns 1.7, B70)
  * @version 1.10 - name_copy_ipv6(): once a swap is over, the copy's IPv6 answers the site's name in reverse DNS when
  *                 the site's AAAA gives it, and says so when it does not (Keep tries again); nothing named it. The
  *                 AAAA refusal leads with pointing the record at the copy's IPv6 (site copy B45)
@@ -329,16 +332,23 @@ class IpSwapMove {
 			$given = $given || @inet_pton($a) === @inet_pton($v6);
 		}
 		if (!$given) {
-			// Not Set Reverse DNS once kept: it names the node's IPv4 too, the
-			// moved address whose reverse DNS stays as it came.
+			// Once kept, the IPv6 alone: the moved IPv4's reverse DNS stays as
+			// it came.
 			return "Reverse DNS for {$v6} was not set: no AAAA record of {$domain} names it. Point the AAAA at it, then "
-				. ($kept ? "set reverse DNS for {$v6} to {$domain} in the provider's panel." : 'keep the switch-over, which tries again.');
+				. ($kept ? "use Set Reverse DNS on the Overview tab with {$domain} for {$v6} only."
+					: 'keep the switch-over, which tries again.');
 		}
+		$p = null;
 		try {
 			$p = self::plan_provision($plan, 'copy');
 			$driver = self::$driver_for ? (self::$driver_for)($p) : NodeReverseDns::driverForProvision($p);
 			$driver->setReverseDns((string)$plan['copy']['instance_id'], $v6, $domain);
 			return self::COPY_IPV6_NAMED . "{$v6} now answers {$domain}.";
+		} catch (CloudComputeException $e) {
+			// The provider's refusal, said as what to fix.
+			$why = $p ? NodeReverseDns::refused($e, $p) : $e;
+			return "Reverse DNS was not set for {$v6}: " . $why->getMessage()
+				. (!empty($why->reconnect) ? ' Re-connect the cloud account at /profile/server_manager/connect_cloud.' : '');
 		} catch (Exception $e) {
 			return "Reverse DNS was not set for {$v6}: " . $e->getMessage();
 		}

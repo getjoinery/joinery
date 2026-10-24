@@ -25,6 +25,7 @@
  * of a site whose agent key is not on record, and alive or dead is the
  * source's, whatever the target (on a host too).
  *
+ * @version 1.1 - a site whose agent was never heard from is not copied as a running one (B101)
  * @version 1.0
  */
 
@@ -178,6 +179,10 @@ $why = implode(' | ', SiteCopyRunner::source_refusals($silent, true, SiteCopy::F
 check(strpos($why, 'has not been heard from') !== false && strpos($why, 'backups') !== false,
 	'a site whose agent is silent is not copied as a running one, and is told to copy from its backups', $why);
 check(SiteCopyRunner::source_refusals($silent, true, SiteCopy::FROM_BACKUPS) === array(), 'from its backups it is, dead');
+// An agent never heard from is not one heard just now (B101).
+$silent->set('mgn_agent_last_poll', null);
+$why = implode(' | ', SiteCopyRunner::source_refusals($silent, true, SiteCopy::FROM_SOURCE));
+check(strpos($why, 'has not been heard from at all') !== false, 'nor is a site whose agent was never heard from', $why);
 $keyless = new ManagedNode($own->key, TRUE);
 $keyless->set('mgn_agent_public_key', null);
 $why = implode(' | ', SiteCopyRunner::source_refusals($keyless, true, SiteCopy::FROM_BACKUPS));

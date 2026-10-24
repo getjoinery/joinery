@@ -98,6 +98,11 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.42 - a host whose agent has not been heard from within ALIVE_WITHIN_SECONDS takes no copy (B100); an agent
+ *                never heard from no longer reads as heard just now, for the source too (B101); an old container its
+ *                host does not answer (gone, or down) never stops the switch-over: its stop stays queued on that host
+ *                and is recorded when it runs, cancelled once that container is gone, and the way back starts the old
+ *                container when its host took the stop up meanwhile (B103)
  * @version 1.41 - a switch by IP swap ends by naming the copy's IPv6 in reverse DNS when the site's AAAA gives it
  *                (IpSwapMove::name_copy_ipv6), said on the Copy tab; keeping the switch-over asks again when it was
  *                not named (B45)
@@ -233,7 +238,8 @@ class SiteCopyRunner {
 
 	/**
 	 * A running site's agent must have polled within this to be copied as a
-	 * running site (the agent-silent incident's threshold).
+	 * running site, and a host's agent to take a copy (the agent-silent
+	 * incident's threshold).
 	 */
 	const ALIVE_WITHIN_SECONDS = 7200;
 
@@ -285,6 +291,12 @@ class SiteCopyRunner {
 
 	/** Steps this management node does itself, with no agent job. */
 	const LOCAL_STEPS = array('go_back', 'power_off', 'power_on', 'power_cycle', 'ip_swap', 'probe');
+
+	/** A step's verdicts the run goes on from: passed, or an old container's stop left owed (owe_hold()). */
+	const DONE_VERDICTS = array('passed', 'owed');
+
+	/** An owed stop's job statuses that end it: run, failed, or cancelled (its old container gone, or the way back). */
+	const OWED_ENDED_STATUSES = array('completed', 'failed', 'cancelled');
 
 	/** How long one call of the probe step asks before it gives the worker back. */
 	const PROBE_CALL_SECONDS = 15;
@@ -438,7 +450,7 @@ class SiteCopyRunner {
 		}
 		if (!$backups) {
 			// Frozen through its agent, and copied once more: it must answer.
-			$heard = strtotime((string)$source->get('mgn_agent_last_poll') . ' UTC');
+			$heard = self::agent_heard_at($source);
 			if (!$heard || time() - $heard > self::ALIVE_WITHIN_SECONDS) {
 				$why[] = 'Its agent has not been heard from ' . ($heard ? 'since ' . gmdate('M j, H:i', $heard) . ' UTC' : 'at all')
 					. ', and a copy of the running site freezes it through its agent. If the site is dead, copy it from its backups.';
@@ -952,6 +964,16 @@ class SiteCopyRunner {
 	}
 
 	/**
+	 * When the node's agent last polled, as a Unix time; null when it never
+	 * has (strtotime of ' UTC' alone would read as now).
+	 */
+	private static function agent_heard_at(ManagedNode $node): ?int {
+		$at = trim((string)$node->get('mgn_agent_last_poll'));
+		$t = $at === '' ? false : strtotime($at . ' UTC');
+		return $t ?: null;
+	}
+
+	/**
 	 * Why the site cannot be copied onto this host: one line per reason, empty
 	 * when it can. Read-only, from this management node's records and the
 	 * host's last report.
@@ -966,6 +988,12 @@ class SiteCopyRunner {
 			return array('It has no agent of its own paired with this management node.');
 		}
 		$why = array();
+		// Its agent installs the copy and holds it quiet: it must answer.
+		$heard = self::agent_heard_at($host_node);
+		if (!$heard || time() - $heard > self::ALIVE_WITHIN_SECONDS) {
+			$why[] = 'Its agent has not been heard from ' . ($heard ? 'since ' . gmdate('M j, H:i', $heard) . ' UTC' : 'at all')
+				. ', and the copy is installed and held quiet through it. Check that the host is running.';
+		}
 		$missing = array_values(array_filter(self::HOST_COPY_WORDS, function ($w) use ($host_node) {
 			return !JobCommandBuilder::has_primitive($host_node, $w);
 		}));
@@ -1590,7 +1618,8 @@ class SiteCopyRunner {
 	 * host (site_copy.md B5): each old container not yet removed, and each one
 	 * removed whose host still holds its certificate. Newest first, one entry
 	 * per old container: array('node' => the old row, 'removed' => bool,
-	 * 'certificates' => names). Nothing is listed once its cleanup is done,
+	 * 'certificates' => names, 'hold_owed' => the stop its host did not take
+	 * up (owe_hold()), or null). Nothing is listed once its cleanup is done,
 	 * however long ago the switch-over was.
 	 */
 	public static function cleanup_left(int $source_id): array {
@@ -1606,7 +1635,9 @@ class SiteCopyRunner {
 			if ($removed && !$certificates) {
 				continue;
 			}
-			$out[] = array('node' => $old, 'removed' => $removed, 'certificates' => $certificates);
+			$owed = $copy->switch_record()['hold_owed'] ?? null;
+			$out[] = array('node' => $old, 'removed' => $removed, 'certificates' => $certificates,
+				'hold_owed' => is_array($owed) ? $owed : null);
 		}
 		return $out;
 	}
@@ -1624,6 +1655,38 @@ class SiteCopyRunner {
 			if (($copy->switch_record()['watch']['state'] ?? '') === 'watching') {
 				self::advance_watch($copy);
 				$moved++;
+			}
+		}
+		// An old container's stop left queued on its host: its outcome is
+		// recorded here too, should the job's own hook have missed it.
+		foreach (self::owed_copies() as $copy) {
+			$job_id = (int)($copy->switch_record()['hold_owed']['job_id'] ?? 0);
+			if ($job_id <= 0) {
+				continue;
+			}
+			try {
+				$job = new ManagementJob($job_id, TRUE);
+			} catch (Exception $e) {
+				continue;
+			}
+			// The old container gone (its host saw it gone, or its row was
+			// removed): a stop still queued is cancelled, so a site installed
+			// there later under its name is never the one stopped.
+			$old = self::old_container($copy);
+			if ((!$old || (string)$old->get('mgn_moved_check_state') === 'absent' || $old->get('mgn_site_removed_time'))
+					&& in_array((string)$job->get('mjb_status'), array('queued', 'pending'), true)) {
+				$job->set('mjb_status', 'cancelled');
+				$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+				$job->save();
+			}
+			if (in_array((string)$job->get('mjb_status'), self::OWED_ENDED_STATUSES, true) && self::lock()) {
+				try {
+					$copy->load();
+					self::owed_hold_ran($copy, $job);
+					$moved++;
+				} finally {
+					self::unlock();
+				}
 			}
 		}
 		return $moved;
@@ -1646,6 +1709,14 @@ class SiteCopyRunner {
 			}
 			$copy = new SiteCopy($copy_id, TRUE);
 			if ($copy->key && !$copy->get('scp_delete_time')) {
+				if ((string)$job->get('mjb_job_type') === 'hold_container' && self::lock()) {
+					try {
+						$copy->load();
+						self::owed_hold_ran($copy, $job);
+					} finally {
+						self::unlock();
+					}
+				}
 				self::advance($copy);
 			}
 		} catch (Throwable $e) {
@@ -1807,7 +1878,7 @@ class SiteCopyRunner {
 		$steps = $copy->steps();
 		$pos = null;
 		foreach ($steps as $i => $s) {
-			if ($s['verdict'] !== 'passed') {
+			if (!in_array($s['verdict'], self::DONE_VERDICTS, true)) {
 				$pos = $i;
 				break;
 			}
@@ -1872,6 +1943,14 @@ class SiteCopyRunner {
 			$steps[$pos]['verdict'] = 'running';
 			$copy->set_steps($steps);
 			$copy->save();
+			// A host that has gone silent is not waited for: the stop stays
+			// queued there and runs if it answers again.
+			$heard = self::is_owed_hold($step) ? self::agent_heard_at($target) : null;
+			if (self::is_owed_hold($step) && (!$heard || time() - $heard > self::ALIVE_WITHIN_SECONDS)) {
+				self::owe_hold($copy, $steps, $pos, $target->get('mgn_name') . ' has not been heard from '
+					. ($heard ? 'since ' . gmdate('M j, H:i', $heard) . ' UTC' : 'at all'));
+				return true;
+			}
 			return false;
 		}
 
@@ -1885,6 +1964,12 @@ class SiteCopyRunner {
 			$queued = strtotime((string)$job->get('mjb_create_time') . ' UTC');
 			$limit = self::STEP_WAIT_MINUTES[$step['op']] ?? 60;
 			if ($queued && time() - $queued > $limit * 60) {
+				// Never claimed: its host is not answering, and the site does
+				// not wait for it.
+				if (self::is_owed_hold($step) && in_array((string)$job->get('mjb_status'), array('queued', 'pending'), true)) {
+					self::owe_hold($copy, $steps, $pos, $target->get('mgn_name') . " has not taken it up in {$limit} minutes");
+					return true;
+				}
 				self::fail_step($copy, $steps, $pos, "it has not finished in {$limit} minutes (status "
 					. $job->get('mjb_status') . '; is the agent claiming jobs?)');
 			}
@@ -3375,6 +3460,11 @@ class SiteCopyRunner {
 			if (isset($switch['watch'])) {
 				$switch['watch']['state'] = 'ended';
 			}
+			// An old container's stop still queued on its host is cancelled
+			// with the other open steps: the site goes back to it. One its host
+			// has taken up meanwhile may have stopped it, so it is started.
+			$restart_old = self::old_container_restarts($switch);
+			unset($switch['hold_owed']);
 			$copy->set_switch_record($switch);
 			self::cancel_open_steps($copy->steps());
 			if ($swapped) {
@@ -3413,7 +3503,7 @@ class SiteCopyRunner {
 						|| ($settle_began && is_array($switch['power']['source'] ?? null))) {
 					$template[] = array('op' => 'power_on', 'on' => 'source', 'arg' => 'source');
 				}
-				if (is_array($switch['hold'] ?? null) && !empty($switch['held'])) {
+				if ($restart_old) {
 					$template[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'start');
 				}
 				if (is_array($switch['hosts']['source'] ?? null)) {
@@ -3698,7 +3788,7 @@ class SiteCopyRunner {
 			return false;
 		}
 		foreach ($copy->steps() as $s) {
-			if ($s['verdict'] !== 'passed') {
+			if (!in_array($s['verdict'], self::DONE_VERDICTS, true)) {
 				return in_array($s['op'], self::LOCAL_STEPS, true);
 			}
 		}
@@ -3723,6 +3813,110 @@ class SiteCopyRunner {
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────────
+
+	/**
+	 * Is this step the old container's stop, once the copy has the site? The
+	 * site already runs on the copy, so it never waits on a host that does not
+	 * answer; one that answers and does not stop it still halts the run, since
+	 * the old container runs beside the copy.
+	 */
+	private static function is_owed_hold(array $step): bool {
+		return ($step['op'] ?? '') === 'hold_container' && ($step['on'] ?? '') === 'host' && ($step['arg'] ?? '') === 'stop';
+	}
+
+	/**
+	 * The old container's host is not answering: the run goes on, and the
+	 * switch record says why (hold_owed) for the Copy tab. Its stop stays
+	 * queued on the host, which runs it if it answers again, and
+	 * owed_hold_ran() records the outcome.
+	 */
+	private static function owe_hold(SiteCopy $copy, array $steps, int $pos, string $why): void {
+		$steps[$pos]['verdict'] = 'owed';
+		$steps[$pos]['reason'] = mb_substr($why, 0, 500);
+		$copy->set_steps($steps);
+		$switch = $copy->switch_record();
+		$switch['hold_owed'] = array('why' => mb_substr($why, 0, 500), 'job_id' => (int)($steps[$pos]['job_id'] ?? 0),
+			'time' => gmdate('Y-m-d H:i:s'));
+		$copy->set_switch_record($switch);
+		$copy->save();
+	}
+
+	/**
+	 * An old container's stop that was left queued on its host (owe_hold()),
+	 * now finished there: recorded on the switch, whatever the copy's status.
+	 */
+	private static function owed_hold_ran(SiteCopy $copy, ManagementJob $job): void {
+		$switch = $copy->switch_record();
+		$owed = $switch['hold_owed'] ?? null;
+		if (!is_array($owed) || (int)($owed['job_id'] ?? 0) !== (int)$job->key
+				|| !in_array((string)$job->get('mjb_status'), self::OWED_ENDED_STATUSES, true)) {
+			return;
+		}
+		if ((string)$job->get('mjb_status') === 'cancelled') {
+			// Nothing is owed any more: the old container is gone.
+			unset($switch['hold_owed']);
+			$copy->set_switch_record($switch);
+			$copy->save();
+			return;
+		}
+		JobResultProcessor::process_if_due($job);
+		$job->load();
+		$r = json_decode((string)$job->get('mjb_result'), true);
+		if ((string)$job->get('mjb_status') === 'completed' && is_array($r) && !empty($r['done']) && ($r['action'] ?? '') === 'stop') {
+			unset($switch['hold_owed']);
+			$switch['held'] = true;
+			$switch['held_late_time'] = gmdate('Y-m-d H:i:s');
+		} else {
+			// Its host answered and did not stop it: said on the Copy tab, which
+			// points at Permanently Delete Site on the old record.
+			$owed['why'] = 'its host answered and did not stop it'
+				. (is_array($r) && ($r['state'] ?? '') !== '' ? ' (it is ' . $r['state'] . ')' : ' (job ' . $job->get('mjb_status') . ')');
+			$owed['job_id'] = 0;
+			$switch['hold_owed'] = $owed;
+		}
+		$copy->set_switch_record($switch);
+		$copy->save();
+	}
+
+	/** The copies with an old container's stop owed (hold_owed), found by the database, not by reading every copy. */
+	private static function owed_copies(): array {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT scp_site_copy_id FROM scp_site_copies
+			WHERE scp_delete_time IS NULL AND (scp_switch -> 'hold_owed') IS NOT NULL ORDER BY scp_site_copy_id");
+		$q->execute();
+		$out = array();
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+			$copy = new SiteCopy((int)$id, TRUE);
+			if ($copy->key) {
+				$out[] = $copy;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Does the way back start the old container? When it was held stopped,
+	 * and when a stop owed for it has been taken up by its host since (it
+	 * came back meanwhile), which may have stopped it. A start of a container
+	 * already running passes.
+	 */
+	public static function old_container_restarts(array $switch): bool {
+		if (!is_array($switch['hold'] ?? null)) {
+			return false;
+		}
+		if (!empty($switch['held'])) {
+			return true;
+		}
+		$job_id = (int)($switch['hold_owed']['job_id'] ?? 0);
+		if ($job_id <= 0) {
+			return false;
+		}
+		try {
+			$job = new ManagementJob($job_id, TRUE);
+		} catch (Exception $e) {
+			return false;
+		}
+		return $job->key && !in_array((string)$job->get('mjb_status'), array('queued', 'pending', 'cancelled'), true);
+	}
 
 	private static function fail_step(SiteCopy $copy, array $steps, int $pos, string $why): void {
 		$steps[$pos]['verdict'] = 'failed';

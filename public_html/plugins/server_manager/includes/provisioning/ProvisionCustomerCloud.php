@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.20 - a join from a provision's machine may also be approved as a site in a container on it (B102)
  * @version 2.19 - with no plan chosen, the driver's default plan is the one sold in the provision's region (B31)
  * @version 2.18 - the provider's own layer is recorded for every server it creates, not only one we encrypt
  *                (specs/site_copy_final_test.md E4)
@@ -1011,6 +1012,23 @@ class ProvisionCustomerCloud {
 	}
 
 	/**
+	 * The nodes a join from a provision's machine may be approved as: the
+	 * machine's own (machine_node_ids()), and each site in a container on it,
+	 * whose agent reaches this plane from the machine's address.
+	 */
+	public static function join_node_ids($provision): array {
+		$ids = self::machine_node_ids($provision);
+		foreach ($provision->machine_addresses() as $ip) {
+			foreach (new MultiManagedNode(['host' => $ip, 'deleted' => false]) as $n) {
+				if (trim((string)$n->get('mgn_container_name')) !== '') {
+					$ids[] = (int)$n->key;
+				}
+			}
+		}
+		return array_values(array_unique($ids));
+	}
+
+	/**
 	 * One line for the dashboard: where the install password stands.
 	 */
 	public static function install_password_summary($provision): string {
@@ -1059,9 +1077,9 @@ class ProvisionCustomerCloud {
 		// A null node means "is this the provision's machine?" only — the
 		// dashboard's adoption of a provision's HOST join asks that before it
 		// makes the host node.
-		if ($node !== null && !in_array((int)$node->key, self::machine_node_ids($provision), true)) {
+		if ($node !== null && !in_array((int)$node->key, self::join_node_ids($provision), true)) {
 			$out['reason'] = "This join comes from provision #{$provision->key}'s machine ({$provision->get('cvp_domain')}), "
-				. 'but this node is neither that provision\'s site nor a host record at its address. '
+				. 'but this node is neither that provision\'s site, a host record at its address, nor a site in a container on it. '
 				. 'Approve it against the right node, or reject it.';
 			return $out;
 		}

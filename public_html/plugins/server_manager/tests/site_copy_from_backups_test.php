@@ -17,6 +17,8 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.5 - an old container's stop its host never takes up is owed, not waited for: the switch-over ends, and
+ *               the stop is recorded when the host runs it (B103)
  * @version 1.4 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.3 - the key request carries a signed link to the manifest (specs/storage_targets.md F7); the sources'
  *               backups are on a test target of their own (lib/node_space_fixture.php): since a node backs up only
@@ -196,6 +198,10 @@ $drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, 
 		harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 		$key = $current['op'] . (!empty($current['arg']) ? ':' . $current['arg'] : '') . '@' . $current['on'];
 		$ops[] = $key;
+		if (($by_op[$key] ?? null) === 'unclaimed') {
+			// Its machine never takes the job up.
+			break;
+		}
 		if ($current['op'] === 'copy_take_key') {
 			// The source's own schedule runs again while the copy waits for its
 			// key: storage now holds a newer manifest, with run 1 in it.
@@ -352,7 +358,7 @@ section('A container\'s old container: stopped on its host once the copy has tak
 
 // A container site on a shared server, whose host has an agent of its own.
 $hnode = $mk_node('host', array('mgn_host' => '192.0.2.95', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
-	'mgn_agent_version' => '1.59.0', 'mgn_agent_primitives' => 'host_report,restart_container'));
+	'mgn_agent_version' => '1.59.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_agent_primitives' => 'host_report,restart_container'));
 $mh = new ManagedHost(NULL);
 foreach (array('mgh_slug' => 'harnessscb-h-' . $tag, 'mgh_name' => 'HarnessTest SCB host', 'mgh_host' => '192.0.2.95',
 	'mgh_mgn_managed_node_id' => (int)$hnode->key) as $k => $v) {
@@ -430,9 +436,35 @@ SiteCopyRunner::retry_start($ccopy);
 $ccopy->load();
 $stopped = array('completed', array('output' => json_encode(array('container' => 'scbtwo', 'action' => 'stop',
 	'done' => true, 'held' => true, 'state' => 'exited', 'restart' => 'no'))));
-$ops = $drive($ccopy, array(SiteCopy::STATUS_STARTING), array('hold_container:stop@host' => $stopped));
-check($ccopy->status() === SiteCopy::STATUS_SWITCHED && end($ops) === 'hold_container:stop@host',
-	'tried again, the old container is stopped and held, and the switch-over is done', $ccopy->status() . ' ' . json_encode($ops));
+// Tried again, and this time the host never takes the stop up (it went down):
+// past the step's wait the site, already on the copy, waits for it no longer
+// (B103).
+$ops = $drive($ccopy, array(SiteCopy::STATUS_STARTING), array('hold_container:stop@host' => 'unclaimed'));
+$owed_job = null;
+foreach ($ccopy->steps() as $st) {
+	if ($st['op'] === 'hold_container' && !empty($st['job_id'])) {
+		$owed_job = new ManagementJob((int)$st['job_id'], TRUE);
+	}
+}
+check($ccopy->status() === SiteCopy::STATUS_STARTING && $owed_job && $owed_job->get('mjb_status') === 'pending',
+	'within the step\'s wait, the start waits for the old container\'s stop', $ccopy->status() . ' ' . json_encode($ops));
+$owed_job->set('mjb_create_time', gmdate('Y-m-d H:i:s', time() - (SiteCopyRunner::STEP_WAIT_MINUTES['hold_container'] + 1) * 60));
+$owed_job->save();
+SiteCopyRunner::advance($ccopy);
+$ccopy->load();
+$owed = $ccopy->switch_record()['hold_owed'] ?? null;
+check($ccopy->status() === SiteCopy::STATUS_SWITCHED && is_array($owed) && strpos((string)$owed['why'], 'has not taken it up') !== false
+	&& (int)$owed['job_id'] === (int)$owed_job->key && empty($ccopy->switch_record()['held']),
+	'past it, the switch-over ends with the stop owed, still queued on the host', $ccopy->status() . ' ' . json_encode($owed));
+$owed_job->set('mjb_status', 'completed');
+$owed_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$owed_job->set('mjb_result', null);
+$owed_job->set('mjb_output', "=== [Step 1/1] hold_container ===\n" . json_encode(array('api_version' => '1.0', 'data' => $stopped[1])));
+$owed_job->save();
+SiteCopyRunner::advance_all();
+$ccopy->load();
+check(!isset($ccopy->switch_record()['hold_owed']) && !empty($ccopy->switch_record()['held']),
+	'once the host runs it, the task tick records the old container held', json_encode($ccopy->switch_record()['hold_owed'] ?? null));
 SiteCopyRunner::finish($ccopy);
 
 // The site's Copy tab names the old container until it is removed and its

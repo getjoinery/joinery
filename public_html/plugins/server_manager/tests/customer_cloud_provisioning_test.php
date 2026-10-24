@@ -495,6 +495,21 @@ class CustomerCloudProvisioningTest {
 		$stranger->load();
 		$no = $probe->join_approval_check($ip, $stranger);
 		check(!$no['ok'] && strpos($no['reason'], 'neither') !== false, 'a node that is not the machine is refused, saying so');
+		// A site installed in a container on the machine reaches the plane from
+		// its address, and is approved as itself (B102).
+		$tenant = new ManagedNode(NULL);
+		$tenant->set('mgn_name', 'HarnessTest tenant ' . $suffix);
+		$tenant->set('mgn_slug', 'retire-' . $suffix . '-tenant');
+		$tenant->set('mgn_host', $ip);
+		$tenant->set('mgn_container_name', 'tenant' . $suffix);
+		$tenant->set('mgn_web_root', '/var/www/html/tenant' . $suffix . '/public_html');
+		$tenant->set('mgn_uptime_enabled', false);
+		$tenant->save();
+		$tenant->load();
+		$ok = $probe->join_approval_check($ip, $tenant);
+		check($ok['ok'], 'a site in a container on the machine approves against its own node', $ok['reason']);
+		check(!in_array((int)$tenant->key, ProvisionCustomerCloud::machine_node_ids($prov), true),
+			'and is not one of the machine\'s own nodes, which a host agent\'s auto-approval counts');
 		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'status' => 'offline'];
 		$no = $probe->join_approval_check($ip, $site);
 		check(!$no['ok'] && strpos($no['reason'], 'not running') !== false, 'an instance the provider says is not running is refused');
@@ -515,10 +530,10 @@ class CustomerCloudProvisioningTest {
 		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 
 		// Cleanup: jobs, then the nodes (site first: its FK points at the host record), host record, provision.
-		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
-		$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key, $tenant->key]);
+		$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id IN (?, ?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key, $tenant->key]);
 		$db->prepare('UPDATE mgh_managed_hosts SET mgh_mgn_managed_node_id = NULL WHERE mgh_host = ?')->execute([$ip]);
-		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key, $tenant->key]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
 		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$prov->key]);
 	}
@@ -987,6 +1002,15 @@ class CustomerCloudProvisioningTest {
 			&& $fake->last_hostname === 'mail.example.com',
 			'driver called with provision instance/ip and lowercased hostname');
 		check($result['rdns'] === 'mail.example.com', 'set returns the provider result');
+
+		// A node with no IPv6 has none to name alone (B70).
+		try {
+			NodeReverseDns::set($node, 'mail.example.com', $fake, array('203.0.113.80'), NodeReverseDns::ADDRESSES_IPV6);
+			check(false, 'the IPv6 alone on a node with none: refused');
+		} catch (NodeReverseDnsException $e) {
+			check(strpos($e->getMessage(), 'no IPv6 address on record') !== false && $fake->calls === 1,
+				'the IPv6 alone on a node with none: refused before the provider call', $e->getMessage());
+		}
 
 		// Forward-record precondition: a hostname that cannot resolve to the
 		// node IP is refused with the create-the-A-record instruction, and the

@@ -16,6 +16,7 @@
  * file, whose machines take a call or two to change state, as real ones do.
  * Agent jobs are finished by hand, as site_copy_switch does.
  *
+ * @version 1.5 - B70: a kept swap's unnamed IPv6 is named alone with Set Reverse DNS
  * @version 1.4 - B45: the copy's IPv6 is named in reverse DNS when the AAAA gives it, at the switch or at Keep, and
  *                the Copy tab says what to do when it is not; the AAAA refusal leads with pointing it at the copy
  * @version 1.3 - holds the copy lock for the run, so the live tick never refuses one of its actions
@@ -125,6 +126,7 @@ class IpSwapTestDriver implements CloudComputeProvider, CloudAddressSwap {
 	public $generation = array();   // instance => interface generation (B8)
 	public $calls = array();
 	public $drop_rdns = false;
+	public $refuse_v6_rdns = 0;  // an HTTP status the provider answers an IPv6 reverse DNS call with
 	private $pending = array();  // instance => status it reaches on the next read
 
 	public function getInstance(string $id): array {
@@ -175,6 +177,9 @@ class IpSwapTestDriver implements CloudComputeProvider, CloudAddressSwap {
 		}
 	}
 	public function setReverseDns(string $id, string $ip, string $hostname): array {
+		if ($this->refuse_v6_rdns && strpos($ip, ':') !== false) {
+			throw new CloudComputeException('unauthorized', $this->refuse_v6_rdns);
+		}
 		$this->calls[] = "rdns {$ip} {$hostname}";
 		$this->rdns[$ip] = $hostname;
 		return array('ip' => $ip, 'rdns' => $hostname);
@@ -273,7 +278,7 @@ $census = function (int $rows) {
 };
 
 $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
-	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.54.0',
+	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.54.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'copy_export,copy_vouch,site_census,site_quiet,backup_run,check_status',
 	'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
 	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
@@ -663,8 +668,8 @@ check($copy4->status() === SiteCopy::STATUS_SWITCHED && !preg_grep('/^rdns 2600:
 	'switched with no AAAA, the copy\'s IPv6 is not named, and the Copy tab says Keep tries again',
 	$copy4->status() . ' ' . $copy4->get('scp_halt_reason') . ' ' . $note4);
 check(strpos(IpSwapMove::name_copy_ipv6((array)$copy4->switch_record()['swap'], true),
-	'set reverse DNS for 2600:3c03::2 to sci.example.org in the provider\'s panel') !== false,
-	'kept with still no AAAA naming it, the line says to name the IPv6 alone at the provider');
+	'use Set Reverse DNS on the Overview tab with sci.example.org for 2600:3c03::2 only') !== false,
+	'kept with still no AAAA naming it, the line says to name the IPv6 alone with Set Reverse DNS (B70)');
 // Then the owner points the AAAA at the copy's IPv6, and keeps the switch-over.
 $aaaa = array('2600:3c03::2');
 SiteCopyRunner::finish($copy4);
@@ -675,6 +680,14 @@ check($copy4->status() === SiteCopy::STATUS_FINISHED && ($stopped->rdns['2600:3c
 	'keeping it names the copy\'s IPv6 then, and says so', $copy4->status() . ' ' . $note4 . ' ' . json_encode($stopped->calls));
 check($stopped->rdns[$S4] === 'mail.example.org' && !preg_grep('/^rdns ' . preg_quote($S4, '/') . ' /', $stopped->calls),
 	'and the moved IPv4 keeps its reverse DNS', json_encode($stopped->calls));
+// A provider refusing the credential: the line says what to fix, not only
+// what the provider answered.
+$stopped->refuse_v6_rdns = 401;
+$note4 = IpSwapMove::name_copy_ipv6((array)$copy4->switch_record()['swap'], true);
+$stopped->refuse_v6_rdns = 0;
+check(strpos($note4, 'Reverse DNS was not set for 2600:3c03::2: The provider refused the credential for ') === 0
+	&& strpos($note4, 'Replace it on the Hosting tab of Provisioning Setup') !== false && !IpSwapMove::copy_ipv6_named($note4),
+	'a provider refusing the credential: the line says where to replace it (B70 N1)', $note4);
 $aaaa = array();
 
 SiteCopyRunner::$chain_lister = null;

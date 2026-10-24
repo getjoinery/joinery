@@ -254,7 +254,7 @@ section('Preflight');
 
 $src_status = json_encode(array('backup_recovery_state' => 'proven'));
 $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_site_url' => 'https://scp.example.org',
-	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.50.0',
+	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.50.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.472',
 	'mgn_last_status_data' => $src_status, 'mgn_backup_recovery_fpr' => str_repeat('ab', 32),
 	'mgn_agent_server_manager' => 'inactive',
