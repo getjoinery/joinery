@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
 # arm_ssl_retry.sh - watch for the name to reach this box, then issue the certificate on its own
-# Version: 1.2.1 - The two ways the https hop can fail are two journal lines: 526 is the
+# Version: 1.2.2 - Each tick first mints the site's placeholder when it has no certificate at all
+#                  (install.sh ensure_placeholder_cert); a 525 no longer names a render_vhost.sh
+#                  a container host does not have (B110).
+# Version: 1.2.1 -The two ways the https hop can fail are two journal lines: 526 is the
 #                  edge on Strict refusing the placeholder (set it to Full); 525 is this box
 #                  answering no TLS at all, which after the placeholder is a defect
 #                  (specs/implemented/tls_and_origin_trust.md R2).
@@ -186,13 +189,19 @@ fi
 # shellcheck source=/dev/null
 . "$INSTALL_SH"
 
+# The placeholder an edge's https hop needs, minted when the site has neither
+# it nor a real certificate (an install.sh older than 3.35 has no such step).
+if command -v ensure_placeholder_cert > /dev/null 2>&1; then
+    ensure_placeholder_cert "$DOMAIN"
+fi
+
 reach=0
 name_reaches_here "$DOMAIN" || reach=$?
 case "$reach" in
     0) ;;
     2)  echo "$DOMAIN reaches an edge that is on Full (Strict) and refuses the placeholder certificate this box presents. Set the edge to Full until the first certificate lands — waiting."
         exit 0 ;;
-    3)  echo "$DOMAIN reaches an edge, but this box did not complete a TLS handshake: the placeholder certificate is missing. On the host: bash $(dirname "$INSTALL_SH")/render_vhost.sh — waiting."
+    3)  echo "$DOMAIN reaches an edge, but the edge's https hop reached no site here (above) — waiting."
         exit 0 ;;
     *)  echo "$DOMAIN does not reach this box yet — waiting."
         exit 0 ;;

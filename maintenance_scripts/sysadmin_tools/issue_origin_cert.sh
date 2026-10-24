@@ -2,6 +2,9 @@
 #
 # issue_origin_cert.sh - issue (or re-issue) the origin certificate for a name,
 # apex + www, on the box that terminates TLS for it.
+# Version: 1.2 - Mints the site's placeholder first when it has no certificate at all
+#                (install.sh ensure_placeholder_cert); a 525 no longer names a
+#                render_vhost.sh a Docker host does not have (B110).
 # Version: 1.1 - 525 and 526 are two messages (a box with no TLS listener at all
 #                is a missing placeholder, not an edge on Strict); www resolves
 #                through name_resolves, which never mistakes a CNAME target for
@@ -56,6 +59,9 @@ INSTALL_SH="${SCRIPT_DIR}/../install_tools/install.sh"
 command -v certbot >/dev/null 2>&1 || { echo "ERROR: certbot is not installed on this box." >&2; exit 1; }
 
 echo "== Reach =="
+# The placeholder an edge's https hop needs, minted when the site has neither
+# it nor a real certificate.
+ensure_placeholder_cert "$DOMAIN"
 reach=0
 name_reaches_here "$DOMAIN" || reach=$?
 case "$reach" in
@@ -63,8 +69,7 @@ case "$reach" in
     2)  echo "The edge in front of ${DOMAIN} is on Full (Strict) and refuses the placeholder certificate this box presents." >&2
         echo "Set it to Full, re-run this, then set Strict. Nothing issued." >&2
         exit 1 ;;
-    3)  echo "${DOMAIN} reaches an edge, but this box did not complete a TLS handshake: the placeholder certificate is missing." >&2
-        echo "Run: sudo bash ${SCRIPT_DIR}/../install_tools/render_vhost.sh   then re-run this. Nothing issued." >&2
+    3)  echo "${DOMAIN} reaches an edge, but the edge's https hop reached no site here (above). Nothing issued." >&2
         exit 1 ;;
     *)  echo "${DOMAIN} does not reach this box, so HTTP-01 cannot be answered from here. Nothing issued." >&2
         exit 1 ;;

@@ -373,8 +373,13 @@ check($retry_block !== '' && strpos($retry_block, 'have_real_cert') !== false,
     'an operator or an origin-cert flow can place a self-signed cert there, so file-exists is not a finish line');
 check($retry_block !== '' && preg_match('/^\s*2\)\s+echo ".*Full \(Strict\).*Set the edge to Full/m', $retry_block) === 1,
     'when the edge is on Strict and refuses the placeholder (526), the journal line says to set it to Full until the first one lands');
-check($retry_block !== '' && preg_match('/^\s*3\)\s+echo ".*placeholder certificate is missing.*render_vhost\.sh/m', $retry_block) === 1,
-    'when this box completed no handshake at all (525), the journal line says the placeholder is missing and names render_vhost.sh');
+check($retry_block !== '' && strpos($retry_block, 'ensure_placeholder_cert "$DOMAIN"') !== false
+        && strpos($retry_block, 'ensure_placeholder_cert "$DOMAIN"') < strpos($retry_block, 'name_reaches_here "$DOMAIN"'),
+    'each tick mints the site\'s missing placeholder before it probes, so a 525 is never a placeholder no one will make',
+    'B110: a container host\'s proxy vhosts are never re-rendered');
+check($retry_block !== '' && preg_match('/^\s*3\)\s+echo ".*https hop reached no site here/m', $retry_block) === 1
+        && strpos($retry_block, 'render_vhost.sh') === false,
+    'when the https hop reaches no site here (525), the journal line says so and names no render_vhost.sh, which a container host does not have');
 check($retry_block !== '' && strpos($retry_block, '. "$INSTALL_SH"') !== false,
     'the probe is install.sh\'s own, sourced from beside the setup_ssl.sh that will run, so the timer and the installer cannot disagree');
 

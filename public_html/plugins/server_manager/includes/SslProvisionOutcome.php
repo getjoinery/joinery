@@ -25,12 +25,53 @@
  * collapsing them into one "failed" is how a five-minute fix becomes an
  * afternoon. They are separated here so a dashboard can say which one it is.
  *
+ * A run that issued nothing usually arms the node's retry timer, which asks
+ * every five minutes whether the name reaches the node and issues the moment
+ * it does: that is a wait, not a fault. A timer that could not be armed, or an
+ * edge on Full (Strict), is a fault nothing on the node will clear.
+ *
+ * @version 1.2 - reads the words the scripts print today (B111): "drop credentials at" in any case, and
+ *                "no DNS-01 provider was detected" beside the older "no LE challenge path available", so a
+ *                no-certificate run is no longer unreadable; a run that armed the retry timer is a wait
+ *                (WAITING_FOR_NAME), one whose timer could not be armed (RETRY_NOT_ARMED) and an edge on
+ *                Full (Strict) (EDGE_STRICT) need a person. PHRASES is held to the scripts by a test.
  * @version 1.1
  */
 class SslProvisionOutcome {
 
+	/**
+	 * What the certificate scripts (install.sh's provision_origin_cert, setup_ssl.sh) print, as matched
+	 * below. ssl_primitive_chain_test holds each to the scripts' source, so a reworded line fails a test
+	 * instead of turning every result unreadable. Matched case-insensitively.
+	 */
+	const PHRASES = [
+		'issued'        => 'Issued LE certificate for',
+		'kept'          => 'Kept the LE certificate for',
+		'not_issued'    => 'No origin cert issued',
+		'retry_armed'   => 'A retry timer asks every five minutes',
+		'retry_unarmed' => 'No retry timer could be armed',
+		'edge_strict'   => 'Set the edge to Full',
+		'credentials'   => 'drop credentials at',
+		'no_provider'   => 'no DNS-01 provider was detected',
+		'dns_attempt'   => 'DNS-01 via',
+		'http_failed'   => 'HTTP-01 failed',
+		'configtest'    => 'configtest failed',
+	];
+
+	/** How a node not yet on this release says there is no challenge path. */
+	const LEGACY_NO_PATH = 'no LE challenge path available';
+
 	/** A certificate is on the node. The only state that means SSL is live. */
 	const ISSUED = 'issued';
+
+	/** No certificate yet, and the node's retry timer issues one once the name reaches it. */
+	const WAITING_FOR_NAME = 'waiting_for_name';
+
+	/** No certificate, and the retry timer that would issue one could not be armed. */
+	const RETRY_NOT_ARMED = 'retry_not_armed';
+
+	/** The edge in front of the domain is on Full (Strict) and refuses the placeholder certificate. */
+	const EDGE_STRICT = 'edge_strict';
 
 	/** DNS-01 is the only viable path and /etc/letsencrypt/{provider}.ini is missing. */
 	const NO_DNS_CREDENTIALS = 'no_dns_credentials';
@@ -75,8 +116,8 @@ class SslProvisionOutcome {
 		// A certificate certbot found valid and not yet due is kept, not issued
 		// again (one a copy carried in from its old server, or a run again on a
 		// node that has one): a certificate is on the node all the same.
-		$kept = strpos($text, 'Kept the LE certificate for') !== false;
-		if ($kept || strpos($text, 'Issued LE certificate for') !== false) {
+		$kept = self::says($text, 'kept');
+		if ($kept || self::says($text, 'issued')) {
 			// Which challenge answered matters beyond curiosity: HTTP-01 can
 			// only have succeeded if the domain resolves to this box, which is
 			// the precondition a reverse-DNS grant is checked against. DNS-01
@@ -96,30 +137,58 @@ class SslProvisionOutcome {
 			];
 		}
 
-		// Checked before the generic "No origin cert issued", which this case
-		// also prints. This is the actionable one: the script has already
-		// worked out the provider and the exact path it wants the file at.
-		if (strpos($text, 'Drop credentials at') !== false) {
-			$cred = self::matched('/Drop credentials at (\S+)/', $text);
+		// Nothing on the node clears these two: no timer is asking again, or
+		// the edge refuses every answer this node can give until a person
+		// changes it.
+		if (self::says($text, 'retry_unarmed')) {
 			return [
-				'state'  => self::NO_DNS_CREDENTIALS,
-				'detail' => 'No certificate was issued: this domain needs a DNS-01 challenge and the provider '
-				          . 'credentials are not on the node. Put them at '
-				          . ($cred !== '' ? $cred : '/etc/letsencrypt/{provider}.ini')
-				          . ' and provision again.',
+				'state'  => self::RETRY_NOT_ARMED,
+				'detail' => 'No certificate was issued, and the retry timer that would issue one once the domain '
+				          . 'reaches the node could not be armed. Run setup_ssl.sh for the domain on the node (on its '
+				          . 'host, for a site in a container) once the domain reaches it.',
+			];
+		}
+		if (self::says($text, 'edge_strict')) {
+			return [
+				'state'  => self::EDGE_STRICT,
+				'detail' => 'No certificate was issued: the edge in front of the domain is on Full (Strict) and '
+				          . 'refuses the placeholder certificate the node answers with until it has a real one. Set '
+				          . 'the edge to Full; the node\'s retry timer then issues the certificate, and Full (Strict) '
+				          . 'works after that.',
 			];
 		}
 
-		if (strpos($text, 'no LE challenge path available') !== false) {
-			return [
-				'state'  => self::NO_CHALLENGE_PATH,
-				'detail' => 'No certificate was issued: the domain does not resolve to this node and its '
-				          . 'nameservers are not a DNS provider this node can answer a challenge through. '
-				          . 'Point the domain here, or use a supported DNS provider.',
-			];
+		// The script has already worked out the provider and the exact path it
+		// wants credentials at, whenever it found one.
+		if (self::says($text, 'not_issued')) {
+			$cred = self::matched('/drop credentials at (\S+)/i', $text);
+			if (self::says($text, 'retry_armed')) {
+				return [
+					'state'  => self::WAITING_FOR_NAME,
+					'detail' => 'No certificate yet: the node\'s retry timer asks every five minutes whether the '
+					          . 'domain reaches it, and issues one when it does.'
+					          . ($cred !== '' ? ' To issue one now through DNS-01 instead, put the provider '
+					          . 'credentials at ' . $cred . ' and provision again.' : ''),
+				];
+			}
+			if ($cred !== '') {
+				return [
+					'state'  => self::NO_DNS_CREDENTIALS,
+					'detail' => 'No certificate was issued: this domain needs a DNS-01 challenge and the provider '
+					          . 'credentials are not on the node. Put them at ' . $cred . ' and provision again.',
+				];
+			}
+			if (self::says($text, 'no_provider') || stripos($text, self::LEGACY_NO_PATH) !== false) {
+				return [
+					'state'  => self::NO_CHALLENGE_PATH,
+					'detail' => 'No certificate was issued: the domain does not reach this node and its '
+					          . 'nameservers are not a DNS provider this node can answer a challenge through. '
+					          . 'Point the domain here, or use a supported DNS provider.',
+				];
+			}
 		}
 
-		if (strpos($text, 'DNS-01 via') !== false && strpos($text, 'failed') !== false) {
+		if (self::says($text, 'dns_attempt') && strpos($text, 'failed') !== false) {
 			return [
 				'state'  => self::CHALLENGE_FAILED,
 				'detail' => 'A DNS-01 challenge was attempted and did not validate. The credentials on the '
@@ -127,7 +196,7 @@ class SslProvisionOutcome {
 			];
 		}
 
-		if (strpos($text, 'HTTP-01 failed') !== false) {
+		if (self::says($text, 'http_failed')) {
 			return [
 				'state'  => self::CHALLENGE_FAILED,
 				'detail' => 'An HTTP-01 challenge was attempted and did not validate, and no DNS-01 fallback '
@@ -135,7 +204,7 @@ class SslProvisionOutcome {
 			];
 		}
 
-		if (strpos($text, 'configtest failed') !== false) {
+		if (self::says($text, 'configtest')) {
 			return [
 				'state'  => self::APACHE_CONFIG_BROKEN,
 				'detail' => 'Apache would not accept its configuration afterwards, so it was not reloaded. '
@@ -158,13 +227,22 @@ class SslProvisionOutcome {
 	/**
 	 * Is this worth waking a person for, or will retrying fix it?
 	 *
-	 * Missing credentials and a missing challenge path are both "a human must
-	 * change something outside this node"; retrying either on a timer produces
-	 * an identical result forever. A failed challenge can be transient (a zone
-	 * mid-propagation, a rate limit), so it stays on the retry path.
+	 * Missing credentials and a missing challenge path with no retry timer, a
+	 * timer that could not be armed, and an edge on Full (Strict) are all "a
+	 * human must change something outside this node"; retrying any of them
+	 * produces an identical result forever. A failed challenge can be transient
+	 * (a zone mid-propagation, a rate limit), and a node whose retry timer is
+	 * armed issues on its own once the name reaches it, so both stay on the
+	 * retry path.
 	 */
 	public static function needs_operator($state) {
-		return in_array($state, [self::NO_DNS_CREDENTIALS, self::NO_CHALLENGE_PATH, self::APACHE_CONFIG_BROKEN], true);
+		return in_array($state, [self::NO_DNS_CREDENTIALS, self::NO_CHALLENGE_PATH, self::APACHE_CONFIG_BROKEN,
+			self::RETRY_NOT_ARMED, self::EDGE_STRICT], true);
+	}
+
+	/** The script's text says one of PHRASES, in any case. */
+	private static function says($text, $key) {
+		return stripos($text, self::PHRASES[$key]) !== false;
 	}
 
 	/**

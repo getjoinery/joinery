@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/install.sh, maintenance_scripts/sysadmin_tools/setup_ssl.sh]
  */
 /**
  * The primitive SSL chain's decisions, as pure functions.
@@ -136,6 +137,81 @@ check($state($envelope) === SslProvisionOutcome::ISSUED,
 $envelope_no_creds = json_encode(['api_version' => '1.0', 'data' => ['output' => $no_creds]]);
 check($state($envelope_no_creds) === SslProvisionOutcome::NO_DNS_CREDENTIALS,
 	'and so is a non-issuing one');
+
+section('The words the scripts print today are read, and a retry timer makes a wait (B111)');
+
+// A copy's switch-over (C19, job 4211): the certificate step ran before the
+// site answered, and the bundle could not arm the retry (B109).
+$unarmed = "{$B}[INFO]{$N} m.example.com does not reach this box (HTTP 000).\n"
+         . "{$B}[INFO]{$N} No origin cert issued for m.example.com.\n"
+         . "{$B}[INFO]{$N}   The retry timer issues it on its own once m.example.com reaches this box; or drop credentials at "
+         . "/etc/letsencrypt/cloudflare.ini and re-run sysadmin_tools/setup_ssl.sh m.example.com for DNS-01.\n"
+         . "{$Y}[WARN]{$N} No retry timer could be armed for m.example.com: run setup_ssl.sh m.example.com again once "
+         . "m.example.com reaches this box.\n"
+         . "Apache reloaded.\n";
+$armed = str_replace("{$Y}[WARN]{$N} No retry timer could be armed for m.example.com: run setup_ssl.sh m.example.com again once "
+         . "m.example.com reaches this box.\n",
+         "{$B}[INFO]{$N} A retry timer asks every five minutes whether m.example.com reaches this box, and issues its "
+         . "certificate when it does.\n", $unarmed);
+$no_provider_armed = "{$B}[INFO]{$N} No vhost on this box answers for n.example.com; it cannot reach here.\n"
+         . "{$B}[INFO]{$N} No origin cert issued for n.example.com (the name does not reach this box and no DNS-01 provider was detected).\n"
+         . "{$B}[INFO]{$N} A retry timer asks every five minutes whether n.example.com reaches this box, and issues its "
+         . "certificate when it does.\n"
+         . "Apache reloaded.\n";
+$no_provider_unarmed_old = "{$B}[INFO]{$N} No origin cert issued for n.example.com (the name does not reach this box and no DNS-01 provider was detected).\n"
+         . "Apache reloaded.\n";
+$creds_today = "{$B}[INFO]{$N} No origin cert issued for m.example.com.\n"
+         . "{$B}[INFO]{$N}   The retry timer issues it on its own once m.example.com reaches this box; or drop credentials at "
+         . "/etc/letsencrypt/linode.ini and re-run sysadmin_tools/setup_ssl.sh m.example.com for DNS-01.\n"
+         . "Apache reloaded.\n";
+$strict = "{$Y}[WARN]{$N} s.example.com reaches an edge, but the edge is on Full (Strict) and refuses the placeholder "
+         . "certificate this box presents (HTTP 526).\n"
+         . "{$Y}[WARN]{$N}   Set the edge to Full until the first certificate lands; then Full (Strict) works.\n"
+         . "{$B}[INFO]{$N} No origin cert issued for s.example.com.\n"
+         . "{$B}[INFO]{$N}   Set the edge to Full (not Full (Strict)) until the first certificate lands; the retry timer "
+         . "issues it on its own once s.example.com reaches here.\n"
+         . "{$B}[INFO]{$N} A retry timer asks every five minutes whether s.example.com reaches this box, and issues its "
+         . "certificate when it does.\n"
+         . "Apache reloaded.\n";
+
+$c = SslProvisionOutcome::classify($unarmed);
+check($c['state'] === SslProvisionOutcome::RETRY_NOT_ARMED && SslProvisionOutcome::needs_operator($c['state']),
+	'no certificate and no retry timer: a person is needed, and the record says so',
+	'it was read as unreadable, and the copy sat on its placeholder unseen');
+check(strpos($c['detail'], 'setup_ssl.sh') !== false, 'and the detail says what to run', $c['detail']);
+$c = SslProvisionOutcome::classify($armed);
+check($c['state'] === SslProvisionOutcome::WAITING_FOR_NAME && !SslProvisionOutcome::needs_operator($c['state']),
+	'no certificate yet with the retry timer armed: a wait, not a fault', $c['state']);
+check(strpos($c['detail'], '/etc/letsencrypt/cloudflare.ini') !== false,
+	'and the detail still names the credentials file that would issue one now', $c['detail']);
+check(SslProvisionOutcome::classify($no_provider_armed)['state'] === SslProvisionOutcome::WAITING_FOR_NAME,
+	'no DNS provider with the retry timer armed: a wait too');
+check(SslProvisionOutcome::classify($no_provider_unarmed_old)['state'] === SslProvisionOutcome::NO_CHALLENGE_PATH,
+	'no DNS provider and no retry timer (a node before setup_ssl.sh 1.1): no challenge path, in today\'s words');
+$c = SslProvisionOutcome::classify($creds_today);
+check($c['state'] === SslProvisionOutcome::NO_DNS_CREDENTIALS && strpos($c['detail'], '/etc/letsencrypt/linode.ini') !== false,
+	'credentials missing and no retry timer, in today\'s lowercase words: the missing-credentials state, naming the file', $c['state']);
+$c = SslProvisionOutcome::classify($strict);
+check($c['state'] === SslProvisionOutcome::EDGE_STRICT && SslProvisionOutcome::needs_operator($c['state']),
+	'an edge on Full (Strict): a person is needed even with the timer armed, since only the edge\'s owner can change it', $c['state']);
+foreach ([$unarmed, $armed, $no_provider_armed, $creds_today, $strict] as $sample) {
+	check(!SslProvisionOutcome::is_issued(SslProvisionOutcome::classify($sample)['state']),
+		'and none of them is read as a certificate on the node');
+}
+
+section('Every phrase the classifier reads is one the certificate scripts print (B111)');
+// The classifier reads text; the scripts are free to reword it. Each phrase is
+// held to their source here, so a reworded line fails this test instead of
+// turning every result unreadable on the fleet.
+$cert_scripts = '';
+foreach (['maintenance_scripts/install_tools/install.sh', 'maintenance_scripts/sysadmin_tools/setup_ssl.sh'] as $rel) {
+	$cert_scripts .= (string)file_get_contents(dirname(PathHelper::getRootDir()) . '/' . $rel);
+}
+check(strlen($cert_scripts) > 100000, 'install.sh and setup_ssl.sh are read');
+foreach (SslProvisionOutcome::PHRASES as $key => $phrase) {
+	check(stripos($cert_scripts, $phrase) !== false, "'{$phrase}' ({$key}) is printed by the scripts",
+		'reword SslProvisionOutcome::PHRASES with the script, or the outcome reads as unreadable');
+}
 
 section('An old node is refused by name, never as a routing failure');
 

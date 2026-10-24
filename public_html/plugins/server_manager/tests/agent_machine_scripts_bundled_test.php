@@ -138,8 +138,13 @@ section('Every file a bundled script reaches through install.sh ships in the bun
 // the bundle left out, and no container host ever retried a certificate).
 // Read as bash runs it: the part of install.sh a sourcing script loads (up to
 // its sourced-mode return), split into its functions; from each sourcing
-// script, the functions it calls in command position, then theirs in turn. A
-// file named only in a message is advice to an operator, not a use.
+// script, the functions it calls, then theirs in turn. A call is a name in
+// command position (a line's start, after ; & | ( ) { ! $( or a backtick, after
+// then/do/else/if/elif/while/until/time/exec, past any VAR=value prefix), or a
+// bare word handed to trap, eval, command, nice, nohup, timeout, env or xargs.
+// A callback held in a variable ("$cb") cannot be resolved this way and is not
+// followed. A file named only in a message (a print_*, echo or printf line) is
+// advice to an operator, not a use; a real use on such a line is missed.
 $si_bundled = SupportBundlePublisher::declaredContents();
 $si_root = dirname(PathHelper::getRootDir());
 $si_rel = 'maintenance_scripts/install_tools/install.sh';
@@ -159,12 +164,18 @@ for ($si_i = 0; $si_i < $si_end; $si_i++) {
 		if (preg_match('/^(.*)\}\s*$/', $si_m[2], $si_one)) { $si_funcs[$si_m[1]] = $si_one[1] . "\n"; } else { $si_cur = $si_m[1]; }
 		continue;
 	}
-	if ($si_cur !== null && $si_line === '}') { $si_cur = null; continue; }
+	if ($si_cur !== null && preg_match('/^\}\s*(#.*)?$/', $si_line)) { $si_cur = null; continue; }
 	if (preg_match('/^\s*#/', $si_line)) { continue; }
 	if ($si_cur !== null) { $si_funcs[$si_cur] .= $si_line . "\n"; } else { $si_top .= $si_line . "\n"; }
 }
 check(count($si_funcs) >= 50 && isset($si_funcs['provision_origin_cert'], $si_funcs['install_ssl_retry_timer']),
 	'install.sh\'s functions are found', count($si_funcs) . ' found');
+// A function whose closing line was not recognised swallows the ones after it,
+// whose calls are then never followed: a definition inside a body is that.
+$si_swallowers = array_keys(array_filter($si_funcs, function ($body) {
+	return preg_match('/^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{/m', $body) === 1;
+}));
+check($si_swallowers === array(), 'no function of install.sh swallowed the next', implode(', ', $si_swallowers));
 
 // The files a piece of install.sh uses beside itself, as tree paths.
 $si_files = function (string $code): array {
@@ -180,18 +191,40 @@ $si_files = function (string $code): array {
 	}
 	return array_unique($paths);
 };
-// The install.sh functions a piece of bash calls: each name in command position.
+// The install.sh functions a piece of bash calls (the forms above).
 $si_calls = function (string $code) use ($si_funcs): array {
 	$called = array();
 	foreach (array_keys($si_funcs) as $name) {
-		if (preg_match('/(?:^|[;&|({!]|\$\(|\b(?:then|do|else|if|while|until|time|exec))[ \t]*' . preg_quote($name, '/') . '(?![A-Za-z0-9_(])/m', $code)) {
+		$q = preg_quote($name, '/');
+		if (preg_match('/(?:^|[;&|(){!`]|\$\(|\b(?:then|do|else|if|elif|while|until|time|exec))[ \t]*'
+				. '(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*' . $q . '(?![A-Za-z0-9_(])/m', $code)
+			|| preg_match('/\b(?:trap|eval|command|nice|nohup|timeout|env|xargs)\b[^\n;|&]*?[\s\'"]' . $q . '(?![A-Za-z0-9_])/', $code)) {
 			$called[] = $name;
 		}
 	}
 	return $called;
 };
 
+// The walk's own call forms, on a function install.sh has.
+$si_probe = function (string $snippet) use ($si_calls): bool {
+	return in_array('provision_origin_cert', $si_calls($snippet), true);
+};
+foreach (array(
+	"case \"\$x\" in\n    a) provision_origin_cert ;;\nesac" => 'in a one-line case arm',
+	"if false; then :\nelif provision_origin_cert; then :; fi" => 'after elif',
+	'QUIET=1 DOMAIN=x provision_origin_cert "$d"' => 'behind VAR=value assignments',
+	'trap provision_origin_cert EXIT' => 'handed to trap',
+	"trap 'provision_origin_cert' EXIT" => 'handed to trap quoted',
+	'timeout 60 provision_origin_cert "$d"' => 'handed to timeout',
+	'x=`provision_origin_cert "$d"`' => 'in backticks',
+) as $si_snippet => $si_form) {
+	check($si_probe($si_snippet), "a call {$si_form} is followed");
+}
+check(!$si_probe('print_info "run provision_origin_cert by hand"') && !$si_probe("awk '/^provision_origin_cert\\(\\) \\{/' f"),
+	'a name in a message or a pattern is not a call');
+
 $si_sourcers = array();
+$si_reached = array();
 foreach ($si_bundled as $si_script) {
 	if (substr($si_script, -3) !== '.sh' || $si_script === $si_rel) { continue; }
 	$si_code = preg_replace('/^\s*#.*$/m', '', (string)file_get_contents($si_root . '/' . $si_script));
@@ -210,6 +243,7 @@ foreach ($si_bundled as $si_script) {
 		foreach ($si_files($si_funcs[$si_f]) as $si_path) { $si_used[$si_path] = $si_used[$si_path] ?? $si_f . '()'; }
 	}
 	$si_sourcers[$si_name] = array_keys($si_used);
+	$si_reached[$si_name] = array_keys($si_seen);
 	foreach ($si_used as $si_path => $si_by) {
 		check(in_array($si_path, $si_bundled, true), "{$si_name}: {$si_path} is in the support bundle",
 			"used by {$si_by}; add it to SupportBundlePublisher::\$contents");
@@ -219,5 +253,8 @@ check(isset($si_sourcers['setup_ssl.sh'], $si_sourcers['recreate_site.sh']), 'th
 	implode(', ', array_keys($si_sourcers)));
 check(in_array('maintenance_scripts/sysadmin_tools/arm_ssl_retry.sh', $si_sourcers['setup_ssl.sh'] ?? array(), true),
 	'setup_ssl.sh reaches the certificate retry\'s armer through install.sh');
+$si_server_setup = array_keys(array_filter($si_reached, function ($fs) { return in_array('do_server_setup', $fs, true); }));
+check($si_server_setup === array(), 'no bundled script reaches do_server_setup, which site_refresh.sh only hashes',
+	implode(', ', $si_server_setup));
 
 harness_finish();

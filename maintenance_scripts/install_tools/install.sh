@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 3.35 - ensure_placeholder_cert: every certificate attempt mints a site's missing placeholder first, so a
+#               container host (whose proxy vhosts nothing re-renders) never needs an operator step; the reach probe's
+#               'no TLS handshake' advice named a render_vhost.sh a host does not have (B110).
+#VERSION 3.34 -site --beta-root-access: the site offers its owner the emergency root access checkbox
+#               (JOINERY_BETA_ROOT_ACCESS, the beta_root_access_offered setting; spec beta_break_glass_root_access 4.1).
 #VERSION 3.33 - root SSH login is off by default, root's keys included, on install.sh server and (for the
 #               first time) install.sh docker: one function, configure_ssh_access, hardens sshd for both,
 #               out of do_server_setup (BASE_IMAGE_VERSION 2.3). Run under sudo, that account keeps its access;
@@ -814,7 +819,7 @@ SITE_INIT_ENV_INPUTS=(
     JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
     JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
-    JOINERY_OUTBOUND_NOTICE_GB
+    JOINERY_OUTBOUND_NOTICE_GB JOINERY_BETA_ROOT_ACCESS
 )
 
 # This script's own version, read from the newest #VERSION header above rather
@@ -892,6 +897,10 @@ OUTBOUND_FIGURE_ARGS=()
 # --outbound-notice-gb=N (site): the monthly notice setting's figure
 # (outbound_monthly_notice_gb), a site setting rather than a limit.
 OUTBOUND_NOTICE_GB=""
+# --beta-root-access (site): a management node that keeps this machine's root
+# password for the beta tells the site to offer its owner the checkbox
+# (beta_root_access_offered). Nothing here keeps or removes a password.
+BETA_ROOT_ACCESS=0
 
 # Takes one outbound figure flag into OUTBOUND_FIGURE_ARGS, refusing a value
 # that is not one in plain words. 1 when ARG is not such a flag.
@@ -1743,6 +1752,42 @@ site_serving_name() {
     return 1
 }
 
+# This box holds a certificate a site's :443 host can answer $1 with: its Let's
+# Encrypt lineage or its placeholder (_placeholder_cert.sh), both kept under
+# the apex, whose certificate names www too.
+certificate_files_here() {
+    local apex="${1#www.}"
+    [ -f "${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/live/${apex}/fullchain.pem" ] \
+        || [ -f "${JOINERY_PLACEHOLDER_ROOT:-/etc/ssl/joinery}/${apex}/fullchain.pem" ]
+}
+
+# A site this box serves answers TLS with its placeholder until a real
+# certificate lands. With neither, its :443 host is not configured at all, an
+# edge's https hop completes no handshake, and the first challenge can never
+# arrive. Every certificate attempt runs this before it probes, so the
+# placeholder is minted here, on any box, and no operator step is needed: a
+# container host's proxy vhosts are written once, at install, and nothing
+# re-renders them. Apache is reloaded only when one was minted, so the retry
+# timer can run this every five minutes. $1 = the apex.
+ensure_placeholder_cert() {
+    local domain="$1" minted
+    command -v mint_placeholder_cert > /dev/null 2>&1 || return 0
+    certificate_files_here "$domain" && return 0
+    site_serving_name "$domain" > /dev/null 2>&1 || return 0
+    if ! minted="$(mint_placeholder_cert "$domain" 2>&1)"; then
+        print_warning "${domain} has no certificate here, and its placeholder could not be minted: ${minted:-the write failed}"
+        return 0
+    fi
+    [ -n "$minted" ] || return 0
+    print_info "${domain} had no certificate here, not even its placeholder; minted the placeholder so its :443 host answers TLS."
+    if apache2ctl configtest > /dev/null 2>&1; then
+        systemctl reload apache2 2>/dev/null || true
+    else
+        print_warning "Apache's configuration does not parse, so it was not reloaded to read the placeholder for ${domain}."
+    fi
+    return 0
+}
+
 # Does an HTTP request for a name land on this box? That is what HTTP-01
 # actually requires, and it is true both when the name resolves here and when
 # it resolves to an edge that forwards here (demo and orgs were issued through
@@ -1755,10 +1800,11 @@ site_serving_name() {
 # status says which of two things is wrong: 2 for 526 — an edge in Full
 # (Strict) refusing the placeholder certificate, which only the owner can
 # change by setting Full until the real certificate lands; 3 for 525 or no
-# answer — this box completed no TLS handshake at all, which means the
-# placeholder is missing (render_vhost.sh mints it) and is a defect here, not
-# at the edge. REACH_STATE names which of the three was seen: direct, edge,
-# none.
+# answer — the edge's https hop reached no site here. Every caller runs
+# ensure_placeholder_cert first, so with a certificate file here that is the
+# edge sending the name to another server, or Apache not answering on 443;
+# with none, the placeholder could not be minted, and ensure_placeholder_cert
+# said why. REACH_STATE names which of the three was seen: direct, edge, none.
 #
 # $1 = the name to probe. JOINERY_REACH_BASE_URL and JOINERY_REACH_DIR replace
 # http://<name> and the site's static_files directory, so a test can run this
@@ -1850,8 +1896,11 @@ name_reaches_here() {
                 return 2
             fi
             if [ -z "$code" ] || [ "$code" = "000" ] || [ "${code:0:1}" = "5" ]; then
-                print_warning "${name} reaches an edge, but this box did not complete a TLS handshake (HTTP ${code:-none}): the placeholder certificate is missing."
-                print_warning "  On the host: bash ${SCRIPT_DIR:-${BASH_SOURCE%/*}}/render_vhost.sh"
+                if certificate_files_here "$name"; then
+                    print_warning "${name} reaches an edge, but the edge's https hop reached no site here (HTTP ${code:-none}), though this box has a certificate for it: the edge sends ${name} to another server, or Apache here is not answering on 443."
+                else
+                    print_warning "${name} reaches an edge, but this box did not complete a TLS handshake (HTTP ${code:-none}): it has no certificate for ${name}, not even its placeholder."
+                fi
                 return 3
             fi ;;
     esac
@@ -1933,6 +1982,8 @@ provision_origin_cert() {
     local domain="$1"
     # A certificate a copy carried over renews under this machine's account.
     adopt_carried_lineage "$domain"
+    # The placeholder an edge's https hop needs before any challenge arrives.
+    ensure_placeholder_cert "$domain"
 
     # Ensure certbot is available (HTTP-01 path needs it; DNS-01 plugins extend it).
     if ! command -v certbot &> /dev/null; then
@@ -2020,7 +2071,7 @@ provision_origin_cert() {
             if [ "$reach" -eq 2 ]; then
                 print_info "  Set the edge to Full (not Full (Strict)) until the first certificate lands; the retry timer issues it on its own once ${domain} reaches here."
             elif [ "$reach" -eq 3 ]; then
-                print_info "  This box answered no TLS: the placeholder certificate is missing. Run render_vhost.sh on the host; the retry timer issues once ${domain} reaches here."
+                print_info "  The edge's https hop reached no site here (above); the retry timer issues once ${domain} reaches here."
             else
                 print_info "  The retry timer issues it on its own once ${domain} reaches this box; or drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} for DNS-01."
             fi
@@ -4532,6 +4583,10 @@ do_site_create() {
                     || { print_error "--outbound-notice-gb=${OUTBOUND_NOTICE_GB} is not a number of GB (1000; 0 turns the notice off)"; exit 1; }
                 shift
                 ;;
+            --beta-root-access)
+                BETA_ROOT_ACCESS=1
+                shift
+                ;;
             --admin-email)
                 ADMIN_EMAIL="$2"
                 shift 2
@@ -4620,6 +4675,9 @@ do_site_create() {
                 echo "                         A rebuild keeps them; default takes one back."
                 echo "  --outbound-notice-gb=N Tell the admins past N GB sent in a month (1000;"
                 echo "                         0 turns it off). A setting the site can change."
+                echo "  --beta-root-access     The site offers its owner the emergency root access"
+                echo "                         checkbox (a management node that keeps this machine's"
+                echo "                         root password for the beta passes it)."
                 echo ""
                 echo "Automation:"
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
@@ -5015,6 +5073,9 @@ do_site_create() {
     fi
     if [ -n "$OUTBOUND_NOTICE_GB" ]; then
         export JOINERY_OUTBOUND_NOTICE_GB="$OUTBOUND_NOTICE_GB"
+    fi
+    if [ "$BETA_ROOT_ACCESS" -eq 1 ]; then
+        export JOINERY_BETA_ROOT_ACCESS=1
     fi
     export UPGRADE_SERVER
 
