@@ -222,6 +222,9 @@ struct MemFsState {
     /// wrong is recoverable, so the simulator keeps the evidence.
     trash: Vec<(String, Node)>,
     root_available: bool,
+    /// Folders where a second disk is mounted inside the root
+    /// (`MemFs::mount_another_disk`). Nothing renames across one.
+    mounts: BTreeSet<String>,
     failures: Vec<ScheduledFailure>,
     /// Spool files in flight, by their temporary name.
     spools: BTreeMap<String, Vec<u8>>,
@@ -482,6 +485,7 @@ impl MemFs {
                 watch_lost: false,
                 trash: Vec::new(),
                 root_available: true,
+                mounts: BTreeSet::new(),
                 failures: Vec::new(),
                 spools: BTreeMap::new(),
                 next_spool: 0,
@@ -806,6 +810,25 @@ impl MemFs {
     /// Take the sync root away, or give it back.
     pub fn set_root_available(&self, available: bool) {
         self.state.lock().unwrap().root_available = available;
+    }
+
+    /// Mount a second disk at the folder `path` inside the root: a rename of
+    /// anything under it to outside it, or back, is refused as a real one is,
+    /// a copy being the only way across. What is in the folder now is on that
+    /// disk. The folder itself renames, and the disk goes with it, as on a Mac
+    /// (Linux refuses with `EBUSY`, which this does not model).
+    pub fn mount_another_disk(&self, path: &str) {
+        // By its key, as every other lookup is: a mount named in another
+        // spelling or case than the folder holds would otherwise match nothing.
+        let key = self.key_for(&PathBuf::from("/sync").join(path)).unwrap_or_else(|_| self.store_path(path));
+        self.state.lock().unwrap().mounts.insert(key);
+    }
+
+    /// The disk a path is on: the innermost mount it is strictly under, or
+    /// the root's own (`None`). A mount point itself stands on the disk it is
+    /// mounted in.
+    fn disk_of(st: &MemFsState, key: &str) -> Option<String> {
+        st.mounts.iter().filter(|m| key.starts_with(&format!("{m}/"))).max_by_key(|m| m.len()).cloned()
     }
 
     /// Fail the next `times` occurrences of `op` (optionally only at `path`).
@@ -2198,6 +2221,16 @@ impl Vfs for MemFs {
         let Some(source) = st.nodes.get(&f).cloned() else {
             return Err(VfsError::NotFound(from.to_path_buf()));
         };
+        // A rename never crosses from one disk to another (`EXDEV`).
+        let (here, there) = (Self::disk_of(&st, &f), Self::disk_of(&st, &t));
+        if here != there {
+            let mount = there.or(here).unwrap_or_default();
+            return Err(VfsError::OtherVolume {
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+                mount: PathBuf::from("/sync").join(mount),
+            });
+        }
         // A directory does not move into itself. Every real filesystem refuses
         // it (`EINVAL`), and a mock that allowed it produced a tree with a loop
         // in it that the engine then read back as its own agreement.
@@ -2241,7 +2274,21 @@ impl Vfs for MemFs {
             return Err(refused);
         }
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
+        // A disk mounted at or under what moved goes with it.
+        let carried: Vec<String> =
+            st.mounts.iter().filter(|m| **m == f || m.starts_with(&format!("{f}/"))).cloned().collect();
+        for m in carried {
+            st.mounts.remove(&m);
+            st.mounts.insert(format!("{t}{}", &m[f.len()..]));
+        }
         Ok(())
+    }
+
+    fn crosses_a_disk(&self, from: &Path, to: &Path) -> Option<PathBuf> {
+        let (f, t) = (self.key_for(from).ok()?, self.key_for(to).ok()?);
+        let st = self.state.lock().unwrap();
+        let (here, there) = (Self::disk_of(&st, &f), Self::disk_of(&st, &t));
+        (here != there).then(|| PathBuf::from("/sync").join(there.or(here).unwrap_or_default()))
     }
 
     fn trash(&self, path: &Path) -> VfsResult<()> {

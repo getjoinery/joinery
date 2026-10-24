@@ -65,6 +65,12 @@ pub enum VfsError {
     /// volume; this is its answer, and no retry changes it.
     #[error("this disk cannot hold the name {0}")]
     NameRefused(PathBuf),
+    /// A rename between two volumes: a second disk mounted inside the sync
+    /// root, and a move onto it or off it. `mount` is the folder where that
+    /// disk starts. A rename never crosses, and no retry changes that; a copy
+    /// would be a new file, not this one moved.
+    #[error("{from} cannot be moved to {to}: {mount} is a separate disk inside the sync folder")]
+    OtherVolume { from: PathBuf, to: PathBuf, mount: PathBuf },
     #[error("io error on {path}: {source}")]
     Io {
         path: PathBuf,
@@ -362,6 +368,15 @@ pub trait Vfs: Send + Sync {
     /// landed in it as their moves, and every device carries them out of the
     /// folder they belong to (soak run 1571).
     fn create_dir(&self, path: &Path) -> VfsResult<()>;
+    /// Would a rename from `from` to `to` cross from one disk to another (a
+    /// second disk mounted inside the root)? The folder where the other disk
+    /// starts, or `None`. Asked before anything is moved out of the way for a
+    /// move, so nothing is set aside for one no rename can make. `None` where
+    /// the volume cannot tell; the rename still refuses
+    /// ([`VfsError::OtherVolume`]).
+    fn crosses_a_disk(&self, _from: &Path, _to: &Path) -> Option<PathBuf> {
+        None
+    }
     /// Rename within the sync root. The folder `to` goes into must already be
     /// on this disk; a missing one is refused (`NoFolder`), never made, for
     /// the reason [`Vfs::create_dir`] gives.

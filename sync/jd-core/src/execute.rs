@@ -477,11 +477,11 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
 
 /// Run one op, marking the crash window around it and recording how it ended.
 pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
-    // The server answered this op with a refusal that stands: the same
-    // request is refused again until something it asked about moves
-    // (`stands_here`). Never a transport failure, a timeout, a 5xx,
-    // or a refusal a retry can cure (a checksum mismatch at completion): those
-    // go as they always went.
+    // The server answered this op with a refusal that stands, or the disk
+    // with a move between two volumes: the same request is refused again
+    // until something it asked about moves (`held_here`). Never a transport
+    // failure, a timeout, a 5xx, or a refusal a retry can cure (a checksum
+    // mismatch at completion): those go as they always went.
     let mut refused = false;
     let outcome = match readiness(env, op)? {
         // Decided before anything is in flight: an op that never left needs
@@ -522,8 +522,7 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                         }
                         other => other,
                     };
-                    refused = matches!(outcome, OpOutcome::Withdrawn(_))
-                        && matches!(&e, ExecError::Proto(p) if stands_here(p));
+                    refused = matches!(outcome, OpOutcome::Withdrawn(_)) && held_here(&e);
                     outcome
                 }
             }
@@ -801,6 +800,19 @@ fn classify(e: &ExecError) -> OpOutcome {
             "this disk cannot hold the name {}; naming will park it",
             p.display()
         )),
+        // A second disk mounted inside the sync folder, and a move onto it or
+        // off it: a rename never crosses, so a retry asks the same question
+        // of the same two disks for ever. Withdrawn and held (`held_here`)
+        // until something it was asked about moves, and said, naming the
+        // disk. A copy would be a new file standing for this one.
+        ExecError::Vfs(jd_vfs::VfsError::OtherVolume { from, to, mount }) => OpOutcome::Withdrawn(format!(
+            "{} stays where it is, not at {}: {} is a separate disk inside the sync folder, and sync \
+             cannot move anything onto it or off it. Move it there yourself, or take that disk out of \
+             the sync folder",
+            from.display(),
+            to.display(),
+            mount.display()
+        )),
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
@@ -819,6 +831,17 @@ fn classify(e: &ExecError) -> OpOutcome {
 /// asked about moves (`pass::lift_or_keep_refusals`).
 fn stands_here(p: &ProtoError) -> bool {
     p.standing() || p.reason() == Some("vault_needed")
+}
+
+/// A withdrawal asked again unchanged is answered the same, so it is held
+/// (`pass::lift_or_keep_refusals`): a refusal that stands here, or a move
+/// between two disks, which no rename carries out.
+fn held_here(e: &ExecError) -> bool {
+    match e {
+        ExecError::Proto(p) => stands_here(p),
+        ExecError::Vfs(jd_vfs::VfsError::OtherVolume { .. }) => true,
+        _ => false,
+    }
 }
 
 /// Has this server said every refusal it sends names its reason
@@ -6290,6 +6313,12 @@ fn move_local(
                     .ok()
                     .flatten()
             });
+        // Onto or off a second disk inside the root no rename crosses, and
+        // whatever stands at the destination would be set aside for a move
+        // that cannot happen. Refused first, as the rename would refuse it.
+        if let Some(mount) = env.vfs.crosses_a_disk(&from, &dest) {
+            return Err(jd_vfs::VfsError::OtherVolume { from, to: dest, mount }.into());
+        }
         make_room(env, &dest, moving.as_deref(), &op.idempotency_key)?;
         match env.vfs.rename(&from, &dest) {
             Ok(()) => {}
