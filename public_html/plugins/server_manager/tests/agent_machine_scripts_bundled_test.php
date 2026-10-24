@@ -5,7 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
- * covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/install_site_engine.sh]
+ * covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/install_site_engine.sh, maintenance_scripts/install_tools/install.sh, maintenance_scripts/sysadmin_tools/setup_ssl.sh, maintenance_scripts/sysadmin_tools/arm_ssl_retry.sh, maintenance_scripts/sysadmin_tools/recreate_site.sh, maintenance_scripts/install_tools/site_refresh.sh]
  */
 /**
  * Every script a host word runs ships in the support bundle.
@@ -24,6 +24,10 @@
  * file host_housekeeping.sh and the engine installer it runs name beside
  * themselves ships too (site_container_engine B32: the engine installer and
  * its filter were left out, and no host converged its engine after install).
+ *
+ * A bundled script that sources install.sh runs install.sh's functions there,
+ * so every file the functions it reaches use beside install.sh ships too
+ * (B109: setup_ssl.sh's certificate retry armer was left out).
  * Run: php plugins/server_manager/tests/agent_machine_scripts_bundled_test.php
  */
 
@@ -126,5 +130,94 @@ foreach (array('host_housekeeping.sh', 'install_site_engine.sh') as $hk_script) 
 }
 check(strpos((string)file_get_contents($hk_root . '/maintenance_scripts/install_tools/host_housekeeping.sh'), 'bash "${SIE}" converge') !== false,
 	'host housekeeping converges the engine on a host that has it');
+
+section('Every file a bundled script reaches through install.sh ships in the bundle (B109)');
+// A bundled script that sources install.sh runs install.sh's functions out of
+// the bundle, so every file those functions use beside install.sh ships too
+// (B109: setup_ssl.sh's certificate retry is armed by arm_ssl_retry.sh, which
+// the bundle left out, and no container host ever retried a certificate).
+// Read as bash runs it: the part of install.sh a sourcing script loads (up to
+// its sourced-mode return), split into its functions; from each sourcing
+// script, the functions it calls in command position, then theirs in turn. A
+// file named only in a message is advice to an operator, not a use.
+$si_bundled = SupportBundlePublisher::declaredContents();
+$si_root = dirname(PathHelper::getRootDir());
+$si_rel = 'maintenance_scripts/install_tools/install.sh';
+$si_lines = file($si_root . '/' . $si_rel, FILE_IGNORE_NEW_LINES);
+$si_end = count($si_lines);
+foreach ($si_lines as $si_i => $si_line) {
+	if (strpos($si_line, 'if [ "${BASH_SOURCE[0]}" != "${0}" ]; then') === 0) { $si_end = $si_i; break; }
+}
+check($si_end < count($si_lines), 'install.sh\'s sourced-mode return is found', 'line ' . ($si_end + 1));
+$si_funcs = array();
+$si_top = '';
+$si_cur = null;
+for ($si_i = 0; $si_i < $si_end; $si_i++) {
+	$si_line = $si_lines[$si_i];
+	if ($si_cur === null && preg_match('/^([A-Za-z_][A-Za-z0-9_]*)\(\)\s*\{(.*)$/', $si_line, $si_m)) {
+		$si_funcs[$si_m[1]] = '';
+		if (preg_match('/^(.*)\}\s*$/', $si_m[2], $si_one)) { $si_funcs[$si_m[1]] = $si_one[1] . "\n"; } else { $si_cur = $si_m[1]; }
+		continue;
+	}
+	if ($si_cur !== null && $si_line === '}') { $si_cur = null; continue; }
+	if (preg_match('/^\s*#/', $si_line)) { continue; }
+	if ($si_cur !== null) { $si_funcs[$si_cur] .= $si_line . "\n"; } else { $si_top .= $si_line . "\n"; }
+}
+check(count($si_funcs) >= 50 && isset($si_funcs['provision_origin_cert'], $si_funcs['install_ssl_retry_timer']),
+	'install.sh\'s functions are found', count($si_funcs) . ' found');
+
+// The files a piece of install.sh uses beside itself, as tree paths.
+$si_files = function (string $code): array {
+	$code = preg_replace('/^\s*(print_[a-z]+|echo|printf)\b.*$/m', '', $code);
+	preg_match_all('#\$\{SCRIPT_DIR(?::-\$\{BASH_SOURCE%/\*\})?\}/([A-Za-z0-9_./-]+)|\$SCRIPT_DIR/([A-Za-z0-9_./-]+)#', $code, $m);
+	$paths = array();
+	foreach (array_filter(array_merge($m[1], $m[2])) as $ref) {
+		$parts = array();
+		foreach (explode('/', 'maintenance_scripts/install_tools/' . $ref) as $part) {
+			if ($part === '..') { array_pop($parts); } elseif ($part !== '' && $part !== '.') { $parts[] = $part; }
+		}
+		$paths[] = implode('/', $parts);
+	}
+	return array_unique($paths);
+};
+// The install.sh functions a piece of bash calls: each name in command position.
+$si_calls = function (string $code) use ($si_funcs): array {
+	$called = array();
+	foreach (array_keys($si_funcs) as $name) {
+		if (preg_match('/(?:^|[;&|({!]|\$\(|\b(?:then|do|else|if|while|until|time|exec))[ \t]*' . preg_quote($name, '/') . '(?![A-Za-z0-9_(])/m', $code)) {
+			$called[] = $name;
+		}
+	}
+	return $called;
+};
+
+$si_sourcers = array();
+foreach ($si_bundled as $si_script) {
+	if (substr($si_script, -3) !== '.sh' || $si_script === $si_rel) { continue; }
+	$si_code = preg_replace('/^\s*#.*$/m', '', (string)file_get_contents($si_root . '/' . $si_script));
+	if (!preg_match('/^\s*(\.|source)\s+"(\$\{?INSTALL_SH\}?|[^"]*install\.sh)"/m', $si_code)) { continue; }
+	$si_name = basename($si_script);
+	$si_seen = array();
+	$si_queue = $si_calls($si_code);
+	while ($si_queue) {
+		$si_f = array_shift($si_queue);
+		if (isset($si_seen[$si_f])) { continue; }
+		$si_seen[$si_f] = true;
+		foreach ($si_calls($si_funcs[$si_f]) as $si_g) { if (!isset($si_seen[$si_g])) { $si_queue[] = $si_g; } }
+	}
+	$si_used = array_fill_keys($si_files($si_top), 'install.sh as it loads');
+	foreach (array_keys($si_seen) as $si_f) {
+		foreach ($si_files($si_funcs[$si_f]) as $si_path) { $si_used[$si_path] = $si_used[$si_path] ?? $si_f . '()'; }
+	}
+	$si_sourcers[$si_name] = array_keys($si_used);
+	foreach ($si_used as $si_path => $si_by) {
+		check(in_array($si_path, $si_bundled, true), "{$si_name}: {$si_path} is in the support bundle",
+			"used by {$si_by}; add it to SupportBundlePublisher::\$contents");
+	}
+}
+check(isset($si_sourcers['setup_ssl.sh'], $si_sourcers['recreate_site.sh']), 'the bundled scripts that source install.sh are found',
+	implode(', ', array_keys($si_sourcers)));
+check(in_array('maintenance_scripts/sysadmin_tools/arm_ssl_retry.sh', $si_sourcers['setup_ssl.sh'] ?? array(), true),
+	'setup_ssl.sh reaches the certificate retry\'s armer through install.sh');
 
 harness_finish();
