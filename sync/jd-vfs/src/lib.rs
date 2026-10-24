@@ -71,6 +71,11 @@ pub enum VfsError {
     /// would be a new file, not this one moved.
     #[error("{from} cannot be moved to {to}: {mount} is a separate disk inside the sync folder")]
     OtherVolume { from: PathBuf, to: PathBuf, mount: PathBuf },
+    /// A rename of the folder a second disk is mounted at, on a system that
+    /// refuses one while the disk is mounted (Linux, `EBUSY`). Nothing about
+    /// the folder changes until the disk is unmounted, so no retry does.
+    #[error("{from} cannot be moved to {to}: a separate disk is mounted at it")]
+    MountPoint { from: PathBuf, to: PathBuf },
     #[error("io error on {path}: {source}")]
     Io {
         path: PathBuf,
@@ -376,6 +381,14 @@ pub trait Vfs: Send + Sync {
     /// ([`VfsError::OtherVolume`]).
     fn crosses_a_disk(&self, _from: &Path, _to: &Path) -> Option<PathBuf> {
         None
+    }
+    /// Is a second disk mounted at this folder, on a system that will not
+    /// rename or move a folder while one is (Linux)? Asked before anything is
+    /// moved out of the way for a move of it, as [`Vfs::crosses_a_disk`] is.
+    /// `false` where the volume cannot tell; the rename still refuses
+    /// ([`VfsError::MountPoint`]).
+    fn is_a_fixed_mount_point(&self, _path: &Path) -> bool {
+        false
     }
     /// Rename within the sync root. The folder `to` goes into must already be
     /// on this disk; a missing one is refused (`NoFolder`), never made, for

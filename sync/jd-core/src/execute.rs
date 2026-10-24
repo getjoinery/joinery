@@ -813,6 +813,18 @@ fn classify(e: &ExecError) -> OpOutcome {
             to.display(),
             mount.display()
         )),
+        // The folder a second disk is mounted at, on a system that will not
+        // rename it while the disk is mounted: asked again, refused again.
+        // Held and said the same way.
+        ExecError::Vfs(jd_vfs::VfsError::MountPoint { from, to }) => OpOutcome::Withdrawn(format!(
+            "{} stays where it is, not at {}: a separate disk is mounted at {}, and this computer \
+             cannot rename or move a folder while a disk is mounted at it. Pause syncing, unmount the \
+             disk, move the folder, mount the disk again and resume syncing, or take that disk out of \
+             the sync folder",
+            from.display(),
+            to.display(),
+            from.display()
+        )),
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
@@ -834,12 +846,13 @@ fn stands_here(p: &ProtoError) -> bool {
 }
 
 /// A withdrawal asked again unchanged is answered the same, so it is held
-/// (`pass::lift_or_keep_refusals`): a refusal that stands here, or a move
-/// between two disks, which no rename carries out.
+/// (`pass::lift_or_keep_refusals`): a refusal that stands here, a move
+/// between two disks, which no rename carries out, or a move of the folder a
+/// disk is mounted at, which this system will not make.
 fn held_here(e: &ExecError) -> bool {
     match e {
         ExecError::Proto(p) => stands_here(p),
-        ExecError::Vfs(jd_vfs::VfsError::OtherVolume { .. }) => true,
+        ExecError::Vfs(jd_vfs::VfsError::OtherVolume { .. } | jd_vfs::VfsError::MountPoint { .. }) => true,
         _ => false,
     }
 }
@@ -6318,6 +6331,11 @@ fn move_local(
         // that cannot happen. Refused first, as the rename would refuse it.
         if let Some(mount) = env.vfs.crosses_a_disk(&from, &dest) {
             return Err(jd_vfs::VfsError::OtherVolume { from, to: dest, mount }.into());
+        }
+        // Nor is the folder a disk is mounted at moved where the system will
+        // not move it while the disk is mounted.
+        if env.vfs.is_a_fixed_mount_point(&from) {
+            return Err(jd_vfs::VfsError::MountPoint { from, to: dest }.into());
         }
         make_room(env, &dest, moving.as_deref(), &op.idempotency_key)?;
         match env.vfs.rename(&from, &dest) {

@@ -26612,3 +26612,45 @@ fn a_file_never_sent_and_renamed_to_a_temporary_name_is_not_sent() {
     assert!(laptop.fs.exists("x.tmp"));
     assert_converged(&world);
 }
+
+/// A peer renames the folder a second disk is mounted at here, on a system
+/// that will not rename it while the disk is mounted (Linux). The rename is
+/// said once, naming the folder, the device goes quiet, and nothing on the
+/// server changes back. Done by hand -- unmounted, renamed, mounted again --
+/// it is the server's folder again and the saying ends. RED with the busy
+/// folder retried.
+#[test]
+fn a_peers_rename_of_a_folder_a_disk_is_mounted_at_settles_and_says_so() {
+    let world = World::new(9_945, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    mac.fs.user_mkdir("Disk");
+    mac.fs.user_write("Disk/a.txt", b"on the other disk");
+    committed.note("Disk/a.txt", b"on the other disk");
+    assert!(world.settle().is_some(), "never settled before the rename");
+    assert!(lin.fs.exists("Disk/a.txt"), "{:?}", lin.fs.all_paths());
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.mount_points_stay();
+
+    mac.fs.user_rename("Disk", "Disk2");
+    committed.note("Disk2/a.txt", b"on the other disk");
+    world.pass(mac);
+    world.pass(lin);
+    for _ in 0..3 {
+        let again = world.pass(lin);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert!(lin.fs.exists("Disk/a.txt"), "{:?}", lin.fs.all_paths());
+    let said = |d: &jd_sim::Device| -> Vec<String> {
+        d.store.open_issues().unwrap().into_iter().map(|i| i.detail).filter(|t| t.contains("a separate disk is mounted at /sync/Disk")).collect()
+    };
+    assert_eq!(said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+    assert_eq!(world.server.folders().iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["Disk2"]);
+
+    lin.fs.user_remounts_disk("Disk", "Disk2");
+    assert!(world.settle().is_some(), "never settled after the folder was renamed by hand");
+    assert!(said(lin).is_empty(), "still said after the rename by hand: {:?}", said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(world.server.folders().iter().filter(|f| !f.trashed).count(), 1, "{:?}", world.server.folders());
+}

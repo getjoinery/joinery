@@ -225,6 +225,8 @@ struct MemFsState {
     /// Folders where a second disk is mounted inside the root
     /// (`MemFs::mount_another_disk`). Nothing renames across one.
     mounts: BTreeSet<String>,
+    /// Mount points stay where they are, as on Linux (`mount_points_stay`).
+    mounts_stay: bool,
     failures: Vec<ScheduledFailure>,
     /// Spool files in flight, by their temporary name.
     spools: BTreeMap<String, Vec<u8>>,
@@ -486,6 +488,7 @@ impl MemFs {
                 trash: Vec::new(),
                 root_available: true,
                 mounts: BTreeSet::new(),
+                mounts_stay: false,
                 failures: Vec::new(),
                 spools: BTreeMap::new(),
                 next_spool: 0,
@@ -815,13 +818,32 @@ impl MemFs {
     /// Mount a second disk at the folder `path` inside the root: a rename of
     /// anything under it to outside it, or back, is refused as a real one is,
     /// a copy being the only way across. What is in the folder now is on that
-    /// disk. The folder itself renames, and the disk goes with it, as on a Mac
-    /// (Linux refuses with `EBUSY`, which this does not model).
+    /// disk. The folder itself renames, and the disk goes with it, as on a Mac;
+    /// after [`MemFs::mount_points_stay`], as on Linux, it does not.
     pub fn mount_another_disk(&self, path: &str) {
         // By its key, as every other lookup is: a mount named in another
         // spelling or case than the folder holds would otherwise match nothing.
         let key = self.key_for(&PathBuf::from("/sync").join(path)).unwrap_or_else(|_| self.store_path(path));
         self.state.lock().unwrap().mounts.insert(key);
+    }
+
+    /// The folder a disk is mounted at is renamed or moved by nothing while
+    /// the disk is mounted, as on Linux (`EBUSY`, mapped by the real volume
+    /// to `VfsError::MountPoint`). A folder above one still moves, and its
+    /// mount with it.
+    pub fn mount_points_stay(&self) {
+        self.state.lock().unwrap().mounts_stay = true;
+    }
+
+    /// What a person does where the folder a disk is mounted at stays put
+    /// (`mount_points_stay`): unmount the disk, rename or move the folder, and
+    /// mount the disk again there. The files on the disk are the same files.
+    pub fn user_remounts_disk(&self, from: &str, to: &str) {
+        let f = self.key_for(&PathBuf::from("/sync").join(from)).unwrap_or_else(|_| self.store_path(from));
+        let t = self.store_path(to);
+        self.state.lock().unwrap().mounts.remove(&f);
+        self.user_rename(from, to);
+        self.state.lock().unwrap().mounts.insert(t);
     }
 
     /// The disk a path is on: the innermost mount it is strictly under, or
@@ -2221,6 +2243,9 @@ impl Vfs for MemFs {
         let Some(source) = st.nodes.get(&f).cloned() else {
             return Err(VfsError::NotFound(from.to_path_buf()));
         };
+        if st.mounts_stay && (st.mounts.contains(&f) || st.mounts.contains(&t)) {
+            return Err(VfsError::MountPoint { from: from.to_path_buf(), to: to.to_path_buf() });
+        }
         // A rename never crosses from one disk to another (`EXDEV`).
         let (here, there) = (Self::disk_of(&st, &f), Self::disk_of(&st, &t));
         if here != there {
@@ -2282,6 +2307,12 @@ impl Vfs for MemFs {
             st.mounts.insert(format!("{t}{}", &m[f.len()..]));
         }
         Ok(())
+    }
+
+    fn is_a_fixed_mount_point(&self, path: &Path) -> bool {
+        let Ok(key) = self.key_for(path) else { return false };
+        let st = self.state.lock().unwrap();
+        st.mounts_stay && st.mounts.contains(&key)
     }
 
     fn crosses_a_disk(&self, from: &Path, to: &Path) -> Option<PathBuf> {
