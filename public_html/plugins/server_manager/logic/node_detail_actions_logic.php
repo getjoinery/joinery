@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.75 - set_reverse_dns names the address the form chose: both, the IPv4 alone or the IPv6 alone (B70)
  * @version 1.74 - edge_vs_origin (EdgeOriginProbe, run here, no agent), net_health and web_workers (agent 1.93.0)
  * @version 1.73 - site_log_count: the Logs box's 'Count problem lines since' form posts here; the time is UTC
  * @version 1.72 - the settings form saves mgn_rollout_first (Test releases here first) on a node that hosts a site
@@ -993,8 +994,9 @@ class NodeDetailActions {
 				}
 				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
 				$rdns_hostname = trim($_POST['rdns_hostname'] ?? '');
+				$rdns_addresses = (string)($_POST['rdns_addresses'] ?? NodeReverseDns::ADDRESSES_BOTH);
 				try {
-					$result = NodeReverseDns::set($node, $rdns_hostname);
+					$result = NodeReverseDns::set($node, $rdns_hostname, null, null, $rdns_addresses);
 					// Messages are plain text: the display loop escapes them, so
 					// pre-escaping double-encodes and embedded HTML renders literally.
 					$session->save_message(new DisplayMessage(

@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.32 - an old container whose host did not answer is said owed, before and after the switch-over is kept (B103)
  * @version 1.31 - a kept IP swap whose copy's IPv6 was not named in reverse DNS says what to do (B45)
  * @version 1.30 - a container source's certificate staged by its host for the export, and cleared, are named
  * @version 1.29 - the ended note and the 'current as of' line give their times in UTC, as the rest of the tab does (B35)
@@ -122,7 +123,15 @@ $copy_step_labels = array(
 );
 $copy_verdict_badge = array(
 	'pending' => 'secondary', 'running' => 'primary', 'passed' => 'success', 'failed' => 'danger', 'skipped' => 'secondary',
+	'owed' => 'warning',
 );
+// An old container's stop its host did not take up (B103), in plain words.
+$copy_owed_note = function (array $owed) use ($copy_h): string {
+	return 'Its old container was not stopped: ' . $copy_h($owed['why'] ?? '') . '. '
+		. (!empty($owed['job_id']) ? 'The stop stays queued on that host and runs if it answers again; until then, should it come back, '
+			. 'the old container may start with it. ' : '')
+		. 'Remove the old container with <strong>Permanently Delete Site</strong> on its old record.';
+};
 
 // A dormant copy's own row, or a switched-over site's old server, points at
 // the tab where the copy is run.
@@ -159,7 +168,8 @@ if (!$site_copy) {
 		$old_link = '<a href="' . $copy_h($old_url) . '">its old record</a>';
 		if (!$left['removed']) {
 			echo '<div class="alert alert-warning border">This site\'s old container is still on its host. Open ' . $old_link
-				. ' and choose <strong>Permanently Delete Site</strong>. Its host checks first that the domain reaches this server.</div>';
+				. ' and choose <strong>Permanently Delete Site</strong>. Its host checks first that the domain reaches this server.'
+				. ($left['hold_owed'] ? '<br>' . $copy_owed_note($left['hold_owed']) : '') . '</div>';
 			continue;
 		}
 		$old_host = '';
@@ -660,6 +670,10 @@ if ($copy_steps) {
 		}
 	}
 	echo '</tbody></table>';
+	$owed_hold = $site_copy->switch_record()['hold_owed'] ?? null;
+	if (is_array($owed_hold)) {
+		echo '<div class="alert alert-warning small">The site runs on the copy. ' . $copy_owed_note($owed_hold) . '</div>';
+	}
 }
 
 $census = $site_copy->census();

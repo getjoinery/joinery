@@ -11,9 +11,10 @@
  *
  * Both of the node's addresses are named: its IPv4, whose A record must
  * already resolve to it, and its IPv6 when the name's AAAA resolves to that.
- * Providers (Linode included) validate the forward record and reject the
- * update otherwise, so it is checked here first to give an actionable error
- * instead of a provider 400.
+ * Or one alone: after an IP swap the IPv4 keeps the name it brought, and only
+ * the IPv6 is the site's to name. Providers (Linode included) validate the
+ * forward record and reject the update otherwise, so it is checked here first
+ * to give an actionable error instead of a provider 400.
  *
  * Grant note: Linode access tokens are short-lived with no refresh token, so
  * a stale grant surfaces as NodeReverseDnsException with reconnect=true — the
@@ -27,6 +28,9 @@
  * their own Cloud Manager. That is said plainly, with no reconnect: there is
  * no grant to reconnect.
  *
+ * @version 1.7 - set() names both addresses, the IPv4 alone or the IPv6 alone ($addresses); naming both renamed an
+ *               IPv4 an IP swap had kept (site copy B70); refused() is what any caller of a provider's reverse DNS
+ *               says when the provider refuses
  * @version 1.6 - the node's IPv6 is named too, when the name's AAAA gives it (it was left with no PTR while
  *               the site's AAAA pointed at it); a caller that has seen the public resolvers passes the
  *               addresses they gave, not a yes, so each address is checked against its own record
@@ -62,6 +66,13 @@ class NodeReverseDnsException extends Exception {
 }
 
 class NodeReverseDns {
+
+	/** Which of the node's addresses set() names: the IPv4, and the IPv6 when the name's AAAA gives it. */
+	const ADDRESSES_BOTH = 'both';
+	/** The IPv4 alone; the IPv6 keeps what it answers. */
+	const ADDRESSES_IPV4 = 'ipv4';
+	/** The IPv6 alone; the IPv4 keeps what it answers. */
+	const ADDRESSES_IPV6 = 'ipv6';
 
 	/** What a transferred instance's reverse DNS answer is: the customer's own panel. */
 	const TRANSFERRED_MESSAGE = 'This server was moved to its customer\'s own Linode account, so its reverse DNS is set '
@@ -111,7 +122,8 @@ class NodeReverseDns {
 	 * an A record leaves the IPv6 as it was, and the result says so: a
 	 * provider takes only a name that resolves to the address. The IPv4 is
 	 * the one that must take; a provider refusing only the IPv6 is reported,
-	 * not thrown.
+	 * not thrown. With $addresses one alone is named, and it is the one that
+	 * must take: its own record must give it.
 	 *
 	 * @param ManagedNode $node
 	 * @param string $hostname   FQDN the addresses should reverse-resolve to.
@@ -119,13 +131,17 @@ class NodeReverseDns {
 	 * @param array|null $named  The addresses the caller has seen the public resolvers give the name (a
 	 *                           settled site copy move), so this machine's own resolver, which may lag, is
 	 *                           not asked; the provider checks. Null asks this machine's resolver.
-	 * @return array {ip: the IPv4, rdns, set: every address set, not_set: address => why it was not}
+	 * @param string $addresses  ADDRESSES_BOTH, ADDRESSES_IPV4 or ADDRESSES_IPV6.
+	 * @return array {ip: the first address set, rdns, set: every address set, not_set: address => why it was not}
 	 * @throws NodeReverseDnsException with an operator-actionable message.
 	 */
-	public static function set($node, $hostname, $driver = null, ?array $named = null) {
+	public static function set($node, $hostname, $driver = null, ?array $named = null, string $addresses = self::ADDRESSES_BOTH) {
 		$hostname = strtolower(trim((string)$hostname));
 		if (!preg_match('/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/', $hostname)) {
 			throw new NodeReverseDnsException('Enter a fully-qualified hostname, e.g. mail.example.com.');
+		}
+		if (!in_array($addresses, array(self::ADDRESSES_BOTH, self::ADDRESSES_IPV4, self::ADDRESSES_IPV6), true)) {
+			throw new NodeReverseDnsException('Choose which of the node\'s addresses to name.');
 		}
 
 		$provision = self::provisionForNode($node);
@@ -140,30 +156,39 @@ class NodeReverseDns {
 
 		$ip = (string)$provision->get('cvp_instance_ip');
 		$ip6 = (string)$provision->get('cvp_instance_ipv6');
+		if ($addresses === self::ADDRESSES_IPV6 && $ip6 === '') {
+			throw new NodeReverseDnsException('This node has no IPv6 address on record, so there is none to name.');
+		}
+		$want4 = $addresses !== self::ADDRESSES_IPV6;
+		$want6 = $addresses !== self::ADDRESSES_IPV4 && $ip6 !== '';
 
 		// The provider rejects rDNS values whose forward record does not point
 		// at the address; check first so the error names the real fix.
 		if ($named === null) {
 			$named = array();
-			try {
-				$named = (array)DnsResolver::getA($hostname);
-			} catch (Exception $e) {
+			if ($want4) {
+				try {
+					$named = (array)DnsResolver::getA($hostname);
+				} catch (Exception $e) {
+				}
 			}
-			if ($ip6 !== '') {
+			if ($want6) {
 				try {
 					$named = array_merge($named, (array)DnsResolver::getAaaa($hostname));
 				} catch (Exception $e) {
 				}
 			}
 		}
-		if (!self::names($named, $ip)) {
-			$a_records = array_values(array_filter($named, function ($a) { return strpos((string)$a, ':') === false; }));
-			$found = count($a_records) ? implode(', ', $a_records) : 'none';
-			throw new NodeReverseDnsException(
-				"Create the A record first: {$hostname} must resolve to {$ip} before the provider will accept it as reverse DNS (currently resolves to: {$found}).");
+		if ($want4 && !self::names($named, $ip)) {
+			throw new NodeReverseDnsException("Create the A record first: {$hostname} must resolve to {$ip} before the provider "
+				. 'will accept it as reverse DNS (currently resolves to: ' . self::found($named, false) . ').');
 		}
 		$not_set = array();
-		if ($ip6 !== '' && !self::names($named, $ip6)) {
+		if ($want6 && !self::names($named, $ip6)) {
+			if (!$want4) {
+				throw new NodeReverseDnsException("Create the AAAA record first: {$hostname} must resolve to {$ip6} before the "
+					. 'provider will accept it as reverse DNS (currently resolves to: ' . self::found($named, true) . ').');
+			}
 			$not_set[$ip6] = "{$hostname} has no AAAA record giving it";
 		}
 
@@ -172,32 +197,55 @@ class NodeReverseDns {
 		}
 
 		$instance_id = (string)$provision->get('cvp_instance_id');
-		try {
-			$r = $driver->setReverseDns($instance_id, $ip, $hostname);
-		} catch (CloudComputeException $e) {
-			if ((int)$e->getCode() === 401 && $provision->is_operator_hosted()) {
-				$account = HeldCloudAccounts::provision_account($provision);
-				throw new NodeReverseDnsException('The provider refused the credential for '
-					. ($account ? $account->label() : 'our cloud account')
-					. '. Replace it on the Hosting tab of Provisioning Setup, then try again.');
-			}
-			if ((int)$e->getCode() === 401) {
-				throw NodeReverseDnsException::reconnect(
-					'The cloud account grant has expired. Re-connect it, then try again.');
-			}
-			throw new NodeReverseDnsException('Provider rejected the update: ' . $e->getMessage());
-		}
-		$set = array($ip);
-		if ($ip6 !== '' && !isset($not_set[$ip6])) {
+		$set = array();
+		$r = null;
+		if ($want4) {
 			try {
-				$driver->setReverseDns($instance_id, $ip6, $hostname);
-				$set[] = $ip6;
+				$r = $driver->setReverseDns($instance_id, $ip, $hostname);
 			} catch (CloudComputeException $e) {
+				throw self::refused($e, $provision);
+			}
+			$set[] = $ip;
+		}
+		if ($want6 && !isset($not_set[$ip6])) {
+			try {
+				$r6 = $driver->setReverseDns($instance_id, $ip6, $hostname);
+				$set[] = $ip6;
+				$r = $r ?? $r6;
+			} catch (CloudComputeException $e) {
+				// Named alone, the IPv6 is the one that must take.
+				if (!$want4) {
+					throw self::refused($e, $provision);
+				}
 				$not_set[$ip6] = 'the provider refused it: ' . $e->getMessage();
 			}
 		}
-		return array('ip' => (string)($r['ip'] ?? $ip), 'rdns' => (string)($r['rdns'] ?? $hostname),
+		return array('ip' => (string)($r['ip'] ?? $set[0]), 'rdns' => (string)($r['rdns'] ?? $hostname),
 			'set' => $set, 'not_set' => $not_set);
+	}
+
+	/**
+	 * A provider's refusal of a reverse DNS call for this provision's server,
+	 * as what the operator does about it: a credential to replace, a grant to
+	 * re-connect, or the provider's own words.
+	 */
+	public static function refused(CloudComputeException $e, $provision): NodeReverseDnsException {
+		if ((int)$e->getCode() === 401 && $provision->is_operator_hosted()) {
+			$account = HeldCloudAccounts::provision_account($provision);
+			return new NodeReverseDnsException('The provider refused the credential for '
+				. ($account ? $account->label() : 'our cloud account')
+				. '. Replace it on the Hosting tab of Provisioning Setup, then try again.');
+		}
+		if ((int)$e->getCode() === 401) {
+			return NodeReverseDnsException::reconnect('The cloud account grant has expired. Re-connect it, then try again.');
+		}
+		return new NodeReverseDnsException('Provider rejected the update: ' . $e->getMessage());
+	}
+
+	/** The addresses of one family a name gave, for an error: 'none' when it gave none. */
+	private static function found(array $named, bool $v6): string {
+		$of = array_values(array_filter($named, function ($a) use ($v6) { return (strpos((string)$a, ':') !== false) === $v6; }));
+		return count($of) ? implode(', ', $of) : 'none';
 	}
 
 	/**

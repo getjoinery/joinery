@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.9 - a join for a site in a container on a provisioned machine is not called refused (B102)
  * @version 1.8 - Move to another management node: the agent asks the other one to adopt the machine (move_to_plane)
  * @version 1.7 - a stored secret is a locked field with Reset; the separate Clear form is gone (clearing
  *                the public key removes the pair)
@@ -165,7 +166,7 @@
 			if ($join_prov) {
 				$prov_age = $join_prov->get('cvp_create_time')
 					? max(0, (int)floor((time() - strtotime($join_prov->get('cvp_create_time') . ' UTC')) / 60)) : null;
-				$machine_ids = class_exists('ProvisionCustomerCloud') ? ProvisionCustomerCloud::machine_node_ids($join_prov) : [];
+				$machine_ids = class_exists('ProvisionCustomerCloud') ? ProvisionCustomerCloud::join_node_ids($join_prov) : [];
 				$is_machine_node = in_array((int)$node->key, $machine_ids, true);
 				echo '<div class="small mb-2">This address is <strong>provision #' . (int)$join_prov->key . '</strong> ('
 				   . htmlspecialchars($join_prov->get('cvp_domain')) . '): instance '
@@ -174,7 +175,7 @@
 				   . '. Install password: ' . htmlspecialchars(ProvisionCustomerCloud::install_password_summary($join_prov)) . '. '
 				   . ($is_machine_node
 						? 'Approving here asks the provider to confirm the instance is running at this address first.'
-						: '<strong>This node is neither that provision\'s site nor a host record at its address</strong> — approval here will be refused.')
+						: '<strong>This node is neither that provision\'s site, a host record at its address, nor a site in a container on it</strong> — approval here will be refused.')
 				   . '</div>';
 			}
 			echo '<div class="small mb-2">Approve <strong>only</strong> if this exactly matches the fingerprint shown on the node\'s own '

@@ -17,6 +17,9 @@
  * before the node is taken unfreezes the site; discarding removes the copy
  * from its host.
  *
+ * @version 1.3 - a host whose agent has gone silent takes no copy (B100); a dead container whose host is gone is
+ *               switched over and kept, its stop owed until that host runs it, cancelled once the container is gone,
+ *               and a way back starts the old container when its host took the stop up meanwhile (B103)
  * @version 1.2 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.1 - the way back after take-over (specs/site_copy_anything_to_anything.md D7); a copy onto a host of a running
  *               site is alive, its runs from backups (D5)
@@ -102,18 +105,19 @@ $install_output = function (int $port, string $fpr) {
 // The site's own host (Docker, its agent able to freeze it and hold its old
 // container), the copy's host (the site container engine), and the site.
 $src_host_agent = $mk_node('srchost', array('mgn_host' => $H_SRC, 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
-	'mgn_agent_version' => '1.78.0', 'mgn_agent_primitives' => 'host_report,hold_container,site_certificate_stage,site_quiet_host,provision_certificate',
+	'mgn_agent_version' => '1.78.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_agent_primitives' => 'host_report,hold_container,site_certificate_stage,site_quiet_host,provision_certificate',
 	'mgn_last_host_report' => json_encode(array('site_engine' => 'docker', 'containers' => array(
 		array('name' => 'schsite', 'memory' => array('limit_bytes' => 402653184)))))));
 $src_host = $mk_host('s', $H_SRC, $src_host_agent);
 $copy_host_agent = $mk_node('copyhost', array('mgn_host' => $H_COPY, 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
 	'mgn_agent_version' => '1.78.0',
 	'mgn_agent_primitives' => 'host_report,hold_container,site_install,site_quiet_host,provision_certificate,discard_copy',
+	'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_last_host_report' => json_encode(array('site_engine' => 'podman', 'containers' => array()))));
 $copy_host = $mk_host('c', $H_COPY, $copy_host_agent);
 $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/schsite/public_html', 'mgn_site_url' => 'https://sch.example.org',
 	'mgn_host' => $H_SRC, 'mgn_container_name' => 'schsite', 'mgn_mgh_managed_host_id' => (int)$src_host->key,
-	'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.78.0',
+	'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.78.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'copy_vouch,site_census,site_quiet,backup_run,check_status',
 	'mgn_joinery_version' => $release, 'mgn_backup_recovery_fpr' => $recovery_fpr, 'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven'))));
@@ -139,6 +143,21 @@ check(SiteCopyRunner::host_refusals($src, $copy_host) === array(), 'a host on th
 $why = implode(' | ', SiteCopyRunner::host_refusals($src, $src_host));
 check(strpos($why, 'own host') !== false && strpos($why, 'site container engine') !== false,
 	'the site\'s own host, on Docker, does not', $why);
+// A host whose agent has gone silent (the machine gone, or stopped) cannot
+// install the copy, and is said so before anything is made (B100).
+$copy_host_agent->set('mgn_agent_last_poll', gmdate('Y-m-d H:i:s', time() - SiteCopyRunner::ALIVE_WITHIN_SECONDS - 60));
+$copy_host_agent->save();
+$why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host, SiteCopy::FROM_BACKUPS));
+check(strpos($why, 'Its agent has not been heard from since') !== false && strpos($why, 'Check that the host is running') !== false,
+	'a host whose agent has not been heard from takes no copy, from backups either', $why);
+$copy_host_agent->set('mgn_agent_last_poll', null);
+$copy_host_agent->save();
+$why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));
+check(strpos($why, 'has not been heard from at all') !== false, 'nor one whose agent was never heard from', $why);
+$copy_host_agent->set('mgn_agent_last_poll', gmdate('Y-m-d H:i:s'));
+$copy_host_agent->save();
+check(SiteCopyRunner::host_refusals($src, $copy_host) === array(), 'heard from again, it takes the copy',
+	implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host)));
 $copy_host_agent->set('mgn_agent_primitives', 'host_report,site_quiet_host');
 $copy_host_agent->save();
 $why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));
@@ -455,7 +474,7 @@ section('Discard: the copy removed from its host');
 // A second site on the old host, copied onto the copy's host and discarded.
 $src2 = $mk_node('src2', array('mgn_web_root' => '/var/www/html/sch2site/public_html', 'mgn_site_url' => 'https://sch2.example.org',
 	'mgn_host' => $H_SRC, 'mgn_container_name' => 'sch2site', 'mgn_mgh_managed_host_id' => (int)$src_host->key,
-	'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.78.0',
+	'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.78.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'copy_vouch,site_census,site_quiet,backup_run,check_status',
 	'mgn_joinery_version' => $release, 'mgn_backup_recovery_fpr' => $recovery_fpr, 'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven'))));
@@ -484,6 +503,132 @@ $rcmd = json_decode((string)$removal->get('mjb_commands'), true);
 check($copy2->status() === SiteCopy::STATUS_DISCARDED && (int)$removal->get('mjb_mgn_managed_node_id') === (int)$copy_host_agent->key
 	&& ($rcmd['primitive'] ?? '') === 'discard_copy' && ($rcmd['params'] ?? null) == array('name' => 'sch2site'),
 	'discarding it asks its host to remove the dormant copy', json_encode($rcmd));
+
+// ---------------------------------------------------------------------------
+section('A dead container whose host is gone: switched over and kept, its stop owed (B103)');
+
+// A third site on the old host, dead with it, copied from its backups.
+$src3 = $mk_node('src3', array('mgn_web_root' => '/var/www/html/sch3site/public_html', 'mgn_site_url' => 'https://sch3.example.org',
+	'mgn_host' => $H_SRC, 'mgn_container_name' => 'sch3site', 'mgn_mgh_managed_host_id' => (int)$src_host->key,
+	'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.78.0',
+	'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s', time() - 3 * 86400),
+	'mgn_agent_primitives' => 'copy_vouch,site_census,site_quiet,backup_run,check_status',
+	'mgn_joinery_version' => $release, 'mgn_backup_recovery_fpr' => $recovery_fpr, 'mgn_agent_server_manager' => 'inactive',
+	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven'))));
+sm_test_node_space($src3);
+$copy3 = SiteCopyRunner::start_on_host($src3, (int)$copy_host->key, 1, SiteCopy::FROM_BACKUPS);
+harness_register_row('scp_site_copies', 'scp_site_copy_id', $copy3->key);
+$cnode3 = SiteCopyRunner::copy_row($copy3, true);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $cnode3->key);
+$i3 = new ManagementJob((int)$copy3->get('scp_install_job_id'), TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $i3->key);
+$copy3_key = base64_encode(random_bytes(32));
+$copy3_fpr = AgentJoinRequest::fingerprint(base64_decode($copy3_key));
+$i3->set('mjb_status', 'completed');
+$i3->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$i3->set('mjb_output', $envelope('site_install', array('output' => $install_output(9097, $copy3_fpr), 'output_bytes' => 100)));
+$i3->save();
+SiteCopyRunner::advance($copy3);
+$j3 = new AgentJoinRequest(NULL);
+foreach (array('ajr_claimed_name' => 'sch3site', 'ajr_public_key' => $copy3_key, 'ajr_fingerprint' => $copy3_fpr,
+	'ajr_source_ip' => $H_COPY, 'ajr_status' => 'pending', 'ajr_container' => true) as $k => $v) {
+	$j3->set($k, $v);
+}
+$j3->save();
+$j3->load();
+harness_register_row('ajr_agent_join_requests', 'ajr_agent_join_request_id', $j3->key);
+SiteCopyRunner::advance($copy3);
+$cnode3->load();
+$cnode3->set('mgn_agent_primitives', 'host_report,copy_look,copy_take_key,copy_take_vouch,copy_stage,copy_restore,site_census,take_node_id,site_quiet,provision_certificate');
+$cnode3->set('mgn_agent_version', '1.78.0');
+$cnode3->set('mgn_last_host_report', json_encode(array('disk' => array('avail_bytes' => 50 * 1073741824),
+	'memory' => array('total_bytes' => 402653184))));
+$cnode3->save();
+$copy3->load();
+$drive($copy3, array(SiteCopy::STATUS_WAITING, SiteCopy::STATUS_COPYING), array(
+	'copy_look@copy'     => array('completed', array('look_path' => $look)),
+	'copy_take_key@copy' => array('completed', array('chain_id' => $chain_id, 'manifest_sha256' => hash('sha256', $manifest),
+		'recovery_fingerprint' => $recovery_fpr)),
+	'site_census@copy'   => array('completed', $census(80)),
+));
+check($copy3->status() === SiteCopy::STATUS_DORMANT && !$copy3->source_alive(), 'a dead site\'s copy from its backups is dormant',
+	$copy3->status() . ' ' . $copy3->get('scp_halt_reason'));
+
+// Its host has gone too: nothing has been heard from it for days.
+$src_host_agent->set('mgn_agent_last_poll', gmdate('Y-m-d H:i:s', time() - 2 * 86400));
+$src_host_agent->save();
+SiteCopyRunner::begin_switch($copy3, SiteCopyRunner::METHOD_MANUAL, null, 1);
+$copy3->load();
+check($copy3->status() === SiteCopy::STATUS_READY, 'a dead site has nothing to freeze: ready at once', $copy3->status() . ' ' . $copy3->get('scp_halt_reason'));
+SiteCopyRunner::move_address($copy3, null, 1);
+$copy3->load();
+$ops = $drive($copy3, array(SiteCopy::STATUS_STARTING), array());
+$steps3 = $copy3->steps();
+$hold3 = end($steps3);
+$owed = $copy3->switch_record()['hold_owed'] ?? null;
+$owed_job = new ManagementJob((int)($owed['job_id'] ?? 0), TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $owed_job->key);
+check($copy3->status() === SiteCopy::STATUS_SWITCHED && ($hold3['op'] ?? '') === 'hold_container' && ($hold3['verdict'] ?? '') === 'owed'
+	&& !in_array('hold_container:stop@host', $ops, true),
+	'the old container\'s host is not waited for: the switch-over ends, its stop owed', $copy3->status() . ' ' . json_encode($hold3) . ' ' . $copy3->get('scp_halt_reason'));
+check(is_array($owed) && strpos((string)$owed['why'], 'has not been heard from since') !== false
+	&& (int)$owed_job->get('mjb_mgn_managed_node_id') === (int)$src_host_agent->key && $owed_job->get('mjb_status') === 'pending'
+	&& empty($copy3->switch_record()['held']),
+	'it says why, and the stop stays queued on the old host for when it answers', json_encode($owed) . ' ' . $owed_job->get('mjb_status'));
+SiteCopyRunner::finish($copy3);
+$copy3->load();
+check($copy3->status() === SiteCopy::STATUS_FINISHED, 'and the switch-over is kept', $copy3->status());
+$left3 = SiteCopyRunner::cleanup_left((int)$src3->key);
+check(count($left3) === 1 && $left3[0]['removed'] === false && strpos((string)($left3[0]['hold_owed']['why'] ?? ''), 'has not been heard from') !== false,
+	'once kept, the site\'s Copy tab still names the old container and why it was not stopped', json_encode($left3[0]['hold_owed'] ?? null));
+
+// The way back would start the old container only once its host has taken
+// the stop up (it came back meanwhile): until then it was never stopped.
+check(SiteCopyRunner::old_container_restarts($copy3->switch_record()) === false,
+	'while the stop waits on its host, the way back leaves the old container alone');
+$owed_job->set('mjb_status', 'running');
+$owed_job->save();
+check(SiteCopyRunner::old_container_restarts($copy3->switch_record()) === true,
+	'once its host has taken the stop up, the way back starts the old container again');
+
+// The old host answers again, and runs the stop it was owed.
+$owed_job->set('mjb_status', 'completed');
+$owed_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$owed_job->set('mjb_result', null);
+$owed_job->set('mjb_output', $envelope('hold_container', array('output' => json_encode(array('container' => 'sch3site', 'action' => 'stop',
+	'done' => true, 'held' => true, 'state' => 'exited', 'restart' => 'no')))));
+$owed_job->save();
+SiteCopyRunner::job_finished($owed_job);
+$copy3->load();
+$sw3 = $copy3->switch_record();
+check(!isset($sw3['hold_owed']) && !empty($sw3['held']) && !empty($sw3['held_late_time']) && $copy3->status() === SiteCopy::STATUS_FINISHED,
+	'once it has run, the old container is recorded held', json_encode(array_intersect_key($sw3, array('hold_owed' => 1, 'held' => 1, 'held_late_time' => 1))));
+$left3 = SiteCopyRunner::cleanup_left((int)$src3->key);
+check(count($left3) === 1 && $left3[0]['hold_owed'] === null, 'and the tab names it for removal alone', json_encode($left3[0]['hold_owed'] ?? 'none'));
+
+// A stop still owed when its host sees the old container gone is cancelled by
+// the task tick: a site installed there later under its name is never the one
+// stopped.
+$late = ManagementJob::createFromBuild($src_host_agent->key, 'hold_container',
+	JobCommandBuilder::build_hold_container($src_host_agent, 'sch3site', 'stop'), array('site_copy_id' => (int)$copy3->key), 1);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $late->key);
+$sw3['held'] = false;
+$sw3['hold_owed'] = array('why' => 'test', 'job_id' => (int)$late->key, 'time' => gmdate('Y-m-d H:i:s'));
+$copy3->set_switch_record($sw3);
+$copy3->save();
+SiteCopyRunner::advance_all();
+$late->load();
+$copy3->load();
+check($late->get('mjb_status') === 'pending' && isset($copy3->switch_record()['hold_owed']),
+	'while the old container is still there, its stop stays queued', $late->get('mjb_status'));
+$old3 = SiteCopyRunner::old_container($copy3);
+$old3->set('mgn_moved_check_state', 'absent');
+$old3->save();
+SiteCopyRunner::advance_all();
+$late->load();
+$copy3->load();
+check($late->get('mjb_status') === 'cancelled' && !isset($copy3->switch_record()['hold_owed']),
+	'once its host has seen it gone, the stop is cancelled and nothing is owed', $late->get('mjb_status') . ' ' . json_encode($copy3->switch_record()['hold_owed'] ?? null));
 
 DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_unlock(' . SiteCopyRunner::LOCK_KEY . ')');
 harness_finish();

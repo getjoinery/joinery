@@ -499,6 +499,32 @@ $threw = '';
 try { NodeReverseDns::set($rdns_node, $domain, $cloud, array($S4, $T6)); } catch (NodeReverseDnsException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'Create the A record first') !== false && strpos($threw, $S4) !== false,
 	'a name whose A still gives another address: refused, naming what it resolves to', $threw);
+// One address alone (B70): after an IP swap the IPv4 keeps the name it
+// brought, and only the IPv6 is the site's to name.
+$cloud->rdns = array();
+$r = NodeReverseDns::set($rdns_node, $domain, $cloud, array($S4, $T6), NodeReverseDns::ADDRESSES_IPV6);
+check($cloud->rdns === array(array('7200a', $T6, $domain)) && $r['set'] === array($T6) && $r['not_set'] === array()
+	&& NodeReverseDns::summary($r) === $T6 . ' now answers ' . $domain,
+	'the IPv6 alone: only it is named, whatever the A gives, and the IPv4 keeps what it answers (B70)',
+	json_encode(array($cloud->rdns, $r)));
+$cloud->rdns = array();
+$r = NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4, $T6), NodeReverseDns::ADDRESSES_IPV4);
+check($cloud->rdns === array(array('7200a', $T4, $domain)) && $r['set'] === array($T4) && $r['not_set'] === array(),
+	'the IPv4 alone: only it is named, and the IPv6 is not reported as left', json_encode(array($cloud->rdns, $r)));
+$threw = '';
+$cloud->rdns = array();
+try { NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4), NodeReverseDns::ADDRESSES_IPV6); } catch (NodeReverseDnsException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'Create the AAAA record first') !== false && strpos($threw, $T6) !== false && $cloud->rdns === array(),
+	'the IPv6 alone with no AAAA giving it: refused before the provider is asked, naming the record to create', $threw);
+$threw = '';
+$cloud->refuse_rdns = array($T6);
+try { NodeReverseDns::set($rdns_node, $domain, $cloud, array($T6), NodeReverseDns::ADDRESSES_IPV6); } catch (NodeReverseDnsException $e) { $threw = $e->getMessage(); }
+$cloud->refuse_rdns = array();
+check(strpos($threw, 'Provider rejected the update') !== false && $cloud->rdns === array(),
+	'named alone, the IPv6 must take: a provider refusing it is thrown, not reported', $threw);
+$threw = '';
+try { NodeReverseDns::set($rdns_node, $domain, $cloud, array($T4), 'all'); } catch (NodeReverseDnsException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'Choose which') !== false && $cloud->rdns === array(), 'an unknown choice of addresses is refused', $threw);
 
 // ---------------------------------------------------------------------------
 section('Keep puts the TTLs back');
