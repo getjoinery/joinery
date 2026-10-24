@@ -1,0 +1,109 @@
+/*
+ * ScrollDaddy's look for the platform's .jy-ui kit — the shared pages every
+ * Joinery site renders (profile, account, password, contact preferences,
+ * change tier, sign-in and reset). Colours and fonts come from the
+ * brand_tokens in theme.json; this file carries only what tokens cannot say:
+ * ScrollDaddy's pill buttons and fields, and its rounded, borderless price
+ * boxes. Every rule is scoped to .jy-ui, so the theme's own pages are untouched.
+ *
+ * @version 1.0.0
+ */
+
+/* Buttons: pills, as .th-btn draws them */
+.jy-ui .btn {
+  border-radius: 100px;
+  padding: 0 var(--jy-space-6);
+  font-weight: 500;
+}
+.jy-ui .btn-lg { padding: 0 40px; }
+.jy-ui .btn-sm { padding: 0 var(--jy-space-4); }
+.jy-ui .btn:disabled,
+.jy-ui .btn.disabled {
+  background: #ffffff;
+  border-color: #E0E0E0;
+  color: var(--jy-color-text-subtle);
+  opacity: 1;
+  cursor: default;
+}
+
+/* Headings: the theme's own h1 is a hero size; a page title is smaller */
+.jy-ui .jy-page-header h1 { font-size: 40px; }
+@media (max-width: 767px) {
+  .jy-ui .jy-page-header h1 { font-size: 30px; }
+}
+
+/* Fields: ScrollDaddy's rounded inputs */
+.jy-ui .form-control {
+  border-radius: 12px;
+  border-color: #E0E0E0;
+}
+.jy-ui .form-control:focus {
+  border-color: var(--jy-color-primary);
+  box-shadow: 0 0 0 3px rgba(107, 97, 252, 0.15);
+}
+
+/* Cards and panels: soft lavender boxes with large radii, like .price-box */
+.jy-ui .card,
+.jy-ui .jy-panel {
+  border-radius: 24px;
+  border-color: #ECEAFE;
+  box-shadow: 0 10px 40px rgba(107, 97, 252, 0.06);
+}
+.jy-ui .card-header {
+  background: #F9F8FF;
+  border-bottom-color: #ECEAFE;
+  padding: var(--jy-space-5) var(--jy-space-6);
+}
+.jy-ui .card-body { padding: var(--jy-space-6); }
+
+/* Change tier: each plan as a price box, the current one in ScrollDaddy purple */
+.jy-ui .jy-tier-card {
+  background: #F9F8FF;
+  border: none;
+  border-radius: 30px;
+  box-shadow: none;
+  transition: box-shadow 0.4s, transform 0.4s;
+}
+.jy-ui .jy-tier-card:hover {
+  box-shadow: 0 10px 50px 10px #E8E8E8;
+  transform: translateY(-4px);
+}
+.jy-ui .jy-tier-card .card-header {
+  background: transparent;
+  border-bottom: none;
+  display: block;
+  text-align: center;
+  padding: var(--jy-space-6) var(--jy-space-6) 0;
+}
+.jy-ui .jy-tier-card.is-current {
+  box-shadow: 0 0 0 2px var(--jy-color-primary), 0 10px 50px 10px #E8E8E8;
+}
+.jy-ui .jy-tier-card.is-current .card-header { background: transparent; color: inherit; }
+.jy-ui .jy-tier-card.is-current .jy-tier-name { color: var(--jy-color-text); }
+.jy-ui .jy-tier-current-label {
+  color: var(--jy-color-primary);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: var(--jy-text-xs);
+}
+.jy-ui .jy-tier-name { font-size: var(--jy-text-xl); }
+.jy-ui .jy-tier-product { border-top-color: #E4E1FD; }
+.jy-ui .jy-tier-price {
+  font-family: var(--jy-font-display);
+  font-size: 40px;
+  color: var(--jy-color-text);
+}
+.jy-ui .jy-tier-period { color: var(--jy-color-text-muted); font-size: var(--jy-text-base); }
+
+/* The account pages' side menu: pills, the current one lavender */
+.jy-ui .jy-settings-nav-link { border-radius: 100px; }
+.jy-ui .jy-settings-nav-link:hover { background: #F9F8FF; }
+.jy-ui .jy-settings-nav-link.active { background: #EFEDFF; color: var(--jy-color-primary); }
+
+/* Tabs: the active one underlined in purple */
+.jy-ui .tab.active,
+.jy-ui .tab[aria-selected="true"] {
+  color: var(--jy-color-primary);
+  border-bottom-color: var(--jy-color-primary);
+}

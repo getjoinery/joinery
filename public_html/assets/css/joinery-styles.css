@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.17.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.17.1
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -917,6 +917,7 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
 
 .jy-ui .form-control {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   height: var(--jy-control-h-md);
   padding: 0 var(--jy-space-3);
@@ -1195,7 +1196,7 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
 .jy-ui .card-header.bg-body-tertiary { background: var(--jy-color-surface); }
 .jy-ui .card-header h6,
 .jy-ui .card-header .h6 {
-  margin-bottom: 0;
+  margin: 0;
   font-size: var(--jy-text-sm);
   font-weight: 600;
 }

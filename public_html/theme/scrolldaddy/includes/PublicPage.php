@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.4 - links scrolldaddy-kit.css, ScrollDaddy's look for the shared .jy-ui pages
  * @version 1.2.3 - its stylesheet and joinery-validate.js carry their file times, so a change reaches visitors past a cache at once
  * @version 1.2.2 - BeginPage escapes the title, as every theme does
  * @changelog 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
@@ -242,6 +243,8 @@ Career Area
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/style.css?v=<?php echo $this->asset_mtime('theme/scrolldaddy/assets/css/style.css'); ?>">
     <!-- ScrollDaddy Plugin CSS -->
     <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/scrolldaddy-plugin.css?v=18">
+    <!-- ScrollDaddy's look for the shared .jy-ui pages (profile, account, change tier) -->
+    <link rel="stylesheet" href="/theme/scrolldaddy/assets/css/scrolldaddy-kit.css?v=<?php echo $this->asset_mtime('theme/scrolldaddy/assets/css/scrolldaddy-kit.css'); ?>">
     <?php $this->render_theme_tail(); ?>
 </head>
 

@@ -44,7 +44,7 @@
                 // Shared form definition — also serves GET /api/v1/form/password_edit
                 password_edit_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));
 
-                echo '<a href="/profile/account_edit">Cancel</a>';
+                echo '<a class="btn btn-ghost" href="/profile/account_edit">Cancel</a>';
 
                 $formwriter->end_form();
                 ?>
