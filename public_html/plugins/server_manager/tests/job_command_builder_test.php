@@ -374,6 +374,8 @@ $bare_cmd = jcb_ssh_steps($bare_steps)[0]['cmd'];
 check(strpos($bare_cmd, "install.sh -y -q docker --management-node=") !== false
 	&& strpos($bare_cmd, "--node-name='relayshard'") !== false,
 	'a bare instance installs the host agent under the node\'s own name');
+check(strpos($bare_cmd, "--node-name='relayshard' --keep-root-login") !== false,
+	'install.sh docker keeps root login: this plane logs in with the root password again', $bare_cmd);
 check(strpos($bare_cmd, 'install.sh -y -q site') === false, 'and no site');
 $bare_target->load();
 check((string)$bare_target->get('mgn_container_name') === '', 'a bare node is not given a container name');
@@ -385,7 +387,7 @@ $metal_target = jcb_node(array('mgn_web_root' => '/var/www/html/metalsite/public
 $metal_cmd = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
 	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com',
 	'docker_mode' => 'bare-metal')))[0]['cmd'];
-check(strpos($metal_cmd, './install.sh -y -q server') !== false, 'bare metal runs install.sh server when prerequisites are missing');
+check(strpos($metal_cmd, './install.sh -y -q server --keep-root-login') !== false, 'bare metal runs install.sh server when prerequisites are missing, keeping root login', $metal_cmd);
 check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' --password-file=/root/.joinery_postgres_password 'metal.example.com' --enable-agent") !== false,
 	'then the site, with the postgres role password the server setup recorded', $metal_cmd);
 check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
@@ -1776,11 +1778,11 @@ check(JobCommandBuilder::outbound_install_flags() === ' --outbound-ceiling=150 -
 	'the plane\'s figures become install.sh flags, saying the plane set them; an empty one or one that is not a figure is left out', JobCommandBuilder::outbound_install_flags());
 $ol_metal_cmd = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
 	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com', 'docker_mode' => 'bare-metal')))[0]['cmd'];
-check(strpos($ol_metal_cmd, './install.sh -y -q server --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane;') !== false,
+check(strpos($ol_metal_cmd, './install.sh -y -q server --keep-root-login --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane;') !== false,
 	'install.sh server gets them', $ol_metal_cmd);
 $ol_boot_cmd = implode("\n", array_column(jcb_ssh_steps(JobCommandBuilder::build_install_node($boot_target, array(
 	'mode' => 'bare', 'sitename' => 'olboot', 'docker_mode' => 'docker'))), 'cmd'));
-check(preg_match("#install\\.sh -y -q docker --management-node=\\S+ --node-name='olboot' --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane#", $ol_boot_cmd) === 1,
+check(preg_match("#install\\.sh -y -q docker --management-node=\\S+ --node-name='olboot' --keep-root-login --outbound-ceiling=150 --outbound-conn-rate=30 --outbound-set-by=plane#", $ol_boot_cmd) === 1,
 	'and install.sh docker', $ol_boot_cmd);
 harness_set_setting_mem('server_manager_outbound_ceiling_mbit', 'off');
 check(JobCommandBuilder::outbound_install_flags() === ' --outbound-ceiling=off --outbound-conn-rate=30 --outbound-set-by=plane', 'a ceiling of off is passed as off');

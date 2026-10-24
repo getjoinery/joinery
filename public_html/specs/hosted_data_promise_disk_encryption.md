@@ -205,7 +205,9 @@ to make that true.**
   host and bare metal are not three designs.
 - **No new human-held key.** The owner already holds one recovery key; this
   reuses it.
-- **Root login stays off.** Nothing here needs a login.
+- **Root login stays off.** Nothing here needs a login. (During the beta,
+  `beta_break_glass_root_access` keeps a root password login on hosted
+  machines whose owner allows it; this line holds again when the beta ends.)
 - What it does not promise is stated as plainly as what it does.
 
 ## What it buys, and what it does not

@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 3.33 - root SSH login is off by default, root's keys included, on install.sh server and (for the
+#               first time) install.sh docker: one function, configure_ssh_access, hardens sshd for both,
+#               out of do_server_setup (BASE_IMAGE_VERSION 2.3). Run under sudo, that account keeps its access;
+#               otherwise a run with a terminal asks once, defaulting to off. --keep-root-login keeps the
+#               older rules (key-only when root holds keys, root's password left alone when it is the only
+#               way in), and removes this script's drop-in from an earlier run when there is nothing to set.
+#               A main-file root-login line sshd refuses is put back as it was, not left in place
+#               (specs/beta_break_glass_root_access.md section 2).
 #VERSION 3.32 - a start that is not a login (a systemd unit, cron, cloud-init) leaves HOME unset, and Composer refuses
 #               to run without it: the running account's home stands in (B104)
 #VERSION 3.31 - server sizes PHP-FPM's workers from the machine (tune_php_fpm.sh) beside PostgreSQL's memory:
@@ -645,7 +653,8 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [--keep-root-login] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#                       Root SSH login is turned off, keys included (--keep-root-login keeps it; server too)
 #                       Docker keeps its data on the host's data root, /srv/joinery/docker: XFS with project
 #                       quotas, made before Docker's first start and grown as it fills
 #                       Root in a container is not root on the host (userns-remap) on every new Docker host,
@@ -660,7 +669,7 @@
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [--keep-root-login] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
 #                       --encrypted-data-root: the data root on a LUKS2 volume, its key sealed to the recovery key
 #                       --no-tpm2: a TPM2 chip never opens it; every boot asks for the key
 #                       whose public half KEY is (specs/hosted_data_promise_disk_encryption.md)
@@ -778,7 +787,7 @@ site_engine_build_flags() {
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="2.2"
+BASE_IMAGE_VERSION="2.3"
 
 # Where `install.sh server` records the postgres role password it generated, and
 # where `install.sh site` looks for it on bare metal. One constant, because the
@@ -826,6 +835,8 @@ CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
 SSH_ROOT_LOGIN=""        # Set by derive_ssh_access: prohibit-password, no, or empty (leave as is)
 SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps access
+SSH_ROOT_ONLY=0          # Set by derive_ssh_access: 1 when root was the only SSH way in and is turned off
+KEEP_ROOT_LOGIN=0        # --keep-root-login (server, docker): the older root-login rules, not root SSH off
 
 # --memory=SIZE: the memory budget for a site container, in Docker's own syntax
 # (512m, 2g). Empty means unlimited, which is Docker's default and stays the
@@ -1111,37 +1122,79 @@ print_email_setup_notice() {
 # SSH ACCESS DERIVATION
 #==============================================================================
 
-# Work out what root SSH login can safely become once the server is hardened,
-# without creating any account. Sets:
+# Work out what root SSH login becomes once the server is hardened, without
+# creating any account. Sets:
 #
 #   SSH_ROOT_LOGIN         prohibit-password | no | "" (leave it as it is)
 #   SSH_REACHABLE_ACCOUNT  who keeps access (informational)
+#   SSH_ROOT_ONLY          1 when root was the only SSH way in and is turned off
 #
-# Three cases:
+# The default is root SSH login off, root's keys included (Q3 of
+# specs/beta_break_glass_root_access.md):
 #
-#   1. Running as root with keys in /root/.ssh/authorized_keys - root keeps
-#      key login and loses password login (prohibit-password).
-#   2. Running under sudo from an ordinary account - that account already holds
-#      a credential and sudo, so root login is turned off.
+#   - Running under sudo from an ordinary account - that account keeps its own
+#     SSH access.
+#   - Otherwise root was the only SSH way in. A run with a terminal asks once,
+#     defaulting to off; -y or no terminal does not ask. The provider's web
+#     console logs in as root whatever sshd says.
+#
+# --keep-root-login (KEEP_ROOT_LOGIN=1), or the answer "no" to that question,
+# keeps the older rules:
+#
+#   1. Root holds keys in /root/.ssh/authorized_keys - root keeps key login and
+#      loses password login (prohibit-password).
+#   2. Running under sudo from an ordinary account - root login is turned off.
 #   3. Neither (root reached by password, no key) - the password is the only
-#      way in. Leave root login alone; on a machine a management node
-#      provisioned, the management node retires that password itself once the
-#      machine's agents are admitted.
+#      way in, and root login is left as it is. A machine a management node
+#      provisions runs this way: the management node logs in with that
+#      password until it retires it itself (retire_install_password).
 derive_ssh_access() {
     SSH_ROOT_LOGIN=""
     SSH_REACHABLE_ACCOUNT=""
+    SSH_ROOT_ONLY=0
 
-    if [ -s /root/.ssh/authorized_keys ]; then
+    local sudo_account=""
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        sudo_account="$SUDO_USER"
+    fi
+
+    if [ "$KEEP_ROOT_LOGIN" -eq 0 ]; then
+        if [ -n "$sudo_account" ]; then
+            SSH_ROOT_LOGIN="no"
+            SSH_REACHABLE_ACCOUNT="$sudo_account"
+            print_info "Running under sudo as '$sudo_account' - that account keeps its own SSH access; root SSH login is turned off"
+            return 0
+        fi
+        if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+            SSH_ROOT_LOGIN="no"
+            SSH_ROOT_ONLY=1
+            return 0
+        fi
+        echo ""
+        print_warning "Root is the only SSH way into this server. Your provider's web console still logs in as root (it is not SSH)."
+        read -p "Turn root SSH login off? [Y/n] " -n 1 -r || true
+        echo ""
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            SSH_ROOT_LOGIN="no"
+            SSH_ROOT_ONLY=1
+            return 0
+        fi
+        print_info "Keeping root SSH login"
+    fi
+
+    # ROOT_AUTHORIZED_KEYS and SSHD_ETC are the gate's fixtures; nothing in
+    # production sets them.
+    if [ -s "${ROOT_AUTHORIZED_KEYS:-/root/.ssh/authorized_keys}" ]; then
         SSH_ROOT_LOGIN="prohibit-password"
         SSH_REACHABLE_ACCOUNT="root (its SSH keys)"
         print_info "Root holds SSH keys - root keeps key login, password login is turned off"
         return 0
     fi
 
-    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    if [ -n "$sudo_account" ]; then
         SSH_ROOT_LOGIN="no"
-        SSH_REACHABLE_ACCOUNT="$SUDO_USER"
-        print_info "Running under sudo as '$SUDO_USER' - that account keeps its own SSH access"
+        SSH_REACHABLE_ACCOUNT="$sudo_account"
+        print_info "Running under sudo as '$sudo_account' - that account keeps its own SSH access"
         return 0
     fi
 
@@ -1150,6 +1203,83 @@ derive_ssh_access() {
     print_warning "It is being left enabled; fail2ban limits guessing."
     echo ""
     return 0
+}
+
+# install.sh server and install.sh docker: sshd's hardening, the same on a
+# bare-metal server and a Docker host. Kept out of do_server_setup, which the
+# joinery-base image build runs and hashes; an image has no sshd of its own.
+configure_ssh_access() {
+    if is_docker; then
+        print_info "Docker detected - skipping SSH hardening"
+        return 0
+    fi
+    print_step "Configuring SSH security..."
+    local etc="${SSHD_ETC:-/etc/ssh}"
+    cp "$etc/sshd_config" "$etc/sshd_config.backup"
+
+    # Work out whether anything other than root can still get in, and make
+    # that true where we can, before touching PermitRootLogin.
+    derive_ssh_access
+
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' "$etc/sshd_config"
+    sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' "$etc/sshd_config"
+    sed -i 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/' "$etc/sshd_config"
+    sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' "$etc/sshd_config"
+    sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' "$etc/sshd_config"
+    sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' "$etc/sshd_config"
+
+    # The one directive that can lock the operator out. Everything above is
+    # applied unconditionally; this follows what derive_ssh_access found.
+    #
+    # sshd takes the FIRST value it reads for a keyword, and Ubuntu's
+    # sshd_config includes sshd_config.d/*.conf at its top, so a provider's
+    # drop-in outranks anything written in the main file. The setting goes
+    # in a drop-in that sorts first; sshd -t checks it before the restart,
+    # and a setting sshd refuses is taken back rather than left to lock anyone
+    # out: the drop-in removed, or the main file's line put back as it was.
+    local dropin="$etc/sshd_config.d/00-joinery-root-login.conf"
+    local has_include=0 main_before=""
+    grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$etc/sshd_config" && has_include=1
+    if [ -n "$SSH_ROOT_LOGIN" ]; then
+        if [ "$has_include" -eq 1 ]; then
+            install -d -m 755 "$etc/sshd_config.d"
+            printf '# Written by install.sh: root SSH login after hardening.\nPermitRootLogin %s\n' \
+                "$SSH_ROOT_LOGIN" > "$dropin"
+            chmod 644 "$dropin"
+        else
+            main_before="$(mktemp)"
+            cp "$etc/sshd_config" "$main_before"
+            sed -i -E "s/^#?PermitRootLogin .*/PermitRootLogin ${SSH_ROOT_LOGIN}/" "$etc/sshd_config"
+            grep -q '^PermitRootLogin ' "$etc/sshd_config" || echo "PermitRootLogin ${SSH_ROOT_LOGIN}" >> "$etc/sshd_config"
+        fi
+        if ! sshd -t 2>/dev/null; then
+            if [ "$has_include" -eq 1 ]; then
+                rm -f "$dropin"
+            else
+                cp "$main_before" "$etc/sshd_config"
+            fi
+            print_warning "sshd refused the root-login setting; root login is left as it was"
+            SSH_ROOT_LOGIN=""
+            SSH_ROOT_ONLY=0
+        fi
+        [ -z "$main_before" ] || rm -f "$main_before"
+    elif [ -f "$dropin" ]; then
+        # Nothing to set (--keep-root-login, root's password the only way in):
+        # an earlier run's drop-in is this script's own, and leaving it would
+        # keep root off. Without it the machine's own setting applies.
+        rm -f "$dropin"
+        print_info "Removed ${dropin} from an earlier run: root login follows this machine's own sshd settings"
+    fi
+
+    service_restart ssh
+
+    if [ "$SSH_ROOT_ONLY" -eq 1 ]; then
+        print_warning "Root SSH login is now off. Your provider's web console still logs in as root (it is not SSH). To keep root SSH login, re-run with --keep-root-login."
+    elif [ -n "$SSH_ROOT_LOGIN" ]; then
+        print_success "SSH security configured (PermitRootLogin ${SSH_ROOT_LOGIN}; ${SSH_REACHABLE_ACCOUNT} keeps access)"
+    else
+        print_success "SSH security configured (root login left enabled — see the warning above)"
+    fi
 }
 
 #==============================================================================
@@ -2787,6 +2917,7 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
     if [ "$multi" -eq 1 ]; then
         multi_tenant_host_install || exit 1
     fi
+    configure_ssh_access
     outbound_limits_install 0 "$no_outbound"
     host_housekeeping
     install_docker_host_agent "$mgmt" "$node"
@@ -2811,6 +2942,7 @@ do_docker_install() {
             --no-tpm2) NO_TPM2=1 ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --site-engine) SITE_ENGINE_HOST=1 ;;
+            --keep-root-login) KEEP_ROOT_LOGIN=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
@@ -2873,6 +3005,7 @@ do_docker_install() {
         # Do NOT exit here: an existing Docker host still needs its
         # housekeeping and its host agent installed and (if a URL was given)
         # joined — the whole point on a keyless machine.
+        configure_ssh_access
         outbound_limits_install 0 "$NO_OUTBOUND_LIMITS"
         host_housekeeping
         install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
@@ -3009,6 +3142,7 @@ do_docker_install() {
         print_success "Postgres ports 9080-9099 blocked over IPv6 on $PUBLIC_IFACE6"
     fi
 
+    configure_ssh_access
     outbound_limits_install 0 "$NO_OUTBOUND_LIMITS"
     host_housekeeping
     install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"
@@ -3079,7 +3213,7 @@ outbound_limits_install() {  # WEB_USER(0|1) OFF(0|1)
 }
 
 # install.sh server: the bare-metal setup, then the limits on the web server's
-# user. Kept out of do_server_setup, which the joinery-base image build runs
+# user and sshd's hardening. Kept out of do_server_setup, which the joinery-base image build runs
 # and hashes; an image has no host of its own to limit.
 do_server() {
     local NO_OUTBOUND_LIMITS=0 arg
@@ -3088,11 +3222,13 @@ do_server() {
         case "$arg" in
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --outbound-ceiling=*|--outbound-conn-rate=*|--outbound-conn-burst=*|--outbound-open-conns=*|--outbound-set-by=plane) consume_outbound_flag "$arg" ;;
+            --keep-root-login) KEEP_ROOT_LOGIN=1 ;;
             *) rest+=("$arg") ;;
         esac
     done
     do_server_setup "${rest[@]+"${rest[@]}"}"
     is_docker || outbound_limits_install 1 "$NO_OUTBOUND_LIMITS"
+    is_docker || configure_ssh_access
 }
 
 #==============================================================================
@@ -3100,10 +3236,10 @@ do_server() {
 #==============================================================================
 
 # Everything here is idempotent and locks nobody out, so it needs no gate and
-# no confirmation. Turning password login off is NOT here: on a plane-
-# provisioned machine the management node does that once the machine's agents
-# are admitted (retire_install_password), and on a self-hosted machine the
-# owner's root password is their only way in, so nothing turns it off.
+# no confirmation. Root SSH login is NOT here: configure_ssh_access turns it off
+# at install (a plane-provisioned machine passes --keep-root-login, and the
+# management node retires the password itself once the machine's agents are
+# admitted, retire_install_password); the timer never touches it.
 host_housekeeping() {
     print_header "Host Housekeeping"
 
@@ -4129,59 +4265,11 @@ EOF
 
     print_success "PHP configured"
 
-    # Skip SSH, firewall, and security hardening in Docker
+    # Skip the firewall and security hardening in Docker. SSH login is
+    # configure_ssh_access's, which install.sh server and docker both run.
     if is_docker; then
-        print_info "Docker detected - skipping SSH, firewall, and security hardening"
+        print_info "Docker detected - skipping firewall and security hardening"
     else
-        # Configure SSH security
-        print_step "Configuring SSH security..."
-        cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
-
-        # Work out whether anything other than root can still get in, and make
-        # that true where we can, before touching PermitRootLogin.
-        derive_ssh_access
-
-        sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-        sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-        sed -i 's/PermitEmptyPasswords yes/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-        sed -i 's/#MaxAuthTries 6/MaxAuthTries 3/' /etc/ssh/sshd_config
-        sed -i 's/#ClientAliveInterval 0/ClientAliveInterval 300/' /etc/ssh/sshd_config
-        sed -i 's/#ClientAliveCountMax 3/ClientAliveCountMax 2/' /etc/ssh/sshd_config
-
-        # The one directive that can lock the operator out. Everything above is
-        # applied unconditionally; this follows what derive_ssh_access found,
-        # and is left alone when root's password is the only way in.
-        #
-        # sshd takes the FIRST value it reads for a keyword, and Ubuntu's
-        # sshd_config includes sshd_config.d/*.conf at its top, so a provider's
-        # drop-in outranks anything written in the main file. The setting goes
-        # in a drop-in that sorts first; sshd -t checks it before the restart,
-        # and a file sshd refuses is removed rather than left to lock anyone out.
-        if [ -n "$SSH_ROOT_LOGIN" ]; then
-            ROOT_LOGIN_DROPIN=/etc/ssh/sshd_config.d/00-joinery-root-login.conf
-            if grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then
-                printf '# Written by install.sh server: root SSH login after hardening.\nPermitRootLogin %s\n' \
-                    "$SSH_ROOT_LOGIN" > "$ROOT_LOGIN_DROPIN"
-                chmod 644 "$ROOT_LOGIN_DROPIN"
-            else
-                sed -i -E "s/^#?PermitRootLogin .*/PermitRootLogin ${SSH_ROOT_LOGIN}/" /etc/ssh/sshd_config
-                grep -q '^PermitRootLogin ' /etc/ssh/sshd_config || echo "PermitRootLogin ${SSH_ROOT_LOGIN}" >> /etc/ssh/sshd_config
-            fi
-            if ! sshd -t 2>/dev/null; then
-                rm -f "$ROOT_LOGIN_DROPIN"
-                print_warning "sshd refused the root-login setting; root login is left as it was"
-                SSH_ROOT_LOGIN=""
-            fi
-        fi
-
-        service_restart ssh
-
-        if [ -n "$SSH_ROOT_LOGIN" ]; then
-            print_success "SSH security configured (PermitRootLogin ${SSH_ROOT_LOGIN}; ${SSH_REACHABLE_ACCOUNT} keeps access)"
-        else
-            print_success "SSH security configured (root login left enabled — see the warning above)"
-        fi
-
         # Configure UFW firewall
         print_step "Configuring firewall..."
         ufw --force reset
@@ -4266,7 +4354,6 @@ EOF
     if ! is_docker; then
         echo -e "${GREEN}✓${NC} UFW firewall configured"
         echo -e "${GREEN}✓${NC} fail2ban installed and configured"
-        echo -e "${GREEN}✓${NC} SSH security configured"
         echo -e "${GREEN}✓${NC} Automatic security updates enabled"
         echo -e "${GREEN}✓${NC} System security hardening applied"
     fi
@@ -6416,6 +6503,11 @@ show_help() {
     echo "                         into /root/.joinery_postgres_password)"
     echo ""
     echo "Docker and Server Command Options:"
+    echo "  --keep-root-login      Keep root SSH login. Without it root SSH login is"
+    echo "                         turned off, root's keys included, unless the run is"
+    echo "                         under sudo from another account (that account keeps"
+    echo "                         its access). With it: key-only when root holds keys,"
+    echo "                         left as it is when root's password is the only way in"
     echo "  --no-outbound-limits   No limits on the connections sites open, and no"
     echo "                         UDP drop (sudo joinery-limits on turns them on)"
     echo "  --outbound-ceiling=MBIT|off  The machine's speed ceiling per site (200)"
