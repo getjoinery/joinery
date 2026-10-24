@@ -221,7 +221,7 @@ fi
 if [ "$RELOAD" -eq 1 ]; then
     # A reload, never a restart: a restart drops every connection the site
     # holds. shared_buffers waits for the next restart someone chooses, and
-    # PostgreSQL marks it pending_restart, which the host report reads.
+    # the host report shows it pending (the drop-in newer than the cluster's start).
     if [ "$(id -u)" -eq 0 ]; then
         if [ -d /run/systemd/system ]; then
             systemctl reload "postgresql@${PG_VERSION}-main" 2>/dev/null || true

@@ -332,21 +332,41 @@ PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootss
 chk "nothing sized it: the packaged 5" "$(jv "$T/php1.json" php_workers.source)/$(jv "$T/php1.json" php_workers.max_children)/$(jv "$T/php1.json" php_workers.version)" "packaged/5/8.3"
 chk "no pool file line is ever carried" "$(grep -c -E 'hunter2|SECRET' "$T/php1.json")" "0"
 printf '; joinery-plan: budget_mb=1369 source=MemTotal reserve_mb=640 cpus=1 children=8\n[www]\npm.max_children = 8\n' > "$T/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf"
-cat > "$T/bin/setpriv" <<'STUB'
+# PostgreSQL read with no login: postgres -C answers from the files, and
+# postmaster.pid's third line is when the cluster started.
+mkdir -p "$T/etc/postgresql/16/main/conf.d" "$T/pgdata"
+: > "$T/etc/postgresql/16/main/postgresql.conf"; touch "$T/pgbin"; chmod 755 "$T/pgbin"
+printf 'shared_buffers = 299MB\n' > "$T/etc/postgresql/16/main/conf.d/20-joinery-memory.conf"
+printf '1234\n/x\n%s\n' "$(( $(date +%s) - 3600 ))" > "$T/pgdata/postmaster.pid"
+echo 38272 > "$T/pg_sb"     # 299 MB in 8 kB pages: the drop-in is the value in force
+cat > "$T/bin/setpriv" <<STUB
 #!/bin/bash
-printf 'shared_buffers\n'
+case "\$*" in
+    *"-C data_directory"*) echo "$T/pgdata" ;;
+    *"-C shared_buffers"*) cat "$T/pg_sb" ;;
+    *) exit 1 ;;
+esac
 STUB
 chmod 755 "$T/bin/setpriv"
+export HOST_REPORT_PG_BIN="$T/pgbin"
 PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php2.json" 2>/dev/null
 chk "the plan: its figure, budget, source, reserve and CPUs" \
     "$(jv "$T/php2.json" php_workers.source)/$(jv "$T/php2.json" php_workers.max_children)/$(jv "$T/php2.json" php_workers.budget_mb)/$(jv "$T/php2.json" php_workers.plan_source)/$(jv "$T/php2.json" php_workers.reserve_mb)/$(jv "$T/php2.json" php_workers.cpus)" \
     "plan/8/1369/MemTotal/640/1"
 chk "PostgreSQL's settings waiting for a restart, by name" "$(jv "$T/php2.json" php_workers.pg_pending_restart)" '["shared_buffers"]'
+touch -d '2 hours ago' "$T/etc/postgresql/16/main/conf.d/20-joinery-memory.conf"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php2b.json" 2>/dev/null
+chk "the drop-in older than the cluster's start: nothing pending" "$(jv "$T/php2b.json" php_workers.pg_pending_restart)" '[]'
+touch "$T/etc/postgresql/16/main/conf.d/20-joinery-memory.conf"; echo 16384 > "$T/pg_sb"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php2c.json" 2>/dev/null
+chk "a later hand file overriding the drop-in: nothing of ours pending" "$(jv "$T/php2c.json" php_workers.pg_pending_restart)" '[]'
+chk "never a database login (the local postgres role takes a password)" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c -E '\bpsql\b')" "0"
 chk "what the rest of the machine holds: root only, never a partial sum" "$(jv "$T/php2.json" php_workers.non_site_rss_mb)" "$([ "$(id -u)" = 0 ] && jv "$T/php2.json" php_workers.non_site_rss_mb || echo null)"
 printf '[www]\npm.max_children = 12\n' > "$T/etc/php/8.3/fpm/pool.d/zz-local.conf"
 PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php4.json" 2>/dev/null
 chk "a later file overriding the plan's figure: overridden, with the figure in force" "$(jv "$T/php4.json" php_workers.source)/$(jv "$T/php4.json" php_workers.max_children)" "overridden/12"
 chk "never through PAM: runuser and su are not used" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c -E '\brunuser\b|\bsu -')" "0"
+unset HOST_REPORT_PG_BIN; rm -rf "$T/etc/postgresql" "$T/pgdata"
 rm -f "$T/bin/setpriv" "$T/etc/php/8.3/fpm/pool.d/zz-local.conf" "$T/etc/apache2/conf-enabled/php8.3-fpm.conf"
 PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/php3.json" 2>/dev/null
 chk "Apache hands PHP to no PHP-FPM: null" "$(jv "$T/php3.json" php_workers)" "null"

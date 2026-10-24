@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.40 - php_workers.pg_pending_restart is read with no database login (postgres -C and
+#                postmaster.pid): the local postgres role takes a password, so 1.39's psql read
+#                always said unknown (jeremytunnell, 2026-10-24)
 # Version: 1.39 - php_workers: PHP-FPM's worker ceiling in the version Apache uses and where it came from
 #                (tune_php_fpm.sh's plan line, or packaged), the host reserve beside what the machine's
 #                other processes actually hold, and PostgreSQL's settings pending a restart
@@ -723,13 +726,42 @@ emit_cpus() {
 # CPUs), "overridden" when a later pool file set another figure, "packaged"
 # when nothing did. Beside the reserve, what the machine's
 # processes other than PHP, PostgreSQL and Apache actually hold, so a reserve
-# that has drifted from the machine is seen. And the PostgreSQL settings
-# changed in the files that wait for a restart (pg_settings.pending_restart):
-# the host converger writes them and never restarts PostgreSQL.
+# that has drifted from the machine is seen. And whether PostgreSQL's memory
+# drop-in waits for a restart (pg_memory_pending): the host converger writes it
+# and never restarts PostgreSQL.
 #
 # Numbers and names only: a pool file's lines are never sent (a pool can
 # carry env[] values). null where Apache hands PHP to no PHP-FPM.
 # ---------------------------------------------------------------------------
+# Whether PostgreSQL's memory drop-in (tune_postgres_memory.sh) waits for a
+# restart: it changed after the postmaster started (postmaster.pid's third
+# line), and its shared_buffers is the value the files put in force (postgres
+# -C, which reads the configuration with no login; a later hand conf.d file can
+# override the drop-in, and then nothing of ours is pending). No database
+# login: the local postgres role takes a password on these machines. Prints a
+# JSON list (["shared_buffers"] or []), or "unknown".
+pg_memory_pending() {
+    local etc="${HOST_REPORT_ETC:-/etc}" v conf drop bin datadir started want have
+    v="$(ls "$etc/postgresql" 2>/dev/null | sort -n | tail -1)"
+    conf="$etc/postgresql/${v}/main/postgresql.conf"
+    drop="$etc/postgresql/${v}/main/conf.d/20-joinery-memory.conf"
+    bin="${HOST_REPORT_PG_BIN:-/usr/lib/postgresql/${v}/bin/postgres}"
+    [[ -n "$v" && -f "$conf" && -x "$bin" ]] || { printf '"unknown"'; return; }
+    [[ -f "$drop" ]] || { printf '[]'; return; }
+    # setpriv, not su or runuser: no PAM session, so no auth.log pair on every report.
+    datadir="$(run setpriv --reuid=postgres --regid=postgres --init-groups "$bin" -C data_directory --config-file="$conf")"
+    started="$(sed -n 3p "${datadir}/postmaster.pid" 2>/dev/null)"
+    want="$(sed -n 's/^shared_buffers = \([0-9]*\)MB$/\1/p' "$drop")"
+    have="$(run setpriv --reuid=postgres --regid=postgres --init-groups "$bin" -C shared_buffers --config-file="$conf")"
+    [[ "$started" =~ ^[0-9]+$ && "$want" =~ ^[0-9]+$ && "$have" =~ ^[0-9]+$ ]] || { printf '"unknown"'; return; }
+    # postgres -C gives shared_buffers in 8 kB pages.
+    if (( $(stat -c %Y "$drop") > started )) && (( have * 8 / 1024 == want )); then
+        printf '["shared_buffers"]'
+    else
+        printf '[]'
+    fi
+}
+
 emit_php_workers() {
     local etc="${HOST_REPORT_ETC:-/etc}" f ver="" max plan source budget="" src="" reserve="" cpus="" rss="" pending
     for f in "$etc"/apache2/conf-enabled/php*-fpm.conf; do
@@ -771,17 +803,7 @@ emit_php_workers() {
         done
         rss=$(( kb / 1024 ))
     fi
-    pending='"unknown"'
-    local out
-    # setpriv, not runuser: no PAM session, so no auth.log pair on every report.
-    if out="$(run setpriv --reuid=postgres --regid=postgres --init-groups psql -XAtc "SELECT name FROM pg_settings WHERE pending_restart ORDER BY name")"; then
-        pending='['; local sep="" n
-        while IFS= read -r n; do
-            [[ -n "$n" ]] || continue
-            pending="${pending}${sep}$(json_str "$n")"; sep=","
-        done <<< "$out"
-        pending="${pending}]"
-    fi
+    pending="$(pg_memory_pending)"
     printf '{"version":%s,"max_children":%s,"source":"%s","budget_mb":%s,"plan_source":%s,"reserve_mb":%s,"cpus":%s,"non_site_rss_mb":%s,"pg_pending_restart":%s}' \
         "$(json_str "$ver")" "$(json_num_or_unknown "$max")" "$source" \
         "$(json_num_or_unknown "$budget")" "$([[ -n "$src" ]] && json_str "$src" || printf '"unknown"')" \
