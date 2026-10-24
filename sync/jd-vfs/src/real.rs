@@ -269,6 +269,33 @@ fn volume_boundary(root: &Path, from: &Path, to: &Path) -> PathBuf {
     top
 }
 
+/// Does this `/proc/self/mountinfo` text name `path` as a mount point? The
+/// fifth field of each line, with the kernel's octal escapes (`\040` for a
+/// space) read back.
+#[cfg(any(target_os = "linux", test))]
+fn mount_table_names(table: &str, path: &Path) -> bool {
+    let unescape = |field: &str| -> String {
+        let bytes = field.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            let octal = bytes.get(i + 1..i + 4).filter(|d| bytes[i] == b'\\' && d.iter().all(|c| (b'0'..=b'7').contains(c)));
+            match octal {
+                Some(d) => {
+                    out.push(d.iter().fold(0u8, |n, c| n.wrapping_mul(8).wrapping_add(c - b'0')));
+                    i += 4;
+                }
+                None => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    table.lines().filter_map(|l| l.split(' ').nth(4)).any(|m| Path::new(&unescape(m)) == path)
+}
+
 /// Windows names no volume a folder is on without a call of its own; the
 /// destination folder is named instead.
 #[cfg(not(unix))]
@@ -859,6 +886,26 @@ impl Vfs for OsVfs {
         }
     }
 
+    /// A mount point is a folder the kernel's mount table names. Not a folder
+    /// on another device from its parent: a btrfs subvolume is that and
+    /// renames like any folder, and a bind mount of the same filesystem is a
+    /// mount point and is not that. Without the table, the device is asked.
+    #[cfg(target_os = "linux")]
+    fn is_a_fixed_mount_point(&self, path: &Path) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        if !fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+            return false;
+        }
+        if let Ok(table) = fs::read_to_string("/proc/self/mountinfo") {
+            return mount_table_names(&table, path);
+        }
+        let dev = |p: &Path| fs::symlink_metadata(p).ok().map(|m| m.dev());
+        match (dev(path), path.parent().and_then(dev)) {
+            (Some(here), Some(above)) => here != above,
+            _ => false,
+        }
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         folder_on_disk(to)?;
         let to = as_written(to, &self.personality);
@@ -869,6 +916,12 @@ impl Vfs for OsVfs {
                     to: to.clone(),
                     mount: volume_boundary(&self.root, from, &to),
                 };
+            }
+            // A rename refuses a folder a disk is mounted at, there or in
+            // the way at the destination, with `EBUSY` and nothing else.
+            #[cfg(unix)]
+            if e.kind() == std::io::ErrorKind::ResourceBusy {
+                return VfsError::MountPoint { from: from.to_path_buf(), to: to.clone() };
             }
             io_err(from, e)
         })
@@ -1483,6 +1536,20 @@ impl Drop for OsSpoolFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mount table, not the device number, says what is a mount point:
+    /// a btrfs subvolume has a device of its own and is not one, and a name
+    /// with a space in it is written with an octal escape.
+    #[test]
+    fn the_mount_table_names_mount_points() {
+        let table = "22 1 0:21 / / rw,relatime shared:1 - btrfs /dev/sda2 rw\n\
+                     88 22 7:4 / /home/u/Joinery/My\\040Disk rw,relatime shared:40 - ext4 /dev/loop4 rw\n\
+                     89 22 0:21 /bound /home/u/Joinery/Bound rw shared:1 - btrfs /dev/sda2 rw\n";
+        assert!(mount_table_names(table, Path::new("/home/u/Joinery/My Disk")));
+        assert!(mount_table_names(table, Path::new("/home/u/Joinery/Bound")), "a bind mount is a mount point");
+        assert!(!mount_table_names(table, Path::new("/home/u/Joinery/Big")), "a subvolume is not");
+        assert!(!mount_table_names(table, Path::new("/home/u/Joinery/My\\040Disk")));
+    }
 
     struct TempDir(PathBuf);
     impl TempDir {

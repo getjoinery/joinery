@@ -4561,3 +4561,65 @@ fn an_upload_killed_after_it_landed_and_was_recorded_is_still_one_file() {
         .expect("the record of the server file the upload made");
     assert_eq!(entry.status, LocalStatus::Synced);
 }
+
+/// The folder a second disk is mounted at, on a system that will not rename
+/// it while the disk is mounted (Linux answers `EBUSY`, read until now as a
+/// passing fault and retried for ever with nothing said). The move is held
+/// and said once, naming the folder; nothing at the destination is set aside
+/// for a move that cannot happen. RED with the busy folder retried.
+#[test]
+fn a_move_of_a_folder_a_disk_is_mounted_at_is_held_and_said_not_retried() {
+    let (_clock, server, device) = world();
+    let disk = server.seed_folder(None, "Disk");
+    device.fs.user_mkdir("Disk");
+    device.fs.user_write("Disk/a.txt", b"on the other disk");
+    device.fs.user_mkdir("Disk2");
+    device.fs.user_write("Disk2/b.txt", b"a different folder, never synced");
+    device.fs.mount_another_disk("Disk");
+    device.fs.mount_points_stay();
+    let mut folder = fresh(EntityId::folder(disk), None, "Disk", LocalStatus::Synced);
+    folder.synced_placement = Some(folder.remote.clone());
+    device.store.put_entry(&folder).unwrap();
+    let id = EntityId::folder(disk);
+
+    let renamed = Action::ApplyRemoteMove { to: Placement { parent: None, name: "Disk2".into() }, agree_at: None };
+    let report = do_one(&device, id, renamed);
+    assert_eq!((report.retrying, report.withdrawn), (0, 1), "{report:?}");
+    assert!(device.store.queued_ops().unwrap().is_empty(), "nothing is left to retry");
+    let said: Vec<String> =
+        device.store.open_issues().unwrap().into_iter().filter(|i| i.entity == Some(id)).map(|i| i.detail).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("/sync/Disk stays where it is, not at /sync/Disk2: a separate disk is mounted at /sync/Disk"), "{said:?}");
+    assert_eq!(device.fs.peek("Disk/a.txt").as_deref(), Some(&b"on the other disk"[..]));
+    assert_eq!(
+        device.fs.peek("Disk2/b.txt").as_deref(),
+        Some(&b"a different folder, never synced"[..]),
+        "the folder at the destination was set aside: {:?}",
+        device.fs.all_paths()
+    );
+    assert_eq!(device.fs.all_paths().len(), 4, "{:?}", device.fs.all_paths());
+    assert_eq!(device.store.refusals().unwrap().len(), 1, "held, so the next pass does not ask again");
+}
+
+/// Where the folder a disk is mounted at stays put, a folder above it still
+/// moves, and the disk with it; the mount point itself is refused by the
+/// rename as the real volume refuses it.
+#[test]
+fn a_mount_point_that_stays_is_refused_and_its_parent_still_moves() {
+    let (_clock, _server, device) = world();
+    device.fs.user_mkdir("Media");
+    device.fs.user_mkdir("Media/Disk");
+    device.fs.user_write("Media/Disk/a.txt", b"on the other disk");
+    device.fs.mount_another_disk("Media/Disk");
+    device.fs.mount_points_stay();
+    let at = |p: &str| std::path::PathBuf::from("/sync").join(p);
+    assert!(jd_vfs::Vfs::is_a_fixed_mount_point(&device.fs, &at("Media/Disk")));
+    assert!(!jd_vfs::Vfs::is_a_fixed_mount_point(&device.fs, &at("Media")));
+    match jd_vfs::Vfs::rename(&device.fs, &at("Media/Disk"), &at("Media/Disk2")) {
+        Err(jd_vfs::VfsError::MountPoint { from, .. }) => assert_eq!(from, at("Media/Disk")),
+        other => panic!("{other:?}"),
+    }
+    jd_vfs::Vfs::rename(&device.fs, &at("Media"), &at("Media2")).expect("a folder above a mount point moves");
+    assert!(jd_vfs::Vfs::is_a_fixed_mount_point(&device.fs, &at("Media2/Disk")));
+    assert_eq!(device.fs.peek("Media2/Disk/a.txt").as_deref(), Some(&b"on the other disk"[..]));
+}

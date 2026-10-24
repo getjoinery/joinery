@@ -1262,6 +1262,19 @@ move it there themselves or take the disk out of the sync folder. A copy is
 never made in its place, since a copy is a new file standing for this one.
 Moved by hand, the file is read where it now stands and the hold lifts.
 
+The folder the other disk is mounted at is one more thing a rename cannot
+always do. A Mac renames or moves it, disk and all. Linux refuses while the
+disk is mounted (`EBUSY`), so there a rename or move of that folder from the
+server stays put, with nothing at its new name set aside
+(`Vfs::is_a_fixed_mount_point`, asked first of the kernel's mount table, so a
+btrfs subvolume, which has a device of its own and renames like any folder, is
+not taken for one; `VfsError::MountPoint`). It is held and said the same way,
+naming the folder. The issue asks the person to pause syncing, unmount the
+disk, move the folder, mount the disk again and resume, since a pass that ran
+while the disk was unmounted would find the folder empty. Once that is done,
+the folder is read where it now stands and the hold lifts. A folder above a
+mount point still moves, and the disk with it.
+
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification
 at completion and re-queues. After the transfer the fingerprint is
