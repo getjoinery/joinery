@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.34 - carries arm_ssl_retry.sh: setup_ssl.sh run from the bundle armed no certificate retry,
+ *                so a container host's site whose name did not reach it yet never got a certificate (B109)
  * @version 1.33 - carries net_health.sh and web_workers.sh, the two machine words of agent 1.93.0
  *                (specs/slow_request_diagnosis_words.md)
  * @version 1.32 - carries site_certificate_stage.sh, a site container's certificate staged for its copy's export
@@ -166,6 +168,12 @@ class SupportBundlePublisher {
 		// setup_ssl.sh sources this for provision_origin_cert() and its
 		// helpers; without it the bundle ships a script that cannot run.
 		'maintenance_scripts/install_tools/install.sh',
+		// setup_ssl.sh ends with no certificate when the name does not reach
+		// this machine yet (a copy's switch asks seconds after the address
+		// moves), and install.sh runs this, beside it, to arm the timer that
+		// asks again. Without it the certificate is never retried. Sources
+		// nothing; the timer it writes sources install.sh beside setup_ssl.sh.
+		'maintenance_scripts/sysadmin_tools/arm_ssl_retry.sh',
 		// install.sh and _site_run_spec.sh source this for the engine a host's
 		// sites run on (Docker, or the site container engine) and call every
 		// container command through it. Sources nothing.
