@@ -77,6 +77,25 @@ check($changed['beta']['go'] === true && $changed['beta_host']['go'] === true,
 	'a file extending a word\'s file name is that word\'s; one that is another word\'s own file is only that word\'s');
 check(AgentLiveProofs::changed($src, null, $site) === array('alpha' => $changed['alpha']), 'with no bundled agent to compare, only scripts count');
 
+// A site root that is a repository: the script as its commit holds it, which
+// is what a publish ships. An uncommitted edit (another session's) is not.
+$site_git = function (...$args) use ($site) {
+	$cmd = 'git -C ' . escapeshellarg($site) . ' -c user.email=t@example.com -c user.name=t';
+	foreach ($args as $a) { $cmd .= ' ' . escapeshellarg($a); }
+	exec($cmd . ' 2>&1', $out, $rc);
+	return $rc === 0 ? implode("\n", $out) : null;
+};
+$site_git('init', '-q');
+$site_git('add', '-A');
+$site_git('commit', '-q', '-m', 'site');
+$committed = hash_file('sha256', $site . '/maintenance_scripts/sysadmin_tools/alpha.sh');
+file_put_contents($site . '/maintenance_scripts/sysadmin_tools/alpha.sh', "#!/bin/bash\necho uncommitted\n");
+file_put_contents($site . '/maintenance_scripts/sysadmin_tools/gamma.sh', "#!/bin/bash\necho uncommitted\n");
+$in_repo = AgentLiveProofs::changed($src, $first, $site);
+check(array_keys($in_repo) === array_keys($changed) && $in_repo['alpha']['script_sha256'] === $committed,
+	'in a repository, a script is read as committed: alpha\'s uncommitted edit is not its hash, gamma\'s does not make it changed', json_encode($in_repo));
+check(AgentLiveProofs::shipped_sha256($site, 'maintenance_scripts/sysadmin_tools/absent.sh') === '', 'a script the commit does not hold has no hash');
+
 section('Proven, or not');
 
 $un = AgentLiveProofs::unproven($changed, '1.88.0', array());

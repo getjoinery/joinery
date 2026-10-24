@@ -13,8 +13,8 @@
  * A word has changed when, since the release this plane last published:
  *   - its Go file under the agent's primitives/ changed (git, from the commit
  *     the bundled agent was built from to the source's HEAD), or
- *   - the script it runs differs from the hash the signed RELEASE_MANIFEST
- *     holds for it.
+ *   - the script it runs, as the commit a publish ships holds it, differs
+ *     from the hash the signed RELEASE_MANIFEST holds for it.
  *
  * A proof is a row of agent_live_proofs.json beside the plugin: the word, the
  * agent version and the script's sha256 it ran with, where and when. It
@@ -26,6 +26,7 @@
  * server and runs each changed word through an agent built for the run
  * (AgentLiveProofRun, agent_live_proofs_live_test).
  *
+ * @version 1.2 - a script's change is read from the commit a publish ships (shipped_sha256), not the working tree
  * @version 1.1 - record(): one place a proof is written, for the script and the live test
  * @version 1.0
  */
@@ -121,8 +122,7 @@ class AgentLiveProofs {
 			$script = false;
 			$sha = '';
 			if ($w['script'] !== '') {
-				$path = rtrim($site_root, '/') . '/' . $w['script'];
-				$sha = is_file($path) ? (string)hash_file('sha256', $path) : '';
+				$sha = self::shipped_sha256($site_root, $w['script']);
 				// A script the last release did not carry, or carried otherwise, is new code.
 				$script = ($sha !== '' && ($hashes[$w['script']] ?? '') !== $sha);
 			}
@@ -131,6 +131,25 @@ class AgentLiveProofs {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * The sha256 of a script as a release would ship it: as HEAD holds it
+	 * when the site root is a repository (a publish builds from the commit,
+	 * never the working tree, so another session's uncommitted edit neither
+	 * proves nor unproves anything), else the file. '' when it is in neither.
+	 */
+	public static function shipped_sha256(string $site_root, string $rel): string {
+		$root = rtrim($site_root, '/');
+		if (ReleaseCommit::head($root) === null) {
+			return is_file($root . '/' . $rel) ? (string)hash_file('sha256', $root . '/' . $rel) : '';
+		}
+		if (ReleaseCommit::git($root, array('cat-file', '-e', 'HEAD:' . $rel))['exit'] !== 0) {
+			return '';
+		}
+		$raw = shell_exec('git -c ' . escapeshellarg('safe.directory=' . $root) . ' -C ' . escapeshellarg($root)
+			. ' cat-file blob ' . escapeshellarg('HEAD:' . $rel) . ' 2>/dev/null');
+		return hash('sha256', is_string($raw) ? $raw : '');
 	}
 
 	/**
