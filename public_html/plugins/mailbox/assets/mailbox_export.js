@@ -19,7 +19,7 @@
  * #mail-export-form with [name=export_folder]; [data-export-note];
  * [data-export-list].
  *
- * Vanilla JS. @version 1.1 - back from /verify-stepup on a Fortress mailbox, the folder is kept and the page says to press Download
+ * Vanilla JS. @version 1.2 - writes the server's export header lines (item.headers) on each message (B70)
  */
 (function () {
 	'use strict';
@@ -318,7 +318,7 @@
 						if (item.entry) entry = b64bytes(item.entry);
 						else {
 							var raw = await fortressMessage(item.message);
-							entry = MailboxMimeBuild.mboxEntry(raw, item.labels, MailboxMimeBuild.envelopeOf(item.message.sender), item.time);
+							entry = MailboxMimeBuild.mboxEntry(raw, item.headers, MailboxMimeBuild.envelopeOf(item.message.sender), item.time);
 						}
 					} catch (e) {
 						notes.push(folderName + ': message ' + item.id + ': ' + ((e && e.message) || 'could not be opened on this device') + '.');
