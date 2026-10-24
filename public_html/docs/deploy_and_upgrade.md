@@ -1293,7 +1293,7 @@ the machine actually owns and writes the result as `conf.d/20-joinery-memory.con
 It is idempotent, writes nothing when the drop-in already matches, and restarts the cluster
 unit (`postgresql@{version}-main`) only when it wrote. `--dry-run` prints what it would
 write; `--no-restart` writes without restarting; `--reload` writes and reloads, so a changed
-`shared_buffers` waits for the next restart and PostgreSQL reports it `pending_restart`.
+`shared_buffers` waits for the next restart, and the host report shows it pending.
 
 `tune_php_fpm.sh` sizes PHP-FPM's worker pool from the same budget. The split lives in one
 sourced file, `sysadmin_tools/_memory_plan.sh`, which both tuners read:
