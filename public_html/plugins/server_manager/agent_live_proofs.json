@@ -72,6 +72,87 @@
             "where": "getjoinery plane, 10 fleet sites on 0.8.527 (jobs 7915-7925)",
             "what": "counted error.log markers since the upgrade on all 10 and since 2026-10-22 23:00 on jeremytunnell-vps; every read covered its window; job page table rendered",
             "date": "2026-10-23"
+        },
+        {
+            "word": "site_install",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/install_tools/install.sh",
+            "script_sha256": "e5ce33cbcb73bce14773cc3a256f5ff022f723a0231f7733f6b39eaf1ea131c6",
+            "where": "test server proof530 (Linode 109092019, Ubuntu, g6-standard-1), run by hand as root over SSH",
+            "what": "0.8.529 release with this tree's install.sh: install.sh server, then site --bare-metal proof530 proof530.joinerytest.com --no-ssl; INSTALL_SUCCESS, site serving",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "provision_certificate",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/sysadmin_tools/setup_ssl.sh",
+            "script_sha256": "ec4d083e106661708151ca3678e674fe7c64a77641bdf897e548abd4611abeff",
+            "where": "test server proof530 (Linode 109092019, Ubuntu, g6-standard-1), run by hand as root over SSH",
+            "what": "setup_ssl.sh with no DNS: no cert, retry timer armed (B67); DNS added, the timer issued a Let's Encrypt cert at 14:41 and removed itself",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "run_plugin_installers",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/install_tools/_plugin_installers_start.sh",
+            "script_sha256": "5a2fbf6d8e2db7dc76697347e8b034b00379a1fb17f3c340fe2eaa22ff76b5c7",
+            "where": "test server proof530 (Linode 109092019, Ubuntu, g6-standard-1), run by hand as root over SSH",
+            "what": "_plugin_installers_start.sh proof530: core then mailbox install_email.sh ran, exit 0; the still-active check read the database and let the active plugin run",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "host_report",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/sysadmin_tools/host_report.sh",
+            "script_sha256": "69aeed30372eac74bb1c9780c79bd9ad94fbee289580345e71ab23d809f75ddd",
+            "where": "test server wp7-proof-e4da23 (Linode 109092981), Ubuntu, agent built for the run from b513695b3250",
+            "what": "job 178862 through the agent: answered with output, output_bytes (agent_live_proofs_live)",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "net_health",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/sysadmin_tools/net_health.sh",
+            "script_sha256": "1a975dc01bc304ca0fa3d4a7e2f352fa49a95ca0cc8e84dcd674baba4fecd6e0",
+            "where": "test server wp7-proof-e4da23 (Linode 109092981), Ubuntu, agent built for the run from b513695b3250",
+            "what": "job 178864 through the agent: answered with output, output_bytes (agent_live_proofs_live)",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "web_workers",
+            "agent_version": "1.93.0",
+            "script": "maintenance_scripts/sysadmin_tools/web_workers.sh",
+            "script_sha256": "e8ac2a8b738dee0266ae49172689b48d16d557862068684151d780c67c0032bb",
+            "where": "test server wp7-proof-e4da23 (Linode 109092981), Ubuntu, agent built for the run from b513695b3250",
+            "what": "job 178865 through the agent: answered with output, output_bytes (agent_live_proofs_live)",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "apply_update",
+            "agent_version": "1.93.0",
+            "script": "public_html/utils/upgrade.php",
+            "script_sha256": "c6e12d60d6bbbecfbac0374b41ae6099df9dd3888c88cb0a2b80ef70c0aab2f6",
+            "where": "test server wp7-proof-5ad2ee (Linode 109093176), site wp7proof5ad2ee installed at 0.8.529, agent built for the run from b513695b3250",
+            "what": "job 178869: upgraded 0.8.529 to 0.8.530, deploy tier passed, no rollback onto candidate 0.8.530 built from this tree (agent_live_proofs_site_live)",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "upgrade_preflight",
+            "agent_version": "1.93.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "test server wp7-proof-5ad2ee (Linode 109093176), site wp7proof5ad2ee installed at 0.8.529, agent built for the run from b513695b3250",
+            "what": "jobs 178868 and 178875: ready before and after the upgrade (agent_live_proofs_site_live)",
+            "date": "2026-10-24"
+        },
+        {
+            "word": "site_log",
+            "agent_version": "1.93.0",
+            "script": "",
+            "script_sha256": "",
+            "where": "test server wp7-proof-5ad2ee (Linode 109093176), site wp7proof5ad2ee installed at 0.8.529, agent built for the run from b513695b3250",
+            "what": "job 179252: answered with file, lines_returned, modified_time, present, previous, size_bytes, text, truncated, unparsed_lines, the access log of the site upgraded to 0.8.530 (agent_live_proofs_site_live)",
+            "date": "2026-10-24"
         }
     ]
 }

@@ -54,6 +54,7 @@
  * A changed word in neither list (publish_upgrade, which only the publishing
  * box runs) is proven by hand with record_live_proof.php.
  *
+ * @version 1.3 - net_health and web_workers are words a bare machine proves; site_log is proven on the upgraded site
  * @version 1.2 - a site run: the newest published release installed, upgraded through apply_update onto a candidate
  *                built from this tree, with upgrade_preflight before and after (Q9)
  * @version 1.1 - reviewer2: adopt() takes the join only from the server's own address (the address this plane saw it
@@ -74,16 +75,20 @@ class AgentLiveProofRun {
 		'agent_report'             => array('params' => array(), 'wait' => 300),
 		'host_report'              => array('params' => array(), 'wait' => 600),
 		'install_security_updates' => array('params' => array(), 'wait' => 1200),
+		'net_health'               => array('params' => array(), 'wait' => 300),
+		'web_workers'              => array('params' => array(), 'wait' => 300),
 	);
 
 	/**
 	 * The words a site proves, in the order they run: how long each job may
 	 * take from queueing. upgrade_preflight runs before and after the
-	 * upgrade; apply_update is judged as a staged rollout judges it.
+	 * upgrade; apply_update is judged as a staged rollout judges it;
+	 * site_log reads the upgraded site's access log.
 	 */
 	const SITE_RECIPES = array(
 		'upgrade_preflight' => array('wait' => 300),
 		'apply_update'      => array('wait' => 1200),
+		'site_log'          => array('wait' => 300),
 	);
 
 	/** A site run's server: a site and its database want more than the smallest. */
@@ -384,7 +389,11 @@ class AgentLiveProofRun {
 		if (!isset(self::SITE_RECIPES[$word])) {
 			return array('ok' => false, 'job_id' => 0, 'what' => 'no site recipe');
 		}
-		$built = $word === 'apply_update' ? JobCommandBuilder::build_apply_update($node) : JobCommandBuilder::build_upgrade_preflight($node);
+		if ($word === 'site_log') {
+			$built = JobCommandBuilder::build_site_log_primitive($node, 'access', false, 20);
+		} else {
+			$built = $word === 'apply_update' ? JobCommandBuilder::build_apply_update($node) : JobCommandBuilder::build_upgrade_preflight($node);
+		}
 		$job = ManagementJob::createFromBuild($node->key, $word, $built, null, null);
 		$until = time() + self::SITE_RECIPES[$word]['wait'];
 		do {
@@ -397,6 +406,9 @@ class AgentLiveProofRun {
 		JobResultProcessor::process_if_due($job);
 		$job->load();
 		$tail = self::output_tail($job);
+		if ($word === 'site_log') {
+			return array('job_id' => (int)$job->key) + self::judge($word, $job);
+		}
 		if ($word === 'apply_update') {
 			$why = StagedRolloutRunner::gate($job, $version);
 			if ($why !== null && $tail !== '') { $why .= "\n      its output ended:\n" . $tail; }

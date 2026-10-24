@@ -126,6 +126,10 @@ check($apply['ok'], 'apply_update: ' . $apply['what'] . ($apply['job_id'] ? ' (j
 $after = AgentLiveProofRun::prove_site($node, 'upgrade_preflight', $candidate);
 check($after['ok'], 'upgrade_preflight on the upgraded site: ' . $after['what'] . ' (job ' . $after['job_id'] . ')');
 
+section('site_log on the upgraded site');
+$log = AgentLiveProofRun::prove_site($node, 'site_log', $candidate);
+check($log['ok'], 'site_log of the access log: ' . $log['what'] . ($log['job_id'] ? ' (job ' . $log['job_id'] . ')' : ''));
+
 if ($apply['ok']) {
 	AgentLiveProofs::record('apply_update', $build['version'], $where, 'job ' . $apply['job_id'] . ': ' . $apply['what']
 		. ' onto candidate ' . $candidate . ' built from this tree (agent_live_proofs_site_live)');
@@ -133,6 +137,10 @@ if ($apply['ok']) {
 if ($before['ok'] && $after['ok']) {
 	AgentLiveProofs::record('upgrade_preflight', $build['version'], $where, 'jobs ' . $before['job_id'] . ' and ' . $after['job_id']
 		. ': ready before and after the upgrade (agent_live_proofs_site_live)');
+}
+if ($log['ok']) {
+	AgentLiveProofs::record('site_log', $build['version'], $where, 'job ' . $log['job_id'] . ': ' . $log['what']
+		. ', the access log of the site upgraded to ' . $candidate . ' (agent_live_proofs_site_live)');
 }
 
 } catch (Exception $e) {
