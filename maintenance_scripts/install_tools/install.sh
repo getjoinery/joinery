@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.31 - server sizes PHP-FPM's workers from the machine (tune_php_fpm.sh) beside PostgreSQL's memory:
+#               the packaged pool allowed 5 whatever the machine. site refuses a second site directly on a
+#               machine that already has one: a machine is one site, and several sites share a machine as
+#               containers, each with workers of its own (specs/php_fpm_sizing_bare_metal.md).
 #VERSION 3.30 - arm_ssl_retry_unless_issued: setup_ssl.sh arms the retry timer whenever no CA-signed
 #               certificate is in place after it runs, as its message says; a copy's switch ran it once,
 #               before the name reached the copy, and nothing asked again (B67)
@@ -2031,6 +2035,23 @@ list_docker_containers() {
     echo ""
 }
 
+# The name of a Joinery site already directly on this machine other than
+# SITENAME and its test site, or nothing. A site is a directory under
+# /var/www/html with public_html and its config file; NAME_test beside NAME is
+# NAME's test site, not a site of its own.
+other_baremetal_site() {
+    local want="$1" dir name
+    for dir in "${BAREMETAL_SITES_ROOT:-/var/www/html}"/*/; do
+        [ -d "${dir}public_html" ] && [ -f "${dir}config/Globalvars_site.php" ] || continue
+        name="$(basename "$dir")"
+        [ "$name" = "$want" ] || [ "$name" = "${want}_test" ] && continue
+        [[ "$name" == *_test ]] && [ -d "${BAREMETAL_SITES_ROOT:-/var/www/html}/${name%_test}" ] && continue
+        [[ "$want" == *_test ]] && [ "$name" = "${want%_test}" ] && continue
+        echo "$name"
+        return 0
+    done
+}
+
 # List existing Joinery bare-metal sites
 list_baremetal_sites() {
     echo ""
@@ -3944,6 +3965,14 @@ EOF
         # install.sh into the build context, so sysadmin_tools is absent by
         # design and PostgreSQL keeps its packaged settings until first start.
         print_info "tune_postgres_memory.sh not in this context; PostgreSQL is sized at container start"
+    fi
+    # PHP's workers from the same plan (MemTotal less the host reserve, at most
+    # 8 a CPU): the packaged pool allows 5 whatever the machine. --no-restart
+    # because PHP-FPM is restarted at the end of this setup; the host converger
+    # keeps both sized from then on (host_housekeeping.sh 4b).
+    fpm_tuner="${SCRIPT_DIR}/../sysadmin_tools/tune_php_fpm.sh"
+    if [ -f "$fpm_tuner" ]; then
+        bash "$fpm_tuner" --no-restart || [ "$?" -eq 3 ]
     fi
 
     # Record who connects, and from where.
@@ -6041,6 +6070,22 @@ do_site_baremetal() {
     # a question the next check is going to override, and a refusal here has
     # touched nothing.
     assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT" baremetal
+
+    # One site directly on a machine. Its PHP workers, PostgreSQL's memory and
+    # the vhost's address handling are all sized and written for one site;
+    # several sites share a machine as containers, each sized from a budget of
+    # its own. The site's own test site (SITENAME_test) is part of it. Only a
+    # NEW site is refused: rebuilding one already here adds none, even on a
+    # machine that took two sites before this rule.
+    local other_site=""
+    if [ ! -f "/var/www/html/$SITENAME/config/Globalvars_site.php" ]; then
+        other_site="$(other_baremetal_site "$SITENAME")"
+    fi
+    if [ -n "$other_site" ]; then
+        print_error "This machine already runs the site '$other_site' directly. A machine runs one site directly;"
+        print_error "several sites share a machine as containers: install.sh docker (or --site-engine), then install.sh site with a port"
+        exit 1
+    fi
 
     # Check if site already exists
     if [ -d "/var/www/html/$SITENAME" ] && [ -f "/var/www/html/$SITENAME/config/Globalvars_site.php" ]; then

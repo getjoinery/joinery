@@ -4,6 +4,11 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.32 - Every run on a machine that is its own site sizes PHP-FPM's workers and PostgreSQL's memory
+#                from the machine (tune_php_fpm.sh, tune_postgres_memory.sh --reload: _memory_plan.sh's
+#                host reserve and 8 workers a CPU). PHP-FPM is reloaded; PostgreSQL is reloaded, never
+#                restarted, and a changed shared_buffers waits for the next restart
+#                (specs/php_fpm_sizing_bare_metal.md WP4).
 # Version: 1.31 - PHP-FPM answers its status page on a listener of its own (pm.status_listen at
 #                /run/php/joinery-fpm-status.sock, pm.status_path /fpm-status) in the PHP version Apache
 #                hands PHP to, and gives a request in flight 10 s to finish on a reload
@@ -772,6 +777,58 @@ for pool_dir in "${FS_ROOT}"/etc/php/*/fpm/pool.d; do
     fi
 done
 rm -f "${fpm_status_tmp}"
+
+# --- 4b. PHP's workers and PostgreSQL's memory follow the machine -------------
+# A site container is sized at every start (_site_start.sh). A machine that is
+# its own site was sized only at install, and PHP never: it kept the packaged
+# 5 workers whatever the machine. Both tuners read the one plan
+# (_memory_plan.sh: MemTotal less the host reserve, at most 8 workers a CPU),
+# and both are idempotent, so a run that changes nothing writes nothing.
+#
+# PHP-FPM is reloaded, which with process_control_timeout (4a) lets a request
+# in flight finish. PostgreSQL is reloaded and never restarted here: this runs
+# every minute, and a restart drops every connection the site holds. A changed
+# shared_buffers waits for the next restart someone chooses; PostgreSQL marks
+# it pending_restart, and the host report says so
+# (specs/php_fpm_sizing_bare_metal.md WP4).
+# The site's own tree: this runs only where the machine is its own site.
+TUNERS_DIR="${SITE_ROOT}/maintenance_scripts/sysadmin_tools"
+if [[ "${IN_CONTAINER}" == 1 || "${MACHINE}" == 1 ]]; then
+    :   # a container is sized at its start; a machine with no site has no pool to size
+elif [[ ! -f "${TUNERS_DIR}/tune_php_fpm.sh" || ! -f "${TUNERS_DIR}/tune_postgres_memory.sh" || ! -f "${TUNERS_DIR}/_memory_plan.sh" ]]; then
+    warn "the memory tuners are missing from ${TUNERS_DIR} - PHP's workers and PostgreSQL's memory not checked"
+elif [[ -z "${FS_ROOT}" && "$(id -u)" != "0" ]]; then
+    say "no-systemctl mode: PHP's workers and PostgreSQL's memory not checked"
+else
+    tune_env=()
+    tune_mode=()
+    if [[ -n "${FS_ROOT}" ]]; then
+        tune_env=(FPM_ROOT="${FS_ROOT}/etc/php" PG_ETC="${FS_ROOT}/etc/postgresql" MEMORY_PLAN_ROOT="${FS_ROOT}")
+        tune_mode=(--no-restart)
+    fi
+    if compgen -G "${FS_ROOT}/etc/php/*/fpm/pool.d" >/dev/null; then
+        if out="$(env "${tune_env[@]}" bash "${TUNERS_DIR}/tune_php_fpm.sh" "${tune_mode[@]}" 2>&1)"; then
+            if grep -q '^Left as it is' <<<"${out}"; then
+                warn "PHP's workers: $(grep '^Left as it is' <<<"${out}")"
+            elif ! grep -q '^Already tuned' <<<"${out}"; then
+                say "PHP's workers: $(head -1 <<<"${out}")"
+            fi
+        else
+            warn "PHP's workers could not be sized: $(tail -1 <<<"${out}")"
+        fi
+    fi
+    if compgen -G "${FS_ROOT}/etc/postgresql/*/main" >/dev/null; then
+        pg_mode=(--reload)
+        [[ -n "${FS_ROOT}" ]] && pg_mode=(--no-restart)
+        if out="$(env "${tune_env[@]}" bash "${TUNERS_DIR}/tune_postgres_memory.sh" "${pg_mode[@]}" 2>&1)"; then
+            if ! grep -q '^Already tuned' <<<"${out}"; then
+                say "PostgreSQL's memory: $(head -1 <<<"${out}"); a changed shared_buffers is pending until the next PostgreSQL restart"
+            fi
+        else
+            warn "PostgreSQL's memory could not be sized: $(tail -1 <<<"${out}")"
+        fi
+    fi
+fi
 
 # --- 5. PostgreSQL answers only locally ----------------------------------------
 # A Joinery site's database is used by the site on the same machine and by

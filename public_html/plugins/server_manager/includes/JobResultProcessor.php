@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.107 - host_report's php_workers (host_report 1.39): PHP-FPM's worker ceiling and where it came from,
+ *                 the host reserve beside what the rest of the machine holds, and PostgreSQL's settings
+ *                 pending a restart, held to its shape (specs/php_fpm_sizing_bare_metal.md WP5)
  * @version 1.106 - net_health and web_workers results (agent 1.93.0, specs/slow_request_diagnosis_words.md): each
  *                 held to its shape with a one-line verdict; kernel_events_24h keeps conntrack_full and syn_flood
  *                 when the node reports them (host_report 1.38)
@@ -4385,6 +4388,9 @@ HTML;
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			// Processors, for reading the load average against (host_report 1.6).
 			'cpus'                         => self::host_report_count($in['cpus'] ?? null),
+			// PHP's worker ceiling and where it came from (host_report 1.39); null from an older node or a
+			// machine whose Apache hands PHP to no PHP-FPM.
+			'php_workers'                  => self::host_report_php_workers($in['php_workers'] ?? null),
 			'reboot_required'              => $reboot,
 			// When it was first asked for; a time only while one is pending.
 			'reboot_required_since'        => ($reboot === true) ? self::host_report_count($in['reboot_required_since'] ?? null) : null,
@@ -5158,6 +5164,37 @@ HTML;
 	private static function host_report_name($v) {
 		if (!is_string($v)) { return ''; }
 		return substr(preg_replace('/[^A-Za-z0-9._@:-]/', '', $v), 0, self::HOST_REPORT_MAX_NAME);
+	}
+
+	/**
+	 * PHP's workers (host_report 1.39): the [www] pool's max_children, plan or
+	 * packaged, the plan's budget, source, host reserve and CPUs, what the
+	 * machine's other processes hold, and PostgreSQL's settings pending a
+	 * restart. source is plan, overridden (a later pool file set another
+	 * figure) or packaged. Null when absent or not an object.
+	 */
+	public static function host_report_php_workers($v) {
+		if (!is_array($v)) { return null; }
+		$cpus = (is_string($v['cpus'] ?? null) && preg_match('/^[0-9]{1,4}(\.[0-9]{1,3})?$/', $v['cpus'])) ? $v['cpus'] : 'unknown';
+		$pending = 'unknown';
+		if (is_array($v['pg_pending_restart'] ?? null)) {
+			$pending = array();
+			foreach (array_slice(array_values($v['pg_pending_restart']), 0, self::HOST_REPORT_MAX_LIST) as $n) {
+				$n = self::host_report_name($n);
+				if ($n !== '') { $pending[] = $n; }
+			}
+		}
+		return array(
+			'version'            => (is_string($v['version'] ?? null) && preg_match('/^[0-9]{1,2}\.[0-9]{1,2}$/', $v['version'])) ? $v['version'] : 'unknown',
+			'max_children'       => self::host_report_count($v['max_children'] ?? null),
+			'source'             => in_array($v['source'] ?? null, array('plan', 'overridden', 'packaged'), true) ? $v['source'] : 'unknown',
+			'budget_mb'          => self::host_report_count($v['budget_mb'] ?? null),
+			'plan_source'        => in_array($v['plan_source'] ?? null, array('MemTotal', 'cgroup_limit', '--ram-mb'), true) ? $v['plan_source'] : 'unknown',
+			'reserve_mb'         => self::host_report_count($v['reserve_mb'] ?? null),
+			'cpus'               => $cpus,
+			'non_site_rss_mb'    => ($v['non_site_rss_mb'] ?? null) === null ? null : self::host_report_count($v['non_site_rss_mb']),
+			'pg_pending_restart' => $pending,
+		);
 	}
 
 	/** A non-negative integer, or unknown. A JSON number arrives as int or float; a digit string counts too. */

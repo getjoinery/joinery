@@ -4375,4 +4375,43 @@ if ($apache_b1 !== '' && is_file('/usr/lib/apache2/modules/mod_info.so')) {
 }
 shell_exec('rm -rf ' . escapeshellarg($b1));
 
+section('One site directly on a machine (specs/php_fpm_sizing_bare_metal.md)');
+
+preg_match('/^other_baremetal_site\(\) \{\n.*?\n\}\n/ms', $install_src, $fn);
+check(!empty($fn[0]), 'install.sh defines other_baremetal_site');
+$sites = sys_get_temp_dir() . '/joinery_one_site_' . getmypid();
+$mk = function ($name, $config = true) use ($sites) {
+	@mkdir("$sites/$name/public_html", 0755, true);
+	if ($config) { @mkdir("$sites/$name/config", 0755, true); touch("$sites/$name/config/Globalvars_site.php"); }
+};
+$other = function ($want) use ($sites, $fn) {
+	return trim((string)shell_exec('BAREMETAL_SITES_ROOT=' . escapeshellarg($sites) . ' bash -c ' . escapeshellarg(($fn[0] ?? '') . "\nother_baremetal_site " . escapeshellarg($want))));
+};
+@mkdir($sites, 0755, true);
+check($other('alpha') === '', 'an empty machine has no other site');
+$mk('alpha'); $mk('alpha_test');
+check($other('alpha') === '', 'the site itself (a rebuild) and its own test site are not another site');
+check($other('alpha_test') === '', 'nor is the main site, to its own test site');
+$mk('leftover', false);
+check($other('alpha') === '', 'a directory with no config is no site');
+check($other('beta') === 'alpha', 'a second site is refused, naming the one already there');
+shell_exec('rm -rf ' . escapeshellarg($sites));
+preg_match('/^do_site_baremetal\(\) \{\n.*?\n\}\n/ms', $install_src, $dsb);
+$guard = (preg_match('/\n    local other_site="".*?\n    fi\n    if \[ -n "\$other_site" \]; then\n.*?\n    fi\n/s', $dsb[0] ?? '', $g)) ? $g[0] : '';
+check($guard !== '' && strpos($dsb[0], $guard) < strpos($dsb[0], '# Check if site already exists'),
+	'do_site_baremetal refuses before it asks or overwrites anything');
+$refuses = function ($want) use ($sites, $fn, $guard) {
+	$script = ($fn[0] ?? '') . "\nprint_error() { :; }\nSITENAME=" . escapeshellarg($want) . "\nf() {\n" . str_replace('/var/www/html/', $sites . '/', $guard) . "\necho allowed\n}\nf";
+	return trim((string)shell_exec('BAREMETAL_SITES_ROOT=' . escapeshellarg($sites) . ' bash -c ' . escapeshellarg($script))) === 'allowed' ? 'allowed' : 'refused';
+};
+@mkdir($sites, 0755, true);
+$mk('alpha'); $mk('beta');
+check($refuses('alpha') === 'allowed' && $refuses('beta') === 'allowed',
+	'on a machine that took two sites before the rule, rebuilding either one is not refused');
+check($refuses('gamma') === 'refused', 'a new site beside them is');
+shell_exec('rm -rf ' . escapeshellarg($sites));
+check(strpos($install_src, 'bash "$fpm_tuner" --no-restart || [ "$?" -eq 3 ]') !== false
+	&& strpos($install_src, 'fpm_tuner="${SCRIPT_DIR}/../sysadmin_tools/tune_php_fpm.sh"') !== false,
+	'install.sh server sizes PHP\'s workers beside PostgreSQL\'s memory');
+
 harness_finish();

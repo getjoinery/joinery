@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/_host_files.sh, maintenance_scripts/install_tools/_kernel_settings.sh, public_html/includes/cloudflare_ip_ranges.txt]
+# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/sysadmin_tools/tune_php_fpm.sh, maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh, maintenance_scripts/sysadmin_tools/_memory_plan.sh, maintenance_scripts/install_tools/_host_files.sh, maintenance_scripts/install_tools/_kernel_settings.sh, public_html/includes/cloudflare_ip_ranges.txt]
 #
 # host_housekeeping.sh (specs/post_release_fleet_defects.md B2) run in its
 # override mode against a temporary /etc as an unprivileged user: it writes
@@ -618,6 +618,29 @@ chk "a second run writes nothing" "$(printf '%s\n' "$out" | grep -c 'zz-joinery-
 rm -f "$PF/etc/apache2/conf-enabled/php8.3-fpm.conf"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PF" bash "$SCRIPT" 2>&1)"
 chk "no PHP handed to by Apache: none kept anywhere" "$(ls "$PF"/etc/php/*/fpm/pool.d/zz-joinery-status.conf 2>/dev/null | wc -l)" "0"
+
+echo "=== PHP's workers and PostgreSQL's memory follow the machine (specs/php_fpm_sizing_bare_metal.md WP4) ==="
+MT="$T/metal"
+mkdir -p "$MT/proc" "$MT/usr/bin" "$MT/etc/php/8.3/fpm/pool.d" "$MT/etc/postgresql/16/main/conf.d"
+printf 'MemTotal:        2057216 kB\n' > "$MT/proc/meminfo"    # 2009 MB, one CPU: jeremytunnell.com
+touch "$MT/usr/bin/rspamd"
+printf '[www]\npm.max_children = 5\n' > "$MT/etc/php/8.3/fpm/pool.d/www.conf"
+printf "include_dir = 'conf.d'\n" > "$MT/etc/postgresql/16/main/postgresql.conf"
+out="$(MEMORY_PLAN_CPUS=1 JOINERY_HOUSEKEEPING_ROOT="$MT" bash "$SCRIPT" 2>&1)"
+chk "PHP gets 8 workers: 1,497 MB after the reserve, 8 a CPU" "$(grep -c '^pm.max_children = 8$' "$MT/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf" 2>/dev/null)" "1"
+chk "PostgreSQL's share is of what the site has, not the whole machine" "$(grep -c '^shared_buffers = 299MB$' "$MT/etc/postgresql/16/main/conf.d/20-joinery-memory.conf" 2>/dev/null)" "1"
+chk "the run says what it sized, and that PostgreSQL's change waits for a restart" \
+    "$(printf '%s\n' "$out" | grep -c "PHP's workers: RAM available: 1497 MB")/$(printf '%s\n' "$out" | grep -c 'pending until the next PostgreSQL restart')" "1/1"
+chk "no max_connections on a machine that is its own site: the packaged 100 holds 80 + 20" "$(grep -c max_connections "$MT/etc/postgresql/16/main/conf.d/20-joinery-memory.conf")" "0"
+out="$(MEMORY_PLAN_CPUS=1 JOINERY_HOUSEKEEPING_ROOT="$MT" bash "$SCRIPT" 2>&1)"
+chk "a second run says nothing about either" "$(printf '%s\n' "$out" | grep -c -E "PHP's workers|PostgreSQL's memory")" "0"
+HK="$SITE_ROOT/maintenance_scripts/install_tools/host_housekeeping.sh"
+calls="$(grep -F 'bash "${TUNERS_DIR}/tune_postgres_memory.sh"' "$HK")"
+chk "the converger never restarts PostgreSQL to size it: every call takes pg_mode, and pg_mode is only --reload or --no-restart" \
+    "$(printf '%s\n' "$calls" | grep -c .)/$(printf '%s\n' "$calls" | grep -c -F '"${pg_mode[@]}"')/$(grep -o 'pg_mode=([^)]*)' "$HK" | grep -c -v -x -E 'pg_mode=\((--reload|--no-restart)\)')" "1/1/0"
+MC="$T/metal-ctr"; cp -r "$MT" "$MC"; rm -f "$MC"/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf "$MC"/etc/postgresql/16/main/conf.d/20-joinery-memory.conf; touch "$MC/.dockerenv"
+MEMORY_PLAN_CPUS=1 JOINERY_HOUSEKEEPING_ROOT="$MC" bash "$SCRIPT" >/dev/null 2>&1
+chk "a container is left to its own start (_site_start.sh)" "$(ls "$MC"/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf "$MC"/etc/postgresql/16/main/conf.d/20-joinery-memory.conf 2>/dev/null | wc -l)" "0"
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
