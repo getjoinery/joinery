@@ -152,6 +152,11 @@ calls `ProblemReport::noteError()`, which:
 - skips errors that are people meeting a wall rather than bugs: a message marked safe to
   show (the `Displayable*` family, a displayable `BaseException`), a permission refusal,
   a sign-in requirement, a validation failure (`ProblemReport::isUnexpected()`);
+- skips errors a test caused (`ProblemReport::fromTest()`): any error in a process that
+  loaded the test harness (a suite, or the deploy tier during an upgrade), and any error
+  in a request carrying `X-Joinery-Test` that came from this machine (the loopback or the
+  server's own address). `harness_request()` sends that header on every request. The
+  error is still recorded; it is the test's to report;
 - works out the fault's key, `ProblemReportBundle::fingerprint()`: the error's kind, the
   file it was thrown in, and the files and function names of its first five stack frames,
   with line numbers dropped. With no frames, the message with numbers, quoted text and

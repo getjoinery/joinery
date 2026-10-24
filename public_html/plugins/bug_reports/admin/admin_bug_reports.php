@@ -8,8 +8,11 @@
  * how many still open, the newest version seen, and when it was first and
  * last seen. Every report
  * lists them one by one, filtered by host, version, verification or status.
- * "Mark all seen" (POST) clears the new-report notice.
+ * "Mark all seen" (POST) clears the new-report notice. "Mute" (POST) on a
+ * group stops a fault reopening or sending email from any site or version;
+ * "Unmute" undoes it.
  *
+ * @version 1.2.0 - Mute and Unmute on a group
  * @version 1.1.0 - groups by fingerprint; Times seen
  * @version 1.0.0
  */
@@ -21,6 +24,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
 	foreach (new MultiReceivedBugReport(array('status' => ReceivedBugReport::STATUS_NEW)) as $r) {
 		$r->set('rbr_status', ReceivedBugReport::STATUS_SEEN);
 		$r->save();
+	}
+	header('Location: /plugins/bug_reports/admin/admin_bug_reports');
+	exit;
+}
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && in_array($_POST['action'] ?? '', array('mute_group', 'unmute_group'), true)) {
+	$group = (string)($_POST['group'] ?? '');
+	if ($_POST['action'] === 'mute_group') {
+		ReceivedBugReport::mute_group($group);
+	} else {
+		ReceivedBugReport::unmute_group($group);
 	}
 	header('Location: /plugins/bug_reports/admin/admin_bug_reports');
 	exit;
@@ -43,7 +56,9 @@ echo '<p>Sites that upgrade from this one send a report when a member reports an
 	. 'is not filed again; it adds to that report\'s count. '
 	. 'Each report is checked by calling the site back: <strong>verified</strong> means it answered as the Joinery version it claimed, '
 	. '<strong>version mismatch</strong> that it runs another version, and <strong>unverified</strong> that it did not answer as a Joinery site '
-	. '(a site behind an IP allowlist answers that way too). Report contents come from another machine; treat them as untrusted.</p>';
+	. '(a site behind an IP allowlist answers that way too). Report contents come from another machine; treat them as untrusted.</p>'
+	. '<p><strong>Mute</strong> an error you have decided to live with: its reports keep counting, from every site and version, '
+	. 'but it never reopens or sends email. A member\'s own report of it still arrives as new.</p>';
 
 echo '<p><a href="?view=grouped" class="btn btn-' . ($view === 'grouped' ? 'primary' : 'outline-secondary') . '">Grouped by error</a> '
 	. '<a href="?view=all" class="btn btn-' . ($view === 'all' ? 'primary' : 'outline-secondary') . '">Every report</a> ';
@@ -59,14 +74,20 @@ $verdicts = array(
 );
 
 if ($view === 'grouped') {
-	$page->tableheader(array('Error', 'Where', 'Sites', 'Reports', 'Times seen', 'Open', 'Newest version', 'First', 'Last'),
+	$page->tableheader(array('Error', 'Where', 'Sites', 'Reports', 'Times seen', 'Open', 'Newest version', 'First', 'Last', ''),
 		array('title' => 'Grouped by error'));
 	foreach (ReceivedBugReport::groups() as $g) {
 		$link = '?view=all&group=' . urlencode($g['hash']);
 		$label = $g['hash'] === '' ? 'No recorded error (message only)' : ($g['kind'] ?: 'Error');
+		$muted = (bool)$g['muted'];
+		$mute = ReceivedBugReport::is_group_key((string)$g['hash'])
+			? AdminPage::action_button($muted ? 'Unmute' : 'Mute', '/plugins/bug_reports/admin/admin_bug_reports', array(
+				'hidden' => array('action' => $muted ? 'unmute_group' : 'mute_group', 'group' => (string)$g['hash']),
+			))
+			: '';
 		$page->disprow(array(
 			'<a href="' . htmlspecialchars($link) . '">' . htmlspecialchars($label) . '</a><br><small>'
-				. htmlspecialchars(mb_substr((string)$g['message'], 0, 120)) . '</small>',
+				. htmlspecialchars(mb_substr((string)$g['message'], 0, 120)) . '</small>' . ($muted ? ' <small>(muted)</small>' : ''),
 			'<small>' . htmlspecialchars((string)$g['location']) . '</small>',
 			(int)$g['sites'],
 			(int)$g['reports'],
@@ -75,6 +96,7 @@ if ($view === 'grouped') {
 			htmlspecialchars((string)$g['newest_version']),
 			htmlspecialchars(LibraryFunctions::convert_time($g['first_time'], 'UTC', $tz, 'M j, Y')),
 			htmlspecialchars(LibraryFunctions::convert_time($g['last_time'], 'UTC', $tz, 'M j, Y g:i A')),
+			$mute,
 		));
 	}
 	$page->endtable();

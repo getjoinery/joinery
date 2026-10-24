@@ -16,6 +16,7 @@
  *      stored as an automatic report for the same site and version is not
  *      stored again: its count is added to that report, which reopens if it
  *      was closed (specs/implemented/bug_reports.md, Part 2, D12);
+ *      A report of a muted fault is filed muted: counted, never reopened, no email;
  *   5. keep the image when it passes the same checks a member upload does,
  *      and note why when it does not (a bad image never refuses the report);
  *   6. save the row, and email the operator about a new error when asked to.
@@ -25,6 +26,7 @@
  * claimed host is used for exactly one thing, the callback, and that goes
  * through SafeHttpClient, which refuses private and internal addresses.
  *
+ * @version 1.3.0 - a new automatic report of a muted fault is filed muted, with no email
  * @version 1.2.0 - FILE_SOURCE: the bug_report_image origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.1.0 - fingerprints; automatic reports merge into the stored one and add their count
@@ -142,14 +144,19 @@ class BugReportIntake {
 		$report->set('rbr_bundle', $bundle_json);
 		$report->set('rbr_fil_file_id', $file ? (int)$file->key : null);
 		$report->set('rbr_image_note', $image_note);
-		$report->set('rbr_status', ReceivedBugReport::STATUS_NEW);
+		// A person's report of a muted fault still arrives new: their words
+		// are worth reading. One the site sent on its own stays muted.
+		$muted = $automatic && ReceivedBugReport::is_muted((string)($fingerprint ?: ($hash ?: '')));
+		$report->set('rbr_status', $muted ? ReceivedBugReport::STATUS_MUTED : ReceivedBugReport::STATUS_NEW);
 		$report->set('rbr_fingerprint', $fingerprint);
 		$report->set('rbr_automatic', $automatic);
 		$report->set('rbr_occurrences', $automatic ? $occurrences : 1);
 		$report->set('rbr_last_seen_time', gmdate('Y-m-d H:i:s'));
 		$report->save();
 
-		self::notify($report);
+		if (!$muted) {
+			self::notify($report);
+		}
 		return $report;
 	}
 
@@ -164,7 +171,7 @@ class BugReportIntake {
 
 	/**
 	 * Add $occurrences to the stored automatic report of this fault from this
-	 * site and version, and reopen it if it was closed. One UPDATE, so two
+	 * site and version, and reopen it if it was closed (a muted one stays muted). One UPDATE, so two
 	 * count updates arriving together both land. NULL when there is none.
 	 */
 	public static function addToStored(string $fingerprint, string $host, string $version, int $occurrences): ?ReceivedBugReport {

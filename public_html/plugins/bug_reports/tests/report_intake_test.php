@@ -275,5 +275,32 @@ check($group !== null && (int)$group['reports'] === 3 && (int)$group['occurrence
 check(count(new MultiReceivedBugReport(array('group' => (string)$first->get('rbr_fingerprint')))) === 3,
 	'the group filter finds every report in the group');
 
+section('A muted fault counts, but never reopens');
+
+$fp = (string)$first->get('rbr_fingerprint');
+check(!ReceivedBugReport::is_muted($fp), 'not muted to begin with');
+check(ReceivedBugReport::mute_group($fp) === 3 && ReceivedBugReport::is_muted($fp), 'Mute mutes every report of the fault');
+check(ReceivedBugReport::mute_group('') === 0 && !ReceivedBugReport::is_muted(''), 'reports with no recorded error cannot be muted');
+$auto_receive($auto_bundle(4));
+$first = new ReceivedBugReport($first->key, TRUE);
+check($first->get('rbr_status') === ReceivedBugReport::STATUS_MUTED && (int)$first->get('rbr_occurrences') === 14,
+	'a recurrence adds to the count and the report stays muted', $first->get('rbr_status'));
+$client->version = '0.8.437';
+$muted_new = $auto_receive($auto_bundle(1, '0.8.437'));
+check($muted_new->get('rbr_status') === ReceivedBugReport::STATUS_MUTED, 'a new version of a muted fault arrives muted', $muted_new->get('rbr_status'));
+$client->version = '0.8.435';
+$member_again = BugReportIntake::receive(json_encode(array('format' => 1, 'site' => array('host' => $auto_host, 'version' => '0.8.435'),
+	'error' => $auto_error)), 'Still broken for me.', null, '198.51.100.40');
+harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $member_again->key);
+check($member_again->get('rbr_status') === ReceivedBugReport::STATUS_NEW, 'a member\'s report of a muted fault still arrives new');
+$group = null;
+foreach (ReceivedBugReport::groups(500) as $g) {
+	if ($g['hash'] === $fp) { $group = $g; }
+}
+check($group !== null && $group['muted'] && (int)$group['open'] === 1, 'the grouped view shows it muted, with only the member\'s report open', json_encode($group));
+check(ReceivedBugReport::unmute_group($fp) === 4 && !ReceivedBugReport::is_muted($fp), 'Unmute unmutes the reports it muted');
+$first = new ReceivedBugReport($first->key, TRUE);
+check($first->get('rbr_status') === ReceivedBugReport::STATUS_SEEN, 'an unmuted report is seen', $first->get('rbr_status'));
+
 BugReportIntake::useClient(null);
 harness_finish();

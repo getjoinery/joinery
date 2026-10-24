@@ -287,6 +287,20 @@ ErrorReference::log(new RuntimeException('prb automatic off, again'));
 check($auto_count() === $before, 'with the switch off, nothing is noted');
 
 harness_set_setting_mem('problem_reports_auto_send', '1');
+$test_id = ErrorReference::log(new RuntimeException('prb automatic on, but a test caused it'));
+harness_register_row('err_general_errors', 'err_general_error_id', $test_id);
+check($auto_count() === $before, 'an error under the test harness is not noted');
+check(ProblemReport::fromTest(), 'the harness is loaded, so this process is a test');
+$marked = array(ProblemReport::TEST_HEADER => '1', 'SERVER_ADDR' => '203.0.113.5');
+check(ProblemReport::requestMarkedAsTest($marked + array('REMOTE_ADDR' => '127.44.3.9')), 'a marked request from the loopback is a test\'s');
+check(ProblemReport::requestMarkedAsTest($marked + array('REMOTE_ADDR' => '::1')), 'from the IPv6 loopback too');
+check(ProblemReport::requestMarkedAsTest($marked + array('REMOTE_ADDR' => '::ffff:203.0.113.5')), 'from the server\'s own address, however written');
+check(ProblemReport::requestMarkedAsTest(array(ProblemReport::TEST_HEADER => '1', 'SERVER_ADDR' => '2001:db8::5', 'REMOTE_ADDR' => '2001:DB8:0::5')),
+	'from the server\'s own IPv6 address');
+check(!ProblemReport::requestMarkedAsTest($marked + array('REMOTE_ADDR' => '198.51.100.7')), 'a marked request from anywhere else is not');
+check(!ProblemReport::requestMarkedAsTest(array('SERVER_ADDR' => '203.0.113.5', 'REMOTE_ADDR' => '127.0.0.1')), 'an unmarked request from the loopback is not');
+ProblemReport::noteTestErrors(true);
+harness_defer(function () { ProblemReport::noteTestErrors(false); });
 /** Thrown from one place, so every call is the same fault. */
 function prb_auto_fault($n) {
 	return new RuntimeException('prb automatic fault number ' . $n);
