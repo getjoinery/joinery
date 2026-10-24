@@ -26348,3 +26348,60 @@ fn an_unsent_folder_renamed_and_its_old_name_made_again_ends_as_two_folders() {
     assert_converged(&world);
     assert_no_entry_is_stranded(&world);
 }
+
+/// B1 residual, end to end: a second disk mounted inside one device's sync
+/// folder, and the other device moving a file and a folder onto it. No rename
+/// carries either across, and each was retried for ever with nothing said, so
+/// the device never settled (traced on the mini: a disk image mounted inside a
+/// real root, the peer's moves retried on the backoff, no issue). Each move is
+/// said once, naming the disk, the device goes quiet, and nothing is lost or
+/// doubled on the server. Moved across by hand, the files are the server's
+/// own again and the saying ends. RED with the move read as a retry.
+#[test]
+fn a_peers_move_onto_another_disk_inside_the_root_settles_and_says_so() {
+    let world = World::new(9_934, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    lin.fs.user_mkdir("Disk");
+    lin.fs.user_mkdir("Disk/In");
+    lin.fs.user_write("a.txt", b"moved onto the other disk");
+    lin.fs.user_mkdir("Fold");
+    lin.fs.user_write("Fold/b.txt", b"inside a folder moved onto it");
+    assert!(world.settle().is_some(), "never settled before the moves");
+    assert!(mac.fs.exists("Disk/In") && mac.fs.exists("a.txt"), "{:?}", mac.fs.all_paths());
+    mac.fs.mount_another_disk("Disk");
+
+    lin.fs.user_rename("a.txt", "Disk/In/a.txt");
+    lin.fs.user_rename("Fold", "Disk/In/Fold");
+    world.pass(lin);
+    world.pass(mac);
+    for _ in 0..3 {
+        let again = world.pass(mac);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert!(mac.fs.exists("a.txt") && mac.fs.exists("Fold/b.txt"), "{:?}", mac.fs.all_paths());
+    let said = |d: &jd_sim::Device| -> Vec<String> {
+        d.store.open_issues().unwrap().into_iter().map(|i| i.detail).filter(|t| t.contains("/sync/Disk is a separate disk")).collect()
+    };
+    assert_eq!(said(mac).len(), 2, "one issue for each move: {:?}", mac.store.open_issues().unwrap());
+    let tree = world.server.tree();
+    let on_server: Vec<&String> = tree.keys().filter(|p| p.ends_with("a.txt") || p.ends_with("b.txt")).collect();
+    assert_eq!(on_server, vec!["Disk/In/Fold/b.txt", "Disk/In/a.txt"], "{tree:?}");
+
+    let live = |w: &World| -> Vec<i64> { w.server.files().iter().filter(|f| !f.trashed).map(|f| f.id).collect() };
+    let ids = live(&world);
+
+    // Carried across by hand, the way a file manager does it: a copy on the
+    // other disk, the original removed. Each is taken up as the record it
+    // copies (an adopted placement), so the server's files keep their ids.
+    mac.fs.user_mkdir("Disk/In/Fold");
+    mac.fs.user_write("Disk/In/Fold/b.txt", b"inside a folder moved onto it");
+    mac.fs.user_remove("Fold");
+    mac.fs.user_write("Disk/In/a.txt", b"moved onto the other disk");
+    mac.fs.user_remove("a.txt");
+    assert!(world.settle().is_some(), "never settled after the hand move");
+    assert!(said(mac).is_empty(), "still said after the files were moved: {:?}", said(mac));
+    let tree = world.server.tree();
+    let on_server: Vec<&String> = tree.keys().filter(|p| p.contains("a.txt") || p.contains("b.txt")).collect();
+    assert_eq!(on_server, vec!["Disk/In/Fold/b.txt", "Disk/In/a.txt"], "nothing doubled or lost: {tree:?}");
+    assert_eq!(live(&world), ids, "the server's files were replaced, not kept");
+}

@@ -242,6 +242,40 @@ fn io_err(path: &Path, e: std::io::Error) -> VfsError {
     }
 }
 
+/// Where the other volume of a rename that crossed one starts: of the two
+/// folders, the one not on the root's own volume, walked up to the topmost
+/// folder inside the root still on that volume -- the mount point, the folder
+/// a person can find and act on. The destination folder where that cannot be
+/// told.
+#[cfg(unix)]
+fn volume_boundary(root: &Path, from: &Path, to: &Path) -> PathBuf {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| fs::metadata(p).ok().map(|m| m.dev());
+    let home = dev(root);
+    let to_dir = to.parent().unwrap_or(to);
+    let from_dir = from.parent().unwrap_or(from);
+    let away = [to_dir, from_dir]
+        .into_iter()
+        .find(|d| dev(d).is_some_and(|v| Some(v) != home))
+        .unwrap_or(to_dir);
+    let theirs = dev(away);
+    let mut top = away.to_path_buf();
+    while let Some(up) = top.parent() {
+        if up == root || !up.starts_with(root) || dev(up) != theirs {
+            break;
+        }
+        top = up.to_path_buf();
+    }
+    top
+}
+
+/// Windows names no volume a folder is on without a call of its own; the
+/// destination folder is named instead.
+#[cfg(not(unix))]
+fn volume_boundary(_root: &Path, _from: &Path, to: &Path) -> PathBuf {
+    to.parent().unwrap_or(to).to_path_buf()
+}
+
 #[cfg(unix)]
 fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
     use std::os::unix::fs::MetadataExt;
@@ -815,10 +849,29 @@ impl Vfs for OsVfs {
         }
     }
 
+    #[cfg(unix)]
+    fn crosses_a_disk(&self, from: &Path, to: &Path) -> Option<PathBuf> {
+        use std::os::unix::fs::MetadataExt;
+        let dev = |p: &Path| fs::metadata(p.parent()?).ok().map(|m| m.dev());
+        match (dev(from), dev(to)) {
+            (Some(here), Some(there)) if here != there => Some(volume_boundary(&self.root, from, to)),
+            _ => None,
+        }
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         folder_on_disk(to)?;
         let to = as_written(to, &self.personality);
-        rename_as_stored(from, &to, &self.personality, |from, to| fs::rename(from, to)).map_err(|e| io_err(from, e))
+        rename_as_stored(from, &to, &self.personality, |from, to| fs::rename(from, to)).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::CrossesDevices {
+                return VfsError::OtherVolume {
+                    from: from.to_path_buf(),
+                    to: to.clone(),
+                    mount: volume_boundary(&self.root, from, &to),
+                };
+            }
+            io_err(from, e)
+        })
     }
 
     fn trash(&self, path: &Path) -> VfsResult<()> {

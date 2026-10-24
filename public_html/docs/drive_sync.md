@@ -1225,6 +1225,16 @@ name that outlives its commit is trashed by the next walk unless its op is
 still open in the journal; the server still holds the bytes, so the download is
 simply planned again.
 
+A move is a rename, and a rename never crosses either: a file or folder the
+server moved onto that other disk, or off it, stays where it is here, and
+nothing at its name on the other side is set aside for it
+(`Vfs::crosses_a_disk`, asked first). The move is withdrawn and held like a
+standing refusal (`VfsError::OtherVolume`), and
+the issue names the folder where the other disk starts and asks the person to
+move it there themselves or take the disk out of the sync folder. A copy is
+never made in its place, since a copy is a new file standing for this one.
+Moved by hand, the file is read where it now stands and the hold lifts.
+
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification
 at completion and re-queues. After the transfer the fingerprint is

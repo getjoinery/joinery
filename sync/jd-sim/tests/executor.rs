@@ -3905,6 +3905,87 @@ fn a_name_the_disk_refuses_is_written_down_not_retried() {
     assert!(matches!(after.status, LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { .. })), "{:?}", after.status);
 }
 
+/// B1 residual: a second disk mounted inside the sync folder, and the server
+/// moving a file onto it. A rename never crosses from one disk to another, so
+/// the move was retried on the backoff for ever with nothing said (traced on
+/// the mini, a disk image mounted inside a real root). Withdrawn, held and
+/// said once, naming the disk; the file stays where it is, and a different
+/// file already at its name on that disk is not set aside for a move that
+/// cannot happen. RED with the move read as a retry.
+#[test]
+fn a_move_onto_another_disk_inside_the_root_is_held_and_said_not_retried() {
+    let (_clock, server, device) = world();
+    let disk = server.seed_folder(None, "Disk");
+    let body = b"stays on the root's own disk";
+    let file = server.seed_file(None, "a.txt", body);
+    device.fs.user_mkdir("Disk");
+    device.fs.mount_another_disk("Disk");
+    device.fs.user_write("a.txt", body);
+    device.fs.user_write("Disk/a.txt", b"a different file, never synced");
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("a.txt")).unwrap().unwrap();
+    let mut folder = fresh(EntityId::folder(disk), None, "Disk", LocalStatus::Synced);
+    folder.synced_placement = Some(folder.remote.clone());
+    device.store.put_entry(&folder).unwrap();
+    let id = EntityId::file(file);
+    let mut e = fresh(id, Some(disk), "a.txt", LocalStatus::Synced);
+    let content = ContentId { sha256: sha256_hex(body), size: body.len() as u64 };
+    e.synced_placement = Some(Placement { parent: None, name: "a.txt".into() });
+    e.synced_fingerprint = Some(fp);
+    e.own_file = Some(fp.identity());
+    e.synced_content = Some(content.clone());
+    e.remote_content = Some(content);
+    device.store.put_entry(&e).unwrap();
+
+    let onto_the_disk = Action::ApplyRemoteMove { to: Placement { parent: Some(disk), name: "a.txt".into() }, agree_at: None };
+    let report = do_one(&device, id, onto_the_disk);
+    assert_eq!((report.retrying, report.withdrawn), (0, 1), "{report:?}");
+    assert!(device.store.queued_ops().unwrap().is_empty(), "nothing is left to retry");
+    let said: Vec<String> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.entity == Some(id))
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("/sync/a.txt stays where it is, not at /sync/Disk/a.txt: /sync/Disk is a separate disk"), "{said:?}");
+    assert_eq!(device.fs.peek("a.txt").as_deref(), Some(&body[..]), "the file stays where it is");
+    assert_eq!(
+        device.fs.peek("Disk/a.txt").as_deref(),
+        Some(&b"a different file, never synced"[..]),
+        "the file at its name on the other disk was set aside: {:?}",
+        device.fs.all_paths()
+    );
+    assert_eq!(device.fs.all_paths().len(), 3, "{:?}", device.fs.all_paths());
+    assert_eq!(device.store.refusals().unwrap().len(), 1, "held, so the next pass does not ask again");
+}
+
+/// The simulated mount follows a Mac: the folder a disk is mounted at
+/// renames like any folder and the disk goes with it, and a move onto it
+/// under its new name is refused naming the new name. Under the mount it is
+/// one disk: a rename inside it is an ordinary rename.
+#[test]
+fn a_simulated_mount_point_renames_and_its_disk_goes_with_it() {
+    let (_clock, _server, device) = world();
+    device.fs.user_mkdir("Disk");
+    device.fs.user_mkdir("Disk/In");
+    device.fs.mount_another_disk("Disk");
+    device.fs.user_write("a.txt", b"on the root's disk");
+    device.fs.user_write("Disk/b.txt", b"on the other disk");
+    let at = |p: &str| std::path::PathBuf::from("/sync").join(p);
+    jd_vfs::Vfs::rename(&device.fs, &at("Disk/b.txt"), &at("Disk/In/b.txt")).expect("a rename within one disk");
+    jd_vfs::Vfs::rename(&device.fs, &at("Disk"), &at("Disk2")).expect("the mount point itself renames");
+    assert_eq!(jd_vfs::Vfs::crosses_a_disk(&device.fs, &at("a.txt"), &at("Disk2/a.txt")), Some(at("Disk2")));
+    assert_eq!(jd_vfs::Vfs::crosses_a_disk(&device.fs, &at("Disk2/In/b.txt"), &at("b.txt")), Some(at("Disk2")));
+    match jd_vfs::Vfs::rename(&device.fs, &at("a.txt"), &at("Disk2/a.txt")) {
+        Err(jd_vfs::VfsError::OtherVolume { mount, .. }) => assert_eq!(mount, at("Disk2")),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(jd_vfs::Vfs::crosses_a_disk(&device.fs, &at("a.txt"), &at("c.txt")), None);
+}
+
 /// B4's guard: a download for a record that already agrees with the server's
 /// head, its own file standing here, fetches nothing and stands down.
 #[test]
