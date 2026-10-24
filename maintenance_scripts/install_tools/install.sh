@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.32 - a start that is not a login (a systemd unit, cron, cloud-init) leaves HOME unset, and Composer refuses
+#               to run without it: the running account's home stands in (B104)
 #VERSION 3.31 - server sizes PHP-FPM's workers from the machine (tune_php_fpm.sh) beside PostgreSQL's memory:
 #               the packaged pool allowed 5 whatever the machine. site refuses a second site directly on a
 #               machine that already has one: a machine is one site, and several sites share a machine as
@@ -718,6 +720,14 @@
 
 set -e  # Exit on error
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
+
+# A start that is not a login (a systemd unit, cron, cloud-init) leaves HOME
+# unset, and Composer refuses to run without it: the running account's home
+# stands in, for this script and every one it runs.
+if [ -z "${HOME:-}" ]; then
+    HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+    export HOME="${HOME:-/root}"
+fi
 
 # Every apt call this script makes must be answerable without a terminal.
 # Set once, globally, so a new apt line cannot reintroduce a debconf prompt
