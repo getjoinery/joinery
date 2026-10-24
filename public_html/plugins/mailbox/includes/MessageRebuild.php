@@ -38,21 +38,21 @@
  * A rebuilt message is a faithful rendering of what Joinery holds, not the
  * original: the sender's DKIM signature does not verify against a rebuilt
  * body. A download or an export says so with marked() (X-Joinery-Rebuilt:
- * yes); a mail program is served the bytes unmarked, as FORMAT 1 has always
- * been.
+ * yes); a mail program is served the bytes unmarked, as it always has been.
  *
  * Sealed content is opened in the window (the model's sealed-field read); a
  * closed one throws VaultLockedException, and nothing is built in its place.
  * The browser builds the same tree for a Fortress message
  * (assets/mailbox_mime_build.js), which the server cannot read.
  *
+ * @version 2.0.0 - FORMAT 2: a part that arrived with no name is written with none (B67)
  * @version 1.0.0
  */
 
 class MessageRebuild {
 
 	/** The rebuilt format. Changing ANY output byte means a new value. */
-	const FORMAT = 1;
+	const FORMAT = 2;
 
 	/** base64 line length, and quoted-printable's maximum encoded line. */
 	const LINE = 76;
@@ -292,16 +292,10 @@ class MessageRebuild {
 		if (!preg_match('~^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$~', $type)) {
 			$type = 'application/octet-stream';
 		}
+		// A part that arrived with no name is written with none, as it arrived.
 		$name = trim(str_replace(array("\r", "\n", "\t"), ' ', (string)$att->get('ima_filename')));
-		if ($name === '') {
-			// FORMAT 1 names a part that arrived nameless 'attachment' (no extension).
-			// The next FORMAT should leave it nameless, as it arrived, here and in
-			// mailbox_mime_build.js (B67); changing it alone is not worth restarting
-			// every mail program's folders.
-			$name = 'attachment';
-		}
-		$headers = 'Content-Type: ' . $type . '; ' . self::nameParam('name', $name)
-			. "\r\n" . 'Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; ' . self::nameParam('filename', $name)
+		$headers = 'Content-Type: ' . $type . ($name !== '' ? '; ' . self::nameParam('name', $name) : '')
+			. "\r\n" . 'Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . ($name !== '' ? '; ' . self::nameParam('filename', $name) : '')
 			. "\r\n" . 'Content-Transfer-Encoding: base64';
 		$cid = trim((string)$att->get('ima_content_id'), '<> ');
 		if ($cid !== '' && preg_match('/^[\x21-\x7e]+$/', $cid)) {

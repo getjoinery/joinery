@@ -6,7 +6,7 @@
  * The server keeps no original of an end-to-end message and cannot read its
  * fields, so a Fortress mailbox export (mailbox_export.js) builds each message
  * here from the opened header block, bodies and parts. The tree and the bytes
- * are MessageRebuild's, FORMAT 1, for the same inputs: the retained header
+ * are MessageRebuild's, same FORMAT, for the same inputs: the retained header
  * block minus its MIME headers (or headers made from the row's fields), then
  * multipart/mixed over multipart/related (HTML and its inline parts by
  * Content-ID) over multipart/alternative (plain and HTML); bodies UTF-8
@@ -22,12 +22,12 @@
  *   MailboxMimeBuild.marked(bytes)   // X-Joinery-Rebuilt: yes in front
  *   MailboxMimeBuild.mboxEntry(bytes, headers, envelopeOf(sender), unixTime)   // MailExport::mboxEntry's bytes
  *
- * Vanilla JS; runs under node too (module.exports). @version 1.2 - mboxEntry takes the server's export header lines (B70)
+ * Vanilla JS; runs under node too (module.exports). @version 1.3 - FORMAT 2: a part that arrived with no name is written with none (B67)
  */
 (function (root) {
 	'use strict';
 
-	var FORMAT = 1;
+	var FORMAT = 2;
 	var LINE = 76;
 	var MARKER = 'X-Joinery-Rebuilt: yes';
 	var enc = new TextEncoder();
@@ -286,9 +286,10 @@
 	function attachmentPart(p, inline) {
 		var type = String(p.content_type || '').trim().toLowerCase();
 		if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(type)) type = 'application/octet-stream';
-		var name = String(p.filename || '').replace(/[\r\n\t]/g, ' ').trim() || 'attachment';
-		var headers = 'Content-Type: ' + type + '; ' + nameParam('name', name)
-			+ '\r\nContent-Disposition: ' + (inline ? 'inline' : 'attachment') + '; ' + nameParam('filename', name)
+		// A part that arrived with no name is written with none, as it arrived.
+		var name = String(p.filename || '').replace(/[\r\n\t]/g, ' ').trim();
+		var headers = 'Content-Type: ' + type + (name !== '' ? '; ' + nameParam('name', name) : '')
+			+ '\r\nContent-Disposition: ' + (inline ? 'inline' : 'attachment') + (name !== '' ? '; ' + nameParam('filename', name) : '')
 			+ '\r\nContent-Transfer-Encoding: base64';
 		var cid = trimChars(String(p.content_id || ''), '<> ');
 		if (cid !== '' && /^[\x21-\x7e]+$/.test(cid)) headers += '\r\nContent-ID: <' + cid + '>';
