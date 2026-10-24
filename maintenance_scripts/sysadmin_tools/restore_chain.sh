@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.12.0 - the site root's own deletions are replayed here, not by tar, and never take what is the
+#                  machine's: a mount point (the site container engine mounts a volume at each top-level
+#                  directory) or an upgrade's trees; an own server's chain restored into a container failed
+#                  as busy on the deploy/ volume the source never had (B107). An extraction that fails puts
+#                  this machine's own files back before it stops: the exit's clean-up deleted the only copy,
+#                  and left the chain's config with another machine's database password in place (B108)
 # Version: 1.11.0 - the database restore and the reconcile run with this release's tools, copied before the
 #                  extraction: an older run puts older tools back, and one refused what this release asks (B23)
 # Version: 1.10.0 - the database restore is told which run it restores (--restored-run), and records it as
@@ -134,7 +140,6 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.9.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -473,8 +478,12 @@ mkdir -p "$PARENT"
 # shipped. Refused, nothing is written and the database is not touched.
 # An upgrade's own trees are the machine's on every host: an older whole-tree
 # archive may carry them, and neither pass below writes them.
-UPGRADE_TREE_EXCLUDES=(--exclude="${ARCHIVE_ROOT}/deploy" --exclude="${ARCHIVE_ROOT}/upgrades"
-    --exclude="${ARCHIVE_ROOT}/upgrade_archives" --exclude="${ARCHIVE_ROOT}/public_html_*")
+# Each with its contents named too: the extraction below runs without recursion
+# in its patterns, so a directory's pattern alone would not reach inside it.
+UPGRADE_TREE_EXCLUDES=(--exclude="${ARCHIVE_ROOT}/deploy" --exclude="${ARCHIVE_ROOT}/deploy/*"
+    --exclude="${ARCHIVE_ROOT}/upgrades" --exclude="${ARCHIVE_ROOT}/upgrades/*"
+    --exclude="${ARCHIVE_ROOT}/upgrade_archives" --exclude="${ARCHIVE_ROOT}/upgrade_archives/*"
+    --exclude="${ARCHIVE_ROOT}/public_html_*")
 RESTORE_RESTRICTED=false
 LIVE_PUBLIC_HTML="$(cd "${SCRIPT_DIR}/../../public_html" 2>/dev/null && pwd || true)"
 RESTORE_GUARD="${SCRIPT_DIR}/../install_tools/_restore_guard.sh"
@@ -537,6 +546,44 @@ KEEP_TMP=$(mktemp -d)
 KEPT_FILES=()
 cleanup_kept() { rm -rf "${KEEP_TMP:?}"; }
 trap cleanup_kept EXIT
+
+# Each held file back where it was; non-zero, naming the file in PUT_BACK_FAILED,
+# at the first that cannot be.
+PUT_BACK_FAILED=""
+put_back_kept() {
+    local rel
+    for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
+        ${SUDO} mkdir -p "${PROJECT_DIR}/$(dirname "$rel")"
+        if ! ${SUDO} cp -a "${KEEP_TMP}/${rel}" "${PROJECT_DIR}/${rel}"; then
+            PUT_BACK_FAILED="$rel"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# A failure once the extraction has begun: it may already have written the
+# chain's config over this machine's, so this machine's own files go back
+# before the script stops, and the clean-up must never delete the only copy.
+stop_part_restored() {
+    print_error "$1"
+    if put_back_kept; then
+        if [ "$LEDGER_KEPT" = true ]; then
+            ${SUDO} rm -rf "${PROJECT_DIR:?}/${LEDGER_REL:?}"
+            ${SUDO} mkdir -p "${PROJECT_DIR}/config"
+            ${SUDO} cp -a "${KEEP_TMP}/${LEDGER_REL}" "${PROJECT_DIR}/${LEDGER_REL}" 2>/dev/null || true
+        fi
+        if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
+            print_error "This machine's own ${KEPT_FILES[*]} were put back: the site keeps its database password and keys."
+        fi
+    else
+        trap - EXIT
+        print_error "This machine's own ${PUT_BACK_FAILED} could not be put back; the only copy is at"
+        print_error "${KEEP_TMP}/${PUT_BACK_FAILED}, left there deliberately. Put it back at ${PROJECT_DIR}/${PUT_BACK_FAILED}."
+    fi
+    print_error "The tree is part-restored; re-run from the start once the cause is fixed."
+    exit 1
+}
 
 # The steps after the extraction (the database, the reconcile) are this
 # release's, so they run with this release's tools, never the ones the
@@ -615,21 +662,52 @@ fi
 # its directories' full listings, and tar removes anything present locally that
 # the listing does not mention. Without it a restore only ever adds, so a file
 # deleted a month ago comes back from the dead.
+#
+# Every directory but the site root itself: its entry is left out (an anchored
+# exclude without recursion matches that one entry, not what is under it), and
+# its deletions are replayed below, sparing what is the machine's. The root's
+# own mode, owner and times are the machine's too (its installer made it, or the
+# engine mounts it), so none is taken from the archive.
 i=0
 for archive in "${FILES_ARCHIVES[@]}"; do
     print_info "Applying $(basename "$archive") ($((i+1))/${#FILES_ARCHIVES[@]})"
     STATUS=0
     ( set -o pipefail
       openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
-        | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PARENT" --anchored "${UPGRADE_TREE_EXCLUDES[@]}" --no-anchored \
+        | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PARENT" \
+            --anchored --no-recursion --exclude="${ARCHIVE_ROOT}" "${UPGRADE_TREE_EXCLUDES[@]}" --no-anchored \
     ) 3< "$KEY_FILE" || STATUS=$?
     if [ "$STATUS" -ne 0 ]; then
-        print_error "Failed applying $(basename "$archive") (exit ${STATUS})."
-        print_error "The tree is part-restored; re-run from the start once the cause is fixed."
-        exit 1
+        stop_part_restored "Failed applying $(basename "$archive") (exit ${STATUS})."
     fi
     i=$((i+1))
 done
+
+# The site root's deletions, from the newest run's listing of it. tar would
+# remove whatever the listing does not name, and at the site root that includes
+# what is the machine's and never the site's: the site container engine mounts
+# a volume at each of the site's top-level directories, and one the source never
+# had (an own server has no deploy/) cannot be removed, which stopped the whole
+# restore as busy (B107); and an upgrade's trees, which no restore takes. A
+# listing that cannot be read removes nothing.
+ROOT_LISTING="$( { ( openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "${FILES_ARCHIVES[${#FILES_ARCHIVES[@]}-1]}" 2>/dev/null \
+                       | tar --list --incremental --verbose --verbose -zf - 2>/dev/null ) 3< "$KEY_FILE" || true; } \
+                 | awk -v root="${ARCHIVE_ROOT}/" 'found && /^$/ { exit } found && /^[YND] / { print substr($0, 3) } !found && $NF == root { found = 1 }' )"
+if [ -n "$ROOT_LISTING" ]; then
+    while IFS= read -r -d '' entry; do
+        name="$(basename "$entry")"
+        if printf '%s\n' "$ROOT_LISTING" | grep -qxF -- "$name"; then
+            continue
+        fi
+        case "$name" in deploy|upgrades|upgrade_archives|public_html_*) continue ;; esac
+        if command -v mountpoint >/dev/null 2>&1; then
+            mountpoint -q "$entry" 2>/dev/null && continue
+        elif awk -v p="$entry" '$5 == p { found = 1 } END { exit !found }' /proc/self/mountinfo 2>/dev/null; then
+            continue
+        fi
+        ${SUDO} rm -rf -- "${entry:?}"
+    done < <(${SUDO} find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 -print0)
+fi
 i=0
 for archive in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do
     print_info "Applying $(basename "$archive") into ${PROJECT_DIR} ($((i+1))/${#CODE_ARCHIVES[@]})"
@@ -639,9 +717,7 @@ for archive in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do
         | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PROJECT_DIR" \
     ) 3< "$KEY_FILE" || STATUS=$?
     if [ "$STATUS" -ne 0 ]; then
-        print_error "Failed applying $(basename "$archive") (exit ${STATUS})."
-        print_error "The tree is part-restored; re-run from the start once the cause is fixed."
-        exit 1
+        stop_part_restored "Failed applying $(basename "$archive") (exit ${STATUS})."
     fi
     i=$((i+1))
 done
@@ -675,21 +751,18 @@ if [ "$ADOPT_SECRET_KEY" = true ] && ${SUDO} test -f "${PROJECT_DIR}/config/Glob
 fi
 
 # Put this machine's own files back over whatever the chain brought.
-for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
-    ${SUDO} mkdir -p "${PROJECT_DIR}/$(dirname "$rel")"
-    if ! ${SUDO} cp -a "${KEEP_TMP}/${rel}" "${PROJECT_DIR}/${rel}"; then
-        # The only copy of this machine's secret_box_key is now the one in
-        # KEEP_TMP, so the cleanup trap must not run. Pointing at a path that is
-        # about to be deleted would be worse than saying nothing.
-        trap - EXIT
-        print_error "Could not put this machine's ${rel} back after extraction."
-        print_error "The only copy is at ${KEEP_TMP}/${rel} and has been left there deliberately."
-        print_error "Put it back at ${PROJECT_DIR}/${rel} before the site is used: it holds this"
-        print_error "machine's database password and its secret_box_key, and without the latter"
-        print_error "every secret encrypted at rest on this box is unreadable."
-        exit 1
-    fi
-done
+if ! put_back_kept; then
+    # The only copy of this machine's secret_box_key is now the one in
+    # KEEP_TMP, so the cleanup trap must not run. Pointing at a path that is
+    # about to be deleted would be worse than saying nothing.
+    trap - EXIT
+    print_error "Could not put this machine's ${PUT_BACK_FAILED} back after extraction."
+    print_error "The only copy is at ${KEEP_TMP}/${PUT_BACK_FAILED} and has been left there deliberately."
+    print_error "Put it back at ${PROJECT_DIR}/${PUT_BACK_FAILED} before the site is used: it holds this"
+    print_error "machine's database password and its secret_box_key, and without the latter"
+    print_error "every secret encrypted at rest on this box is unreadable."
+    exit 1
+fi
 if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
     print_success "This machine's own ${KEPT_FILES[*]} kept"
 fi

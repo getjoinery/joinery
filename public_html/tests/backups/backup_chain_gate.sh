@@ -163,6 +163,68 @@ chk "and still holds what this machine recorded, not the archive's copy" \
 chk "and is not left writable by group or other" \
     "$(stat -c '%a' "$W/out/site/config/backup-ledger/manager.json" 2>/dev/null)" "600"
 
+# ── The site root's own entries are the machine's (B107) ────────────────────
+#
+# The site container engine mounts a volume at each of a site's top-level
+# directories, and an own server has no deploy/. Restored into a container,
+# its chain's root listing names no deploy/, and tar's deletion replay tried to
+# remove the volume and stopped the whole restore as busy. The root's
+# deletions are replayed by the script instead: an upgrade's tree (deploy/
+# here; a mount point too, which this gate cannot make) is the machine's and
+# stays, and anything else the run does not name still goes.
+echo "== The machine's own top-level trees survive =="
+rm -rf "${W:?}/out"; mkdir -p "$W/out/site/deploy" "$W/out/site/stray_dir"
+echo "machine" > "$W/out/site/deploy/RELEASE_MANIFEST"
+echo "stray" > "$W/out/site/stray_dir/x"
+echo "stale" > "$W/out/site/will_delete.txt"
+bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
+    --key-file "$W/chain.key" --force --skip-database >/dev/null 2>&1
+chk "a restore keeps the machine's deploy/, which the source never had" \
+    "$(cat "$W/out/site/deploy/RELEASE_MANIFEST" 2>/dev/null)" "machine"
+chk "a top-level directory the run does not name is still removed" \
+    "$([ -e "$W/out/site/stray_dir" ] && echo present || echo gone)" "gone"
+chk "and so is a top-level file the run deleted" \
+    "$([ -e "$W/out/site/will_delete.txt" ] && echo present || echo gone)" "gone"
+chk "what is under the root is restored as at run 1" \
+    "$(cd "$W/out/site" && find . -type f ! -path './deploy/*' ! -path './config/*' | sort | tr '\n' ' ')" \
+    "./added.txt ./keep.txt ./sub/nested.txt ./will_change.txt "
+
+# ── A failed extraction puts the machine's own config back (B108) ───────────
+#
+# The extraction writes the chain's config/Globalvars_site.php over this
+# machine's (another machine's database password and keys) and only puts this
+# machine's back once it has finished. One that stopped part-way left the
+# chain's in place, and the exit's clean-up deleted the only copy of this
+# machine's own: the site could not reach its own database. A directory the
+# extraction cannot write into stops it here, after config/ is written.
+echo "== A failed extraction keeps this machine's own config =="
+# A read-only directory stops only a user who is not root.
+if [ "$(id -u)" -ne 0 ]; then
+    X="$W/b108"; mkdir -p "$X/site/config" "$X/site/zsub" "$X/arts" "$X/out/site/config" "$X/out/site/zsub"
+    echo "chain's" > "$X/site/config/Globalvars_site.php"
+    echo "x" > "$X/site/zsub/x"
+    OUT=$(bash "$BACKUP" testsite --project-dir "$X/site" --output-dir "$X/arts" \
+            --name files-0000 --snar "$X/site.snar" --key-file "$W/chain.key" 2>/dev/null)
+    XF=$(echo "$OUT" | grep '^ARCHIVE=' | cut -d= -f2)
+    cat > "$X/arts/manifest.json" <<JSON
+{"version": 1, "chain_id": "chain-20260802_130000", "slug": "testsite", "created": "2026-08-02T13:00:00Z",
+ "updated": "2026-08-02T13:00:00Z", "runs": [{"seq": 0, "level": 0, "time": "2026-08-02T13:00:00Z",
+ "artifacts": {"files": {"name": "$(basename "$XF")", "bytes": $(echo "$OUT" | grep '^BYTES=' | cut -d= -f2),
+ "sha256": "$(echo "$OUT" | grep '^SHA256=' | cut -d= -f2)"}}}]}
+JSON
+    echo "this machine's" > "$X/out/site/config/Globalvars_site.php"
+    chmod 555 "$X/out/site/zsub"
+    OUT=$(bash "$RESTORE" testsite --target-dir "$X/out/site" --artifacts "$X/arts" \
+            --key-file "$W/chain.key" --force --skip-database 2>&1) && RC=0 || RC=$?
+    chmod 755 "$X/out/site/zsub"
+    chk "an extraction that cannot finish fails the restore" "$([ "$RC" -ne 0 ] && echo yes || echo no)" "yes"
+    chk "and this machine's own config is put back, not left as the chain's" \
+        "$(cat "$X/out/site/config/Globalvars_site.php" 2>/dev/null)" "this machine's"
+    chk "and it says so" "$(echo "$OUT" | grep -c 'were put back: the site keeps its database password and keys')" "1"
+else
+    echo "  SKIP: run as root, a read-only directory cannot stop the extraction"
+fi
+
 # ── Snapshot loss degrades to a new chain ───────────────────────────────────
 echo "== Snapshot loss =="
 rm -f "$SNAR"
