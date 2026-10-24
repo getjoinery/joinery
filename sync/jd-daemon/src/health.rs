@@ -118,10 +118,12 @@ impl Health {
     ///
     /// `out_of_scope` counts as settled because it is a deliberate choice, not
     /// an unfinished job — a descoped subtree is exactly where the user asked
-    /// for it to be.
+    /// for it to be. `ignored` for the same reason: a system file is where it
+    /// belongs, on the one computer that made it.
     pub fn settled(&self) -> usize {
         self.entries.get("synced").copied().unwrap_or(0)
             + self.entries.get("out_of_scope").copied().unwrap_or(0)
+            + self.entries.get("ignored").copied().unwrap_or(0)
     }
 
     pub fn tracked(&self) -> usize {
@@ -225,7 +227,7 @@ fn unsettled(entries: &BTreeMap<String, usize>) -> usize {
                 // open, which no amount of waiting improves. The user still
                 // hears about it — it raises an issue, and an issue outranks
                 // Working — but it is not work in progress.
-                "synced" | "out_of_scope" | "unsyncable" | "pending_key" | "unreadable"
+                "synced" | "out_of_scope" | "ignored" | "unsyncable" | "pending_key" | "unreadable"
             )
         })
         .map(|(_, n)| *n)

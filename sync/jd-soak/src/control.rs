@@ -87,7 +87,8 @@ impl Status {
 
     /// Entries that are neither in agreement nor at a legitimate resting place.
     ///
-    /// `synced` and `out_of_scope` are agreement. `unsyncable` and
+    /// `synced` and `out_of_scope` are agreement, and `ignored` is a system
+    /// file kept on the computer that made it. `unsyncable` and
     /// `pending_key` are resting places: nothing on this machine will move them
     /// and both are surfaced to the user by name. Everything else is work that
     /// has not finished, and a device holding any of it has not settled however
@@ -109,7 +110,7 @@ impl Status {
                 **n > 0
                     && !matches!(
                         state.as_str(),
-                        "synced" | "out_of_scope" | "unsyncable" | "pending_key"
+                        "synced" | "out_of_scope" | "ignored" | "unsyncable" | "pending_key"
                     )
             })
             .map(|(state, n)| (state.clone(), *n))
@@ -124,7 +125,7 @@ impl Status {
     pub fn unsettled_entries(&self) -> u64 {
         self.entries
             .iter()
-            .filter(|(state, _)| state.as_str() != "synced" && state.as_str() != "out_of_scope")
+            .filter(|(state, _)| !matches!(state.as_str(), "synced" | "out_of_scope" | "ignored"))
             .map(|(_, n)| *n)
             .sum()
     }

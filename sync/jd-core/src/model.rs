@@ -105,6 +105,15 @@ pub enum LocalStatus {
     /// the caller's visibility. Tracked, not absent, which is what makes
     /// "unchecked" structurally different from "deleted".
     OutOfScope,
+    /// A system file or folder (`jd_vfs::is_system_file`,
+    /// `jd_vfs::is_system_folder`), or something inside one, that was never
+    /// agreed: made here, it is never sent; held by the server and never had
+    /// here, it is never brought here. Tracked like any other record, so a
+    /// temporary file saved over a document is still read as that document's
+    /// new version, and lifted the moment it is renamed to an ordinary name
+    /// (`pass::mark_system_files`). A system file both sides already agreed
+    /// on goes on syncing as it did.
+    Ignored,
 }
 
 /// Where a folder's directory stands on this disk, and the agreement that
@@ -389,9 +398,9 @@ impl Entry {
     /// where one would go? Asked of the record alone; `pass::holds_here` adds
     /// what only the disk can say.
     ///
-    /// Three statuses say the device will not be materializing anything new
+    /// Four statuses say the device will not be materializing anything new
     /// here: a name the filesystem cannot hold, an encrypted entry whose key
-    /// is not here, and a subtree out of scope. What each means about the disk
+    /// is not here, a subtree out of scope, and a system file never agreed. What each means about the disk
     /// differs, and the difference is load-bearing. `Unsyncable` is a release:
     /// the park operation gives up the local copy, so nothing of this entry is
     /// at that path. `PendingKey` and `OutOfScope` are not: both say only that
@@ -411,6 +420,9 @@ impl Entry {
         match self.status {
             LocalStatus::Unsyncable(_) => false,
             LocalStatus::PendingKey | LocalStatus::OutOfScope => self.is_tied_here(),
+            // Made here, it holds the file it was made from; held only by the
+            // server, it was never brought here.
+            LocalStatus::Ignored => self.id.is_provisional(),
             _ => true,
         }
     }

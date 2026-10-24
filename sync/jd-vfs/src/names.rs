@@ -140,6 +140,60 @@ pub fn is_internal(name: &str) -> bool {
     name.starts_with(INTERNAL_PREFIX)
 }
 
+/// A file an operating system or an application makes beside the user's
+/// files for its own use: Finder's view settings, Explorer's thumbnail cache
+/// and folder settings, a custom folder icon, a resource fork on a disk that
+/// has no place for one, an office suite's lock file, a temporary file.
+///
+/// One that comes into being here is never sent, and one the server holds
+/// that this device never had is never brought here (`LocalStatus::Ignored`).
+/// Each device makes its own, so sending one only puts one computer's
+/// settings onto every other, and makes a conflict of every pair.
+pub fn is_system_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(lower.as_str(), ".ds_store" | "thumbs.db" | "desktop.ini" | "icon\r")
+        || name.starts_with("~$")
+        || name.starts_with(".~lock")
+        || name.starts_with("._")
+        || lower.ends_with(".tmp")
+}
+
+/// A folder a volume keeps for itself at its root: the macOS event log,
+/// search index, trash and versions store, the Windows recycle bin and
+/// restore data, a freedesktop trash. Seen wherever a disk is the sync root
+/// or is mounted inside it. Kept like [`is_system_file`], with everything in
+/// it.
+pub fn is_system_folder(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        ".fseventsd"
+            | ".spotlight-v100"
+            | ".trashes"
+            | ".temporaryitems"
+            | ".documentrevisions-v100"
+            | "$recycle.bin"
+            | "system volume information"
+            | ".trash"
+    ) || lower.starts_with(".trash-")
+}
+
+/// A path, relative to the sync root, that is a system file or folder or
+/// lies inside a system folder: one a device keeps for itself.
+pub fn is_system_path(path: &str, is_folder: bool) -> bool {
+    let mut parts = path.split('/').filter(|p| !p.is_empty()).peekable();
+    while let Some(part) = parts.next() {
+        let last = parts.peek().is_none();
+        if (!last || is_folder) && is_system_folder(part) {
+            return true;
+        }
+        if last && !is_folder && is_system_file(part) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Resolve a server name to what this filesystem should hold, ignoring
 /// siblings (clash detection needs the sibling set — see [`resolve_siblings`]).
 pub fn to_local_name(remote_name: &str, p: &Personality) -> LocalName {
@@ -849,5 +903,27 @@ mod tests {
         assert_eq!(split_extension(".bashrc"), (".bashrc", None));
         assert_eq!(split_extension("Makefile"), ("Makefile", None));
         assert_eq!(split_extension("trailing."), ("trailing.", None));
+    }
+    #[test]
+    fn system_files_and_folders_are_told_from_the_users() {
+        for name in [".DS_Store", "Thumbs.db", "thumbs.db", "desktop.ini", "Desktop.ini", "Icon\r",
+            "~$port 1.docx", ".~lock.sheet.ods#", "._photo.jpg", "a.tmp", "tmp0001.TMP"]
+        {
+            assert!(is_system_file(name), "{name:?}");
+        }
+        for name in ["Report.docx", "DS_Store", "Icon", "notes.tmp.txt", "shot.psd.tmp1453", "~doc.txt", "a.ds_store"] {
+            assert!(!is_system_file(name), "{name:?}");
+        }
+        for name in [".fseventsd", ".Spotlight-V100", ".Trashes", "$RECYCLE.BIN", "$Recycle.Bin", ".Trash-1000"] {
+            assert!(is_system_folder(name), "{name:?}");
+        }
+        for name in ["Trash", "fseventsd", "Docs.tmp", "Recycle"] {
+            assert!(!is_system_folder(name), "{name:?}");
+        }
+        assert!(is_system_path("Disk/.fseventsd/fseventsd-uuid", false));
+        assert!(is_system_path("Docs/.DS_Store", false));
+        assert!(!is_system_path("Docs.tmp/a.txt", false));
+        assert!(!is_system_path("Docs.tmp", true));
+        assert!(!is_system_path("Thumbs.db", true));
     }
 }

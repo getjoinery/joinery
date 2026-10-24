@@ -221,8 +221,11 @@ pub fn diff(
     };
 
     let mut out = Vec::new();
+    // A system file or folder is each device's own: one made here is never
+    // sent, and one the server holds is never brought here
+    // (`LocalStatus::Ignored`). Neither is a disagreement.
     for (key, entry) in &local.entries {
-        if is_excluded(key) {
+        if is_excluded(key) || jd_vfs::is_system_path(&entry.path, entry.is_dir) {
             continue;
         }
         let Some(members) = remote.get(key) else {
@@ -267,8 +270,10 @@ pub fn diff(
             continue;
         }
         if !local.entries.contains_key(key) {
-            for (_, _, path) in members {
-                out.push(Difference::OnlyRemote { path: path.clone() });
+            for (is_folder, _, path) in members {
+                if !jd_vfs::is_system_path(path, *is_folder) {
+                    out.push(Difference::OnlyRemote { path: path.clone() });
+                }
             }
         }
     }

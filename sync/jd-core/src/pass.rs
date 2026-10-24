@@ -940,6 +940,7 @@ pub fn run_pass(
             continue;
         }};
     }
+    let system_folders = mark_system_files(env)?;
     for mut entry in all_entries(env)? {
         let traced_id = entry.id;
         // A file never uploaded follows its own file: where the scan found it
@@ -1335,6 +1336,22 @@ pub fn run_pass(
             )?;
         }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
+            declined!(traced_id);
+        }
+        // A system file never agreed (`mark_system_files`): nothing is sent
+        // and nothing brought. A remote delete still gets through, and the
+        // record goes with it. Asked of where it stands now as well as of its
+        // mark: a file never sent and renamed to a system name, its move read
+        // into its record above, was marked before the move and would go up
+        // under the new name -- and, agreed, go on syncing.
+        if !entry.remote_deleted
+            && (entry.status == LocalStatus::Ignored
+                || (may_be_ignored(&entry) && is_system_record(&entry, &system_folders)))
+        {
+            if entry.status != LocalStatus::Ignored {
+                entry.status = LocalStatus::Ignored;
+                env.store.put_entry(&entry)?;
+            }
             declined!(traced_id);
         }
         // Wearing a scratch name on the server, with no agreed placement here
@@ -8802,6 +8819,96 @@ pub(crate) fn a_park_refuses(reason: &jd_vfs::UnsyncableReason, name: &str, p: &
         }
         _ => matches!(jd_vfs::to_local_name(name, p), jd_vfs::LocalName::Unsyncable(_)),
     }
+}
+
+/// Mark every record of a system file or folder never agreed
+/// (`LocalStatus::Ignored`), and everything under such a folder; lift the mark
+/// from one that no longer is one -- renamed to an ordinary name, or moved out
+/// of the folder -- so it goes on its way as the file it now is.
+///
+/// Only records on their way somewhere: a file made here and not yet sent, or
+/// one the server holds that was never brought here. One both sides agreed on
+/// keeps syncing, so nothing already on the server is taken from it or from
+/// another device; one held for any other reason keeps that reason.
+///
+/// Records, not a filter on the walk. A temporary file renamed over a
+/// document has to be the record the scan reads as that document's next
+/// version, and a file renamed through a temporary name on its way somewhere
+/// has to be followed there; a walk that did not see them would read both as
+/// a delete.
+fn mark_system_files(env: &ExecEnv) -> Result<SystemFolders, ExecError> {
+    let entries = all_entries(env)?;
+    let folders = system_folders(&entries);
+    for mut entry in entries.iter().cloned() {
+        if !may_be_ignored(&entry) {
+            continue;
+        }
+        let status = match (is_system_record(&entry, &folders), &entry.status) {
+            (true, _) => LocalStatus::Ignored,
+            (false, LocalStatus::Ignored) if entry.id.is_provisional() => {
+                if entry.is_encrypted && env.vault.is_none() {
+                    LocalStatus::PendingKey
+                } else {
+                    LocalStatus::PendingUpload
+                }
+            }
+            (false, LocalStatus::Ignored) => LocalStatus::PendingDownload,
+            (false, _) => continue,
+        };
+        if entry.status != status {
+            entry.status = status;
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(folders)
+}
+
+/// Each folder's parent and name, by id, for asking whether a record lies in
+/// a system folder (`is_system_record`).
+type SystemFolders = HashMap<i64, (Option<i64>, String)>;
+
+fn system_folders(entries: &[Entry]) -> SystemFolders {
+    entries
+        .iter()
+        .filter(|e| e.id.entity_type == EntityType::Folder)
+        .map(|e| (e.id.server_id, (e.remote.parent, e.remote.name.clone())))
+        .collect()
+}
+
+/// A record on its way somewhere and never agreed: the only kind
+/// `mark_system_files` marks or lifts.
+fn may_be_ignored(entry: &Entry) -> bool {
+    entry.synced_placement.is_none()
+        && !entry.remote_deleted
+        && matches!(
+            entry.status,
+            LocalStatus::PendingUpload | LocalStatus::PendingDownload | LocalStatus::Ignored
+        )
+}
+
+/// Is this record, where it stands now, a system file or folder or inside a
+/// system folder?
+fn is_system_record(entry: &Entry, folders: &SystemFolders) -> bool {
+    let own = match entry.id.entity_type {
+        EntityType::File => jd_vfs::is_system_file(&entry.remote.name),
+        EntityType::Folder => jd_vfs::is_system_folder(&entry.remote.name),
+    };
+    if own {
+        return true;
+    }
+    let mut parent = entry.remote.parent;
+    let mut guard = 0;
+    while let Some(id) = parent {
+        guard += 1;
+        let Some((up, name)) = folders.get(&id).filter(|_| guard <= 512) else {
+            return false;
+        };
+        if jd_vfs::is_system_folder(name) {
+            return true;
+        }
+        parent = *up;
+    }
+    false
 }
 
 /// An entry's path relative to the sync root: where it stands on this disk,

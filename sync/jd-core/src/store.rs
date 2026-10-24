@@ -2309,6 +2309,7 @@ fn encode_status(status: &LocalStatus) -> (String, Option<String>) {
         LocalStatus::Conflict => ("conflict".into(), None),
         LocalStatus::PendingKey => ("pending_key".into(), None),
         LocalStatus::OutOfScope => ("out_of_scope".into(), None),
+        LocalStatus::Ignored => ("ignored".into(), None),
         LocalStatus::Unsyncable(reason) => ("unsyncable".into(), Some(encode_reason(reason))),
     }
 }
@@ -2320,6 +2321,7 @@ fn decode_status(status: &str, reason: Option<String>) -> LocalStatus {
         "conflict" => LocalStatus::Conflict,
         "pending_key" => LocalStatus::PendingKey,
         "out_of_scope" => LocalStatus::OutOfScope,
+        "ignored" => LocalStatus::Ignored,
         "unsyncable" => match reason.as_deref().and_then(decode_reason) {
             Some(r) => LocalStatus::Unsyncable(r),
             // A reason this build cannot read. Rather than invent one — the UI
