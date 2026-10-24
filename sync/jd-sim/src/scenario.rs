@@ -2156,9 +2156,24 @@ pub fn assert_converged(world: &World) {
             })
             .filter_map(|e| server_path_of(&entries, e))
             .collect();
+        // A system file or folder never agreed is each device's own
+        // (`LocalStatus::Ignored`): one made here stands only on this disk,
+        // and one the server holds was never brought here. Excused by its
+        // record, on the side it is on, so a system file that WAS agreed is
+        // still held to both.
+        let ignored = |made_here: bool| -> std::collections::HashSet<String> {
+            entries
+                .iter()
+                .filter(|e| e.status == jd_core::model::LocalStatus::Ignored && e.id.is_provisional() == made_here)
+                .filter_map(|e| server_path_of(&entries, e))
+                .collect()
+        };
+        let (ignored_here, ignored_there) = (ignored(true), ignored(false));
+        let disk: BTreeMap<String, Option<String>> =
+            disk.into_iter().filter(|(p, _)| !ignored_here.contains(p)).collect();
         let server: BTreeMap<String, Option<String>> = server
             .iter()
-            .filter(|(p, _)| !held_folders.contains(p))
+            .filter(|(p, _)| !held_folders.contains(p) && !ignored_there.contains(*p))
             .map(|(p, h)| (p.clone(), h.clone()))
             .collect();
 

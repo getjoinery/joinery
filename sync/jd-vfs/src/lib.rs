@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 pub use dirty::{DirtyPath, DirtySet, Hint};
 pub use names::{
-    comparison_key, conflict_copy_name, is_internal, nfc, numbered_name, path_fits,
+    comparison_key, conflict_copy_name, is_internal, is_system_file, is_system_folder, is_system_path, nfc, numbered_name, path_fits,
     resolve_siblings, to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
     land_name, landing_op, LAND_PREFIX,
 };

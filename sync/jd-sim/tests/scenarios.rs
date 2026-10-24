@@ -26405,3 +26405,210 @@ fn a_peers_move_onto_another_disk_inside_the_root_settles_and_says_so() {
     assert_eq!(on_server, vec!["Disk/In/Fold/b.txt", "Disk/In/a.txt"], "nothing doubled or lost: {tree:?}");
     assert_eq!(live(&world), ids, "the server's files were replaced, not kept");
 }
+
+// ---------------------------------------------------------------------------
+// System files
+// ---------------------------------------------------------------------------
+
+/// The names and folders an operating system or an application makes for
+/// itself (traced on the mini: Finder's .DS_Store, an office lock file, a
+/// temporary file and a mounted disk's .fseventsd all reached the server and
+/// the other device). Made here, none is sent and none is said: the device
+/// is up to date, the other device never sees them, and they stay where they
+/// were made. Renamed to an ordinary name, one goes up as the file it now is.
+/// RED with every name sent.
+#[test]
+fn system_files_made_here_stay_here() {
+    let world = World::new(9_940, &["mac", "pc"]);
+    let (mac, pc) = (world.device("mac"), world.device("pc"));
+    let mut committed = Committed::default();
+    mac.fs.user_write("real.txt", b"the user's own file");
+    committed.note("real.txt", b"the user's own file");
+    mac.fs.user_mkdir("Docs");
+    assert!(world.settle().is_some(), "never settled before the system files");
+    let system = [
+        ".DS_Store",
+        "Docs/.DS_Store",
+        "Thumbs.db",
+        "desktop.ini",
+        "Docs/~$port.docx",
+        "a.tmp",
+        ".~lock.sheet.ods#",
+        "._real.txt",
+        ".fseventsd/fseventsd-uuid",
+    ];
+    mac.fs.user_mkdir(".fseventsd");
+    for path in system {
+        mac.fs.user_write(path, b"made by the system");
+    }
+    assert!(world.settle().is_some(), "never settled with the system files");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let names: Vec<String> = world.server.files().into_iter().map(|f| f.name).collect();
+    assert_eq!(names, vec!["real.txt".to_string()], "a system file reached the server");
+    assert_eq!(world.server.folders().iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["Docs"]);
+    assert_eq!(disk_tree(pc).into_keys().collect::<Vec<_>>(), vec!["Docs", "real.txt"]);
+    for path in system {
+        assert!(mac.fs.exists(path), "{path} was taken away: {:?}", mac.fs.all_paths());
+    }
+    let ignored = mac.store.every_entry().unwrap().into_iter().filter(|e| e.status == jd_core::model::LocalStatus::Ignored).count();
+    assert_eq!(ignored, system.len() + 1, "each system file and the folder is a record, ignored");
+    assert!(mac.store.open_issues().unwrap().is_empty(), "{:?}", mac.store.open_issues().unwrap());
+    for _ in 0..3 {
+        let again = world.pass(mac);
+        assert!(again.quiet(), "not quiet with the system files: {:?}", again.exec);
+    }
+
+    // Renamed to ordinary names, a file and the folder go up as what they now are.
+    mac.fs.user_rename("a.tmp", "notes.txt");
+    mac.fs.user_rename(".fseventsd", "Events");
+    committed.note("notes.txt", b"made by the system");
+    committed.note("Events/fseventsd-uuid", b"made by the system");
+    assert!(world.settle().is_some(), "never settled after the renames");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(pc.fs.peek("notes.txt").as_deref(), Some(&b"made by the system"[..]));
+    assert_eq!(pc.fs.peek("Events/fseventsd-uuid").as_deref(), Some(&b"made by the system"[..]));
+}
+
+/// The two ways a temporary name passes through a folder of real files. An
+/// application saving through one (write `tmp0001.tmp`, rename it over the
+/// document) makes a new version of the document and sends no temporary
+/// file; a file renamed through one on its way to a new name stays the same
+/// file on the server. RED with the temporary file sent.
+#[test]
+fn a_save_through_a_temporary_file_sends_only_the_new_version() {
+    let world = World::new(9_941, &["mac", "pc"]);
+    let (mac, pc) = (world.device("mac"), world.device("pc"));
+    let mut committed = Committed::default();
+    mac.fs.user_mkdir("Docs");
+    mac.fs.user_write("Docs/Report.docx", b"report v1");
+    mac.fs.user_write("Docs/swap-a.txt", b"renamed through a temporary name");
+    committed.note("Docs/Report.docx", b"report v1");
+    committed.note("Docs/swap-a.txt", b"renamed through a temporary name");
+    assert!(world.settle().is_some(), "never settled before the save");
+    let id_of = |name: &str| world.server.files().into_iter().find(|f| f.name == name && !f.trashed).map(|f| f.id);
+    let (report, swap) = (id_of("Report.docx").unwrap(), id_of("swap-a.txt").unwrap());
+
+    mac.fs.user_write("Docs/tmp0001.tmp", b"report v2");
+    world.pass(mac);
+    mac.fs.user_rename("Docs/tmp0001.tmp", "Docs/Report.docx");
+    mac.fs.user_rename("Docs/swap-a.txt", "Docs/x.tmp");
+    world.pass(mac);
+    mac.fs.user_rename("Docs/x.tmp", "Docs/swap-b.txt");
+    committed.note("Docs/Report.docx", b"report v2");
+    committed.note("Docs/swap-b.txt", b"renamed through a temporary name");
+    assert!(world.settle().is_some(), "never settled after the save");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let names: Vec<String> = world.server.files().into_iter().map(|f| f.name).collect();
+    assert!(!names.iter().any(|n| n == "tmp0001.tmp"), "the temporary file reached the server: {names:?}");
+    assert_eq!(id_of("Report.docx"), Some(report), "the save made a new file: {:?}", world.server.files());
+    assert_eq!(id_of("swap-b.txt"), Some(swap), "the rename made a new file: {:?}", world.server.files());
+    assert_eq!(pc.fs.peek("Docs/Report.docx").as_deref(), Some(&b"report v2"[..]));
+}
+
+/// A system file the server holds that this device never had -- uploaded
+/// from the web, or by a client that sent them -- is never brought here, and
+/// one standing here under the same name is left alone: no download over it,
+/// no conflict copy. Renamed on the server to an ordinary name, it comes down.
+/// RED with each one brought here.
+#[test]
+fn system_files_the_server_holds_are_never_brought_here() {
+    let world = World::new(9_942, &["mac", "pc"]);
+    let (mac, pc) = (world.device("mac"), world.device("pc"));
+    let mut committed = Committed::default();
+    world.server.seed_file(None, "real.txt", b"an ordinary file");
+    committed.note("real.txt", b"an ordinary file");
+    let theirs = world.server.seed_file(None, ".DS_Store", b"another computer's view settings");
+    let thumbs = world.server.seed_file(None, "Thumbs.db", b"another computer's thumbnails");
+    let events = world.server.seed_folder(None, ".fseventsd");
+    world.server.seed_file(Some(events), "fseventsd-uuid", b"another disk's event log");
+    mac.fs.user_write(".DS_Store", b"this computer's view settings");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(disk_tree(pc).into_keys().collect::<Vec<_>>(), vec!["real.txt"]);
+    assert_eq!(mac.fs.peek(".DS_Store").as_deref(), Some(&b"this computer's view settings"[..]));
+    assert_eq!(disk_tree(mac).into_keys().collect::<Vec<_>>(), vec![".DS_Store", "real.txt"]);
+    for d in [mac, pc] {
+        assert!(d.store.open_issues().unwrap().is_empty(), "{}: {:?}", d.name, d.store.open_issues().unwrap());
+    }
+    assert_eq!(world.server.files().iter().filter(|f| !f.trashed).count(), 4, "{:?}", world.server.files());
+
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": thumbs, "name": "thumbnails.db" }))
+        .unwrap();
+    committed.note("thumbnails.db", b"another computer's thumbnails");
+    assert!(world.settle().is_some(), "never settled after the rename");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(pc.fs.peek("thumbnails.db").as_deref(), Some(&b"another computer's thumbnails"[..]));
+
+    // The server's copy thrown away: the record goes, and the one standing
+    // here, this computer's own, stays.
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": theirs }))
+        .unwrap();
+    assert!(world.settle().is_some(), "never settled after the trash");
+    assert_converged(&world);
+    assert_eq!(mac.fs.peek(".DS_Store").as_deref(), Some(&b"this computer's view settings"[..]));
+    assert!(
+        !mac.store.every_entry().unwrap().iter().any(|e| e.id.server_id == theirs),
+        "the record of the server's copy stayed"
+    );
+}
+
+/// A system file or folder removed here takes its record with it: nothing
+/// is left claiming a file that is not there, and the device stays quiet.
+#[test]
+fn a_system_file_removed_here_leaves_no_record() {
+    let world = World::new(9_943, &["mac"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("real.txt", b"the user's own file");
+    mac.fs.user_write(".DS_Store", b"view settings");
+    mac.fs.user_mkdir(".fseventsd");
+    mac.fs.user_write(".fseventsd/fseventsd-uuid", b"event log");
+    assert!(world.settle().is_some(), "never settled");
+    let ignored = |d: &jd_sim::Device| {
+        d.store.every_entry().unwrap().into_iter().filter(|e| e.status == jd_core::model::LocalStatus::Ignored).count()
+    };
+    assert_eq!(ignored(mac), 3);
+    mac.fs.user_remove(".DS_Store");
+    mac.fs.user_remove(".fseventsd");
+    assert!(world.settle().is_some(), "never settled after the removal");
+    assert_eq!(ignored(mac), 0, "{:?}", mac.store.every_entry().unwrap());
+    assert_converged(&world);
+    for _ in 0..3 {
+        assert!(world.pass(mac).quiet());
+    }
+}
+
+/// A file never sent -- its upload refused by a full Drive -- renamed to a
+/// temporary name before it goes is not sent under that name: renamed in the
+/// pass that would send it, it was marked under its old name and went up as
+/// x.tmp, and then synced for good as a file both sides agreed on. RED with
+/// the mark read only from before the move.
+#[test]
+fn a_file_never_sent_and_renamed_to_a_temporary_name_is_not_sent() {
+    let world = World::new(9_944, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("small.txt", b"fits");
+    assert!(world.settle().is_some());
+    world.server.set_quota_bytes(Some(64));
+    laptop.fs.user_write("notes.bin", &[7u8; 4096]);
+    for _ in 0..3 {
+        world.pass(laptop);
+    }
+    assert!(!world.server.tree().contains_key("notes.bin"), "{:?}", world.server.tree());
+    laptop.fs.user_rename("notes.bin", "x.tmp");
+    world.server.set_quota_bytes(None);
+    world.clock.advance_secs(61 * 60);
+    assert!(world.settle().is_some(), "never settled after the rename");
+    let names: Vec<String> = world.server.files().into_iter().map(|f| f.name).collect();
+    assert_eq!(names, vec!["small.txt".to_string()], "the file went up under a temporary name");
+    assert!(laptop.fs.exists("x.tmp"));
+    assert_converged(&world);
+}

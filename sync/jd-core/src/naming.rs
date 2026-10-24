@@ -352,7 +352,13 @@ pub fn apply_naming(
         // their names (`Entry::is_tied_here`), and a folder the server makes
         // under one is that name's duplicate here, never let into the
         // directory. They are never judged themselves (below).
-        if entry.remote_deleted || (entry.status == LocalStatus::OutOfScope && !holds(&gone, &entry)) {
+        // A system file only the server holds (`LocalStatus::Ignored`) holds
+        // no slot either, and is never judged: refused here, it would raise
+        // an issue about a file nobody wanted on this computer.
+        if entry.remote_deleted
+            || (entry.status == LocalStatus::OutOfScope && !holds(&gone, &entry))
+            || (entry.status == LocalStatus::Ignored && !entry.holds_a_local_file())
+        {
             continue;
         }
         // Nor is anything under a vault parked on a weak volume judged: it
@@ -937,7 +943,10 @@ fn judge_destinations(
         .filter_map(|e| e.replaces)
         .collect();
     for entry in all {
-        if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+        if entry.status == LocalStatus::OutOfScope
+            || entry.remote_deleted
+            || (entry.status == LocalStatus::Ignored && !entry.holds_a_local_file())
+        {
             continue;
         }
         if replaced.contains(&entry.id) {

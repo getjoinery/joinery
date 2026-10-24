@@ -792,6 +792,33 @@ so the pair resolves itself. What survives is the real identity, with whatever
 was last agreed about it left intact, so an ordinary edit stays an edit instead
 of becoming a conflicted copy.
 
+### System files
+
+Some names are made by an operating system or an application for its own use,
+beside the user's files: `.DS_Store`, `Thumbs.db`, `desktop.ini`, `Icon\r`,
+`._*` resource forks, `~$*` and `.~lock*` lock files, and anything ending in
+`.tmp` (`jd_vfs::is_system_file`). A volume keeps folders of its own at its
+root, seen wherever a disk is the sync root or is mounted inside it:
+`.fseventsd`, `.Spotlight-V100`, `.Trashes`, `.TemporaryItems`,
+`.DocumentRevisions-V100`, `$RECYCLE.BIN`, `System Volume Information`, and the
+freedesktop `.Trash` and `.Trash-*` (`jd_vfs::is_system_folder`, everything
+inside one included).
+
+One that was never agreed is `ignored` (`LocalStatus::Ignored`): made here, it
+is never sent, and held by the server and never had here, it is never brought
+here. Each device keeps its own, so nothing is said about them, and a server
+copy beside a device's own under the same name is no conflict. `ignored` counts
+as settled. The pass marks them before the round and the round skips them
+(`pass::mark_system_files`); a remote delete still reaches the record.
+
+They are records, not a filter on the walk. A temporary file renamed over a
+document is still the record the scan reads as that document's next version,
+so the save sends one new version of the document and never the temporary
+file. A file renamed through a temporary name on its way to a new one is still
+followed there. Renamed to an ordinary name, or moved out of a system folder,
+the mark lifts and the file or folder goes on as the new item it now is. A
+system file both sides already agreed on keeps syncing like any other.
+
 ### Encrypted files and folders
 
 This section is about **Fortress** folders — the client-custody level, where the
@@ -1261,12 +1288,12 @@ no bytes.
 ## Health, and never stopping silently
 
 Every entry is always in exactly one visible state — `synced`, `pending_*`,
-`conflict`, `unsyncable`, `pending_key`, or `out_of_scope` — and those reduce to
-one indicator:
+`conflict`, `unsyncable`, `pending_key`, `out_of_scope`, or `ignored` — and
+those reduce to one indicator:
 
 | Indicator | Meaning |
 |---|---|
-| **Green** | Converged: everything is in agreement, deliberately not synced here, or waiting on a key that only arrives from elsewhere. |
+| **Green** | Converged: everything is in agreement, deliberately not synced here, a system file kept where it was made, or waiting on a key that only arrives from elsewhere. |
 | **Working** | Transfers in flight or queued. |
 | **Attention** | *n* things need a person: name clashes, conflicts, a full Drive, ciphertext that failed to authenticate. |
 | **Stopped** | Cannot sync at all: no server, dead credentials, the folder is missing, or paused. |

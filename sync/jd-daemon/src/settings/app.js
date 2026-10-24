@@ -27,6 +27,7 @@
     synced: '',
     pending: 'syncing',
     not_here: 'not on this computer',
+    system: 'system folder, not synced',
     waiting_for_key: 'waiting for a key',
     unsyncable: 'cannot be kept here',
     conflict: 'conflict'

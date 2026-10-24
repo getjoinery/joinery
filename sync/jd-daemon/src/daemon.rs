@@ -1154,6 +1154,7 @@ pub fn folder_state(status: &jd_core::model::LocalStatus) -> &'static str {
     match status {
         LocalStatus::Synced => "synced",
         LocalStatus::OutOfScope => "not_here",
+        LocalStatus::Ignored => "system",
         LocalStatus::PendingKey => "waiting_for_key",
         LocalStatus::Unsyncable(_) => "unsyncable",
         LocalStatus::Conflict => "conflict",
