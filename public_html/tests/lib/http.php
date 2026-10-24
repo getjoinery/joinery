@@ -183,6 +183,10 @@ function harness_request($method, $url, array $opts = array()) {
 	$host = parse_url($full, PHP_URL_HOST);
 
 	$headers = isset($opts['headers']) ? $opts['headers'] : array();
+	// Marks the request as a test's, so an error it causes is not reported
+	// to the upgrade source (ProblemReport::fromTest()). Honoured only from
+	// this machine, which is where a pinned request comes from.
+	$headers[] = 'X-Joinery-Test: 1';
 	$accept = array_key_exists('accept', $opts) ? $opts['accept'] : 'application/json';
 	if ($accept !== null) {
 		$headers[] = 'Accept: ' . $accept;

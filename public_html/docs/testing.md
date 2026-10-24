@@ -626,7 +626,9 @@ harness (it pulls the harness in) whenever a test makes real requests. There is
 no per-suite curl to copy, and nothing to configure: the base URL comes from the
 `webDir` setting, and requests to that site are automatically pinned to the
 machine's own origin IP so they bypass Cloudflare and keep a stable
-`REMOTE_ADDR`.
+`REMOTE_ADDR`. Every request carries `X-Joinery-Test: 1`, so an error it causes
+is recorded but never reported to the upgrade source automatically
+(see [Error Handling](error_handling.md) § Automatic reports).
 
 ```php
 require_once(__DIR__ . '/../lib/http.php');

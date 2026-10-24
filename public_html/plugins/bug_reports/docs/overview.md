@@ -51,14 +51,15 @@ In order, `BugReportIntake::receive()`:
    was thrown in, and the files and functions of its stack frames, line numbers dropped).
    An automatic report whose fingerprint, host and version match a stored automatic
    report is not stored again: its `occurrences` (1 to 1,000,000; 1 when missing) are
-   added to that report in one UPDATE, last-seen moves, a closed report reopens as `new`,
-   and the answer is that report's id. No email. A member's report is always stored.
+   added to that report in one UPDATE, last-seen moves, a closed report reopens as `new`
+   (a muted one stays muted), and the answer is that report's id. No email. A member's
+   report is always stored. A new automatic report of a muted fault is stored `muted`.
 5. **Image.** Kept privately (`BugReportIntake::FILE_SOURCE`, declared under `fileSources` in `plugin.json`) when it passes the size
    and type checks. A refused image never refuses the report; the row says why it was
    not kept.
-6. **Save and notify.** The row is saved as `new`. When `bug_reports_notify_email` is
-   set, one email goes out for a fault not reported in the last day, carrying only the
-   host, version, error kind and place.
+6. **Save and notify.** The row is saved as `new`, or `muted` as above. When
+   `bug_reports_notify_email` is set, one email goes out for a fault not reported in the
+   last day and not muted, carrying only the host, version, error kind and place.
 
 Everything in a report came from another machine. It is stored as text, escaped on
 display, and never executed, resolved or used as a path. The claimed host is used for
@@ -72,10 +73,15 @@ the callback only.
   open, the newest version seen, and when first and last seen. **Every report** lists
   them singly with their counts and filters by host, version, verdict, status and group. **Mark all seen** clears the
   notice.
+- **Mute** on a group, for a fault the operator has decided to live with: every report
+  of it is marked `muted`, from every site and version. It keeps counting, never
+  reopens, sends no email, and sorts last; the retention sweep keeps it, since only
+  closed reports are deleted. A member's own report of a muted fault still arrives as
+  `new`. **Unmute** marks its muted reports `seen`, and the next one arrives `new`.
 - **One report** (`admin_bug_report`). Who sent it (a member, or the site
   automatically), times seen and when last, the member's words, the image, the verdict
-  and its reason, and every bundle section. **Mark seen**, **Mark closed** and **Reopen**
-  are POST buttons.
+  and its reason, and every bundle section. **Mark seen**, **Mark closed**, **Reopen**
+  and, on a muted report, **Unmute this error** are POST buttons.
 
 A notice above every admin page says how many reports are `new`, for admins at
 permission 9.
@@ -85,7 +91,7 @@ permission 9.
 `rbr_received_bug_reports` (`ReceivedBugReport`): received time, sender address (the one
 personal datum kept, for abuse handling), claimed host and version, verdict and reason,
 error hash, fingerprint, kind, place and message, comment, bundle, image, whether it
-came automatically, times seen and when last, and status (`new | seen | closed`) with
+came automatically, times seen and when last, and status (`new | seen | closed | muted`) with
 who closed it and when.
 
 Closed reports older than `bug_reports_retention_days` (default 365) are deleted with

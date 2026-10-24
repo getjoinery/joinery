@@ -2,9 +2,11 @@
 /**
  * Admin: one received bug report — what the member wrote, the image, the
  * callback's verdict and reason, and every section of the bundle. Mark seen,
- * Mark closed and Reopen are POST buttons. Everything shown came from another
+ * Mark closed and Reopen are POST buttons; a muted report offers Unmute, which
+ * unmutes its whole fault. Everything shown came from another
  * machine and is escaped.
  *
+ * @version 1.2.0 - muted reports: Unmute
  * @version 1.1.0 - automatic reports: sender, count, last seen; group link by fingerprint
  * @version 1.0.0
  */
@@ -30,6 +32,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 			break;
 		case 'reopen':
 			$report->reopen();
+			break;
+		case 'unmute':
+			ReceivedBugReport::unmute_group($report->group_key());
 			break;
 	}
 	header('Location: /plugins/bug_reports/admin/admin_bug_report?rbr_received_bug_report_id=' . (int)$report->key);
@@ -78,7 +83,9 @@ echo '</tbody></table><p>';
 if ($report->get('rbr_status') === ReceivedBugReport::STATUS_NEW) {
 	echo AdminPage::action_button('Mark seen', $base, array('hidden' => $hidden + array('action' => 'seen'))) . ' ';
 }
-if ($report->get('rbr_status') === ReceivedBugReport::STATUS_CLOSED) {
+if ($report->get('rbr_status') === ReceivedBugReport::STATUS_MUTED) {
+	echo AdminPage::action_button('Unmute this error', $base, array('hidden' => $hidden + array('action' => 'unmute')));
+} elseif ($report->get('rbr_status') === ReceivedBugReport::STATUS_CLOSED) {
 	echo AdminPage::action_button('Reopen', $base, array('hidden' => $hidden + array('action' => 'reopen')));
 } else {
 	echo AdminPage::action_button('Mark closed', $base, array('hidden' => $hidden + array('action' => 'close')));

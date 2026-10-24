@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.2.0 - an error a test caused is never reported automatically (fromTest())
  * @version 1.1.1 - no save() override: an update writes only the columns it set, so a recurrence counted meanwhile is never put back
  * @version 1.1.0 - automatic reports: noteError(), counts, and the count update on send
  * @version 1.0.0
@@ -67,6 +68,12 @@ class ProblemReport extends SystemBase {
 
 	/** @var bool Set while noteError() runs, so an error inside it is not noted in turn. */
 	private static $noting = false;
+
+	/** The header the test harness sends on every request it makes (harness_request()), as PHP presents it. */
+	const TEST_HEADER = 'HTTP_X_JOINERY_TEST';
+
+	/** @var bool Note errors even under the test harness. For the suite that tests noteError() itself. */
+	private static $note_test_errors = false;
 
 	/** Largest image accepted, in bytes. */
 	const IMAGE_MAX_BYTES = 5242880;
@@ -344,6 +351,49 @@ class ProblemReport extends SystemBase {
 	}
 
 	/**
+	 * Whether the failing code ran under a test: the test harness is loaded in
+	 * this process (a suite, or the deploy tier during an upgrade), or the
+	 * request carries the harness's header and came from this machine (the
+	 * loopback or the server's own address), which is where the harness sends
+	 * from. A test's error is the test's to report: it fails the test.
+	 */
+	public static function fromTest(): bool {
+		return defined('JOINERY_HARNESS_LOADED') || self::requestMarkedAsTest($_SERVER);
+	}
+
+	/** Whether a request ($_SERVER's shape) carries the harness's header and came from this machine. */
+	public static function requestMarkedAsTest(array $server): bool {
+		if (empty($server[self::TEST_HEADER])) {
+			return false;
+		}
+		$remote = self::packedAddress((string)($server['REMOTE_ADDR'] ?? ''));
+		if ($remote === null) {
+			return false;
+		}
+		if ((strlen($remote) === 4 && $remote[0] === "\x7f") || $remote === inet_pton('::1')) {
+			return true;
+		}
+		return $remote === self::packedAddress((string)($server['SERVER_ADDR'] ?? ''));
+	}
+
+	/** An address as inet_pton() packs it, an IPv4 address mapped into IPv6 as the IPv4 one; NULL when it is not an address. */
+	private static function packedAddress(string $ip): ?string {
+		$packed = @inet_pton($ip);
+		if ($packed === false) {
+			return null;
+		}
+		if (strlen($packed) === 16 && substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+			return substr($packed, 12);
+		}
+		return $packed;
+	}
+
+	/** Note errors even under the test harness (TRUE), or not (FALSE, the default). For tests. */
+	public static function noteTestErrors(bool $on): void {
+		self::$note_test_errors = $on;
+	}
+
+	/**
 	 * An error was recorded as row $error_id: count it toward its automatic
 	 * report, or start one. Runs on the failing request, so it sends nothing
 	 * (the hourly task does), throws nothing, and does nothing unless both of
@@ -357,7 +407,8 @@ class ProblemReport extends SystemBase {
 		}
 		self::$noting = true;
 		try {
-			if (!self::autoSendEnabled() || !self::sendingEnabled() || !self::isUnexpected($e)) {
+			if (!self::autoSendEnabled() || !self::sendingEnabled() || !self::isUnexpected($e)
+					|| (self::fromTest() && !self::$note_test_errors)) {
 				return;
 			}
 			$row = new GeneralError($error_id, TRUE);

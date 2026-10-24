@@ -24,6 +24,16 @@
  *                     (refused, timed out, private address, or no header —
  *                     a site behind an IP allowlist lands here too)
  *
+ * Statuses:
+ *   new     not opened yet; counted in the admin notice
+ *   seen    opened
+ *   closed  dealt with; reopens when the same fault recurs, and is deleted by
+ *           the retention sweep
+ *   muted   a fault the operator chose not to hear about (muteGroup()): every
+ *           report of it, from any site or version, keeps counting but never
+ *           reopens or sends email, and the retention sweep keeps it
+ *
+ * @version 1.3.0 - muted: a fault can be muted across every site and version
  * @version 1.2.0 - the admin notice yields to a management node's incident line, which counts new reports
  *                  for the superadmins who see it (incident_triage.md Q2)
  * @version 1.1.0 - fingerprint grouping; automatic reports and their counts
@@ -44,6 +54,7 @@ class ReceivedBugReport extends SystemBase {
 	const STATUS_NEW    = 'new';
 	const STATUS_SEEN   = 'seen';
 	const STATUS_CLOSED = 'closed';
+	const STATUS_MUTED  = 'muted';
 
 	public static $field_specifications = array(
 		'rbr_received_bug_report_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
@@ -170,6 +181,47 @@ class ReceivedBugReport extends SystemBase {
 	/** The group key: the fingerprint, else the Part 1 hash, else '' (no recorded error). */
 	const GROUP_KEY = "COALESCE(rbr_fingerprint, rbr_error_hash, '')";
 
+	/** Whether $group is a group key a fault can be muted by: a fingerprint or a hash, never ''. */
+	public static function is_group_key(string $group): bool {
+		return (bool)preg_match('/^[0-9a-f]{32}$/', $group);
+	}
+
+	/** Whether the fault with this group key is muted. */
+	public static function is_muted(string $group): bool {
+		if (!self::is_group_key($group)) {
+			return false;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT 1 FROM rbr_received_bug_reports WHERE " . self::GROUP_KEY . " = ? AND rbr_status = 'muted' LIMIT 1");
+		$stmt->execute(array($group));
+		return $stmt->fetchColumn() !== false;
+	}
+
+	/** Mute every report of this fault. How many. */
+	public static function mute_group(string $group): int {
+		if (!self::is_group_key($group)) {
+			return 0;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			"UPDATE rbr_received_bug_reports
+			    SET rbr_status = 'muted', rbr_closed_usr_user_id = NULL, rbr_closed_time = NULL
+			  WHERE " . self::GROUP_KEY . " = ?");
+		$stmt->execute(array($group));
+		return $stmt->rowCount();
+	}
+
+	/** Unmute this fault: its reports become seen, and the next one is new again. How many. */
+	public static function unmute_group(string $group): int {
+		if (!self::is_group_key($group)) {
+			return 0;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			"UPDATE rbr_received_bug_reports SET rbr_status = 'seen'
+			  WHERE " . self::GROUP_KEY . " = ? AND rbr_status = 'muted'");
+		$stmt->execute(array($group));
+		return $stmt->rowCount();
+	}
+
 	/** This report's group key. */
 	public function group_key(): string {
 		return (string)($this->get('rbr_fingerprint') ?: ($this->get('rbr_error_hash') ?: ''));
@@ -178,7 +230,8 @@ class ReceivedBugReport extends SystemBase {
 	/**
 	 * The same fault grouped across reports: one row per group key, with how
 	 * many sites and reports, how many times it happened, the newest version
-	 * seen, the first and last time, and how many are still open.
+	 * seen, the first and last time, how many are still open, and whether it
+	 * is muted. Muted faults sort last.
 	 */
 	public static function groups(int $limit = 100): array {
 		$db = DbConnector::get_instance()->get_db_link();
@@ -190,13 +243,14 @@ class ReceivedBugReport extends SystemBase {
 			        COUNT(DISTINCT rbr_claimed_host) AS sites,
 			        COUNT(*) AS reports,
 			        SUM(rbr_occurrences) AS occurrences,
-			        SUM(CASE WHEN rbr_status <> 'closed' THEN 1 ELSE 0 END) AS open,
+			        SUM(CASE WHEN rbr_status IN ('new', 'seen') THEN 1 ELSE 0 END) AS open,
+			        BOOL_OR(rbr_status = 'muted') AS muted,
 			        MAX(rbr_claimed_version) AS newest_version,
 			        MIN(rbr_received_time) AS first_time,
 			        MAX(COALESCE(rbr_last_seen_time, rbr_received_time)) AS last_time
 			   FROM rbr_received_bug_reports
 			  GROUP BY " . self::GROUP_KEY . "
-			  ORDER BY SUM(CASE WHEN rbr_status <> 'closed' THEN 1 ELSE 0 END) > 0 DESC, MAX(COALESCE(rbr_last_seen_time, rbr_received_time)) DESC
+			  ORDER BY BOOL_OR(rbr_status = 'muted') ASC, SUM(CASE WHEN rbr_status IN ('new', 'seen') THEN 1 ELSE 0 END) > 0 DESC, MAX(COALESCE(rbr_last_seen_time, rbr_received_time)) DESC
 			  LIMIT :limit");
 		$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 		$stmt->execute();
@@ -244,7 +298,7 @@ class MultiReceivedBugReport extends SystemMultiBase {
 			$filters['rbr_status'] = array($this->options['status'], PDO::PARAM_STR);
 		}
 		if (!empty($this->options['open'])) {
-			$filters['rbr_status'] = "<> 'closed'";
+			$filters['rbr_status'] = "IN ('new', 'seen')";
 		}
 		if (isset($this->options['group'])) {
 			// A group key is an md5, or '' for reports with no recorded error.
