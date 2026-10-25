@@ -21,10 +21,12 @@
  *  - the address restriction refuses a malformed entry at save, naming it,
  *    and matches as addresses and prefixes of either family
  *    (ApiAuth::restrictionAllows);
- *  - a user's allowed sign-in addresses refuse a malformed entry the same way.
+ *  - a user's allowed sign-in addresses refuse a malformed entry the same way;
+ *  - the page is level 10: a permission-8 admin is refused.
  *
  * Run: php tests/run.php db --filter=api_key_admin
  *
+ * @version 1.2 - the key page is level 10 (B16); keys are made by a 10
  * @version 1.1
  */
 
@@ -69,8 +71,19 @@ try {
 	check(count($above_8) === 0 || count(array_intersect($above_8, array_keys($offered_to_10))) === count($above_8),
 		'A permission-10 admin is offered them');
 
+	section('Only a level 10 opens the page');
+	// Keys are 10 to read and change (spec declared_permissions 3.1, B16).
+	$sign_in(make_user('KeyAdmin8', 8));
+	$refused = false;
+	try {
+		harness_call_logic('adm/logic/admin_api_key_edit_logic.php', 'admin_api_key_edit_logic', array(), 'GET');
+	} catch (SystemAuthenticationError $e) {
+		$refused = true;
+	}
+	check($refused, 'A permission-8 admin is refused');
+
 	section('Making a scoped key');
-	$admin = make_user('KeyAdmin', 8);
+	$admin = make_user('KeyAdmin', 10);
 	$sign_in($admin);
 	$result = harness_call_logic('adm/logic/admin_api_key_edit_logic.php', 'admin_api_key_edit_logic', array(
 		'apk_name'          => 'HarnessTest scoped',

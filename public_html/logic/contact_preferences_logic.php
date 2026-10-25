@@ -12,11 +12,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$session = SessionControl::get_instance();
 
-	if($input['hash']){
-		$user = new User($input['user'], TRUE);
+	if(!empty($input['hash'])){
+		$user_id = intval($input['user'] ?? 0);
+		$user = $user_id > 0 && User::check_if_exists($user_id) ? new User($user_id, TRUE) : null;
 
-		if($input['hash'] !== $user->get('usr_authhash')){
-			return LogicResult::error("Users don't match.  You cannot edit someone else's info.");
+		$stored = $user ? (string)$user->get('usr_authhash') : '';
+		if($stored === '' || !hash_equals($stored, (string)$input['hash'])){
+			return LogicResult::error('This link no longer works. Sign in to change which emails you get.');
 		}
 	}
 	else{

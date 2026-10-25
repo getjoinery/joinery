@@ -1820,3 +1820,12 @@
 	$migration['migration_file'] = 'subscription_end_for_period_end_cancels.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The contact-preferences link token was a digest of the user id and a salt in
+	// the code, so any user's link could be worked out. Every user gets a random one.
+	$migration = array();
+	$migration['database_version'] = '222';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'user_authhash_random.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

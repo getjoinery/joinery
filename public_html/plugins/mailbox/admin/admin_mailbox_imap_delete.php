@@ -1,9 +1,11 @@
 <?php
 /**
  * IMAP-feed delete choice — Keep (materialize local) vs Remove (delete rows).
- * Shown only when the feed has reference-backed messages that would otherwise be
- * stranded (specs/mailbox_data_loss_fixes.md, Fix 8). FormWriter only.
+ * Reached when the feed has reference-backed messages that would otherwise be
+ * stranded (specs/mailbox_data_loss_fixes.md, Fix 8). If none are left by the time
+ * it opens, it asks a plain yes/no. FormWriter only.
  *
+ * @version 1.1 - a plain confirm when no mirrored messages are left
  * @version 1.0
  */
 
@@ -39,22 +41,27 @@ if (!empty($cascade_alias_id)) {
 	$formwriter->hiddeninput('also_permadelete_alias_id', '', array('value' => (string)$cascade_alias_id));
 }
 
-// The choice. Keep is the default; the connectable state is fed to helptext so the
-// operator knows up front whether Keep can run.
-$keep_help = $connectable
-	? 'Copy each message into this system (attachments become local files), then remove the feed.'
-	: 'Unavailable — this account is not connected. Connect it first, or choose Remove.';
+if ($ref_count === 0) {
+	echo '<p>No message fetches its attachments from this account, so nothing is lost. Remove the feed?</p>';
+	$formwriter->submitbutton('btn_submit', 'Remove feed');
+} else {
+	// The choice. Keep is the default; the connectable state is fed to helptext so the
+	// operator knows up front whether Keep can run.
+	$keep_help = $connectable
+		? 'Copy each message into this system (attachments become local files), then remove the feed.'
+		: 'Unavailable — this account is not connected. Connect it first, or choose Remove.';
 
-$formwriter->radioinput('delete_mode', $ref_count . ' message(s) still fetch their attachments from this account', array(
-	'options' => array(
-		'keep'   => 'Keep them — copy the mail into this system',
-		'remove' => 'Remove them — delete the mirrored messages',
-	),
-	'value'   => 'keep',
-	'helptext' => $keep_help . ' Remove deletes the mirrored messages here; the mail stays on the source server.',
-));
+	$formwriter->radioinput('delete_mode', $ref_count . ' message(s) still fetch their attachments from this account', array(
+		'options' => array(
+			'keep'   => 'Keep them — copy the mail into this system',
+			'remove' => 'Remove them — delete the mirrored messages',
+		),
+		'value'   => 'keep',
+		'helptext' => $keep_help . ' Remove deletes the mirrored messages here; the mail stays on the source server.',
+	));
 
-$formwriter->submitbutton('btn_submit', 'Continue');
+	$formwriter->submitbutton('btn_submit', 'Continue');
+}
 echo ' <a class="btn btn-outline-secondary" href="' . htmlspecialchars($accounts_url) . '">Cancel</a>';
 
 echo $formwriter->end_form();

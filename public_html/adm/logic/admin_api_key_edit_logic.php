@@ -19,7 +19,7 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	$session->check_permission(10); // API keys and webhook signing secrets are keys: 10 to read and change
 	$settings = Globalvars::get_instance();
 
 	if (isset($input['edit_primary_key_value'])) {

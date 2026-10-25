@@ -27,6 +27,12 @@ function admin_users_edit_logic(array $input): LogicResult {
 		return LogicResult::error('User ID is required for editing');
 	}
 
+	// Only a user above this one's level may change them (10 excepted): the edit
+	// page holds their email, allowed IPs and second factor.
+	if ($user->key) {
+		$user->assert_can_write($session);
+	}
+
 	// Load mailing lists (needed for both display and processing)
 	$search_criteria = array('deleted' => false, 'active' => true);
 	$mailing_lists = new MultiMailingList(

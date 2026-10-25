@@ -7,6 +7,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_user_logic — the user detail page.
  *
+ * @version 1.5 - Undelete is a POST action here that clears the delete time; soft delete and undelete need 8
  * @version 1.4 - Resend activation email and Activate User are POST actions here (resend_activation, activate),
  *   not links to pages that sent mail or activated on GET
  * @version 1.3 - the Security card carries no mail fact: no mail protection level or
@@ -64,13 +65,15 @@ function admin_user_logic(array $input): LogicResult {
 	$action = $input['action'] ?? $input['action'] ?? null;
 
 	// Delete and undelete are buttons (POST): a link is a GET any site can make
-	// the browser follow.
+	// the browser follow. Both need 8, the level the menu offers them at.
 	if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'delete'){
+		$session->check_permission(8);
 		$user->assert_can_write($session);
 		$user->soft_delete();
 		return LogicResult::redirect('/admin/admin_users');
 	}
 	else if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'undelete'){
+		$session->check_permission(8);
 		$user->assert_can_write($session);
 		$user->undelete();
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
@@ -92,6 +95,7 @@ function admin_user_logic(array $input): LogicResult {
 		}
 		else if($input['action'] == 'activate'){
 			$session->check_permission(9);
+			$user->assert_can_write($session);
 			$act_code = Activation::getTempCode($user->key, '30 day', 2, NULL, NULL);
 			if (Activation::ActivateUser($act_code)) {
 				admin_user_say($session, 'User activated.', true);
@@ -245,8 +249,8 @@ function admin_user_logic(array $input): LogicResult {
 			}
 		}
 	}
-	else {
-		$options['altlinks']['Undelete'] = '/admin/admin_users_undelete?usr_user_id='.$user->key;
+	else if($_SESSION['permission'] > 7){
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'undelete', 'usr_user_id' => $user->key));
 	}
 	if ($_SESSION['permission'] == 10) {
 		$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;

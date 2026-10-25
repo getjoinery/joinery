@@ -160,14 +160,16 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_date_of_birth' => array('type'=>'date'),
 	    'usr_gender' => array('type'=>'varchar(30)'),
 	    'usr_profile_visibility' => array('type'=>'varchar(20)', 'default'=>'members_only'),
-	    'usr_totp_secret' => array('type'=>'varchar(255)'),
+	    // A SecretBox blob (TOTP_SECRET_LOCATOR), never plain text: totp_secret() opens it.
+	    'usr_totp_secret' => array('type'=>'text'),
 	    'usr_totp_backup_codes' => array('type'=>'jsonb'),
 	    'usr_totp_enabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_totp_last_used_step' => array('type'=>'int8'),
 	    // Signs trusted-device cookies (sf_trusted) for ANY second-factor method.
 	    // Minted lazily when the first cookie is issued; rotating it is how every
 	    // trusted device is revoked at once (specs/second_factor_ux_coherence.md).
-	    'usr_second_factor_hmac_key' => array('type'=>'varchar(128)'),
+	    // A SecretBox blob (HMAC_KEY_LOCATOR): second_factor_hmac_key() opens it.
+	    'usr_second_factor_hmac_key' => array('type'=>'text'),
 	    // 2FA cadence (specs/mailbox_security_levels.md § 5.2): 'every_login' asks
 	    // the second factor on each password sign-in; 'sensitive_only' signs in
 	    // password-only and defers the factor to sensitive actions (step-up).
@@ -814,7 +816,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	 * @param string $secret Base32-encoded TOTP secret (already validated against a TOTP code)
 	 */
 	function enable_totp($secret) {
-		$this->set('usr_totp_secret', $secret);
+		$this->set('usr_totp_secret', (new SecretBox())->seal(self::TOTP_SECRET_LOCATOR, (string)$secret));
 		$this->set('usr_totp_enabled_time', gmdate('Y-m-d H:i:s'));
 		$this->set('usr_totp_last_used_step', null);
 		$this->save();
@@ -828,8 +830,44 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	 * revocation). The factors themselves are untouched.
 	 */
 	function rotate_second_factor_hmac_key() {
-		$this->set('usr_second_factor_hmac_key', bin2hex(random_bytes(64)));
+		$this->set('usr_second_factor_hmac_key', self::new_sealed_hmac_key());
 		$this->save();
+	}
+
+	/** A fresh contact-preferences link token: 128 random bits as 32 hex characters. */
+	public static function new_authhash(): string {
+		return bin2hex(random_bytes(16));
+	}
+
+	/** Where the two second-factor secrets live, as declared in settings.json sealed_secrets. */
+	const TOTP_SECRET_LOCATOR = 'usr_users.usr_totp_secret';
+	const HMAC_KEY_LOCATOR = 'usr_users.usr_second_factor_hmac_key';
+
+	/** A fresh trusted-device signing key, sealed for storage. */
+	private static function new_sealed_hmac_key(): string {
+		return (new SecretBox())->seal(self::HMAC_KEY_LOCATOR, bin2hex(random_bytes(64)));
+	}
+
+	/**
+	 * A stored second-factor secret, opened. Null when none is stored or it can no
+	 * longer be opened (the database moved to a site with another secret_box_key);
+	 * the caller treats that as not set. A value from before these were sealed reads
+	 * as itself until the reconciler's next cold pass seals it.
+	 */
+	private function open_secret_column(string $column): ?string {
+		$opened = (new SecretBox())->open($this->get($column));
+		return in_array($opened['state'], array(SecretBox::OPEN_OK, SecretBox::OPEN_PLAINTEXT), true)
+			&& (string)$opened['value'] !== '' ? (string)$opened['value'] : null;
+	}
+
+	/** The TOTP shared secret (Base32), or null. */
+	function totp_secret(): ?string {
+		return $this->open_secret_column('usr_totp_secret');
+	}
+
+	/** The key that signs this user's trusted-device cookies, or null until the first trust grant. */
+	function second_factor_hmac_key(): ?string {
+		return $this->open_secret_column('usr_second_factor_hmac_key');
 	}
 
 	/**
@@ -842,7 +880,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		$this->set('usr_totp_enabled_time', null);
 		$this->set('usr_totp_backup_codes', null);
 		$this->set('usr_totp_last_used_step', null);
-		$this->set('usr_second_factor_hmac_key', bin2hex(random_bytes(64)));
+		$this->set('usr_second_factor_hmac_key', self::new_sealed_hmac_key());
 		$this->save();
 	}
 
@@ -856,7 +894,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	 * @return bool true if valid and not replayed
 	 */
 	function verify_totp($code) {
-		$secret = $this->get('usr_totp_secret');
+		$secret = $this->totp_secret();
 		if (empty($secret)) {
 			return false;
 		}
@@ -1053,15 +1091,46 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	}
 
 	function authenticate_write($data) {
+		$actor = (int)$data['current_user_permission'];
 		if ($this->key != $data['current_user_id']) {
 			// If the user's ID doesn't match, we have to make
 			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
+			if ($actor < 5) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
+					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$actor );
+			}
+			// The target rule: staff change only a user strictly below their own
+			// level, so a 9 cannot reset a 10's password and sign in as them. 10 is
+			// exempt, so two owners can manage each other.
+			if ($actor < 10 && $this->key && $this->stored_permission() >= $actor) {
+				throw new SystemAuthenticationError(
+					'Only a user above level ' . $this->stored_permission() . ' may change this user.');
 			}
 		}
+		// And grant at most their own level, to anyone, themselves included.
+		if ($actor < 10 && (int)$this->get('usr_permission') !== $this->stored_permission()
+			&& (int)$this->get('usr_permission') > $actor) {
+			throw new SystemAuthenticationError(
+				'A user at level ' . $actor . ' cannot grant level ' . (int)$this->get('usr_permission') . '.');
+		}
 	}
+
+	/** The level this user holds in the database (0 for one not saved yet). */
+	private function stored_permission(): int {
+		if (!$this->key) {
+			return 0;
+		}
+		if ($this->loaded_permission === NULL) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare('SELECT usr_permission FROM usr_users WHERE usr_user_id = ?');
+			$q->execute(array($this->key));
+			$this->loaded_permission = (int)$q->fetchColumn();
+		}
+		return $this->loaded_permission;
+	}
+
+	/** usr_permission as loaded; NULL until a load (stored_permission() reads it then). */
+	private $loaded_permission = NULL;
 
 	function load() {
 		$result = parent::load();
@@ -1088,6 +1157,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		foreach (self::PROFILE_FIELDS as $field) {
 			$this->loaded_profile[$field] = (string)$this->get('usr_' . $field);
 		}
+		$this->loaded_permission = $this->data !== NULL ? (int)$this->get('usr_permission') : NULL;
 		$this->loaded_could_approve = (int)$this->get('usr_permission') >= SandboxConsent::APPROVER_PERMISSION
 			&& !$this->get('usr_is_disabled');
 	}
@@ -1153,10 +1223,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			SessionControl::get_instance()->end_other_sessions($this);
 		}
 		$this->loaded_password_hash = $this->get('usr_password');
+		$this->loaded_permission = (int)$this->get('usr_permission');
 
-		//THIS IS A SPECIAL CALCULATED FIELD BASED ON THE USER ID
+		// The token in this user's mailing-list footer links (contact preferences):
+		// random, so no one can work out another user's link.
 		if($this->get('usr_authhash') === NULL){
-			$authhash = substr(hash('sha256', $this->key.'izsalt'), 0, 8);
+			$authhash = self::new_authhash();
 			$sql = "UPDATE usr_users SET usr_authhash = :usr_authhash WHERE usr_user_id = :usr_user_id";
 
 			try{

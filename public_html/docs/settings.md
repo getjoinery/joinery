@@ -157,6 +157,11 @@ missing from the request is kept. One that arrives blank is removed, and one
 with text replaces what was there. `SettingsWriter` reads each submitted secret
 through `FormWriterV2Base::process_secretinput()`, which is the whole rule.
 
+**Level 10 changes a credential.** Below `SettingsWriter::SECRET_WRITE_PERMISSION`
+(10) a credential is drawn locked with no Reset and a note saying who may change
+it, and a save that sets, replaces or removes one is refused whole, naming the
+field. CLI and scheduled tasks have no session and are not limited.
+
 **Stored sealed.** A `secret` setting is stored sealed with
 [`SecretBox`](secret_box.md), under its own name: `Setting::put()` and every
 model save seal it (`Setting::sealForStorage()`; a value already sealed is

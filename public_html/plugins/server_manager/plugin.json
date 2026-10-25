@@ -707,6 +707,12 @@
       "feature": "Domain registration",
       "kind": "operator",
       "locator": "server_manager_namecheap_promotion_code"
+    },
+    {
+      "label": "Node API secret keys",
+      "feature": "Server Manager node API access",
+      "kind": "operator",
+      "locator": "mgn_managed_nodes.mgn_api_secret_key"
     }
   ],
   "signals": {

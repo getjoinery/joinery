@@ -20,21 +20,24 @@ function admin_product_logic(array $input): LogicResult {
 	$product = new Product($input['pro_product_id'], TRUE);
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
-	// Handle actions
-	if($input['action'] == 'delete'){
+	// Handle actions. Each is the Actions menu's POST button; opening the page is a GET.
+	$action = LibraryFunctions::isFormSubmission() ? ($input['action'] ?? '') : '';
+	if($action == 'delete'){
 		$product->assert_can_write($session);
 		$product->soft_delete();
 
 		return LogicResult::redirect('/plugins/store/admin/admin_products');
 	}
-	else if($input['action'] == 'undelete'){
+	else if($action == 'undelete'){
 		$product->assert_can_write($session);
 		$product->undelete();
 
 		return LogicResult::redirect('/plugins/store/admin/admin_products');
 	}
 
-	if($input['action'] == 'permanent_delete'){
+	if($action == 'permanent_delete'){
+		// The menu offers it only at 10; the handler holds the same line.
+		$session->check_permission(10);
 		if($orders->count_all()){
 			return LogicResult::error('You cannot delete a product with orders.');
 		}

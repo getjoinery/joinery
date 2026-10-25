@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.17 - the trusted-device key is read sealed (User::second_factor_hmac_key()); set_api_user() takes the level the API request was authorized at, so a browser-credential
+ *   action runs at the session's level, not the stored one
  * @version 1.16 - crawlerDetect() names JoineryEdgeProbe, the management node timing a site through its edge and
  *                direct (specs/slow_request_diagnosis_words.md WP5): a measurement, never a visitor
  * @version 1.15 - a session whose account no longer exists ends without writing a logout row, a vault audit
@@ -782,7 +784,7 @@ class SessionControl{
 	 * passkey revocation (specs/second_factor_ux_coherence.md).
 	 */
 	private function compute_trusted_device_hmac($user, $expiry) {
-		$key = $user->get('usr_second_factor_hmac_key');
+		$key = $user->second_factor_hmac_key();
 		if (empty($key)) {
 			return null;
 		}
@@ -809,7 +811,7 @@ class SessionControl{
 		if ($days <= 0) return;
 		// The signing key is minted lazily by the first trust grant — it exists
 		// exactly when at least one trusted device could.
-		if (empty($user->get('usr_second_factor_hmac_key'))) {
+		if ($user->second_factor_hmac_key() === null) {
 			$user->rotate_second_factor_hmac_key();
 		}
 		$expiry = time() + ($days * 86400);
@@ -1091,8 +1093,9 @@ class SessionControl{
 	 * @param int $user_id The user ID associated with the API key
 	 * @param int|null $api_key_id The presented ApiKey's id (null for the
 	 *        browser-session credential, which has no ApiKey row)
+	 * @param int|null $permission The level the request was authorized at
 	 */
-	public function set_api_user($user_id, $api_key_id = null) {
+	public function set_api_user($user_id, $api_key_id = null, $permission = null) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = new User($user_id, TRUE);
 
@@ -1107,7 +1110,9 @@ class SessionControl{
 
 		$_SESSION['loggedin'] = TRUE;
 		$_SESSION['usr_user_id'] = $user->key;
-		$_SESSION['permission'] = $user->get('usr_permission');
+		// The level the request was authorized at (ApiLogicEndpoint::actingPermission()),
+		// so the logic enforces the same one; the stored level when none is given.
+		$_SESSION['permission'] = $permission !== null ? (int)$permission : $user->get('usr_permission');
 		$_SESSION['timezone'] = $user->get('usr_timezone');
 		$_SESSION['api_key_id'] = $api_key_id;
 	}

@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.76 - the node API secret is stored sealed (ManagedNode::set_api_secret_key())
  * @version 1.75 - set_reverse_dns names the address the form chose: both, the IPv4 alone or the IPv6 alone (B70)
  * @version 1.74 - edge_vs_origin (EdgeOriginProbe, run here, no agent), net_health and web_workers (agent 1.93.0)
  * @version 1.73 - site_log_count: the Logs box's 'Count problem lines since' form posts here; the time is UTC
@@ -1036,17 +1037,17 @@ class NodeDetailActions {
 				// its public half is useless, so clearing the public key removes
 				// the secret with it — the pair is gone and jobs route via SSH.
 				list($sec_what, $sec) = FormWriterV2Base::process_secretinput(
-					$_POST, 'mgn_api_secret_key', (bool)$node->get('mgn_api_secret_key'));
+					$_POST, 'mgn_api_secret_key', $node->api_secret_key() !== null);
 				if ($sec_what === FormWriterV2Base::SECRET_SET) {
-					$node->set('mgn_api_secret_key', $sec);
+					$node->set_api_secret_key($sec);
 				} elseif ($sec_what === FormWriterV2Base::SECRET_CLEAR || $pub === '') {
-					$node->set('mgn_api_secret_key', null);
+					$node->set_api_secret_key(null);
 				}
 				$node->set('mgn_tls_insecure', $tls_insecure);
 				$node->save();
 				$node->load();
 				$session->save_message(new DisplayMessage(
-					($node->get('mgn_api_public_key') && $node->get('mgn_api_secret_key'))
+					($node->get('mgn_api_public_key') && $node->api_secret_key() !== null)
 						? 'API credential saved.' : 'API credential saved. Without both keys, jobs route via SSH.',
 					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE

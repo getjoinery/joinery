@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.68 - mgn_api_secret_key is stored sealed (API_SECRET_LOCATOR): api_secret_key() opens it,
+ *                 set_api_secret_key() seals it
  * @version 1.66 - mgn_addresses: the machine's own addresses, IPv4 and IPv6, as its agent last reported them (its
  *                 join, or an escrow state post), for the edge-versus-origin probe to time each one
  *                 (specs/slow_request_diagnosis_words.md WP4)
@@ -186,7 +188,8 @@ class ManagedNode extends SystemBase {
 		'mgn_last_host_report'      => array('type'=>'jsonb'),
 		'mgn_last_host_report_time' => array('type'=>'timestamp(6)'),
 		'mgn_api_public_key'      => array('type'=>'varchar(255)'),
-		'mgn_api_secret_key'      => array('type'=>'varchar(255)'),
+		// A SecretBox blob (API_SECRET_LOCATOR), never plain text: api_secret_key() opens it.
+		'mgn_api_secret_key'      => array('type'=>'text'),
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Fingerprint of the backup recovery public key this node is holding, as
@@ -601,6 +604,26 @@ class ManagedNode extends SystemBase {
 	public function reported_addresses(): array {
 		$list = json_decode((string)$this->get('mgn_addresses'), true);
 		return is_array($list) ? array_values(array_filter($list, 'is_string')) : array();
+	}
+
+	/** Where the node's API secret lives, as declared in plugin.json sealed_secrets. */
+	const API_SECRET_LOCATOR = 'mgn_managed_nodes.mgn_api_secret_key';
+
+	/**
+	 * The node's API secret key, opened. Null when none is stored or it can no
+	 * longer be opened (the database moved to a site with another secret_box_key):
+	 * the plane then reaches the node over the agent or SSH, as with no key.
+	 */
+	public function api_secret_key(): ?string {
+		$opened = (new SecretBox())->open($this->get('mgn_api_secret_key'));
+		return in_array($opened['state'], array(SecretBox::OPEN_OK, SecretBox::OPEN_PLAINTEXT), true)
+			&& (string)$opened['value'] !== '' ? (string)$opened['value'] : null;
+	}
+
+	/** Store the node's API secret key sealed (unsaved); null removes it. */
+	public function set_api_secret_key(?string $secret): void {
+		$this->set('mgn_api_secret_key', ($secret === null || $secret === '')
+			? null : (new SecretBox())->seal(self::API_SECRET_LOCATOR, $secret));
 	}
 
 	public function is_operational(): bool {

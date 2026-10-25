@@ -21,7 +21,10 @@
 		throw new SystemDisplayableError('User not found.');
 	}
 
-	if($_POST){
+	// Only a user above this one's level may change their password (10 excepted).
+	$user->assert_can_write($session);
+
+	if(LibraryFunctions::isFormSubmission()){
 
 		try {
 			$user->set('usr_password', User::GeneratePassword($_POST['usr_password']));

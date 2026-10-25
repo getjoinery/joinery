@@ -26,7 +26,7 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+	$session->check_permission(8); // how each mailbox delivers is config: 8
 	$settings = Globalvars::get_instance();
 
 	// IMAP feeds carry full-mailbox credentials — superadmin-only, like the

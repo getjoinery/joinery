@@ -5,27 +5,29 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
-	require_once(PathHelper::getIncludePath('data/items_class.php'));
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 	$session->set_return();
 	$settings = Globalvars::get_instance(); 
 
-	$item = new Item($_GET['itm_item_id'], TRUE);
+	// The Actions menu's buttons POST the id; opening the page carries it in the URL.
+	$item = new Item($_REQUEST['itm_item_id'] ?? NULL, TRUE);
 
-	if($_REQUEST['action'] == 'delete'){
+	// Delete and undelete are those POST buttons; opening the page is a GET.
+	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
+	if($action == 'delete'){
 		$item->assert_can_write($session);
 		$item->soft_delete();
 
-		header("Location: /admin/admin_items");
+		header("Location: /plugins/items/admin/admin_items");
 		exit();				
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if($action == 'undelete'){
 		$item->assert_can_write($session);
 		$item->undelete();
 
-		header("Location: /admin/admin_items");
+		header("Location: /plugins/items/admin/admin_items");
 		exit();				
 	}
 
@@ -34,7 +36,7 @@
 	array(
 		'menu-id'=> 'blog-items',
 		'breadcrumbs' => array(
-			'Items'=>'/admin/admin_items', 
+			'Items'=>'/plugins/items/admin/admin_items', 
 			$item->get('itm_name')=>'',
 		),
 		'session' => $session,
@@ -42,12 +44,12 @@
 	);	
 	
 	$options['title'] = $item->get('itm_name');
-	$options['altlinks'] = array('Edit Item' => '/admin/admin_item_edit?itm_item_id='.$item->key);
+	$options['altlinks'] = array('Edit Item' => '/plugins/items/admin/admin_item_edit?itm_item_id='.$item->key);
 	if(!$item->get('itm_delete_time')){
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_item', 'hidden' => array('action' => 'delete', 'itm_item_id' => $item->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'delete', 'itm_item_id' => $item->key));
 	}
 	else{
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key));
+		$options['altlinks']['Undelete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key));
 	}
 
 

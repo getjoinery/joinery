@@ -6,7 +6,7 @@ review: named data classes, a read level on models, raise-only column
 classes, page headers, one decision function, a generated inventory
 (sections 3 and 8). Every open question answered 2026-10-23. WP1 built and
 released in log mode (0.8.521); its flip is left (WP1). WP0 and WP2 to WP6
-not started.
+not started. The research bugs are fixed except those a package fixes (7).
 
 Running each model's own rules on every save is a separate spec,
 `model_rules_on_every_save`, because it carries its own breakage and testing.
@@ -601,39 +601,42 @@ POST check in each of the ~60 handlers.
 ## 7. Bugs found by the research
 
 Each is tracked in memory `project_todo_admin_access_research_bugs`. They need
-fixing whatever happens to this spec.
+fixing whatever happens to this spec. Status as of 2026-10-24: every one is fixed
+except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
 
-| ID | Bug | Where | Checked |
+| ID | Bug | Where | Status |
 |---|---|---|---|
-| B1 | Admin actions run on a GET, so another site can trigger them (SameSite=Lax sends the cookie on top-level navigation) | ~80 core pages, most plugin logic; DnsPublishBox::handle | pattern confirmed (admin_page, node_detail:83) |
-| B2 | Server Manager publish page deletes a release archive and row on a GET | plugins/server_manager/includes/publish_upgrade.php:268, :1584 | reported |
-| B3 | API action and form floors use the stored `usr_permission`, not the session's (login-as, IP-change zeroing); session simulation copies the stored value into the logic's session too | ApiLogicEndpoint.php:195, :700; SessionControl.php:1060; vs ApiAuth.php:301 | confirmed by reading |
-| B4 | Undelete on a message calls `soft_delete()` | adm/admin_message.php:32-34 | confirmed |
-| B5 | Root-request panel polls `/api/v1/root_request_status` (missing `/action/`): ~2,500 400s, panels stay "Queued" | includes/AdminPage.php:131 | confirmed |
-| B6 | Opening the IMAP delete page deletes the feed when nothing depends on it | plugins/mailbox/logic/admin_mailbox_imap_delete_logic.php:47 | confirmed |
-| B7 | Order delete treats any input as confirmation; a GET with `confirm=1` permanently deletes an order | plugins/store/logic/admin_order_delete_logic.php:22 | reported |
-| B8 | Product permanent delete runs after `check_permission(5)`; the 10 check only hides the link | plugins/store/admin/logic/admin_product_logic.php:14, :37-42, :57 | confirmed by reading 10-20 |
-| B9 | Opening "Edit Question" saves it | adm/logic/admin_question_edit_logic.php:54 | reported |
-| B10 | `admin_mailbox_message` shows any unsealed message by id at permission 5 with no mailbox grant check | plugins/mailbox | reported |
-| B11 | Store payment settings print part of the PayPal secret and Stripe endpoint secret; the fields are not flagged `secret: true` | plugins/store admin_settings_payments:321, :458 | reported |
-| B12 | File upload widget posts to `/admin/admin_file_upload_process` without a CSRF header, at permission 5 | FormWriterV2Base.php:4943 | reported |
-| B13 | Store order page and joinery_ai sweep write on page view without `server_initiated_write` | store admin_order_logic:25, :71; ChatAsync::sweepMessage | reported |
-| B14 | User permanent-delete confirmation unreachable; admin_softdelete_logic never deletes; admin_page form nested in `#layoutForm`; items admin links to missing `/admin/admin_item*` | various | reported |
-| B15 | Menu permission and page check disagree in 33 places | admin_menus.json, plugin.json vs pages | confirmed by count |
-| B16 | The single API key page and the key create and edit pages, and the webhook pages, are gated at 8, but they issue or show secrets (keys, level 10); the key list is 10 and shows only public key ids | adm/logic/admin_api_key_logic.php:11, admin_api_key_edit_logic.php:22, admin_webhook_logic.php:12 | confirmed by reading |
-| B17 | Subscription tier edit and tier edit write prices at 5 (money writes at 7, Q6) | adm/logic/admin_subscription_tier_edit_logic.php:14, adm/admin_tier_edit.php:10 | confirmed by reading |
-| B18 | Store orders list is gated at 5 and renders buyer addresses (personal, read 6) | plugins/store/admin/admin_orders.php:121-135 | confirmed by reading |
-| B19 | Mailbox account list is gated at 5; the page renders delivery mode and enabled state only, no credentials, so the bug is config at 5, not a credential leak | plugins/mailbox/logic/admin_mailbox_accounts_logic.php:29; plugins/mailbox/admin/admin_mailbox_accounts.php | page file verified 10-20; included panels not read |
-| B20 | Settings pages take secret fields (captcha secret and similar) at 8; keys need 10. 23 core and 23 plugin settings carry `secret: true`; the column rule (3.3) gates them | adm/admin_settings.php:363, adm/admin_settings_plugins.php | confirmed by count 10-20 |
-| B21 | Sandbox page accepts POST with only the router gate at 5 and writes plugin settings through SettingsWriter | adm/logic/admin_sandbox_page_logic.php:42, :57 | confirmed by reading 10-20 |
-| B22 | Password edit has no guard on the target user's level: an 8 resets a 10's password; users edit lets an 8 change a 10's email and allowed IPs | adm/admin_users_password_edit.php:10, :17; adm/logic/admin_users_edit_logic.php:14, :81 | confirmed by reading 10-20 |
-| B23 | Any level 5 reads every row of every model through the REST API and the AI chat: the read default is "owner or 5 and above", the User model allows 5, and the AI chat treats 5 as admin (owner scoping off) | includes/SystemBase.php is_owner_or_admin(); data/users_class.php:1055; api/apiv1.php:700, :925; plugins/joinery_ai/includes/ChatTurnContext.php:32, :209 | confirmed by reading 10-20 |
-| B24 | `User.usr_totp_secret` holds the TOTP seed in plaintext. No sealed locator, so it is not sealed by the registry | data/users_class.php:816 (`enable_totp`) | confirmed by reading 10-20 |
-| B25 | `User.usr_second_factor_hmac_key` holds a second-factor HMAC key in plaintext. No sealed locator. The spec's secret pattern missed it | data/users_class.php:830, :844 | confirmed by reading 10-20 |
-| B26 | `ManagedNode.mgn_api_secret_key` stores the node's API secret in plaintext. The value is set directly, not sealed | plugins/server_manager/logic/node_detail_actions_logic.php:991-995 | confirmed by reading 10-20 |
-| B27 | `SdDeviceBackup.sbk_deactivation_pin` is a device deactivation PIN copied in plaintext from the device and shown back on the devices page. No sealed locator. To verify whether the PIN is meant to be readable | plugins/dns_filtering/data/devices_class.php:150; plugins/dns_filtering/views/profile/devices.php:80 | to verify |
-| B28 | `OrderItem.odi_play_purchase_token` stores a Google Play purchase token in plaintext. No sealed locator. It is a live billing reference | plugins/store/data/order_items_class.php:108; plugins/store/includes/GooglePlayHelper.php:193 | confirmed by reading 10-20 |
-| B29 | `User.usr_authhash` is a plaintext auth hash used in contact-preference links. No sealed locator | logic/contact_preferences_logic.php:18 | confirmed by reading 10-20 |
+| B1 | Admin actions run on a GET, so another site can trigger them (SameSite=Lax sends the cookie on top-level navigation) | ~80 core pages, most plugin logic; DnsPublishBox::handle | WP1: guard logs, links are buttons; refusal is the flip |
+| B2 | Server Manager publish page deletes a release archive and row on a GET | plugins/server_manager/includes/publish_upgrade.php:268, :1584 | fixed (WP1) |
+| B3 | API action and form floors use the stored `usr_permission`, not the session's (login-as, IP-change zeroing); session simulation copies the stored value into the logic's session too | ApiLogicEndpoint.php; SessionControl::set_api_user() | fixed 10-24: `ApiLogicEndpoint::actingPermission()` (session's level for the browser credential, stored for a key) feeds both the floor and `set_api_user()` |
+| B4 | Undelete on a message calls `soft_delete()` | adm/admin_message.php | fixed before 10-24 |
+| B5 | Root-request panel polls `/api/v1/root_request_status` (missing `/action/`) | includes/AdminPage.php | fixed before 10-24 (AdminPage 1.4) |
+| B6 | Opening the IMAP delete page deletes the feed when nothing depends on it | plugins/mailbox/logic/admin_mailbox_imap_delete_logic.php | fixed 10-24: only the confirm form's POST deletes; with nothing mirrored the page asks yes/no |
+| B7 | Order delete treats any input as confirmation; a GET with `confirm=1` permanently deletes an order | plugins/store/admin/logic/admin_order_delete_logic.php | fixed (WP1) |
+| B8 | Product permanent delete runs after `check_permission(5)`; the 10 check only hides the link | plugins/store/admin/logic/admin_product_logic.php | fixed 10-24: the handler requires 10; every action is POST-only |
+| B9 | Opening "Edit Question" saves it | adm/logic/admin_question_edit_logic.php | fixed (WP1) |
+| B10 | `admin_mailbox_message` shows any unsealed message by id at permission 5 with no mailbox grant check | plugins/mailbox/logic/admin_mailbox_message_logic.php | fixed 10-24: `MailboxViewer::canReadMessage()`, as the reader; delete is POST-only |
+| B11 | Store payment settings print part of the PayPal secret and Stripe endpoint secret | plugins/store/admin/admin_settings_payments.php | fixed 10-24: lengths only; the token and Basic-auth fragments are gone (the fields were already `secret: true`) |
+| B12 | File upload widget posts to `/admin/admin_file_upload_process` without a CSRF header | FormWriterV2Base.php | not a bug: no CSRF in admin (owner, settled) |
+| B13 | Store order page and joinery_ai sweep write on page view without `server_initiated_write` | StripeHelper::update_order_refund_amount_from_stripe(); ChatAsync::sweepMessage | fixed 10-24: both marked, listed in core_api_mechanical_test |
+| B14 | User permanent-delete confirmation unreachable; admin_softdelete never deletes; admin_page form nested in `#layoutForm`; items admin links to missing `/admin/admin_item*` | various | fixed 10-24: permanent delete reachable (WP1); admin_softdelete removed (nothing linked to it); admin_page's order inputs join `#layoutForm` by its id so each Remove is its own form (Remove and Save Order both removed the last component); items links point at `/plugins/items/admin/`, and the item pages no longer require a missing core file |
+| B15 | Menu permission and page check disagree in 33 places | admin_menus.json, plugin.json vs pages | WP3 (menus derive from the page) |
+| B16 | The single API key page and the key create and edit pages, and the webhook pages, are gated at 8, but they issue or show secrets | adm/logic/admin_api_key_logic.php, admin_api_key_edit_logic.php, admin_webhook_logic.php, admin_webhook_edit_logic.php | fixed 10-24: 10 (8.4); the webhook list stays 8; API Keys menu entry 10 |
+| B17 | Subscription tier edit and tier edit write prices at 5 | adm/logic/admin_subscription_tier_edit_logic.php, adm/admin_tier_edit.php | fixed 10-24: open at 5, save at 7 |
+| B18 | Store orders list is gated at 5 and renders buyer addresses | plugins/store/admin/admin_orders.php | fixed 10-24: 6 |
+| B19 | Mailbox account list is gated at 5 (config) | plugins/mailbox/logic/admin_mailbox_accounts_logic.php | fixed 10-24: 8 |
+| B20 | Settings pages take secret fields at 8; keys need 10 | SettingsWriter, SettingsFieldRenderer | fixed 10-24: a credential is drawn locked below 10 and `SettingsWriter` refuses its change, naming it |
+| B21 | Sandbox page accepts POST with only the router gate at 5 | adm/logic/admin_sandbox_page_logic.php | fixed before 10-24 (`SandboxPluginManager::ADMIN_PERMISSION`, 8) |
+| B22 | Password edit has no guard on the target user's level: an 8 resets a 10's password; users edit lets an 8 change a 10's email and allowed IPs | data/users_class.php authenticate_write | fixed 10-24: the target rule (3.8) in `User::authenticate_write()`, asked by password edit, users edit (incl. 2FA reset), activate, soft delete and undelete |
+| B23 | Any level 5 reads every row of every model through the REST API and the AI chat | SystemBase is_owner_or_admin(); data/users_class.php; api/apiv1.php; ChatTurnContext.php | WP2 (model read levels) |
+| B24 | `User.usr_totp_secret` holds the TOTP seed in plaintext | data/users_class.php | fixed 10-24: sealed (`usr_users.usr_totp_secret`); the reconciler sealed the stored ones |
+| B25 | `User.usr_second_factor_hmac_key` holds a second-factor HMAC key in plaintext | data/users_class.php | fixed 10-24: sealed (`usr_users.usr_second_factor_hmac_key`, ephemeral) |
+| B26 | `ManagedNode.mgn_api_secret_key` stores the node's API secret in plaintext | plugins/server_manager | fixed 10-24: sealed (`ManagedNode::set_api_secret_key()` / `api_secret_key()`) |
+| B27 | `SdDeviceBackup.sbk_deactivation_pin` is a device deactivation PIN in plaintext, shown back on the devices page | plugins/dns_filtering | verified 10-24: the owner is meant to read it (they type it on the device), and neither device model is on the AI or REST surface; the PIN came from `rand()`, now `random_int()` |
+| B28 | `OrderItem.odi_play_purchase_token` stores a Google Play purchase token in plaintext | plugins/store | not a bug: it is not a credential (using it needs the store's Google service account), it is looked up by value when Google notifies, and `*_token` already keeps it off the REST and AI surfaces |
+| B29 | `User.usr_authhash`, the contact-preferences link token, was a digest of the user id and a salt in the code: anyone could work out any user's link | data/users_class.php; logic/contact_preferences_logic.php | fixed 10-24: random 128-bit token (`User::new_authhash()`), compared with hash_equals; migration 222 replaced every stored one |
+| B30 | A deleted user's Undelete went to admin_users_undelete, which cleared the disabled flags and never the delete time | adm/admin_users_undelete.php | fixed 10-24: Undelete is a POST action on admin_user at 8; the page is removed |
+| B31 | admin_page and admin_post read the page's id from the URL only, so their Soft Delete and Undelete buttons, which post it in the body, did nothing | adm/admin_page.php, adm/admin_post.php | fixed 10-24: the id is read from the request; every action is POST-only |
 
 ## 8. Level scheme and page inventory
 
@@ -840,7 +843,6 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/admin_settings` | config | 8 | 8 |  | Setting | key fields need 10: see notes |
 | `/admin/admin_settings_email` | config | 8 | 8 |  | Setting | secret settings are keys columns, masked below 10 (3.3) |
 | `/admin/admin_settings_plugins` | config | 8 | 8 |  | Setting | plugin keys need 10: see notes |
-| `/admin/admin_softdelete` | config | 9 | 8 |  | - | unclear page; see B14 |
 | `/admin/admin_spec_view` | config | 10 | 8 |  | - |  |
 | `/admin/admin_static_cache` | config | 9 | 8 |  | - |  |
 | `/admin/admin_subscription_tier_edit` | money | 5 | 5 |  | SubscriptionTier | prices and tiers |
@@ -866,7 +868,6 @@ seed (`maintenance_scripts/dev_tools/permissions_seed.json`).
 | `/admin/admin_users_message` | personal | 8 | 6 |  | Email |  |
 | `/admin/admin_users_password_edit` | restricted | 8 | 8 |  | User | write 9 |
 | `/admin/admin_users_permanent_delete` | personal | 10 | 6 |  | User | irreversible erasure (Q7) |
-| `/admin/admin_users_undelete` | personal | 10 | 6 |  | User | undelete takes the soft-delete level (8.3 item 6) |
 | `/admin/admin_utilities` | config | 10 | 8 |  | - | maintenance commands |
 | `/admin/admin_video` | content | 8 | 5 |  | Video |  |
 | `/admin/admin_video_edit` | content | 8 | 5 |  | Video |  |

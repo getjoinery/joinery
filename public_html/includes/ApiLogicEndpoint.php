@@ -30,7 +30,9 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.3
+ * @version 1.8.4
+ * @changelog 1.8.4 - The level floor and the simulated session use the acting level (actingPermission()):
+ *   the session's for the browser credential, the stored one for a key.
  * @changelog 1.8.3 - A declared body that is missing is told apart by size (RequestBody): over
  *   post_max_size stays RequestTooLarge 413, a body that never arrived is RequestBodyIncomplete 400.
  *   Action rows carry RequestLogger::elapsed_ms(); the $GLOBALS start time never reached here.
@@ -331,6 +333,22 @@ class ApiLogicEndpoint {
 	}
 
 	/**
+	 * The level a request acts at. A key acts at its user's stored level; the
+	 * browser credential acts at the session's, which is what pages enforce:
+	 * a login-as session is the target's level, and the IP-change guard zeroes
+	 * a session used from another network. Null for the anonymous principal.
+	 */
+	private static function actingPermission($api_entry, $api_user): ?int {
+		if (!$api_user) {
+			return null;
+		}
+		if ($api_entry === null) {
+			return (int)SessionControl::get_instance()->get_permission();
+		}
+		return (int)$api_user->get('usr_permission');
+	}
+
+	/**
 	 * Post-authentication dispatch for sessioned actions. Always exits.
 	 */
 	public static function dispatchActionAuthenticated($url_segments, $api_entry, $api_user) {
@@ -347,8 +365,8 @@ class ApiLogicEndpoint {
 		// (`'app_purpose' => 'mail'`); authorize() admits that purpose's
 		// credentials there and nothing else, and refuses them everywhere else.
 		$auth['app_purpose'] = $meta['app_purpose'] ?? null;
-		ApiAuth::authorize($auth, $api_entry,
-			$api_user ? $api_user->get('usr_permission') : null, 'Action', $action_label);
+		$acting_permission = self::actingPermission($api_entry, $api_user);
+		ApiAuth::authorize($auth, $api_entry, $acting_permission, 'Action', $action_label);
 
 		// Sessionless actions were executed pre-auth; anything reaching here
 		// with requires_session=false would be a dispatch-order bug, so run it
@@ -453,7 +471,7 @@ class ApiLogicEndpoint {
 
 		// Set up session simulation if needed
 		if ($api_user) {
-			$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
+			$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null, $acting_permission);
 		}
 
 		// Populate $_POST from JSON body so logic files can use !empty($_POST)
@@ -854,12 +872,13 @@ class ApiLogicEndpoint {
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_READ];
 		$auth['app_purpose'] = $meta['app_purpose'] ?? null;
-		ApiAuth::authorize($auth, $api_entry, $api_user->get('usr_permission'), 'Form');
+		$acting_permission = self::actingPermission($api_entry, $api_user);
+		ApiAuth::authorize($auth, $api_entry, $acting_permission, 'Form');
 
 		// Session simulation so the builder sees the acting user's timezone
 		// and session context, exactly as the action face provides
 		$session = SessionControl::get_instance();
-		$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null);
+		$session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null, $acting_permission);
 
 		self::serveForm($action_label, $action_name, $form_function, $api_user, $api_user->key);
 	}
