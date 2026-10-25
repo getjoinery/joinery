@@ -475,7 +475,12 @@ function harness_defer(callable $fn) {
  * stranger's file in the executable set besides. Scratch goes under
  * {site}/cache/tests, which is data and is never executed.
  *
- * Each call with the same $label gives the same directory, created if needed.
+ * The directory is this run's own, cache/tests/<label>/<run_token>: two runs
+ * of one suite at once (two sessions, or a direct run beside the runner)
+ * would otherwise share it and wipe each other's fixtures mid-run. Each call
+ * with the same $label in a run gives the same directory, created if needed,
+ * and it is removed when the run ends. One a crashed run left is swept by the
+ * next run that asks for the label, once that run's lock is released.
  * Tests that write CODE into the tree on purpose — a task class, a plugin
  * directory, a probe file at a routed path — are testing discovery at a real
  * location and do not use this.
@@ -484,6 +489,33 @@ function harness_defer(callable $fn) {
  * @return string Absolute path, with no trailing slash
  */
 function harness_scratch_dir($label = 'scratch') {
+	$h = &$GLOBALS['__harness'];
+	$base = harness_shared_dir($label);
+	$dir = $base . '/' . $h['run_token'];
+	if (empty($h['scratch_dirs'][$dir]) || !is_dir($dir)) {
+		harness_sweep_scratch($base);
+		if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) {
+			throw new RuntimeException('harness: could not create the scratch directory at ' . $dir);
+		}
+		if (empty($h['scratch_dirs'][$dir])) {
+			$h['scratch_dirs'][$dir] = true;
+			harness_defer(function () use ($dir) {
+				harness_remove_tree($dir);
+				unset($GLOBALS['__harness']['scratch_dirs'][$dir]);
+			});
+		}
+	}
+	return $dir;
+}
+
+/**
+ * A directory every run shares, cache/tests/<label>: only for what runs must
+ * see of each other (the run locks, harness_hold_run_lock()). A suite's own
+ * scratch is harness_scratch_dir().
+ *
+ * @return string Absolute path, with no trailing slash
+ */
+function harness_shared_dir($label) {
 	$label = preg_replace('/[^a-z0-9_-]/i', '', (string)$label);
 	if ($label === '') {
 		$label = 'scratch';
@@ -495,6 +527,39 @@ function harness_scratch_dir($label = 'scratch') {
 		throw new RuntimeException('harness: could not create the scratch directory at ' . $dir);
 	}
 	return $dir;
+}
+
+/**
+ * Remove the per-run scratch directories under $base that no live run owns:
+ * a run whose lock is released ('dead'), or one from before the lock with
+ * nothing written for a day ('unknown'). Never this run's, never a live one.
+ */
+function harness_sweep_scratch($base) {
+	foreach (glob($base . '/*', GLOB_ONLYDIR) ?: array() as $d) {
+		$token = basename($d);
+		if (!preg_match('/^[0-9a-f]{8}$/', $token)) {
+			continue;
+		}
+		$state = harness_run_token_state($token);
+		if ($state === 'live' || ($state === 'unknown' && (int)@filemtime($d) > time() - 86400)) {
+			continue;
+		}
+		harness_remove_tree($d);
+	}
+}
+
+/** Remove a directory and everything in it, not following links out of it. */
+function harness_remove_tree($path) {
+	if (is_link($path) || !is_dir($path)) {
+		@unlink($path);
+		return;
+	}
+	foreach (scandir($path) ?: array() as $entry) {
+		if ($entry !== '.' && $entry !== '..') {
+			harness_remove_tree($path . '/' . $entry);
+		}
+	}
+	@rmdir($path);
 }
 
 function harness_fixture_email($label) {
@@ -523,7 +588,7 @@ function harness_hold_run_lock() {
 	$h = &$GLOBALS['__harness'];
 	if (!empty($h['run_lock'])) return;
 	try {
-		$file = harness_scratch_dir('live') . '/' . $h['run_token'];
+		$file = harness_shared_dir('live') . '/' . $h['run_token'];
 		$fh = @fopen($file, 'c');
 		if ($fh && flock($fh, LOCK_EX | LOCK_NB)) {
 			$h['run_lock'] = $fh;   // kept open for the life of the process
