@@ -25,6 +25,7 @@ if (!$conversation_id) {
 }
 
 $conversation = new Conversation($conversation_id, TRUE);
+$conversation->assert_found();
 
 // Handle actions
 if (isset($_REQUEST['action'])) {
@@ -76,7 +77,7 @@ $page->admin_header(
 // Conversation metadata
 $options = array('title' => 'Conversation Details');
 if (!$conversation->get('cnv_delete_time')) {
-	$options['altlinks']['Delete Conversation'] = array('post' => '/admin/admin_conversation', 'hidden' => array('action' => 'delete_conversation', 'cnv_conversation_id' => $conversation_id));
+	$options['altlinks']['Delete Conversation'] = array('post' => '/admin/admin_conversation', 'hidden' => array('action' => 'delete_conversation', 'cnv_conversation_id' => $conversation_id), 'model' => $conversation, 'verb' => 'soft_delete');
 }
 $page->begin_box($options);
 
@@ -206,6 +207,8 @@ if ($messages->count() === 0) {
 						'cnv_conversation_id' => $conversation_id,
 						'msg_message_id'      => (int)$msg->key,
 					),
+					'model'   => $msg,
+					'verb'    => 'soft_delete',
 					'class'   => 'btn btn-link btn-sm',
 					'confirm' => 'Delete this message?',
 				))

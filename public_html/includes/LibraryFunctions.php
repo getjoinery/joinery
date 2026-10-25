@@ -1222,6 +1222,15 @@ class LibraryFunctions {
 	$require_type - if 'int', will validate the variable as an integer
 
 	*********************************************************************/
+	// A request value asked for as text: an array (name[]=...) is not one, and
+	// answers as bad input, not a crash in strip_tags.
+	private static function single_value($value, $varname) {
+		if (is_array($value)) {
+			throw new SystemDisplayableErrorNoLog('The variable '.$varname.' must be a single value.');
+		}
+		return $value;
+	}
+
 	static function fetch_variable($varname, $defaultvalue, $required=FALSE, $errortext='Some information needed for this page is not present.', $safemode=TRUE, $require_type=FALSE){
 		
 		if(!$errortext){
@@ -1242,7 +1251,7 @@ class LibraryFunctions {
 			}
 			
 			if($safemode){
-				return strip_tags($GLOBALS[$varname]);
+				return strip_tags(self::single_value($GLOBALS[$varname], $varname));
 			}
 			else{
 				return $GLOBALS[$varname];
@@ -1263,7 +1272,7 @@ class LibraryFunctions {
 			}
 
 			if($safemode){
-				return strip_tags($_REQUEST[$varname]);
+				return strip_tags(self::single_value($_REQUEST[$varname], $varname));
 			}
 			else{
 				return $_REQUEST[$varname];
@@ -1308,7 +1317,7 @@ class LibraryFunctions {
 				}
 
 				if($safemode){
-					return strip_tags($foundvar);
+					return strip_tags(self::single_value($foundvar, $varname));
 				}
 				else{
 					return $foundvar;
@@ -1330,7 +1339,7 @@ class LibraryFunctions {
 			}
 
 			if($safemode){
-				return strip_tags($foundvar);
+				return strip_tags(self::single_value($foundvar, $varname));
 			}
 			else{
 				return $foundvar;

@@ -58,19 +58,36 @@ try {
         case 'checkout.session.completed':
             $sessionobject = $event->data->object;
 
-            $order = new Order(NULL);
-            $order->set('ord_total_cost', $sessionobject->amount_total / 100);
-            if ($sessionobject->client_reference_id) {
-                $order->set('ord_usr_user_id', $sessionobject->client_reference_id);
-            }
-            $order->set('ord_stripe_session_id', $sessionobject->id);
-            $order->set('ord_raw_response', $sessionobject);
-            $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
-            $order->set('ord_stripe_subscription_id_temp', $sessionobject->subscription);
-            $order->set('ord_status', Order::STATUS_PAID);
+            // One order per session. The buyer's return (cart_charge) may have
+            // made and completed it already; then this only records what Stripe
+            // reports. Otherwise this makes it, PAID, and the return completes it.
+            Order::with_payment_lock((string)$sessionobject->id, function () use ($sessionobject) {
+                $order = Order::GetByStripeSession($sessionobject->id);
+                if ($order) {
+                    if (!$order->get('ord_stripe_payment_intent_id') && $sessionobject->payment_intent) {
+                        $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
+                    }
+                    if (!$order->get('ord_raw_response')) {
+                        $order->set('ord_raw_response', $sessionobject);
+                    }
+                    $order->save();
+                    return;
+                }
 
-            $order->prepare();
-            $order->save();
+                $order = new Order(NULL);
+                $order->set('ord_total_cost', $sessionobject->amount_total / 100);
+                if ($sessionobject->client_reference_id) {
+                    $order->set('ord_usr_user_id', $sessionobject->client_reference_id);
+                }
+                $order->set('ord_stripe_session_id', $sessionobject->id);
+                $order->set('ord_raw_response', $sessionobject);
+                $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
+                $order->set('ord_stripe_subscription_id_temp', $sessionobject->subscription);
+                $order->set('ord_status', Order::STATUS_PAID);
+
+                $order->prepare();
+                $order->save();
+            });
             break;
 
         case 'customer.subscription.updated':

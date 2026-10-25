@@ -19,6 +19,7 @@ function admin_order_logic(array $input): LogicResult {
 
 	$order_id = LibraryFunctions::fetch_variable('ord_order_id', 0, 0, TRUE);
 	$order = new Order($order_id, TRUE);
+	$order->assert_found();
 
 	$stripe_helper = new StripeHelper();
 	$charge = $stripe_helper->update_order_refund_amount_from_stripe($order);

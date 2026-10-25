@@ -429,6 +429,8 @@
 								<?php if ($is_cancelled): ?>
 									<?php echo AdminPage::action_button('Delete', '/plugins/event_manager/admin/admin_event', [
 										'hidden'  => ['action' => 'delete_instance', 'instance_event_id' => $mat_instance->key, 'evt_event_id' => $event->key],
+										'model'   => $mat_instance,
+										'verb'    => 'soft_delete',
 										'confirm' => 'Permanently delete this cancelled occurrence?',
 										'class'   => 'btn btn-sm btn-danger py-0 px-2',
 									]); ?>
@@ -437,6 +439,8 @@
 									<a href="/plugins/event_manager/admin/admin_event_edit?evt_event_id=<?php echo $mat_instance->key; ?>" class="btn btn-sm btn-soft-default py-0 px-2">Edit</a>
 									<?php echo AdminPage::action_button('Revert', '/plugins/event_manager/admin/admin_event', [
 										'hidden'  => ['action' => 'revert_instance', 'instance_event_id' => $mat_instance->key, 'evt_event_id' => $event->key],
+										'model'   => $mat_instance,
+										'verb'    => 'soft_delete',
 										'confirm' => 'Revert this occurrence to the series default? Your customizations will be lost.',
 										'class'   => 'btn btn-sm btn-soft-warning py-0 px-2',
 									]); ?>
@@ -647,6 +651,8 @@
 		$action_link = '<a href="/plugins/event_manager/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-default">Edit</a> ';
 		$action_link .= AdminPage::action_button('Delete', '/plugins/event_manager/admin/admin_event_session_edit', array(
 			'hidden'  => array('action' => 'delete', 'evs_event_session_id' => $event_session->key),
+			'model'   => $event_session,
+			'verb'    => 'permanent_delete',
 			'class'   => 'btn btn-sm btn-soft-danger',
 			'confirm' => 'Delete this session?',
 		));

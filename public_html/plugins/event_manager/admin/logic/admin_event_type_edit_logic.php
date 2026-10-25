@@ -9,6 +9,7 @@ function admin_event_type_edit_logic(array $input): LogicResult {
 
 	if (isset($input['ety_event_type_id'])) {
 		$event_type = new EventType($input['ety_event_type_id'], TRUE);
+		$event_type->assert_found();
 	} else {
 		$event_type = new EventType(NULL);
 	}

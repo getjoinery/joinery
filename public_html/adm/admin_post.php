@@ -15,6 +15,7 @@
 
 	// The Actions menu's buttons post the id in the body; opening the page carries it in the URL.
 	$post = new Post($_REQUEST['pst_post_id'] ?? NULL, TRUE);
+	$post->assert_found();
 
 	// Every action is a POST button on this page; opening it is a GET.
 	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
@@ -50,10 +51,10 @@
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Post' => '/admin/admin_post_edit?pst_post_id='.$post->key);
 	if(!$post->get('pst_delete_time')){
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'delete', 'pst_post_id' => $post->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'delete', 'pst_post_id' => $post->key), 'model' => $post, 'verb' => 'soft_delete');
 	}
 	else{
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'undelete', 'pst_post_id' => $post->key));
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'undelete', 'pst_post_id' => $post->key), 'model' => $post, 'verb' => 'soft_delete');
 	}
 
 	if($post->can_delete(SessionControl::get_instance(), true) && PublicPageBase::may_open('/admin/admin_post_permanent_delete')) {

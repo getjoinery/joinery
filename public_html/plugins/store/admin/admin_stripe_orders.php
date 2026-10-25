@@ -48,17 +48,22 @@
 	$created['gte'] = $startdate;
 	$created['lte'] = $enddate;
 	
-	if($offset){
-		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
-		//$charges = $stripe->charges->all(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
-	}
-	else{
-		$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'created' => $created]);
-		//$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
+	// A site with no Stripe keys has no charges to list: say so instead of failing.
+	$stripe_error = null;
+	try {
+		if($offset){
+			$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
+		}
+		else{
+			$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'created' => $created]);
+		}
+	} catch (StripeHelperException $e) {
+		$stripe_error = $e->getMessage();
 	}
 
+	// The page object draws the form and the table in print format too.
+	$page = new AdminPage();
 	if(empty($_GET['print-format'])){
-		$page = new AdminPage();
 		$page->admin_header(
 		array(
 			'menu-id'=> 'stripe-payments',
@@ -74,6 +79,14 @@
 
 	}
 	
+	if ($stripe_error !== null) {
+		echo '<div class="alert alert-warning">' . htmlspecialchars($stripe_error) . ' Add the keys on the Payments settings page.</div>';
+		if (empty($_GET['print-format'])) {
+			$page->admin_footer();
+		}
+		return;
+	}
+
 	$formwriter = $page->getFormWriter('form1', [
 		'method' => 'GET',
 		'action' => '/plugins/store/admin/admin_stripe_orders'

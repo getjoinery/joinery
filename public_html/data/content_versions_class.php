@@ -88,7 +88,18 @@ function get_previous_version(){
 	
 	const MAX_VERSIONS_PER_ITEM = 100;
 
+	/**
+	 * Record a version of a row being saved. Its caller's own write rule has
+	 * already decided (the model asks guard_raw_write('write') first, or calls
+	 * this after its save), so the version rows are that save's bookkeeping.
+	 */
 	static function NewVersion($type, $foreign_key_id, $content, $description=NULL, $title=NULL){
+		return SystemBase::rule_checked_write(function () use ($type, $foreign_key_id, $content, $description, $title) {
+			return self::write_version($type, $foreign_key_id, $content, $description, $title);
+		});
+	}
+
+	private static function write_version($type, $foreign_key_id, $content, $description, $title){
 		$session = SessionControl::get_instance();
 		$results = new MultiContentVersion(array('type' => $type, 'foreign_key_id' => $foreign_key_id), array('content_version_id' => 'DESC'));
 		$numresult = $results->count_all();

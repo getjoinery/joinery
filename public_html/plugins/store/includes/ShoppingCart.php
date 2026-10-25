@@ -29,6 +29,25 @@ class ShoppingCart {
 	 */
 	const SESSION_KEY = 'shopping_cart';
 
+	/**
+	 * Session slot for the payments a gateway was asked to take (record_payment()).
+	 * A record is kept for as long as its payment can still come back: a Stripe
+	 * Checkout session lives at most a day, and a PayPal approval far less. The
+	 * count is only a bound on the session's size; every view of the checkout
+	 * page records a payment per gateway, so it is well above what a buyer's
+	 * open tabs can make in a day.
+	 */
+	const PAYMENTS_KEY = 'cart_payments';
+	const PAYMENTS_MAX_AGE = 86400;
+	const PAYMENTS_KEPT = 200;
+
+	/**
+	 * The DisplayMessage identifier of a gateway payment that was taken but
+	 * not made into an order (cart_charge); /cart_confirm shows it in place of
+	 * a receipt.
+	 */
+	const PAYMENT_NOT_COMPLETED = 'payment_not_completed';
+
 	/** In-request cache of the hydrated cart so repeated current() calls share state. */
 	private static $active = null;
 
@@ -660,6 +679,80 @@ class ShoppingCart {
 			$hash_string .= serialize($cart_item);
 		}
 		return md5($hash_string);
+	}
+
+	/**
+	 * Freeze what a gateway payment is being created for, keyed by the
+	 * gateway's reference (a Stripe Checkout session id, or the token a PayPal
+	 * order or subscription carries as its custom_id).
+	 *
+	 * The gateway's return comes back later, and the cart may have changed in
+	 * between (another tab, another billing email): the return completes the
+	 * order from this record, never from the live cart. It holds the cart's
+	 * plain session data (items, prices, coupons, billing details) and who was
+	 * signed in when the payment was made. It lives in this session alongside
+	 * the cart, so only this browser's return can complete it. One is kept per
+	 * payment the checkout page offered, for as long as that payment can still
+	 * come back (PAYMENTS_MAX_AGE).
+	 */
+	public function record_payment(string $ref, string $gateway, array $extra = array()) {
+		$record = $this->to_session_data();
+		unset($record['last_receipt']);
+		$session_user = SessionControl::get_instance()->get_user_id();
+		$record['gateway'] = $gateway;
+		$record['payer_user_id'] = $session_user ? (int)$session_user : null;
+		$record['recorded_time'] = time();
+		$record['total'] = $this->get_total();
+		$record = array_merge($record, $extra);
+
+		$all = (isset($_SESSION[self::PAYMENTS_KEY]) && is_array($_SESSION[self::PAYMENTS_KEY]))
+			? $_SESSION[self::PAYMENTS_KEY] : array();
+		unset($all[$ref]);
+		$oldest_kept = time() - self::PAYMENTS_MAX_AGE;
+		foreach ($all as $kept_ref => $kept) {
+			if (!is_array($kept) || (int)($kept['recorded_time'] ?? 0) < $oldest_kept) {
+				unset($all[$kept_ref]);
+			}
+		}
+		$all[$ref] = $record;
+		$_SESSION[self::PAYMENTS_KEY] = array_slice($all, -self::PAYMENTS_KEPT, null, true);
+	}
+
+	/**
+	 * What a cart's lines are, from its session data's items: each line's
+	 * product, version, quantity and form data, in order. Two carts with the
+	 * same lines answer the same, however the product rows have changed since.
+	 */
+	public static function lines_of(array $session_items): array {
+		$lines = array();
+		foreach ($session_items as $item) {
+			$lines[] = array(
+				(int)($item['product_id'] ?? 0),
+				(int)($item['version_id'] ?? 0),
+				(int)($item['quantity'] ?? 0),
+				$item['form_data'] ?? array(),
+			);
+		}
+		return $lines;
+	}
+
+	/** Whether this cart still holds exactly the lines a record_payment() record was made for. */
+	public function holds_lines_of(array $record): bool {
+		$session_data = $this->to_session_data();
+		return self::lines_of($session_data['items']) === self::lines_of((array)($record['items'] ?? array()));
+	}
+
+	/** The record_payment() record for this gateway reference, or null. */
+	public static function recorded_payment(string $ref) {
+		if ($ref === '' || empty($_SESSION[self::PAYMENTS_KEY][$ref]) || !is_array($_SESSION[self::PAYMENTS_KEY][$ref])) {
+			return null;
+		}
+		return $_SESSION[self::PAYMENTS_KEY][$ref];
+	}
+
+	/** A completed payment's record is spent. */
+	public static function forget_payment(string $ref) {
+		unset($_SESSION[self::PAYMENTS_KEY][$ref]);
 	}
 
 	public function clear_cart() {

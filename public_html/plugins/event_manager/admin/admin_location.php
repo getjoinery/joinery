@@ -12,6 +12,7 @@
 	$settings = Globalvars::get_instance();
 
 	$location = new Location($_REQUEST['loc_location_id'] ?? null, TRUE);
+	$location->assert_found();
 
 	if($_REQUEST['action'] == 'delete'){
 		$location->assert_can_write($session);

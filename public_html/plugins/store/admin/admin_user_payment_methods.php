@@ -17,6 +17,7 @@
 
 	$user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must pass a user id');
 	$user = new User($user_id, TRUE);
+	$user->assert_found();
 
 	$stripe_helper = new StripeHelper();
 

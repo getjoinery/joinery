@@ -11,8 +11,10 @@
 
 	if (isset($_POST['edit_primary_key_value'])) {
 		$admin_menu = new AdminMenu($_POST['edit_primary_key_value'], TRUE);
+		$admin_menu->assert_found();
 	} elseif (isset($_GET['amu_admin_menu_id'])) {
 		$admin_menu = new AdminMenu($_GET['amu_admin_menu_id'], TRUE);
+		$admin_menu->assert_found();
 	} else {
 		$admin_menu = new AdminMenu(NULL);
 	}

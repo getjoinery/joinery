@@ -48,6 +48,7 @@ if (!$mgn_managed_node_id) {
 
 try {
 	$node = new ManagedNode($mgn_managed_node_id, TRUE);
+	$node->assert_found();
 } catch (Exception $e) {
 	header('Location: /admin/server_manager');
 	exit;

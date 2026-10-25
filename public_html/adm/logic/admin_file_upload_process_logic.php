@@ -198,6 +198,7 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			&& class_exists('PluginHelper') && PluginHelper::isPluginActive('event_manager')){
 			require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_sessions_class.php'));
 			$event_session = new EventSession($input['evs_event_session_id'], TRUE);
+			$event_session->assert_found();
 			$event_session->add_file($file->key);
 		}
 

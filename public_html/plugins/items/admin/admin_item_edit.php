@@ -9,30 +9,35 @@
 
 	$session = SessionControl::get_instance();
 
-	if (isset($_REQUEST['pst_item_id'])) {
+	if (!empty($_REQUEST['itm_item_id'])) {
 		$item = new Item($_REQUEST['itm_item_id'], TRUE);
+		$item->assert_found();
 	} else {
 		$item = new Item(NULL);
 	}
 
 	if($_POST){
 
-		$editable_fields = array('itm_body', 'itm_title', 'itm_is_published', 'itm_description', 'itm_body', 'itm_is_pinned');
-
-		foreach($editable_fields as $field) {
-			$item->set($field, $_POST[$field]);
+		// The item's own columns (the form once posted a post's field names).
+		foreach (array('itm_name', 'itm_description', 'itm_body') as $field) {
+			if (array_key_exists($field, $_POST)) {
+				$item->set($field, $_POST[$field]);
+			}
+		}
+		if (trim((string)$item->get('itm_name')) === '') {
+			throw new SystemDisplayableError('An item needs a name.');
 		}
 
 		if(!$item->get('itm_link') || Access::permits(10)){
-			if($_POST['itm_link']){
+			if(!empty($_POST['itm_link'])){
 				$item->set('itm_link', $item->create_url($_POST['itm_link']));
 			}
 			else{
-				$item->set('itm_link', $item->create_url($event->get('itm_title')));
+				$item->set('itm_link', $item->create_url($item->get('itm_name')));
 			}
 		}
 
-		if($_REQUEST['itm_is_published']){
+		if(!empty($_POST['itm_is_published'])){
 			if(!$item->get('itm_published_time')){
 				$item->set('itm_published_time', 'NOW()');
 			}
@@ -69,8 +74,9 @@
 	$title = $item->get('itm_name');
 	$content = $item->get('itm_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cvn_content_version_id']){
+	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+		$content_version->assert_found();
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
 	}
@@ -104,21 +110,21 @@
 
 	$tags = '';
 	if($item->key){
-		$formwriter->hiddeninput('itm_item_id', $item->key);
-		$formwriter->hiddeninput('action', 'edit');
+		$formwriter->hiddeninput('itm_item_id', '', ['value' => $item->key]);
+		$formwriter->hiddeninput('action', '', ['value' => 'edit']);
 
 		//$item_tags = Group::get_groups_for_member($item->key, 'item_tag', false, 'names');
 
 		//$tags = implode(', ', $item_tags);
 	}
 
-	$formwriter->textinput('itm_title', 'Item name', [
+	$formwriter->textinput('itm_name', 'Item name', [
 		'value' => $title,
 		'maxlength' => 255
 	]);
 
-	$formwriter->textinput('itm_short_description', 'Short description (optional)', [
-		'value' => $item->get('itm_short_description'),
+	$formwriter->textinput('itm_description', 'Short description (optional)', [
+		'value' => $item->get('itm_description'),
 		'maxlength' => 255
 	]);
 
@@ -134,7 +140,7 @@
 	$optionvals = array(0=>"No", 1=>"Yes");
 	$formwriter->dropinput("itm_is_published", "Published", [
 		'options' => $optionvals,
-		'value' => $item->get('itm_is_published')
+		'value' => $item->get('itm_published_time') ? 1 : 0
 	]);
 
 	$formwriter->textbox('itm_body', 'Item content', [
@@ -153,13 +159,13 @@
       <div class="p-3">';
 
 	$content_versions = new MultiContentVersion(
-		array('type'=>ContentVersion::TYPE_POST, 'foreign_key_id' => $item->key),
+		array('type'=>ContentVersion::TYPE_ITEM, 'foreign_key_id' => $item->key),
 		array('create_time' => 'DESC'),		//SORT BY => DIRECTION
 		NULL,  //NUM PER PAGE
 		NULL);  //OFFSET
 	$content_versions->load();
 
-	$optionvals = $content_versions->get_dropdown_array(FALSE, $session);
+	$optionvals = $content_versions->get_dropdown_array($session, FALSE);
 
 	if(count($optionvals)){
 		$formwriter = $page->getFormWriter('form_load_version', [
@@ -167,7 +173,7 @@
 			'method' => 'GET'
 		]);
 		$formwriter->begin_form();
-		$formwriter->hiddeninput('itm_item_id', $item->key);
+		$formwriter->hiddeninput('itm_item_id', '', ['value' => $item->key]);
 		$formwriter->dropinput("cvn_content_version_id", "Load another version", [
 			'options' => $optionvals
 		]);

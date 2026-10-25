@@ -60,6 +60,7 @@ function admin_user_logic(array $input): LogicResult {
 
 	// Get user
 	$user = new User($input['usr_user_id'] ?? null, TRUE);
+	$user->assert_found();
 
 	// Process actions
 	$action = $input['action'] ?? $input['action'] ?? null;
@@ -83,11 +84,13 @@ function admin_user_logic(array $input): LogicResult {
 		if($input['action'] == 'add_to_group'){
 			//ADD THE USER TO A GROUP
 			$group = new Group($input['grp_group_id'], TRUE);
+			$group->assert_found();
 			$groupmember = $group->add_member($user->key);
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
 		else if($input['action'] == 'remove_from_group'){
 			$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
+			$groupmember->assert_found();
 			$groupmember->remove();
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}

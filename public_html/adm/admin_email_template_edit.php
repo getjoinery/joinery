@@ -11,8 +11,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$email_template = new EmailTemplate($_POST['edit_primary_key_value'], TRUE);
+		$email_template->assert_found();
 	} elseif (isset($_GET['emt_email_template_id'])) {
 		$email_template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
+		$email_template->assert_found();
 	} else {
 		$email_template = new EmailTemplate(NULL);
 	}
@@ -38,6 +40,7 @@
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+		$content_version->assert_found();
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
 	}

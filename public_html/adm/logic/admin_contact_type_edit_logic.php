@@ -10,8 +10,10 @@ function admin_contact_type_edit_logic(array $input): LogicResult {
 
 	if (isset($input['edit_primary_key_value'])) {
 		$contact_type = new ContactType($input['edit_primary_key_value'], TRUE);
+		$contact_type->assert_found();
 	} elseif (isset($input['ctt_contact_type_id'])) {
 		$contact_type = new ContactType($input['ctt_contact_type_id'], TRUE);
+		$contact_type->assert_found();
 	} else {
 		$contact_type = new ContactType(NULL);
 	}

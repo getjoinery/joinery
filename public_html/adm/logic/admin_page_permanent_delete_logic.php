@@ -22,6 +22,7 @@ function admin_page_permanent_delete_logic(array $input): LogicResult {
 		$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $input);
 
 		$page = new Page($pag_page_id, TRUE);
+		$page->assert_found();
 		$page->assert_can_write($session);
 
 		// Smart cascade: delete components not used by any other active page
@@ -44,6 +45,7 @@ function admin_page_permanent_delete_logic(array $input): LogicResult {
 	$pag_page_id = LibraryFunctions::fetch_variable('pag_page_id', NULL, 1, 'You must provide a page to delete.', $input);
 
 	$page = new Page($pag_page_id, TRUE);
+	$page->assert_found();
 
 	$session->set_return('/admin/admin_pages');
 

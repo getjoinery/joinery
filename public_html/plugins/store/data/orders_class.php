@@ -105,6 +105,33 @@ function is_stripe_order(){
 	}
 	*/
 
+	/**
+	 * Run $fn holding a lock on one gateway payment reference (a Stripe
+	 * Checkout session id, a PayPal order or subscription id). The buyer's
+	 * return and the gateway's webhook can arrive together, and a return can be
+	 * followed twice: whoever holds the lock decides whether that payment's
+	 * order exists yet, so it is made, and completed, once.
+	 */
+	public static function with_payment_lock(string $ref, callable $fn) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$lock = $dblink->prepare('SELECT pg_advisory_lock(hashtext(?))');
+		$lock->execute(array('payment:' . $ref));
+		try {
+			return $fn();
+		} finally {
+			$unlock = $dblink->prepare('SELECT pg_advisory_unlock(hashtext(?))');
+			$unlock->execute(array('payment:' . $ref));
+		}
+	}
+
+	/** Whether this order has been completed into its lines (a return has fulfilled it). */
+	public function is_fulfilled(): bool {
+		if (!$this->key) {
+			return false;
+		}
+		return (new MultiOrderItem(array('odi_ord_order_id' => $this->key)))->count_all() > 0;
+	}
+
 	public static function GetByStripeSession($session_id) {
 		$data = SingleRowFetch('ord_orders', 'ord_stripe_session_id',
 			$session_id, PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);

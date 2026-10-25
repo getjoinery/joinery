@@ -118,11 +118,15 @@ if ($is_edit) {
 	echo '<p class="text-muted">' . ($confirmed !== '' ? 'Last confirmed ' . htmlspecialchars(LibraryFunctions::time_ago($confirmed, $session->get_timezone())) . '.' : 'Never confirmed.') . '</p>';
 	echo AdminPage::action_button('Confirm it is as written', $self_url, array(
 		'hidden' => array('action' => 'confirm_machine'),
+		'model'  => $machine,
+		'verb'   => 'write',
 		'class'  => 'btn btn-outline-secondary btn-sm',
 	));
 	echo ' ';
 	echo AdminPage::action_button('Remove from the list', $self_url, array(
 		'hidden'  => array('action' => 'remove_machine'),
+		'model'   => $machine,
+		'verb'    => 'soft_delete',
 		'confirm' => 'Remove this machine from the list? Do this once it is gone.',
 		'class'   => 'btn btn-outline-danger btn-sm',
 	));

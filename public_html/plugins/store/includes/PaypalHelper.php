@@ -139,7 +139,11 @@ class PaypalHelper{
 
 	}
 	
-	public function output_paypal_subscription_checkout_code($plan_id){ 
+	/**
+	 * $custom_id is the checkout's record of what this subscription is for
+	 * (ShoppingCart::record_payment()); PayPal returns it on the subscription.
+	 */
+	public function output_paypal_subscription_checkout_code($plan_id, $custom_id = ''){ 
 	
 		$output = '
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
@@ -151,9 +155,7 @@ class PaypalHelper{
    <script>
     paypal.Buttons({
       createSubscription: function(data, actions) {
-        return actions.subscription.create({
-          "plan_id": "'.$plan_id.'",
-        });
+        return actions.subscription.create('.json_encode(array_filter(array('plan_id' => (string)$plan_id, 'custom_id' => (string)$custom_id))).');
       },
       onApprove: function(data, actions) {
 		// Go to the return URL page with subscription ID
@@ -228,7 +230,7 @@ class PaypalHelper{
 		$curl = curl_init();
 
 		curl_setopt_array($curl, array(
-		  CURLOPT_URL => $this->endpoint.'/v2/checkout/orders/'.$payment_id,
+		  CURLOPT_URL => $this->endpoint.'/v2/checkout/orders/'.rawurlencode((string)$payment_id),
 		  CURLOPT_RETURNTRANSFER => true,
 		  CURLOPT_ENCODING => '',
 		  CURLOPT_MAXREDIRS => 10,
@@ -511,7 +513,7 @@ class PaypalHelper{
 		$curl = curl_init();
 
 		curl_setopt_array($curl, array(
-		  CURLOPT_URL => $this->endpoint.'/v1/billing/subscriptions/'.$sub_id,
+		  CURLOPT_URL => $this->endpoint.'/v1/billing/subscriptions/'.rawurlencode((string)$sub_id),
 		  CURLOPT_RETURNTRANSFER => true,
 		  CURLOPT_ENCODING => '',
 		  CURLOPT_MAXREDIRS => 10,

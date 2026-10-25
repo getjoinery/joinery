@@ -49,6 +49,8 @@ foreach ($groups as $group){
 
 	$delform = AdminPage::action_button('Delete', '/admin/admin_group_permanent_delete', [
 		'hidden'  => ['action' => 'remove', 'grp_group_id' => $group->key],
+		'model'   => $group,
+		'verb'    => 'permanent_delete',
 		'confirm' => 'Are you sure you want to delete this group?',
 	]);
 

@@ -72,6 +72,7 @@ if (!$job_id) {
 
 try {
 	$job = new ManagementJob($job_id, TRUE);
+	$job->assert_found();
 } catch (Exception $e) {
 	header('Location: /admin/server_manager/jobs');
 	exit;

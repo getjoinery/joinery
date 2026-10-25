@@ -25,8 +25,10 @@ $settings = Globalvars::get_instance();
 // CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 if (isset($_POST['edit_primary_key_value'])) {
 	$content = new PageContent($_POST['edit_primary_key_value'], TRUE);
+	$content->assert_found();
 } elseif (isset($_GET['pac_page_content_id']) && $_GET['pac_page_content_id']) {
 	$content = new PageContent($_GET['pac_page_content_id'], TRUE);
+	$content->assert_found();
 } else {
 	$content = new PageContent(NULL);
 }
@@ -44,6 +46,7 @@ $version_notice = '';
 if (isset($_GET['cvn_content_version_id']) && $_GET['cvn_content_version_id'] && $content->key) {
 	$loading_version = true;
 	$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+	$content_version->assert_found();
 
 	// Parse the versioned config JSON
 	$versioned_content = $content_version->get('cvn_content');

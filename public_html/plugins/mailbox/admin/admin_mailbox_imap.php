@@ -92,6 +92,8 @@ foreach ($accounts as $acct) {
 
 	$actions .= PublicPageBase::action_button('Delete', $base, array(
 		'hidden' => array('action' => 'delete', 'iia_inbound_imap_account_id' => $acct->key),
+		'model' => $acct,
+		'verb' => 'soft_delete',
 		'confirm' => 'Delete this IMAP account? Already-ingested mail is kept.',
 		'class' => 'btn btn-sm btn-outline-danger',
 	));

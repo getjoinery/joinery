@@ -20,7 +20,9 @@ function admin_survey_answers_logic(array $input): LogicResult {
 	$survey_id = LibraryFunctions::fetch_variable('survey_id', 'DESC', 1, 'You must pass a survey.');
 	$question_id = LibraryFunctions::fetch_variable('question_id', 'DESC', 1, 'You must pass a question.');
 	$survey = new Survey($survey_id, TRUE);
+	$survey->assert_found();
 	$question = new Question($question_id, TRUE);
+	$question->assert_found();
 
 	//$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '');
 

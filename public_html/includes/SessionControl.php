@@ -1243,7 +1243,7 @@ class SessionControl{
 	 * deleted, gone, or disabled (User::actions_allowed()), or one signed in
 	 * before the account's last password change (end_other_sessions()), is
 	 * signed out at its next identity question, as a bridged session is when
-	 * its key dies. Once
+	 * its key dies; one whose level was lowered takes the lower level. Once
 	 * per request; logout()'s own identity calls pass through on the flag. An
 	 * API request is ApiAuth's to check, the CLI has no web session, and a
 	 * database error is no answer, so it signs nobody out.
@@ -1265,6 +1265,11 @@ class SessionControl{
 		} elseif ($user->get('usr_delete_time') || !$user->actions_allowed()
 				|| (int)($_SESSION['session_generation'] ?? 0) !== (int)$user->get('usr_session_generation')) {
 			$this->logout();
+		} elseif ((int)($_SESSION['permission'] ?? 0) > (int)$user->get('usr_permission')) {
+			// A level lowered since sign-in holds from this request on: a demoted
+			// admin loses the old level at once, not when the session ends. A
+			// raise holds from the next sign-in, never inside a session.
+			$_SESSION['permission'] = (int)$user->get('usr_permission');
 		}
 	}
 

@@ -26,6 +26,7 @@ function admin_order_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$order = new Order($ord_order_id, TRUE);
+			$order->assert_found();
 			$order->assert_can_write($session);
 			$order->permanent_delete();
 		}
@@ -39,6 +40,7 @@ function admin_order_delete_logic(array $input): LogicResult {
 	$ord_order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL, 1, 'You must provide a order to edit.', $input);
 
 	$order = new Order($ord_order_id, TRUE);
+	$order->assert_found();
 
 	$session->set_return("/plugins/store/admin/admin_orders");
 

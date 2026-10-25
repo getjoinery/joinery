@@ -13,6 +13,7 @@ header('Content-type: text/html');
 $session = SessionControl::get_instance();
 
 $template = new EmailTemplate($_GET['emt_email_template_id'] ?? null, TRUE);
+$template->assert_found();
 
 echo $template->get('emt_body');
 ?>

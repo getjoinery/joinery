@@ -33,6 +33,7 @@ if ($active_id <= 0) {
 
 try {
 	$active = new AgentFile($active_id, TRUE);
+	$active->assert_found();
 } catch (\Throwable $e) {
 	echo '<div class="alert alert-danger">Agent file not found.</div>';
 	$page->admin_footer();

@@ -52,8 +52,10 @@ foreach ($surveys as $survey){
 		array_push($rowvalues, '<b>Deleted</b>');
 	}
 	else{
-		$delform = AdminPage::action_button('Delete', '/admin/admin_survey_permanent_delete', [
+		$delform = AdminPage::action_button('Delete', '/admin/admin_survey', [
 			'hidden'  => ['action' => 'removesurvey', 'svy_survey_id' => $survey->key],
+			'model'   => $survey,
+			'verb'    => 'permanent_delete',
 			'confirm' => 'Are you sure you want to delete this survey?',
 		]);
 		array_push($rowvalues, $delform);

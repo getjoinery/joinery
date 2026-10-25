@@ -23,7 +23,8 @@
  *      constructed events signed by the site's configured stripe_endpoint_secret
  *      — the exact shape Stripe posts. A valid checkout marks an order paid; an
  *      invalid-signature post is refused with 400 and writes nothing; a replayed
- *      event id is suppressed (no second order); and customer.subscription.deleted
+ *      event id is suppressed (no second order); a session the buyer's return
+ *      already made an order for gets no second one; and customer.subscription.deleted
  *      cancels the order item and strips the subscriber's tier.
  *
  * The endpoint script exits() and defines a function, so it is built to run once
@@ -32,7 +33,7 @@
  *
  * Run: php plugins/store/tests/stripe_webhook_test.php [base_url] [origin_ip]
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -260,6 +261,39 @@ check(WebhookLog::isDuplicate('evt_sw_' . $run_id . '_dup'), 'processed event id
 $r2 = sw_post($payload_c, $header_c); // byte-identical replay
 check($r2['status'] === 200, 'replayed event returns 200 (suppressed, not an error)', 'status ' . $r2['status']);
 check(count(sw_order_ids_for_session($sess_c)) === 1, 'the replay created no second order', 'orders: ' . count(sw_order_ids_for_session($sess_c)));
+
+// --- a session the buyer's return already completed gets no second order ---
+
+$sess_d = 'cs_test_sw_' . $run_id . '_d';
+SystemBase::server_initiated_write(function () use ($sess_d, $subscriber) {
+	$returned = new Order(NULL);
+	$returned->set('ord_usr_user_id', $subscriber->key);
+	$returned->set('ord_total_cost', 20);
+	$returned->set('ord_stripe_session_id', $sess_d);
+	$returned->set('ord_status', Order::STATUS_PAID);
+	$returned->prepare();
+	$returned->save();
+});
+foreach (sw_order_ids_for_session($sess_d) as $oid) {
+	harness_register_row('ord_orders', 'ord_order_id', $oid);
+}
+$payload_d = sw_event('evt_sw_' . $run_id . '_after_return', 'checkout.session.completed', array(
+	'id'                  => $sess_d,
+	'object'              => 'checkout.session',
+	'amount_total'        => 2000,
+	'currency'            => 'usd',
+	'client_reference_id' => (string)$subscriber->key,
+	'payment_intent'      => 'pi_swd_' . $run_id,
+	'subscription'        => null,
+));
+$r = sw_post($payload_d, sw_sign_header($payload_d, $endpoint_secret));
+check($r['status'] === 200, 'checkout.session.completed after the return is accepted (200)', 'status ' . $r['status']);
+$ids_d = sw_order_ids_for_session($sess_d);
+check(count($ids_d) === 1, 'the session keeps its one order', 'orders: ' . count($ids_d));
+if (count($ids_d) === 1) {
+	$order_d = new Order($ids_d[0], TRUE);
+	check($order_d->get('ord_stripe_payment_intent_id') === 'pi_swd_' . $run_id, 'the webhook records the payment intent on it');
+}
 
 // --- customer.subscription.deleted revokes the tier -----------------------
 

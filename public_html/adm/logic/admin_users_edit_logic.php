@@ -20,8 +20,10 @@ function admin_users_edit_logic(array $input): LogicResult {
 			return LogicResult::error('User ID mismatch.');
 		}
 		$user = new User($input['edit_primary_key_value'], TRUE);
+		$user->assert_found();
 	} elseif (isset($input['usr_user_id'])) {
 		$user = new User($input['usr_user_id'], TRUE);
+		$user->assert_found();
 	} else {
 		return LogicResult::error('User ID is required for editing');
 	}
@@ -59,13 +61,18 @@ function admin_users_edit_logic(array $input): LogicResult {
 			return LogicResult::redirect('/admin/admin_users_edit?usr_user_id=' . $user->key);
 		}
 
-		$user->set('usr_first_name', trim($input['usr_first_name']));
-		$user->set('usr_last_name', trim($input['usr_last_name']));
-		$user->set('usr_password_recovery_disabled', (bool)$input['usr_password_recovery_disabled']);
-		$user->set('usr_timezone', $input['usr_timezone']);
-		$user->set('usr_nickname', trim($input['usr_nickname']));
+		// Only what the form posted changes; a field left out keeps its value.
+		foreach (array('usr_first_name', 'usr_last_name', 'usr_nickname') as $field) {
+			if (array_key_exists($field, $input)) {
+				$user->set($field, trim((string)$input[$field]));
+			}
+		}
+		$user->set('usr_password_recovery_disabled', !empty($input['usr_password_recovery_disabled']));
+		if (isset($input['usr_timezone']) && $input['usr_timezone'] !== '') {
+			$user->set('usr_timezone', $input['usr_timezone']);
+		}
 
-		if($input['usr_organization_name']){
+		if(!empty($input['usr_organization_name'])){
 			$user->set('usr_organization_name', trim($input['usr_organization_name']));
 		}
 
@@ -95,6 +102,10 @@ function admin_users_edit_logic(array $input): LogicResult {
 			}
 		}
 
+		// Only a 10 changes a level here; anyone else asking to is refused, not ignored.
+		if (array_key_exists('usr_permission', $input) && (string)$input['usr_permission'] !== (string)(int)$user->get('usr_permission')) {
+			Access::demand(10, $session);
+		}
 		if(Access::permits(10, $session) && array_key_exists('usr_permission', $input)){
 			// Only a level permissions.json names (docs/permissions.md); left out, it stays.
 			$level = (string)$input['usr_permission'];
@@ -134,7 +145,8 @@ function admin_users_edit_logic(array $input): LogicResult {
 		}
 
 		//HANDLE THE USERS'S MAILING LISTS
-		$messages = $user->add_user_to_mailing_lists($input['new_list_subscribes']);
+		// No box ticked sends no field at all: subscribed to none.
+		$messages = $user->add_user_to_mailing_lists($input['new_list_subscribes'] ?? array());
 
 		//NOW REDIRECT
 		return LogicResult::redirect("/admin/admin_user?usr_user_id=$user->key");

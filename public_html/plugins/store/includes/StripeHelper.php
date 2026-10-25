@@ -194,10 +194,12 @@ class StripeHelper {
 	}
 
 	/**
-	 * Validate and sanitize a Stripe Checkout session ID with replay protection
+	 * Validate a Stripe Checkout session ID and retrieve the paid session.
+	 * Whether the session has already been completed into an order is the
+	 * caller's question (a replayed return shows that order's receipt).
 	 * @param string $session_id The session ID from $_GET or other source
-	 * @return string The validated and sanitized session ID
-	 * @throws StripeHelperException if validation fails
+	 * @return \Stripe\Checkout\Session The session, as Stripe reports it, paid
+	 * @throws StripeHelperException if validation fails or it is not paid
 	 */
 	public function validate_session_id($session_id) {
 		// Basic validation
@@ -231,20 +233,16 @@ class StripeHelper {
 			throw new StripeHelperException("Test session ID received in live mode");
 		}
 		
-		// Session content validation and replay protection
 		try {
 			$session = $this->client()->checkout->sessions->retrieve($session_id);
 			
-			// Verify payment status
-			if ($session->payment_status !== 'paid') {
+			// Verify payment status. A subscription that starts with a free
+			// trial completes with nothing to pay ('no_payment_required').
+			$completed = ($session->payment_status === 'paid')
+				|| ($session->payment_status === 'no_payment_required' && ($session->status ?? '') === 'complete');
+			if (!$completed) {
 				error_log("Unpaid session attempted: " . substr($session_id, 0, 15) . "... status: " . $session->payment_status);
 				throw new StripeHelperException("Session payment not completed");
-			}
-			
-			// Replay protection: Check if we already processed this session
-			if (Order::GetByStripeSession($session_id)) {
-				error_log("Session replay attempt detected: " . substr($session_id, 0, 15) . "...");
-				throw new StripeHelperException("Session already processed");
 			}
 			
 		} catch (\Stripe\Exception\InvalidRequestException $e) {
@@ -258,7 +256,7 @@ class StripeHelper {
 		// Log successful validation
 		error_log("Stripe session validated: " . substr($session_id, 0, 15) . "... (test_mode: " . ($this->test_mode ? 'yes' : 'no') . ", status: paid)");
 		
-		return $session_id;
+		return $session;
 	}
 
 	/**

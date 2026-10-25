@@ -11,6 +11,7 @@ function admin_api_key_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$api_key = new ApiKey($input['apk_api_key_id'] ?? null, TRUE);
+	$api_key->assert_found();
 
 	// A sandboxed plugin's credential is made and removed with the plugin.
 	$sandbox_plugin = $api_key->sandbox_plugin();

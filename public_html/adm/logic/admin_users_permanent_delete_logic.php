@@ -26,6 +26,7 @@ function admin_users_permanent_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$user = new User($usr_user_id, TRUE);
+			$user->assert_found();
 			$user->assert_can_write($session);
 			$user->permanent_delete();
 		}
@@ -39,6 +40,7 @@ function admin_users_permanent_delete_logic(array $input): LogicResult {
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.', $input);
 
 	$user = new User($usr_user_id, TRUE);
+	$user->assert_found();
 
 	$session->set_return("/admin/admin_users");
 

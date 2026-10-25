@@ -11,6 +11,7 @@
 	$session = SessionControl::get_instance();
 
 	$comment = new Comment($_REQUEST['cmt_comment_id'] ?? null, TRUE);
+	$comment->assert_found();
 
 	if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);

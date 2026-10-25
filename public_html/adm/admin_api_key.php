@@ -42,15 +42,15 @@
 		// (no actions)
 	}
 	elseif(!$api_key->get('apk_delete_time')){
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'soft_delete', 'apk_api_key_id' => $api_key->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'soft_delete', 'apk_api_key_id' => $api_key->key), 'model' => $api_key, 'verb' => 'soft_delete');
 	}
 	else{
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'undelete', 'apk_api_key_id' => $api_key->key));
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'undelete', 'apk_api_key_id' => $api_key->key), 'model' => $api_key, 'verb' => 'soft_delete');
 	}
 
 	// Add regenerate secret option (not shown when secret is currently displayed)
 	if($sandbox_plugin === null && !$api_key->get('apk_delete_time') && !(isset($_SESSION['new_api_secret']) && isset($_SESSION['new_api_key_id']) && $_SESSION['new_api_key_id'] == $api_key->key)){
-		$options['altlinks']['Regenerate Secret'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'regenerate_secret', 'apk_api_key_id' => $api_key->key));
+		$options['altlinks']['Regenerate Secret'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'regenerate_secret', 'apk_api_key_id' => $api_key->key), 'model' => $api_key, 'verb' => 'write', 'confirm' => 'Regenerate secret key? This will invalidate the current secret key immediately. Any applications using the old secret will stop working. You will be shown the new secret key ONE TIME only.');
 	}
 
 	if($sandbox_plugin === null && $api_key->can_delete($session, true)) {
@@ -148,22 +148,6 @@
 	echo '<br />';
 	$page->end_box();
 
-?>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-	const regenerateLink = document.querySelector('a[href*="action=regenerate_secret"]');
-	if(regenerateLink) {
-		regenerateLink.addEventListener('click', function(e) {
-			e.preventDefault();
-			var href = regenerateLink.href;
-			JoineryModal.confirm('Regenerate secret key? This will invalidate the current secret key immediately. Any applications using the old secret will stop working. You will be shown the new secret key ONE TIME only.', function() {
-				window.location = href;
-			});
-		});
-	}
-});
-</script>
-<?php
 	$page->admin_footer();
 ?>
 

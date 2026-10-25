@@ -13,6 +13,7 @@
 
 	// The Actions menu's buttons POST the id; opening the page carries it in the URL.
 	$item = new Item($_REQUEST['itm_item_id'] ?? NULL, TRUE);
+	$item->assert_found();
 
 	// Delete and undelete are those POST buttons; opening the page is a GET.
 	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
@@ -46,10 +47,10 @@
 	$options['title'] = $item->get('itm_name');
 	$options['altlinks'] = array('Edit Item' => '/plugins/items/admin/admin_item_edit?itm_item_id='.$item->key);
 	if(!$item->get('itm_delete_time')){
-		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'delete', 'itm_item_id' => $item->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'delete', 'itm_item_id' => $item->key), 'model' => $item, 'verb' => 'soft_delete');
 	}
 	else{
-		$options['altlinks']['Undelete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key));
+		$options['altlinks']['Undelete'] = array('post' => '/plugins/items/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key), 'model' => $item, 'verb' => 'soft_delete');
 	}
 
 

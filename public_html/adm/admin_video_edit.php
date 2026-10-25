@@ -11,8 +11,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$video = new Video($_POST['edit_primary_key_value'], TRUE);
+		$video->assert_found();
 	} elseif (isset($_GET['vid_video_id']) && $_GET['vid_video_id']) {
 		$video = new Video($_GET['vid_video_id'], TRUE);
+		$video->assert_found();
 	} else {
 		$video = new Video(NULL);
 	}

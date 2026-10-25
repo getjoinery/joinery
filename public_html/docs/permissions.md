@@ -57,12 +57,16 @@ Access::staffLevel();                 // 5: the lowest level above a member's
   (`SessionControl::get_permission()`): the level the request was authorized
   at, which for an API call is the acting level `set_api_user()` simulates.
   It is never the user's stored `usr_permission`, which a login-as session or
-  an IP-change-zeroed session is below.
+  an IP-change-zeroed session is below. A browser session whose stored level
+  was lowered takes the lower level at its next request, so a demotion holds
+  at once; a raise holds from the next sign-in.
 - `allows()` is the same comparison for a caller that already holds the level
   (`ApiAuth::authorize()` holds the acting level, a stored user's
   `usr_permission` is another person's).
 - `permits()` is the session's comparison without the audit: for what a page
-  shows (a column, a button, deleted rows in a list), never for what it does.
+  shows (a column, a button, deleted rows in a list) or a choice that refuses
+  nothing (a save that fills a field itself below the level). A refusal is
+  `decide()` or `demand()`, so it is recorded.
 - `demand()` is `decide()` for one action: refused, it throws
   `SystemAuthenticationError`, a 401 that names the level.
 - Code never compares a level itself (`get_permission() >= 10`): it asks one

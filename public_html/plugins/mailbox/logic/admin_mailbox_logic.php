@@ -11,6 +11,7 @@ function admin_mailbox_logic(array $input): LogicResult {
 	// Handle delete action
 	if ($input && isset($input['action']) && $input['action'] === 'delete') {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->assert_found();
 		$alias->soft_delete();
 
 		$session->save_message(new DisplayMessage(
@@ -28,6 +29,7 @@ function admin_mailbox_logic(array $input): LogicResult {
 	// its mail back in the reader with no re-attachment step.
 	if ($input && isset($input['action']) && $input['action'] === 'undelete') {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->assert_found();
 		$alias->undelete();
 
 		$session->save_message(new DisplayMessage(
@@ -42,6 +44,7 @@ function admin_mailbox_logic(array $input): LogicResult {
 
 	if ($input && isset($input['action']) && $input['action'] === 'permanent_delete') {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->assert_found();
 
 		// Permanently deleting the alias cascades to permanent-delete its IMAP
 		// account, which would strand that account's reference-backed ('remote')
@@ -70,6 +73,7 @@ function admin_mailbox_logic(array $input): LogicResult {
 	// Handle enable/disable toggle
 	if ($input && isset($input['action']) && $input['action'] === 'toggle_enabled') {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->assert_found();
 		$alias->set('iea_is_enabled', $alias->get('iea_is_enabled') ? false : true);
 		$alias->save();
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');

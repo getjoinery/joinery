@@ -213,6 +213,8 @@ class PageContent extends SystemBase {
 			}
 			$version_content = $config ?: $this->get('pac_body');
 
+			// This save's own rule first: the version below is its bookkeeping.
+			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(
 				ContentVersion::TYPE_PAGE_CONTENT,
 				$this->key,

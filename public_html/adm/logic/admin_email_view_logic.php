@@ -11,6 +11,7 @@ function admin_email_view_logic(array $input): LogicResult {
 
 	$email_id = $input['eml_email_id'] ?? $input['eml_email_id'] ?? NULL;
 	$email = new Email($email_id, TRUE);
+	$email->assert_found();
 
 	$page_vars = array();
 	$page_vars['session'] = $session;

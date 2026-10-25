@@ -23,11 +23,14 @@ function admin_product_edit_logic(array $input): LogicResult {
 	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
 	if (isset($input['edit_primary_key_value'])) {
 		$product = new Product($input['edit_primary_key_value'], TRUE);
+		$product->assert_found();
 	} elseif (isset($input['pro_product_id'])) {
 		$product = new Product($input['pro_product_id'], TRUE);
+		$product->assert_found();
 	} elseif (isset($input['p'])) {
 		// Backward compatibility: old URL parameter 'p'
 		$product = new Product($input['p'], TRUE);
+		$product->assert_found();
 	} else {
 		$product = new Product(NULL);
 	}

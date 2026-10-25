@@ -10,8 +10,10 @@ function admin_address_edit_logic(array $input): LogicResult {
 	// Load or create address first
 	if (isset($input['edit_primary_key_value'])) {
 		$address = new Address($input['edit_primary_key_value'], TRUE);
+		$address->assert_found();
 	} elseif (isset($input['usa_address_id'])) {
 		$address = new Address($input['usa_address_id'], TRUE);
+		$address->assert_found();
 	} else {
 		$address = new Address(NULL);
 	}

@@ -10,8 +10,10 @@ function admin_comment_edit_logic(array $input): LogicResult {
 
 	if (isset($input['edit_primary_key_value'])) {
 		$comment = new Comment($input['edit_primary_key_value'], TRUE);
+		$comment->assert_found();
 	} elseif (isset($input['cmt_comment_id'])) {
 		$comment = new Comment($input['cmt_comment_id'], TRUE);
+		$comment->assert_found();
 	} else {
 		$comment = new Comment(NULL);
 	}

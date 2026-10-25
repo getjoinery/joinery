@@ -14,6 +14,7 @@ function admin_email_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$email = new Email($input['eml_email_id'] ?? null, TRUE);
+	$email->assert_found();
 
 	// Handle actions
 	if($input['action'] == 'delete'){

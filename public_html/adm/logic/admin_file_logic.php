@@ -49,12 +49,12 @@ function admin_file_logic(array $input): LogicResult {
 	$options['altlinks'] = array();
 	$options['altlinks'] += array('Edit File' => '/admin/admin_file_edit?fil_file_id='.$file->key);
 	if($file->get('fil_delete_time')){
-		$options['altlinks'] += array('Undelete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'undelete', 'fil_file_id' => $file->key)));
+		$options['altlinks'] += array('Undelete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'undelete', 'fil_file_id' => $file->key), 'model' => $file, 'verb' => 'soft_delete'));
 	}
 	else{
-		$options['altlinks'] += array('Soft Delete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'delete', 'fil_file_id' => $file->key)));
+		$options['altlinks'] += array('Soft Delete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'delete', 'fil_file_id' => $file->key), 'model' => $file, 'verb' => 'soft_delete'));
 	}
-	if($session->get_user_id() == 1){
+	if($file->can_delete($session, true) && PublicPageBase::may_open('/admin/admin_file_delete')){
 		$options['altlinks'] += array('Permanently Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
 	}
 

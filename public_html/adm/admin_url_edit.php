@@ -12,8 +12,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$url = new Url($_POST['edit_primary_key_value'], TRUE);
+		$url->assert_found();
 	} elseif (isset($_GET['url_url_id']) && $_GET['url_url_id']) {
 		$url = new Url($_GET['url_url_id'], TRUE);
+		$url->assert_found();
 	} else {
 		$url = new Url(NULL);
 	}

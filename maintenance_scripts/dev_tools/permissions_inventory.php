@@ -16,6 +16,7 @@
  *   php maintenance_scripts/dev_tools/permissions_inventory.php [--table=pages|models|columns|actions|all]
  *       [--plugin=NAME] [--seed=FILE]
  *
+ * @version 1.2 - the pages table reads each page's header, as the router does: class, level and the level it opens at
  * @version 1.1 - reads permissions.json and the code's declarations before the seed
  */
 
@@ -383,74 +384,6 @@ function php_files_views(string $ROOT): array {
 	return $out;
 }
 
-/** The page file plus what it includes (two levels, no core, no data) and its conventional logic. */
-function page_sources(string $ROOT, array $page): array {
-	[$kind, $name, $file, $url, $family] = $page;
-	$files = [$file];
-	$queue = [[$file, 0]];
-	while ($queue) {
-		[$f, $depth] = array_shift($queue);
-		if ($depth >= 2) {
-			continue;
-		}
-		preg_match_all('/getIncludePath\(\s*\'([^\']+)\'/', file_get_contents($f), $r);
-		foreach ($r[1] as $inc) {
-			if (preg_match('#^(includes|utils|maintenance_scripts|data|plugins/[^/]+/data)/#', $inc)) {
-				continue;
-			}
-			$p = "$ROOT/$inc";
-			if (is_file($p) && !in_array($p, $files, true)) {
-				$files[] = $p;
-				$queue[] = [$p, $depth + 1];
-			}
-		}
-	}
-	$conventional = [];
-	if ($family === 'core') {
-		$conventional[] = "$ROOT/adm/logic/{$name}_logic.php";
-	} elseif ($family === 'plugin_admin') {
-		$plugin = $kind;
-		$conventional[] = "$ROOT/plugins/$plugin/admin/logic/{$name}_logic.php";
-		$conventional[] = "$ROOT/plugins/$plugin/logic/admin_{$name}_logic.php";
-		$conventional[] = "$ROOT/plugins/$plugin/logic/{$name}_logic.php";
-	} else {
-		$plugin = $kind;
-		$flat = str_replace('/', '_', $name);
-		$conventional[] = "$ROOT/plugins/$plugin/logic/{$flat}_logic.php";
-		$conventional[] = "$ROOT/plugins/$plugin/logic/admin_{$flat}_logic.php";
-	}
-	foreach ($conventional as $p) {
-		if (is_file($p) && !in_array($p, $files, true)) {
-			$files[] = $p;
-		}
-	}
-	return $files;
-}
-
-/** Today's gate: the levels the page and its logic check, '5 (router)' or 'open'. */
-function today_gate(array $files, array $page, array $models_by_class): string {
-	$levels = [];
-	foreach ($files as $f) {
-		$src = strip_comments(file_get_contents($f));
-		preg_match_all('/check_permission\(\s*(\d+)\s*\)/', $src, $m);
-		foreach ($m[1] as $n) {
-			$levels[] = (int)$n;
-		}
-		preg_match_all('/check_permission\(\s*(\w+)::\$\w+\s*\)/', $src, $c);
-		foreach ($c[1] as $cls) {
-			if (isset($models_by_class[$cls]) && $models_by_class[$cls]['write_perm'] !== null) {
-				$levels[] = $models_by_class[$cls]['write_perm'];
-			}
-		}
-	}
-	if ($levels) {
-		$levels = array_values(array_unique($levels));
-		sort($levels);
-		return implode('/', $levels);
-	}
-	return $page[4] === 'plugin_admin' ? 'open' : '5 (router)';
-}
-
 function print_pages(string $ROOT, array $seed, array $models_by_class, ?string $only_plugin): void {
 	$rows = [];
 	foreach (page_list($ROOT) as $page) {
@@ -459,18 +392,16 @@ function print_pages(string $ROOT, array $seed, array $models_by_class, ?string 
 		}
 		$url = $page[3];
 		$s = $seed['pages'][$url] ?? [];
-		$class = $s['class'] ?? '?';
-		$read = in_array($class, Access::classes(), true) ? Access::level("$class:read") : '?';
-		$override = $s['level'] ?? '';
-		if ($override !== '') {
-			$read = $override;
-		}
-		$files = page_sources($ROOT, $page);
+		// What the router enforces: the page's own header (AdminPageAccess).
+		$header = AccessDeclarations::pageHeader($page[2]);
+		$class = $header['class'] ?? '';
+		$level_decl = isset($header['level']) ? (string)$header['level'] : '';
+		$opens = AdminPageAccess::levelForFile(substr($page[2], strlen($ROOT) + 1));
 		$writes = $seed['page_writes'][$url] ?? written_models(concat_sources(own_sources($ROOT, $page)), $models_by_class);
-		$rows[] = ['`' . $url . '`', $class, today_gate($files, $page, $models_by_class), $read, $override, $writes, $s['note'] ?? ''];
+		$rows[] = ['`' . $url . '`', $class !== '' ? $class : ($header === null ? 'undeclared' : ''), $level_decl, $opens, $writes, $s['note'] ?? ''];
 	}
 	echo "#### Table 8.4 Pages (" . count($rows) . ")\n\n";
-	echo md_table(['Page', 'Class', 'Now', 'Read', 'Level override', 'Models written', 'Note'], $rows);
+	echo md_table(['Page', 'Class', 'Level', 'Opens at', 'Models written', 'Note'], $rows);
 }
 
 /** The page file and its conventional logic file, and nothing it includes. */

@@ -18,6 +18,9 @@ function admin_booking_type_edit_logic(array $input): LogicResult {
 
 	$pk = $input['edit_primary_key_value'] ?? ($input['bty_booking_type_id'] ?? null);
 	$type = $pk ? new BookingType($pk, TRUE) : new BookingType(NULL);
+	if ($pk) {
+		$type->assert_found();
+	}
 
 	if (LibraryFunctions::isFormSubmission()) {
 		$strings = ['bty_name','bty_slug','bty_description_plain','bty_provider','bty_location_mode',

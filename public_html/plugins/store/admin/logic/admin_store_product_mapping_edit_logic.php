@@ -13,8 +13,10 @@ function admin_store_product_mapping_edit_logic(array $input): LogicResult {
 
 	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 		$mapping = new MobileStoreProduct($input['edit_primary_key_value'], TRUE);
+		$mapping->assert_found();
 	} elseif ($mapping_id) {
 		$mapping = new MobileStoreProduct($mapping_id, TRUE);
+		$mapping->assert_found();
 	} else {
 		$mapping = new MobileStoreProduct(NULL);
 	}

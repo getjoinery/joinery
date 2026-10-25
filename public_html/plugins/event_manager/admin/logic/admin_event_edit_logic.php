@@ -23,11 +23,14 @@ function admin_event_edit_logic(array $input): LogicResult {
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 		$event = new Event($input['edit_primary_key_value'], TRUE);
+		$event->assert_found();
 	} elseif (isset($input['evt_event_id'])) {
 		$event = new Event($input['evt_event_id'], TRUE);
+		$event->assert_found();
 	} elseif ($is_virtual_edit && !LibraryFunctions::isFormSubmission()) {
 		// GET request for editing a virtual instance: pre-populate from parent
 		$parent = new Event($parent_event_id, TRUE);
+		$parent->assert_found();
 		$parent->assert_can_write($session);
 
 		$event = new Event(NULL);
@@ -81,6 +84,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 		// If editing a virtual instance, materialize it first
 		if ($is_virtual_edit && !$input['edit_primary_key_value']) {
 			$parent = new Event($parent_event_id, TRUE);
+			$parent->assert_found();
 			$parent->assert_can_write($session);
 			$event = $parent->materialize_instance($instance_date);
 		}
@@ -226,6 +230,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($input['cvn_content_version_id'])){
 		$content_version = new ContentVersion($input['cvn_content_version_id'], TRUE);
+		$content_version->assert_found();
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
 	}

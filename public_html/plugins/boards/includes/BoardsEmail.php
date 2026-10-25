@@ -122,7 +122,11 @@ class BoardsEmail {
 			if (!isset($allowed[$domain_id])) {
 				throw new BoardsRefusal('That mail domain cannot be used for board email.');
 			}
-			$ensured = InboundHandlerRegistry::ensureAlias(self::HANDLER, $allowed[$domain_id]);
+			// The board's admin chose an eligible domain (the caller's role check):
+			// the domain's boards alias is made for them, never switched back on.
+			$ensured = SystemBase::rule_checked_write(function () use ($allowed, $domain_id) {
+				return InboundHandlerRegistry::ensureAlias(self::HANDLER, $allowed[$domain_id], false);
+			});
 			if ($ensured['alias'] === null) {
 				throw new BoardsRefusal((string)$ensured['reason']);
 			}

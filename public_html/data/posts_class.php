@@ -83,6 +83,8 @@ function prepare() {
 		$was_published = false;
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
+			// This save's own rule first: the version below is its bookkeeping.
+			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));			
 			$q = DbConnector::get_instance()->get_db_link()->prepare(
 				'SELECT pst_published_time IS NOT NULL AND pst_delete_time IS NULL FROM pst_posts WHERE pst_post_id = ?');

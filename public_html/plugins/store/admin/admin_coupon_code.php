@@ -30,7 +30,7 @@
 
 	$options['title'] = 'Coupon Code';
 	$options['altlinks'] = array('Edit Coupon Code'=>'/plugins/store/admin/admin_coupon_code_edit?ccd_coupon_code_id='.$coupon_code->key);
-	$options['altlinks'] += array('Delete Coupon Code' => array('post' => '/plugins/store/admin/admin_coupon_code', 'hidden' => array('action' => 'remove', 'ccd_coupon_code_id' => $coupon_code->key)));
+	$options['altlinks'] += array('Delete Coupon Code' => array('post' => '/plugins/store/admin/admin_coupon_code', 'hidden' => array('action' => 'remove', 'ccd_coupon_code_id' => $coupon_code->key), 'model' => $coupon_code, 'verb' => 'permanent_delete'));
 	$page->begin_box($options);
 
 	echo '<br /><strong>Code:</strong> '.htmlspecialchars($coupon_code->get('ccd_code')) . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';

@@ -10,9 +10,15 @@ $settings   = Globalvars::get_instance();
 $cart     = ShoppingCart::current();
 $receipts = $cart->last_receipt;
 
+// A payment taken but not made into an order (cart_charge) is shown in place
+// of any receipt: the buyer has paid and is asked to contact the site, and
+// nothing here offers the cart for payment again.
+$not_completed = $session->get_messages('/cart_confirm', DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, ShoppingCart::PAYMENT_NOT_COMPLETED);
+$session->mark_shown($not_completed);
+
 $page = new PublicPage();
 $page->public_header([
-    'is_valid_page' => $is_valid_page,
+    'is_valid_page' => true,
     'title'         => 'Checkout confirmation',
 ]);
 ?>
@@ -22,7 +28,25 @@ $page->public_header([
     <div class="jy-container">
         <div class="jy-cc-wrap">
 
-            <?php if ($receipts): ?>
+            <?php if ($not_completed): ?>
+
+            <!-- Paid, not completed -->
+            <div class="jy-cc-hero">
+                <div class="jy-cc-icon-warn">&#9888;</div>
+                <h1 class="jy-cc-h1">Payment Received</h1>
+            </div>
+
+            <div class="jy-cc-panel-lg">
+                <?php foreach ($not_completed as $msg): ?>
+                <p class="jy-cc-panel-text"><?php echo htmlspecialchars($msg->message, ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endforeach; ?>
+                <div class="jy-cc-actions-row">
+                    <a href="/profile" class="btn btn-primary">Your Account</a>
+                    <a href="/" class="btn btn-outline">Back to Home</a>
+                </div>
+            </div>
+
+            <?php elseif ($receipts): ?>
 
             <!-- Success -->
             <div class="jy-cc-hero">
