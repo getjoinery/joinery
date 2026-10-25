@@ -173,6 +173,15 @@ try {
     ok("no _uidx created while active duplicates exist",
           count(array_filter(table_indexes($dblink, $TEST_TABLE), function ($n) { return substr($n, -5) === '_uidx'; })) === 0);
 
+    // update_database's second pass after migrations (Step 4.7): once a
+    // migration has fixed the data, the same call makes the skipped index.
+    section("Phase 3: a skipped unique index is made on the next pass once the data allows");
+    $dblink->exec("UPDATE {$TEST_TABLE} SET zit_email = NULL WHERE zit_id = (SELECT max(zit_id) FROM {$TEST_TABLE})");
+    $r3d = $updater->manageIndexes([IdxStubPhase3::class]);
+    $made = array_filter($r3d['messages'], function ($m) { return strpos($m, 'Added index:') === 0 && substr($m, -5) === '_uidx'; });
+    ok("the second pass adds the unique index", count($made) >= 1, implode(' | ', $r3d['messages']));
+    ok("and warns no more", !array_filter($r3d['warnings'], function ($w) { return strpos($w, '_uidx') !== false; }));
+
 } catch (Exception $e) {
     ok("index management ran without exception", false, $e->getMessage());
 } finally {
