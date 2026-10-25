@@ -30,6 +30,7 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.11 - a claim's root_access is a closed set, and mgn_agent_root_access moves with the machine (beta_break_glass_root_access 5.1)
  * @version 1.10 - host addresses are drawn from those no live node, placement record or provision has, so a
  *                 run never links its node to another fixture's placement record
  * @version 1.9 - a claim's update_state and update_offered are closed sets (release_transparency O7)
@@ -513,6 +514,21 @@ foreach (array('true', '1', 'Active', 'active,inactive') as $v) {
 	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
 		"server_manager '$v' is outside the closed set and refused");
 }
+
+// The site owner's emergency root access answer rides the claim the same way
+// (specs/implemented/beta_break_glass_root_access.md 5.1): on, off, or no answer.
+foreach (array('on', 'off', '') as $v) {
+	$with = $claim; $with['root_access'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null,
+		"A claim reporting root_access '$v' is accepted", (string)AgentChannelEndpoint::validation_error($with, $claim_spec));
+}
+foreach (array('yes', '1', 'OFF', 'on;off') as $v) {
+	$with = $claim; $with['root_access'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
+		"root_access '$v' is outside the closed set and refused");
+}
+check(in_array('mgn_agent_root_access', SiteCopySwap::MACHINE_COLUMNS, true),
+	'the owner\'s root access answer moves with the machine at a switch-over');
 
 // Where the agent's own self-update stands rides the claim as a closed set of
 // verdicts and a version (release_transparency O7: a refusal is an incident).

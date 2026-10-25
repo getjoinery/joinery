@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.89 - Turn off root login in the Security box (disable_root_login, agent 1.95.0), behind the confirm dialog,
+ *                 or the reason it is not offered (specs/implemented/beta_break_glass_root_access.md 5.3)
+ * @version 1.88 - Emergency root access box: a root password kept for the beta (kept, its holder, the owner's answer) and
+ *                 every reveal and retire of it, whatever the row's state (specs/implemented/beta_break_glass_root_access.md 3.5)
  * @version 1.87 - Health shows PHP's workers: how many at once, sized from what memory and CPUs, or PHP's
  *                 packaged figure named as unsized; the host reserve beside what the rest of the machine
  *                 holds; and a PostgreSQL restart pending (host_report 1.39, specs/php_fpm_sizing_bare_metal.md)
@@ -224,6 +228,7 @@
 </form>
 <?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
 	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine',
+	'nodeActionDisableRootLogin' => 'disable_root_login',
 	'nodeActionSiteStateReport' => 'site_state_report',
 	'nodeActionNetHealth' => 'net_health', 'nodeActionWebWorkers' => 'web_workers',
 	'nodeActionInstallSecurityUpdates' => 'install_security_updates',
@@ -703,7 +708,7 @@
 		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
 			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
-			'install_security_updates', 'net_health', 'web_workers'];
+			'install_security_updates', 'net_health', 'web_workers', 'disable_root_login'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
@@ -2357,6 +2362,20 @@
 		if ($more) {
 			echo '<div class="small text-muted mt-2">' . htmlspecialchars(implode(' · ', $more)) . '</div>';
 		}
+		// Root SSH login off for good, through the machine's own agent: no
+		// password and no vault (specs/implemented/beta_break_glass_root_access.md 5.3).
+		if (JobCommandBuilder::has_primitive($node, 'disable_root_login')) {
+			$drl_why = JobCommandBuilder::disable_root_login_refusal($node);
+			if ($drl_why === null) {
+				$drl_ask = 'Turn off root login on ' . (string)$node->get('mgn_name') . '? Root can no longer log in over SSH, with a password or a key, '
+					. 'and nothing turns it back on. Other accounts and open sessions are not affected; the provider\'s console still logs in.';
+				echo '<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
+					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($drl_ask), ENT_QUOTES, 'UTF-8')
+					. ', function(){ document.getElementById(\'nodeActionDisableRootLogin\').submit(); })">Turn off root login</button></div>';
+			} else {
+				echo '<div class="small text-muted mt-2">Root login is not turned off from here: ' . htmlspecialchars($drl_why) . '</div>';
+			}
+		}
 		echo '</div></div>';
 
 		echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
@@ -2387,6 +2406,37 @@
 		}
 		echo '</p>';
 		$page->end_box();
+	}
+
+	// ── Emergency root access (specs/implemented/beta_break_glass_root_access.md 3.5) ──
+	// A box of its own rather than a line in Security, which a container
+	// site's node does not show. Reveal and Retire are on the dashboard, for
+	// the holder; this is where the history stays visible after a retire.
+	$bg_provision = CustomerCloudProvision::latest_for_node((int)$node->key);
+	if ($bg_provision) {
+		$bg_events = BreakGlassRootAccess::events_for_provision((int)$bg_provision->key, 10);
+		$bg_kept = (string)$bg_provision->get('cvp_install_password') === 'kept';
+		if ($bg_kept || $bg_events) {
+			$page->begin_box(['title' => 'Emergency root access']);
+			echo '<div>' . ($bg_kept ? '<span class="badge bg-warning">kept</span> ' : '')
+				. htmlspecialchars(ProvisionCustomerCloud::install_password_summary($bg_provision)) . '</div>';
+			$bg_answer = (string)$node->get('mgn_agent_root_access');
+			if ($bg_answer !== '') {
+				echo '<div class="small text-muted mt-1">The site\'s owner allows it: ' . ($bg_answer === 'on' ? 'yes' : 'no, they turned it off') . '</div>';
+			}
+			if ($bg_kept) {
+				echo '<div class="small text-muted mt-1">Its holder reveals or retires it from the <a href="/admin/server_manager">dashboard</a>.</div>';
+			}
+			if ($bg_events) {
+				echo '<ul class="small mt-2 mb-0">';
+				foreach ($bg_events as $bg_event) {
+					echo '<li>' . htmlspecialchars($bg_event['label'] . ', '
+						. LibraryFunctions::convert_time($bg_event['time'], 'UTC', $session->get_timezone())) . '</li>';
+				}
+				echo '</ul>';
+			}
+			$page->end_box();
+		}
 	}
 
 	// ── Encrypted data root card (specs/hosted_data_promise_disk_encryption.md) ──

@@ -29,6 +29,8 @@
  * row at once. Both take the row's lock (SELECT … FOR UPDATE) and re-read it
  * before they decide, so neither saves over the other's state.
  *
+ * @version 1.5 - a kept install password (beta_break_glass_root_access) is retired by its holder's Retire click, and the
+ *                fix text says so
  * @version 1.4 - the driver is the account's provider's (ComputeDriverRegistry)
  * @version 1.3 - the driver is the provision's own account's (cloud_accounts_list)
  * @version 1.2 - the open-incidents check counts every still-happening incident not ignored (a fix awaiting its proof too)
@@ -208,7 +210,9 @@ class InstanceTransfers {
 		if (in_array($password, CustomerCloudProvision::PASSWORD_HELD_STATES, true)) {
 			$items[] = self::item('install_password', 'The install password is retired', 'blocker',
 				'The machine still accepts the install password (' . $password . ').',
-				'Retire it first (re-run retire_install_password from its job page): a working credential of ours must not ride along.');
+				$password === 'kept'
+					? 'Retire it first: the holder clicks Retire on the dashboard. A working credential of ours must not ride along.'
+					: 'Retire it first (re-run retire_install_password from its job page): a working credential of ours must not ride along.');
 		} elseif ($password === '') {
 			$items[] = self::item('install_password', 'The install password is retired', 'warning',
 				'This site predates keyless provisioning, so there is no record of how it was reached.',

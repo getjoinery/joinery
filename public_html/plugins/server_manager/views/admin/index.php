@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.56 - a kept root password (beta_break_glass_root_access 3.5): Reveal and Retire for its holder, Retire all
+ *                 requested and Retire all kept, and each box's reveal and retire history on its row
  * @version 1.55 - a node whose reported release keys are not the ones expected says so (release keys differ,
  *                specs/release_key_rotation.md R6), and one whose agent reports them and has not, says that
  * @version 1.54 - the approve list leaves out this management node's own row, and the approve refuses it (B29)
@@ -271,6 +273,85 @@ if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
 		$prov->get('cvp_domain') . ' dismissed. It created nothing, so nothing is left running.',
 		'Dismissed', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 	header('Location: /admin/server_manager'); exit;
+}
+
+// A root password kept for the beta (specs/implemented/beta_break_glass_root_access.md
+// 3.5). Only its holder, with their vault open and their second factor used
+// recently, may Reveal it or Retire it; every read is recorded. Retire moves
+// it back under SecretBox at held, and the next pass retires it the way any
+// install password is retired. Opening the password arms the sealed-content
+// write rule for the rest of the request, so each of these does its work and
+// leaves: Reveal answers with a page of its own, Retire redirects.
+if ($_POST && in_array($_POST['action'] ?? '', ['break_glass_reveal', 'break_glass_retire', 'break_glass_retire_all'], true)) {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$bg_fail = function (string $message) use ($session, $page_regex) {
+		$session->save_message(new DisplayMessage($message, 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	};
+	$bg_check = function ($prov) use ($session, $bg_fail) {
+		$verdict = BreakGlassRootAccess::holder_action_refusal($prov, $session);
+		if ($verdict['stepup']) {
+			header('Location: ' . SessionControl::stepup_redirect('/admin/server_manager')->redirect); exit;
+		}
+		if ($verdict['refusal'] !== null) {
+			$bg_fail($prov->get('cvp_domain') . ': ' . $verdict['refusal'] . '.');
+		}
+	};
+
+	if ($_POST['action'] === 'break_glass_retire_all') {
+		// Every kept box sealed to this holder, or only those whose owner asked.
+		$only_requested = ($_POST['scope'] ?? '') === 'requested';
+		$mine = array_values(array_filter(BreakGlassRootAccess::kept_rows(), function ($prov) use ($session, $only_requested) {
+			return (int)$prov->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id()
+				&& (!$only_requested || BreakGlassRootAccess::owner_asked_off(BreakGlassRootAccess::live_node($prov)));
+		}));
+		if (!$mine) {
+			$bg_fail($only_requested ? 'No box you hold has an owner asking to remove it.' : 'You hold no kept root password.');
+		}
+		$bg_check($mine[0]);
+		$done = 0;
+		foreach ($mine as $prov) {
+			BreakGlassRootAccess::retire($prov, $session);
+			$done++;
+		}
+		$session->save_message(new DisplayMessage(
+			"Retired {$done} kept root " . ($done === 1 ? 'password' : 'passwords') . '. Each is back with this management node, '
+			. 'which turns it off on its machine on the next pass.',
+			'Retired', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+	if (!$prov->key || $prov->get('cvp_delete_time')) {
+		$bg_fail('That provision is no longer on the board.');
+	}
+	$bg_check($prov);
+
+	if ($_POST['action'] === 'break_glass_retire') {
+		BreakGlassRootAccess::retire($prov, $session);
+		$session->save_message(new DisplayMessage(
+			$prov->get('cvp_domain') . ': the kept root password is back with this management node, which turns it off on its machine on the next pass.',
+			'Retired', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+
+	// Reveal: shown once, on a page of its own, and recorded.
+	$bg_password = BreakGlassRootAccess::reveal($prov, $session);
+	header('Cache-Control: no-store');
+	header('Content-Type: text/html; charset=utf-8');
+	echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+		. '<meta name="robots" content="noindex"><title>Root password</title>'
+		. '<style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;background:#fff;color:#111}'
+		. 'code{display:block;font-size:1.25rem;padding:.75rem;background:#f3f3f3;border-radius:4px;word-break:break-all;user-select:all}'
+		. 'p{line-height:1.5}a{color:#0645ad}</style></head><body>'
+		. '<h1>Root password for ' . htmlspecialchars((string)$prov->get('cvp_domain')) . '</h1>'
+		. '<code>' . htmlspecialchars($bg_password) . '</code>'
+		. '<p>Log in as <strong>root</strong> at ' . htmlspecialchars((string)$prov->get('cvp_instance_ip')) . '. This view is recorded. '
+		. 'Nothing is stored in your browser: closing this page is the end of it.</p>'
+		. '<p><a href="/admin/server_manager">Back to the dashboard</a></p></body></html>';
+	exit;
 }
 
 // Process completed jobs that haven't had their results parsed yet.
@@ -935,6 +1016,34 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 			<span class="badge badge-primary svm-card-count"><?php echo count($inflight_provisions); ?></span>
 		</summary>
 		<div class="svm-card-body svm-prov-list">
+			<?php // Kept root passwords this viewer holds, across every account (3.5, 5.2).
+			$bg_mine = array_values(array_filter(BreakGlassRootAccess::kept_rows(), function ($kp) use ($session) {
+				return (int)$kp->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id();
+			}));
+			$bg_requested = count(array_filter($bg_mine, function ($kp) {
+				return BreakGlassRootAccess::owner_asked_off(BreakGlassRootAccess::live_node($kp));
+			}));
+			if ($bg_mine): ?>
+				<div class="svm-prov svm-muted">
+					You hold <?php echo count($bg_mine); ?> kept root <?php echo count($bg_mine) === 1 ? 'password' : 'passwords'; ?>.
+					<?php if ($bg_requested): ?>
+						<form method="post" action="/admin/server_manager" id="bg_retire_requested" class="svm-inline-form">
+							<input type="hidden" name="action" value="break_glass_retire_all">
+							<input type="hidden" name="scope" value="requested">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="btn btn-sm btn-outline-secondary"
+								onclick="<?php echo $confirm_submit('bg_retire_requested', 'Retire the ' . $bg_requested . ' kept root ' . ($bg_requested === 1 ? 'password whose owner' : 'passwords whose owners') . ' asked? Each machine then stops accepting it. This cannot be undone.'); ?>">Retire all requested (<?php echo $bg_requested; ?>)</button>
+						</form>
+					<?php endif; ?>
+					<form method="post" action="/admin/server_manager" id="bg_retire_all" class="svm-inline-form">
+						<input type="hidden" name="action" value="break_glass_retire_all">
+						<input type="hidden" name="scope" value="all">
+						<?php echo SmAdminCsrf::field(); ?>
+						<button type="button" class="btn btn-sm btn-outline-secondary"
+							onclick="<?php echo $confirm_submit('bg_retire_all', 'Retire every kept root password you hold (' . count($bg_mine) . ')? Each machine then stops accepting it. This cannot be undone.'); ?>">Retire all kept</button>
+					</form>
+				</div>
+			<?php endif; ?>
 			<?php foreach ($inflight_provisions as $prov):
 				$pstatus = $prov->get('cvp_status');
 				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
@@ -972,6 +1081,29 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 							</form>
 						<?php endif; ?>
 					</div>
+					<?php if ($pw_state === 'kept'):
+						$bg_holder = (int)$prov->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id(); ?>
+						<?php if ($bg_holder): ?>
+							<div class="svm-prov-top">
+								<form method="post" action="/admin/server_manager" class="svm-inline-form">
+									<input type="hidden" name="action" value="break_glass_reveal">
+									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+									<?php echo SmAdminCsrf::field(); ?>
+									<button type="submit" class="btn btn-sm btn-outline-secondary" title="Shown once, on a page of its own. Every view is recorded.">Reveal root password</button>
+								</form>
+								<form method="post" action="/admin/server_manager" id="bg_retire_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+									<input type="hidden" name="action" value="break_glass_retire">
+									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+									<?php echo SmAdminCsrf::field(); ?>
+									<button type="button" class="btn btn-sm btn-outline-secondary"
+										onclick="<?php echo $confirm_submit('bg_retire_' . (int)$prov->key, 'Retire the kept root password for ' . $prov->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.'); ?>">Retire</button>
+								</form>
+							</div>
+						<?php endif; ?>
+						<?php foreach (BreakGlassRootAccess::events_for_provision((int)$prov->key, 3) as $bg_event): ?>
+							<div class="svm-prov-detail svm-muted"><?php echo htmlspecialchars($bg_event['label'] . ', ' . LibraryFunctions::convert_time($bg_event['time'], 'UTC', $session->get_timezone(), 'M j, g:i a')); ?></div>
+						<?php endforeach; ?>
+					<?php endif; ?>
 					<?php if ($pdetail !== ''): ?>
 						<div class="svm-prov-detail <?php echo ($perr !== '' || $pw_state === 'retire_failed') ? 'svm-bad' : 'svm-muted'; ?>"
 							title="<?php echo htmlspecialchars($pdetail . ($pw_summary !== '' ? ' — install password: ' . $pw_summary : '')); ?>"><?php echo htmlspecialchars(mb_substr($pdetail, 0, 90)); ?></div>

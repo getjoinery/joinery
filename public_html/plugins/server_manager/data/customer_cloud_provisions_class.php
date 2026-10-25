@@ -37,8 +37,14 @@
  * machine still accepts it and this row still holds it, retiring while the
  * retire_install_password job runs, retired once neither is true, or
  * retire_failed when the job could not prove the machine refuses it (the
- * password is kept, so the machine stays reachable).
+ * password is kept, so the machine stays reachable). During the beta a fresh
+ * install's password may instead be kept (specs/implemented/beta_break_glass_root_access.md):
+ * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
+ * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.26 - install password state 'kept': the root password sealed to the holder's vault
+ *                (cvp_root_pass_vault_sealed and the four sealing columns), cvp_root_access_offered;
+ *                the write path never seals to the buyer (spec beta_break_glass_root_access 3.3)
  * @version 1.25 - the instance's addresses are stored canonical, so a join from an IPv6 the provider
  *                reported with leading zeros finds its provision (normalize_addresses)
  * @version 1.24 - cvp_recovery_public_key: an encrypted data root in its owner's account is sealed to its site's own
@@ -104,6 +110,13 @@ class CustomerCloudProvision extends SystemBase {
 
 	public static $json_vars = array('cvp_mail_records');
 
+	// A kept install password (beta_break_glass_root_access 3.3), sealed to the
+	// holder's vault. Nothing reads provisions field by field through
+	// export_as_array(), which would throw VaultLockedException on a kept row
+	// with no vault open; the model is not API-exposed, and must not become so
+	// without handling that.
+	public static $sealed_fields = array('cvp_root_pass_vault_sealed');
+
 	protected static $foreign_key_actions = array(
 		'cvp_usr_user_id'    => array('action' => 'prevent', 'message' => 'this user has cloud provisions - deprovision them first'),
 		'cvp_cca_customer_cloud_account_id' => array('action' => 'null'),
@@ -157,8 +170,9 @@ class CustomerCloudProvision extends SystemBase {
 		// install only. It is the sole credential for a keyless provision — no
 		// SSH key is ever placed on a machine we create — and it is erased when
 		// the install password is retired, once the agent's join is approved.
-		// NULL means either a pre-keyless provision or a provision whose install
-		// password has been retired.
+		// NULL means a pre-keyless provision, a provision whose install
+		// password has been retired, or one whose password is kept (it is then
+		// in cvp_root_pass_vault_sealed).
 		'cvp_root_pass_sealed'       => array('type'=>'text'),
 		// Public keys (one authorized_keys line each) the retire step puts on root. Empty: root login is turned off.
 		'cvp_root_ssh_keys'          => array('type'=>'text'),
@@ -171,7 +185,26 @@ class CustomerCloudProvision extends SystemBase {
 		// password is KEPT and cvp_error says why; re-running the job from its
 		// detail page retries. NULL: a provision that predates keyless
 		// provisioning, or one that never had an instance to hold a password for.
-		'cvp_install_password'       => array('type'=>'varchar(16)', 'allowed_values'=>array('held', 'retiring', 'retired', 'retire_failed')),
+		// kept: during the beta, a fresh install's password is kept as a way
+		// back in, sealed to the holder's vault (cvp_root_pass_vault_sealed)
+		// and not under SecretBox; the holder's Retire returns it to held.
+		'cvp_install_password'       => array('type'=>'varchar(16)', 'allowed_values'=>array('held', 'kept', 'retiring', 'retired', 'retire_failed')),
+		// The kept password, sealed to the holder's vault. No default,
+		// required, allowed_values or validation: save() reads only fields
+		// that declare one, so the sweep's saves of a kept row, with nobody's
+		// vault open, never try to open it.
+		'cvp_root_pass_vault_sealed' => array('type'=>'text'),
+		// Sealed Vault convention columns (docs/sealed_vault.md). The owner
+		// is the holder, set before the seal; never the buyer.
+		'cvp_content_sealed'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'cvp_sealed_key'             => array('type'=>'text', 'is_nullable'=>true),
+		'cvp_sealed_owner_user_id'   => array('type'=>'int8', 'is_nullable'=>true),
+		'cvp_key_generation'         => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		// The install told the site to offer its owner the emergency root
+		// access checkbox (--beta-root-access): only a fresh install that may
+		// be kept. The keep requires it, and Retire clears it, so a box
+		// retired by its holder is never kept again.
+		'cvp_root_access_offered'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Fleet enrollment seeding (mailbox plugin) travels over the agent
 		// channel, so it waits for the node's agent to pair: pending →
 		// dispatched → done | failed. NULL means no seeding applies.
@@ -530,7 +563,25 @@ class CustomerCloudProvision extends SystemBase {
 	}
 
 	/** The install-password states in which the plane still holds a password. */
-	const PASSWORD_HELD_STATES = array('held', 'retiring', 'retire_failed');
+	const PASSWORD_HELD_STATES = array('held', 'kept', 'retiring', 'retire_failed');
+
+	/**
+	 * Whose vault the kept password seals to: the owner column, which the keep
+	 * sets to the holder first. The default falls back to cvp_usr_user_id,
+	 * which on a provision is the buyer, and the root password must never seal
+	 * to the customer, so an unset owner refuses the write.
+	 */
+	protected static function sealOwnerForWrite(array $row): ?int {
+		$owner = static::sealedOwnerUserIdFor($row);
+		// Nothing to seal (the column written empty): nothing to refuse.
+		if ($owner === null && (string)($row['cvp_root_pass_vault_sealed'] ?? '') === '') {
+			return null;
+		}
+		if ($owner === null) {
+			throw new CustomerCloudProvisionException('A kept install password seals to its holder, and none is set on this row.');
+		}
+		return $owner;
+	}
 
 	/**
 	 * The provision whose instance lives at this address, or null. Used when a

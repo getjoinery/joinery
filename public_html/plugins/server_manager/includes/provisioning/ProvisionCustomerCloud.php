@@ -58,6 +58,10 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.21 - the install password may be kept for the beta (specs/implemented/beta_break_glass_root_access.md 3.2, 4.1): a fresh
+ *                 install that may be kept passes beta_root_access and records cvp_root_access_offered; a held box whose
+ *                 agents are admitted is kept (BreakGlassRootAccess::keep) instead of retired when every condition holds;
+ *                 a kept row is left alone by the sweep, its node gone or not; the summary has a kept line
  * @version 2.20 - a join from a provision's machine may also be approved as a site in a container on it (B102)
  * @version 2.19 - with no plan chosen, the driver's default plan is the one sold in the provision's region (B31)
  * @version 2.18 - the provider's own layer is recorded for every server it creates, not only one we encrypt
@@ -560,6 +564,12 @@ class ProvisionCustomerCloud {
 				$own = trim((string)$provision->get('cvp_recovery_public_key'));
 				$job_params['recovery_public_key'] = $own !== '' ? $own : base64_encode(BackupRecoveryKey::public_key());
 			}
+			// The beta's emergency root access (4.1): the site offers its owner
+			// the checkbox, and only an install that offered it may be kept.
+			$offer_root_access = BreakGlassRootAccess::offer_on_install($provision);
+			if ($offer_root_access) {
+				$job_params['beta_root_access'] = true;
+			}
 			$steps = JobCommandBuilder::build_install_node($node, $job_params);
 		} catch (Exception $e) {
 			$node->set('mgn_install_state', 'install_failed');
@@ -576,6 +586,7 @@ class ProvisionCustomerCloud {
 		$provision->set('cvp_instance_ip', $instance['ip']);
 		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_status',      'installing');
+		$provision->set('cvp_root_access_offered', $offer_root_access);
 		$provision->save();
 		return 1;
 	}
@@ -890,6 +901,12 @@ class ProvisionCustomerCloud {
 	 */
 	protected function handle_install_password($provision) {
 		$state = (string)$provision->get('cvp_install_password');
+		// Kept for the beta: only its holder's Retire moves it, back to held.
+		// Before the node-gone check, which would mark it retire_failed while
+		// the SecretBox copy that state expects is gone.
+		if ($state === 'kept') {
+			return 0;
+		}
 		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
 		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
@@ -904,6 +921,16 @@ class ProvisionCustomerCloud {
 			$agents = self::machine_agents($provision, $node);
 			if (!$agents['ready']) {
 				return 0;
+			}
+			// Kept instead of retired while every condition holds (3.2). A keep
+			// that does not hold falls back to held, never to a password left
+			// in the clear, and the next pass retires it.
+			if (BreakGlassRootAccess::keep_refusal($provision, $node) === null) {
+				$kept = BreakGlassRootAccess::keep($provision);
+				if (!$kept['kept']) {
+					$this->errors[] = "Provision #{$provision->key}: " . $kept['reason'];
+				}
+				return 1;
 			}
 			ManagementJob::createJob($node->key, 'retire_install_password',
 				JobCommandBuilder::build_retire_install_password($node, (string)$provision->get('cvp_root_ssh_keys')),
@@ -1049,6 +1076,16 @@ class ProvisionCustomerCloud {
 					return 'Held — kept while the install is unfinished, so the machine stays reachable';
 				}
 				return 'Held for the install';
+			case 'kept':
+				$line = 'Kept for the beta (holder: '
+					. BreakGlassRootAccess::holder_name((int)$provision->get('cvp_sealed_owner_user_id')) . ')';
+				$node = BreakGlassRootAccess::live_node($provision);
+				if ($node === null) {
+					$line .= ' — the node record is gone';
+				} elseif (BreakGlassRootAccess::owner_asked_off($node)) {
+					$line .= ' — owner asked to remove it';
+				}
+				return $line;
 			case 'retiring':      return 'Retiring — the machine is being told to stop accepting it';
 			case 'retired':       return 'Retired';
 			case 'retire_failed': return 'NOT retired — kept so the machine stays reachable; see detail';

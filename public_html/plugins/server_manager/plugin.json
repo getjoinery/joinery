@@ -12,6 +12,9 @@
     "packages": ["sshpass"]
   },
   "bootstrap": "includes/bootstrap.php",
+  "vaultConsumer": {
+    "reseals": true
+  },
   "styles": [
     "assets/css/server_manager.css"
   ],
@@ -607,6 +610,22 @@
       "label": "Auto-approve joins from machines this plane built",
       "type": "checkbox",
       "helptext": "A join from a provisioned machine is approved automatically when its address, name and key match what the install showed and the provider confirms the instance. Turn off to approve every join by hand."
+    },
+    {
+      "name": "server_manager_beta_root_access",
+      "default": "1",
+      "group": "provisioning",
+      "label": "Keep emergency root access during the beta",
+      "type": "checkbox",
+      "helptext": "A fresh install this management node makes keeps its root password, sealed to the holder's vault, so the holder can log in as root if the agent cannot reach the machine. The site's owner can turn it off, permanently. Off: every install password is retired as soon as the machine's agents are admitted."
+    },
+    {
+      "name": "server_manager_beta_root_access_holder",
+      "default": "",
+      "group": "provisioning",
+      "label": "Emergency root access holder (user id)",
+      "type": "number",
+      "helptext": "The operator whose vault new kept root passwords are sealed to. They need a vault and a second factor; until both hold, new installs are retired instead of kept, and an incident says so. Changing it affects new installs only: a kept password stays with the holder it was kept under."
     }
   ],
   "sealed_secrets": [
