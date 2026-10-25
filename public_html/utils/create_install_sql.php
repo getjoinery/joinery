@@ -16,6 +16,8 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.6 - com_components ships only rows whose template file is in the tree
+ *                and whose theme or plugin is published (component_ships)
  * @version 1.5 - each seed table's rows in primary-key order (PgDumpRowOrder), so a row
  *                updated on the publishing site does not show as a change
  * @version 1.4 - deterministic output: no timestamp line, a fixed pg_dump restrict
@@ -252,6 +254,70 @@ function pg_dump_or_die(array $args, ?string $password, string $what) {
     return $stdout;
 }
 
+/**
+ * Whether a component row belongs in the install SQL: its template file is in
+ * this tree, and when it lives in a theme or plugin, that theme or plugin is
+ * published. com_components keeps rows for themes long removed (switched off,
+ * never deleted), and their placeholder text is whatever the theme's client
+ * wrote. An install that receives the theme gets its rows from the theme sync.
+ */
+function component_ships(string $template): bool {
+    if ($template === '' || $template === '\\N') {
+        return false;
+    }
+    if (strpos($template, '/') === false) {
+        return true;   // legacy filename-only row: resolved through the active theme
+    }
+    if (!file_exists(PathHelper::getIncludePath($template))) {
+        return false;
+    }
+    if (preg_match('#^(theme|plugins)/([^/]+)/#', $template, $m)) {
+        $manifest = PathHelper::getIncludePath($m[1] . '/' . $m[2] . '/' . ($m[1] === 'theme' ? 'theme.json' : 'plugin.json'));
+        $data = is_file($manifest) ? json_decode(file_get_contents($manifest), true) : null;
+        if (!is_array($data) || !($data['included_in_publish'] ?? true) || !empty($data['deprecated'])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * $dump (pg_dump --data-only of com_components) without the rows component_ships()
+ * refuses. In COPY text format a row is a line and a field is a tab-separated part.
+ */
+function drop_unshipped_components(string $dump, array &$dropped): string {
+    $lines = explode("\n", $dump);
+    $out = array();
+    $at = null;
+    $in_copy = false;
+    foreach ($lines as $line) {
+        if (!$in_copy) {
+            if (preg_match('/^COPY \S+ \((.*)\) FROM stdin;$/', $line, $m)) {
+                $columns = array_map(function ($c) { return trim(trim($c), '"'); }, explode(',', $m[1]));
+                $at = array_search('com_template_file', $columns, true);
+                if ($at === false) {
+                    fail("ERROR: com_components COPY block has no com_template_file column\n");
+                }
+                $in_copy = true;
+            }
+            $out[] = $line;
+            continue;
+        }
+        if ($line === '\\.') {
+            $in_copy = false;
+            $out[] = $line;
+            continue;
+        }
+        $template = explode("\t", $line)[$at] ?? '';
+        if (component_ships($template)) {
+            $out[] = $line;
+        } else {
+            $dropped[] = $template;
+        }
+    }
+    return implode("\n", $out);
+}
+
 $schema_output = pg_dump_or_die([
     '-U', $db_user,
     '-d', $db_name,
@@ -331,6 +397,15 @@ foreach ($essential_tables as $table) {
          ORDER BY array_position(i.indkey::int2[], a.attnum)");
     $key_q->execute([':table' => 'public.' . $table]);
     $table_output = PgDumpRowOrder::sort($table_output, $key_q->fetchAll(PDO::FETCH_COLUMN));
+
+    if ($table === 'com_components') {
+        $dropped = array();
+        $table_output = drop_unshipped_components($table_output, $dropped);
+        foreach ($dropped as $template) {
+            echo "   Left out component row for unshipped template: $template\n";
+        }
+        $row_count -= count($dropped);
+    }
 
     file_put_contents($table_file, $table_output);
     $data_files[$table] = $table_file;
