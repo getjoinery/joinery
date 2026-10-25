@@ -6,7 +6,9 @@
  *   - the system user (User::USER_SYSTEM) becomes the username system and the
  *     deleted-user row (User::USER_DELETED) the username deleted-user, each
  *     with its placeholder address cleared. Found by id, never by address:
- *     sites seeded them under different placeholders.
+ *     sites seeded them under different placeholders. A row at that id that
+ *     is not the placeholder (a site installed before the seed, whose first
+ *     members took ids 2 and 3) is left alone (seeded_accounts_is_placeholder()).
  *   - the seeded admin, user 1, when it still has exactly admin@example.com,
  *     becomes the username admin and loses that address, which nobody can
  *     receive at (and which passed the mail-domain check only by accident).
@@ -20,7 +22,8 @@
  * And a blank address stored as '' becomes NULL, as every save now stores it:
  * the email's unique index ignores NULL, not '', so two '' rows would keep the
  * index from ever being made. update_database makes indexes before it runs
- * migrations, so such a site gets the index on its next run.
+ * migrations and tries a skipped unique index again after them, so such a
+ * site gets the index in the same run.
  *
  * Idempotent: a row already carrying its username is skipped.
  */
@@ -33,15 +36,15 @@ function seeded_accounts_usernames() {
 	}
 
 	$rows = array(
-		array(User::USER_SYSTEM, 'system', null),
-		array(User::USER_DELETED, 'deleted-user', null),
-		array(1, 'admin', 'admin@example.com'),
+		array(User::USER_SYSTEM, 'system', null, 'System'),
+		array(User::USER_DELETED, 'deleted-user', null, 'Deleted'),
+		array(1, 'admin', 'admin@example.com', null),
 	);
-	$read = $db->prepare('SELECT usr_user_id, usr_email, usr_username FROM usr_users WHERE usr_user_id = ?');
+	$read = $db->prepare('SELECT usr_user_id, usr_email, usr_username, usr_first_name, usr_last_name FROM usr_users WHERE usr_user_id = ?');
 	$taken = $db->prepare('SELECT usr_user_id FROM usr_users WHERE LOWER(usr_username) = LOWER(?) AND usr_user_id <> ?');
 	$update = $db->prepare('UPDATE usr_users SET usr_username = ?, usr_email = NULL WHERE usr_user_id = ?');
 
-	foreach ($rows as list($id, $username, $only_if_email)) {
+	foreach ($rows as list($id, $username, $only_if_email, $placeholder_first)) {
 		$read->execute(array($id));
 		$row = $read->fetch(PDO::FETCH_ASSOC);
 		if (!$row) {
@@ -49,9 +52,18 @@ function seeded_accounts_usernames() {
 		}
 		if ((string)$row['usr_username'] !== '') {
 			echo "  user $id already has a username ({$row['usr_username']})\n";
+			// A run before the credentials rewrite existed (dev) gave the admin
+			// its username but left the file naming the old address.
+			if ($only_if_email !== null && strcasecmp((string)$row['usr_username'], $username) === 0) {
+				echo '  ' . seeded_accounts_rewrite_credentials(PathHelper::getSiteRoot() . '/config/admin_credentials.txt', $only_if_email, $username) . "\n";
+			}
 			continue;
 		}
 		if ($only_if_email !== null && strtolower((string)$row['usr_email']) !== $only_if_email) {
+			continue;
+		}
+		if ($placeholder_first !== null && !seeded_accounts_is_placeholder($row, $placeholder_first, $username)) {
+			echo "  user $id is a person's account, not the $username placeholder; left as it was\n";
 			continue;
 		}
 		$taken->execute(array($username, $id));
@@ -66,6 +78,21 @@ function seeded_accounts_usernames() {
 		}
 	}
 	return true;
+}
+
+/**
+ * Whether row 2 or 3 is the seeded placeholder. Installs before 2026-01 seeded
+ * only the admin, so on an older site ids 2 and 3 can be its first members,
+ * whose addresses must never be cleared. The placeholder is named '<First>
+ * User' or has the '<username>@' address every site seeded it under.
+ */
+function seeded_accounts_is_placeholder(array $row, string $first, string $username): bool {
+	if (strcasecmp(trim((string)$row['usr_first_name']), $first) === 0
+		&& strcasecmp(trim((string)$row['usr_last_name']), 'User') === 0) {
+		return true;
+	}
+	$local = strtolower(strstr((string)$row['usr_email'], '@', true) ?: '');
+	return $local === ($username === 'system' ? 'system-user' : $username);
 }
 
 /**
