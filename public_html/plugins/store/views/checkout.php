@@ -120,7 +120,7 @@
                     ?>
                     <div class="jy-checkout-mobile-itemrow">
                         <span><?php echo htmlspecialchars($product->get('pro_name'), ENT_QUOTES, 'UTF-8'); ?></span>
-                        <span><?php echo $currency_symbol . number_format($price, 2, '.', ','); ?></span>
+                        <span><?php echo $currency_symbol . number_format($price, 2, '.', ',') . htmlspecialchars($product_version->price_period_suffix(), ENT_QUOTES, 'UTF-8'); ?></span>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -343,7 +343,7 @@
                             </div>
                             <div class="jy-checkout-lineitem-pricewrap">
                                 <div class="jy-checkout-price">
-                                    <?php echo $currency_symbol . number_format($price, 2, '.', ','); ?>
+                                    <?php echo $currency_symbol . number_format($price, 2, '.', ',') . htmlspecialchars($product_version->price_period_suffix(), ENT_QUOTES, 'UTF-8'); ?>
                                     <?php if ($discount): ?>
                                     <div class="jy-checkout-discount">-<?php echo $currency_symbol . number_format($discount, 2, '.', ','); ?></div>
                                     <?php endif; ?>
@@ -406,6 +406,24 @@
                                 <?php echo $currency_symbol . number_format($cart->get_total(), 2, '.', ','); ?>
                             </dd>
                         </dl>
+                        <?php
+                        // A subscription's first payment is in today's total;
+                        // say what it renews at, so the total is not read as
+                        // a one-time price.
+                        $renewals = array();
+                        foreach ($cart->items as $cart_item) {
+                            list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+                            if ($product_version->is_subscription()) {
+                                $renewals[] = $currency_symbol . number_format($quantity * $price - $discount, 2, '.', ',')
+                                    . $product_version->price_period_suffix();
+                            }
+                        }
+                        ?>
+                        <?php if ($renewals): ?>
+                        <p class="jy-muted"><small>Today's total includes the first payment of
+                            <?php echo htmlspecialchars(implode(' and ', $renewals), ENT_QUOTES, 'UTF-8'); ?>,
+                            which renews until you cancel.</small></p>
+                        <?php endif; ?>
                     </div>
 
                     <div class="jy-checkout-addmore">

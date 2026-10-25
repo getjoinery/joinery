@@ -112,6 +112,14 @@ AbstractProductRequirement::register('MyCustomRequirement', __FILE__);
 
 Override only what you need; every method has a no-op default.
 
+#### Answers on the cart and the order
+
+A `$data_array` value shaped `['question' => 'Label', 'answer' => 'value']` is
+saved on the order item as a labelled answer: the buyer sees it on the cart and
+the admin sees it on the order page. Add `'internal' => true` to an answer that
+is bookkeeping (a row id the fulfilment provider reads back, a freeze time):
+it is still saved and shown on the admin's order page, and the cart skips it.
+
 #### The scope of `extra_cart_lines()`
 
 A requirement may contribute additional cart lines whose price it derives

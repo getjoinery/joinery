@@ -51,7 +51,16 @@ public function is_subscription(){
 			return $this->get('prv_price_type');
 		}
 		return false;
-	}	
+	}
+
+	/**
+	 * What follows a price shown to a buyer: '/month' for a monthly
+	 * subscription, '' for a one-time price.
+	 */
+	public function price_period_suffix(): string {
+		$period = $this->is_subscription();
+		return $period ? '/' . $period : '';
+	}
 	
 }
 

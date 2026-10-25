@@ -71,7 +71,7 @@ else{
 		$charge = $stripe_helper->get_charge($charge_id);		
 	}	
 	else if ($order->get('ord_stripe_payment_intent_id')) {
-		$charge = get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
+		$charge = $stripe_helper->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
 	}
 	else{
 		echo "No payment intent or charge id.";
