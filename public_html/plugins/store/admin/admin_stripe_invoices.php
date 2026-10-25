@@ -65,7 +65,7 @@
 		
 		if($stripe_invoice->get('siv_usr_user_id')){
 			$user = new User($stripe_invoice->get('siv_usr_user_id'), TRUE);
-			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id=' . $user->key . '">' . $user->display_name() . '</a>');
+			array_push($rowvalues, PublicPageBase::admin_user_link($user));
 		}
 		else{
 			$user = new User(NULL);

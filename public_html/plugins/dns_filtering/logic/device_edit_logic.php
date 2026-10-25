@@ -76,11 +76,9 @@ function device_edit_logic(array $input): LogicResult{
 				return LogicResult::error("You have reached your device limit of {$max_devices}.");
 			}
 
-			$empty_device = new SdDevice(NULL);
-			$empty_device->save();
-			$empty_device->load();
-
-			$device = SdDevice::createDevice($empty_device, $user, $_POST);
+			// One save, with the owner already set: a member may write only a
+			// device that is theirs, so a row saved before it has an owner is refused.
+			$device = SdDevice::createDevice(new SdDevice(NULL), $user, $_POST);
 
 			// A native app creates a device to apply configuration to the phone
 			// it runs on. The web redirect gives it no way to learn which row it

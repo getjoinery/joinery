@@ -49,7 +49,7 @@ if ($report) {
 		'Reporter' => $reporter === null
 			? 'Automatic: sent by this site when the error happened'
 			: ($reporter->key
-				? '<a href="/admin/admin_user?usr_user_id=' . (int)$reporter->key . '">' . htmlspecialchars($reporter->display_name()) . '</a>'
+				? PublicPageBase::admin_user_link($reporter)
 				: 'User ' . (int)$report->get('prr_usr_user_id')),
 		'Times seen' => (bool)$report->get('prr_automatic')
 			? (int)$report->get('prr_occurrences') . ' (the receiver has heard ' . (int)$report->get('prr_occurrences_sent') . '), last '

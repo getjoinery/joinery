@@ -80,9 +80,7 @@
 							<tr>
 								<td class="p-1" style="width: 35%;">Event Leader:</td>
 								<td class="p-1 text-600">
-									<a href="/admin/admin_user?usr_user_id=<?php echo $event_leader->key; ?>">
-										<?php echo htmlspecialchars($event_leader->display_name()); ?>
-									</a>
+									<?php echo PublicPageBase::admin_user_link($event_leader); ?>
 								</td>
 							</tr>
 							<?php endif; ?>
@@ -509,7 +507,7 @@
 		$registrant = new User($event_registrant->get('evr_usr_user_id'), TRUE);
 
 		$rowvalues=array();
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
+		array_push($rowvalues, PublicPageBase::admin_user_link($registrant));
 		array_push($rowvalues, $event_registrant->get_local('evr_create_time'));
 		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_default'), "Default", " dsasd"));
 		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_verified'), "Verified", 'Not Verified [<a class="sortlink" href="/admin/admin_phone_verify?evr_registrant_id='. $registrant->key. '">Verify</a>]'));
@@ -577,7 +575,7 @@
 			$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
 
 			$rowvalues=array();
-			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
+			array_push($rowvalues, PublicPageBase::admin_user_link($registrant));
 			array_push($rowvalues, $waiting_list->get_local('ewl_create_time'));
 
 			$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event', [

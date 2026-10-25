@@ -70,9 +70,9 @@
 		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Mailgun credentials are not in the db or settings.</div>';
 	}
 
-	echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';
+	echo '<strong>From:</strong> ('.$sender->key.') ' . PublicPageBase::admin_user_link($sender) . '<br />';
 	if($message->get('msg_usr_user_id_recipient')){
-		echo '<strong>To:</strong> ('.$recipient->key.') <a href="/admin/admin_user?usr_user_id='.$recipient->key.'">'.$recipient->display_name() .'</a><br />';
+		echo '<strong>To:</strong> ('.$recipient->key.') ' . PublicPageBase::admin_user_link($recipient) . '<br />';
 	}
 	if($message->get('msg_context_type') && $message->get('msg_context_id')){
 		if($context && !empty($context['url'])){

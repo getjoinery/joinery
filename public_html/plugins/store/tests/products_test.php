@@ -35,6 +35,7 @@
  *
  * Run: php plugins/store/tests/products_test.php
  *
+ * @version 1.1.0 - a cart of one subscription marks its order paid
  * @version 1.0.0
  */
 
@@ -64,9 +65,12 @@ $settings = Globalvars::get_instance();
 $run_id = substr(md5(uniqid('pt', true)), 0, 8);
 
 // The admin logic calls check_permission(); an admin session satisfies it, and
-// test_mode routes StripeHelper at the test keys.
+// test_mode routes StripeHelper at the test keys. The admin is a fixture of
+// this run: the test database carries no users, and checkout refuses a
+// signed-in buyer with no email.
+$pt_admin = make_user('PtAdmin' . $run_id, 10);
 $_SESSION['loggedin'] = 1;
-$_SESSION['usr_user_id'] = 1;
+$_SESSION['usr_user_id'] = (int)$pt_admin->key;
 $_SESSION['permission'] = 10;
 $_SESSION['test_mode'] = true;
 
@@ -530,6 +534,78 @@ if ($checkout_type !== 'stripe_regular') {
 				check(false, 'Stripe charge verification', $e->getMessage());
 			}
 		}
+	}
+}
+
+// ===========================================================================
+section('Payment: a cart of one subscription and nothing else');
+// ===========================================================================
+// No one-time line means no card charge, which is what marks a mixed cart's
+// order paid. The subscription's own first invoice is the payment, so a live
+// subscription must mark the order paid (dev had such orders stuck at unpaid).
+
+if ($checkout_type !== 'stripe_regular') {
+	harness_skip('subscription-only charge through cart_charge_logic',
+		"checkout_type is '$checkout_type'; only stripe_regular can be driven headlessly");
+} else {
+	// The charge above signs its buyer in; the product is made as the admin again.
+	$_SESSION['loggedin'] = 1;
+	$_SESSION['usr_user_id'] = (int)$pt_admin->key;
+	$_SESSION['permission'] = 10;
+	$ps_id = pt_create_product('PT Monthly ' . $run_id, 'pt-monthly-' . $run_id);
+	$vs = $ps_id ? pt_create_version($ps_id, 'Monthly', '3.00', 'month') : null;
+	check($vs !== null && $vs->is_subscription(), 'a monthly version is made');
+	ShoppingCart::current()->clear_cart();
+	// A buyer of its own: the first charge's buyer now has an account, which a
+	// checkout by address alone refuses.
+	if ($ps_id) pt_add_to_cart($ps_id, array('email' => 'products_test_sub_' . $run_id . '@example.com'));
+	ShoppingCart::current()->billing_user_prefill_from_items();
+	check(ShoppingCart::current()->get_non_recurring_total() == 0, 'the cart has no one-time amount');
+
+	$watermark = pt_max_order_id();
+	$post = array('stripeToken' => 'tok_visa', 'password' => '');
+	$original_post = $_POST; $original_request = $_REQUEST; $original_get = $_GET;
+	$original_method = $_SERVER['REQUEST_METHOD'] ?? null;
+	$original_send = $_SESSION['send_emails'] ?? true;
+	$_POST = $post; $_REQUEST = $post; $_GET = array();
+	$_SERVER['REQUEST_METHOD'] = 'POST';
+	$_SESSION['send_emails'] = false;
+	$charge_error = null;
+	try {
+		$result = cart_charge_logic($post);
+		if ($result->redirect === '/checkout') $charge_error = 'bounced to /checkout: ' . implode(' | ', array_map(function ($m) { return is_object($m) ? (string)($m->message_text ?? $m->message ?? json_encode((array)$m)) : (string)$m; }, (array)($_SESSION['saved_messages'] ?? array())));
+	} catch (Exception $e) {
+		$charge_error = $e->getMessage();
+	} finally {
+		$_POST = $original_post; $_REQUEST = $original_request; $_GET = $original_get;
+		if ($original_method === null) unset($_SERVER['REQUEST_METHOD']);
+		else $_SERVER['REQUEST_METHOD'] = $original_method;
+		$_SESSION['send_emails'] = $original_send;
+	}
+	check($charge_error === null, 'the subscription checkout completes', (string)$charge_error);
+
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare('SELECT ord_order_id FROM ord_orders WHERE ord_order_id > ? ORDER BY ord_order_id DESC LIMIT 1');
+	$q->execute(array($watermark));
+	$sub_order_id = $q->fetchColumn();
+	if ($sub_order_id) {
+		$sub_order = new Order((int)$sub_order_id, TRUE);
+		harness_register_row('ord_orders', 'ord_order_id', $sub_order->key);
+		$sub_items = new MultiOrderItem(array('odi_ord_order_id' => $sub_order->key));
+		$sub_id = null;
+		foreach ($sub_items as $sub_item) {
+			harness_register_row('odi_order_items', 'odi_order_item_id', $sub_item->key);
+			$sub_id = $sub_item->get('odi_stripe_subscription_id') ?: $sub_id;
+		}
+		check(!empty($sub_id), 'its line carries a Stripe subscription');
+		check((int)$sub_order->get('ord_status') === Order::STATUS_PAID, 'and the order is marked paid',
+			'status ' . $sub_order->get('ord_status'));
+		if ($sub_id) {
+			try { (new StripeHelper())->cancel_subscription($sub_id, 'immediate'); }
+			catch (Exception $e) { echo "  WARNING: test subscription $sub_id not cancelled: " . $e->getMessage() . "\n"; }
+		}
+	} else {
+		check(false, 'the subscription checkout makes an order', 'watermark ' . $watermark . ', result ' . json_encode(array('redirect' => $result->redirect ?? null, 'error' => $result->error ?? null)));
 	}
 }
 

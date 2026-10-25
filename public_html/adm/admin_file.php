@@ -87,7 +87,7 @@
 							<?php endif; ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploader</td>
-								<td class="p-1 text-600"><?php if($user): ?><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?></a><?php else: ?>—<?php endif; ?></td>
+								<td class="p-1 text-600"><?php if($user): ?><?php echo PublicPageBase::admin_user_link($user); ?><?php else: ?>—<?php endif; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploaded</td>

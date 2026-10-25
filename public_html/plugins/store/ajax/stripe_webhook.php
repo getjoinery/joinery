@@ -278,6 +278,25 @@ try {
             }
             break;
 
+        case 'charge.refunded':
+            // A refund made anywhere (the admin refund page, Stripe's dashboard)
+            // lands on the order at once; amount_refunded is the charge's total
+            // refunded so far, so a repeat or out-of-order event changes nothing.
+            $charge = $event->data->object;
+            $order = Order::GetByStripeCharge($charge->id);
+            if (!$order && !empty($charge->payment_intent)) {
+                $order = Order::GetByStripePaymentIntent($charge->payment_intent);
+            }
+            if ($order) {
+                $order->set('ord_refund_amount', $charge->amount_refunded / 100);
+                if (!$order->get('ord_refund_time')) {
+                    $order->set('ord_refund_time', 'now()');
+                }
+                $order->save();
+                error_log("Stripe webhook: charge {$charge->id} refunded " . ($charge->amount_refunded / 100) . " on order {$order->key}");
+            }
+            break;
+
         default:
             error_log("Stripe webhook: unhandled event type $event_type");
             break;

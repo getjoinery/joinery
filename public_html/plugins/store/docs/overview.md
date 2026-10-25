@@ -10,7 +10,7 @@ The plugin is a **commercial extension** (`license: Joinery-Commercial`, `requir
 
 **Core URLs (plugin-delegated in serve.php):** `/products`, `/product/{slug}`, `/pricing`, `/cart`, `/checkout`, `/cart_charge`, `/cart_confirm`, `/cart_clear`, and the `/profile/orders`, `/profile/billing`, `/profile/subscriptions` pages. Admin pages live at `/plugins/store/admin/*`.
 
-**Webhooks:** `/ajax/stripe_webhook` and `/ajax/paypal_subscription_webhook` (URLs registered with the payment providers; files live in `plugins/store/ajax/`).
+**Webhooks:** `/ajax/stripe_webhook` and `/ajax/paypal_subscription_webhook` (URLs registered with the payment providers; files live in `plugins/store/ajax/`). The Stripe endpoint handles `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed` and `charge.refunded`; subscribe it to those six in Stripe. `charge.refunded` records a refund made anywhere, Stripe's dashboard included, on its order (`ord_refund_amount`, the charge's total refunded); without it, the order page folds the refund in when an admin opens it.
 
 ## Key Pieces
 

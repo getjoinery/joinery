@@ -89,8 +89,7 @@ foreach ($ownerships as $ownership) {
 
 	$owner = new User($ownership->get('own_usr_user_id'), TRUE);
 	$rowvalues[] = $owner->key
-		? '<a href="/admin/admin_user?usr_user_id=' . $owner->key . '">'
-			. htmlspecialchars($owner->display_name()) . '</a>'
+		? PublicPageBase::admin_user_link($owner)
 		: 'Unknown user';
 
 	$tag = $ownership->get('own_tag');

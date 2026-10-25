@@ -70,7 +70,7 @@
 							<tr>
 								<td class="p-1" style="width: 35%;">Customer:</td>
 								<td class="p-1">
-									<a href="/admin/admin_user?usr_user_id=<?php echo $order_user->key; ?>"><?php echo htmlspecialchars($order_user->display_name()); ?> (User #<?php echo $order_user->key; ?>)</a>
+									<?php echo PublicPageBase::admin_user_link($order_user, $order_user->display_name() . ' (User #' . $order_user->key . ')'); ?>
 								</td>
 							</tr>
 							<?php if(Access::permits(10, $session)): ?>
@@ -134,7 +134,7 @@
 								</div>
 								<?php if($order_item->get('odi_usr_user_id')): ?>
 								<div class="fs-10 text-600 mb-1">
-									For: <a href="/admin/admin_user?usr_user_id=<?php echo $order_item_user->key; ?>"><?php echo htmlspecialchars($order_item_user->display_name()); ?></a>
+									For: <?php echo PublicPageBase::admin_user_link($order_item_user); ?>
 								</div>
 								<?php endif; ?>
 								<div class="fs-10 text-600 mb-1">

@@ -800,7 +800,7 @@ class StripeHelper {
 				return $this->get_charge($charge_id);
 
 			}
-			catch(\Stripe\Exception $e) {
+			catch(\Stripe\Exception\ExceptionInterface $e) {
 				  return false;
 			}	
 		}	
@@ -810,11 +810,12 @@ class StripeHelper {
 				$charge = $this->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
 				return $charge;
 			}
-			catch(\Stripe\Exception $e) {
+			catch(\Stripe\Exception\ExceptionInterface $e) {
 				  return false;
 			}
 		}
-			
+		// Neither id: a PayPal, free or hand-made order has no Stripe charge.
+		return false;
 	}
 	
 	public function update_order_refund_amount_from_stripe($order){
@@ -830,7 +831,16 @@ class StripeHelper {
 				return false;			
 			}			
 		}
-		$charge = $this->get_charge_from_order($order);
+		// A refresh on the order page's view: Stripe out of reach (no keys,
+		// a refused call) leaves the stored total as it is.
+		try {
+			$charge = $this->get_charge_from_order($order);
+		} catch (StripeHelperException $e) {
+			return false;
+		}
+		if (!$charge) {
+			return false;
+		}
 
 		if($charge->amount_refunded){
 			//print_r($charge->refunds);
@@ -862,12 +872,11 @@ class StripeHelper {
 			'amount' => $refund_amount*100
 			]);
 		}
-		catch(\Stripe\Exception $e) {
-			  echo 'Status is:' . $e->getHttpStatus() . '\n';
-			  echo 'Type is:' . $e->getError()->type . '\n';
-			  echo 'Code is:' . $e->getError()->code . '\n';
-			  exit;
-		}		
+		catch(\Stripe\Exception\ExceptionInterface $e) {
+			// Stripe refused it, so nothing was refunded; the refund page says so.
+			throw new StripeHelperException($e->getMessage(), 0, $e);
+		}
+		return $re;
 	}
 	
 	public function update_all_subscriptions_in_order($order){
@@ -1524,7 +1533,7 @@ class StripeHelper {
 		try {
 			$session = $this->client()->checkout->sessions->retrieve($session_id);
 			return $session;
-		} catch (\Stripe\Exception $e) {
+		} catch (\Stripe\Exception\ExceptionInterface $e) {
 			return false;
 		}
 	}
@@ -1562,19 +1571,11 @@ class StripeHelper {
 				'status' => $session->status, // 'complete', 'expired', 'open'
 				'payment_intent' => $session->payment_intent
 			];
-		} catch (\Stripe\Exception $e) {
+		} catch (\Stripe\Exception\ExceptionInterface $e) {
 			return false;
 		}
 	}
 	
-	public function webhook_construct_event($payload, $sig_header, $endpoint_secret){
-	
-		  $event = $this->client()->Webhook->construct_event(
-			$payload, $sig_header, $endpoint_secret
-		  );
-		  return $event;
-	}
-
 	/**
 	 * Process webhook - handles ALL Stripe setup and validation internally
 	 * @return object Stripe event object

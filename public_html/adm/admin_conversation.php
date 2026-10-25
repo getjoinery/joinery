@@ -114,7 +114,7 @@ foreach ($participants as $p) {
 	$user_id = $p->get('cnp_usr_user_id');
 	try {
 		$user = new User($user_id, TRUE);
-		$user_link = '<a href="/admin/admin_user?usr_user_id=' . (int)$user_id . '">' . htmlspecialchars($user->display_name(), ENT_QUOTES, 'UTF-8') . '</a>';
+		$user_link = PublicPageBase::admin_user_link($user);
 	} catch (Exception $e) {
 		$user_link = 'User #' . (int)$user_id;
 	}
