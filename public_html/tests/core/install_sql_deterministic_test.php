@@ -58,8 +58,11 @@ section('Each former source of difference, by name');
 check(strpos($a_sql, 'Generated at') === false, 'no timestamp line');
 check(preg_match('/^\\\\restrict joineryinstall$/m', $a_sql) === 1, 'pg_dump restrict token is the fixed one',
 	'first restrict line: ' . (preg_match('/^\\\\restrict .*$/m', $a_sql, $m) ? $m[0] : 'none'));
-check(preg_match("/VALUES \\(1, 'Admin', '', 'admin@example.com', 10, true, true, '!'/", $a_sql) === 1,
-	'the seed admin row carries the locked marker, not a salted hash');
+check(preg_match("/VALUES \\(1, 'Admin', '', NULL, 'admin', 10, true, false, '!'/", $a_sql) === 1,
+	'the seed admin row carries the locked marker, not a salted hash, and is the username admin with no email');
+check(preg_match("/VALUES \\(2, 'System', 'User', NULL, 'system',/", $a_sql) === 1
+	&& preg_match("/VALUES \\(3, 'Deleted', 'User', NULL, 'deleted-user',/", $a_sql) === 1,
+	'the system and deleted-user rows have usernames and no made-up address');
 check(substr($a, 0, 2) === "\x1f\x8b" && ord($a[9]) !== 0 || substr($a, 4, 4) === "\0\0\0\0",
 	'gzip header carries no modification time (gzip -n)', 'mtime bytes: ' . bin2hex(substr($a, 4, 4)));
 

@@ -170,7 +170,7 @@ There is one auth story with **four credentials**: three key types, distinguishe
 | Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` | The person, through `app_password_create` (browser session + step-up), for one declared purpose and one named device | Logging in on the website; the page emits the CSRF token as a `<meta name="joinery-api-csrf">` tag |
 | Identity | The user account the admin attached | The user who logged in | The person who made it | The web session's user, exactly as pages see it (login-as included) |
 | Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request | SHA-256, as session keys | n/a — the token is compared constant-time against the session's stored value |
-| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate | Its purpose: only actions declaring that `app_purpose` | Same as a session key: full capability (4); the user's role and per-record authorization are the effective gates |
+| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (the owner, else the model's class level — see [Per-record authorization](#per-record-authorization)) is the effective gate | Its purpose: only actions declaring that `app_purpose` | Same as a session key: full capability (4); the user's role and per-record authorization are the effective gates |
 | Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) | None; it ends when its purpose's plugin is deactivated | The web session's lifetime |
 | Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | `app_credential_revoke`, the profile **App Sessions** page and the purpose's own page, and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
 | Management API | Allowed (with superadmin owner) | **Never** | **Never** | **Never** |
@@ -295,7 +295,7 @@ The one place passwords transit the API. Body (JSON or form):
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `email` | Yes | Account email |
+| `email` | Yes | The account's email or username (whatever the person signs in with) |
 | `password` | Yes | Account password |
 | `device_label` | No | Stored as the key name, shown in session lists (e.g. "Jeremy's iPhone") |
 
@@ -309,7 +309,7 @@ Success returns the key pair — **the only time the secret plaintext is ever re
         "public_key": "sess_…",
         "secret_key": "…64 hex chars…",
         "expires_time": "2027-06-11 17:00:00",
-        "user": { "user_id": 5, "display_name": "…", "email": "…",
+        "user": { "user_id": 5, "display_name": "…", "email": "…", "username": null,
                   "permission": 0, "tier": { "name": "…", "tier_level": 2, "features": {} } }
     }
 }
@@ -416,7 +416,7 @@ function catalog_logic_descriptor(): array {
             'requires_person_credential' => false, // browser session or an app session key; refuse machine keys
             'allow_guest'              => false,   // accept the anonymous browser principal (valid CSRF, no signed-in user)
             'session_write'            => false,   // re-open the session so the action's $_SESSION writes persist (browser credential only)
-            'min_user_permission'      => 0,       // a level or class:verb (docs/permissions.md) against the acting level: the session's for the browser credential, the key user's usr_permission for a key
+            'min_user_permission'      => 0,       // required: a level or class:verb (docs/permissions.md) against the acting level: the session's for the browser credential, the key user's usr_permission for a key; 0 for a person's own rows (the model's owner rule is the gate)
             'requires_scoped_key'      => false,   // admit only a machine key whose apk_scope names this action
         ],
     ];
@@ -459,13 +459,17 @@ model surface) read the **same** declarations below, so you configure each fact 
 
 1. **Resource?** Set `$api_readable` / `$api_writable` (both default `false` → 404). Leave both
    off for credential, config, audit/log, and join tables.
-2. **Row scope?** The `SystemBase` default is **owner-or-staff (deny)** and needs no code:
+2. **Row scope?** Declare the model's data class, `public static $access_class = 'personal';`
+   ([Permissions](permissions.md)). The `SystemBase` rule is **the owner, else the class's level
+   (deny)** and needs no other code:
    - Standard `{prefix}_usr_user_id` owner column → nothing to write.
-   - No owner column → automatically staff-only; nothing to write.
+   - Another owner column → `public static $owner_column = 'xyz_owner_user_id';`.
+   - A user column that records who acted (a log) → `public static $owner_column = false;`.
+   - No owner column → level-only; nothing to write.
    - Public catalog content → set `$api_public_read = true` (you override **to open**, never to
      close).
-   - Non-standard ownership (e.g. sender/recipient) → override `authenticate_read` /
-     `authenticate_write` and **throw to deny**.
+   - A real rule of its own (a conversation's participants, a board role) → override
+     `authenticate_read` / `authenticate_write` and **throw to deny**.
 3. **Secret / privileged columns?** Add genuine secrets to `$api_unreadable_fields` and
    privileged-but-readable columns to `$api_unwritable_fields`. Skip anything matching
    `/_(password|secret|key|token|hash)$/i` — the regex floor catches those automatically. Both
@@ -517,19 +521,21 @@ touch. Before returning or mutating a row, the API calls `authenticate_read($dat
 $data = ['current_user_id' => <acting user id>, 'current_user_permission' => <their level>];
 ```
 
-**The `SystemBase` default is owner-or-staff (deny).** A caller may touch a row only if they own
-it — the conventional `{prefix}_usr_user_id` column equals `current_user_id` — or they are staff
-(`current_user_permission >= 5`). A model with no owner column falls to staff-only. The contract
-is **throw-to-deny**: the method throws `SystemAuthenticationError` to refuse, and returns nothing
+**The `SystemBase` rule is the owner, else the class's level (deny).** A caller may touch a row
+only if they own it — its owner column (`{prefix}_usr_user_id`, or the model's `$owner_column`)
+equals `current_user_id` — or their level meets the model's level for the verb: read, write,
+soft delete or permanent delete, from its `$access_class` in `permissions.json` and its per-verb
+exceptions ([Permissions](permissions.md)). A model with no owner column is level-only. The
+contract is **throw-to-deny**: the method throws `SystemAuthenticationError` to refuse, and returns nothing
 to allow. (An explicit `false` return is also treated as denial.) It composes with both read
 shapes: a **single** `GET /{Class}/{id}` of an unauthorized row returns an error, while a
 **collection** `GET /{Class}s` simply **skips** rows the caller isn't authorized to see.
 
-A member's request for a **list** of a model they can never read a row of
-(not public, no owner column, keeping SystemBase's own read rule, so staff
-only) is refused with a 403 before anything is counted: the list would show
-them nothing, but its `num_results` would still answer for the rows matching
-their filter.
+A request for a **list** of a model the caller can never read a row of
+(not public, no owner column, keeping SystemBase's own read rule, and the
+caller below its read level) is refused with a 403 before anything is
+counted: the list would show them nothing, but its `num_results` would still
+answer for the rows matching their filter.
 
 You override `authenticate_read` in two directions. To make a resource **public** there is a
 declarative flag for the common case:
@@ -540,7 +546,7 @@ public static $api_public_read = true;   // catalog content: world-readable over
 
 When `$api_public_read` is true, the read surface skips the per-record scope **and** the
 collection owner-filter — the rows are the same for everyone (Events, Products, Posts, Pages).
-When false (the default), reads are owner-or-staff. Audit/log/credential tables simply stay
+When false (the default), reads are the owner, else the read level. Audit/log/credential tables simply stay
 unexposed (`$api_readable = false`).
 
 The rare opposite is tightening to **owner-only**: a model whose rows are personal credential
@@ -555,8 +561,12 @@ unauthorized rows are skipped, so any caller at any permission receives only the
 - **The owner column is unwritable** — `{prefix}_usr_user_id` is dropped from CRUD input, so
   ownership can never be reassigned through a field write.
 - **POST stamps the owner server-side** — created rows are owned by the caller by construction;
-  a supplied owner in the body is ignored. For non-staff callers, the **collection** query is
-  owner-filtered in SQL, so `num_results` reflects only the caller's rows (no count disclosure).
+  a supplied owner in the body is ignored. For a caller below the model's read level, the
+  **collection** query is owner-filtered in SQL, so `num_results` reflects only the caller's rows
+  (no count disclosure).
+- **The record surface runs as its caller** — the session is the API caller at the level the
+  request was authorized at (`set_api_user()`), so the model's own write-path check
+  ([Permissions](permissions.md)) sees the same person the endpoint authorized.
 
 ### Field floors (read and write)
 
@@ -615,6 +625,15 @@ Unwritable fields are **silently dropped** from POST/PUT input (strong-params st
 keeps its stored value (PUT) or model default (POST), and a full-object round-trip still works.
 This is what makes a model like `User` safely writable: the dangerous column (`usr_permission`) is
 blocked at the field layer, not the whole model.
+
+A column a create may set but an update must never change goes in `$api_create_only_fields`. It
+is accepted on POST and silently dropped from PUT, on the AI update surface too. `User` lists
+`usr_email`: the sign-in address changes only through the account page, behind a second-factor
+re-check and a confirm link mailed to the new address.
+
+```php
+public static $api_create_only_fields = array('usr_email');
+```
 
 The AI surface composes over the same floors: `$ai_excluded_fields` trims **reads** for
 relevance/noise on top of the unreadable floor, and `$ai_writable_fields` is an allowlist that

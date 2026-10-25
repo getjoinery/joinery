@@ -31,15 +31,8 @@ class OrderItemException extends SystemBaseException {}
 
 class OrderItem extends SystemBase {	public static $prefix = 'odi';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'odi_order_items';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'odi_order_item_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -105,7 +98,7 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_paypal_subscription_id' => array('type'=>'varchar(64)'),
 	    'odi_payment_source' => array('type'=>'varchar(20)'),
 	    'odi_app_store_original_transaction_id' => array('type'=>'varchar(64)'),
-	    'odi_play_purchase_token' => array('type'=>'varchar(255)'),
+	    'odi_play_purchase_token' => array('access_class' => 'restricted', 'type'=>'varchar(255)'),
 	    'odi_store_environment' => array('type'=>'varchar(20)'),
 	);
 
@@ -139,20 +132,14 @@ function get_order() {
 		return 'none';
 	}
 	
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
-
 	function get_data() {
-		$data = unserialize(base64_decode($this->get('odi_product_info')));
+		$data = unserialize(base64_decode((string)$this->get('odi_product_info')));
 		$clean_data = array();
+		// An item bought without product info (a subscription renewal, an app
+		// store purchase) has none to show.
+		if (!is_array($data)) {
+			return $clean_data;
+		}
 		foreach($data as $key => $value) {
 			// Check if value is a string before applying htmlspecialchars
 			if (is_string($value)) {
@@ -271,7 +258,7 @@ function get_order() {
 	 */
 	protected function notify_cancelled($provider_id, $order, $order_user) {
 		$list = (string)Globalvars::get_instance()->get_setting('subscription_notification_emails');
-		$body = 'Subscription '.$provider_id.' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
+		$body = 'Subscription '.$provider_id.' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->login_label().')';
 		foreach (explode(',', $list) as $notify_email) {
 			$notify_email = trim($notify_email);
 			if ($notify_email === '') {

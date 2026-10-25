@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 // @version 1.3 - the last-factor removal warning names the cost as password-only sign-in, not a weaker vault
 // @version 1.2 - the Security card's notes follow the vault alone: no mail protection level or add-on requires a second factor
 // @version 1.1 - a Remove button only for a group with a membership row, read once by the logic (specs/post_release_fleet_defects.md B4.2)
@@ -80,10 +81,15 @@ array(
 						<tr>
 							<td class="p-1" style="width: 35%;">Email:</td>
 							<td class="p-1">
+								<?php if(!$user->get('usr_email')): ?>
+									<span class="text-600">None: signs in with a username</span>
+								<?php else: ?>
 								<a class="text-600 text-decoration-none" href="mailto:<?php echo htmlspecialchars($user->get('usr_email')); ?>">
 									<?php echo htmlspecialchars($user->get('usr_email')); ?>
 								</a>
-								<?php if($user->get('usr_email_is_verified')): ?>
+								<?php endif; ?>
+								<?php if(!$user->get('usr_email')): ?>
+								<?php elseif($user->get('usr_email_is_verified')): ?>
 									<span class="badge rounded-pill badge-subtle-success ms-2">
 										<span>Verified</span><span class="fas fa-check ms-1" data-fa-transform="shrink-4"></span>
 									</span>
@@ -94,6 +100,12 @@ array(
 								<?php endif; ?>
 							</td>
 						</tr>
+						<?php if($user->get('usr_username')): ?>
+						<tr>
+							<td class="p-1" style="width: 35%;">Username:</td>
+							<td class="p-1 text-600"><?php echo htmlspecialchars($user->get('usr_username')); ?></td>
+						</tr>
+						<?php endif; ?>
 						<tr>
 							<td class="p-1" style="width: 35%;">Signed Up:</td>
 							<td class="p-1 text-600"><?php echo $user->get_local('usr_signup_date', 'M j, Y'); ?></td>
@@ -200,6 +212,7 @@ array(
 										<?php echo AdminPage::action_button('Remove', '/admin/admin_user', [
 											'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $groupmember_id, 'usr_user_id' => $user->key],
 											'confirm' => 'Remove user from this group?',
+											'model'   => new GroupMember($groupmember_id, TRUE), 'verb' => 'soft_delete',
 										]); ?>
 										<?php endif; ?>
 									</td>
@@ -487,7 +500,7 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 			</div>
 		</div>
 
-		<?php if($user->get('usr_permission') > 0): ?>
+		<?php if(Access::allows(Access::staffLevel(), (int)$user->get('usr_permission'))): ?>
 		<!-- Sent Emails -->
 		<div class="card mt-3">
 			<div class="card-header bg-body-tertiary">

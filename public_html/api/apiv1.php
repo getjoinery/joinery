@@ -2,7 +2,16 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.30
+ * @version 2.32
+ * @changelog 2.32 - the HTTPS requirement believes X-Forwarded-Proto only from a proxy we know
+ *   (LibraryFunctions::isSecure()).
+ * @changelog 2.31 - Every route family past the action dispatch runs as its caller
+ *   (set_api_user), so the model write-path check sees them; a list's owner scope and its
+ *   staff-only refusal read the model's read level (spec declared_permissions 3.2), and the
+ *   owner column is the model's own (access_owner_column()). Acting as the caller makes those families
+ *   an API context (SessionControl::is_api_context()), as actions already were: the account-standing
+ *   check is ApiAuth's, and a password change through PUT /User ends the caller's other sessions as
+ *   one made through an action does.
  * @changelog 2.30 - A person's budget is kept per kind of credential: their browser
  *   (api_session_rate_limit_*), their devices together (api_device_rate_limit_requests) and their
  *   app credentials together (ApiAuth::APP_REQUEST_LIMIT at least). A desktop's first sync of a
@@ -312,8 +321,7 @@ function api_flag($class_name, $prop) {
  * (writes), and owner-scoping the collection query.
  */
 function api_owner_column($class_name) {
-	$col = $class_name::$prefix . '_usr_user_id';
-	return array_key_exists($col, $class_name::$field_specifications) ? $col : null;
+	return $class_name::access_owner_column();
 }
 
 /**
@@ -339,11 +347,12 @@ function api_record_write_fields(array $fallback) {
  * bypassed by a model defining its own factory. Drops unwritable fields (credential
  * pattern + $api_unwritable_fields) and the owner column (never reassignable via CRUD).
  */
-function api_sanitize_write_input(array $input, $class_name) {
+function api_sanitize_write_input(array $input, $class_name, $is_update = false) {
 	$owner_col = api_owner_column($class_name);
 	$clean = array();
 	foreach ($input as $key => $value) {
 		if ($class_name::is_unwritable_field($key)) continue;
+		if ($is_update && in_array($key, $class_name::$api_create_only_fields, true)) continue;
 		if ($owner_col !== null && $key === $owner_col) continue;
 		$clean[$key] = $value;
 	}
@@ -390,9 +399,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Read as a yes/no setting, the way every other toggle is read — an unset
 // value therefore still requires HTTPS.
 if ((string)$settings->get_setting('api_require_https', false, true) !== '0') {
-	$is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-		|| (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
-		|| (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+	// A proxy's X-Forwarded-Proto counts only from a proxy we know (isSecure()).
+	$is_https = LibraryFunctions::isSecure();
 	if (!$is_https) {
 		api_error('API requires HTTPS. Please use https:// instead of http://', 'SecurityError', 426);
 	}
@@ -664,6 +672,15 @@ if (strtolower($url_segments[2] ?? '') === 'action' && isset($url_segments[3])) 
 	// dispatchActionAuthenticated() always exits.
 }
 
+// Every route family below acts as the caller, as an action's logic does: the
+// model write-path check (spec declared_permissions 3.2) then sees who it is
+// and the level the request was authorized at.
+if ($api_user !== null) {
+	$api_session = SessionControl::get_instance();
+	$api_session->set_api_user($api_user->key, $api_entry ? $api_entry->key : null, (int)$auth_data['current_user_permission']);
+	register_shutdown_function(function () use ($api_session) { $api_session->clear_api_user(); });
+}
+
 // URL segments were parsed above the pre-auth dispatches
 $operation = isset($url_segments[2]) ? ucwords($url_segments[2]) : '';
 $entity_id = isset($url_segments[3]) ? $url_segments[3] : null;
@@ -784,7 +801,7 @@ if (in_array($operation, $classes)) {
 			// only update a row you already own (the owner column is unwritable below, so
 			// it cannot be flipped to forge ownership mid-update).
 			api_authorize_row($object, 'authenticate_write', $auth_data);
-			foreach (api_sanitize_write_input(api_record_write_fields($url_parts), $class_name) as $key => $value) {
+			foreach (api_sanitize_write_input(api_record_write_fields($url_parts), $class_name, true) as $key => $value) {
 				$object->set($key, $value);
 			}
 			$object->prepare();
@@ -896,13 +913,13 @@ if (in_array($operation, $classes)) {
 		null, ['model' => $class_name, 'verb' => 'read']);
 
 	// A model with no owner column, not public, keeping SystemBase's own read
-	// rule is staff only: a member is never shown a row. The list would still
+	// rule is read at its read level only: no one below it is shown a row. The list would still
 	// answer num_results for whatever the member filtered on, a yes-or-no on
 	// rows they may not see, so the list is refused before it is counted.
 	if (!$class_name::$api_public_read && api_owner_column($class_name) === null
-			&& (int)$auth_data['current_user_permission'] < 5
+			&& !Access::allows($class_name::access_level('read'), (int)$auth_data['current_user_permission'])
 			&& (new ReflectionMethod($class_name, 'authenticate_read'))->getDeclaringClass()->getName() === 'SystemBase') {
-		api_error('Fetch objects: ' . $class_name . ' can be read by staff only', 'AuthenticationError', 403);
+		api_error('Fetch objects: ' . $class_name . ' needs level ' . $class_name::access_level('read'), 'AuthenticationError', 403);
 	}
 
 	$multiclassname = 'Multi' . $class_name;
@@ -934,12 +951,14 @@ if (in_array($operation, $classes)) {
 
 	$objects = new $multiclassname($url_parts, $sortarray, $numperpage, $offset);
 
-	// §4.5 owner-scope: for a non-public owner-column model read by a non-staff caller, AND
-	// the owner filter into the query itself, so count_all() is correct and there is no count
-	// disclosure. Public-read models (catalog content) and staff get the unfiltered query.
+	// §4.5 owner-scope: for a non-public owner-column model read by a caller below its read
+	// level, AND the owner filter into the query itself, so count_all() is correct and there
+	// is no count disclosure. Public-read models (catalog content) and callers at the model's
+	// read level get the unfiltered query.
 	$is_public_read = $class_name::$api_public_read;
 	$owner_col = api_owner_column($class_name);
-	if (!$is_public_read && $owner_col !== null && (int)$auth_data['current_user_permission'] < 5) {
+	if (!$is_public_read && $owner_col !== null
+			&& !Access::allows($class_name::access_level('read'), (int)$auth_data['current_user_permission'])) {
 		$objects->api_owner_scope = [$owner_col, $auth_data['current_user_id']];
 	}
 

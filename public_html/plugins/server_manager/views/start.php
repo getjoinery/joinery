@@ -57,9 +57,9 @@ $page->public_header(array(
 				// The sign-in handler's alternate field names (lbx_*), so the two
 				// forms on this page never share an element id and every label
 				// points at its own field.
-				$fw_login->textinput('lbx_email', 'Email:', array(
-					'type'     => 'email',
-					'required' => true,
+				$fw_login->textinput('lbx_email', 'Email or username:', array(
+					'required'     => true,
+					'autocomplete' => 'username',
 					'value'    => ($form === 'login') ? (string)($values['lbx_email'] ?? '') : '',
 				));
 				$fw_login->passwordinput('lbx_password', 'Password:', array('required' => true));

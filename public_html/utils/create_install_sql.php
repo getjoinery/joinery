@@ -16,6 +16,9 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.8 - the seeded accounts have usernames and no email: admin (user 1), system (2),
+ *                deleted-user (3) (spec optional_username)
+ * @version 1.7 - the admin menu rows carry no level: menus show what the reader may open
  * @version 1.6 - com_components ships only rows whose template file is in the tree
  *                and whose theme or plugin is published (component_ships)
  * @version 1.5 - each seed table's rows in primary-key order (PgDumpRowOrder), so a row
@@ -432,32 +435,32 @@ $bcrypt_hash = '!';
 
 // Create admin user SQL (user_id 1) - explicit ID to ensure correct ordering
 $admin_user_sql = sprintf(
-    "-- Default admin user (email: admin@example.com). The password hash below has no\n" .
-    "-- known plaintext; a password is set at install time.\n" .
-    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "-- Default admin user (username: admin, no email). The password hash below has no\n" .
+    "-- known plaintext; a password (and, when given, an email) is set at install time.\n" .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
-    "VALUES (1, 'Admin', '', 'admin@example.com', 10, true, true, '%s', CURRENT_DATE, true, 'America/New_York');\n\n",
+    "VALUES (1, 'Admin', '', NULL, 'admin', 10, true, false, '%s', CURRENT_DATE, true, 'America/New_York');\n\n",
     $bcrypt_hash
 );
 
 // Create system user SQL (user_id 2) - used for system-generated actions.
 // It is an attribution id, never a login: nothing reads its permission, so it holds none.
 $system_user_sql = "-- System user (user_id 2) - used for system-generated actions\n" .
-    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
-    "VALUES (2, 'System', 'User', 'system-user@joinery.local', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n";
+    "VALUES (2, 'System', 'User', NULL, 'system', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n";
 
 // Create deleted user SQL (user_id 3) - placeholder for reassigning ownership when users are deleted
 $deleted_user_sql = "-- Deleted user (user_id 3) - placeholder for reassigning ownership when users are deleted\n" .
-    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission, " .
+    "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username, usr_permission, " .
     "usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone) " .
-    "VALUES (3, 'Deleted', 'User', 'deleted-user@joinery.local', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n" .
+    "VALUES (3, 'Deleted', 'User', NULL, 'deleted-user', 0, false, false, '', CURRENT_DATE, false, 'America/New_York');\n\n" .
     "-- Reset usr_users sequence to start after default users\n" .
     "SELECT setval('public.usr_users_usr_user_id_seq', 3, true);\n";
 
 $admin_file = $temp_dir . '/admin_user.sql';
 file_put_contents($admin_file, $admin_user_sql . $system_user_sql . $deleted_user_sql);
-echo "   Generated admin user (admin@example.com, no usable password until install)\n";
+echo "   Generated admin user (username admin, no usable password until install)\n";
 echo "   Generated system user (user_id 2)\n";
 echo "   Generated deleted user (user_id 3)\n";
 
@@ -536,7 +539,7 @@ $header = <<<SQL
 -- for a fresh Joinery installation. It is generated on demand during the
 -- publish_upgrade process to ensure install SQL is always up-to-date.
 --
--- Seeded admin account: admin@example.com
+-- Seeded admin account: username admin (no email until install sets one)
 --
 -- Its password hash has no known plaintext. install.sh sets a real password when
 -- it creates the site. If you restore this file by hand, set one with:
@@ -839,7 +842,6 @@ $write_menu_insert = function($handle, $entry, $location, $visibility) use ($pg_
     $title = $pg_escape($entry['title']);
     $url = $pg_escape($entry['url'] ?? '');
     $order = (int)$entry['order'];
-    $permission = (int)$entry['permission'];
     $icon = isset($entry['icon']) ? "'" . $pg_escape($entry['icon']) . "'" : 'NULL';
     $setting_activate = isset($entry['settingActivate']) ? "'" . $pg_escape($entry['settingActivate']) . "'" : 'NULL';
     $parent_expr = !empty($entry['parent'])
@@ -847,8 +849,8 @@ $write_menu_insert = function($handle, $entry, $location, $visibility) use ($pg_
         : 'NULL';
 
     $sql = "INSERT INTO public.amu_admin_menus "
-         . "(amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_setting_activate, amu_disable, amu_location, amu_visibility) "
-         . "VALUES ('$title', '" . $pg_escape($slug) . "', '$url', $parent_expr, $order, $permission, $icon, $setting_activate, 0, '" . $pg_escape($location) . "', '" . $pg_escape($visibility) . "');\n";
+         . "(amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_icon, amu_setting_activate, amu_disable, amu_location, amu_visibility) "
+         . "VALUES ('$title', '" . $pg_escape($slug) . "', '$url', $parent_expr, $order, $icon, $setting_activate, 0, '" . $pg_escape($location) . "', '" . $pg_escape($visibility) . "');\n";
     fwrite($handle, $sql);
 };
 
@@ -967,7 +969,7 @@ echo "File size:         $file_size_mb MB (" . number_format($file_size) . " byt
 echo "Database version:  $version\n";
 echo "Tables with data:  " . count($data_files) . "\n";
 echo "Compression:       " . ($compress ? "Enabled (gzip)" : "Disabled") . "\n";
-echo "Default admin:     admin@example.com (password set at install time)\n";
+echo "Default admin:     username admin (password set at install time)\n";
 echo "Generated at:      " . date('Y-m-d H:i:s T') . "\n";
 echo str_repeat("=", 70) . "\n\n";
 

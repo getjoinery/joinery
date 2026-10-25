@@ -404,7 +404,7 @@ class SettingsFieldRenderer {
 				if ((int)$value > 0) {
 					$chosen = new User((int)$value, TRUE);
 					$choices[(int)$value] = $chosen->key
-						? $chosen->display_name() . ' (' . $chosen->get('usr_email') . ')'
+						? $chosen->display_name() . ' (' . $chosen->login_label() . ')'
 						: 'User #' . (int)$value . ' (not found)';
 				}
 				$field['options'] = $choices;

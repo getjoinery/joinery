@@ -516,7 +516,9 @@ Fixtures and teardown (all LIFO, run automatically at finish or on crash):
 
 - `make_user($suffix, $permission = 0)` — a test user, registered for cleanup.
   The generated email carries a per-run random token, so leftovers from a
-  killed run can never collide with the next run's same-suffix fixture.
+  killed run can never collide with the next run's same-suffix fixture. Every
+  call is a new user: a suffix used before in the run gets a numbered address
+  (`harnesstest_<suffix>_2_<token>@…`), since no two accounts may share one.
 - `harness_fixture_email($label)` — the address a fixture should use when it
   needs a real, deliverable one. Use it instead of writing an address by hand:
   the shared shape is what stops a leftover from colliding with the next run,
@@ -744,6 +746,22 @@ throw on failure, so a test can assert on the result; `harness_call_logic_ok()`
 is the variant that throws, for fixture-setup steps where a failure should stop
 the run.
 
+The call runs as a web request for the model check: every save it makes is
+asked against the session and refused below the model's level, as on the site
+([Permissions](permissions.md#every-write-is-checked)). Outside a logic call,
+any write a suite makes while a simulated person is signed in is checked the
+same way (`harness_boot()` sets `Access::$check_cli_persons`); fixtures made
+with no one signed in are not. A fixture a suite builds as one of its users
+goes inside `SystemBase::server_initiated_write()` when no person's rule
+should apply to it.
+
+What a test file asks of a model directly (`$user->save()`, `make_user()`,
+`User::CreateNew()`, `Conversation::add_message()`) is a fixture and is not
+checked, whoever is signed in. So a suite proves a flow passes the check only
+when it drives the flow through its logic (`harness_call_logic()`) or through a
+service that is not a model; and a visitor's flow is checked only through
+`harness_call_logic()`, since with no one signed in a CLI write is exempt.
+
 ## The result contract
 
 A declared `.php` test **must** emit this contract. If it doesn't — it crashed,
@@ -869,8 +887,11 @@ public static $test_fixture = array(
 `values` override generated data in every dataset the tester builds (and pinned
 fields are exempted from null-value probing — the pin exists because other
 values are invalid). `update_field` names the field the CRUD update step
-modifies, for models whose first spec-order field is enum-validated. Declare a
-fixture only when the field specs genuinely cannot express the rule.
+modifies, for models whose first spec-order field is enum-validated. `generate`
+lists optional fields the tester fills anyway, for a rule that spans fields:
+`User` lists `usr_email`, since an account needs an email or a username and
+neither is required alone. Declare a fixture only when the field specs
+genuinely cannot express the rule.
 
 ## Plugin tests
 

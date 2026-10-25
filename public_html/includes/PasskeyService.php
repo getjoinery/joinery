@@ -21,6 +21,7 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
+ * @version 1.12 - ceremony challenges, step-up markers and the sign counter save as the server's own writes (no owner; sign-in has no session user)
  * @version 1.11 - getDerivationOptions() can ask the same touch for a second secret (the root vault's)
  * @version 1.10
  * @changelog 1.10 - One pending challenge PER PURPOSE per session, not one per
@@ -210,7 +211,7 @@ class PasskeyService {
 		$challenge = random_bytes(32);
 		$options = PublicKeyCredentialCreationOptions::create(
 			PublicKeyCredentialRpEntity::create($this->rp_name, $this->rp_id),
-			PublicKeyCredentialUserEntity::create($user->get('usr_email'), (string)$user->key, $this->_displayName($user)),
+			PublicKeyCredentialUserEntity::create($this->_userName($user), (string)$user->key, $this->_displayName($user)),
 			$challenge,
 			$this->_pubKeyCredParams(),
 			$this->_authenticatorSelection(),
@@ -280,7 +281,7 @@ class PasskeyService {
 
 		$options = PublicKeyCredentialCreationOptions::create(
 			PublicKeyCredentialRpEntity::create($this->rp_name, $this->rp_id),
-			PublicKeyCredentialUserEntity::create($user->get('usr_email'), (string)$user->key, $this->_displayName($user)),
+			PublicKeyCredentialUserEntity::create($this->_userName($user), (string)$user->key, $this->_displayName($user)),
 			$challenge,
 			$this->_pubKeyCredParams(),
 			null,
@@ -330,10 +331,11 @@ class PasskeyService {
 	// Authentication (sign-in)
 	// ========================================================================
 
+	/** $email is what the person typed: an email or a username. */
 	public function getAuthenticationOptions(?string $email = null): array {
 		$allow = [];
 		if ($email) {
-			$user = User::GetByEmail($email);
+			$user = User::GetByLogin($email);
 			if ($user && $user->key) {
 				$creds = new MultiPasskey(['user_id' => $user->key]);
 				$creds->load();
@@ -428,7 +430,9 @@ class PasskeyService {
 		$marker->set('pks_kind', 'stepup');
 		$marker->set('pks_purpose', 'stepup_verified');
 		$marker->set('pks_expires_time', gmdate('Y-m-d H:i:s', time() + self::STEPUP_MARKER_TTL_SECONDS));
-		$marker->save();
+		// The marker is keyed by the browser session, not a person: the
+		// server's record that the passkey just answered.
+		SystemBase::server_initiated_write(function () use ($marker) { $marker->save(); });
 
 		return (string)$passkey->get('pkc_credential_id');
 	}
@@ -793,7 +797,12 @@ class PasskeyService {
 
 	private function _displayName(User $user): string {
 		$name = trim($user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
-		return $name !== '' ? $name : $user->get('usr_email');
+		return $name !== '' ? $name : $this->_userName($user);
+	}
+
+	/** The name a passkey is saved under on the person's device: what they sign in with. */
+	private function _userName(User $user): string {
+		return (string)($user->get('usr_email') ?: $user->get('usr_username'));
 	}
 
 	private function _host(): string {
@@ -859,7 +868,9 @@ class PasskeyService {
 		$passkey->set('pkc_source_json', $this->serializer->serialize($credential_record, 'json'));
 		$passkey->set('pkc_sign_count', $credential_record->counter);
 		$passkey->set('pkc_last_used_time', gmdate('Y-m-d H:i:s'));
-		$passkey->save();
+		// The credential was just proved; recording its counter is the
+		// server's bookkeeping, and at sign-in no one is signed in yet to own it.
+		SystemBase::server_initiated_write(function () use ($passkey) { $passkey->save(); });
 
 		return $credential_record;
 	}
@@ -906,7 +917,9 @@ class PasskeyService {
 		$row->set('pks_purpose', $purpose);
 		$row->set('pks_challenge', base64_encode($challenge));
 		$row->set('pks_expires_time', gmdate('Y-m-d H:i:s', time() + self::CHALLENGE_TTL_SECONDS));
-		$row->save();
+		// A challenge belongs to the browser session, not a person (sign-in
+		// stashes one before anyone is signed in): the server's own state.
+		SystemBase::server_initiated_write(function () use ($row) { $row->save(); });
 	}
 
 	/** Single-use: deletes the purpose's stash before validating, so a replay finds nothing. */

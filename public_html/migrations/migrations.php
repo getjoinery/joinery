@@ -1830,6 +1830,16 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// The seeded accounts are known by username, not a made-up address: the
+	// system and deleted-user rows, and the seeded admin while it still has
+	// admin@example.com (spec optional_username Q1).
+	$migration = array();
+	$migration['database_version'] = '223';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'seeded_accounts_usernames.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
 	// The Cayman Islands carried the calling code -344, so its phone numbers
 	// showed as "+-344" and a domain registrant phone was read as Spain's +34.
 	// It is +1 345, written 1345 like the other North American Numbering Plan

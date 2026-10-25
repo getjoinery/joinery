@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	
@@ -10,7 +11,6 @@
 	$settings = Globalvars::get_instance();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 	
 	$settings = Globalvars::get_instance();
@@ -54,7 +54,10 @@
 		$stripe_helper = new StripeHelper();
 		$stripe_customer = $stripe_helper->get_customer($user);
 
-		if($stripe_customer['invoice_settings']['default_payment_method']){
+		if(!$stripe_customer){
+			echo 'No Stripe customer for this user.';
+		}
+		else if($stripe_customer['invoice_settings']['default_payment_method']){
 			echo '<p>Default payment method:</p>'.$stripe_customer['invoice_settings']['default_payment_method'];
 		}
 		else if($stripe_customer['default_source']){

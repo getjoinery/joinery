@@ -53,12 +53,12 @@ class ProvisioningSetup {
 
 	/**
 	 * The pipeline reads other buyers' order items/requirements and posts
-	 * queued emails; the API's model authorization grants cross-user read
-	 * only at permission >= 5, so the service user must be an admin-level
-	 * account. The API key's own apk_permission axis (CRUD capability) is
-	 * kept at 3: read + write, no delete.
+	 * queued emails; those models are personal (permissions.json): 6 to read
+	 * another person's, 8 to write, so the service user is an 8. The API
+	 * key's own apk_permission axis (CRUD capability) is kept at 3: read +
+	 * write, no delete.
 	 */
-	const SERVICE_USER_PERMISSION = 5;
+	const SERVICE_USER_PERMISSION = 8;
 	const SERVICE_KEY_PERMISSION = 3;
 	const DOMAIN_QUESTION_TEXT = 'What domain would you like to use for your site?';
 
@@ -288,13 +288,13 @@ class ProvisioningSetup {
 
 		$user_created = false;
 		if ($user === null) {
-			// A random address on this site's host: nobody can register it
-			// ahead of the account, and the account is found by id anyway.
-			$email = self::SERVICE_USER_LOCAL_PART . '-' . bin2hex(random_bytes(6)) . '@' . self::selfHost();
+			// A machine account: a username and no email, since no mail is ever
+			// sent to it. The random part keeps a person from claiming the name
+			// first, and the account is found by id anyway.
 			$user = new User(NULL);
 			$user->set('usr_first_name', 'Provisioning');
 			$user->set('usr_last_name', 'Service');
-			$user->set('usr_email', $email);
+			$user->set('usr_username', self::SERVICE_USER_LOCAL_PART . '-' . bin2hex(random_bytes(6)));
 			$user->set('usr_password', User::GeneratePassword(bin2hex(random_bytes(24))));
 			$user->set('usr_permission', self::SERVICE_USER_PERMISSION);
 			$user->set('usr_email_is_verified', TRUE);

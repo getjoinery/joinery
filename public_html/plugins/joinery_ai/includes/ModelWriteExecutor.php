@@ -68,7 +68,9 @@ class ModelWriteExecutor {
             throw new InvalidArgumentException("Row not found: $class key=$key");
         }
 
-        $applied = self::applyFields($obj, $fields, $info['writable_fields']);
+        // A create-only column is set at birth and changes only through its own action.
+        $updatable = array_values(array_diff($info['writable_fields'], $class::$api_create_only_fields));
+        $applied = self::applyFields($obj, $fields, $updatable);
         $obj = $applied['obj'];
 
         $obj->prepare();

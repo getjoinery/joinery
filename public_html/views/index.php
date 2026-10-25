@@ -92,8 +92,8 @@ $page->public_header([
                     <p>Administrator login:</p>
                     <div class="jy-home-creds">
                         <div class="jy-home-cred-row">
-                            <span class="jy-home-cred-label">Email:</span>
-                            <code>admin@example.com</code>
+                            <span class="jy-home-cred-label">Username:</span>
+                            <code>admin</code>
                         </div>
                         <div class="jy-home-cred-row">
                             <span class="jy-home-cred-label">Password:</span>

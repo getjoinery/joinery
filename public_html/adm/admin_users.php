@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -25,7 +26,7 @@
 	$headers = array("User", "Email", "Signup Date", "Email Verified");
 
 	$altlinks = array();
-	if($_SESSION['permission'] == 10){
+	if(Access::permits(User::access_level('write'), $session)){
 		$altlinks = array('Add User'=>'/admin/admin_user_add');
 	}
 
@@ -48,10 +49,13 @@
 		$rowvalues = array();
 
 		array_push($rowvalues, "<a href='/admin/admin_user?usr_user_id=$user->key'>".$user->display_name()."</a> ".$deleted_status);
-		array_push($rowvalues, $user->get('usr_email'));
+		array_push($rowvalues, htmlspecialchars($user->login_label()));
 		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y'));
 
-		if($user->get('usr_email_is_verified')) {
+		if(!$user->get('usr_email')) {
+			$status = 'No email';
+		}
+		else if($user->get('usr_email_is_verified')) {
 			$status = 'Verified';
 		}
 		else {

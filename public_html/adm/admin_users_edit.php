@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 
 require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_users_edit_logic.php'));
@@ -57,7 +58,11 @@ if(Activation::CheckForActiveCode($user->key, Activation::EMAIL_CHANGE)) {
 }
 $formwriter->textinput('usr_email_new', 'Email', [
 	'value' => $user->get('usr_email'),
-	'validation' => ['required' => true]
+	'helptext' => 'Leave blank for an account that signs in with a username and has no email.',
+]);
+$formwriter->textinput('usr_username', 'Username', [
+	'validation' => ['maxlength' => 32, 'pattern' => '/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/'],
+	'helptext' => 'Optional. Signs in wherever an email does. 3 to 32 letters, digits, dots, dashes or underscores. An account needs an email, a username, or both.',
 ]);
 
 $optionvals = Address::get_timezone_drop_array();
@@ -66,7 +71,7 @@ $formwriter->dropinput('usr_timezone', 'Time Zone', [
 	'validation' => ['required' => true]
 ]);
 
-if($_SESSION['permission'] == 10){
+if(Access::permits(10, $session)){
 	$optionvals = array();
 	foreach (Access::levels() as $level => $name) {
 		$optionvals[$level] = "$name ($level)";

@@ -112,6 +112,15 @@ abstract class SystemBase {
 	public static $api_unwritable_fields = array();
 
 	/**
+	 * Columns a CRUD/AI create may set but an update never changes: a value that
+	 * belongs to the row from birth and changes only through its own action (a
+	 * user's sign-in email changes through the confirm-by-link flow, never by a
+	 * PUT, which would skip that flow's checks). Honored by the REST update
+	 * boundary and the AI update surface, beside $api_unwritable_fields.
+	 */
+	public static $api_create_only_fields = array();
+
+	/**
 	 * Sealed Vault (docs/sealed_vault.md) generic content hook. A consumer with
 	 * fields sealed under the vault lists their column names here; add the
 	 * four convention columns ({prefix}_content_sealed, {prefix}_sealed_key,
@@ -167,6 +176,9 @@ abstract class SystemBase {
 	 * loaded earlier cannot put back what another save changed in between.
 	 */
 	protected $changed = array();
+
+	/** Column => its value before the first set() since load or save, for the column check. */
+	protected $original = array();
 
 	/**
 	 * @var array{0:mixed,1:bool}|null memo of [row id, sealed?] as the DATABASE
@@ -239,6 +251,181 @@ abstract class SystemBase {
 		}
 	}
 
+	/** Set inside rule_checked_write(). */
+	private static $access_rule_checked = false;
+
+	/**
+	 * Run writes a rule of the caller's own has already admitted, past the
+	 * model write-path check (spec declared_permissions 3.2): a participant
+	 * posting to a conversation moves the conversation's update time; a
+	 * member's registration updates its event's count. The user is behind
+	 * these writes, so the page-view guard still applies, unlike
+	 * server_initiated_write(). The callers are enumerated in
+	 * tests/unit/core_api_mechanical_test.php.
+	 *
+	 * @param callable $action
+	 * @return mixed Whatever $action returns.
+	 */
+	public static function rule_checked_write(callable $action) {
+		$previous = self::$access_rule_checked;
+		self::$access_rule_checked = true;
+		try {
+			return $action();
+		} finally {
+			self::$access_rule_checked = $previous;
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Who may read, change or delete this kind of row
+	// (spec declared_permissions 3.2, 3.3; docs/permissions.md)
+	// ------------------------------------------------------------------
+
+	/**
+	 * The model's data class, a class in permissions.json. It gives the model
+	 * its read, write, soft-delete and permanent-delete levels. A model that
+	 * declares none behaves as keys.
+	 */
+	public static $access_class = null;
+
+	/** Per-verb exceptions: a level, only for the verb that differs from the class. */
+	public static $read_permission = null;
+	public static $write_permission = null;
+	public static $delete_permission = null;            // soft delete and undelete
+	public static $permanent_delete_permission = null;
+
+	/**
+	 * The column naming the row's owner, when it is not {prefix}_usr_user_id.
+	 * The owner may read and write their own row whatever the level. false
+	 * says the row has no owner: its user column records who acted (a log, an
+	 * error, a login), and the model is level-only.
+	 */
+	public static $owner_column = null;
+
+	/** Exception property => the verb it replaces. */
+	const ACCESS_EXCEPTIONS = array(
+		'read'             => 'read_permission',
+		'write'            => 'write_permission',
+		'soft_delete'      => 'delete_permission',
+		'permanent_delete' => 'permanent_delete_permission',
+	);
+
+	/** Set while soft_delete()/undelete() save, which they have already checked. */
+	private $access_checked = false;
+
+	/** op => true once guard_raw_write() asked it of this row, so the parent's path does not ask (and audit) again. */
+	private $access_guarded = array();
+
+	/** True while a write-path check runs, so the session's own writes do not recurse into it. */
+	private static $access_checking = false;
+
+	/** The level this model needs for a verb: its exception, else its class's. */
+	public static function access_level(string $verb): int {
+		$prop = self::ACCESS_EXCEPTIONS[$verb] ?? null;
+		if ($prop === null) {
+			throw new InvalidArgumentException("access_level: unknown verb '$verb'");
+		}
+		if (static::$$prop !== null) {
+			return Access::level((int)static::$$prop);
+		}
+		return Access::level((static::$access_class ?? 'keys') . ':' . $verb);
+	}
+
+	/** The owner column, or null for a model with none (level-only). */
+	public static function access_owner_column(): ?string {
+		if (static::$owner_column === false) {
+			return null;
+		}
+		if (static::$owner_column !== null) {
+			return static::$owner_column;
+		}
+		$conventional = static::$prefix . '_usr_user_id';
+		return array_key_exists($conventional, static::$field_specifications) ? $conventional : null;
+	}
+
+	/**
+	 * The class a column declares, or null when it follows its model. A column
+	 * a sealed-secrets locator names (table.column) is keys without saying so.
+	 */
+	public static function column_access_class(string $column): ?string {
+		$declared = static::$field_specifications[$column]['access_class'] ?? null;
+		if ($declared !== null) {
+			return $declared;
+		}
+		return SealedSecretsDeclarations::isDeclared(static::$tablename . '.' . $column) ? 'keys' : null;
+	}
+
+	/** The level a column needs for a verb: the stricter of its own class and its model's. */
+	public static function column_access_level(string $column, string $verb): int {
+		$model = static::access_level($verb);
+		$class = static::column_access_class($column);
+		return $class === null ? $model : max($model, Access::level("$class:$verb"));
+	}
+
+	/**
+	 * Whether a column is hidden from a reader (spec declared_permissions 3.3):
+	 * it is stricter than its model, the reader is below its read level, and
+	 * the row is not theirs. The surfaces that show rows (the REST serializer,
+	 * FormWriter, the admin table, the AI executor) leave it out.
+	 */
+	public function column_hidden_from(string $column, $user_id, int $permission): bool {
+		if (static::column_access_class($column) === null) return false;
+		if (Access::allows(static::column_access_level($column, 'read'), $permission)) return false;
+		return !$this->access_owner_is($user_id);
+	}
+
+	/**
+	 * The columns hidden from the request's session, column => true; none on
+	 * the CLI, which has no reader.
+	 */
+	public function columns_hidden_from_session(): array {
+		return $this->columns_for_session('read');
+	}
+
+	/**
+	 * The columns the request's session may see but not change (a column
+	 * stricter than its model, the reader below its write level), column =>
+	 * the level it needs; none on the CLI.
+	 */
+	public function columns_locked_for_session(): array {
+		$locked = array();
+		foreach ($this->columns_for_session('write') as $column => $level) {
+			$locked[$column] = $level;
+		}
+		return array_diff_key($locked, $this->columns_hidden_from_session());
+	}
+
+	/** column => the level it needs, for each stricter column the session is below at $verb (not the owner). */
+	private function columns_for_session(string $verb): array {
+		if (Access::$sapi === 'cli' || !isset($_SERVER['REQUEST_METHOD'])) return array();
+		$session = SessionControl::get_instance();
+		$user_id = (int)$session->get_user_id();
+		$permission = (int)$session->get_permission();
+		if ($this->access_owner_is($user_id)) return array();
+		$out = array();
+		foreach (array_keys(static::$field_specifications) as $column) {
+			if (static::column_access_class($column) === null) continue;
+			$needed = static::column_access_level($column, $verb);
+			if (!Access::allows($needed, $permission)) $out[$column] = $verb === 'read' ? true : $needed;
+		}
+		return $out;
+	}
+
+	/**
+	 * Whether this row's owner is $user_id. A saved row's owner is the one
+	 * stored, not one set() gave it in this request: naming yourself the owner
+	 * of someone else's row is a change the model's level decides.
+	 */
+	public function access_owner_is($user_id): bool {
+		$col = static::access_owner_column();
+		return $col !== null && (int)$user_id > 0 && (int)$this->access_stored($col) === (int)$user_id;
+	}
+
+	/** A column's stored value: as loaded, before any set() in this request. */
+	protected function access_stored(string $column) {
+		return array_key_exists($column, $this->original) ? $this->original[$column] : $this->get($column);
+	}
+
 	/**
 	 * Targeted single-row UPDATE of exactly the given columns, without loading
 	 * the row or running save()'s checks of every column. For columns some other
@@ -251,6 +438,7 @@ abstract class SystemBase {
 		if ($id <= 0 || empty($columns)) {
 			return;
 		}
+		static::enforce_access_columns($id, array_intersect_key($columns, static::$field_specifications));
 		$sets = array();
 		$params = array();
 		foreach ($columns as $col => $value) {
@@ -438,6 +626,9 @@ abstract class SystemBase {
 		if (!empty(static::$sealed_fields) && in_array($key, static::$sealed_fields, true)) {
 			$this->sealed_dirty[$key] = true;
 		}
+		if (!array_key_exists($key, $this->original) && $this->key !== NULL) {
+			$this->original[$key] = $this->data->$key ?? null;
+		}
 		$this->changed[$key] = true;
 		$this->data->$key = $value;
 	}
@@ -449,7 +640,7 @@ abstract class SystemBase {
 	 */
 	function set_as_stored($key, $value) {
 		$this->data->$key = $value;
-		unset($this->changed[$key]);
+		unset($this->changed[$key], $this->original[$key]);
 	}
 
 	/** The columns set() was called for since this copy was loaded or last saved. */
@@ -2274,8 +2465,9 @@ abstract class SystemBase {
 			return $this->export_for_api_sealed_for_browser();
 		}
 		$out = array();
+		$hidden = $this->columns_hidden_from_session();
 		foreach (array_keys(static::$field_specifications) as $field) {
-			if (array_key_exists($field, $full) && !static::is_unreadable_field($field)) {
+			if (array_key_exists($field, $full) && !static::is_unreadable_field($field) && !isset($hidden[$field])) {
 				$out[$field] = $full[$field];
 			}
 		}
@@ -2308,8 +2500,9 @@ abstract class SystemBase {
 	 */
 	function export_for_api_locked() {
 		$out = array();
+		$hidden = $this->columns_hidden_from_session();
 		foreach (array_keys(static::$field_specifications) as $field) {
-			if (static::is_unreadable_field($field)) {
+			if (static::is_unreadable_field($field) || isset($hidden[$field])) {
 				continue;
 			}
 			try {
@@ -2350,8 +2543,9 @@ abstract class SystemBase {
 			throw new RuntimeException(get_called_class() . ' row ' . $this->key . ' is not sealed for the browser.');
 		}
 		$out = array();
+		$hidden = $this->columns_hidden_from_session();
 		foreach (array_keys(static::$field_specifications) as $field) {
-			if (static::is_unreadable_field($field)) {
+			if (static::is_unreadable_field($field) || isset($hidden[$field])) {
 				continue;
 			}
 			try {
@@ -2506,6 +2700,7 @@ abstract class SystemBase {
 		// row's ciphertext again.
 		$this->sealed_dirty = array();
 		$this->changed = array();
+		$this->original = array();
 		$this->db_seal_state = null;
 		if ($this->key === NULL) {
 			throw new SystemBaseNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
@@ -2537,7 +2732,7 @@ abstract class SystemBase {
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', 'now()');
-				$this->save();
+				$this->save_checked_as('soft_delete');
 				return true;				
 			}
 		}
@@ -2546,10 +2741,11 @@ abstract class SystemBase {
 	}
 	
 	function undelete(){
+		self::assert_not_get_mutation('undelete');
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', NULL);
-				$this->save();	
+				$this->save_checked_as('soft_delete');
 				return true;			
 			}
 		}
@@ -2702,6 +2898,7 @@ abstract class SystemBase {
 	 */
 	public function permanent_delete($debug=false) {
 		self::assert_not_get_mutation('permanent_delete');
+		$this->enforce_access('permanent_delete');
 		$db = DbConnector::get_instance()->get_db_link();
 
 		$this_transaction = false;
@@ -2784,7 +2981,10 @@ abstract class SystemBase {
 									$select_stmt->execute([$this->key]);
 									while ($row = $select_stmt->fetch(PDO::FETCH_ASSOC)) {
 										$obj = new $model_class($row[$dep_pkey], true);
-										$obj->permanent_delete($debug);
+										// A dependent's deletion follows from the decision
+										// already made for this row: it is not asked again
+										// (its own rows may be another person's).
+										self::rule_checked_write(function () use ($obj, $debug) { $obj->permanent_delete($debug); });
 									}
 								}
 							} else {
@@ -2872,6 +3072,7 @@ abstract class SystemBase {
 		// get(), so it really is holding plaintext to be re-sealed.)
 		$this->sealed_dirty = array();
 		$this->changed = array();
+		$this->original = array();
 		$this->db_seal_state = null;
 	}
 
@@ -2925,10 +3126,24 @@ abstract class SystemBase {
 	}
 
 	// And to save it to the database
+	/** save() under a delete verb's check instead of the write check. */
+	private function save_checked_as(string $verb) {
+		$this->enforce_access($verb);
+		$this->access_checked = true;
+		try {
+			return $this->save();
+		} finally {
+			$this->access_checked = false;
+		}
+	}
+
 	function save($debug=false) {
 		self::assert_not_get_mutation('save');
 		if ($this->data === NULL) {
 			throw new SystemBaseException('This '.static::$tablename.' object has no data.');
+		}
+		if (!$this->access_checked) {
+			$this->enforce_access('write');
 		}
 		
 		// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays
@@ -3430,6 +3645,7 @@ abstract class SystemBase {
 
 		// The copy now matches the row: saving it again writes nothing.
 		$this->changed = array();
+		$this->original = array();
 
 		// --- END: SQL generation and execution ---
 
@@ -3452,45 +3668,240 @@ abstract class SystemBase {
 	}
 
 	/**
-	 * Layer 2 — deny-by-default row scope. The base contract is owner-or-staff:
-	 * a caller may touch this row only if they own it (the conventional
-	 * {prefix}_usr_user_id column matches current_user_id) or they are staff
-	 * (permission >= 5). Models with no owner column fall to staff-only — safe for
-	 * tables with no per-user ownership. Overrides go both ways: a publicly
-	 * readable model (posts, pages) overrides authenticate_read to a no-op, and a
-	 * personal-credential model (Passkey) tightens it to owner-ONLY, no staff
-	 * bypass. The contract is throw-to-deny.
-	 */
-	/**
-	 * The platform ownership rule, shared by the record gates
-	 * (authenticate_read / authenticate_write) and the File serving gate
-	 * (File::is_viewable): a request is allowed when the session user owns this
-	 * row (the conventional {prefix}_usr_user_id column matches) or is staff
-	 * (permission >= 5). Models with no owner column fall to staff-only. One rule,
-	 * one place — the record gate and the serving gate can never drift apart.
+	 * The record gates (spec declared_permissions 3.2). A caller may touch this
+	 * row when they own it (access_owner_is()) or their level meets the model's
+	 * level for the verb (access_level()). Models with no owner column are
+	 * level-only. A model with a real rule of its own (owner-only rows, a post's
+	 * author or moderator, a user's target rule) overrides authenticate_read()
+	 * or authenticate_write(); the delete check runs authenticate_write() first,
+	 * so such a rule holds for deletes too. The contract is throw-to-deny.
+	 *
+	 * is_owner_or_admin() is the same rule for the File serving gate
+	 * (File::is_viewable), so the record gate and the serving gate never drift.
 	 *
 	 * @return bool true when allowed
 	 */
-	protected function is_owner_or_admin($user_id, $permission) {
-		$owner_col = static::$prefix . '_usr_user_id';
-		$owner_matches = array_key_exists($owner_col, static::$field_specifications)
-			&& $this->get($owner_col) == $user_id;
-		return $owner_matches || (int)$permission >= 5;
+	protected function is_owner_or_admin($user_id, $permission, string $verb = 'read') {
+		// The owner reads, changes and soft-deletes their own row; destroying it
+		// is the level's alone (a member's own purge says so: rule_checked_write()).
+		return ($verb !== 'permanent_delete' && $this->access_owner_is($user_id))
+			|| Access::allows(static::access_level($verb), (int)$permission);
 	}
 
 	function authenticate_read($data) {
-		if (!$this->is_owner_or_admin($data['current_user_id'], $data['current_user_permission'])) {
+		if (!$this->is_owner_or_admin($data['current_user_id'] ?? 0, $data['current_user_permission'] ?? 0, 'read')) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to view this entry in ' . static::$tablename);
+				'Viewing this entry in ' . static::$tablename . ' needs level ' . static::access_level('read') . '.');
 		}
 	}
 
 	function authenticate_write($data) {
-		if (!$this->is_owner_or_admin($data['current_user_id'], $data['current_user_permission'])) {
+		if (!$this->is_owner_or_admin($data['current_user_id'] ?? 0, $data['current_user_permission'] ?? 0, 'write')) {
 			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
+				'Changing this entry in ' . static::$tablename . ' needs level ' . static::access_level('write') . '.');
 		}
 	}
+
+	/**
+	 * Refuse unless the caller may delete this row: soft_delete (also undelete)
+	 * or permanent_delete. The write rule first, then the verb's level.
+	 */
+	function authenticate_delete($data, string $verb = 'soft_delete') {
+		$this->authenticate_write($data);
+		if (!$this->is_owner_or_admin($data['current_user_id'] ?? 0, $data['current_user_permission'] ?? 0, $verb)) {
+			throw new SystemAuthenticationError(
+				($verb === 'permanent_delete' ? 'Permanently deleting' : 'Deleting') . ' this entry in '
+				. static::$tablename . ' needs level ' . static::access_level($verb) . '.');
+		}
+	}
+
+	/**
+	 * Refuse when a column this save changes is stricter than the model and the
+	 * caller is below it (3.3). An unchanged value is ignored, so a stale form
+	 * that still carries the field does not break. The owner is exempt, as for
+	 * the row, and so is a new row: there is no stored value to take over, and
+	 * making the row is the write its level allowed.
+	 */
+	function authenticate_columns($data) {
+		if ($this->key === NULL || $this->access_owner_is($data['current_user_id'] ?? 0)) {
+			return;
+		}
+		$permission = (int)($data['current_user_permission'] ?? 0);
+		foreach ($this->changed_columns() as $column) {
+			if (static::column_access_class($column) === null) continue;
+			$needed = static::column_access_level($column, 'write');
+			if (Access::allows($needed, $permission) || !$this->column_value_changed($column)) continue;
+			throw new SystemAuthenticationError(
+				'Changing ' . $column . ' in ' . static::$tablename . ' needs level ' . $needed . '.');
+		}
+	}
+
+	/** Whether set() gave a column a value other than the one loaded. */
+	protected function column_value_changed(string $column): bool {
+		if (!array_key_exists($column, $this->original)) {
+			return isset($this->changed[$column]);
+		}
+		$now = $this->data->$column ?? null;
+		$was = $this->original[$column];
+		if (is_array($now) || is_object($now)) $now = json_encode($now);
+		if (is_array($was) || is_object($was)) $was = json_encode($was);
+		return (string)$now !== (string)$was || ($now === null) !== ($was === null);
+	}
+
+	/** Whether the session may read this row. The same rule assert_can_read() enforces. */
+	public function can_read($session): bool {
+		try { $this->assert_can_read($session); return true; }
+		catch (SystemAuthenticationError $e) { return false; }
+	}
+
+	/** Whether the session may change this row. */
+	public function can_write($session): bool {
+		try { $this->assert_can_write($session); return true; }
+		catch (SystemAuthenticationError $e) { return false; }
+	}
+
+	/** Whether the session may delete this row: soft (and undelete), or permanently. */
+	public function can_delete($session, bool $permanent = false): bool {
+		try {
+			$this->authenticate_delete(self::session_identity($session), $permanent ? 'permanent_delete' : 'soft_delete');
+			return true;
+		} catch (SystemAuthenticationError $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * The write-path check (3.2): save(), soft_delete(), undelete(),
+	 * permanent_delete() run it against the session on every web request.
+	 * CLI, cron and scheduled tasks have no session and are exempt, as is the
+	 * server's own write (server_initiated_write()). A refusal throws
+	 * (Access::writeRefused()).
+	 */
+	protected function enforce_access(string $op): void {
+		if (!self::access_enforced() || !empty($this->access_guarded[$op])) return;
+		self::$access_checking = true;
+		try {
+			$session = SessionControl::get_instance();
+			$identity = self::session_identity($session);
+			try {
+				if ($op === 'write') {
+					$this->authenticate_write($identity);
+					$this->authenticate_columns($identity);
+				} else {
+					$this->authenticate_delete($identity, $op);
+				}
+			} catch (SystemAuthenticationError $e) {
+				Access::writeRefused($op, static::class . ($this->key ? '#' . $this->key : ' (new)'), $e->getMessage(),
+					(int)$identity['current_user_id'], (int)$identity['current_user_permission'], static::access_level($op));
+				return;
+			}
+			if ($op === 'permanent_delete') {
+				Access::writeGranted($op, static::class . '#' . $this->key,
+					(int)$identity['current_user_id'], (int)$identity['current_user_permission'], static::access_level($op));
+			}
+		} finally {
+			self::$access_checking = false;
+		}
+	}
+
+	/**
+	 * For a model method that writes this row with its own SQL instead of
+	 * save() or a delete (a membership's remove(), an undelete that brings
+	 * children back): the same checks those paths make, the GET guard and the
+	 * caller's rule for $op ('write', 'soft_delete' or 'permanent_delete').
+	 */
+	protected function guard_raw_write(string $op): void {
+		self::assert_not_get_mutation($op);
+		$this->enforce_access($op);
+		$this->access_guarded[$op] = true;
+	}
+
+	/**
+	 * Under the test harness: whether the write is a test's own fixture or
+	 * teardown. A test file (or the harness) that calls a model directly is
+	 * building or removing fixtures, and everything inside that call is too;
+	 * a test that calls logic or a service is driving the flow under test,
+	 * which is checked.
+	 */
+	private static function written_by_test_code(): bool {
+		foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+			if (strpos($frame['file'] ?? '', '/tests/') === false || empty($frame['class'])) continue;
+			if (is_a($frame['class'], self::class, true) || is_a($frame['class'], 'SystemMultiBase', true)) return true;
+		}
+		return false;
+	}
+
+	/** Whether the write-path check applies to this write: a web request, not the server's own. */
+	protected static function access_enforced(): bool {
+		if (Access::$sapi === 'cli' || !isset($_SERVER['REQUEST_METHOD'])) {
+			if (!Access::$check_cli_persons || self::$access_checking || self::written_by_test_code()) return false;
+			self::$access_checking = true;
+			try {
+				if (!(int)SessionControl::get_instance()->get_user_id()) return false;
+			} finally {
+				self::$access_checking = false;
+			}
+		}
+		if (self::$allow_get_mutation || self::$access_checking || self::$access_rule_checked) return false;
+		return true;
+	}
+
+	/**
+	 * updateColumns()' check. A caller at the model's write level who changes
+	 * no stricter column passes without a read, unless the model has a write
+	 * rule of its own. Anyone else gets the rule
+	 * save() asks: the row is loaded, the columns staged on it, and
+	 * authenticate_write() and authenticate_columns() run, so a model whose
+	 * owner is not a column (User, a calendar entry, a mailbox message) and a
+	 * model's own rule hold here too.
+	 */
+	protected static function enforce_access_columns(int $id, array $columns): void {
+		if (!self::access_enforced()) return;
+		self::$access_checking = true;
+		try {
+			$session = SessionControl::get_instance();
+			$identity = self::session_identity($session);
+			$permission = (int)$identity['current_user_permission'];
+			// A model with a write rule of its own (a user's target rule, an
+			// owner-only queue) is always asked through its row.
+			$needs_row = !Access::allows(static::access_level('write'), $permission)
+				|| (new ReflectionMethod(static::class, 'authenticate_write'))->getDeclaringClass()->getName() !== self::class;
+			foreach (array_keys($columns) as $col) {
+				if (static::column_access_class($col) !== null && !Access::allows(static::column_access_level($col, 'write'), $permission)) {
+					$needs_row = true;
+				}
+			}
+			if (!$needs_row) return;
+			$row = new static($id, TRUE);
+			if (!$row->key) return;   // no such row: the UPDATE changes nothing
+			$row->stage_columns($columns);
+			try {
+				$row->authenticate_write($identity);
+				$row->authenticate_columns($identity);
+			} catch (SystemAuthenticationError $e) {
+				Access::writeRefused('updateColumns', static::class . '#' . $id, $e->getMessage(),
+					(int)$identity['current_user_id'], $permission, static::access_level('write'));
+			}
+		} finally {
+			self::$access_checking = false;
+		}
+	}
+
+	/**
+	 * Put values on this copy as set() would for the checks, without a
+	 * subclass's set() and without marking a sealed column dirty: the copy is
+	 * asked, never saved.
+	 */
+	private function stage_columns(array $columns): void {
+		foreach ($columns as $col => $value) {
+			if (!array_key_exists($col, $this->original)) {
+				$this->original[$col] = $this->data->$col ?? null;
+			}
+			$this->changed[$col] = true;
+			$this->data->$col = $value;
+		}
+	}
+
 
 	/**
 	 * One of this record's times, in the viewer's timezone, ready to print.
@@ -3587,7 +3998,7 @@ abstract class SystemBase {
 		}
 
 		// Admins always see gated content
-		if ($session->get_permission() >= 5) {
+		if (Access::permits(Access::staffLevel(), $session)) {
 			return ['allowed' => true];
 		}
 
@@ -4223,7 +4634,10 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	 * @throws SystemAuthenticationError
 	 */
 	public function assert_can_read($session) {
-		$this->assert_can_read($session);
+		$this->authenticate_read(array(
+			'current_user_id'         => $session->get_user_id(),
+			'current_user_permission' => $session->get_permission(),
+		));
 	}
 
 	function usort($callback) {

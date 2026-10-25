@@ -205,6 +205,13 @@ $success = EmailSender::sendTemplate(
 );
 ```
 
+**A blank recipient is "nothing sent".** An account may have no email (it signs
+in with a username), so `sendTemplate()` and `quickSend()` given a blank
+recipient return `false` and log one `[EMAIL_NO_ADDRESS]` line instead of
+building a message. A malformed, non-blank address still throws. Code that must
+reach the person checks `$user->get('usr_email')` first and says so when there is
+none (checkout, mailing-list sign-up, the admin "Resend activation" action).
+
 ## Template System
 
 ### Template Processing

@@ -75,14 +75,44 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$session->set_timezone($user->get('usr_timezone'));
 		
 
-		if(isset($input['usr_email_new']) && $input['usr_email_new'] != $user->get('usr_email')) {
+		// The sign-in identifiers. A changed username, a removed email and a new
+		// email are each a sensitive action (specs/mailbox_security_levels.md
+		// § 5.5): re-confirm the second factor first. A new email takes effect
+		// only when the link mailed to it is used (email_change).
+		$new_email = strtolower(trim((string)($input['usr_email_new'] ?? '')));
+		$current_email = strtolower((string)$user->get('usr_email'));
+		$new_username = array_key_exists('usr_username', $input) ? trim((string)$input['usr_username']) : null;
+		$username_changes = $new_username !== null && strtolower($new_username) !== strtolower((string)$user->get('usr_username'));
+		$email_removed = isset($input['usr_email_new']) && $new_email === '' && $current_email !== '';
+		$email_changes = $new_email !== '' && $new_email !== $current_email;
 
-			// Changing the account (login) email is a sensitive action
-			// (specs/mailbox_security_levels.md § 5.5): re-confirm the second factor.
+		if ($username_changes || $email_removed || $email_changes) {
 			$stepup = $session->require_recent_second_factor('/profile/account_edit');
 			if ($stepup !== null) {
 				return $stepup;
 			}
+		}
+		$identifier_error = null;
+		if ($username_changes || $email_removed) {
+			if ($username_changes) {
+				$user->set('usr_username', $new_username);
+			}
+			if ($email_removed) {
+				$user->set('usr_email', NULL);
+			}
+			try {
+				$user->save();
+			} catch (DisplayableUserException $e) {
+				$identifier_error = $e->getMessage();
+				$user = new User($user->key, TRUE);
+			}
+		}
+
+		if ($identifier_error !== null) {
+			$message = new DisplayMessage($identifier_error, 'Not saved', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
+			$session->save_message($message);
+		}
+		else if($email_changes) {
 
 			// Population-2 precondition (§ 7): making one of the user's OWN hosted
 			// mailboxes the login email would send every future reset link into the
@@ -90,7 +120,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			// least one non-email reset path first: a passkey, TOTP, or a verified
 			// external recovery address (reset links also land there). State the
 			// locked-out floor now, not during the crisis.
-			$new_email_addr = trim($input['usr_email_new']);
+			$new_email_addr = $new_email;
 			$at = strrpos($new_email_addr, '@');
 			$new_domain = $at !== false ? strtolower(substr($new_email_addr, $at + 1)) : '';
 			$is_user_hosted = false;
@@ -120,16 +150,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$message = new DisplayMessage($msgtxt, 'Set up a recovery method first', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 				$session->save_message($message);
 			}
-			else if (User::GetByEmail(trim($input['usr_email_new']))) {
-				$msgtxt = 'An account has already been registered with the email address '. htmlspecialchars($input['usr_email_new']) .'.';
+			else if (User::GetByEmail($new_email)) {
+				$msgtxt = 'An account has already been registered with the email address '. htmlspecialchars($new_email) .'.';
 				$message = new DisplayMessage($msgtxt, 'Account already registered', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 				$session->save_message($message);
 
 			}
 			else {
-				Activation::email_change_send($user->key, trim($input['usr_email_new']));
+				Activation::email_change_send($user->key, $new_email);
 
-				$msgtxt = 'To complete your email change, please click the activation link that we sent you at '. htmlspecialchars($input['usr_email_new']) .'.';
+				$msgtxt = 'To complete your email change, please click the link we sent to '. htmlspecialchars($new_email) .'.';
 				$message = new DisplayMessage($msgtxt, 'Activate your email', '/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE);
 				$session->save_message($message);	
 			}
@@ -175,6 +205,19 @@ function account_edit_logic_form($formwriter, $user = null, $input = []) {
 		]);
 	}
 
+	// The sign-in identifiers. A change asks for your second factor again; a new
+	// email takes effect when you use the link mailed to it.
+	$formwriter->textinput('usr_email_new', 'Email', [
+		'value'     => $user ? (string)$user->get('usr_email') : '',
+		'maxlength' => 64,
+		'helptext'  => 'Changing it sends a confirmation link to the new address. You may leave it blank if you have a username.',
+	]);
+	$formwriter->textinput('usr_username', 'Username', [
+		'maxlength'  => 32,
+		'validation' => ['pattern' => '/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/'],
+		'helptext'   => 'Optional. Sign in with it instead of your email. 3 to 32 letters, digits, dots, dashes or underscores.',
+	]);
+
 	$formwriter->dropinput('usr_timezone', 'Your Time Zone', [
 		'options' => Address::get_timezone_drop_array()
 	]);
@@ -184,6 +227,7 @@ function account_edit_logic_form($formwriter, $user = null, $input = []) {
 
 function account_edit_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Update the current user\'s profile fields.',
 		'requires_session' => true,
 		'mutates'          => true,
@@ -192,7 +236,8 @@ function account_edit_logic_descriptor(): array {
 			'usr_first_name' => ['type' => 'string', 'required' => true, 'label' => 'First name'],
 			'usr_last_name' => ['type' => 'string', 'required' => true, 'label' => 'Last name'],
 			'usr_timezone' => ['type' => 'string', 'required' => true, 'label' => 'Timezone'],
-			'usr_email_new' => ['type' => 'email', 'required' => false, 'label' => 'New email address'],
+			'usr_email_new' => ['type' => 'string', 'required' => false, 'label' => 'Email address (blank removes it, for an account with a username)'],
+			'usr_username' => ['type' => 'string', 'required' => false, 'label' => 'Username'],
 		],
 	];
 }

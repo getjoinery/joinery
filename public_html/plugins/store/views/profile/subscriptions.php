@@ -43,7 +43,7 @@
             <div class="jy-panel jy-subs-summary">
                 <div>
                     <h5 class="jy-subs-name"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></h5>
-                    <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
+                    <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($page_vars['user']->login_label()); ?></p>
                     <?php if($page_vars['user']->get('usr_timezone')): ?>
                     <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($page_vars['user']->get('usr_timezone')); ?></p>
                     <?php endif; ?>

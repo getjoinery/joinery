@@ -22,7 +22,8 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.7.0
+ * @version 1.8.0
+ * @changelog 1.8.0 - login and device_link write as the server (server_initiated_write): the proved credential is the authority
  * @changelog 1.7.0 - auth/login refuses a disabled account with 403 and the web login's words
  * @changelog 1.6.0 - the device-link poll is a POST: the approved answer hands over a
  *   one-time secret and scrubs it, which is a write, and a GET never writes
@@ -52,18 +53,24 @@ class ApiAuthEndpoint {
 	public static function dispatchPreAuth($url_segments) {
 		$endpoint = strtolower($url_segments[3] ?? '');
 
+		// Before authentication no one is signed in: the credential the request
+		// proves (a password, a device-link code) is the authority, so what these
+		// write (the issued key, the ceremony's state) is the server's own
+		// (spec declared_permissions 3.2).
 		if ($endpoint === 'login') {
-			self::handle_login();
+			SystemBase::server_initiated_write(function () { self::handle_login(); });
 			// handle_login() always exits.
 		}
 
 		if ($endpoint === 'device_link') {
 			// Both halves of the ceremony are pre-auth by definition: the device
 			// has no credential yet — acquiring one is the whole point.
-			if (isset($url_segments[4]) && $url_segments[4] !== '') {
-				self::handle_device_link_poll($url_segments[4]);
-			}
-			self::handle_device_link_begin();
+			SystemBase::server_initiated_write(function () use ($url_segments) {
+				if (isset($url_segments[4]) && $url_segments[4] !== '') {
+					self::handle_device_link_poll($url_segments[4]);
+				}
+				self::handle_device_link_begin();
+			});
 			// Both always exit.
 		}
 
@@ -100,6 +107,7 @@ class ApiAuthEndpoint {
 		}
 
 		$params = self::request_params();
+		// 'email' takes an email or a username: whatever the person signs in with.
 		$email = trim($params['email'] ?? '');
 		$password = $params['password'] ?? '';
 		$device_label = $params['device_label'] ?? NULL;
@@ -108,9 +116,9 @@ class ApiAuthEndpoint {
 			RequestLogger::log('api_auth', 'auth/login', false, [
 				'status_code' => 400,
 				'error_type' => 'AuthenticationError',
-				'note' => 'Missing email or password'
+				'note' => 'Missing email/username or password'
 			]);
-			api_error('Email and password are required', 'AuthenticationError', 400);
+			api_error('Email or username, and password, are required', 'AuthenticationError', 400);
 		}
 
 		// The verify-and-mint decision lives in ApiAuth; this shell owns only the
@@ -154,7 +162,7 @@ class ApiAuthEndpoint {
 				'error_type' => 'AuthenticationError',
 				'note' => 'Invalid login credentials'
 			]);
-			api_error('Invalid email or password', 'AuthenticationError', 401);
+			api_error('Invalid email, username or password', 'AuthenticationError', 401);
 		}
 
 		$user = $result['user'];
@@ -531,6 +539,7 @@ class ApiAuthEndpoint {
 			'last_name' => $user->get('usr_last_name'),
 			'display_name' => $user->display_name(),
 			'email' => $user->get('usr_email'),
+			'username' => $user->get('usr_username'),
 			'permission' => (int)$user->get('usr_permission'),
 			'tier' => $tier_summary,
 		);

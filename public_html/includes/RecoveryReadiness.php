@@ -497,7 +497,7 @@ class RecoveryReadiness {
 	public static function vaultAggregate($exclude_user_id, $limit = 50) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT u.usr_email, v.uev_scope, v.uev_custody,
+			"SELECT u.usr_user_id, u.usr_email, u.usr_username, v.uev_scope, v.uev_custody,
 			        COUNT(*) FILTER (WHERE w.uew_unlocker_type = 'recovery' AND w.uew_is_used = false AND w.uew_delete_time IS NULL) AS unused_codes,
 			        COUNT(*) FILTER (WHERE w.uew_unlocker_type = 'passkey' AND w.uew_delete_time IS NULL) AS passkeys,
 			        COUNT(*) FILTER (WHERE w.uew_unlocker_type = 'passphrase' AND w.uew_delete_time IS NULL) AS passphrases
@@ -505,10 +505,10 @@ class RecoveryReadiness {
 			   JOIN usr_users u ON u.usr_user_id = v.uev_usr_user_id
 			   LEFT JOIN uew_user_encryption_wrappings w ON w.uew_uev_user_encryption_vault_id = v.uev_user_encryption_vault_id
 			  WHERE v.uev_usr_user_id <> ?
-			  GROUP BY u.usr_email, v.uev_scope, v.uev_custody
+			  GROUP BY u.usr_user_id, u.usr_email, u.usr_username, v.uev_scope, v.uev_custody
 			 HAVING COUNT(*) FILTER (WHERE w.uew_unlocker_type = 'recovery' AND w.uew_is_used = false AND w.uew_delete_time IS NULL) < ?
 			     OR COUNT(*) FILTER (WHERE w.uew_unlocker_type = 'passkey' AND w.uew_delete_time IS NULL) = 0
-			  ORDER BY u.usr_email, v.uev_scope
+			  ORDER BY COALESCE(u.usr_email, u.usr_username), v.uev_scope
 			  LIMIT " . (int)$limit);
 		$q->execute(array((int)$exclude_user_id, self::LOW_CODE_THRESHOLD));
 		$rows = array();
@@ -521,7 +521,8 @@ class RecoveryReadiness {
 				$issues[] = 'no passkey';
 			}
 			$rows[] = array(
-				'email'   => $row['usr_email'],
+				// Who it is: the email, else @username (User::login_label()).
+				'email'   => $row['usr_email'] !== null && $row['usr_email'] !== '' ? $row['usr_email'] : '@' . $row['usr_username'],
 				'scope'   => $row['uev_scope'],
 				'custody' => $row['uev_custody'],
 				'issues'  => implode(', ', $issues),

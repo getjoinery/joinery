@@ -25,7 +25,7 @@ function passkey_login_options_logic(array $input): LogicResult {
 	if ($email !== '') {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		$existing_user = User::GetByEmail($email);
+		$existing_user = User::GetByLogin($email);
 		if ($existing_user && $existing_user->key && UserEncryptionVault::loadForUser($existing_user->key)) {
 			RequestLogger::log('passkey_login', 'options', false);
 			return LogicResult::error(
@@ -48,10 +48,11 @@ function passkey_login_options_logic(array $input): LogicResult {
 
 function passkey_login_options_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Begin passwordless passkey sign-in (returns WebAuthn request options)',
 		'input' => [
-			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address (omit for a discoverable credential)'],
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email or username (omit for a discoverable credential)'],
 		],
 	];
 }

@@ -572,16 +572,16 @@ class TestDatabaseHelper {
             $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
             $placeholders = array(
-                array(User::USER_SYSTEM,  'System',  'system-user@joinery.local'),
-                array(User::USER_DELETED, 'Deleted', 'deleted-user@joinery.local'),
+                array(User::USER_SYSTEM,  'System',  'system'),
+                array(User::USER_DELETED, 'Deleted', 'deleted-user'),
             );
             $insert = $pdo->prepare(
-                "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_email, usr_permission,
+                "INSERT INTO public.usr_users (usr_user_id, usr_first_name, usr_last_name, usr_username, usr_permission,
                      usr_is_activated, usr_email_is_verified, usr_password, usr_signup_date, usr_force_password_change, usr_timezone)
-                 VALUES (:id, :first, 'User', :email, 0, false, false, '', CURRENT_DATE, false, 'America/New_York')
+                 VALUES (:id, :first, 'User', :username, 0, false, false, '', CURRENT_DATE, false, 'America/New_York')
                  ON CONFLICT (usr_user_id) DO NOTHING");
             foreach ($placeholders as $row) {
-                $insert->execute(array(':id' => $row[0], ':first' => $row[1], ':email' => $row[2]));
+                $insert->execute(array(':id' => $row[0], ':first' => $row[1], ':username' => $row[2]));
             }
 
             $reserved = max(User::USER_SYSTEM, User::USER_DELETED);

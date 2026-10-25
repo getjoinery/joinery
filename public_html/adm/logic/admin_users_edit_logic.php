@@ -11,7 +11,6 @@ function admin_users_edit_logic(array $input): LogicResult {
 
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Load or create user
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
@@ -70,21 +69,33 @@ function admin_users_edit_logic(array $input): LogicResult {
 			$user->set('usr_organization_name', trim($input['usr_organization_name']));
 		}
 
-		if(isset($input['usr_email_new']) && $input['usr_email_new'] != $user->get('usr_email')) {
+		// The username: blank removes it (the save refuses an account left with
+		// neither a username nor an email).
+		if (array_key_exists('usr_username', $input)) {
+			$user->set('usr_username', trim((string)$input['usr_username']));
+		}
 
-			if (User::GetByEmail(trim($input['usr_email_new']))) {
-				return LogicResult::error('An account has already been registered with the email address '. htmlspecialchars($input['usr_email_new']) .'.');
+		$new_email = strtolower(trim((string)($input['usr_email_new'] ?? '')));
+		$current_email = strtolower((string)$user->get('usr_email'));
+		if (isset($input['usr_email_new']) && $new_email === '' && $current_email !== '') {
+			// A blank email removes it, for an account that signs in by username.
+			$user->set('usr_email', NULL);
+		}
+		else if ($new_email !== '' && $new_email !== $current_email) {
+
+			if (User::GetByEmail($new_email)) {
+				return LogicResult::error('An account has already been registered with the email address '. htmlspecialchars($new_email) .'.');
 			} else {
-				if($_SESSION['permission'] == 0){
-					Activation::email_change_send($user->key, trim($input['usr_email_new']));
+				if(!Access::permits(Access::staffLevel(), $session)){
+					Activation::email_change_send($user->key, $new_email);
 				}
 				else{
-					$user->set('usr_email', trim($input['usr_email_new']));
+					$user->set('usr_email', $new_email);
 				}
 			}
 		}
 
-		if($_SESSION['permission'] == 10 && array_key_exists('usr_permission', $input)){
+		if(Access::permits(10, $session) && array_key_exists('usr_permission', $input)){
 			// Only a level permissions.json names (docs/permissions.md); left out, it stays.
 			$level = (string)$input['usr_permission'];
 			if (!preg_match('/^\d+$/', $level) || !array_key_exists((int)$level, Access::levels())) {
@@ -115,8 +126,12 @@ function admin_users_edit_logic(array $input): LogicResult {
 			}
 		}
 
-		$user->prepare();
-		$user->save();
+		try {
+			$user->prepare();
+			$user->save();
+		} catch (DisplayableUserException $e) {
+			return LogicResult::error($e->getMessage() . ' Nothing was saved.');
+		}
 
 		//HANDLE THE USERS'S MAILING LISTS
 		$messages = $user->add_user_to_mailing_lists($input['new_list_subscribes']);

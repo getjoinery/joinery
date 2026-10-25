@@ -272,24 +272,65 @@ class LibraryFunctions {
 	// Use require_once(PathHelper::getThemeFilePath('filename.php', 'logic')) instead.
 	// This provides proper theme and plugin override support.
 	
-	//RETURNS WHETHER THE CURRENT SESSION IS UNDER SSL OR NOT
+	/**
+	 * Whether the request arrived over https. What the server itself knows
+	 * (HTTPS, port 443, REQUEST_SCHEME) is always believed; a proxy's word for
+	 * it (X-Forwarded-Proto, -Ssl, -Port, Forwarded proto=) only when
+	 * forwarded_headers_trusted() says the connection came from a proxy we know.
+	 */
 	static function isSecure()
 	{
-
-		if (
-			( ! empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-			|| ( ! empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https')
-			|| ( ! empty($_SERVER['HTTP_X_FORWARDED_SSL']) && $_SERVER['HTTP_X_FORWARDED_SSL'] == 'on')
+		if (( ! empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
 			|| (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443)
-			|| (isset($_SERVER['HTTP_X_FORWARDED_PORT']) && $_SERVER['HTTP_X_FORWARDED_PORT'] == 443)
-			|| (isset($_SERVER['REQUEST_SCHEME']) && $_SERVER['REQUEST_SCHEME'] == 'https')
-		) {
+			|| (isset($_SERVER['REQUEST_SCHEME']) && $_SERVER['REQUEST_SCHEME'] == 'https')) {
 			return true;
-		} else {
+		}
+		if (!self::forwarded_headers_trusted()) {
 			return false;
 		}
+		return ( ! empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
+			|| ( ! empty($_SERVER['HTTP_X_FORWARDED_SSL']) && $_SERVER['HTTP_X_FORWARDED_SSL'] == 'on')
+			|| (isset($_SERVER['HTTP_X_FORWARDED_PORT']) && $_SERVER['HTTP_X_FORWARDED_PORT'] == 443)
+			|| ( ! empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED']));
+	}
 
-	}	
+	/**
+	 * May this request's forwarding headers be believed? Only when the
+	 * connection they came on is from a proxy we know. Any client can send
+	 * X-Forwarded-Proto; believing it from anyone let one curl teach a plain
+	 * http site that it serves https.
+	 *
+	 * Behind Cloudflare or a host's proxy, mod_remoteip has already put the
+	 * visitor in REMOTE_ADDR, so PHP cannot see the peer itself. Apache can:
+	 * joinery-remoteip.conf (host_housekeeping.sh) sets JOINERY_FORWARDER_KNOWN
+	 * on every request and JOINERY_FORWARDER_TRUSTED when the connection's
+	 * address differs from the client's, which happens only when mod_remoteip
+	 * walked X-Forwarded-For from a proxy it trusts (Cloudflare's edge ranges,
+	 * a container's gateway, a trust_forwarder address). Those are environment
+	 * variables, which a client cannot send. Where REMOTE_ADDR is still the
+	 * peer, a loopback peer (a gateway on this machine) or a Cloudflare edge
+	 * (mod_remoteip not loaded) is trusted too. After an internal redirect
+	 * Apache prefixes them REDIRECT_.
+	 *
+	 * An Apache configuration written before these variables existed sets
+	 * neither; the headers are believed there as they always were, until host
+	 * housekeeping rewrites the file (every converge, every container start).
+	 */
+	static function forwarded_headers_trusted() {
+		$env = function ($name) {
+			return !empty($_SERVER[$name]) || !empty($_SERVER['REDIRECT_' . $name]);
+		};
+		if (!$env('JOINERY_FORWARDER_KNOWN')) {
+			return true;
+		}
+		if ($env('JOINERY_FORWARDER_TRUSTED')) {
+			return true;
+		}
+		$peer = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+		return IpAddress::inPrefix($peer, '127.0.0.0/8')
+			|| IpAddress::inPrefix($peer, '::1/128')
+			|| SessionControl::ip_is_cloudflare_edge($peer);
+	}
 	
 	/**
 	 * The protocol to build a URL with when protocol_mode is 'auto'.
@@ -564,35 +605,16 @@ class LibraryFunctions {
 		return DnsResolver::domainAcceptsMail($domain);
 	}
 
-	/** Set only for the duration of withoutEmailDomainCheck(). */
-	private static $email_domain_check_suspended = false;
-
 	/**
 	 * Whether an address's domain must be shown to accept mail: the DNS half of
 	 * email validation, which catches a person mistyping their domain. Off when
-	 * the site turns email_validation_mx_check off, and inside
-	 * withoutEmailDomainCheck(). The syntax half always applies.
+	 * the site turns email_validation_mx_check off. The syntax half always
+	 * applies. An account the server makes for itself (page_probe's viewer, the
+	 * provisioning and support-desk accounts) has a username and no email, so
+	 * there is no address to check.
 	 */
 	public static function emailDomainCheckApplies(): bool {
-		if (self::$email_domain_check_suspended) {
-			return false;
-		}
 		return (string)Globalvars::get_instance()->get_setting('email_validation_mx_check') !== '0';
-	}
-
-	/**
-	 * Run $fn with the DNS half of email validation off, for an account the
-	 * server makes for itself under an address no person typed and no mail is
-	 * sent to (page_probe's throwaway viewer, at `.invalid`). Returns $fn's value.
-	 */
-	public static function withoutEmailDomainCheck(callable $fn) {
-		$previous = self::$email_domain_check_suspended;
-		self::$email_domain_check_suspended = true;
-		try {
-			return $fn();
-		} finally {
-			self::$email_domain_check_suspended = $previous;
-		}
 	}
 
 	
@@ -1210,14 +1232,12 @@ class LibraryFunctions {
 			if($require_type == 'int'){
 				$var = $GLOBALS[$varname];	
 				if(!is_numeric($var)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 
 				$var = $var + 0;
 				if(!is_int($var)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 			}
 			
@@ -1233,14 +1253,12 @@ class LibraryFunctions {
 			if($require_type == 'int'){
 				$var = $_REQUEST[$varname];	
 				if(!is_numeric($var)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 
 				$var = $var + 0;
 				if(!is_int($var)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 			}
 
@@ -1253,7 +1271,7 @@ class LibraryFunctions {
 			
 		}
 		else if ($required===1 || $required === 'required' || $required === TRUE){
-			throw new SystemDisplayablePermanentErrorNoLog($errortext . ' Var: '. $varname);
+			throw new SystemDisplayableErrorNoLog($errortext . ' Var: '. $varname);
 		}
 
 		return $defaultvalue;
@@ -1280,14 +1298,12 @@ class LibraryFunctions {
 
 				if($require_type == 'int'){
 					if(!is_numeric($foundvar)){
-						header("HTTP/1.0 404 Not Found");
-						throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+						throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 					}
 
 					$foundvar = $foundvar + 0;
 					if(!is_int($foundvar)){
-						header("HTTP/1.0 404 Not Found");
-						throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+						throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 					}
 				}
 
@@ -1304,14 +1320,12 @@ class LibraryFunctions {
 
 			if($require_type == 'int'){
 				if(!is_numeric($foundvar)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 
 				$foundvar = $foundvar + 0;
 				if(!is_int($foundvar)){
-					header("HTTP/1.0 404 Not Found");
-					throw new SystemDisplayablePermanentErrorNoLog('The variable '.$varname.' is not an integer.');
+					throw new SystemDisplayableErrorNoLog('The variable '.$varname.' is not an integer.');
 				}
 			}
 

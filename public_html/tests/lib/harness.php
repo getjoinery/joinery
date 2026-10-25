@@ -201,6 +201,12 @@ function harness_boot(array $overrides = array()) {
 
 	harness_enforce_env();
 
+	// A suite's writes as a signed-in person meet the model check, refusing,
+	// as on the web: the CLI exemption is for runs with no one signed in.
+	if (class_exists('Access')) {
+		Access::$check_cli_persons = true;
+	}
+
 	// Before any fixture exists: the lock that tells other runs this one is
 	// alive. See harness_hold_run_lock().
 	harness_hold_run_lock();
@@ -857,10 +863,17 @@ function make_user($suffix, $permission = 0) {
 
 function make_user_row($suffix, $permission = 0) {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
+	// Every call is a new person, and no two accounts share an address (the
+	// model refuses it): a label used before in this run gets a numbered
+	// address. The first use keeps harness_fixture_email($suffix) exactly.
+	static $labels_used = array();
+	$label = strtolower((string)$suffix);
+	$labels_used[$label] = ($labels_used[$label] ?? 0) + 1;
+	$address_label = $labels_used[$label] === 1 ? $suffix : $suffix . '_' . $labels_used[$label];
 	$user = new User(NULL);
 	$user->set('usr_first_name', 'HarnessTest');
 	$user->set('usr_last_name', 'User' . $suffix);
-	$user->set('usr_email', harness_fixture_email($suffix));
+	$user->set('usr_email', harness_fixture_email($address_label));
 	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
 	$user->set('usr_permission', $permission);
 	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));

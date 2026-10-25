@@ -21,6 +21,7 @@ class DisplayablePermanentMailingListException extends MailingListException impl
 
 class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	public static $tablename = 'mlt_mailing_lists';
+	public static $access_class = 'content';
 	public static $pkey_column = 'mlt_mailing_list_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -163,9 +164,9 @@ function get_subscribed_users($return='object'){
 			$registrant->save();
 			$registrant->load();
 
-			if($this->get('mlt_emt_email_template_id')){
+			$user = new User($usr_user_id, TRUE);
+			if($this->get('mlt_emt_email_template_id') && $user->get('usr_email')){
 				//SEND WELCOME EMAIL
-				$user = new User($usr_user_id, TRUE);
 				$template = new EmailTemplate($this->get('mlt_emt_email_template_id'), TRUE);
 				EmailSender::sendTemplate($template->get('emt_machine_name'),
 					$user->get('usr_email'),
@@ -226,6 +227,10 @@ function get_subscribed_users($return='object'){
 			return true;
 		}
 		$user = new User($usr_user_id, TRUE);
+		// A list provider knows people by address; an account with none has nothing to sync.
+		if (!$user->get('usr_email')) {
+			return true;
+		}
 		try {
 			$subscriber_id = $provider->subscribe(
 				$this->get('mlt_provider_list_id'),
@@ -257,6 +262,9 @@ function get_subscribed_users($return='object'){
 			return true;
 		}
 		$user = new User($usr_user_id, TRUE);
+		if (!$user->get('usr_email')) {
+			return true;
+		}
 		try {
 			$provider->unsubscribe(
 				$this->get('mlt_provider_list_id'),
@@ -278,13 +286,6 @@ function get_subscribed_users($return='object'){
 			throw new MailingListException('This request has no data.');
 		}
 		
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 	// ===== Entity Photo Methods =====

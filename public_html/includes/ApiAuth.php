@@ -815,14 +815,16 @@ class ApiAuth {
 	 */
 	public static function attemptLogin($email, $password, $device_label = NULL) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		$user = User::GetByEmail($email);
-		// A missing or deleted account still pays for a password check, so the
-		// answer's speed says nothing about which emails have accounts.
-		if (!$user || $user->get('usr_delete_time')) {
+		// $email is what the caller typed: an email or a username. GetByLogin
+		// never returns a deleted account.
+		$user = User::GetByLogin($email);
+		// A missing account still pays for a password check, so the answer's
+		// speed says nothing about which accounts exist.
+		if (!$user) {
 			User::spend_password_check($password);
 		}
 
-		if (!$user || $user->get('usr_delete_time') || !$user->check_password($password)) {
+		if (!$user || !$user->check_password($password)) {
 			return array('ok' => false, 'user' => $user ?: null);
 		}
 
@@ -832,7 +834,7 @@ class ApiAuth {
 		}
 
 		$settings = Globalvars::get_instance();
-		if ($settings->get_setting('activation_required_login') && !$user->get('usr_is_activated')) {
+		if ($settings->get_setting('activation_required_login') && $user->get('usr_email') && !$user->get('usr_is_activated')) {
 			require_once(PathHelper::getIncludePath('includes/Activation.php'));
 			Activation::email_activate_send($user);
 			return array('ok' => false, 'user' => $user, 'reason' => 'activation_required');

@@ -24,6 +24,21 @@ An account has up to two doors, and they are deliberately different:
 
 Everything below follows from keeping those doors separate.
 
+**An account signs in with its email or its username.** An account has an
+email, a username, or both (`User::check_identifiers()`, on every save). A
+username is 3 to 32 letters, digits, dots, dashes or underscores and never holds
+an `@`, so every sign-in box takes either: text with an `@` is an email, text
+without is a username. Each is unique regardless of capitals, and a deleted
+account's identifiers stay taken, so a closed account's username is never handed
+to someone else. Every sign-in path that starts from typed text (web and API
+sign-in, passkey sign-in with a name typed, both password resets) finds the
+account with `User::GetByLogin()`, which never returns a deleted account. An
+account with no email is created activated: activation proves an address, and
+there is none. A member changes either identifier on their account page behind a
+recent step-up; a new email takes effect when the link mailed to it is used
+(`/email_change`, a one-click confirm, so a mail scanner opening the link spends
+nothing). An API update never changes either (`User::$api_create_only_fields`).
+
 **A page that needs a member sends a visitor to `/login?return=<page>`.** The
 sign-in form keeps that page in the session's return slot
 (`SessionControl::set_return()`), and both doors out of the form read it: a
@@ -36,7 +51,7 @@ member handed a return goes straight to it. Pinned by
 `tests/account_security/login_test.php` and `registration_test.php`.
 
 **Email activation gates every session-opening path.** When
-`activation_required_login` is on, an unactivated account is refused a session
+`activation_required_login` is on, an unactivated account with an email is refused a session
 by web sign-in (`login_logic`) and by API login (`ApiAuth::attemptLogin`, the
 door the native apps use) alike — same setting, same gate. Each refusal
 re-sends the activation email, and the refusal is only issued after the
@@ -475,7 +490,9 @@ each routed through the one completion path
 consumed by `password_reset_2_logic`, never anything vault-scoped):
 
 - **Email link** — the reset link mailed to the account email (and to a
-  verified recovery address, if set). Today's flow, unchanged.
+  verified recovery address, if set). An account with no email gets only the
+  recovery-address copy, if it has one; the page's single answer for every
+  outcome says so, and points it to the passkey and authenticator resets.
 - **Passkey** — a sessionless ceremony
   (`password_reset_passkey_options`/`_verify`), reusing the passwordless
   sign-in dispatch. **For a vault holder the passkey is not enough on its own**:
@@ -614,18 +631,20 @@ past the check. Behind Cloudflare or a host's proxy it is still the visitor,
 because mod_remoteip has already put the visitor in `REMOTE_ADDR`.
 
 When the check fires, `get_permission()` answers 0 and the session's vault
-window closes, for every user; `check_permission()` sends a user of permission 5
-or more to the sign-in page. A member is not signed out: they are treated as
+window closes, for every user; `check_permission()` sends a staff member (any level above a
+member's, `Access::staffLevel()`) to the sign-in page. A member is not signed out: they are treated as
 signed out for as long as that session lasts.
 
 ### Sign-in limits
 
-Failed web sign-ins are counted two ways, each 10 in 15 minutes, and either
+Failed web sign-ins are counted three ways, each 10 in 15 minutes, and any
 refuses: from the caller's network (an IPv4 address, or an IPv6 /64, which one
-subscriber holds whole), and for the email typed, so a caller with many
-networks cannot aim them all at one account. The email's count is kept whether
-or not an account has that email, and both refusals read the same, so the
-limit says nothing about which emails have accounts. Nor does the time a
+subscriber holds whole); for the email or username typed, so a caller with many
+networks cannot aim them all at one account; and for the account it names, so
+typing its email and its username does not buy two allowances. One failure row
+carries both the typed text's key and the account. The typed text's count is
+kept whether or not an account has it, and every refusal reads the same, so the
+limit says nothing about which accounts exist. Nor does the time a
 refusal takes: a sign-in naming no account still spends a password check's time
 (`User::spend_password_check()`), on the website and on `auth/login`. Someone who knows an
 account's email can hold its password sign-in refused by failing on purpose;
@@ -680,7 +699,8 @@ saved, naming the entry. `IpAddress::matchesEntry()` and
 | Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
 | Set / verify an external recovery address | Session + recent step-up; a hosted-domain or over-length address is refused |
 | Change the account password | Session + recent step-up; ends all windows + alerts |
-| Change the account (login) email | Session + recent step-up; a hosted address needs a non-email reset path first |
+| Change the account (login) email | Session + recent step-up, then the link mailed to the new address; a hosted address needs a non-email reset path first |
+| Change or remove the username, or remove the email | Session + recent step-up; an account keeps at least one of the two |
 | Regenerate 2FA backup codes | Session + recent step-up |
 | Change 2FA cadence | Session + recent step-up |
 | Change a domain's security level | Session + recent second-factor step-up |

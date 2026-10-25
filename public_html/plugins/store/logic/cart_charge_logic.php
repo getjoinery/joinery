@@ -30,7 +30,83 @@ function _resolve_receipt_template(Product $product, $default_name) {
 	return $default_name;
 }
 
+/**
+ * Whether a captured PayPal order paid what this cart asks. The amount PayPal
+ * charged is whatever the browser asked it for (the order is created in the
+ * page's script), so it is compared with what the checkout would ask for this
+ * cart, currency included.
+ */
+function _cart_charge_paypal_amount_matches($paypal, $payment, $cart): bool {
+	$expected = $paypal->build_item_array($cart->get_detailed_items());
+	if (!$expected || empty($payment['purchase_units']) || !is_array($payment['purchase_units'])) {
+		return false;
+	}
+	$want_cents = 0;
+	foreach ($expected['purchase_units'] as $unit) {
+		$want_cents += (int)round((float)$unit['amount']['value'] * 100);
+		$want_currency = strtoupper((string)$unit['amount']['currency_code']);
+	}
+	$paid_cents = 0;
+	foreach ($payment['purchase_units'] as $unit) {
+		if (strtoupper((string)($unit['amount']['currency_code'] ?? '')) !== $want_currency) {
+			return false;
+		}
+		$paid_cents += (int)round((float)($unit['amount']['value'] ?? 0) * 100);
+	}
+	return $paid_cents === $want_cents;
+}
+
+/**
+ * Whether this request is a payment gateway sending the buyer back: Stripe
+ * Checkout's success_url (?session_id=) or PayPal's return (?id= for an order,
+ * ?subscription= for a subscription). The handler verifies each with the
+ * gateway before it persists anything.
+ */
+function _cart_charge_is_gateway_return(): bool {
+	$settings = Globalvars::get_instance();
+	if ($settings->get_setting('checkout_type') == 'stripe_checkout' && !empty($_GET['session_id'])) {
+		return true;
+	}
+	if ($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Who is behind the checkout's writes, and so which marker they run under.
+ *
+ * None of them can be checked as the buyer. A guest buyer has no session
+ * identity at all (the account is made here, from the billing email); a gift's
+ * order line, registration and tier belong to the recipient; and what a
+ * purchase grants (a tier, an ownership, an event seat, a coupon use, a
+ * product's remaining count, the version's Stripe price) is the payment's to
+ * grant, not something a member's level lets them write. The authority is the
+ * checkout's own rules (the cart is this session's; coupons, ownership,
+ * availability and the recipients checked before any money moves) and the
+ * payment itself, verified with the gateway or charged here.
+ *
+ *  - The gateway's return (a GET the gateway's redirect makes) persists the
+ *    gateway's verified result: server_initiated_write().
+ *  - The buyer's own POST (a card charge, or a free order from the billing
+ *    form) runs inside rule_checked_write(), which keeps the page-view guard.
+ *  - Any other GET is a link, not a checkout, and persists nothing.
+ */
 function cart_charge_logic(array $input): LogicResult{
+	$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? ''));
+	$page_view = ($method === 'GET' || $method === 'HEAD');
+	$run = function () use ($input) { return _cart_charge_run($input); };
+
+	if (_cart_charge_is_gateway_return()) {
+		return SystemBase::server_initiated_write($run);
+	}
+	if ($page_view) {
+		return LogicResult::redirect('/checkout');
+	}
+	return SystemBase::rule_checked_write($run);
+}
+
+function _cart_charge_run(array $input): LogicResult{
 
 	require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -57,18 +133,16 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
-	// cart_charge is the payment-gateway return handler — Stripe/PayPal redirect the
-	// buyer back here via GET — as well as the checkout POST target. Both legitimately
-	// persist the order, so opt in to the GET-is-read-only tripwire for the handler.
-	//
-	// The opt-in spans the whole handler rather than one call, which is why this
-	// sets the flag directly instead of using SystemBase::server_initiated_write():
-	// the guarded region is the function body, with its own returns.
-	SystemBase::$allow_get_mutation = true;
   try {
 
 	if(!$settings->get_setting('products_active')){
 		return _checkout_error('Purchasing is currently unavailable. Please try again later.');
+	}
+
+	// The checkout page asks a signed-in buyer with no email to add one; this holds
+	// the same rule for a charge that reaches here another way.
+	if($session->get_user_id() && !(new User($session->get_user_id(), TRUE))->get('usr_email')){
+		return User::add_email_first(User::CHECKOUT_NEEDS_EMAIL);
 	}
 	
 	$currency_code = $settings->get_setting('site_currency');
@@ -82,6 +156,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$cart = ShoppingCart::current();
 	$page_vars['cart'] = $cart;
 	$charge_total = $cart->get_total();
+
+	// A free order completes from the checkout's billing form, posted here
+	// with the billing details. Only a cart with nothing to pay completes so.
+	if(!empty($_POST['complete_order'])){
+		if($charge_total > 0){
+			return LogicResult::redirect('/checkout');
+		}
+		if(!empty($_POST['billing_email'])){
+			$cart->determine_billing_user($_POST, false);
+		}
+	}
 	
 
 
@@ -114,6 +199,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	//HANDLE THE BILLING USER
 	$billing_user = User::GetByEmail($cart->billing_user['billing_email']);
+	if ($billing_user && $billing_user->get('usr_delete_time')) {
+		return _checkout_error(User::CLOSED_ACCOUNT_MESSAGE);
+	}
+	// Paying as an account that already exists needs that account's sign-in,
+	// as the checkout page says: the charge, its Stripe customer and the order
+	// are written to that account. A guest's checkout makes a new one. Asked
+	// before money moves; on a gateway's return the buyer has paid, and the
+	// checkout page asked for the sign-in before it offered payment.
+	if($billing_user && !$session->get_user_id() && !_cart_charge_is_gateway_return()){
+		return _checkout_error('An account already uses ' . $billing_user->get('usr_email')
+			. '. Log in to check out with it.');
+	}
 	if(!$billing_user){
 		$user_data = array(
 			'usr_first_name' => $cart->billing_user['billing_first_name'],
@@ -196,6 +293,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 		if(!empty($data['email'])){
 			$existing_user = User::GetByEmail($data['email']);
+			if ($existing_user && $existing_user->get('usr_delete_time')) {
+				return _checkout_error($data['email'] . ': ' . User::CLOSED_ACCOUNT_MESSAGE);
+			}
 			if($existing_user){
 				$resolved_users[$key] = $existing_user;
 				$is_newly_created[$key] = false;
@@ -281,7 +381,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$payment_service = '';
 	if($charge_total > 0){
 		if($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))){
-			$payment_id=$_GET['id'];
+			$payment_id = $_GET['id'] ?? '';
 			$paypal=new PaypalHelper();
 			$payment=$paypal->validatePayment($payment_id);
 
@@ -290,14 +390,29 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$valid_sources = array('paypal', 'venmo', 'card', 'paylater');
 			$payment_method = in_array($funding_source, $valid_sources) ? $funding_source : 'paypal';
 
-			if($_GET['subscription']){
-				// Verify PayPal subscription ID if provided
-				$paypal_sub_id = isset($_GET['paypal_subscription_id']) ? trim($_GET['paypal_subscription_id']) : null;
-				if ($paypal_sub_id) {
-					$sub_details = $paypal->subDetails($paypal_sub_id);
-					if (!$sub_details || !in_array($sub_details['status'] ?? '', ['ACTIVE', 'APPROVED'])) {
-						return _checkout_error('PayPal subscription could not be verified. Please try again.');
+			// The id PayPal returned must be one no order has used yet: a
+			// payment pays for one order, however often its URL is replayed.
+			$paypal_ref = !empty($_GET['subscription'])
+				? trim((string)($_GET['paypal_subscription_id'] ?? ''))
+				: trim((string)$payment_id);
+			if($paypal_ref !== ''){
+				foreach(new MultiOrder(array('ord_paypal_order_id' => $paypal_ref)) as $used_order){
+					if((int)$used_order->key !== (int)$order->key){
+						return _checkout_error("This PayPal payment has already been used for another order.");
 					}
+				}
+			}
+
+			if(!empty($_GET['subscription'])){
+				// A subscription is paid only once PayPal confirms it: without
+				// a verified subscription id nothing has been paid for.
+				$paypal_sub_id = $paypal_ref;
+				if($paypal_sub_id === '' || $cart->get_num_recurring() < 1){
+					return _checkout_error('PayPal subscription could not be verified. Please try again.');
+				}
+				$sub_details = $paypal->subDetails($paypal_sub_id);
+				if (!$sub_details || !in_array($sub_details['status'] ?? '', ['ACTIVE', 'APPROVED'])) {
+					return _checkout_error('PayPal subscription could not be verified. Please try again.');
 				}
 
 				$order->set('ord_status', Order::STATUS_PAID);
@@ -311,7 +426,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$payment_service = 'paypal';
 				// Store subscription ID on order items after they're created (see below)
 			}
-			else if($payment['status']=='COMPLETED'){
+			else if(($payment['status'] ?? '') == 'COMPLETED' && _cart_charge_paypal_amount_matches($paypal, $payment, $cart)){
 				$order->set('ord_status', Order::STATUS_PAID);
 				$order->set('ord_paypal_order_id', $payment_id);
 				$order->set('ord_payment_method', $payment_method);
@@ -642,6 +757,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			if($product_version->is_subscription()){
 				if($payment_service == 'stripe_regular'){
 					$final_price = $price - $discount;
+					// A discounted line is billed at a Stripe price of its own;
+					// the version's stored price stays its own amount.
 					$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);
 					$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($stripe_price, $order_item, $billing_user, $stripe_customer_id);
 					$order_item->set('odi_subscription_status', $subscription_result['status']);
@@ -969,8 +1086,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
 	$support_email = $settings->get_setting('defaultemail');
 	return _checkout_error("Something went wrong processing your order. Please try again" . ($support_email ? " or contact us at $support_email" : "") . ".");
-  } finally {
-	SystemBase::$allow_get_mutation = false;
   }
 }
 

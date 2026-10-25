@@ -547,4 +547,63 @@ check($res->redirect === null,
 	'a signed-out visitor still gets the form',
 	'redirect: ' . var_export($res->redirect, true));
 
+// ---------------------------------------------------------------------------
+section('A username signs in wherever an email does');
+
+$named = make_user('LoginNamed');
+$named_pass = 'TestPassword_LoginNamed';
+$handle = 'ln' . bin2hex(random_bytes(5));
+$named->set('usr_username', $handle);
+$named->save();
+
+login_set_ip('192.0.2.60');
+login_cleanup_ip('192.0.2.60');
+$res = login_call(array('email' => $handle, 'password' => $named_pass));
+check($res->error === null && !login_is_retry($res) && $res->redirect !== null,
+	'the username and password sign in', 'redirect: ' . var_export($res->redirect, true));
+$res = login_call(array('email' => strtoupper($handle), 'password' => $named_pass));
+check($res->error === null && !login_is_retry($res), 'in any capitals',
+	'redirect: ' . var_export($res->redirect, true));
+$res = login_call(array('email' => $handle, 'password' => $named_pass . 'X'));
+check(login_is_retry($res), 'a wrong password with the username is refused');
+$res = login_call(array('email' => $named->get('usr_email'), 'password' => $named_pass));
+check($res->error === null && !login_is_retry($res), 'and the email still signs in the same account');
+
+section('One account, one failure count, whichever identifier is typed');
+
+// Five failures typing the email and five typing the username, each from its
+// own network so no per-network count trips: the account has failed ten
+// times, and the right password is then refused. Counted only by the text
+// typed, each identifier would still have five left.
+$ips = array();
+for ($i = 0; $i < 10; $i++) {
+	$ip = '192.0.2.' . (70 + $i);
+	$ips[] = $ip;
+	login_set_ip($ip);
+	login_cleanup_ip($ip);
+	login_call(array('email' => $i % 2 ? $handle : $named->get('usr_email'), 'password' => 'wrong-' . $i));
+}
+login_set_ip('192.0.2.90');
+login_cleanup_ip('192.0.2.90');
+$res = login_call(array('email' => $handle, 'password' => $named_pass));
+check($res->redirect === '/login?msgtext=too_many_attempts',
+	'the eleventh try is refused, though each identifier was tried only five times',
+	'redirect: ' . var_export($res->redirect, true));
+
+section('B117: a live account sharing a deleted one\'s address signs in');
+
+$gone = make_user('LoginGone');
+$twin = make_user('LoginTwin');
+SystemBase::server_initiated_write(function () use ($gone) { $gone->soft_delete(); });
+// Rows made before the save rules can hold such a pair; only a raw write makes one now.
+$q = DbConnector::get_instance()->get_db_link()->prepare('UPDATE usr_users SET usr_email = ? WHERE usr_user_id = ?');
+$q->execute(array($gone->get('usr_email'), $twin->key));
+login_set_ip('192.0.2.91');
+login_cleanup_ip('192.0.2.91');
+$res = login_call(array('email' => $gone->get('usr_email'), 'password' => 'TestPassword_LoginTwin'));
+check($res->error === null && !login_is_retry($res), 'the live account\'s password signs in',
+	'redirect: ' . var_export($res->redirect, true));
+$res = login_call(array('email' => $gone->get('usr_email'), 'password' => 'TestPassword_LoginGone'));
+check(login_is_retry($res), 'the deleted account\'s password does not');
+
 harness_finish();

@@ -7,6 +7,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_user_logic — the user detail page.
  *
+ * @version 1.6 - opened with no usr_user_id, the page loads an empty user without a warning
  * @version 1.5 - Undelete is a POST action here that clears the delete time; soft delete and undelete need 8
  * @version 1.4 - Resend activation email and Activate User are POST actions here (resend_activation, activate),
  *   not links to pages that sent mail or activated on GET
@@ -46,7 +47,6 @@ function admin_user_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 
 	// Permission check
-	$session->check_permission(5);
 	$session->set_return();
 
 	// Initialize page variables
@@ -59,21 +59,19 @@ function admin_user_logic(array $input): LogicResult {
 	$list_limit = $show_all ? NULL : 10;
 
 	// Get user
-	$user = new User($input['usr_user_id'], TRUE);
+	$user = new User($input['usr_user_id'] ?? null, TRUE);
 
 	// Process actions
 	$action = $input['action'] ?? $input['action'] ?? null;
 
 	// Delete and undelete are buttons (POST): a link is a GET any site can make
-	// the browser follow. Both need 8, the level the menu offers them at.
+	// the browser follow.
 	if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'delete'){
-		$session->check_permission(8);
 		$user->assert_can_write($session);
 		$user->soft_delete();
 		return LogicResult::redirect('/admin/admin_users');
 	}
 	else if(LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') == 'undelete'){
-		$session->check_permission(8);
 		$user->assert_can_write($session);
 		$user->undelete();
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
@@ -94,7 +92,8 @@ function admin_user_logic(array $input): LogicResult {
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
 		else if($input['action'] == 'activate'){
-			$session->check_permission(9);
+			// Activating vouches for an address nobody confirmed.
+			Access::demand('restricted:write', $session);
 			$user->assert_can_write($session);
 			$act_code = Activation::getTempCode($user->key, '30 day', 2, NULL, NULL);
 			if (Activation::ActivateUser($act_code)) {
@@ -107,8 +106,10 @@ function admin_user_logic(array $input): LogicResult {
 		else if($input['action'] == 'resend_activation'){
 			// A POST: it sends mail, and a link would send it whenever anything
 			// fetched the URL.
-			$session->check_permission(8);
-			if ($user->get('usr_email_is_verified')) {
+			Access::demand('personal:write', $session);
+			if (!$user->get('usr_email')) {
+				admin_user_say($session, 'This user has no email address to verify.', false);
+			} else if ($user->get('usr_email_is_verified')) {
 				admin_user_say($session, 'This user is already verified.', false);
 			} else {
 				Activation::email_activate_send($user);
@@ -228,31 +229,35 @@ function admin_user_logic(array $input): LogicResult {
 	$options['altlinks'] = array();
 
 	if(!$user->get('usr_delete_time')) {
-		if($_SESSION['permission'] > 7){
+		if($user->can_write($session)){
 			$options['altlinks']['Edit User'] = '/admin/admin_users_edit?usr_user_id='.$user->key;
 			if(PluginHelper::isPluginActive('store') && $settings->get_setting('checkout_type')){
 				$options['altlinks']['Payment Methods'] = '/plugins/store/admin/admin_user_payment_methods?usr_user_id='.$user->key;
 			}
-			if(!$user->get('usr_email_is_verified')){
+			if($user->get('usr_email') && !$user->get('usr_email_is_verified')){
 				$options['altlinks']['Resend activation email'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'resend_activation', 'usr_user_id' => $user->key));
 			}
-			$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
+			if($user->get('usr_email')){
+				$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
+			}
 
 			$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
-			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'delete', 'usr_user_id' => $user->key));
+			if($user->can_delete($session)) {
+				$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'delete', 'usr_user_id' => $user->key));
+			}
 
 			if(!$user->get('usr_is_activated')) {
 				$options['altlinks']['Activate User'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'activate', 'usr_user_id' => $user->key));
 			}
-			if ($_SESSION['permission'] == 10) {
+			if (Access::permits(10, $session)) {
 				$options['altlinks']['Log in as user'] = array('post' => '/admin/admin_user_login_as', 'hidden' => array('usr_user_id' => $user->key));
 			}
 		}
 	}
-	else if($_SESSION['permission'] > 7){
+	else if($user->can_delete($session)){
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'undelete', 'usr_user_id' => $user->key));
 	}
-	if ($_SESSION['permission'] == 10) {
+	if ($user->can_delete($session, true)) {
 		$options['altlinks']['Permanent Delete'] = '/admin/admin_users_permanent_delete?usr_user_id='.$user->key;
 	}
 
@@ -318,7 +323,7 @@ function admin_user_logic(array $input): LogicResult {
 	// ---- Security posture card (superadmin only) ----
 	// specs/admin_second_factor_management.md § step 5. Left unset for anyone
 	// below permission 10, and the view renders nothing.
-	if (($_SESSION['permission'] ?? 0) == 10) {
+	if (Access::permits(10, $session)) {
 		$page_vars['security'] = admin_user_security_facts($user, $session);
 	}
 
@@ -410,7 +415,7 @@ function admin_user_security_facts($user, $session) {
  * everyone else's factors with a stolen session cookie alone.
  */
 function admin_user_second_factor_gate($session, $user) {
-	$session->check_permission(10);
+	Access::demand('keys:write', $session);
 
 	$back = '/admin/admin_user?usr_user_id=' . $user->key;
 

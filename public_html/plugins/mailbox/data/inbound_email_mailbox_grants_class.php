@@ -51,6 +51,8 @@ class InboundEmailMailboxGrant extends SystemBase {
 	use NotifiesRelayMapOnChange;
 	public static $prefix = 'ieg';
 	public static $tablename = 'ieg_inbound_email_mailbox_grants';
+	public static $access_class = 'config';
+	public static $owner_column = false;
 	public static $pkey_column = 'ieg_inbound_email_mailbox_grant_id';
 
 	protected static $foreign_key_actions = [
@@ -75,13 +77,6 @@ class InboundEmailMailboxGrant extends SystemBase {
 		'ieg_signature'                      => array('type'=>'text', 'is_nullable'=>true),
 		'ieg_create_time'                    => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/**
 	 * Return the alias ids a user holds a grant for.
@@ -189,7 +184,7 @@ class InboundEmailMailboxGrant extends SystemBase {
 			$user = new User($holder_id, TRUE);
 			$name = trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name'));
 			if ($name === '') {
-				$name = (string)$user->get('usr_email');
+				$name = $user->key ? $user->login_label() : '';
 			}
 			if ($name === '') {
 				$name = 'That member';

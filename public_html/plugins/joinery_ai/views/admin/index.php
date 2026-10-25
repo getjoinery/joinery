@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Recipe List
  * URL: /admin/joinery_ai
@@ -11,7 +12,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSched
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $numperpage = 30;
@@ -62,7 +62,7 @@ if (count($recipes)) {
         $oid_list = array_keys($owner_ids);
         $oph = implode(',', array_fill(0, count($oid_list), '?'));
         $oq = $db->prepare(
-            "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email,
+            "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username,
                     usr_permission, usr_delete_time
              FROM usr_users WHERE usr_user_id IN ($oph)"
         );
@@ -70,7 +70,8 @@ if (count($recipes)) {
         foreach ($oq->fetchAll(PDO::FETCH_ASSOC) as $orow) {
             $oid = (int)$orow['usr_user_id'];
             $name = trim(($orow['usr_first_name'] ?? '') . ' ' . ($orow['usr_last_name'] ?? ''));
-            $owner_names[$oid] = $name !== '' ? $name : $orow['usr_email'];
+            $owner_names[$oid] = $name !== '' ? $name
+                : ((string)$orow['usr_email'] !== '' ? (string)$orow['usr_email'] : '@' . $orow['usr_username']);
             $active = !$orow['usr_delete_time'] && (int)$orow['usr_permission'] >= 10;
             $owner_status[$oid] = $active ? 'active' : 'inactive';
         }

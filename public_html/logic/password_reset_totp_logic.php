@@ -42,9 +42,9 @@ function password_reset_totp_logic(array $input): LogicResult {
 	$submitted = isset($input['totp_code']) ? trim((string)$input['totp_code']) : '';
 	$canonical = strtoupper(preg_replace('/[\s-]+/', '', $submitted));
 
-	$generic = 'That email and code combination was not recognized.';
+	$generic = 'That email or username and code combination was not recognized.';
 
-	$user = $email !== '' ? User::GetByEmail($email) : null;
+	$user = $email !== '' ? User::GetByLogin($email) : null;
 
 	// A vault holder is not eligible for TOTP-alone reset — steer to the passkey
 	// path. Checked BEFORE verifying the code so a denied reset never consumes a
@@ -81,10 +81,11 @@ function password_reset_totp_logic(array $input): LogicResult {
 
 function password_reset_totp_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Reset a password using email plus an authenticator code (accounts without a vault only)',
 		'input' => [
-			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address'],
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email or username'],
 			'totp_code' => ['type' => 'password', 'required' => false, 'label' => 'Authenticator code'],
 		],
 	];

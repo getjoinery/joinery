@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/logic/admin_booking_logic.php'));
@@ -30,7 +31,7 @@ echo '<tr><th>Type</th><td>' . htmlspecialchars($type->get('bty_name') ?: '—')
 echo '<tr><th>When</th><td>' . LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $tz, 'l, M j, Y g:i A T')
 	. ' – ' . LibraryFunctions::convert_time($booking->get('bkn_end_time'), 'UTC', $tz, 'g:i A T') . '</td></tr>';
 echo '<tr><th>Host</th><td>' . htmlspecialchars($host->display_name()) . '</td></tr>';
-echo '<tr><th>Invitee</th><td>' . htmlspecialchars($client->display_name()) . ' (' . htmlspecialchars($client->get('usr_email')) . ')</td></tr>';
+echo '<tr><th>Invitee</th><td>' . htmlspecialchars($client->display_name()) . ' (' . htmlspecialchars($client->login_label()) . ')</td></tr>';
 echo '<tr><th>Status</th><td>' . ($status_labels[(int)$booking->get('bkn_status')] ?? 'Unknown')
 	. ($booking->get('bkn_is_no_show') ? ' · No-show' : '') . '</td></tr>';
 if ($booking->get('bkn_notes')) { echo '<tr><th>Notes</th><td>' . nl2br(htmlspecialchars($booking->get('bkn_notes'))) . '</td></tr>'; }
