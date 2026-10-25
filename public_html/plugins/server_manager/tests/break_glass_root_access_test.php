@@ -35,6 +35,7 @@
  *
  * Rows go to the test database and are deleted.
  *
+ * @version 1.2 - a Docker host's own node is the machine, not a container (live check 2026-10-25)
  * @version 1.1 - disable_root_login's builder and result (WP4)
  * @version 1.0
  */
@@ -445,6 +446,33 @@ check(JobCommandBuilder::build_disable_root_login($sn) === array('primitive' => 
 $old = new ManagedNode((int)$sn->key, TRUE);
 $old->set('mgn_agent_primitives', 'host_report');
 check(strpos($drl_refused($old), 'cannot turn root login off from here') !== false, 'a node whose agent lacks the word is refused', $drl_refused($old));
+
+// A Docker host: its own node carries the placement record too, and is the
+// machine; a site in a container on it is not (live check 2026-10-25).
+$mh = new ManagedHost(NULL);
+$mh->set('mgh_slug', 'bg-host-' . $suffix);
+$mh->set('mgh_name', 'HarnessTest break-glass host ' . $suffix);
+$mh->set('mgh_host', '198.51.100.250');
+$mh->save();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', (int)$mh->key);
+list($host_node, $host_prov) = $drl_box('drlhost', array('cvp_install_password' => 'kept'));
+$host_node->set('mgn_mgh_managed_host_id', (int)$mh->key);
+$host_node->save();
+$mh->set('mgh_mgn_managed_node_id', (int)$host_node->key);
+$mh->save();
+$site_node = new ManagedNode(NULL);
+$site_node->set('mgn_name', 'HarnessTest break-glass container ' . $suffix);
+$site_node->set('mgn_slug', 'bg-container-' . $suffix);
+$site_node->set('mgn_host', (string)$host_node->get('mgn_host'));
+$site_node->set('mgn_mgh_managed_host_id', (int)$mh->key);
+$site_node->save();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', (int)$site_node->key);
+$host_node = new ManagedNode((int)$host_node->key, TRUE);
+check(JobCommandBuilder::container_node_host($host_node) === null && JobCommandBuilder::disable_root_login_refusal($host_node) === null,
+	'a Docker host\'s own node, which its placement record names, is the machine: asked, not refused');
+$cv = JobCommandBuilder::container_node_host($site_node);
+check($cv !== null && $cv['host_node'] && (int)$cv['host_node']->key === (int)$host_node->key,
+	'a node on the same placement record that is not its host is a container, and is sent to the host\'s node');
 
 $drl_env = function (array $obj) {
 	return "=== [Step 1/1] disable_root_login ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(

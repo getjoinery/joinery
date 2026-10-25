@@ -3,6 +3,9 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.58 - a holder owed a second-factor confirmation is offered it first, in place of Reveal and Retire, and comes
+ *                 back to the real buttons; a click that still meets the confirmation says to click again
+ * @version 1.57 - Reveal and Retire asked from a node page answer there (return_node)
  * @version 1.56 - a kept root password (beta_break_glass_root_access 3.5): Reveal and Retire for its holder, Retire all
  *                 requested and Retire all kept, and each box's reveal and retire history on its row
  * @version 1.55 - a node whose reported release keys are not the ones expected says so (release keys differ,
@@ -284,16 +287,22 @@ if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
 // leaves: Reveal answers with a page of its own, Retire redirects.
 if ($_POST && in_array($_POST['action'] ?? '', ['break_glass_reveal', 'break_glass_retire', 'break_glass_retire_all'], true)) {
 	$page_regex = '/\/admin\/server_manager/';
-	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
-	$bg_fail = function (string $message) use ($session, $page_regex) {
+	// Asked from a node page (its Emergency root access box): answered there.
+	$bg_back = (int)($_POST['return_node'] ?? 0) > 0
+		? '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$_POST['return_node'] : '/admin/server_manager';
+	if (!SmAdminCsrf::valid()) { header('Location: ' . $bg_back); exit; }
+	$bg_fail = function (string $message) use ($session, $page_regex, $bg_back) {
 		$session->save_message(new DisplayMessage($message, 'Error', $page_regex,
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-		header('Location: /admin/server_manager'); exit;
+		header('Location: ' . $bg_back); exit;
 	};
-	$bg_check = function ($prov) use ($session, $bg_fail) {
+	$bg_check = function ($prov) use ($session, $bg_fail, $bg_back) {
 		$verdict = BreakGlassRootAccess::holder_action_refusal($prov, $session);
 		if ($verdict['stepup']) {
-			header('Location: ' . SessionControl::stepup_redirect('/admin/server_manager')->redirect); exit;
+			// The confirmation window ran out between the page and the click.
+			$session->save_message(new DisplayMessage('Confirm your second factor, then click again: the click that asked for it did nothing.',
+				'Confirm first', '/\/admin\/server_manager/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			header('Location: ' . SessionControl::stepup_redirect($bg_back)->redirect); exit;
 		}
 		if ($verdict['refusal'] !== null) {
 			$bg_fail($prov->get('cvp_domain') . ': ' . $verdict['refusal'] . '.');
@@ -334,7 +343,7 @@ if ($_POST && in_array($_POST['action'] ?? '', ['break_glass_reveal', 'break_gla
 		$session->save_message(new DisplayMessage(
 			$prov->get('cvp_domain') . ': the kept root password is back with this management node, which turns it off on its machine on the next pass.',
 			'Retired', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-		header('Location: /admin/server_manager'); exit;
+		header('Location: ' . $bg_back); exit;
 	}
 
 	// Reveal: shown once, on a page of its own, and recorded.
@@ -350,7 +359,7 @@ if ($_POST && in_array($_POST['action'] ?? '', ['break_glass_reveal', 'break_gla
 		. '<code>' . htmlspecialchars($bg_password) . '</code>'
 		. '<p>Log in as <strong>root</strong> at ' . htmlspecialchars((string)$prov->get('cvp_instance_ip')) . '. This view is recorded. '
 		. 'Nothing is stored in your browser: closing this page is the end of it.</p>'
-		. '<p><a href="/admin/server_manager">Back to the dashboard</a></p></body></html>';
+		. '<p><a href="' . htmlspecialchars($bg_back) . '">Back</a></p></body></html>';
 	exit;
 }
 
@@ -1023,9 +1032,15 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 			$bg_requested = count(array_filter($bg_mine, function ($kp) {
 				return BreakGlassRootAccess::owner_asked_off(BreakGlassRootAccess::live_node($kp));
 			}));
+			// Owed a second-factor confirmation: offered first, so no click is lost to it.
+			$bg_confirm = $bg_mine ? BreakGlassRootAccess::confirm_first_url($session, '/admin/server_manager') : null;
 			if ($bg_mine): ?>
 				<div class="svm-prov svm-muted">
 					You hold <?php echo count($bg_mine); ?> kept root <?php echo count($bg_mine) === 1 ? 'password' : 'passwords'; ?>.
+					<?php if ($bg_confirm !== null): ?>
+						<a class="btn btn-sm btn-outline-secondary" href="<?php echo htmlspecialchars($bg_confirm); ?>"
+							title="Reveal and Retire need your second factor in the last five minutes. You come back here to them.">Confirm your passkey to reveal or retire</a>
+					<?php else: ?>
 					<?php if ($bg_requested): ?>
 						<form method="post" action="/admin/server_manager" id="bg_retire_requested" class="svm-inline-form">
 							<input type="hidden" name="action" value="break_glass_retire_all">
@@ -1042,6 +1057,7 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 						<button type="button" class="btn btn-sm btn-outline-secondary"
 							onclick="<?php echo $confirm_submit('bg_retire_all', 'Retire every kept root password you hold (' . count($bg_mine) . ')? Each machine then stops accepting it. This cannot be undone.'); ?>">Retire all kept</button>
 					</form>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 			<?php foreach ($inflight_provisions as $prov):
@@ -1083,7 +1099,7 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 					</div>
 					<?php if ($pw_state === 'kept'):
 						$bg_holder = (int)$prov->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id(); ?>
-						<?php if ($bg_holder): ?>
+						<?php if ($bg_holder && $bg_confirm === null): ?>
 							<div class="svm-prov-top">
 								<form method="post" action="/admin/server_manager" class="svm-inline-form">
 									<input type="hidden" name="action" value="break_glass_reveal">

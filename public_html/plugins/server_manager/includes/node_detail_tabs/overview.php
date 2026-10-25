@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.90 - the Emergency root access box offers its holder Reveal root password and Retire, and a Docker host's node
+ *                 finds its machine's provision by address
  * @version 1.89 - Turn off root login in the Security box (disable_root_login, agent 1.95.0), behind the confirm dialog,
  *                 or the reason it is not offered (specs/implemented/beta_break_glass_root_access.md 5.3)
  * @version 1.88 - Emergency root access box: a root password kept for the beta (kept, its holder, the owner's answer) and
@@ -2412,7 +2414,12 @@
 	// A box of its own rather than a line in Security, which a container
 	// site's node does not show. Reveal and Retire are on the dashboard, for
 	// the holder; this is where the history stays visible after a retire.
+	// A Docker host's own node is not the provision's node (the site's is):
+	// it finds the machine's provision by its address.
 	$bg_provision = CustomerCloudProvision::latest_for_node((int)$node->key);
+	if (!$bg_provision && JobCommandBuilder::container_node_host($node) === null) {
+		$bg_provision = CustomerCloudProvision::for_machine_address((string)$node->get('mgn_host'));
+	}
 	if ($bg_provision) {
 		$bg_events = BreakGlassRootAccess::events_for_provision((int)$bg_provision->key, 10);
 		$bg_kept = (string)$bg_provision->get('cvp_install_password') === 'kept';
@@ -2424,8 +2431,25 @@
 			if ($bg_answer !== '') {
 				echo '<div class="small text-muted mt-1">The site\'s owner allows it: ' . ($bg_answer === 'on' ? 'yes' : 'no, they turned it off') . '</div>';
 			}
-			if ($bg_kept) {
-				echo '<div class="small text-muted mt-1">Its holder reveals or retires it from the <a href="/admin/server_manager">dashboard</a>.</div>';
+			$bg_confirm = $bg_kept ? BreakGlassRootAccess::confirm_first_url($session, '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$node->key) : null;
+			if ($bg_kept && $bg_confirm !== null && (int)$bg_provision->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id()) {
+				echo '<div class="mt-2"><a class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" href="' . htmlspecialchars($bg_confirm) . '"'
+					. ' title="Reveal and Retire need your second factor in the last five minutes. You come back here to them.">Confirm your passkey to reveal or retire</a></div>';
+			} elseif ($bg_kept && (int)$bg_provision->get('cvp_sealed_owner_user_id') === (int)$session->get_user_id()) {
+				// The dashboard's handlers, answering back here. Each needs the
+				// vault open and a recent second factor (BreakGlassRootAccess).
+				$bg_fields = '<input type="hidden" name="cvp_customer_cloud_provision_id" value="' . (int)$bg_provision->key . '">'
+					. '<input type="hidden" name="return_node" value="' . (int)$node->key . '">' . SmAdminCsrf::field();
+				echo '<div class="mt-2 d-flex flex-wrap gap-1">'
+					. '<form method="post" action="/admin/server_manager" class="d-inline"><input type="hidden" name="action" value="break_glass_reveal">' . $bg_fields
+					. '<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Shown once, on a page of its own. Every view is recorded.">Reveal root password</button></form>'
+					. '<form method="post" action="/admin/server_manager" class="d-inline" id="bg_node_retire"><input type="hidden" name="action" value="break_glass_retire">' . $bg_fields
+					. '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075" onclick="JoineryModal.confirm('
+					. htmlspecialchars(json_encode('Retire the kept root password for ' . $bg_provision->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.'), ENT_QUOTES, 'UTF-8')
+					. ', function(){ document.getElementById(\'bg_node_retire\').submit(); })">Retire</button></form>'
+					. '</div>';
+			} elseif ($bg_kept) {
+				echo '<div class="small text-muted mt-1">Only its holder can reveal or retire it.</div>';
 			}
 			if ($bg_events) {
 				echo '<ul class="small mt-2 mb-0">';
