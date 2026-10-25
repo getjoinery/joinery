@@ -17,8 +17,10 @@ function admin_coupon_code_edit_logic(array $input): LogicResult {
 
 	if (isset($input['edit_primary_key_value'])) {
 		$coupon_code = new CouponCode($input['edit_primary_key_value'], TRUE);
+		$coupon_code->assert_found();
 	} elseif ($coupon_code_id) {
 		$coupon_code = new CouponCode($coupon_code_id, TRUE);
+		$coupon_code->assert_found();
 	}
 	else{
 		$coupon_code = new CouponCode(NULL);

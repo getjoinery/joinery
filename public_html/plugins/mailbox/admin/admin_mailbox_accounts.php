@@ -172,6 +172,8 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 			<?php
 			echo PublicPageBase::action_button('Delete', $domain_base, array(
 				'hidden' => array('action' => 'delete', 'ied_inbound_email_domain_id' => $domain->key),
+				'model' => $domain,
+				'verb' => 'soft_delete',
 				'confirm' => 'Delete this domain and all its mailboxes?',
 				'class' => 'btn btn-sm btn-outline-danger',
 			));
@@ -311,6 +313,8 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 								));
 								echo PublicPageBase::action_button('Remove feed', $imap_action, array(
 									'hidden' => array('action' => 'delete', 'iia_inbound_imap_account_id' => $imap->key),
+									'model' => $imap,
+									'verb' => 'soft_delete',
 									'confirm' => 'Remove this IMAP feed? Already-ingested mail is kept.',
 									'class' => 'btn btn-sm btn-outline-danger',
 								));
@@ -334,6 +338,8 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 					<?php
 					echo PublicPageBase::action_button('Delete', $alias_action, array(
 						'hidden' => array('action' => 'delete', 'iea_inbound_email_alias_id' => $alias->key),
+						'model' => $alias,
+						'verb' => 'soft_delete',
 						'confirm' => 'Delete this mailbox? Stored mail for it is removed from the reader.',
 						'class' => 'btn btn-sm btn-outline-danger',
 					));
@@ -358,11 +364,15 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 						<?php
 						echo PublicPageBase::action_button('Restore', $alias_action, array(
 							'hidden' => array('action' => 'undelete', 'iea_inbound_email_alias_id' => $dmb->key),
+							'model' => $dmb,
+							'verb' => 'soft_delete',
 							'confirm' => 'Restore this mailbox? Its stored mail comes back in the reader.',
 							'class' => 'btn btn-sm btn-outline-success',
 						));
 						echo PublicPageBase::action_button('Permanent delete', $alias_action, array(
 							'hidden' => array('action' => 'permanent_delete', 'iea_inbound_email_alias_id' => $dmb->key),
+							'model' => $dmb,
+							'verb' => 'permanent_delete',
 							'confirm' => 'PERMANENTLY delete this mailbox and its stored mail? This cannot be undone.',
 							'confirm_typed' => 'delete ' . $dmb->get_full_address(),
 							'class' => 'btn btn-sm btn-outline-danger',
@@ -397,11 +407,15 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 					<?php
 					echo PublicPageBase::action_button('Restore', $domain_base, array(
 						'hidden' => array('action' => 'undelete', 'ied_inbound_email_domain_id' => $d->key),
+						'model' => $d,
+						'verb' => 'soft_delete',
 						'confirm' => 'Restore this domain and its aliases?',
 						'class' => 'btn btn-sm btn-outline-success',
 					));
 					echo PublicPageBase::action_button('Permanent delete', $domain_base, array(
 						'hidden' => array('action' => 'permanent_delete', 'ied_inbound_email_domain_id' => $d->key),
+						'model' => $d,
+						'verb' => 'permanent_delete',
 						'confirm' => 'PERMANENTLY delete this domain and all its mailboxes? This cannot be undone.',
 						'confirm_typed' => 'delete ' . $d->get('ied_domain'),
 						'class' => 'btn btn-sm btn-outline-danger',

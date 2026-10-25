@@ -29,6 +29,7 @@
 	if($send_test){
 		$email_id = LibraryFunctions::fetch_variable('eml_email_id', NULL, 1, 'To send a test email, you must pass an email.');
 		$test_email = new Email($email_id, TRUE);
+		$test_email->assert_found();
 		$emails = array();
 		$emails[] = $test_email;
 	}

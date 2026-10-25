@@ -26,6 +26,7 @@ function admin_event_logic(array $input): LogicResult {
 
 	$evt_event_id = !empty($input['evt_event_id']) ? $input['evt_event_id'] : (!empty($input['evt_event_id']) ? $input['evt_event_id'] : null);
 	$event = new Event($evt_event_id, TRUE);
+	$event->assert_found();
 
 	// Handle actions
 	if(($input['action'] ?? null) == 'delete'){
@@ -55,6 +56,7 @@ function admin_event_logic(array $input): LogicResult {
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
 			$instance = new Event($instance_id, TRUE);
+			$instance->assert_found();
 			$instance->soft_delete();
 		}
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
@@ -65,6 +67,7 @@ function admin_event_logic(array $input): LogicResult {
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
 			$instance = new Event($instance_id, TRUE);
+			$instance->assert_found();
 			$instance->soft_delete();
 		}
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
@@ -79,6 +82,7 @@ function admin_event_logic(array $input): LogicResult {
 	if(($input['action'] ?? null) == 'remove_from_event'){
 
 		$eventregistrant = new EventRegistrant($input['evr_event_registrant_id'], TRUE);
+		$eventregistrant->assert_found();
 		$eventregistrant->remove();
 
 		$returnurl = $session->get_return();
@@ -88,6 +92,7 @@ function admin_event_logic(array $input): LogicResult {
 	if(($input['action'] ?? null) == 'remove_from_waiting_list'){
 
 		$waiting_list = new WaitingList($input['ewl_waiting_list_id'], TRUE);
+		$waiting_list->assert_found();
 		$waiting_list->remove();
 
 		$returnurl = $session->get_return();

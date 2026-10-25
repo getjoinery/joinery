@@ -25,6 +25,7 @@ function admin_post_permanent_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$post = new Post($pst_post_id, TRUE);
+			$post->assert_found();
 			$post->assert_can_write($session);
 			$post->permanent_delete();
 		}
@@ -38,6 +39,7 @@ function admin_post_permanent_delete_logic(array $input): LogicResult {
 	$pst_post_id = LibraryFunctions::fetch_variable('pst_post_id', NULL, 1, 'You must provide a post to edit.', $input);
 
 	$post = new Post($pst_post_id, TRUE);
+	$post->assert_found();
 
 	$session->set_return("/admin/admin_posts");
 

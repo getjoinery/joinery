@@ -198,6 +198,8 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		}
 
 		if ($this->key) {
+			// This save's own rule first: the version below is its bookkeeping.
+			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE, $this->key, $this->get_filled_content(), $this->get('pag_title'), $this->get('pag_title'));
 		}
 		

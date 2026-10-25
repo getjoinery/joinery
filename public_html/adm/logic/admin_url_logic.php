@@ -10,6 +10,7 @@ function admin_url_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$url = new Url($input['url_url_id'] ?? null, TRUE);
+	$url->assert_found();
 
 	if($input['action'] == 'soft_delete'){
 		$url->assert_can_write($session);

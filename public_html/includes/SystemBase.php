@@ -22,7 +22,12 @@ class SystemInvalidFormError extends SystemBaseException {}
 
 class SystemBaseNoKeyError extends SystemBaseException {}
 
-class SystemAuthenticationError extends SystemBaseException {}
+/** A row asked for by its id is not there: a 404, as a missing key is. */
+class SystemRowNotFoundError extends SystemBaseNoKeyError {}
+
+// A refusal: its message names what was refused and the level it needs, written
+// for the person refused, so it is shown to them (ErrorStatus still answers 403).
+class SystemAuthenticationError extends SystemBaseException implements DisplayableErrorMessage {}
 
 class SystemDisplayableError extends SystemBaseException implements DisplayableErrorMessage {}
 
@@ -313,7 +318,7 @@ abstract class SystemBase {
 	/** Set while soft_delete()/undelete() save, which they have already checked. */
 	private $access_checked = false;
 
-	/** op => true once guard_raw_write() asked it of this row, so the parent's path does not ask (and audit) again. */
+	/** op => true once guard_raw_write() asked it of this row: the next write of that op does not ask (and audit) again. */
 	private $access_guarded = array();
 
 	/** True while a write-path check runs, so the session's own writes do not recurse into it. */
@@ -2705,6 +2710,14 @@ abstract class SystemBase {
 		if ($this->key === NULL) {
 			throw new SystemBaseNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
 		}
+		// A key is a whole number. Anything else from a request ('abc', '1e9',
+		// an array) names no row: it loads as a missing row does, not as a
+		// database error.
+		if (!(is_int($this->key) || (is_string($this->key) && ctype_digit($this->key)))) {
+			$this->key = NULL;
+			$this->data = new StdClass;
+			return false;
+		}
 
 		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -2725,6 +2738,16 @@ abstract class SystemBase {
 			return false;
 		}
 
+	}
+
+	/**
+	 * For a page that shows or edits one row named in the request: a row that
+	 * was not found (load() leaves no key) answers 404 instead of a blank page.
+	 */
+	public function assert_found(): void {
+		if (!$this->key) {
+			throw new SystemRowNotFoundError('No such entry in ' . static::$tablename . '.');
+		}
 	}
 
 	function soft_delete(){
@@ -3778,7 +3801,11 @@ abstract class SystemBase {
 	 * (Access::writeRefused()).
 	 */
 	protected function enforce_access(string $op): void {
-		if (!self::access_enforced() || !empty($this->access_guarded[$op])) return;
+		if (!empty($this->access_guarded[$op])) {
+			unset($this->access_guarded[$op]);   // guard_raw_write() asked it for this one write
+			return;
+		}
+		if (!self::access_enforced()) return;
 		self::$access_checking = true;
 		try {
 			$session = SessionControl::get_instance();

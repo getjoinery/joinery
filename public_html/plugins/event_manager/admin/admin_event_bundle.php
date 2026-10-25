@@ -13,6 +13,7 @@
 
 	if(($_POST['action'] ?? null) == 'remove'){
 		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
+		$groupmember->assert_found();
 		$groupmember->remove();
 		header("Location: /plugins/event_manager/admin/admin_event_bundle?grp_group_id=".$_REQUEST['grp_group_id']);
 		exit();
@@ -20,6 +21,7 @@
 
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
+	$group->assert_found();
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');

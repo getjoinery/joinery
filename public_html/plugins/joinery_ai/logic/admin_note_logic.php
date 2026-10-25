@@ -9,8 +9,10 @@ function admin_joinery_ai_note_logic(array $input): LogicResult {
 
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
         $note = new RecipeNote($input['edit_primary_key_value'], TRUE);
+        $note->assert_found();
     } elseif (isset($input['rcn_note_id']) && $input['rcn_note_id']) {
         $note = new RecipeNote($input['rcn_note_id'], TRUE);
+        $note->assert_found();
     } else {
         $note = new RecipeNote(NULL);
         $note->set('rcn_owner_user_id', $session->get_user_id());

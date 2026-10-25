@@ -12,8 +12,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$file = new File($_POST['edit_primary_key_value'], TRUE);
+		$file->assert_found();
 	} elseif (isset($_GET['fil_file_id'])) {
 		$file = new File($_GET['fil_file_id'], TRUE);
+		$file->assert_found();
 	} else {
 		echo 'Must pass a file';
 		exit();

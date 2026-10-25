@@ -19,6 +19,7 @@ $session->set_return();
 // Handle delete action
 if (isset($_POST['action']) && $_POST['action'] == 'delete') {
 	$content = new PageContent($_POST['pac_page_content_id'], TRUE);
+	$content->assert_found();
 	$content->soft_delete();
 	header("Location: /admin/admin_components");
 	exit();
@@ -97,6 +98,8 @@ foreach ($contents as $content) {
 
 	$delete_form = AdminPage::action_button('Delete', '', [
 		'hidden'  => ['action' => 'delete', 'pac_page_content_id' => $content->key],
+		'model'   => $content,
+		'verb'    => 'soft_delete',
 		'confirm' => 'Are you sure you want to delete this component?',
 		'class'   => 'btn btn-sm btn-outline-danger',
 	]);

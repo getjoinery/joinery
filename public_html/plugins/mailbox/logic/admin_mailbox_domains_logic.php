@@ -240,6 +240,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	if (LibraryFunctions::isFormSubmission() && isset($input['domain_type'])) {
 		if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 			$domain = new InboundEmailDomain($input['edit_primary_key_value'], TRUE);
+			$domain->assert_found();
 		} else {
 			$domain = new InboundEmailDomain(NULL);
 		}
@@ -662,6 +663,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 
 		if ($domain_id && in_array($action, ['delete', 'undelete', 'permanent_delete'])) {
 			$domain = new InboundEmailDomain($domain_id, TRUE);
+			$domain->assert_found();
 
 			if ($action === 'delete') {
 				// Soft-delete domain and cascade to aliases

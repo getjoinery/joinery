@@ -25,6 +25,7 @@ function admin_group_permanent_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$group = new Group($grp_group_id, TRUE);
+			$group->assert_found();
 			$group->assert_can_write($session);
 			$group->permanent_delete();
 		}
@@ -38,6 +39,7 @@ function admin_group_permanent_delete_logic(array $input): LogicResult {
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', NULL, 1, 'You must provide a group to edit.', $input);
 
 	$group = new Group($grp_group_id, TRUE);
+	$group->assert_found();
 
 	$session->set_return("/admin/admin_groups");
 

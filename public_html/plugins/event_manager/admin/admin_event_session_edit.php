@@ -14,11 +14,13 @@
 	if (isset($_REQUEST['evs_event_session_id']) || isset($_POST['edit_primary_key_value'])) {
 		$session_id = isset($_POST['edit_primary_key_value']) ? $_POST['edit_primary_key_value'] : $_REQUEST['evs_event_session_id'];
 		$event_session = new EventSession($session_id, TRUE);
+		$event_session->assert_found();
 		$event = new Event($event_session->get('evs_evt_event_id'), TRUE);
 	}
 	else if (isset($_REQUEST['evt_event_id'])) {
 		$event_session = new EventSession(NULL);
 		$event = new Event($_REQUEST['evt_event_id'], TRUE);
+		$event->assert_found();
 	}
 	else{
 		echo 'Need an event or a session';
@@ -33,6 +35,7 @@
 	}
 	else if($_REQUEST['action'] == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
+		$event_session->assert_found();
 		$event_session->assert_can_write($session);
 
 		//IF SOMEONE JUST CLICKS THE BUTTON, FAIL SILENTLY
@@ -46,6 +49,7 @@
 	}
 	else if($_REQUEST['action'] == 'removefile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
+		$event_session->assert_found();
 		$event_session->assert_can_write($session);
 		$file_id = $_REQUEST['fil_file_id'];
 		$event_session->remove_file($file_id);

@@ -11,6 +11,7 @@ function admin_mailing_list_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 
 	$mailing_list = new MailingList($input['mlt_mailing_list_id'] ?? null, TRUE);
+	$mailing_list->assert_found();
 
 	if($input['action'] == 'delete'){
 		$mailing_list->assert_can_write($session);
@@ -26,6 +27,7 @@ function admin_mailing_list_logic(array $input): LogicResult {
 	}
 	else if($input['action'] == 'removeregistrant'){
 		$registrant = new MailingListRegistrant($input['mlr_mailing_list_registrant_id'], TRUE);
+		$registrant->assert_found();
 		$mailing_list->remove_registrant($registrant->get('mlr_usr_user_id'));
 		return LogicResult::redirect("/admin/admin_mailing_list?mlt_mailing_list_id=".$mailing_list->key);
 	}
@@ -57,10 +59,10 @@ function admin_mailing_list_logic(array $input): LogicResult {
 
 	if($mailing_list->can_delete($session)){
 		if($mailing_list->get('mlt_delete_time')) {
-			$options['altlinks']['Undelete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'undelete', 'mlt_mailing_list_id' => $mailing_list->key));
+			$options['altlinks']['Undelete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'undelete', 'mlt_mailing_list_id' => $mailing_list->key), 'model' => $mailing_list, 'verb' => 'soft_delete');
 		}
 		else {
-			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'delete', 'mlt_mailing_list_id' => $mailing_list->key));
+			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'delete', 'mlt_mailing_list_id' => $mailing_list->key), 'model' => $mailing_list, 'verb' => 'soft_delete');
 		}
 	}
 

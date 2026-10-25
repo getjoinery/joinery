@@ -12,8 +12,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$group = new Group($_POST['edit_primary_key_value'], TRUE);
+		$group->assert_found();
 	} elseif (isset($_GET['grp_group_id'])) {
 		$group = new Group($_GET['grp_group_id'], TRUE);
+		$group->assert_found();
 	} else {
 		$group = new Group(NULL);
 	}

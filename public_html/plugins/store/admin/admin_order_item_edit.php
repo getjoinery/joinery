@@ -25,6 +25,7 @@
 
 	if ($item_id) {
 		$order_item = new OrderItem($item_id, TRUE);
+		$order_item->assert_found();
 		$order = new Order($order_item->get('odi_ord_order_id'), TRUE);
 		$user = new User($order_item->get('odi_usr_user_id'), TRUE);
 	}
@@ -32,6 +33,7 @@
 		$order_id = LibraryFunctions::fetch_variable('ord_order_id', NULL,1,'You must pass an order id');
 		$order_item = new OrderItem(NULL);
 		$order = new Order($order_id, TRUE);
+		$order->assert_found();
 	}
 
 	if($_POST){

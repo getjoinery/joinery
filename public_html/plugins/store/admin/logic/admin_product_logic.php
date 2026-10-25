@@ -17,6 +17,7 @@ function admin_product_logic(array $input): LogicResult {
 	$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
 
 	$product = new Product($input['pro_product_id'] ?? null, TRUE);
+	$product->assert_found();
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
 	// Handle actions. Each is the Actions menu's POST button; opening the page is a GET.

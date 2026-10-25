@@ -13,6 +13,7 @@
 	$session->set_return();
 
 	$event = new Event($_REQUEST['evt_event_id'] ?? null, TRUE);
+	$event->assert_found();
 
 	//REGISTRANTS
 

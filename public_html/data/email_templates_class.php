@@ -73,6 +73,8 @@ private function _check_for_duplicate_email_template() {
 	function save($debug=false) {
 		if($this->key){
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
+			// This save's own rule first: the version below is its bookkeeping.
+			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(ContentVersion::TYPE_EMAIL_TEMPLATE, $this->key, $this->get('emt_body'), $this->get('emt_name'), $this->get('emt_name'));
 		}
 		

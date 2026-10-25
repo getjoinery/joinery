@@ -22,7 +22,8 @@
  * allows() is the same comparison for a caller that already holds that level.
  * demand() is decide() for an action: it throws the page's 401 refusal.
  * permits() asks it of the session without recording anything: for what a page
- * shows (a column, a button, deleted rows in a list), never for what it does.
+ * shows (a column, a button, deleted rows in a list) or a choice that refuses
+ * nothing; a refusal is decide() or demand(), so it is recorded.
  * staffLevel() is the lowest level above a member's.
  *
  * decide() is where the audit lives. Each of these lands in the event log

@@ -223,6 +223,8 @@ if ($is_edit && $host->key) {
 		echo '<p class="text-muted">Removes this placement record from the dashboard. The machine itself is untouched.</p>';
 		echo AdminPage::action_button('Delete Host', '/admin/server_manager/host_add?mgh_managed_host_id=' . $host->key, [
 			'hidden'  => ['action' => 'delete_host'],
+			'model'   => $host,
+			'verb'    => 'soft_delete',
 			'confirm' => 'Delete this host record?',
 			'class'   => 'btn btn-danger btn-sm',
 		]);

@@ -32,12 +32,17 @@
 		// A refund is money leaving: the order items' level, asked before Stripe
 		// is (the row's owner is the buyer, who does not refund themselves).
 		Access::demand(OrderItem::access_level('write'), $session);
-		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE);
+		$order_item = new OrderItem($_REQUEST['order_item_id'] ?? null, TRUE);
+		$order_item->assert_found();
 
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
-		$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
-
-		$charge = $stripe_helper->get_charge($_POST['charge_id']);
+		try {
+			$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
+			$charge = $stripe_helper->get_charge($_POST['charge_id']);
+		} catch (StripeHelperException $e) {
+			// No keys here, or Stripe refused: nothing was refunded, so nothing is recorded.
+			throw new SystemDisplayableError('The refund was not made: ' . $e->getMessage());
+		}
 		
 		$refund_amount_before = $order_item->get('odi_refund_amount');
 		$refund_amount_this_time = $_POST['refund_amount'];
@@ -66,17 +71,22 @@ else{
 	}
 	
 	$order_item = new OrderItem($_REQUEST['oi'], TRUE);
+	$order_item->assert_found();
 	$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
 	$order = $order_item->get_order();
 
-	if ($order->get('ord_stripe_charge_id')){
-		$charge_id = $order->get('ord_stripe_charge_id');
-		$charge = $stripe_helper->get_charge($charge_id);		
-	}	
-	else if ($order->get('ord_stripe_payment_intent_id')) {
-		$charge = $stripe_helper->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
+	try {
+		if ($order->get('ord_stripe_charge_id')){
+			$charge_id = $order->get('ord_stripe_charge_id');
+			$charge = $stripe_helper->get_charge($charge_id);
+		}
+		else if ($order->get('ord_stripe_payment_intent_id')) {
+			$charge = $stripe_helper->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
+		}
+	} catch (StripeHelperException $e) {
+		throw new SystemDisplayableError('The charge cannot be read: ' . $e->getMessage());
 	}
-	else{
+	if (!$order->get('ord_stripe_charge_id') && !$order->get('ord_stripe_payment_intent_id')){
 		echo "No payment intent or charge id.";
 		exit();					
 	}

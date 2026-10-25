@@ -14,6 +14,8 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 $session = SessionControl::get_instance();
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && ($_POST['action'] ?? '') === 'delete_all') {
+	// One raw DELETE of every row: the rows' own permanent-delete level, asked here.
+	Access::demand(DebugEmailLog::access_level('permanent_delete'), $session);
 	DebugEmailLog::deleteAll();
 	header('Location: /admin/admin_debug_email_logs');
 	exit;
@@ -39,7 +41,8 @@ $numrecords = $logs->count_all();
 
 $headers = array('Time', 'Service', 'Status', 'Message');
 $altlinks = array('Clear log' => array('post' => '/admin/admin_debug_email_logs',
-	'hidden' => array('action' => 'delete_all'), 'confirm' => 'Delete every debug email log line?'));
+	'hidden' => array('action' => 'delete_all'), 'confirm' => 'Delete every debug email log line?',
+	'requires' => DebugEmailLog::access_level('permanent_delete')));
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
 echo '<p>' . ($debug_on
 	? 'Email debug mode is on: every send writes its steps here.'

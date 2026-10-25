@@ -47,6 +47,8 @@ echo AdminPage::action_button('Send a test message', $here, array('hidden' => ar
 echo AdminPage::action_button($active ? 'Pause' : 'Resume', $here, array('hidden' => array('action' => $active ? 'pause' : 'resume'))) . ' ';
 echo AdminPage::action_button('Delete', $here, array(
 	'hidden'        => array('action' => 'delete'),
+	'model'         => $receiver,
+	'verb'          => 'permanent_delete',
 	'confirm'       => 'Delete this webhook and its delivery history?',
 	'confirm_label' => 'Delete',
 	'confirm_style' => 'danger',

@@ -66,6 +66,7 @@
 					} else {
 						// Add user to new tier
 						$tier = new SubscriptionTier($_POST['tier_id'], TRUE);
+						$tier->assert_found();
 						$tier->addUser(
 							$user_id,
 							'manual',

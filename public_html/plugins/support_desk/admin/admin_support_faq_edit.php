@@ -94,6 +94,8 @@ $fw->end_form();
 if ($entry) {
 	echo '<p style="margin-top:1rem">' . AdminPage::action_button('Delete', $self, array(
 		'hidden' => array('action' => 'delete', 'sfq_faq_entry_id' => (int)$entry->key),
+		'model' => $entry,
+		'verb' => 'soft_delete',
 		'confirm' => 'Delete this entry? The model stops reading it.')) . '</p>';
 }
 echo '</div>';

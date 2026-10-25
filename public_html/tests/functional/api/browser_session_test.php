@@ -219,6 +219,20 @@ try {
 	check(in_array($r['status'], array(301, 302, 303), true) && strpos($r['redirect_url'], '/login') !== false,
 		'the other browser is signed out at its next page', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
 
+	section('8b. A level change holds for a session already signed in');
+	$staff = make_user('BrwL' . $run_id, 5);
+	list($staff_jar, $staff_token) = web_login_and_scrape_token($staff, 'BrwL' . $run_id);
+	$r = harness_request('GET', '/admin/admin_posts', array('jar' => $staff_jar, 'accept' => null));
+	check($r['status'] === 200, 'at 5 the session opens a content admin page', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	$demoted = new User($staff->key, TRUE);
+	$demoted->set('usr_permission', 0);
+	$demoted->save();
+	$r = harness_request('GET', '/admin/admin_posts', array('jar' => $staff_jar, 'accept' => null));
+	check($r['status'] === 401 || $r['status'] === 403, 'demoted to 0, the same session is refused it at once',
+		'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	$r = harness_request('GET', '/profile/profile', array('jar' => $staff_jar, 'accept' => null));
+	check($r['status'] === 200, 'and stays signed in as a member', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+
 	section('9. A session whose account was deleted for good ends leaving nothing that names it');
 	// The account's rows go with it; the sign-out its next page triggers must
 	// not write a fresh one (a logout row, a vault audit row) against an id

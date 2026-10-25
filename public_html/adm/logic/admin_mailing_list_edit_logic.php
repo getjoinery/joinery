@@ -11,6 +11,7 @@ function admin_mailing_list_edit_logic(array $input): LogicResult {
 
 	if (isset($input['mlt_mailing_list_id'])) {
 		$mailing_list = new MailingList($input['mlt_mailing_list_id'], TRUE);
+		$mailing_list->assert_found();
 	} else {
 		$mailing_list = new MailingList(NULL);
 	}

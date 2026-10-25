@@ -30,10 +30,10 @@
 	$options['title'] = 'Url';
 	$options['altlinks'] = array('Edit'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 	if(!$url->get('url_delete_time')){
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'soft_delete', 'url_url_id' => $url->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'soft_delete', 'url_url_id' => $url->key), 'model' => $url, 'verb' => 'soft_delete');
 	}
 	else{
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'undelete', 'url_url_id' => $url->key));
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'undelete', 'url_url_id' => $url->key), 'model' => $url, 'verb' => 'soft_delete');
 	}
 
 	if($url->can_delete($session, true)) {

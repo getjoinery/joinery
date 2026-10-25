@@ -17,6 +17,7 @@ header('Content-type: text/html');
 $session = SessionControl::get_instance();
 
 $email = new Email($_GET['eml_email_id'] ?? null, TRUE);
+$email->assert_found();
 
 if ($email->get('eml_status') == Email::EMAIL_SENT) {
 	echo $email->get('eml_message_html');

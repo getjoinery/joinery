@@ -20,6 +20,7 @@
 	}
 
 	$email = new Email($_REQUEST['eml_email_id'] ?? null, TRUE);
+	$email->assert_found();
 
 	$recipient_groups = $email->get_recipient_groups();
 
@@ -112,6 +113,8 @@
 
 			$delform = AdminPage::action_button('Delete', '/admin/admin_email_recipients_modify', [
 				'hidden'  => ['action' => 'remove', 'erg_email_recipient_group_id' => $recipient_group->key, 'eml_email_id' => $email->key],
+				'model'   => $email,
+				'verb'    => 'write',
 				'confirm' => 'Remove this recipient group?',
 			]);
 			array_push($rowvalues, $delform);

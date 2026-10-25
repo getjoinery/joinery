@@ -28,8 +28,10 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 	// Load or create alias
 	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 		$alias = new InboundEmailAlias($input['edit_primary_key_value'], TRUE);
+		$alias->assert_found();
 	} elseif (isset($input['iea_inbound_email_alias_id'])) {
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
+		$alias->assert_found();
 	} else {
 		$alias = new InboundEmailAlias(NULL);
 	}

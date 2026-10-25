@@ -30,6 +30,7 @@ function admin_survey_logic(array $input): LogicResult {
 
                 case 'removequestion':
                     $survey_question = new SurveyQuestion($input['srq_survey_question_id'], TRUE);
+                    $survey_question->assert_found();
                     $survey_question->assert_can_write($session);
                     $survey_question->permanent_delete();
                     return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $input['svy_survey_id']);
@@ -37,6 +38,7 @@ function admin_survey_logic(array $input): LogicResult {
 
                 case 'removesurvey':
                     $survey = new Survey($input['svy_survey_id'], TRUE);
+                    $survey->assert_found();
                     $survey->assert_can_write($session);
                     $survey->permanent_delete();
                     return LogicResult::redirect('/admin/admin_surveys');
@@ -50,6 +52,7 @@ function admin_survey_logic(array $input): LogicResult {
     if (LibraryFunctions::isFormSubmission() && isset($input['action'])) {
         $svy_survey_id = $input['svy_survey_id'] ?? 0;
         $survey = new Survey($svy_survey_id, TRUE);
+        $survey->assert_found();
 
         switch ($input['action']) {
             case 'delete':
@@ -69,6 +72,7 @@ function admin_survey_logic(array $input): LogicResult {
     // Load survey data
     $svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, NULL);
     $survey = new Survey($svy_survey_id, TRUE);
+    $survey->assert_found();
 
     // Pagination
     $numperpage = 30;

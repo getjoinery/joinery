@@ -11,8 +11,10 @@ function admin_product_group_edit_logic(array $input): LogicResult {
 	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
 	if (isset($input['edit_primary_key_value'])) {
 		$product_group = new ProductGroup($input['edit_primary_key_value'], TRUE);
+		$product_group->assert_found();
 	} elseif (isset($input['prg_product_group_id'])) {
 		$product_group = new ProductGroup($input['prg_product_group_id'], TRUE);
+		$product_group->assert_found();
 	} else {
 		$product_group = new ProductGroup(NULL);
 	}

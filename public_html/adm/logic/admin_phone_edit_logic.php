@@ -10,8 +10,10 @@ function admin_phone_edit_logic(array $input): LogicResult {
 	// Load or create phone number first
 	if (isset($input['edit_primary_key_value'])) {
 		$phone_number = new PhoneNumber($input['edit_primary_key_value'], TRUE);
+		$phone_number->assert_found();
 	} elseif (isset($input['phn_phone_number_id'])) {
 		$phone_number = new PhoneNumber($input['phn_phone_number_id'], TRUE);
+		$phone_number->assert_found();
 	} else {
 		$phone_number = new PhoneNumber(NULL);
 	}

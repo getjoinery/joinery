@@ -28,6 +28,7 @@
  * The documents are this platform's own, read from its own archives; nothing
  * here reads a path a request named.
  *
+ * @version 0.2.1 - inside a caller's transaction (a plugin sync during activation) it works in a savepoint
  * @version 0.2.0 - documents come from docs/ alone: the root-file list (INSTALL_README.md) is gone with that file's guide
  * @version 0.1.0
  */
@@ -137,46 +138,43 @@ class SupportDocIndex {
 		$count = 0;
 		$map_lines = array();
 		$faq_parts = array();
-		$db->beginTransaction();
 		try {
-			// The release row first: its unique release name makes a second
-			// sweep running at the same moment wait here and then fail, rather
-			// than write every section twice.
-			$release = new SupportDocRelease(NULL);
-			$release->set('sdr_release', $version);
-			$release->set('sdr_source', $source);
-			$release->save();
+			self::atomically($db, function () use ($db, $version, $source, $files, &$count, &$map_lines, &$faq_parts) {
+				// The release row first: its unique release name makes a second
+				// sweep running at the same moment wait here and then fail, rather
+				// than write every section twice.
+				$release = new SupportDocRelease(NULL);
+				$release->set('sdr_release', $version);
+				$release->set('sdr_source', $source);
+				$release->save();
 
-			$insert = $db->prepare('INSERT INTO sds_doc_sections
-				(sds_release, sds_kind, sds_path, sds_heading, sds_part, sds_body, sds_search_text)
-				VALUES (?, ?, ?, ?, ?, ?, ?)');
-			foreach ($files as $path => $abs) {
-				$markdown = @file_get_contents($abs);
-				if (!is_string($markdown) || trim($markdown) === '') {
-					continue;
+				$insert = $db->prepare('INSERT INTO sds_doc_sections
+					(sds_release, sds_kind, sds_path, sds_heading, sds_part, sds_body, sds_search_text)
+					VALUES (?, ?, ?, ?, ?, ?, ?)');
+				foreach ($files as $path => $abs) {
+					$markdown = @file_get_contents($abs);
+					if (!is_string($markdown) || trim($markdown) === '') {
+						continue;
+					}
+					$kind = self::isFaqPath($path) ? SupportDocSection::KIND_FAQ : SupportDocSection::KIND_DOC;
+					$sections = self::sectionsOf($path, $markdown);
+					foreach ($sections as $s) {
+						$insert->execute(array($version, $kind, $path, $s['heading'], $s['part'], $s['body'],
+							$s['heading'] . "\n" . $s['body']));
+						$count++;
+					}
+					if ($kind === SupportDocSection::KIND_FAQ) {
+						$faq_parts[] = self::faqBlock($path, $sections);
+					} else {
+						$map_lines[] = self::mapLines($path, $markdown, $sections);
+					}
 				}
-				$kind = self::isFaqPath($path) ? SupportDocSection::KIND_FAQ : SupportDocSection::KIND_DOC;
-				$sections = self::sectionsOf($path, $markdown);
-				foreach ($sections as $s) {
-					$insert->execute(array($version, $kind, $path, $s['heading'], $s['part'], $s['body'],
-						$s['heading'] . "\n" . $s['body']));
-					$count++;
-				}
-				if ($kind === SupportDocSection::KIND_FAQ) {
-					$faq_parts[] = self::faqBlock($path, $sections);
-				} else {
-					$map_lines[] = self::mapLines($path, $markdown, $sections);
-				}
-			}
-			$release->set('sdr_sections', $count);
-			$release->set('sdr_map', implode("\n", $map_lines));
-			$release->set('sdr_faq', implode("\n\n", array_filter($faq_parts)));
-			$release->save();
-			$db->commit();
+				$release->set('sdr_sections', $count);
+				$release->set('sdr_map', implode("\n", $map_lines));
+				$release->set('sdr_faq', implode("\n\n", array_filter($faq_parts)));
+				$release->save();
+			});
 		} catch (\Throwable $e) {
-			if ($db->inTransaction()) {
-				$db->rollBack();
-			}
 			return array('built' => false, 'sections' => 0, 'message' => "Release $version was not indexed: " . $e->getMessage());
 		}
 		return array('built' => true, 'sections' => $count,
@@ -476,25 +474,22 @@ class SupportDocIndex {
 			$pages[] = array('id' => (int)$id, 'path' => 'page/' . $page->get('pag_link'),
 				'title' => (string)$page->get('pag_title'), 'text' => $text);
 		}
-		$db->beginTransaction();
 		try {
-			$del = $db->prepare('DELETE FROM sds_doc_sections WHERE sds_release = ? AND sds_kind = ?');
-			$del->execute(array(SupportDocSection::CURRENT, SupportDocSection::KIND_PAGE));
-			$insert = $db->prepare('INSERT INTO sds_doc_sections
-				(sds_release, sds_kind, sds_path, sds_heading, sds_part, sds_body, sds_search_text, sds_ref_id)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-			foreach ($pages as $p) {
-				foreach (self::splitBody($p['text']) as $i => $part) {
-					$heading = 'Public page: ' . ($p['title'] !== '' ? $p['title'] : $p['path']);
-					$insert->execute(array(SupportDocSection::CURRENT, SupportDocSection::KIND_PAGE, $p['path'],
-						$heading, $i, $part, $heading . "\n" . $part, $p['id']));
+			self::atomically($db, function () use ($db, $pages) {
+				$del = $db->prepare('DELETE FROM sds_doc_sections WHERE sds_release = ? AND sds_kind = ?');
+				$del->execute(array(SupportDocSection::CURRENT, SupportDocSection::KIND_PAGE));
+				$insert = $db->prepare('INSERT INTO sds_doc_sections
+					(sds_release, sds_kind, sds_path, sds_heading, sds_part, sds_body, sds_search_text, sds_ref_id)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+				foreach ($pages as $p) {
+					foreach (self::splitBody($p['text']) as $i => $part) {
+						$heading = 'Public page: ' . ($p['title'] !== '' ? $p['title'] : $p['path']);
+						$insert->execute(array(SupportDocSection::CURRENT, SupportDocSection::KIND_PAGE, $p['path'],
+							$heading, $i, $part, $heading . "\n" . $part, $p['id']));
+					}
 				}
-			}
-			$db->commit();
+			});
 		} catch (\Throwable $e) {
-			if ($db->inTransaction()) {
-				$db->rollBack();
-			}
 			return 0;
 		}
 		return count($pages);
@@ -672,5 +667,28 @@ class SupportDocIndex {
 			$out[] = $block;
 		}
 		return implode("\n\n", $out);
+	}
+
+	/**
+	 * Run $work in a transaction of its own, or in a savepoint inside the
+	 * caller's (a plugin sync runs inside the activation's): a failure rolls
+	 * back this work only, leaves the caller's transaction usable, and is
+	 * rethrown.
+	 */
+	private static function atomically(PDO $db, callable $work) {
+		if (!$db->inTransaction()) {
+			return DbConnector::transaction(function () use ($work) { return $work(); });
+		}
+		$db->exec('SAVEPOINT support_doc_index');
+		try {
+			$result = $work();
+			$db->exec('RELEASE SAVEPOINT support_doc_index');
+			return $result;
+		} catch (\Throwable $e) {
+			if ($db->inTransaction()) {
+				$db->exec('ROLLBACK TO SAVEPOINT support_doc_index');
+			}
+			throw $e;
+		}
 	}
 }

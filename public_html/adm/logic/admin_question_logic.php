@@ -14,6 +14,7 @@ function admin_question_logic(array $input): LogicResult {
 	// Get question ID from GET or POST (POST when form is submitted)
 	$question_id = $input['qst_question_id'] ?? $input['qst_question_id'] ?? null;
 	$question = new Question($question_id, TRUE);
+	$question->assert_found();
 
 	// Delete and undelete are buttons (POST): a link is a GET any site can make
 	// the browser follow.

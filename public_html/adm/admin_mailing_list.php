@@ -166,6 +166,8 @@
 
 		$delform = AdminPage::action_button('Delete', '/admin/admin_mailing_list', [
 			'hidden'  => ['action' => 'removeregistrant', 'mlr_mailing_list_registrant_id' => $registrant->key, 'mlt_mailing_list_id' => $mailing_list->key],
+			'model'   => $registrant,
+			'verb'    => 'soft_delete',
 			'confirm' => 'Remove this subscriber?',
 		]);
 		array_push($rowvalues, $delform);

@@ -19,6 +19,7 @@
 
 	if(($_POST['action'] ?? '') == 'remove'){
 		$admin_menu = new AdminMenu($_POST['amu_admin_menu_id'], TRUE);
+		$admin_menu->assert_found();
 		$slug = $admin_menu->get('amu_slug');
 		// Refuse delete on core-* rows. Admins can disable / rename / reorder, not remove.
 		if ($slug && strpos($slug, 'core-') === 0) {

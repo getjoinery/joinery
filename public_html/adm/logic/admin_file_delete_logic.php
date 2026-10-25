@@ -26,6 +26,7 @@ function admin_file_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$file = new File($fil_file_id, TRUE);
+			$file->assert_found();
 			$file->permanent_delete();
 		}
 
@@ -36,6 +37,7 @@ function admin_file_delete_logic(array $input): LogicResult {
 	$fil_file_id = LibraryFunctions::fetch_variable('fil_file_id', NULL, 1, 'You must provide a file to delete.', $input);
 
 	$file = new File($fil_file_id, TRUE);
+	$file->assert_found();
 	$user = new User($file->get('fil_usr_user_id'), TRUE);
 
 	$session->set_return("/admin/admin_files");

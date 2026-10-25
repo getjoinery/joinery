@@ -14,6 +14,7 @@ function admin_order_edit_logic(array $input): LogicResult {
 	if (isset($input['ord_order_id']) || isset($input['ord_order_id'])) {
 		$ord_order_id = isset($input['ord_order_id']) ? $input['ord_order_id'] : $input['ord_order_id'];
 		$order = new Order($ord_order_id, TRUE);
+		$order->assert_found();
 	} else {
 		$order = new Order(NULL);
 	}

@@ -12,6 +12,7 @@
 	$session->set_return();
 
 	$email_template = new EmailTemplate($_GET['emt_email_template_id'] ?? null, TRUE);
+	$email_template->assert_found();
 
 	$page = new AdminPage();
 	$page->admin_header(

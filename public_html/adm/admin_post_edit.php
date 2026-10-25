@@ -15,8 +15,10 @@
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
 		$post = new Post($_POST['edit_primary_key_value'], TRUE);
+		$post->assert_found();
 	} elseif (isset($_GET['pst_post_id'])) {
 		$post = new Post($_GET['pst_post_id'], TRUE);
+		$post->assert_found();
 	} else {
 		$post = new Post(NULL);
 	}
@@ -26,10 +28,11 @@
 		$editable_fields = array('pst_body', 'pst_title', 'pst_is_published', 'pst_short_description', 'pst_is_on_homepage','pst_is_pinned');
 
 		foreach($editable_fields as $field) {
-			$post->set($field, $_POST[$field]);
+			// An unchecked checkbox posts nothing: it reads as empty.
+			$post->set($field, $_POST[$field] ?? null);
 		}
 
-		if($_POST['pst_fil_file_id']){
+		if(!empty($_POST['pst_fil_file_id'])){
 			$post->set('pst_fil_file_id', (int)$_POST['pst_fil_file_id']);
 		}
 		else if(empty($_POST['pst_fil_file_id'])){
@@ -83,6 +86,7 @@
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
+		$content_version->assert_found();
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
 	}

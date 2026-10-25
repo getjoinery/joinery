@@ -42,6 +42,7 @@ if ($_POST){
 else{
 
 	$user = new User($usr_user_id, TRUE);
+	$user->assert_found();
 
 	$page = new AdminPage();
 	$page->admin_header(array(

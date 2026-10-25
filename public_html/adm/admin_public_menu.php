@@ -13,6 +13,7 @@
 
 	if(($_POST['action'] ?? null) == 'remove'){
 		$public_menu = new PublicMenu($_POST['pmu_public_menu_id'], TRUE);
+		$public_menu->assert_found();
 		$public_menu->permanent_delete();
 		header("Location: /admin/admin_public_menu");
 		exit();
@@ -61,6 +62,7 @@
 
 			$delform = AdminPage::action_button('Delete', '/admin/admin_public_menu', [
 				'hidden'  => ['action' => 'remove', 'pmu_public_menu_id' => $menu['id']],
+				'requires' => PublicMenu::access_level('permanent_delete'),
 				'confirm' => 'Delete this menu item?',
 			]);
 				$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$menu['id'].'">edit</a>';
@@ -76,6 +78,7 @@
 					array_push($rowvalues, $submenu['order']);
 					$delform = AdminPage::action_button('Delete', '/admin/admin_public_menu', [
 						'hidden'  => ['action' => 'remove', 'pmu_public_menu_id' => $submenu['id']],
+						'requires' => PublicMenu::access_level('permanent_delete'),
 						'confirm' => 'Delete this menu item?',
 					]);
 					$delform .= ' <a href="/admin/admin_public_menu_edit?pmu_public_menu_id='.$submenu['id'].'">edit</a>';

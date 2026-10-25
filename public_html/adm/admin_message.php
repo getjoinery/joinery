@@ -13,6 +13,7 @@
 	$session->set_return();
 
 	$message = new Message($_REQUEST['msg_message_id'] ?? null, TRUE);
+	$message->assert_found();
 	$sender = new User($message->get('msg_usr_user_id_sender'), TRUE);
 	if($message->get('msg_usr_user_id_recipient')){
 		$recipient = new User($message->get('msg_usr_user_id_recipient'), TRUE);

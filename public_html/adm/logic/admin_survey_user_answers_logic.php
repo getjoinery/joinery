@@ -19,7 +19,9 @@ function admin_survey_user_answers_logic(array $input): LogicResult {
 	$survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 'DESC', 1, 'You must pass a survey.');
 	$user_id = LibraryFunctions::fetch_variable('usr_user_id', 'DESC', 1, 'You must pass a user.');
 	$survey = new Survey($survey_id, TRUE);
+	$survey->assert_found();
 	$user = new User($user_id, TRUE);
+	$user->assert_found();
 
 	$answers = new MultiSurveyAnswer(
 		array('survey_id' => $survey->key, 'user_id' => $user->key),

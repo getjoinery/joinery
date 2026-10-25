@@ -9,6 +9,7 @@ function admin_contact_type_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 
 	$contact_type = new ContactType($input['ctt_contact_type_id'] ?? null, TRUE);
+	$contact_type->assert_found();
 
 	if($input['action'] == 'delete'){
 		$contact_type->assert_can_write($session);

@@ -19,13 +19,16 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 	}
 	$product_id = isset($input['product_id']) ? $input['product_id'] : $input['product_id'];
 	$product = new Product($product_id, TRUE);
+	$product->assert_found();
 
 	// Load or create product version
 	// CRITICAL: Check edit_primary_key_value (form submission first), fallback to GET
 	if (isset($input['edit_primary_key_value'])) {
 		$product_version = new ProductVersion($input['edit_primary_key_value'], TRUE);
+		$product_version->assert_found();
 	} elseif (isset($input['product_version_id'])) {
 		$product_version = new ProductVersion($input['product_version_id'], TRUE);
+		$product_version->assert_found();
 	} else {
 		$product_version = new ProductVersion(NULL);
 	}

@@ -35,6 +35,7 @@
     <?php
     // Display session messages (payment errors, etc.)
     $checkout_messages = $session->get_messages('/checkout');
+    $session->mark_shown($checkout_messages);
     if (!empty($checkout_messages)):
         foreach ($checkout_messages as $msg):
             $is_error_msg = ($msg->get_message_class() === 'error');
@@ -259,8 +260,13 @@
                         <!-- PAYMENT SECTION -->
                         <?php if ($require_login): ?>
                         <div class="alert alert-warning">
+                            <?php if ($session->is_logged_in()): ?>
+                            The email <strong><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></strong> belongs to another account.
+                            <a href="/checkout?use_current_user=1">Bill your own account</a>, or log in to that account to check out with it.
+                            <?php else: ?>
                             The email <strong><?php echo htmlspecialchars($cart->billing_user['billing_email'], ENT_QUOTES, 'UTF-8'); ?></strong> already exists in our system.
                             <a href="/login">Log in</a> to continue checkout.
+                            <?php endif; ?>
                         </div>
                         <?php elseif (!empty($page_vars['payment_refusal'])): ?>
                         <div class="alert alert-warning">
@@ -289,7 +295,7 @@
                                 <h5 class="jy-checkout-payhead">Pay with PayPal</h5>
                                 <?php
                                 if ($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0) {
-                                    echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id']);
+                                    echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id'], $page_vars['paypal_ref'] ?? '');
                                 } else {
                                     echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
                                 }

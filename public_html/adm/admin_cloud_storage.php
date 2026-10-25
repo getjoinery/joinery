@@ -288,6 +288,8 @@ if (!$configured) {
 	if ((int)$cloud_count === 0 && !$draining && !$enabled) {
 		echo AdminPage::action_button('Remove', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'remove'),
+			'model'   => $current,
+			'verb'    => 'soft_delete',
 			'confirm' => 'Forget this file store and its key? Nothing is in it, so no file is affected. Uploads stay on this server.',
 			'class'   => 'btn btn-outline-danger',
 		));
@@ -359,6 +361,8 @@ if (!$configured) {
 			} else {
 				echo AdminPage::action_button('Delete', '/admin/admin_cloud_storage', array(
 					'hidden'  => array('action' => 'delete_store', 'bkt_backup_target_id' => (int)$t->key),
+					'model'   => $t,
+					'verb'    => 'soft_delete',
 					'confirm' => 'Delete the file store ' . $t->get('bkt_name') . '? It holds no file. Nothing in its bucket is touched.',
 					'class'   => 'btn btn-sm btn-outline-danger'));
 			}

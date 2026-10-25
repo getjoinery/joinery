@@ -24,8 +24,10 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 
 	if (isset($input['edit_primary_key_value'])) {
 		$api_key = new ApiKey($input['edit_primary_key_value'], TRUE);
+		$api_key->assert_found();
 	} elseif (isset($input['apk_api_key_id'])) {
 		$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
+		$api_key->assert_found();
 	}
 	else {
 		// A key is added to be used: the form starts at Active, not at the

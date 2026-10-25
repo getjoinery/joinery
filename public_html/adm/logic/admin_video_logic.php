@@ -12,6 +12,7 @@ function admin_video_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$video = new Video($input['vid_video_id'] ?? null, TRUE);
+	$video->assert_found();
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 
 	if($input['action'] == 'remove'){
@@ -38,14 +39,12 @@ function admin_video_logic(array $input): LogicResult {
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
 	if($video->get('vid_delete_time')){
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'undelete', 'vid_video_id' => $video->key));
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'undelete', 'vid_video_id' => $video->key), 'model' => $video, 'verb' => 'soft_delete');
 	}
 	else{
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'delete', 'vid_video_id' => $video->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'delete', 'vid_video_id' => $video->key), 'model' => $video, 'verb' => 'soft_delete');
 	}
-	if($session->get_user_id() == 1){
-		$options['altlinks'] += array('Permanently Delete' => array('post' => '/admin/admin_video', 'hidden' => array('action' => 'remove', 'vid_video_id' => $video->key)));
-	}
+	$options['altlinks'] += array('Permanently Delete' => array('post' => '/admin/admin_video', 'hidden' => array('action' => 'remove', 'vid_video_id' => $video->key), 'model' => $video, 'verb' => 'permanent_delete'));
 
 	// Build dropdown button from altlinks
 	$dropdown_button = '';

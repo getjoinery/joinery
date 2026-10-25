@@ -9,6 +9,7 @@
 	$session->set_return();
 
 	$phone = new PhoneNumber($_GET['phn_phone_number_id'] ?? null, TRUE);
+	$phone->assert_found();
 	$act_result = Activation::CheckForActiveCode($phone->get('phn_usr_user_id'), Activation::PHONE_VERIFY);
 
 	$phone_numbers_unver = new MultiPhoneNumber(

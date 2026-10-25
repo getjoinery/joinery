@@ -15,8 +15,10 @@ function admin_email_edit_logic(array $input): LogicResult {
 	// Load or create email
 	if (isset($input['edit_primary_key_value'])) {
 		$email = new Email($input['edit_primary_key_value'], TRUE);
+		$email->assert_found();
 	} elseif (isset($input['eml_email_id'])) {
 		$email = new Email($input['eml_email_id'], TRUE);
+		$email->assert_found();
 	} else {
 		$email = new Email(NULL);
 	}

@@ -330,6 +330,9 @@ function _admin_backups_handle($action, array $input, $session) {
 			case 'save_target': {
 				$id = (int)($input['bkt_backup_target_id'] ?? 0);
 				$target = $id ? new BackupTarget($id, TRUE) : new BackupTarget(NULL);
+				if ($id) {
+					$target->assert_found();
+				}
 				$saved = BackupTargetForm::save($target, $input);
 				// A site's first target is where its backups go, named here by
 				// the save that made it, never inferred later from the list.

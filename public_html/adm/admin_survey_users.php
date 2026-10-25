@@ -22,6 +22,7 @@
 
 	$svy_survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 0, 0, '');
 	$survey = new Survey($svy_survey_id, TRUE);
+	$survey->assert_found();
 	$users = $survey->get_users_who_answered();
 
 	$page = new AdminPage();

@@ -17,7 +17,7 @@ function admin_subscription_tier_edit_logic(array $input): LogicResult {
         $tier_id = isset($input['edit_primary_key_value']) ? $input['edit_primary_key_value'] : $input['id'];
         try {
             $tier = new SubscriptionTier($tier_id, TRUE);
-            if (!$tier || $tier->get('sbt_delete_time')) {
+            if (!$tier->key || $tier->get('sbt_delete_time')) {
                 // Tier doesn't exist or is deleted
                 return LogicResult::redirect('/admin/admin_subscription_tiers?error=tier_not_found');
             }

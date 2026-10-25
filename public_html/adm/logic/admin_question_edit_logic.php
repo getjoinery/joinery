@@ -14,12 +14,15 @@ function admin_question_edit_logic(array $input): LogicResult {
 	if (isset($input['edit_primary_key_value'])) {
 		// Main form submission with edit_primary_key_value
 		$question = new Question($input['edit_primary_key_value'], TRUE);
+		$question->assert_found();
 	} elseif (isset($input['qst_question_id'])) {
 		// Option form submission with qst_question_id
 		$question = new Question($input['qst_question_id'], TRUE);
+		$question->assert_found();
 	} elseif (isset($input['qst_question_id'])) {
 		// Initial page load from URL parameter
 		$question = new Question($input['qst_question_id'], TRUE);
+		$question->assert_found();
 	} else {
 		// Creating new question
 		$question = new Question(NULL);
@@ -46,6 +49,7 @@ function admin_question_edit_logic(array $input): LogicResult {
 	}
 	if($submitted && isset($input['action']) && $input['action'] == 'remove_question_option'){
 		$question_option = new QuestionOption($input['qop_question_option_id'], TRUE);
+		$question_option->assert_found();
 		$question_option->assert_can_write($session);
 		$question_option->permanent_delete();
 

@@ -10,6 +10,7 @@
  * Deleting a category is soft and hides every topic in it with the same
  * timestamp, so undelete() brings back exactly the topics the delete took.
  *
+ * @version 1.0.1 - a category is changed at its own write level (content), not the moderator's
  * @version 1.0.0
  */
 
@@ -130,10 +131,11 @@ class ForumCategory extends SystemBase {
 		}
 	}
 
-	// Categories are an admin's to change.
+	// Categories are an admin's to change: their own class's write level. A
+	// moderator (ForumPost's lower level) moderates posts, not the categories.
 	function authenticate_write($data) {
-		if (!Access::allows(ForumPost::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
-			throw new SystemAuthenticationError('Only a forum moderator can change a category.');
+		if (!Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
+			throw new SystemAuthenticationError('Changing a forum category needs level ' . static::access_level('write') . '.');
 		}
 	}
 

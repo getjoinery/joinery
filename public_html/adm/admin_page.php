@@ -22,6 +22,7 @@
 	}
 
 	$page = new Page($_REQUEST['pag_page_id'], TRUE);
+	$page->assert_found();
 
 	// Every action is a POST button on this page; opening it is a GET.
 	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
@@ -98,10 +99,10 @@
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
 	if(!$page->get('pag_delete_time') && $page->can_delete(SessionControl::get_instance())) {
-		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'delete', 'pag_page_id' => $page->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'delete', 'pag_page_id' => $page->key), 'model' => $page, 'verb' => 'soft_delete');
 	}
 	else if($page->get('pag_delete_time') && $page->can_delete(SessionControl::get_instance())){
-		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'undelete', 'pag_page_id' => $page->key));
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'undelete', 'pag_page_id' => $page->key), 'model' => $page, 'verb' => 'soft_delete');
 	}
 	if ($page->can_delete(SessionControl::get_instance(), true) && PublicPageBase::may_open('/admin/admin_page_permanent_delete')) {
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
@@ -268,6 +269,8 @@
 								<?php
 								echo AdminPage::action_button('Remove', '', [
 									'hidden' => ['action' => 'remove_component', 'pac_page_content_id' => $component->key, 'pag_page_id' => $page->key],
+									'model'  => $page,
+									'verb'   => 'write',
 									'confirm' => 'Remove this component from the page layout? (The component itself is not deleted.)',
 									'class'  => 'btn btn-sm btn-outline-danger',
 								]);

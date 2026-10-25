@@ -18,8 +18,10 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     // Resolve which recipe we're editing (or that we're creating new)
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
         $recipe = new Recipe($input['edit_primary_key_value'], TRUE);
+        $recipe->assert_found();
     } elseif (isset($input['rcp_recipe_id']) && $input['rcp_recipe_id']) {
         $recipe = new Recipe($input['rcp_recipe_id'], TRUE);
+        $recipe->assert_found();
     } else {
         $recipe = new Recipe(NULL);
         // Pre-fill defaults so the form shows sensible values for a new recipe.

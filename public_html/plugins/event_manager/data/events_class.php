@@ -536,6 +536,8 @@ function get_leader() {
 	function save($debug=false) {
 
 		if ($this->key) {
+			// This save's own rule first: the version below is its bookkeeping.
+			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));
 		}
 

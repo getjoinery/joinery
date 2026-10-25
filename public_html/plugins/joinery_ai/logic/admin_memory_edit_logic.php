@@ -16,8 +16,10 @@ function admin_joinery_ai_memory_edit_logic(array $input): LogicResult {
 
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
         $memory = new AiMemory($input['edit_primary_key_value'], TRUE);
+        $memory->assert_found();
     } elseif (isset($input['mem_memory_id']) && $input['mem_memory_id']) {
         $memory = new AiMemory($input['mem_memory_id'], TRUE);
+        $memory->assert_found();
     } else {
         $memory = new AiMemory(NULL);
         $memory->set('mem_scope', AiMemory::SCOPE_SHARED);

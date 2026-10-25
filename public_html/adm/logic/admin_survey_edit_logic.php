@@ -16,7 +16,7 @@ function admin_survey_edit_logic(array $input): LogicResult {
         $survey_id = isset($input['edit_primary_key_value']) ? $input['edit_primary_key_value'] : $input['svy_survey_id'];
         try {
             $survey = new Survey($survey_id, TRUE);
-            if (!$survey || $survey->get('svy_delete_time')) {
+            if (!$survey->key || $survey->get('svy_delete_time')) {
                 return LogicResult::redirect('/admin/admin_surveys?error=survey_not_found');
             }
         } catch (Exception $e) {

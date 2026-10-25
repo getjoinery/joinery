@@ -32,18 +32,21 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		}
 		elseif ($action === 'pause' && isset($input['sct_scheduled_task_id'])) {
 			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
+			$task->assert_found();
 			$task->set('sct_is_active', false);
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" paused.';
 		}
 		elseif ($action === 'resume' && isset($input['sct_scheduled_task_id'])) {
 			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
+			$task->assert_found();
 			$task->set('sct_is_active', true);
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" resumed.';
 		}
 		elseif ($action === 'deactivate' && isset($input['sct_scheduled_task_id'])) {
 			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
+			$task->assert_found();
 			$name = $task->get('sct_name');
 			$task->soft_delete();
 			$message = 'Task "' . $name . '" deactivated and removed. It can be re-activated from Available Tasks.';
@@ -305,6 +308,7 @@ function _handle_run_now($task_id) {
 	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
 	$task = new ScheduledTask($task_id, true);
+	$task->assert_found();
 	$task_class = $task->get('sct_task_class');
 	$task_file = $task->resolve_task_file();
 
@@ -366,6 +370,7 @@ function _handle_dry_run($task_id) {
 	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 
 	$task = new ScheduledTask($task_id, true);
+	$task->assert_found();
 	$task_class = $task->get('sct_task_class');
 	$task_file = $task->resolve_task_file();
 
@@ -403,6 +408,7 @@ function _handle_dry_run($task_id) {
  */
 function _handle_save($input) {
 	$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
+	$task->assert_found();
 
 	// Update schedule
 	if (isset($input['sct_frequency'])) {

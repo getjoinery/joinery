@@ -197,12 +197,27 @@ function checkout_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 	$page_vars['payment_refusal'] = ($cart->get_total() > 0) ? FulfillmentRegistry::cartRefusal($cart) : null;
 
-	// Payment setup requiring billing email (API calls, PayPal, stripe_checkout session)
-	if ($cart->get_total() > 0 && !empty($cart->billing_user['billing_email']) && $page_vars['payment_refusal'] === null) {
+	// Paying as an account that already exists needs that account's sign-in:
+	// the order, its charge and what it grants are written to that account. A
+	// guest's checkout makes a new one. No payment is offered until then.
+	$require_login = 0;
+	if (!empty($cart->billing_user['billing_email'])) {
+		$billing_account = User::GetByEmail($cart->billing_user['billing_email']);
+		if ($billing_account && (int)$billing_account->key !== (int)$session->get_user_id()) {
+			$require_login = 1;
+		}
+	}
+
+	// Payment setup requiring billing email (API calls, PayPal, stripe_checkout session).
+	// Each payment offered here is recorded with the cart it is for
+	// (ShoppingCart::record_payment()); the gateway's return completes that
+	// record, whatever the cart holds by then.
+	if ($cart->get_total() > 0 && !empty($cart->billing_user['billing_email']) && !$require_login && $page_vars['payment_refusal'] === null) {
 
 		if ($settings->get_setting('use_paypal_checkout')) {
 			$paypal = new PaypalHelper();
 			$page_vars['paypal_helper'] = $paypal;
+			$paypal_plan_id = null;
 			foreach ($cart->items as $key => $cart_item) {
 				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 				if ($product_version->is_subscription()) {
@@ -215,10 +230,17 @@ function checkout_logic(array $input): LogicResult{
 						$paypal_plan = $paypal->createPlan($paypal_product_id, $product_version, $amount);
 					}
 					$page_vars['plan_id'] = $paypal_plan['id'];
+					$paypal_plan_id = $paypal_plan['id'];
 				}
 			}
+			$paypal_ref = 'pp_' . bin2hex(random_bytes(16));
+			$page_vars['paypal_ref'] = $paypal_ref;
 			$paypal_item_list = $paypal->build_item_array($cart->get_detailed_items());
+			if ($paypal_item_list) {
+				$paypal_item_list['purchase_units'][0]['custom_id'] = $paypal_ref;
+			}
 			$page_vars['paypal_item_list'] = $paypal_item_list;
+			$cart->record_payment($paypal_ref, 'paypal', array('plan_id' => $paypal_plan_id));
 		}
 
 		if ($settings->get_setting('checkout_type') == 'stripe_checkout') {
@@ -231,17 +253,10 @@ function checkout_logic(array $input): LogicResult{
 				$create_list = $stripe_helper->build_checkout_item_array($cart, NULL);
 			}
 			$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
+			$cart->record_payment($stripe_session->id, 'stripe_checkout');
 		}
 	}
 
-	// Check if existing email requires login
-	$require_login = 0;
-	if (!$session->get_user_id() && !empty($cart->billing_user['billing_email'])) {
-		$user = User::GetByEmail($cart->billing_user['billing_email']);
-		if ($user) {
-			$require_login = 1;
-		}
-	}
 	$page_vars['require_login'] = $require_login;
 
 	$page_vars['cart'] = $cart;

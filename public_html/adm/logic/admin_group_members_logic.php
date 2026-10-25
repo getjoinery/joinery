@@ -13,17 +13,20 @@ function admin_group_members_logic(array $input): LogicResult {
 	if(($input['action'] ?? null) == 'add_to_group'){
 		//ADD THE USER TO A GROUP
 		$group = new Group($input['grp_group_id'], TRUE);
+		$group->assert_found();
 		$group->add_member($user->key);
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$group->key);
 	}
 	else if(($input['action'] ?? null) == 'remove_from_group'){
 		$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
+		$groupmember->assert_found();
 		$groupmember->remove();
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
 	}
 
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
+	$group->assert_found();
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
