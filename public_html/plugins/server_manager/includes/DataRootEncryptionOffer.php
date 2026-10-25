@@ -24,6 +24,9 @@
  *     new server born with one layer instead.
  * The 32 MiB past the end of the backing the script checks for itself.
  *
+ * @version 1.5 - ready() is false while the provider's layer is on, or not known to be off, on any machine but a
+ *                management node (layer_permits): the node page's Encrypt button was live where queue() always
+ *                refuses (B148)
  * @version 1.4 - provider_layer_fix(): what to do while the provider's layer is on, one answer for the refusal,
  *                the checklist and the node page; a machine in its owner's account is pointed at a copy into
  *                that account, after its recovery key is proven where it is not, never at its own Backups
@@ -169,13 +172,28 @@ class DataRootEncryptionOffer {
 		return $node->is_self() || $node->is_management_node();
 	}
 
+	/**
+	 * Whether the one-layer rule can let this machine be encrypted where it
+	 * stands: the provider's layer is off, or it is a management node, which
+	 * may keep that layer as well (the tick is checked when it is pressed).
+	 */
+	public static function layer_permits(ManagedNode $node): bool {
+		return self::provider_layer($node) === 'disabled' || self::may_keep_provider_layer($node);
+	}
+
+	/**
+	 * Whether the node page's Encrypt button is live: every precondition met,
+	 * and the one-layer rule able to pass. A site's server with the provider's
+	 * layer on is refused by queue() whatever is pressed, so its button stays
+	 * off (B148).
+	 */
 	public static function ready(ManagedNode $node): bool {
 		foreach (self::preconditions($node) as $p) {
 			if (!$p['ok']) {
 				return false;
 			}
 		}
-		return true;
+		return self::layer_permits($node);
 	}
 
 	/**
