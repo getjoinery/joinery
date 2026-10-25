@@ -1,6 +1,6 @@
 {
     "name": "Bookings Management",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "depends": { "store": ">=1.0.0" },
     "description": "Booking and booking type management system",
     "author": "System Developer",
