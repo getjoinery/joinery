@@ -248,6 +248,7 @@ $permitted = array(
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
 	'data/problem_reports_class.php'                          => 'an automatic problem report started or counted, on whatever request recorded an unexpected error',
 	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
+	'includes/Access.php'                                     => 'the access_refused / access_granted audit row decide() writes, on the request it decides',
 	'includes/PageProbe.php'                                  => 'a page_probe grant consumed and its render report written, by the probe request itself from this machine',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
 	'includes/SessionControl.php'                             => 'a visitor event and its A/B counters, recorded on the page view they describe; and logout\'s cleanup (this device\'s remember-me token, its push destination), on whichever request ended the session',

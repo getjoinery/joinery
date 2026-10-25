@@ -84,8 +84,13 @@ function admin_users_edit_logic(array $input): LogicResult {
 			}
 		}
 
-		if($_SESSION['permission'] == 10){
-			$user->set('usr_permission', $input['usr_permission']);
+		if($_SESSION['permission'] == 10 && array_key_exists('usr_permission', $input)){
+			// Only a level permissions.json names (docs/permissions.md); left out, it stays.
+			$level = (string)$input['usr_permission'];
+			if (!preg_match('/^\d+$/', $level) || !array_key_exists((int)$level, Access::levels())) {
+				return LogicResult::error('Permission level ' . htmlspecialchars($level) . ' is not a level this site has.');
+			}
+			$user->set('usr_permission', (int)$level);
 		}
 
 		// Handle allowed IPs - convert newline-separated list to JSON array

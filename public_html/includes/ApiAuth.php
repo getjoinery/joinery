@@ -62,7 +62,9 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.9.0
+ * @version 1.10.0
+ * @changelog 1.10.0 - The user floor is Access::allows(): min_user_permission may be a level or
+ *   class:verb, and a malformed one throws instead of reading as 0.
  * @changelog 1.9.0 - A key's address restriction compares as addresses and accepts prefixes of
  *   either family (restrictionAllows); app sign-in counts by IpAddress::network() and keys its
  *   per-account count with RequestLogger::username_key(), as web sign-in does; auth/login spends a
@@ -564,7 +566,8 @@ class ApiAuth {
 	 *                                anonymous principal is denied 401 before any
 	 *                                other check, so every contract that does not
 	 *                                opt in stays guest-free with no audit needed.
-	 *   'min_user_permission'     => int  (default 0)
+	 *   'min_user_permission'     => int|string (default 0) — a level, or class:verb
+	 *                                (Access::level()); a malformed one throws
 	 *   'requires_scoped_key'     => bool (default false) — admit only a machine
 	 *                                key whose apk_scope names this endpoint.
 	 *                                Refuses unscoped keys and browser sessions,
@@ -675,9 +678,8 @@ class ApiAuth {
 			}
 		}
 
-		// User role floor (usr_permission).
-		$min_user_permission = isset($auth['min_user_permission']) ? (int) $auth['min_user_permission'] : 0;
-		if ((int) $user_permission < $min_user_permission) {
+		// User role floor: the acting level against the declared one.
+		if (!Access::allows($auth['min_user_permission'] ?? 0, (int) $user_permission)) {
 			api_error($message_prefix . ': insufficient user permission', 'AuthenticationError', 403);
 		}
 	}

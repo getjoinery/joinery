@@ -13,6 +13,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Routing](routing.md) -- How pages are created and served, URL patterns, and the theme override chain
 - [Logic Architecture](logic_architecture.md) -- Business logic layer, LogicResult pattern, and page flow
 - [Admin Pages](admin_pages.md) -- Building admin interface pages with AdminPage, tables, and forms
+- [Permissions](permissions.md) -- Levels, the class table in permissions.json, Access::decide() and its audit, declarations and the declaration test
 - [FormWriter](formwriter.md) -- Form generation, validation integration, and field types
 - [Validation](validation.md) -- Three-layer validation system (client, server, model)
 - [Settings](settings.md) -- System settings management and auto-creating settings

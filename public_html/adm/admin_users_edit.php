@@ -67,7 +67,10 @@ $formwriter->dropinput('usr_timezone', 'Time Zone', [
 ]);
 
 if($_SESSION['permission'] == 10){
-	$optionvals = array(0=>'Regular User (0)', 5=>'Assistant (5)', 8=>'Admin (8)', 10 => 'Master Admin (10)');
+	$optionvals = array();
+	foreach (Access::levels() as $level => $name) {
+		$optionvals[$level] = "$name ($level)";
+	}
 	$formwriter->dropinput('usr_permission', 'Permission level', [
 		'options' => $optionvals
 	]);
