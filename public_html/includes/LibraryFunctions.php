@@ -188,7 +188,7 @@ class LibraryFunctions {
 
 		$base_file = PathHelper::getBasePath() . '/views/404.php';
 
-		header("HTTP/1.0 404 Not Found");
+		http_response_code(404);
 		if($theme_file && file_exists($theme_file)){
 			//WE WANT A FILE PATH
 			require_once($theme_file);

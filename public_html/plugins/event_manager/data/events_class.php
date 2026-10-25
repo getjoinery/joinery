@@ -228,7 +228,7 @@ function get_leader() {
 			}
 
 			$link = Link::create($this->get('evt_name'), $start_time_obj, $end_time_obj)
-				->description($this->get('evt_short_description'))
+				->description((string)$this->get('evt_short_description'))
 				->address($address);
 			$calendar_links['google'] =  $link->google();
 			$calendar_links['yahoo'] = $link->yahoo();

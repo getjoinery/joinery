@@ -522,7 +522,7 @@ sudo ./install.sh site SITENAME DOMAIN_NAME [OPTIONS]
 
 Common options:
 
-- `--admin-email=ADDRESS` — the admin account's address. Set at the same moment as its password, so the only account on a new site is recoverable by email from the start. Omitted, the account is `admin@example.com`. An address whose domain has no mail and no website is refused: the account keeps `admin@example.com` with its own new password, the install says why the address was not set, and `config/admin_credentials.txt` names the address to sign in with.
+- `--admin-email=ADDRESS` — the admin account's address. Set at the same moment as its password, so the only account on a new site is recoverable by email from the start. Omitted, the account has the username `admin` and no address. An address whose domain has no mail and no website is refused: the account stays username-only with its own new password, the install says why the address was not set, and `config/admin_credentials.txt` names the username to sign in with.
 - `--activate THEME` — activate a specific theme after install
 - `--with-test-site` — create a companion test site (bare-metal only)
 - `--upgrade-server=URL` — fetch the code from somewhere other than the release site (see [Where a site gets its upgrades](#where-a-site-gets-its-upgrades))

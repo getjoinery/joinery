@@ -47,7 +47,7 @@ See: docs/installation.md > One-click deployment (Linode StackScript)
 
 ## What do I sign in with after the install?
 
-The admin account uses the address you gave with `--admin-email=ADDRESS`. If you left it out, the account is `admin@example.com`.
+The admin account has the username `admin`, which always signs in, and the address you gave with `--admin-email=ADDRESS`, which signs in too. If you left the address out, the account has none until you add one on its profile.
 
 - On a Linode StackScript install, the password is the one you entered in the form, and you keep it.
 - On every other install, the installer generates the password and writes it to a credentials file. You are asked to change it at your first sign-in.

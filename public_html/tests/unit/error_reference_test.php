@@ -207,6 +207,11 @@ check(ErrorStatus::of(new SystemDisplayableError('x')) === 400
 check(ErrorStatus::of(new SystemAuthenticationError('x')) === 403
 		&& ErrorStatus::of(new AuthorizationException('x')) === 403,
 	'a refused permission answers 403');
+check(ErrorStatus::of(new SystemAuthenticationError('x', 401)) === 401,
+	'and a page refused for too low a level, thrown with code 401, answers 401');
+check(ErrorStatus::isExpected(new SystemAuthenticationError('x')) && ErrorStatus::isExpected(new AuthorizationException('x'))
+		&& ErrorStatus::isExpected(new AuthenticationException('x')),
+	'and a refusal for who is asking is expected: no error row, nothing to report');
 check(ErrorStatus::of(new SystemBaseNoKeyError('x')) === 404 && !ErrorStatus::isExpected(new SystemBaseNoKeyError('x')),
 	'a record asked for with no key answers 404, and is still recorded');
 check(ErrorStatus::of(new RuntimeException('x')) === 500
