@@ -44,10 +44,11 @@ function password_reset_passkey_options_logic(array $input): LogicResult {
 
 function password_reset_passkey_options_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Begin a passkey password reset (returns WebAuthn request options)',
 		'input' => [
-			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email address'],
+			'email' => ['type' => 'string', 'required' => false, 'label' => 'Email or username'],
 		],
 	];
 }

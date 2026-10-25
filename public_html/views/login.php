@@ -37,9 +37,9 @@
         $formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
         $formwriter->begin_form();
 
-        $formwriter->textinput('email', 'Email:', [
-            'type'     => 'email',
-            'required' => true,
+        $formwriter->textinput('email', 'Email or username:', [
+            'required'     => true,
+            'autocomplete' => 'username',
         ]);
 
         $formwriter->passwordinput('password', 'Password:', [

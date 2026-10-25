@@ -22,6 +22,7 @@ class DisplayableUserException extends UserException implements DisplayableError
 
 class User extends SystemBase {	public static $prefix = 'usr';
 	public static $tablename = 'usr_users';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'usr_user_id';
 
 	// Universal unreadable floor (stripped from every API export). usr_password,
@@ -40,6 +41,21 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $api_unwritable_fields = array(
 		'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
 		'usr_email_is_verified', 'usr_password_recovery_disabled', 'usr_session_generation',
+	);
+	// The sign-in identifiers change only through the account page, behind a
+	// second-factor re-check (and, for an email, a link mailed to the new address:
+	// account_edit_logic, email_change), never by an API update that skips it.
+	public static $api_create_only_fields = array('usr_email', 'usr_username');
+
+	// The model tester fills the email: an account needs an email or a username
+	// (check_identifiers()), a rule no single field's spec can say.
+	public static $test_fixture = array('generate' => array('usr_email'));
+
+	// Each sign-in identifier is unique regardless of capitals among live accounts;
+	// check_identifiers() also keeps a deleted account's identifiers taken.
+	public static $index_specifications = array(
+		array('columns' => array('LOWER(usr_email)'), 'unique' => true, 'where' => 'usr_delete_time IS NULL'),
+		array('columns' => array('LOWER(usr_username)'), 'unique' => true, 'where' => 'usr_delete_time IS NULL'),
 	);
 	// Derived keys export_as_array() injects that may leave over the API (fail-closed
 	// allowlist). The activation-token derivation is deliberately NOT here and is removed
@@ -69,6 +85,25 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	//SPECIAL USER IDS
 	const USER_SYSTEM = 2;
 	const USER_DELETED = 3;
+
+	/** What anyone is told when an address they typed belongs to a deleted account. */
+	const CLOSED_ACCOUNT_MESSAGE = 'That address belongs to a closed account. Contact us to reopen it.';
+
+	/**
+	 * A signed-in person with no email who asked for something that needs one
+	 * (checkout, a mailing list) goes to their account page, where they can add
+	 * an address, and the page says why ($why: "to check out ..."). Plain text.
+	 */
+	public static function add_email_first(string $why): LogicResult {
+		SessionControl::get_instance()->save_message(new DisplayMessage(
+			'Add an email address to your account ' . $why . '.', 'Email needed',
+			'/\/profile\/account_edit.*/', DisplayMessage::MESSAGE_WARNING,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'userbox', TRUE));
+		return LogicResult::redirect('/profile/account_edit');
+	}
+
+	/** Why checkout needs one. */
+	const CHECKOUT_NEEDS_EMAIL = 'to check out: your receipt and what you buy are sent there';
 
 	/**
 	 * The system and deleted-user rows stand in for "nobody in particular": a
@@ -118,9 +153,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_user_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'usr_first_name' => array('type'=>'varchar(32)', 'required'=>true),
 	    'usr_last_name' => array('type'=>'varchar(32)'),
-	    'usr_email' => array('type'=>'varchar(64)', 'required'=>true, 'validation' => array('email' => true)),
+	    'usr_email' => array('type'=>'varchar(64)', 'validation' => array('email' => true)),
+	    // An account has an email, a username, or both (check_identifiers()).
+	    'usr_username' => array('type'=>'varchar(32)'),
 	    'usr_signup_date' => array('type'=>'date', 'default'=>'now()'),
-	    'usr_password' => array('type'=>'varchar(255)'),
+	    'usr_password' => array('access_class' => 'restricted', 'type'=>'varchar(255)'),
 	    'usr_permission' => array('type'=>'int4', 'zero_on_create'=>true),
 	    'usr_timezone' => array('type'=>'varchar(32)', 'required'=>true, 'default'=>'America/New_York'),
 	    'usr_email_is_verified' => array('type'=>'bool', 'default'=>false),
@@ -143,15 +180,15 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_contact_preferences' => array('type'=>'varchar(32)'),
 	    'usr_disabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_nickname' => array('type'=>'varchar(32)'),
-	    'usr_authhash' => array('type'=>'varchar(32)'),
+	    'usr_authhash' => array('access_class' => 'restricted', 'type'=>'varchar(32)'),
 	    'usr_mailing_list_provider_id' => array('type'=>'varchar(64)'),
 	    'usr_signup_ip' => array('type'=>'varchar(64)'),
 	    'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
 	    'usr_organization_name' => array('type'=>'varchar(32)'),
 	    'usr_delete_time' => array('type'=>'timestamp(6)'),
 	    'usr_password_recovery_disabled' => array('type'=>'bool'),
-	    'usr_allowed_ips' => array('type'=>'jsonb'),
-	    'usr_remember_tokens' => array('type'=>'jsonb', 'is_nullable'=>true),
+	    'usr_allowed_ips' => array('access_class' => 'config', 'type'=>'jsonb'),
+	    'usr_remember_tokens' => array('access_class' => 'restricted', 'type'=>'jsonb', 'is_nullable'=>true),
 	    // Moves on with every real password change; a browser session stamped
 	    // with an older value is signed out (SessionControl::end_other_sessions()).
 	    'usr_session_generation' => array('type'=>'int4', 'default'=>0),
@@ -161,15 +198,15 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_gender' => array('type'=>'varchar(30)'),
 	    'usr_profile_visibility' => array('type'=>'varchar(20)', 'default'=>'members_only'),
 	    // A SecretBox blob (TOTP_SECRET_LOCATOR), never plain text: totp_secret() opens it.
-	    'usr_totp_secret' => array('type'=>'text'),
-	    'usr_totp_backup_codes' => array('type'=>'jsonb'),
+	    'usr_totp_secret' => array('access_class' => 'keys', 'type'=>'text'),
+	    'usr_totp_backup_codes' => array('access_class' => 'restricted', 'type'=>'jsonb'),
 	    'usr_totp_enabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_totp_last_used_step' => array('type'=>'int8'),
 	    // Signs trusted-device cookies (sf_trusted) for ANY second-factor method.
 	    // Minted lazily when the first cookie is issued; rotating it is how every
 	    // trusted device is revoked at once (specs/second_factor_ux_coherence.md).
 	    // A SecretBox blob (HMAC_KEY_LOCATOR): second_factor_hmac_key() opens it.
-	    'usr_second_factor_hmac_key' => array('type'=>'text'),
+	    'usr_second_factor_hmac_key' => array('access_class' => 'keys', 'type'=>'text'),
 	    // 2FA cadence (specs/mailbox_security_levels.md § 5.2): 'every_login' asks
 	    // the second factor on each password sign-in; 'sensitive_only' signs in
 	    // password-only and defers the factor to sensitive actions (step-up).
@@ -206,7 +243,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}, $string);
 	}
 
-	public function add_user_to_mailing_lists($mailing_list_ids){
+	/**
+	 * Subscribe this user to $mailing_list_ids and unsubscribe them from the
+	 * other lists. $scope limits both to the lists a page offered (null: every
+	 * list, for staff); a list outside it is left as it is.
+	 */
+	public function add_user_to_mailing_lists($mailing_list_ids, ?array $scope = null){
 		if(empty($mailing_list_ids)){
 			$mailing_list_ids = array();
 		}
@@ -226,6 +268,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		$messages = array();
 		$thismessage = array();
 		foreach ($mailing_lists as $mailing_list){
+			if ($scope !== null && !in_array((int)$mailing_list->key, array_map('intval', $scope), true)) {
+				continue;
+			}
 					
 			if($mailing_list_ids == 'all'){
 				if($mailing_list->is_user_in_list($this->key)){
@@ -393,8 +438,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			// and an address alone (bob@example.com) gives only one.
 			$last_name = (string)($data['usr_last_name'] ?? '');
 				
-			if(!$email = $data['usr_email']){
-				throw new SystemDisplayablePermanentError("Missing email in create user.");
+			$email = strtolower(trim((string)($data['usr_email'] ?? '')));
+			$username = trim((string)($data['usr_username'] ?? ''));
+			if ($email === '' && $username === '') {
+				throw new SystemDisplayablePermanentError("Missing email or username in create user.");
 			}
 					
 			if(!$password = ($data['password'] ?? null)){
@@ -403,8 +450,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			
 			$send_emails = array_key_exists('send_emails', $data) ? $data['send_emails'] : true;
 
-			//PREVENT DUPLICATES
-			if($user = User::GetByEmail($email)){
+			//PREVENT DUPLICATES. A closed account's address is refused, never reused:
+			// reopening an account is a person's decision, not a side effect.
+			if($email !== '' && $user = User::GetByEmail($email)){
+				if ($user->get('usr_delete_time')) {
+					throw new DisplayableUserException(self::CLOSED_ACCOUNT_MESSAGE);
+				}
 				return $user;
 			}
 	
@@ -427,7 +478,13 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			}
 	
 			$user = new User(NULL);
-			$user->set('usr_email', strip_tags(trim(strtolower($email))));
+			$user->set('usr_email', $email !== '' ? strip_tags($email) : NULL);
+			$user->set('usr_username', $username !== '' ? $username : NULL);
+			// Activation proves control of an address; with none, there is nothing to prove.
+			if ($email === '') {
+				$user->set('usr_is_activated', true);
+				$send_emails = false;
+			}
 			$user->set('usr_first_name', strip_tags(trim($first_name)));
 			$last_name = strip_tags(trim($last_name));
 			$user->set('usr_last_name', $last_name !== '' ? $last_name : null);
@@ -487,12 +544,16 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		$is_new_user = false;
 		try {
 
-			$user = User::GetByEmail(trim($data['usr_email']));
+			$user = User::GetByEmail(trim((string)($data['usr_email'] ?? '')));
+			if ($user && $user->get('usr_delete_time')) {
+				throw new DisplayableUserException(self::CLOSED_ACCOUNT_MESSAGE);
+			}
 			if(!$user){
 				$tdata = array(
 					'usr_first_name' => $data['usr_first_name'],
 					'usr_last_name' => $data['usr_last_name'] ?? '',
-					'usr_email' => $data['usr_email'],
+					'usr_email' => $data['usr_email'] ?? '',
+					'usr_username' => $data['usr_username'] ?? '',
 					'send_emails' => $send_emails
 				);
 
@@ -567,12 +628,12 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}		
 
 		//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
-		if(!$user->phone() && $data['phn_phone_number']){
+		if(!$user->phone() && !empty($data['phn_phone_number'])){
 			$phone_number = PhoneNumber::CreateFromForm($data, $user->key, NULL, FALSE);
 		}
 		
 		//IF THE USER ENTERED AN ADDRESS, SAVE THAT
-		if(!$user->address() && $data['address']){
+		if(!$user->address() && !empty($data['address'])){
 			$address = $data['address'];
 			if(!$address->get('usa_usr_user_id')){
 				$address->set('usa_usr_user_id', $user->key);
@@ -627,16 +688,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	}
 
 	public function prepare() {
-		if ($this->key === NULL) {
-
-			//CHECK FOR DUPLICATES
-			if(User::GetByEmail($this->get('usr_email'))){
-				throw new DisplayableUserException(
-					'Sorry, that email address "'.$this->get('usr_email').'" has already been used.  Please try again.');				
-			}
-		}
-
-		if (!LibraryFunctions::IsValidEmail($this->get('usr_email'))) {
+		// Uniqueness and the email-or-username rule are save()'s (check_identifiers()),
+		// which every write passes through; this is the friendly address check.
+		if ($this->get('usr_email') !== NULL && !LibraryFunctions::IsValidEmail($this->get('usr_email'))) {
 			throw new DisplayableUserException(
 				'Sorry, that email address "'.$this->get('usr_email').'" you entered is invalid.  Please try again.');
 		}
@@ -646,17 +700,149 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		$this->set('usr_last_name', User::UcName($this->get('usr_last_name')));
 	}
 
+	/**
+	 * The account holding $email, the live one first: a deleted account and a
+	 * live one can share an address, and the live one is the one that answers
+	 * to it. A deleted account is returned only when no live one has the
+	 * address, so a closed account's address still reads as taken.
+	 */
 	public static function GetByEmail($email) {
-		$data = SingleRowFetch('usr_users', 'LOWER(usr_email)',
-			trim(strtolower($email)), PDO::PARAM_STR, SINGLE_ROW_ALL_COLUMNS);
+		$email = strtolower(trim((string)$email));
+		if ($email === '') {
+			return NULL;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT * FROM usr_users WHERE LOWER(usr_email) = ?
+			  ORDER BY usr_delete_time IS NOT NULL, usr_user_id LIMIT 1');
+		$q->execute(array($email));
+		$data = $q->fetch(PDO::FETCH_OBJ);
 
-		if ($data === NULL) {
+		if ($data === FALSE) {
 			return NULL;
 		}
 
 		$user = new User($data->usr_user_id);
 		$user->load_from_data($data, array_keys(User::$field_specifications));
 		return $user;
+	}
+
+	/**
+	 * The account holding $username, regardless of capitals, the live one first.
+	 * A deleted account is returned only with $include_deleted, for the check
+	 * that keeps a closed account's username taken.
+	 */
+	public static function GetByUsername($username, $include_deleted = false) {
+		$username = strtolower(trim((string)$username));
+		if ($username === '') {
+			return NULL;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT * FROM usr_users WHERE LOWER(usr_username) = ?'
+			. ($include_deleted ? '' : ' AND usr_delete_time IS NULL')
+			. ' ORDER BY usr_delete_time IS NOT NULL, usr_user_id LIMIT 1');
+		$q->execute(array($username));
+		$data = $q->fetch(PDO::FETCH_OBJ);
+		if ($data === FALSE) {
+			return NULL;
+		}
+		$user = new User($data->usr_user_id);
+		$user->load_from_data($data, array_keys(User::$field_specifications));
+		return $user;
+	}
+
+	/**
+	 * The live account a person signing in means by what they typed: text with
+	 * an @ is an email, anything else a username (a username never holds an @).
+	 * Never a deleted account. Every sign-in path that starts from typed text
+	 * asks this; GetByEmail() is for "who has this address".
+	 */
+	public static function GetByLogin($identifier) {
+		$identifier = trim((string)$identifier);
+		if ($identifier === '') {
+			return NULL;
+		}
+		$user = strpos($identifier, '@') !== false
+			? self::GetByEmail($identifier)
+			: self::GetByUsername($identifier);
+		return ($user && !$user->get('usr_delete_time')) ? $user : NULL;
+	}
+
+	/** 3 to 32 letters, digits, dots, dashes or underscores, starting with a letter or digit. */
+	public static function IsValidUsername($username) {
+		return is_string($username) && preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/', $username) === 1;
+	}
+
+	/** Who this account is, for a list or a picker: the email, else @username. */
+	function login_label() {
+		$email = (string)$this->get('usr_email');
+		return $email !== '' ? $email : '@' . $this->get('usr_username');
+	}
+
+	/** A blank sign-in identifier is stored as NULL, never '', so blanks never collide. */
+	function set($key, $value, $check_existance=TRUE) {
+		if (($key === 'usr_email' || $key === 'usr_username') && is_string($value) && trim($value) === '') {
+			$value = NULL;
+		}
+		parent::set($key, $value, $check_existance);
+	}
+
+	/**
+	 * The rules every save keeps for the sign-in identifiers: an account has an
+	 * email, a username, or both; a username has the allowed form; and neither
+	 * may be one another account holds, a deleted account included, so a closed
+	 * account's identifiers are never handed to someone else. Only an identifier
+	 * this save sets (or a new row's) is checked, so an old row is never refused
+	 * for a value it already had.
+	 */
+	private function check_identifiers() {
+		$email = $this->get('usr_email');
+		$username = $this->get('usr_username');
+		if ($email === NULL && $username === NULL) {
+			throw new DisplayableUserException('An account needs an email address or a username.');
+		}
+		if ($username !== NULL && $this->identifier_set_here('usr_username')) {
+			if (!self::IsValidUsername($username)) {
+				throw new DisplayableUserException('A username is 3 to 32 letters, digits, dots, dashes or underscores, starting with a letter or digit.');
+			}
+			$holder = self::GetByUsername($username, true);
+			if ($holder && (int)$holder->key !== (int)$this->key) {
+				throw new DisplayableUserException('The username "' . $username . '" is taken. Please choose another.');
+			}
+		}
+		if ($email !== NULL && $this->identifier_set_here('usr_email')) {
+			$holder = self::GetByEmail($email);
+			if ($holder && (int)$holder->key !== (int)$this->key) {
+				throw new DisplayableUserException($holder->get('usr_delete_time')
+					? self::CLOSED_ACCOUNT_MESSAGE
+					: 'Sorry, that email address "' . $email . '" has already been used.  Please try again.');
+			}
+		}
+	}
+
+	/**
+	 * A deleted account comes back only while its identifiers are still its own:
+	 * an old row can share an address with a live account (accounts made before
+	 * the save rules), and the live-only unique index would refuse it with a
+	 * database error instead of saying so.
+	 */
+	function undelete() {
+		$email = self::GetByEmail((string)$this->get('usr_email'));
+		$username = self::GetByUsername((string)$this->get('usr_username'));
+		foreach (array('email address' => $email, 'username' => $username) as $what => $holder) {
+			if ($holder && (int)$holder->key !== (int)$this->key && !$holder->get('usr_delete_time')) {
+				throw new DisplayableUserException('This account cannot be restored: its ' . $what
+					. ' now belongs to another account (user ' . (int)$holder->key . '). Change that account first.');
+			}
+		}
+		return parent::undelete();
+	}
+
+	private function identifier_set_here($column) {
+		if ($this->key === NULL) {
+			return true;
+		}
+		return in_array($column, $this->changed_columns(), true)
+			&& strtolower((string)$this->access_stored($column)) !== strtolower((string)$this->get($column));
 	}
 
 	/**
@@ -721,7 +907,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				$this->suppress_session_key_revocation = TRUE;
 				try {
 					$this->set('usr_password', static::GeneratePassword($password));
-					$this->save();
+					// The server's own decision, made before anyone is signed in:
+					// the password just proved is the authority, not a session.
+					SystemBase::server_initiated_write(function () { $this->save(); });
 				} catch (Exception $e) {
 					error_log('Password rehash failed for user ' . $this->key . ': ' . $e->getMessage());
 				} finally {
@@ -1077,41 +1265,32 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		return TRUE;
 	}
 
-	// REST API per-record read scope: only the user themselves (or staff,
-	// permission >= 5) may read this row via the API. NOTE: the row still
-	// includes usr_password via export_as_array() even for the owner — see the
-	// export_as_array sensitive-field concern.
-	function authenticate_read($data) {
-		if ($this->key != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
+	/** A user owns their own row: the owner rule reads the key, not a column. */
+	public function access_owner_is($user_id): bool {
+		return $this->key !== NULL && (int)$user_id > 0 && (int)$this->key === (int)$user_id;
 	}
 
 	function authenticate_write($data) {
 		$actor = (int)$data['current_user_permission'];
-		if ($this->key != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($actor < 5) {
+		if (!$this->access_owner_is($data['current_user_id'] ?? 0)) {
+			if (!Access::allows(static::access_level('write'), $actor)) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$actor );
+					'Changing a user needs level ' . static::access_level('write') . '.');
 			}
 			// The target rule: staff change only a user strictly below their own
 			// level, so a 9 cannot reset a 10's password and sign in as them. 10 is
 			// exempt, so two owners can manage each other.
-			if ($actor < 10 && $this->key && $this->stored_permission() >= $actor) {
+			if (!Access::allows(10, $actor) && $this->key && Access::allows($actor, $this->stored_permission())) {
 				throw new SystemAuthenticationError(
 					'Only a user above level ' . $this->stored_permission() . ' may change this user.');
 			}
 		}
 		// And grant at most their own level, to anyone, themselves included.
-		if ($actor < 10 && (int)$this->get('usr_permission') !== $this->stored_permission()
-			&& (int)$this->get('usr_permission') > $actor) {
+		$granted = (int)$this->get('usr_permission');
+		if (!Access::allows(10, $actor) && $granted !== $this->stored_permission()
+			&& !Access::allows($granted, $actor)) {
 			throw new SystemAuthenticationError(
-				'A user at level ' . $actor . ' cannot grant level ' . (int)$this->get('usr_permission') . '.');
+				'A user at level ' . $actor . ' cannot grant level ' . $granted . '.');
 		}
 	}
 
@@ -1158,7 +1337,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			$this->loaded_profile[$field] = (string)$this->get('usr_' . $field);
 		}
 		$this->loaded_permission = $this->data !== NULL ? (int)$this->get('usr_permission') : NULL;
-		$this->loaded_could_approve = (int)$this->get('usr_permission') >= SandboxConsent::APPROVER_PERMISSION
+		$this->loaded_could_approve = Access::allows(SandboxConsent::APPROVER_PERMISSION, (int)$this->get('usr_permission'))
 			&& !$this->get('usr_is_disabled');
 	}
 
@@ -1178,6 +1357,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		// loaded is not this save's change.
 		$set_by_caller = $this->changed_columns();
 
+		$this->check_identifiers();
 		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
@@ -1185,7 +1365,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		// A superadmin demoted or disabled by this save: the sandboxed plugins
 		// they approved stop acting as them (SandboxCredentials).
 		if ($this->loaded_profile !== NULL && $this->loaded_could_approve
-				&& ((int)$this->get('usr_permission') < SandboxConsent::APPROVER_PERMISSION || $this->get('usr_is_disabled'))) {
+				&& (!Access::allows(SandboxConsent::APPROVER_PERMISSION, (int)$this->get('usr_permission')) || $this->get('usr_is_disabled'))) {
 			$this->loaded_could_approve = FALSE;
 			SandboxCredentials::lapseApprovalsOf((int)$this->key);
 		}
@@ -1347,6 +1527,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 
 		$this->refuse_while_scoped_key_is_live();
+		// Asked before the mailing-list unsubscribes and the cascade below, which
+		// the parent's delete would ask only after they ran.
+		$this->guard_raw_write('permanent_delete');
 		
 		$this_transaction = false;
 		if(!$dblink->inTransaction()){
@@ -1561,7 +1744,7 @@ class MultiUser extends SystemMultiBase {
 	function get_dropdown_array($include_new=FALSE) {
 		$items = array();
 		foreach($this as $item) {
-			$items[$item->key] = $item->display_name().' - '.$item->get('usr_email');
+			$items[$item->key] = $item->display_name().' - '.$item->login_label();
 		}
 		if ($include_new) {
 			$items['new'] = 'Enter New Below';
@@ -1592,6 +1775,10 @@ class MultiUser extends SystemMultiBase {
         
         if (isset($this->options['nickname_like'])) {
             $filters['usr_nickname'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['nickname_like'].'%');
+        }
+
+        if (isset($this->options['username_like'])) {
+            $filters['usr_username'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['username_like'].'%');
         }
 
         if (isset($this->options['name_like'])) {

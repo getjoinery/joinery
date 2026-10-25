@@ -8,7 +8,6 @@ function admin_users_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -49,6 +48,7 @@ function admin_users_logic(array $input): LogicResult {
 			$search_criteria['first_name_like'] = $fsearch;
 			$search_criteria['last_name_like'] = $fsearch;
 			$search_criteria['nickname_like'] = $fsearch;
+			$search_criteria['username_like'] = ltrim($searchterm, '@');
 		}
 
 		if(is_numeric($searchterm) && (int)$searchterm > 0 && (int)$searchterm < 2147483647) {
@@ -60,8 +60,8 @@ function admin_users_logic(array $input): LogicResult {
 		$search_criteria['not_system_users'] = true;
 	}
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//SHOW DELETED ONLY TO THOSE WHO MAY UNDELETE
+	if(!Access::permits(User::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

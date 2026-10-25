@@ -47,6 +47,13 @@ class Activation {
 		return $user;
 	}
 
+	/**
+	 * The email-change link's code, spent: the account's sign-in address becomes
+	 * the one the code was mailed to (possession of the code proves that inbox).
+	 * FALSE for a code that is unknown, used, expired or for a deleted account.
+	 * Throws DisplayableUserException when another account has taken the address
+	 * since the change was asked for; the code is spent either way.
+	 */
 	static function ChangeEmailUser($act_code) {
 		$act_record = self::getTempCodeInfo(strtolower($act_code), Activation::EMAIL_CHANGE);
 
@@ -54,15 +61,19 @@ class Activation {
 			return FALSE;
 		}
 
-		$user_id = $act_record->act_usr_user_id;
-		$new_email = $act_record->act_usr_email;
-		$user = new User($user_id, TRUE);
+		$new_email = strtolower(trim((string)$act_record->act_usr_email));
+		$user = new User($act_record->act_usr_user_id, TRUE);
+		if (!$user->key || $user->get('usr_delete_time') || $new_email === '') {
+			self::deleteTempCode($act_code);
+			return FALSE;
+		}
 
-		$log = new EmailChange(NULL);
-		$log->set('ech_usr_user_id', $user_id);
-		$log->set('ech_old_email', $user->get('usr_email'));
-		$log->set('ech_new_email', $new_email);
-		$log->save();
+		$holder = User::GetByEmail($new_email);
+		if ($holder && (int)$holder->key !== (int)$user->key) {
+			self::deleteTempCode($act_code);
+			throw new DisplayableUserException('The address ' . $new_email
+				. ' now belongs to another account, so your email was not changed.');
+		}
 
 		$user->set('usr_email', $new_email);
 		$user->prepare();
@@ -251,25 +262,26 @@ class Activation {
 		return $success;
 	}
 
-	// Password reset
-	static function email_forgotpw_send($usr_email){
-		$user = User::GetByEmail(strtolower($usr_email));
-
-		if (!$user) {
-			return FALSE;
-		}
-
+	/**
+	 * Password reset: the reset link, to the account's email and to its verified
+	 * recovery address. Returns whether the copy to the account's email went; an
+	 * account with no email gets only the recovery copy, if it has one.
+	 */
+	static function email_forgotpw_send(User $user){
 		//GENERATE SIGNUP CODE
 		$act_code = self::getTempCode($user->key, '30 day', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
 
-		$success = EmailSender::sendTemplate('forgotpw_content',
-			$user->get('usr_email'),
-			[
-				'act_code' => $act_code,
-				'web_dir' => LibraryFunctions::get_absolute_url(''),
-				'recipient' => $user->export_as_array()
-			]
-		);
+		$success = FALSE;
+		if ($user->get('usr_email')) {
+			$success = EmailSender::sendTemplate('forgotpw_content',
+				$user->get('usr_email'),
+				[
+					'act_code' => $act_code,
+					'web_dir' => LibraryFunctions::get_absolute_url(''),
+					'recipient' => $user->export_as_array()
+				]
+			);
+		}
 
 		// External recovery-address authorizer (specs/mailbox_security_levels.md
 		// § Password reset, Population 3): a verified recovery address is a
@@ -319,6 +331,7 @@ class Activation {
 	// Email change
 	static function email_change_send($usr_user_id, $new_email){
 		$user = new User($usr_user_id, TRUE);
+		$new_email = strtolower(trim((string)$new_email));
 		$act_code = self::getTempCode($user->key, '30 days', Activation::EMAIL_CHANGE, NULL, $new_email);
 
 		$message = EmailMessage::fromTemplate('email_change_content', [

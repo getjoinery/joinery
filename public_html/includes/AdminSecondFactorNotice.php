@@ -29,7 +29,7 @@ class AdminSecondFactorNotice {
 		$missing = self::adminsWithoutSecondFactor();
 		$required = (bool)Globalvars::get_instance()->get_setting('totp_require_admins', false, true);
 		return self::forState($missing, (int)$session->get_user_id(), $required,
-			(int)($_SESSION['permission'] ?? 0) >= 10);
+			Access::permits(10));
 	}
 
 	/**
@@ -42,7 +42,7 @@ class AdminSecondFactorNotice {
 		$db = DbConnector::get_instance()->get_db_link();
 		$passkeys_count = (bool)Globalvars::get_instance()->get_setting('passkeys_enabled', false, true);
 		// The platform's own accounts are not people and cannot enrol anything.
-		$sql = "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email
+		$sql = "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username
 			FROM usr_users
 			WHERE usr_permission >= 5 AND usr_delete_time IS NULL
 			  AND usr_user_id NOT IN (" . (int)User::USER_SYSTEM . ", " . (int)User::USER_DELETED . ")
@@ -55,7 +55,7 @@ class AdminSecondFactorNotice {
 		$out = array();
 		foreach ($db->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
 			$name = trim((string)$r['usr_first_name'] . ' ' . (string)$r['usr_last_name']);
-			if ($name === '') $name = (string)$r['usr_email'];
+			if ($name === '') $name = (string)$r['usr_email'] !== '' ? (string)$r['usr_email'] : '@' . $r['usr_username'];
 			$out[] = array('id' => (int)$r['usr_user_id'], 'name' => $name);
 		}
 		return $out;

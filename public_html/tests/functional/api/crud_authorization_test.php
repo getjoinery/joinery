@@ -12,8 +12,9 @@
  *     reachable; a read-only resource is gated per-verb (in-process assert —
  *     no production model is readable-but-not-writable, so a synthetic class
  *     stands in for that branch).
- *   - Layer 2 row scope (deny-by-default owner-or-staff): owner reads own row,
- *     a non-owner is refused, staff reads any row; public-read models
+ *   - Layer 2 row scope (deny-by-default: the owner, else the model's class
+ *     level): owner reads own row, a non-owner is refused, staff at the
+ *     class's read level reads any row; public-read models
  *     ($api_public_read) skip the scope.
  *   - Ownership integrity: POST stamps the owner server-side (a body-supplied
  *     owner cannot spoof); the owner column is unwritable on PUT; PUT authorizes
@@ -22,8 +23,9 @@
  *     usr_permission) and credential (regex) columns are dropped from CRUD
  *     writes, including the User::CreateNew() fast-path; a normal field on the
  *     same request still applies.
- *   - Collection scoping: a non-staff caller's num_results reflects only their
- *     own rows (no count disclosure); staff sees the unfiltered set.
+ *   - Collection scoping: a caller below the read level gets num_results for
+ *     only their own rows (no count disclosure); staff at it sees the
+ *     unfiltered set.
  *   - Nested embed floor: a User export's embedded child objects carry no
  *     unreadable-floor field.
  *   - AI parity: the AI read surface excludes the shared unreadable floor on a
@@ -161,7 +163,7 @@ try {
 	section('Setup');
 	$user_a = make_user($suffix . 'A');         // non-staff owner A
 	$user_b = make_user($suffix . 'B');         // non-staff owner B
-	$staff  = make_user($suffix . 'S', 5);      // staff (permission >= 5)
+	$staff  = make_user($suffix . 'S', 8);      // staff at Address's levels (personal: 6 to read, 8 to write)
 	echo "  Users A=" . $user_a->key . " B=" . $user_b->key . " staff=" . $staff->key . "\n";
 
 	// Full-capability machine keys (apk_permission 4 = read+write+delete).
@@ -289,6 +291,15 @@ try {
 	check($after->get('usr_password') === $pw_before, 'usr_password unchanged (credential dropped)');
 	check($after->get('usr_first_name') === 'FloorOk', 'non-floor field (usr_first_name) WAS applied');
 
+	// A create-only column: the sign-in email changes only through the account
+	// page's confirm-by-link flow, never by a PUT that skips its checks (B120).
+	$email_before = $after->get('usr_email');
+	$r = api_request('PUT', '/api/v1/User/' . $user_a->key . '?usr_email='
+		. rawurlencode(harness_fixture_email('crud_email_' . $suffix)), $ha);
+	check($r['status'] === 200, 'PUT own User with usr_email → 200 (the field is dropped, not refused)', $r['raw']);
+	check((new User($user_a->key, TRUE))->get('usr_email') === $email_before,
+		'usr_email unchanged ($api_create_only_fields)');
+
 	// ------------------------------------------------------------------
 	section('CreateNew fast-path also honors the write floor (§4.4)');
 	// harness_fixture_email() rather than a hand-rolled address: creating this
@@ -296,7 +307,8 @@ try {
 	// own email settings and so never sees this process's test-mode redirect.
 	// The shared naming is what lets teardown recognise and remove it.
 	$new_email = harness_fixture_email('createnew_' . $suffix);
-	$r = api_request('POST', '/api/v1/User', $ha, array(
+	// Creating a user needs User's write level (personal, 8): the staff key.
+	$r = api_request('POST', '/api/v1/User', $hs, array(
 		'usr_email'      => $new_email,
 		'usr_first_name' => 'Created',
 		'usr_last_name'  => 'ViaApi',

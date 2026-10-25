@@ -33,6 +33,7 @@ function user_search_logic(array $input): LogicResult {
 			$search_criteria['first_name_like'] = $fsearch;
 			$search_criteria['last_name_like']  = $fsearch;
 			$search_criteria['nickname_like']   = $fsearch;
+			$search_criteria['username_like']   = ltrim($searchterm, '@');
 		}
 
 		if (is_numeric($searchterm) && (int) $searchterm > 0 && (int) $searchterm < 2147483647) {
@@ -60,7 +61,7 @@ function user_search_logic(array $input): LogicResult {
 	foreach ($users as $user) {
 		$items[] = [
 			'id'   => $user->key,
-			'text' => $user->display_name() . ' - ' . $user->get('usr_email'),
+			'text' => $user->display_name() . ' - ' . $user->login_label(),
 		];
 	}
 
@@ -73,7 +74,7 @@ function user_search_logic_descriptor(): array {
 		'mutates'     => false,
 		'auth'        => [
 			'capability'          => 'read',
-			'min_user_permission' => 5,
+			'min_user_permission' => 'personal:read',
 		],
 		'input'       => [
 			'q'            => ['type' => 'string', 'required' => false, 'label' => 'Search term'],

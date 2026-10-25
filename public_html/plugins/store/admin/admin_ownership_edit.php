@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * One ownership — the detail view, with revoke / un-revoke.
  *
@@ -37,7 +38,7 @@ echo '<p><strong>Owner:</strong> ';
 if ($owner->key) {
 	echo '<a href="/admin/admin_user?usr_user_id=' . $owner->key . '">'
 		. htmlspecialchars($owner->display_name()) . '</a> ('
-		. htmlspecialchars($owner->get('usr_email')) . ')';
+		. htmlspecialchars($owner->login_label()) . ')';
 }
 else {
 	echo 'Unknown user';

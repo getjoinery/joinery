@@ -2992,7 +2992,7 @@ class InboundEmailSetupCheck {
 		$owner = new User($owner_id, TRUE);
 		$who = trim((string)$owner->get('usr_first_name') . ' ' . (string)$owner->get('usr_last_name'));
 		if ($who === '') {
-			$who = (string)$owner->get('usr_email');
+			$who = $owner->login_label();
 		}
 		$is_owner = intval(SessionControl::get_instance()->get_user_id()) === $owner_id;
 		$has_vault = UserEncryptionVault::loadForUser($owner_id) !== null;

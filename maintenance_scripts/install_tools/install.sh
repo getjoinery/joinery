@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 3.37 - the admin login summary names the username admin; an address is optional (spec optional_username)
 #VERSION 3.36 - a name that reached this box and failed HTTP-01 is no longer reported as not reaching it, with or
 #               without a DNS-01 provider (reviewer2 on B111).
 #VERSION 3.35 -ensure_placeholder_cert: every certificate attempt mints a site's missing placeholder first, so a
@@ -691,7 +692,7 @@
 #
 # Site Options:
 #   --password-file=FILE   Read database password from file (recommended for special chars)
-#   --admin-email=EMAIL    Address for the site's admin account (default admin@example.com)
+#   --admin-email=EMAIL    Address for the site's admin account (default none: it signs in as admin)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
 #   --enable-agent         Run the Joinery agent on this site (the binary is
@@ -1049,11 +1050,14 @@ print_admin_login() {
     local email=""
 
     password=$($reader "$cred_path" 2>/dev/null | grep '^Password: ' | cut -d' ' -f2- || true)
-    email=$($reader "$cred_path" 2>/dev/null | grep '^Email: ' | cut -d' ' -f2- || true)
-    [ -n "$email" ] || email="${JOINERY_ADMIN_EMAIL:-admin@example.com}"
+    email=$($reader "$cred_path" 2>/dev/null | grep '^Email: ' | cut -d' ' -f2- | sed 's/^ *//' || true)
+    [ -n "$email" ] || email="${JOINERY_ADMIN_EMAIL:-}"
 
     echo "Admin login:"
-    echo -e "  Email:    ${YELLOW}${email}${NC}"
+    echo -e "  Username: ${YELLOW}admin${NC}"
+    if [ -n "$email" ]; then
+        echo -e "  Email:    ${YELLOW}${email}${NC}"
+    fi
     if [ -n "$password" ]; then
         # The password already lives in the credentials file, so printing it
         # here buys nothing and costs a working login sitting in the install
@@ -4637,7 +4641,7 @@ do_site_create() {
                 echo "  --bare-metal  Force bare-metal mode (requires Apache/PHP/PostgreSQL)"
                 echo ""
                 echo "Site Options:"
-                echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
+                echo "  --admin-email=EMAIL    Address for the admin account (default none: it signs in as admin)"
                 echo "  Environment (optional, secrets never on argv):"
                 echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
                 echo "    JOINERY_ADMIN_PASSWORD_SHOWN=1  that password is shown to the owner elsewhere: ask for a new one at first sign-in"
@@ -6584,7 +6588,7 @@ show_help() {
     echo "                         sudo joinery-limits ceiling 500, sudo joinery-limits show"
     echo ""
     echo "Site Command Options:"
-    echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
+    echo "  --admin-email=EMAIL    Address for the admin account (default none: it signs in as admin)"
     echo "  Environment (optional): JOINERY_ADMIN_PASSWORD, JOINERY_INSTALL_BUNDLE,"
     echo "                         JOINERY_MAIL_API_KEY (+ JOINERY_MAIL_PROVIDER),"
     echo "                         JOINERY_BACKUP_BUCKET + JOINERY_BACKUP_KEY_ID + JOINERY_BACKUP_KEY"

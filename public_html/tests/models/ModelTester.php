@@ -659,8 +659,18 @@ class ModelTester {
         $test_data = [];
         $model_class = $this->model_class;
 
+        // A model whose rule spans fields (an account needs an email or a
+        // username) names the optional ones the generator must still fill:
+        // $test_fixture['generate'].
+        $also_generate = array();
+        if (property_exists($model_class, 'test_fixture')
+            && isset($model_class::$test_fixture['generate'])
+            && is_array($model_class::$test_fixture['generate'])) {
+            $also_generate = $model_class::$test_fixture['generate'];
+        }
+
         foreach ($model_class::$field_specifications as $field_name => $spec) {
-            if ($this->field_requires_value($field_name)) {
+            if ($this->field_requires_value($field_name) || in_array($field_name, $also_generate, true)) {
                 $value = $this->generate_field_value($field_name, $index);
                 if ($value === self::SKIP_FIELD) {
                     continue;

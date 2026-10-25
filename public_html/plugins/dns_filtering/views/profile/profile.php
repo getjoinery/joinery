@@ -38,7 +38,7 @@ Team Area
                             <div class="team-wrapp">
                                 <div>
                                     <h3 class="team-about_title"><?php echo htmlspecialchars($page_vars['user']->display_name()); ?></h3>
-                                    <p class="team-about_desig"><?php echo htmlspecialchars($page_vars['user']->get('usr_email')); ?></p>
+                                    <p class="team-about_desig"><?php echo htmlspecialchars($page_vars['user']->login_label()); ?></p>
                                     <!--<p class="team-about_text">Sem consequat mauris conubia inceptos nostra rutrum morbi
                                         sagittis
                                         pulvinar, commodo curabitur maecenas fermentum magna tempus nisi ullamcorper, ante

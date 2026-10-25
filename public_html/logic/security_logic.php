@@ -495,7 +495,8 @@ function _build_totp_uri($secret, $user, $settings) {
 	if (empty($issuer)) {
 		$issuer = 'Joinery';
 	}
-	$totp->setLabel($user->get('usr_email'));
+	// The account as its owner signs in: the email, else the username.
+	$totp->setLabel((string)($user->get('usr_email') ?: $user->get('usr_username')));
 	$totp->setIssuer($issuer);
 	return $totp->getProvisioningUri();
 }
@@ -511,6 +512,7 @@ function _build_qr_data_uri($provisioning_uri) {
 
 function security_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Manage two-factor authentication settings. action=start_enable begins TOTP setup; confirm_enable confirms it; cancel_enable aborts pending setup; regenerate_backup_codes issues new codes; disable turns off TOTP.',
 		'requires_session' => true,
 		'mutates'          => true,

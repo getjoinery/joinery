@@ -445,8 +445,8 @@
         <h3 class="jy-checkout-modal-title">Log In</h3>
         <div id="login-modal-error" class="jy-checkout-modal-error" hidden></div>
         <div class="jy-checkout-modal-field">
-            <label for="login_modal_email" class="jy-checkout-modal-label">Email</label>
-            <input type="email" id="login_modal_email" name="email" class="jy-checkout-input" autocomplete="email">
+            <label for="login_modal_email" class="jy-checkout-modal-label">Email or username</label>
+            <input type="text" id="login_modal_email" name="email" class="jy-checkout-input" autocomplete="username">
         </div>
         <div class="jy-checkout-modal-field is-last">
             <label for="login_modal_password" class="jy-checkout-modal-label">Password</label>
@@ -525,7 +525,9 @@
     function submitBilling(andComplete) {
         var form = document.createElement('form');
         form.method = 'POST';
-        form.action = '/checkout';
+        // A free order completes at /cart_charge as a POST; the billing step
+        // alone goes back to /checkout.
+        form.action = andComplete ? '/cart_charge' : '/checkout';
 
         var email = document.getElementById('contact_email') ? document.getElementById('contact_email').value.trim() : '';
         var firstName = document.getElementById('billing_first_name') ? document.getElementById('billing_first_name').value.trim() : '';

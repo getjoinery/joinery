@@ -32,7 +32,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		$email = strtolower(trim($input['email'] ?? $input['usr_email']));
 
-		$user = User::GetByEmail($email);
+		// What was typed: an email or a username.
+		$user = User::GetByLogin($email);
+
+		// One answer for every outcome, so the page says nothing about which accounts exist.
+		$sent_message = 'Next step: Check your email for a message from us with a link to enter your new password.  If you do not receive an email from us within a few minutes, please check your spam folder.'
+			. '  No email on your account? Reset with your authenticator app or passkey instead, or ask an administrator.';
 
 		if ($user) {
 			if($user->get('usr_password_recovery_disabled')){
@@ -42,10 +47,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			RequestLogger::log('password_reset', 'reset_request', true, [
 				'note' => 'Password reset sent to: ' . $email,
 			]);
-			Activation::email_forgotpw_send($email);
+			Activation::email_forgotpw_send($user);
 			$page_vars['message_type'] = 'success';
 			$page_vars['message_title'] = 'Reset code sent';
-			$page_vars['message'] = 'Next step: Check your email for a message from us with a link to enter your new password.  If you don not receive an email from us within a few minutes, please check your spam folder.';
+			$page_vars['message'] = $sent_message;
 		}
 		else{
 			RequestLogger::log('password_reset', 'reset_request', false, [
@@ -54,7 +59,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			// Return same success message to prevent user enumeration
 			$page_vars['message_type'] = 'success';
 			$page_vars['message_title'] = 'Reset code sent';
-			$page_vars['message'] = 'Next step: Check your email for a message from us with a link to enter your new password.  If you don not receive an email from us within a few minutes, please check your spam folder.';
+			$page_vars['message'] = $sent_message;
 		}
 
 	}
@@ -77,10 +82,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
  * form definition (GET /api/v1/form/password_reset_1).
  */
 function password_reset_1_logic_form($formwriter, $user = null, $input = []) {
-	$formwriter->textinput('usr_email', 'Email Address:', [
-		'type'      => 'email',
-		'required'  => true,
-		'maxlength' => 64,
+	$formwriter->textinput('usr_email', 'Email or username:', [
+		'required'     => true,
+		'maxlength'    => 64,
+		'autocomplete' => 'username',
 	]);
 
 	$formwriter->submitbutton('btn_submit', 'Send Reset Link');
@@ -88,11 +93,12 @@ function password_reset_1_logic_form($formwriter, $user = null, $input = []) {
 
 function password_reset_1_logic_descriptor(): array {
 	return [
-		'description'      => 'Send a password reset email to the given address.',
+		'auth' => ['min_user_permission' => 0],
+		'description'      => 'Send a password reset email to the account with the given email or username.',
 		'requires_session' => false,
 		'mutates'          => true,
 		'input'            => [
-			'email' => ['type' => 'email', 'required' => true, 'label' => 'Email address'],
+			'email' => ['type' => 'string', 'required' => true, 'label' => 'Email or username'],
 		],
 	];
 }

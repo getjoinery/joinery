@@ -21,7 +21,7 @@
         </div>
 
         <h3>Reset with your authenticator</h3>
-        <p class="text-muted jy-auth-lead">Enter your email and a current code from your authenticator app. A current backup code works too.</p>
+        <p class="text-muted jy-auth-lead">Enter your email or username and a current code from your authenticator app. A current backup code works too.</p>
 
         <?php if (!empty($page_vars['error'])): ?>
             <?php echo PublicPage::alert('Try again', $page_vars['error'], 'warn'); ?>
@@ -30,11 +30,10 @@
         <?php
         $formwriter = $page->getFormWriter('form1', ['action' => '/password-reset-totp', 'method' => 'POST']);
         $formwriter->begin_form();
-        $formwriter->textinput('email', 'Email address', [
-            'type'         => 'email',
+        $formwriter->textinput('email', 'Email or username', [
             'required'     => true,
             'maxlength'    => 64,
-            'autocomplete' => 'email',
+            'autocomplete' => 'username',
             'value'        => $page_vars['email'] ?? '',
         ]);
         $formwriter->textinput('totp_code', 'Authenticator code', [

@@ -46,11 +46,11 @@ class SupportDesk {
 				return '';
 			}
 		}
-		$host = preg_replace('/[^a-z0-9.\-]/', '', strtolower(ServicesClient::host())) ?: 'localhost.invalid';
+		// A username and no email: nobody signs in as it and no mail goes to it.
 		$user = new User(NULL);
 		$user->set('usr_first_name', 'Support');
 		$user->set('usr_last_name', 'Desk');
-		$user->set('usr_email', 'support-desk-' . bin2hex(random_bytes(6)) . '@' . $host);
+		$user->set('usr_username', 'support-desk-' . bin2hex(random_bytes(6)));
 		$user->set('usr_password', User::GeneratePassword(bin2hex(random_bytes(24))));
 		$user->set('usr_permission', 0);
 		$user->set('usr_is_disabled', true);

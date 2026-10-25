@@ -51,11 +51,30 @@ function list_logic(array $input): LogicResult {
 		}
 		
 		
+		// Typing an address proves nothing about owning it: only the signed-in
+		// subscriber (the page offers the form to no one else) or the
+		// unsubscribe link in a list email takes someone off a list.
+		if (isset($_POST['mlt_mailing_list_id_unsubscribe']) && !isset($_POST['mlt_mailing_list_id_subscribe']) && !$session->get_user_id()) {
+			return LogicResult::error('Sign in to unsubscribe, or use the unsubscribe link in any email from this list.');
+		}
+
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
 		if($session->get_user_id()){ 
 			$user = new User($session->get_user_id(), TRUE);
+			// A list reaches people by email; with none, there is nowhere to send it.
+			if(!$user->get('usr_email') && isset($_POST['mlt_mailing_list_id_subscribe'])){
+				return User::add_email_first('to subscribe to a mailing list: the list is sent there');
+			}
 		}
-		else if(!$user = User::GetByEmail($_POST['usr_email'])){
+		else if(($user = User::GetByEmail($_POST['usr_email'] ?? '')) && $user->get('usr_delete_time')){
+			return LogicResult::error(User::CLOSED_ACCOUNT_MESSAGE);
+		}
+		else if($user){
+			// Typing an address proves nothing about owning it: a visitor never
+			// subscribes an existing account, whose owner signs in to manage it.
+			return LogicResult::error('An account already uses that email address. Please sign in to manage its subscriptions.');
+		}
+		else if(!$user){
 			// Guess name from email when name fields aren't provided (e.g. compact newsletter form)
 			$guessed = User::guessNameFromEmail($_POST['usr_email']);
 			$data = array(
@@ -67,11 +86,16 @@ function list_logic(array $input): LogicResult {
 				'password' => $_POST['usr_password'] ?? '',
 				'send_emails' => false
 			);
-			$user = User::CreateNew($data);
-			if (!empty($_POST['privacy'])) {
-				$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
-				$user->save();
-			}
+			// A visitor's signup: no one is signed in to own the new account. The
+			// honeypot, anti-spam question and CAPTCHA above admitted this request.
+			$user = SystemBase::rule_checked_write(function () use ($data) {
+				$user = User::CreateNew($data);
+				if (!empty($_POST['privacy'])) {
+					$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+					$user->save();
+				}
+				return $user;
+			});
 		}
 		
 		$messages = [];
@@ -83,7 +107,9 @@ function list_logic(array $input): LogicResult {
 					'message' => 'You are already subscribed to ' . htmlspecialchars($mailing_list->get('mlt_name')),
 				];
 			} else {
-				$status = $mailing_list->add_registrant($user->key);
+				// The session's own subscription, or a visitor's for the address they
+				// gave, admitted by the honeypot, anti-spam question and CAPTCHA above.
+				$status = SystemBase::rule_checked_write(function () use ($mailing_list, $user) { return $mailing_list->add_registrant($user->key); });
 				$messages[] = $status
 					? ['message_type' => 'success', 'message_title' => 'Success', 'message' => 'You are now subscribed to ' . htmlspecialchars($mailing_list->get('mlt_name'))]
 					: ['message_type' => 'error', 'message_title' => 'Error', 'message' => 'There was an error subscribing you to ' . htmlspecialchars($mailing_list->get('mlt_name'))];

@@ -122,7 +122,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		*/
 
-		if (User::GetByEmail($fixed_fields['usr_email'])) {
+		$existing = User::GetByEmail($fixed_fields['usr_email']);
+		if ($existing && $existing->get('usr_delete_time')) {
+			return LogicResult::error(User::CLOSED_ACCOUNT_MESSAGE, $page_vars);
+		}
+		else if ($existing) {
 			return LogicResult::error('An account has already been registered with this email address.  Please go back and double check the email you entered or <a href="/password-reset-1">click here</a> if you forgot your password.', $page_vars);
 		}
 		// Population-2 precondition at account creation
@@ -137,9 +141,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('That address is a mailbox hosted here, so it cannot be your login email yet: a forgotten-password link would land in an inbox you would be locked out of. Sign up with an outside email address (Gmail, Outlook, etc.). Once you are in, you can add a passkey or authenticator app and then switch your login to a hosted address.', $page_vars);
 		}
 		else{
-			$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
-			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
-			$user->save();
+			// No one is signed in yet: the sign-up rules above admitted this
+			// account, so its rows are written past the model check.
+			$user = SystemBase::rule_checked_write(function () use ($fixed_fields) {
+				$user = User::CreateCompleteNew($fixed_fields, true, true, $fixed_fields['setcookie']);
+				$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+				$user->save();
+				return $user;
+			});
 			$_SESSION['terms_accepted'] = true;
 		}
 
@@ -264,6 +273,7 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 
 function register_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Create a new user account.',
 		'requires_session' => false,
 		'mutates'          => true,

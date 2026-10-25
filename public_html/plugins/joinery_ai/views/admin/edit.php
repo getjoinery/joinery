@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Joinery AI - Recipe Edit
  * URL: /admin/joinery_ai/edit
@@ -87,7 +88,7 @@ $formwriter->textinput('rcp_name', 'Name', ['required' => true]);
 // silent deletion isn't), so transferring ownership is the recovery path.
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 $db = DbConnector::get_instance()->get_db_link();
-$owner_q = $db->prepare("SELECT usr_user_id, usr_first_name, usr_last_name, usr_email
+$owner_q = $db->prepare("SELECT usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username
                          FROM usr_users
                          WHERE usr_permission >= 10
                            AND usr_delete_time IS NULL
@@ -96,8 +97,8 @@ $owner_q->execute();
 $owner_options = ['' => '— select an owner —'];
 foreach ($owner_q->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $name = trim(($row['usr_first_name'] ?? '') . ' ' . ($row['usr_last_name'] ?? ''));
-    $label = ($name !== '' ? $name : $row['usr_email'])
-           . ' (' . $row['usr_email'] . ')';
+    $who = (string)$row['usr_email'] !== '' ? (string)$row['usr_email'] : '@' . $row['usr_username'];
+    $label = ($name !== '' ? $name : $who) . ' (' . $who . ')';
     $owner_options[(string)$row['usr_user_id']] = $label;
 }
 $current_owner = (string)($recipe->get('rcp_owner_user_id') ?: $session->get_user_id());
@@ -106,7 +107,7 @@ $current_owner = (string)($recipe->get('rcp_owner_user_id') ?: $session->get_use
 if (!isset($owner_options[$current_owner]) && $current_owner !== '') {
     $stale_user = new User((int)$current_owner, true);
     if ($stale_user->key) {
-        $owner_options[$current_owner] = '[INACTIVE] ' . $stale_user->get('usr_email');
+        $owner_options[$current_owner] = '[INACTIVE] ' . $stale_user->login_label();
     }
 }
 $formwriter->dropinput('rcp_owner_user_id', 'Owner', [

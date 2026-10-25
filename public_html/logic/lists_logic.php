@@ -67,8 +67,20 @@ function lists_logic(array $input): LogicResult {
 			//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
 			if($session->get_user_id()){
 				$user = new User($session->get_user_id(), TRUE);
+				// A list reaches people by email; with none, there is nowhere to send it.
+				if(!$user->get('usr_email')){
+					return User::add_email_first('to subscribe to a mailing list: the list is sent there');
+				}
 			}
-			else if(!$user = User::GetByEmail($_POST['usr_email'])){
+			else if(($user = User::GetByEmail($_POST['usr_email'] ?? '')) && $user->get('usr_delete_time')){
+				return LogicResult::error(User::CLOSED_ACCOUNT_MESSAGE);
+			}
+			else if($user){
+				// Typing an address proves nothing about owning it: a visitor never
+				// subscribes an existing account, whose owner signs in to manage it.
+				return LogicResult::error('An account already uses that email address. Please sign in to manage its subscriptions.');
+			}
+			else if(!$user){
 				//A COMPACT SIGNUP FORM ASKS ONLY FOR AN EMAIL - NAME THEM FROM IT
 				$guessed = User::guessNameFromEmail($_POST['usr_email'] ?? '');
 				$data = array(
@@ -80,15 +92,20 @@ function lists_logic(array $input): LogicResult {
 					'password' => $_POST['usr_password'] ?? '',
 					'send_emails' => false
 				);
-				$user = User::CreateNew($data);
-				if (!empty($_POST['privacy'])) {
-					$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
-					$user->save();
-				}
+				// A visitor's signup: no one is signed in to own the new account. The
+				// honeypot, anti-spam question and CAPTCHA above admitted this request.
+				$user = SystemBase::rule_checked_write(function () use ($data) {
+					$user = User::CreateNew($data);
+					if (!empty($_POST['privacy'])) {
+						$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+						$user->save();
+					}
+					return $user;
+				});
 			}
 			$page_vars['user'] = $user;
 
-			$page_vars['messages'] = $user->add_user_to_mailing_lists($selected_lists);
+			$page_vars['messages'] = lists_apply_choices($user, $mailing_lists, (array)$selected_lists, (bool)$session->get_user_id());
 		}
 	}
 
@@ -108,6 +125,43 @@ function lists_logic(array $input): LogicResult {
 	$page_vars['user_subscribed_list'] = $user_subscribed_list;
 	
 	return LogicResult::render($page_vars);
+}
+
+/**
+ * Act on the lists this page shows (public, active) and no others: a ticked
+ * list subscribes. An unticked one unsubscribes only a signed-in member, whose
+ * page this is; a visitor who typed an address has proved nothing about owning
+ * it, so a visitor's post only ever adds. A visitor's subscriptions are written
+ * for an account no one is signed in to: the honeypot, anti-spam question and
+ * CAPTCHA in lists_logic() admitted the request.
+ */
+function lists_apply_choices(User $user, $mailing_lists, array $selected, bool $signed_in): array {
+	require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
+	$selected = array_map('intval', $selected);
+	$messages = array();
+	foreach ($mailing_lists as $mailing_list) {
+		$name = $mailing_list->get('mlt_name');
+		$subscribed = $mailing_list->is_user_in_list($user->key);
+		if (in_array((int)$mailing_list->key, $selected, true)) {
+			if ($subscribed) {
+				$messages[] = array('message_type' => 'warn', 'message_title' => 'Notice', 'message' => 'You are already SUBSCRIBED to the following lists: ' . $name);
+				continue;
+			}
+			$status = SystemBase::rule_checked_write(function () use ($mailing_list, $user) { return $mailing_list->add_registrant($user->key); });
+			if ($status) {
+				$messages[] = array('message_type' => 'success', 'message_title' => 'Success', 'message' => 'You are SUBSCRIBED to the following lists: ' . $name);
+				SessionControl::get_instance()->save_visitor_event(VisitorEvent::TYPE_LIST_SIGNUP, FALSE, 'mailing_list', $mailing_list->key);
+			} else {
+				$messages[] = array('message_type' => 'error', 'message_title' => 'Error', 'message' => 'There was an error adding you to the following lists: ' . $name);
+			}
+		} else if ($signed_in && $subscribed) {
+			$status = $mailing_list->remove_registrant($user->key);
+			$messages[] = $status
+				? array('message_type' => 'success', 'message_title' => 'Success', 'message' => 'You are UNSUBSCRIBED from the following lists: ' . $name)
+				: array('message_type' => 'error', 'message_title' => 'Error', 'message' => 'There was an error removing you from the following lists: ' . $name);
+		}
+	}
+	return $messages;
 }
 
 ?>

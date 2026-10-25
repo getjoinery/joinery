@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.22 - The seeded admin is user 1, username admin, with no email (spec optional_username):
+#                found by id, never by an address; with no JOINERY_ADMIN_EMAIL, or one the account
+#                refuses, it stays username-only instead of taking admin@example.com
 # VERSION: 3.21 - JOINERY_BETA_ROOT_ACCESS=1 (install.sh site --beta-root-access) writes beta_root_access_offered = 1:
 #                 the setup wizard offers the emergency root access checkbox (spec beta_break_glass_root_access 4.1)
 # VERSION: 3.20 - An admin address the account refuses (a domain with no mail and no website) no longer leaves the
@@ -487,11 +490,11 @@ if [ "$SKIP_DB_VALIDATION" = false ] && [ "$DB_EXISTS" = false ]; then
     done
     log "Critical settings verified"
 
-    # Check that users table has the admin user
+    # Check that users table has the admin user (user 1, username admin)
     ADMIN_EXISTS=$(psql -U postgres -d "$SITENAME" -tAc \
-        "SELECT COUNT(*) FROM usr_users WHERE usr_email = 'admin@example.com';" 2>/dev/null)
+        "SELECT COUNT(*) FROM usr_users WHERE usr_user_id = 1 AND usr_permission = 10;" 2>/dev/null)
     if [ "$ADMIN_EXISTS" != "1" ]; then
-        log_error "Default admin user (admin@example.com) not found!"
+        log_error "Default admin user (user 1, username admin) not found!"
         VALIDATION_FAILED=true
     else
         log "Default admin user exists"
@@ -532,8 +535,10 @@ fi
 # JOINERY_ADMIN_EMAIL moves the account to the owner's real address in the same
 # call. That ordering matters: a password reset needs a mailbox someone can
 # actually receive at, so setting the address afterwards would leave a window
-# where the only account on the site is unrecoverable.
-ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-admin@example.com}"
+# where the only account on the site is unrecoverable. With none, the account
+# is the username admin with no email: it signs in by username, and resets its
+# password from the server (reset_admin_password.php) until it has an address.
+ADMIN_EMAIL="${JOINERY_ADMIN_EMAIL:-}"
 
 if [ "$DB_EXISTS" = false ]; then
     RESET_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/reset_admin_password.php"
@@ -555,7 +560,7 @@ if [ "$DB_EXISTS" = false ]; then
         chmod 600 "$ADMIN_PW_FILE"
         printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
 
-        RESET_BASE="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
+        RESET_BASE="--user-id=1 --password-file=$ADMIN_PW_FILE --yes"
         if [ "$ADMIN_PASSWORD_SUPPLIED" = true ] && [ "${JOINERY_ADMIN_PASSWORD_SHOWN:-}" != "1" ]; then
             # The owner chose it on the deploy form and nothing wrote it down,
             # so there is nothing to make them replace at first login. A
@@ -565,7 +570,7 @@ if [ "$DB_EXISTS" = false ]; then
             RESET_BASE="$RESET_BASE --chosen"
         fi
         RESET_ARGS="$RESET_BASE"
-        if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+        if [ -n "$ADMIN_EMAIL" ]; then
             RESET_ARGS="$RESET_ARGS --set-email=$ADMIN_EMAIL"
         fi
 
@@ -574,16 +579,16 @@ if [ "$DB_EXISTS" = false ]; then
         ADMIN_EMAIL_REFUSED=""
         if RESET_OUT=$(php "$RESET_TOOL" $RESET_ARGS 2>&1); then
             RESET_OK=true
-        elif [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+        elif [ -n "$ADMIN_EMAIL" ]; then
             # The account's save refuses an address whose domain has no mail
             # and no website, and the tool then writes nothing, which would
-            # leave the seeded default password: the password goes on alone,
-            # under the seeded address, and the refusal is said.
+            # leave the seeded locked password: the password goes on alone,
+            # the account stays username-only, and the refusal is said.
             ADMIN_EMAIL_REFUSED="$(printf '%s\n' "$RESET_OUT" | grep -v '^\s*$' | tail -n 1)"
             log_error "The admin address $ADMIN_EMAIL was not set: $ADMIN_EMAIL_REFUSED"
-            log_error "Sign in as admin@example.com and change the address on the account's profile."
+            log_error "Sign in with the username admin and add the address on the account's profile."
             ADMIN_EMAIL_REFUSED="$ADMIN_EMAIL: $ADMIN_EMAIL_REFUSED"
-            ADMIN_EMAIL="admin@example.com"
+            ADMIN_EMAIL=""
             if RESET_OUT=$(php "$RESET_TOOL" $RESET_BASE 2>&1); then
                 RESET_OK=true
             fi
@@ -591,7 +596,7 @@ if [ "$DB_EXISTS" = false ]; then
 
         if [ "$RESET_OK" = true ]; then
             log "Per-site admin password applied"
-            if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then
+            if [ -n "$ADMIN_EMAIL" ]; then
                 log "Admin account address set to $ADMIN_EMAIL"
             fi
 
@@ -607,7 +612,10 @@ if [ "$DB_EXISTS" = false ]; then
                 {
                     printf 'Joinery admin login for %s\n\n' "$SITENAME"
                     printf 'URL:      http://%s/login\n' "$DOMAIN"
-                    printf 'Email:    %s\n' "$ADMIN_EMAIL"
+                    printf 'Username: admin\n'
+                    if [ -n "$ADMIN_EMAIL" ]; then
+                        printf 'Email:    %s\n' "$ADMIN_EMAIL"
+                    fi
                     if [ "$ADMIN_PASSWORD_SUPPLIED" = false ]; then
                         printf 'Password: %s\n\n' "$ADMIN_PASSWORD"
                         printf 'You are asked to choose a new password at first sign-in.\n'

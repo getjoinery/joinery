@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Ownership — who owns what.
  *
@@ -61,7 +62,7 @@ $user_options = array();
 if ($filter_user_id) {
 	$filter_user = new User($filter_user_id, TRUE);
 	if ($filter_user->key) {
-		$user_options[$filter_user->display_name() . ' - ' . $filter_user->get('usr_email')] = $filter_user->key;
+		$user_options[$filter_user->display_name() . ' - ' . $filter_user->login_label()] = $filter_user->key;
 	}
 }
 $filter_form->dropinput('u', 'Owner', array(

@@ -30,6 +30,8 @@
  *     and counted past it (`truncated`).
  *   - Exit 0 whenever the object was printed; exit 2 for a refused argument.
  *
+ * @version 1.3 - the throwaway viewer is a username with no email (spec optional_username), so
+ *               no address's domain is ever checked
  * @version 1.2 - the throwaway viewer is saved without the email domain check: on a site
  *               with email_validation_mx_check on, `.invalid` failed it and every member
  *               and admin probe answered "could not run: DisplayableUserException"
@@ -105,15 +107,13 @@ try {
 		$user = new User(NULL);
 		$user->set('usr_first_name', 'Page');
 		$user->set('usr_last_name', 'Probe');
-		$user->set('usr_email', 'probe-' . $suffix . '@probe.invalid');
+		$user->set('usr_username', 'probe-' . $suffix);
 		$user->set('usr_password', User::GeneratePassword(bin2hex(random_bytes(24))));
 		$user->set('usr_permission', $viewer === 'admin' ? 10 : 0);
 		$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$user->set('usr_is_activated', true);
 		$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
-		// `.invalid` has no DNS by design, so a site checking that an address's
-		// domain accepts mail would refuse this account.
-		LibraryFunctions::withoutEmailDomainCheck(function () use ($user) { $user->save(); });
+		$user->save();
 		$user->load();
 	}
 	$token = bin2hex(random_bytes(32));

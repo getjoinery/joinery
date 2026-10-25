@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin: one support thread — what the site sent, every turn with its tool
  * trace and tokens, and the operator's reply (specs/support_chatbot.md, The
@@ -15,7 +16,6 @@
  * @version 0.1.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 
 $id = (int)($_GET['sth_support_thread_id'] ?? $_POST['sth_support_thread_id'] ?? 0);
 $thread = new SupportThread($id, TRUE);
@@ -76,7 +76,7 @@ if ((string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET) {
 	$facts['Joined here'] = $node ? $node->get('mgn_name') . ' (node #' . (int)$node->key . ')' : 'no';
 	if ($thread->isConnected()) {
 		$acct = new User((int)$thread->get('sth_account_user_id'), TRUE);
-		$facts['Account'] = $acct->key ? $acct->display_name() . ' <' . $acct->get('usr_email') . '>' : 'connected';
+		$facts['Account'] = $acct->key ? $acct->display_name() . ' <' . $acct->login_label() . '>' : 'connected';
 	} else {
 		$facts['Account'] = 'not connected';
 	}

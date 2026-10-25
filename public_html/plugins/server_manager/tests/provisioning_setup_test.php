@@ -138,10 +138,11 @@ $user = ProvisioningSetup::serviceUser();
 check($user !== NULL && (int)$user->key === (int)$r1['user_id'], 'service user exists, found by the recorded id');
 check((int)ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === (int)$r1['user_id'],
 	'the id is recorded in the managed setting');
-check($user->get('usr_email') !== ProvisioningSetup::legacyServiceUserEmail()
-	&& preg_match('/^provisioning-[0-9a-f]{12}@/', (string)$user->get('usr_email')) === 1,
-	'a new account has a random address, not provisioning@<host>', (string)$user->get('usr_email'));
-check((int)$user->get('usr_permission') === 5, 'service user permission is 5 (cross-user API read)');
+check($user->get('usr_email') === NULL
+	&& preg_match('/^provisioning-[0-9a-f]{12}$/', (string)$user->get('usr_username')) === 1,
+	'a new account is a random username with no email, not provisioning@<host>',
+	var_export($user->get('usr_email'), true) . ' / ' . (string)$user->get('usr_username'));
+check((int)$user->get('usr_permission') === 8, 'service user permission is 8 (reads and queues mail for other people: personal)');
 check((bool)$user->get('usr_password_recovery_disabled'), 'service user password recovery disabled');
 
 $key = new ApiKey($r1['api_key_id'], TRUE);

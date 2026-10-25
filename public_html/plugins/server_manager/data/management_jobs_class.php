@@ -93,6 +93,7 @@ class ManagementJobException extends SystemBaseException {}
 class ManagementJob extends SystemBase {
 	public static $prefix = 'mjb';
 	public static $tablename = 'mjb_management_jobs';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mjb_management_job_id';
 
 	public static $json_vars = array('mjb_commands', 'mjb_parameters', 'mjb_result');
@@ -889,7 +890,7 @@ class ManagementJob extends SystemBase {
 		if ((int)$job->get('mjb_created_by')) {
 			$user = new User((int)$job->get('mjb_created_by'), TRUE);
 			if ($user->key) {
-				$by = trim($user->display_name()) ?: (string)$user->get('usr_email');
+				$by = trim($user->display_name()) ?: $user->login_label();
 			}
 		}
 		$reason = trim((string)($params['reason'] ?? ''));

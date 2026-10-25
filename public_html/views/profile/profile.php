@@ -276,7 +276,7 @@ function dashboard_render_section($section) {
                             <?php endif; ?>
                         </div>
                         <h5 class="jy-profile-username"><?php echo htmlspecialchars($user->display_name()); ?></h5>
-                        <p class="muted text-sm jy-profile-usermeta"><?php echo htmlspecialchars($user->get('usr_email')); ?></p>
+                        <p class="muted text-sm jy-profile-usermeta"><?php echo htmlspecialchars($user->login_label()); ?></p>
                         <?php if ($page_vars['address']->get_address_string(', ')): ?>
                         <p class="muted text-sm jy-profile-useraddr"><?php echo htmlspecialchars($page_vars['address']->get_address_string(', ')); ?></p>
                         <?php else: ?>

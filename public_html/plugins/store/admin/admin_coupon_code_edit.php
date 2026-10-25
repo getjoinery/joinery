@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -142,7 +143,7 @@
 	if ($coupon_code->get('ccd_usr_user_id_affiliate')) {
 		$affiliate_user = new User($coupon_code->get('ccd_usr_user_id_affiliate'), TRUE);
 		// Format must match AJAX response: "Name - Email"
-		$display_text = $affiliate_user->display_name() . ' - ' . $affiliate_user->get('usr_email');
+		$display_text = $affiliate_user->display_name() . ' - ' . $affiliate_user->login_label();
 		// Options array format: [label => value]
 		$affiliate_options = [$display_text => $affiliate_user->key];
 	}

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
@@ -9,10 +10,9 @@
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	$event = new Event($_REQUEST['evt_event_id'], TRUE);
+	$event = new Event($_REQUEST['evt_event_id'] ?? null, TRUE);
 
 	//REGISTRANTS
 
@@ -62,7 +62,7 @@
 
 		$registrant = new User($event_registrant->get('evr_usr_user_id'), TRUE);
 
-		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
+		$registrant_emails .= $registrant->display_name() . ' &lt;'.htmlspecialchars($registrant->login_label()). '&gt;, ';
 	}
 	echo '<p>'.$registrant_emails. '</p>';
 	$page->end_box();
@@ -73,7 +73,7 @@
 
 		$registrant = new User($waiting_list->get('ewl_usr_user_id'), TRUE);
 
-		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
+		$registrant_emails .= $registrant->display_name() . ' &lt;'.htmlspecialchars($registrant->login_label()). '&gt;, ';
 	}
 	$page->begin_box($pageoptions);
 	echo '<p>'.$registrant_emails. '</p>';

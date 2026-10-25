@@ -77,13 +77,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// AJAX requests will be handled by the new ErrorManager system
 
 	if (!empty($_POST)) {
-		// Too many failed sign-ins, counted two ways, each 10 in 15 minutes:
-		// from the caller's network (an IPv6 caller's whole /64), and for the
-		// email typed, so a caller with many networks cannot aim them all at
-		// one account. The email's count is kept whether or not an account
-		// has that email, and both refusals read the same, so the limit says
-		// nothing about which emails have accounts. Passkey sign-in keeps its
-		// own count (passkey_login).
+		// Too many failed sign-ins, counted three ways, each 10 in 15 minutes:
+		// from the caller's network (an IPv6 caller's whole /64); for the email
+		// or username typed, so a caller with many networks cannot aim them all
+		// at one account; and for the account it names, so typing its email and
+		// its username does not buy two allowances. The typed text's count is
+		// kept whether or not an account has it, and every refusal reads the
+		// same, so the limit says nothing about which accounts exist. Passkey
+		// sign-in keeps its own count (passkey_login).
 		$too_many_attempts = function () use ($ajax) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
@@ -99,8 +100,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			(empty($input['password']) && empty($input['lbx_password']))) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/ValidationException.php');
-				throw new ValidationException('Please enter both a username and a password to login.', [
-					'email' => 'Email is required',
+				throw new ValidationException('Please enter both your email or username and a password to login.', [
+					'email' => 'Email or username is required',
 					'password' => 'Password is required'
 				]);
 			} else {
@@ -111,20 +112,26 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$email = empty($input['email']) ? $input['lbx_email'] : $input['email'];
 		$password = empty($input['password']) ? $input['lbx_password'] : $input['password'];
 		$account_key = RequestLogger::username_key((string)$email);
-		if (!RequestLogger::rate_limit_state('login', 10, 900, false, null, $account_key)['allowed']) {
+		$user = User::GetByLogin($email);
+		if (!RequestLogger::rate_limit_state('login', 10, 900, false, null, $account_key)['allowed']
+				|| ($user && !RequestLogger::rate_limit_state('login', 10, 900, false, $user->key)['allowed'])) {
 			return $too_many_attempts();
 		}
-		$user = User::GetByEmail($email);
 		if (!$user) {
 			User::spend_password_check($password);
 		}
 
 		if (!$user || !$user->check_password($password)) {
-			// Email or password was incorrect
-			RequestLogger::log('login', 'login_attempt', false, [
+			// Email/username or password was incorrect. One row carries both
+			// counts: the text typed, and the account when there is one.
+			$failure = array(
 				'note' => 'Failed login for: ' . $email,
 				'key'  => $account_key,
-			]);
+			);
+			if ($user) {
+				$failure['user_id'] = $user->key;
+			}
+			RequestLogger::log('login', 'login_attempt', false, $failure);
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
@@ -155,7 +162,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// and say so on the form. A refusal here is a message on the login page,
 		// never a thrown error — process_logic turns an error with no page data
 		// into the exception page.
-		if($settings->get_setting('activation_required_login')){
+		// An account with no email has no address to prove, so it is never held here.
+		if($settings->get_setting('activation_required_login') && $user->get('usr_email')){
 			if(!$user->get('usr_is_activated')){
 				Activation::email_activate_send($user);
 				if ($ajax) {

@@ -551,7 +551,10 @@ class StripeHelper {
 					'quantity' => $cart_item['quantity'],
 				);
 
-				$stripe_price = $this->get_or_create_price($cart_item['product_version'], $final_price);
+				// The session charges the inline price_data above (discount
+				// included). Make sure the version has its own canonical price,
+				// which a later tier change bills at.
+				$this->get_or_create_price($cart_item['product_version']);
 
 				if($cart_item['price'] > 0){
 					array_push($stripe_item_list, $stripe_current_item);		
@@ -638,7 +641,12 @@ class StripeHelper {
 	}
 
 	public function get_customer($user, $return_type='object') {
-		$stripe_customer = $this->client()->customers->all(["email" => $user->get('usr_email')]);
+		// Stripe's SDK drops a null parameter, so a search with no email would be an
+		// unfiltered list and its first customer someone else's: an account with
+		// no email is never looked up, only created (get_or_create_stripe_customer).
+		$stripe_customer = $user->get('usr_email')
+			? $this->client()->customers->all(["email" => $user->get('usr_email')])
+			: array('data' => array());
 
 		// No matching customer in Stripe — caller (e.g. get_or_create_stripe_customer)
 		// is responsible for creating one. Return-type-appropriate "not found" sentinel.
@@ -696,11 +704,15 @@ class StripeHelper {
 	}
 
 	public function create_customer_at_stripe($user, $return_type='object') {
-		$stripe_customer = $this->client()->customers->create([
-				'name' => $user->get('usr_first_name'). ' ' . $user->get('usr_last_name'),
-				'email' => $user->get('usr_email'),
-				'description' => $user->get('usr_first_name'). ' ' . $user->get('usr_last_name'). ' ('.$user->get('usr_email').')',
-			]);
+		$name = trim($user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
+		$params = array(
+			'name' => $name,
+			'description' => $name . ' (' . $user->login_label() . ')',
+		);
+		if ($user->get('usr_email')) {
+			$params['email'] = $user->get('usr_email');
+		}
+		$stripe_customer = $this->client()->customers->create($params);
 			
 		$this->write_customer_id($user, $stripe_customer['id']);
 
@@ -1245,20 +1257,35 @@ class StripeHelper {
 
 
 	
+	/**
+	 * The Stripe price to charge a product version at.
+	 *
+	 * With no $price, or a $price equal to the version's own (prv_version_price),
+	 * this is the version's canonical price: the one a tier change, the billing
+	 * page and the webhook read back from prv_stripe_price_id(_test) as the
+	 * plan's price. It is found or created at the version's own amount and its id
+	 * stored on the version.
+	 *
+	 * Any other $price (a coupon-discounted checkout) is that one charge's price:
+	 * found or created at that amount and returned, never stored on the version,
+	 * so a discount never becomes what the plan bills at later.
+	 */
 	public function get_or_create_price($product_version, $price=NULL){
-		if(!$price){
-			$price = $product_version->get('prv_version_price');
+		$version_price = $product_version->get('prv_version_price');
+		if($price === NULL){
+			$price = $version_price;
 		}
-		
-		
+		$amount_cents = (int)round((float)$price * 100);
+		$is_canonical = ($amount_cents === (int)round((float)$version_price * 100));
+
 		$product = new Product($product_version->get('prv_pro_product_id'), TRUE);
 		
 		$settings = Globalvars::get_instance();
 		$currency_code = $settings->get_setting('site_currency');
-		$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
 		
-		
-		if($product_version->is_subscription()){
+		$interval = $product_version->is_subscription();
+		$trial_days = (int)$product_version->get('prv_trial_period_days');
+		if($interval){
 			$stripe_type = 'recurring';
 		}
 		else{
@@ -1277,81 +1304,86 @@ class StripeHelper {
 			throw new SystemDisplayablePermanentError("This product does not have a stripe product id."); 
 			exit;
 		}
+
+		$price_id_field = $this->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
+		$stored_id = (string)$product_version->get($price_id_field);
 		
-		//GET ALL PRICES FOR PRODUCT
+		//FIND AN ACTIVE PRICE OF THIS PRODUCT AT THIS AMOUNT, INTERVAL AND TRIAL
 		$stripe_prices = $this->client()->prices->all([
 			'product' => $stripe_product_id,
 			'active' => 'true',
 			'type' => $stripe_type,
+			'limit' => 100,
 			]);
 	
 		$found_price = NULL;
-		foreach ($stripe_prices->data as $stripe_price) {
-			if($stripe_price->unit_amount / 100 == $price){
-				// Store the price ID if it's not already stored
-				if ($this->test_mode) {
-					if (!$product_version->get('prv_stripe_price_id_test')) {
-						$product_version->set('prv_stripe_price_id_test', $stripe_price->id);
-						$product_version->save();
+		foreach ($stripe_prices->autoPagingIterator() as $stripe_price) {
+			if((int)$stripe_price->unit_amount !== $amount_cents){
+				continue;
+			}
+			if($interval){
+				$recurring = $stripe_price->recurring;
+				if(!$recurring || $recurring->interval !== $interval){
+					continue;
+				}
+				if((int)($recurring->trial_period_days ?? 0) !== $trial_days){
+					continue;
+				}
+			}
+			// The id already stored on the version wins over another price at
+			// the same amount, so the stored id never flips between twins.
+			if($found_price === NULL || $stripe_price->id === $stored_id){
+				$found_price = $stripe_price;
+			}
+		}
+
+		if(!$found_price){
+			//IF WE GOT HERE WE NEED TO CREATE ONE
+			// The nickname is what labels this price in the Stripe dashboard, where
+			// every price of a product otherwise looks alike. Build it from the
+			// amount actually being charged. The currency CODE, not the symbol —
+			// CurrencyHelper::symbol() is for HTML (it returns '&euro;') and falls
+			// back to '$' for any currency it does not know, which would label a
+			// GBP price with a dollar sign.
+			$nickname = number_format($amount_cents / 100, 2) . ' ' . strtoupper((string)$currency_code);
+			if($trial_days){
+				$nickname .= '-trial'.$trial_days;
+			}
+			if(!$is_canonical){
+				$nickname .= '-discounted';
+			}
+
+			try{
+				$stripe_params=array();
+				$stripe_params['nickname'] = $nickname;
+				$stripe_params['unit_amount'] = $amount_cents;
+				$stripe_params['currency'] = $currency_code;
+				$stripe_params['product'] = $stripe_product_id;
+				if($interval){
+					$stripe_params['recurring'] = array('interval' => $interval);
+					if($trial_days){
+						$stripe_params['recurring']['trial_period_days'] = $trial_days;
 					}
-				} else {
-					if (!$product_version->get('prv_stripe_price_id')) {
-						$product_version->set('prv_stripe_price_id', $stripe_price->id);
-						$product_version->save();
-					}
 				}
-				return $stripe_price;
+
+				$found_price = $this->create_price($stripe_params);
+			}
+			catch (Exception $e) {
+
+				throw new SystemDisplayablePermanentError("Stripe price creation failed.  Message: ".$e->getMessage());
 			}
 		}
-		
-		//IF WE GOT HERE WE NEED TO CREATE ONE
-		// The nickname is what labels this price in the Stripe dashboard, where
-		// every price of a product otherwise looks alike. Build it from the
-		// amount actually being charged. The currency CODE, not the symbol —
-		// CurrencyHelper::symbol() is for HTML (it returns '&euro;') and falls
-		// back to '$' for any currency it does not know, which would label a
-		// GBP price with a dollar sign.
-		$nickname = number_format((float)$price, 2) . ' ' . strtoupper((string)$currency_code);
-		if($product_version->get('prv_trial_period_days')){
-			$nickname .= '-trial'.$product_version->get('prv_trial_period_days');
+
+		// Only the version's own amount is the version's price. Storing it is
+		// the platform's bookkeeping: the amount comes from the product row, not
+		// from the request, so it is done whoever reached it (a buyer adding the
+		// product to a cart, a member changing tier, an admin editing it).
+		if($is_canonical && $found_price->id !== $stored_id){
+			$product_version->set($price_id_field, $found_price->id);
+			SystemBase::server_initiated_write(function () use ($product_version) { $product_version->save(); });
 		}
-		
 
-	
-		try{
-			$stripe_params=array();
-			$stripe_params['nickname'] = $nickname;
-			$stripe_params['unit_amount'] = $price * 100;
-			$stripe_params['currency'] = $currency_code;
-			$stripe_params['product'] = $stripe_product_id;
-			if($product_version->is_subscription()){
-
-				if($product_version->get('prv_trial_period_days')){
-					$stripe_params['recurring'] = array(
-						'interval' => $product_version->is_subscription(),
-						'trial_period_days' => $product_version->get('prv_trial_period_days')
-						);
-				}
-				else{
-					$stripe_params['recurring'] = array('interval' => $product_version->is_subscription());
-				}
-			}
-
-			$stripe_price = $this->create_price($stripe_params);
-
-			// Automatically store the price ID on the product version
-			if ($this->test_mode) {
-				$product_version->set('prv_stripe_price_id_test', $stripe_price->id);
-			} else {
-				$product_version->set('prv_stripe_price_id', $stripe_price->id);
-			}
-			$product_version->save();
-		}
-		catch (Exception $e) {
-
-			throw new SystemDisplayablePermanentError("Stripe price creation failed.  Message: ".$e->getMessage());
-		}
-		return $stripe_price;
+		return $found_price;
 	}
 
 

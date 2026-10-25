@@ -46,7 +46,7 @@ function checkout_logic(array $input): LogicResult{
 
 	// Coupon handling (GET-based for non-AJAX fallback)
 	if ($settings->get_setting('coupons_active')) {
-		if (StripeHelper::isTestMode() && $session->get_permission() >= 8) {
+		if (StripeHelper::isTestMode() && Access::permits(CouponCode::access_level('read'), $session)) {
 			$coupon_codes = new MultiCouponCode(array());
 			$coupon_codes->load();
 			$page_vars['all_coupons'] = $coupon_codes;
@@ -64,12 +64,19 @@ function checkout_logic(array $input): LogicResult{
 		}
 	}
 
+	// A signed-in buyer with no email adds one to their account first: the receipt
+	// and what they buy are sent there, and the purchase is theirs, not a new
+	// account made from an address typed here.
+	if ($session->is_logged_in() && !(new User($session->get_user_id(), TRUE))->get('usr_email')) {
+		return User::add_email_first(User::CHECKOUT_NEEDS_EMAIL);
+	}
+
 	// Billing user handling
 	if (isset($_GET['use_current_user']) && $_GET['use_current_user'] == 1 && $session->is_logged_in()) {
 		$user = new User($session->get_user_id(), TRUE);
 		$cart->billing_user = array(
-			'billing_first_name' => $user->get('usr_fname'),
-			'billing_last_name' => $user->get('usr_lname'),
+			'billing_first_name' => $user->get('usr_first_name'),
+			'billing_last_name' => $user->get('usr_last_name'),
 			'billing_email' => $user->get('usr_email')
 		);
 		$cart->persist();
@@ -83,11 +90,9 @@ function checkout_logic(array $input): LogicResult{
 		// Implicit consent via the action-button copy replaces the explicit
 		// privacy checkbox. Password is auto-generated downstream by
 		// User::CreateNew when one is not supplied.
+		// A free order's billing form posts straight to /cart_charge, which
+		// completes it; this is the billing step alone.
 		$cart->determine_billing_user($_POST, false);
-		// For free orders, go directly to charge processing
-		if ($cart->get_total() <= 0 && !empty($_POST['complete_order'])) {
-			return LogicResult::redirect('/cart_charge');
-		}
 		return LogicResult::redirect('/checkout');
 	}
 	else {
@@ -220,7 +225,7 @@ function checkout_logic(array $input): LogicResult{
 			$stripe_helper = new StripeHelper();
 			$page_vars['stripe_helper'] = $stripe_helper;
 			if ($session->get_user_id()) {
-				$existing_billing_user = User::GetByEmail($session->get_user_id());
+				$existing_billing_user = new User($session->get_user_id(), TRUE);
 				$create_list = $stripe_helper->build_checkout_item_array($cart, $existing_billing_user);
 			} else {
 				$create_list = $stripe_helper->build_checkout_item_array($cart, NULL);
@@ -246,6 +251,7 @@ function checkout_logic(array $input): LogicResult{
 
 function checkout_logic_descriptor() {
     return [
+        'auth' => ['min_user_permission' => 0],
         'requires_session' => true,
         'description' => 'Add item to cart',
         'input' => [
@@ -254,7 +260,6 @@ function checkout_logic_descriptor() {
             'use_current_user' => ['type' => 'int', 'required' => false, 'label' => '1 to bill the signed-in user'],
             'newbilling' => ['type' => 'int', 'required' => false, 'label' => '1 to enter new billing details'],
             'billing_email' => ['type' => 'string', 'required' => false, 'label' => 'Billing email'],
-            'complete_order' => ['type' => 'string', 'required' => false, 'label' => 'Set to complete a zero-total order'],
         ],
     ];
 }

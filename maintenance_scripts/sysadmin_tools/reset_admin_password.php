@@ -16,12 +16,16 @@
  * outside the web root entirely; the CLI SAPI check below is the second line.
  *
  * Usage:
- *   sudo php reset_admin_password.php [--email=ADDRESS] [--set-email=ADDRESS]
- *                                     [--password-file=PATH]
+ *   sudo php reset_admin_password.php [--user-id=N | --username=NAME | --email=ADDRESS]
+ *                                     [--set-email=ADDRESS] [--password-file=PATH]
  *                                     [--clear-second-factor] [--chosen] [--yes]
  *
- *   --email=ADDRESS         Account to reset. Defaults to the only permission-10
- *                           account when there is exactly one.
+ *   --user-id=N             Account to reset, by its id (an installer names the
+ *                           seeded admin, user 1, this way).
+ *   --username=NAME         Account to reset, by its username.
+ *   --email=ADDRESS         Account to reset, by its email. With none of the
+ *                           three, the only permission-10 account when there is
+ *                           exactly one.
  *   --set-email=ADDRESS     Also change the account's address, in the same save
  *                           as the password. An installer supplies the owner's
  *                           real address here so the account is recoverable by
@@ -55,6 +59,8 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.3 - --user-id and --username pick the account: an account may have no email
+ *                (spec optional_username), and the seeded admin is user 1, username admin
  * @version 1.2 - --chosen: a password the owner picked on a deploy form is not marked for
  *                change at first login; the forced change is for passwords nobody chose
  * @version 1.1
@@ -74,7 +80,9 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 function rap_usage($code = 2) {
     $stream = ($code === 0) ? STDOUT : STDERR;
     fwrite($stream, "Usage: php reset_admin_password.php [options]\n\n");
-    fwrite($stream, "  --email=ADDRESS         account to reset (default: the sole permission-10 account)\n");
+    fwrite($stream, "  --user-id=N             account to reset, by id\n");
+    fwrite($stream, "  --username=NAME         account to reset, by username\n");
+    fwrite($stream, "  --email=ADDRESS         account to reset, by email (default: the sole permission-10 account)\n");
     fwrite($stream, "  --set-email=ADDRESS     also change the account's address, in the same save\n");
     fwrite($stream, "  --password-file=PATH    read the new password from the first line of PATH\n");
     fwrite($stream, "  --clear-second-factor   also disable TOTP and rotate the trusted-device key\n");
@@ -131,8 +139,22 @@ if (isset($opts['help'])) {
 // ---------------------------------------------------------------------------
 
 $email = isset($opts['email']) && is_string($opts['email']) ? trim($opts['email']) : '';
+$username = isset($opts['username']) && is_string($opts['username']) ? trim($opts['username']) : '';
+$user_id = isset($opts['user-id']) && is_string($opts['user-id']) ? trim($opts['user-id']) : '';
 
-if ($email === '') {
+if ($user_id !== '') {
+    $user = ctype_digit($user_id) ? new User((int)$user_id, TRUE) : NULL;
+    if (!$user || !$user->key || $user->get('usr_delete_time')) {
+        fwrite(STDERR, "ERROR: no live account with id '{$user_id}'.\n");
+        exit(1);
+    }
+} elseif ($username !== '') {
+    $user = User::GetByUsername($username);
+    if ($user === NULL) {
+        fwrite(STDERR, "ERROR: no account found for username '{$username}'.\n");
+        exit(1);
+    }
+} elseif ($email === '') {
     $superadmins = new MultiUser(
         ['permission_range' => [10, 10], 'deleted' => false],
         ['usr_user_id' => 'ASC']
@@ -146,15 +168,14 @@ if ($email === '') {
 
     if (count($candidates) === 1) {
         $user = $candidates[0];
-        $email = $user->get('usr_email');
-        fwrite(STDOUT, "No --email given; using the only permission-10 account: {$email}\n");
+        fwrite(STDOUT, "No account named; using the only permission-10 account: " . $user->login_label() . "\n");
     } elseif (count($candidates) === 0) {
-        fwrite(STDERR, "ERROR: no permission-10 account exists. Pass --email=ADDRESS.\n");
+        fwrite(STDERR, "ERROR: no permission-10 account exists. Pass --user-id, --username or --email.\n");
         exit(1);
     } else {
-        fwrite(STDERR, "ERROR: this site has " . count($candidates) . " permission-10 accounts. Pass --email=ADDRESS to choose one:\n");
+        fwrite(STDERR, "ERROR: this site has " . count($candidates) . " permission-10 accounts. Pass --user-id to choose one:\n");
         foreach ($candidates as $candidate) {
-            fwrite(STDERR, '  ' . $candidate->get('usr_email') . "\n");
+            fwrite(STDERR, '  ' . $candidate->key . '  ' . $candidate->login_label() . "\n");
         }
         exit(1);
     }
@@ -165,6 +186,8 @@ if ($email === '') {
         exit(1);
     }
 }
+// Who the account is, in every message below: its email, else @username.
+$email = $user->login_label();
 
 // ---------------------------------------------------------------------------
 // Validate the replacement address, if one was given

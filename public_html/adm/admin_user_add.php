@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -58,8 +59,8 @@ $session = SessionControl::get_instance();
 	}
 
 	$formwriter->textinput('usr_email', 'Email', [
+		'helptext' => 'Leave blank for someone with no email: give them a username instead.',
 		'validation' => [
-			'required' => true,
 			'email' => true,
 			'maxlength' => 64,
 			'custom' => [
@@ -69,6 +70,11 @@ $session = SessionControl::get_instance();
 				'dataFieldName' => 'email'
 			]
 		]
+	]);
+
+	$formwriter->textinput('usr_username', 'Username', [
+		'helptext' => 'Optional. Signs in wherever an email does. 3 to 32 letters, digits, dots, dashes or underscores. An account needs an email, a username, or both.',
+		'validation' => ['maxlength' => 32, 'pattern' => '/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/'],
 	]);
 
 	$formwriter->textinput('password', 'Password', [

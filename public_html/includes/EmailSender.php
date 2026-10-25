@@ -12,6 +12,8 @@ require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.3 - the retry queue, the refused-send event and the debug log save as the server's own writes (no person owns them);
+ *   a retry row with no display name is queued under the address, not refused
  * @version 1.2 - a refused protected-domain send logs its addresses, never its subject
  * @version 1.1 - lastSendReport(): which transport took the message, the carrier's
  *   receipt, which recipients Direct delivered, the error on refusal
@@ -317,7 +319,8 @@ class EmailSender {
             $log->set('evl_event', 'email_send_refused');
             $log->set('evl_was_success', false);
             $log->set('evl_note', $prefix . 'to=' . $to . ' — ' . $reason);
-            $log->save();
+            // An observation of a refused send: the server's own record.
+            SystemBase::server_initiated_write(function () use ($log) { $log->save(); });
         } catch (Throwable $e) {
             error_log('email_send_refused: could not write the event-log record — ' . $e->getMessage());
         }
@@ -532,10 +535,38 @@ class EmailSender {
     }
 
     /**
+     * An account with no email has nobody to send to: a send to a blank
+     * recipient is "nothing sent" (false, one log line), never the exception a
+     * malformed address still is. Every receipt, notice and welcome addressed
+     * to an account's email reaches here as a blank for a username-only account.
+     */
+    private static function noAddress($to, string $what): bool {
+        if (is_array($to)) {
+            // EmailMessage::to(): a list of addresses, or address => name.
+            $blank = true;
+            foreach ($to as $k => $v) {
+                if (trim((string)(is_numeric($k) ? $v : $k)) !== '') {
+                    $blank = false;
+                    break;
+                }
+            }
+        } else {
+            $blank = $to === null || trim((string)$to) === '';
+        }
+        if ($blank) {
+            error_log('[EMAIL_NO_ADDRESS] ' . $what . ': the recipient has no email address; nothing sent');
+        }
+        return $blank;
+    }
+
+    /**
      * Quick send static method for simple cases
      * Uses the default outer template for consistent styling
      */
     public static function quickSend($to, $subject, $body, $from = null) {
+        if (self::noAddress($to, 'quickSend "' . $subject . '"')) {
+            return false;
+        }
         $settings = Globalvars::get_instance();
 
         // Check if body appears to be plain text or HTML
@@ -580,6 +611,9 @@ class EmailSender {
      * Send using a template
      */
     public static function sendTemplate($templateName, $to, $values = [], $subject = null) {
+        if (self::noAddress($to, 'template ' . $templateName)) {
+            return false;
+        }
         $message = EmailMessage::fromTemplate($templateName, $values);
         $message->to($to);
 
@@ -907,19 +941,23 @@ class EmailSender {
         try {
             require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 
-            $fromName = $message->getFromName() ?: '';
+            // Every column is required: a message with no display name is queued
+            // under its address, as Notify queues one, or the row is refused and
+            // the retry silently lost.
+            $fromName = mb_substr($message->getFromName() ?: (string)$message->getFrom(), 0, 70);
 
             foreach ($message->getRecipients() as $recipient) {
                 $queued = new QueuedEmail(NULL);
                 $queued->set('equ_from', $message->getFrom());
                 $queued->set('equ_from_name', $fromName);
                 $queued->set('equ_to', $recipient['email']);
-                $queued->set('equ_to_name', $recipient['name'] ?? '');
-                $queued->set('equ_subject', $message->getSubject());
+                $queued->set('equ_to_name', mb_substr(($recipient['name'] ?? '') ?: $recipient['email'], 0, 70));
+                $queued->set('equ_subject', mb_substr((string)$message->getSubject(), 0, 128));
                 $queued->set('equ_body', $message->getHtmlBody() ?: $message->getTextBody());
                 $queued->set('equ_status', QueuedEmail::ERROR_SENDING);
                 $queued->set('equ_retry_count', 0);
-                $queued->save();
+                // The platform's retry queue, which no person asked for or owns.
+                SystemBase::server_initiated_write(function () use ($queued) { $queued->save(); });
             }
 
             $count = count($message->getRecipients());
@@ -945,7 +983,8 @@ class EmailSender {
             $log->set('dbl_message', $message);
             $log->set('dbl_service', $service ?: 'unknown');
             $log->set('dbl_status', 'debug');
-            $log->save();
+            // An observation the debug setting asked for: the server's own record.
+            SystemBase::server_initiated_write(function () use ($log) { $log->save(); });
         } catch (Exception $e) {
             error_log("Debug email log failed: " . $e->getMessage());
         }
