@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 120
-# covers: [maintenance_scripts/install_tools/outbound_limits.sh, maintenance_scripts/install_tools/_site_run_spec.sh]
+# covers: [maintenance_scripts/install_tools/outbound_limits.sh, maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/install_tools/install.sh, maintenance_scripts/install_tools/_site_init.sh, maintenance_scripts/sysadmin_tools/remove_account.sh, maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh]
 #
 # outbound_limits.sh (node_outbound_and_transfer WP3, WP4, WP5) writes one
 # nftables table limiting what each site opens toward the outside, and a speed
@@ -587,7 +587,7 @@ chk "a container site keeps its own figures across a rebuild, and a given one re
     "$(grep -c 'SPEC_OUTBOUND="$(run_spec_outbound_lines "$SITENAME")"' "$INSTALL")|$(grep -c '\[ -z "$SPEC_OUTBOUND" \] || printf' "$INSTALL")" "1|1"
 chk "a bare-metal site's figures are refused: they are the machine's" "$(grep -c 'a bare-metal site shares the machine' "$INSTALL")" "1"
 chk "--outbound-notice-gb reaches the site's first start: exported, carried into a container, and written as the setting" \
-    "$(grep -c -E '^    JOINERY_OUTBOUND_NOTICE_GB$|export JOINERY_OUTBOUND_NOTICE_GB=' "$INSTALL")|$(grep -c -E "UPDATE stg_settings SET stg_value = .\\$\{JOINERY_OUTBOUND_NOTICE_GB\}. WHERE stg_name = 'outbound_monthly_notice_gb'" "$ROOT/maintenance_scripts/install_tools/_site_init.sh")" "2|1"
+    "$(grep -c -E '^    ([A-Z_]+ )*JOINERY_OUTBOUND_NOTICE_GB( [A-Z_]+)*$|export JOINERY_OUTBOUND_NOTICE_GB=' "$INSTALL")|$(grep -c -E "UPDATE stg_settings SET stg_value = .\\$\{JOINERY_OUTBOUND_NOTICE_GB\}. WHERE stg_name = 'outbound_monthly_notice_gb'" "$ROOT/maintenance_scripts/install_tools/_site_init.sh")" "2|1"
 (
   export JOINERY_SITE_STATE_ROOT="$T/rs"; mkdir -p "$T/rs/etc/joinery/sites/x"
   . "$HELPER"
@@ -644,7 +644,7 @@ chk "install.sh site brings a new container under the limits once it starts" \
 chk "the move script refreshes once every move is done" \
     "$(grep -B3 '^exit "\$status"$' "$ROOT/maintenance_scripts/sysadmin_tools/move_site_to_own_network.sh" | grep -c '^run_spec_limits_refresh$')" "1"
 chk "remove_account.sh refreshes after the run spec is gone" \
-    "$(awk '/for mark in held quiet suspended run_spec[ ;]/ { m = 1 } /=== Removing Docker site ===/ { d = 1 } d && /^    clear_site_marks$/ { f = 1 } m && f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
+    "$(awk '/for mark in .* run_spec[ ;]/ { m = 1 } /=== Removing Docker site ===/ { d = 1 } d && /^    clear_site_marks$/ { f = 1 } m && f && /systemctl start joinery-limits.service/ { print "after"; exit }' "$ROOT/maintenance_scripts/sysadmin_tools/remove_account.sh")" "after"
 
 echo
 echo "outbound_limits gate: $passed passed, $failed failed"
