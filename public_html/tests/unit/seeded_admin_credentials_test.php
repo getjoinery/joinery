@@ -16,10 +16,14 @@
  *   - a file naming another address is left alone;
  *   - no file, or one this run cannot write, is said in words, never an error.
  *
+ * It changes ids 2 and 3 only where they are the seeded placeholders: a site
+ * installed before 2026-01 seeded only the admin, so its first members hold them.
+ *
  * Works on temporary files only.
  *
  * Run: php tests/run.php safe --filter=seeded_admin_credentials
  *
+ * @version 1.1 - ids 2 and 3 only where they are the placeholders
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -69,6 +73,14 @@ if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
 		'an unwritable file is left as it was, and the line says so', $said);
 	chmod($file, 0600);
 }
+
+section('ids 2 and 3 are changed only when they are the placeholders');
+check(seeded_accounts_is_placeholder(array('usr_first_name' => 'System', 'usr_last_name' => 'User', 'usr_email' => null), 'System', 'system'),
+	'the installer\'s System User row is the placeholder');
+check(seeded_accounts_is_placeholder(array('usr_first_name' => 'X', 'usr_last_name' => '', 'usr_email' => 'deleted-user@test.com'), 'Deleted', 'deleted-user'),
+	'so is a row with the deleted-user@ address any site seeded');
+check(!seeded_accounts_is_placeholder(array('usr_first_name' => 'Jane', 'usr_last_name' => 'Doe', 'usr_email' => 'jane@example.org'), 'System', 'system'),
+	'a member who took id 2 on a site installed before the seed is not');
 
 @unlink($file);
 @rmdir($dir);
