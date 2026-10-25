@@ -667,6 +667,27 @@
 		// closes this ordering hazard for good. See "DEFERRED COLUMN CLEANUP" below.
 		$cleanup_result = ['errors' => [], 'warnings' => [], 'messages' => []];
 
+		// Step 4.7: A unique index the data refused before migrations gets a
+		// second try now that they have run, since a migration is how such
+		// data gets fixed (two '' emails made NULL, say). Without it the index
+		// waits for the next run, which on a node is the next release. The pass
+		// makes only what is missing, so the indexes made at Step 3.25 are not
+		// touched, and what the data still refuses is warned about again.
+		$skipped_unique = array_filter($index_result['warnings'] ?? array(), function ($w) {
+			return strpos($w, 'Unique index skipped') === 0;
+		});
+		if ($skipped_unique) {
+			echo "-----INDEXES (after migrations)-----<br>\n";
+			$retry_result = $database_updater->manageIndexes($classes);
+			if (!empty($retry_result['messages'])) {
+				echo implode('<br>', $retry_result['messages']) . "<br>\n";
+				update_database_schema_facts($retry_result['messages']);
+			}
+			foreach (array_merge($retry_result['warnings'], $retry_result['errors']) as $line) {
+				echo 'WARNING: ' . $line . "<br>\n";
+			}
+		}
+
 		// Step 4.8: Materialize declared foreign keys (core classes; plugin
 		// classes get the same treatment in PluginManager::sync). Runs AFTER
 		// migrations so an orphan-cleanup migration can unblock constraint

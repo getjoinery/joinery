@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php safe --filter=plugin_tables_before_migrations
  *
+ * @version 1.2 - pins the second index pass after migrations (Step 4.7)
  * @version 1.1 - the order is checked inside each pass's own function, and the schema-ahead pass is held to
  *                core tables before plugin tables with no migration or full sync; covers names the two files it
  *                reads as text, so an edit to either runs it
@@ -60,6 +61,10 @@ check($core_tables_at !== false && $plugin_pass_at !== false && $migrations_at !
 check($core_tables_at < $plugin_pass_at, 'core tables are created before the plugin table pass (plugin tables may reference core ones)');
 check($plugin_pass_at < $migrations_at, 'the plugin table pass runs BEFORE migrations');
 check($migrations_at < $full_sync_at, 'the full plugin sync still runs after migrations');
+$index_retry_at = strpos($full, '"-----INDEXES (after migrations)-----<br>\n"');
+$foreign_keys_at = strpos($full, '"-----FOREIGN KEYS-----<br>\n"');
+check($index_retry_at !== false && $migrations_at < $index_retry_at && $index_retry_at < $foreign_keys_at,
+	'a unique index the data refused gets its second try after migrations (which fix such data), before foreign keys');
 
 section('The schema-ahead pass: the same order, and nothing but tables and columns');
 $ahead = $body_of('function update_database_schema_ahead(');

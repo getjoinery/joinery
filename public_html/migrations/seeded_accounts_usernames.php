@@ -10,7 +10,9 @@
  *   - the seeded admin, user 1, when it still has exactly admin@example.com,
  *     becomes the username admin and loses that address, which nobody can
  *     receive at (and which passed the mail-domain check only by accident).
- *     It signs in as admin from now on; its password is unchanged.
+ *     It signs in as admin from now on; its password is unchanged. The
+ *     install's config/admin_credentials.txt, while it is still there, is
+ *     rewritten to name the username (seeded_accounts_rewrite_credentials()).
  *
  * A username another account already holds is left alone and said, with the
  * address kept, so no account is ever left with neither.
@@ -59,7 +61,34 @@ function seeded_accounts_usernames() {
 		}
 		$update->execute(array($username, $id));
 		echo "  user $id is now the username $username, with no email\n";
+		if ($only_if_email !== null) {
+			echo '  ' . seeded_accounts_rewrite_credentials(PathHelper::getSiteRoot() . '/config/admin_credentials.txt', $only_if_email, $username) . "\n";
+		}
 	}
 	return true;
+}
+
+/**
+ * The install's credentials file, while it is still there, tells the operator
+ * to sign in with the address the seeded admin just lost. Name the username in
+ * its place. The file is root's (600); a run that cannot write it, the admin
+ * page's update_database as the web user, says what to sign in with instead.
+ * Returns the line to print.
+ */
+function seeded_accounts_rewrite_credentials(string $path, string $email, string $username): string {
+	if (!is_file($path)) {
+		return "sign in as $username (no credentials file to update)";
+	}
+	$text = @file_get_contents($path);
+	$pattern = '/^Email:[ \t]*' . preg_quote($email, '/') . '[ \t]*$/mi';
+	if ($text === false || !preg_match($pattern, $text)) {
+		return "sign in as $username" . ($text === false ? '; config/admin_credentials.txt could not be read, and may still name ' . $email : '');
+	}
+	$text = preg_replace('/^Username:.*\R/mi', '', $text);
+	$text = preg_replace($pattern, 'Username: ' . $username, $text);
+	if (!is_writable($path) || @file_put_contents($path, $text) === false) {
+		return "sign in as $username; config/admin_credentials.txt still names $email (not writable here)";
+	}
+	return "config/admin_credentials.txt now names the username $username";
 }
 ?>
