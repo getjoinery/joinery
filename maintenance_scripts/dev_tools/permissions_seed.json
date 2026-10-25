@@ -1,0 +1,3781 @@
+{
+ "pages": {
+  "/admin/admin_ab_tests": {
+   "class": "content"
+  },
+  "/admin/admin_address_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_admin_menu": {
+   "class": "config"
+  },
+  "/admin/admin_admin_menu_edit": {
+   "class": "config"
+  },
+  "/admin/admin_agent_file_compare": {
+   "class": "config",
+   "note": "AI instructions"
+  },
+  "/admin/admin_agent_file_edit": {
+   "class": "config",
+   "note": "AI instructions"
+  },
+  "/admin/admin_agent_files": {
+   "class": "config",
+   "note": "AI instructions"
+  },
+  "/admin/admin_analytics_activitybydate": {
+   "class": "content",
+   "note": "aggregate only"
+  },
+  "/admin/admin_analytics_attribution": {
+   "class": "content"
+  },
+  "/admin/admin_analytics_email_stats": {
+   "class": "content"
+  },
+  "/admin/admin_analytics_funnels": {
+   "class": "content"
+  },
+  "/admin/admin_analytics_stats": {
+   "class": "content"
+  },
+  "/admin/admin_analytics_users": {
+   "class": "personal",
+   "note": "per-user rows"
+  },
+  "/admin/admin_apache_errors": {
+   "class": "restricted",
+   "note": "server log"
+  },
+  "/admin/admin_api_key": {
+   "class": "keys"
+  },
+  "/admin/admin_api_key_edit": {
+   "class": "keys"
+  },
+  "/admin/admin_api_keys": {
+   "class": "config",
+   "note": "shows public key ids only; revoke is the soft delete; the secret column is keys (3.3)"
+  },
+  "/admin/admin_backups": {
+   "class": "keys",
+   "note": "backup keys"
+  },
+  "/admin/admin_cloud_storage": {
+   "class": "keys",
+   "note": "bucket credentials"
+  },
+  "/admin/admin_comment": {
+   "class": "personal",
+   "note": "author identity"
+  },
+  "/admin/admin_comment_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_comments": {
+   "class": "personal"
+  },
+  "/admin/admin_component_edit": {
+   "class": "content",
+   "note": "custom HTML runs on every page: write 8 (3.1)"
+  },
+  "/admin/admin_component_type": {
+   "class": "config"
+  },
+  "/admin/admin_component_types": {
+   "class": "config"
+  },
+  "/admin/admin_components": {
+   "class": "content",
+   "note": "custom HTML: write 8 (3.1)"
+  },
+  "/admin/admin_contact_type": {
+   "class": "content"
+  },
+  "/admin/admin_contact_type_edit": {
+   "class": "content"
+  },
+  "/admin/admin_contact_types": {
+   "class": "content"
+  },
+  "/admin/admin_content_reports": {
+   "class": "personal",
+   "note": "reporter identity"
+  },
+  "/admin/admin_conversation": {
+   "class": "personal",
+   "note": "private chats (Q13)"
+  },
+  "/admin/admin_conversations": {
+   "class": "personal",
+   "note": "private chats (Q13)"
+  },
+  "/admin/admin_debug_email_logs": {
+   "class": "restricted"
+  },
+  "/admin/admin_email": {
+   "class": "personal",
+   "note": "sent-mail archive (Q12)"
+  },
+  "/admin/admin_email_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_email_preview": {
+   "class": "content"
+  },
+  "/admin/admin_email_recipients_modify": {
+   "class": "personal"
+  },
+  "/admin/admin_email_template": {
+   "class": "content"
+  },
+  "/admin/admin_email_template_edit": {
+   "class": "content",
+   "note": "an edited template reaches every user"
+  },
+  "/admin/admin_email_template_permanent_delete": {
+   "class": "content"
+  },
+  "/admin/admin_email_template_preview": {
+   "class": "content"
+  },
+  "/admin/admin_email_templates": {
+   "class": "content"
+  },
+  "/admin/admin_email_view": {
+   "class": "personal",
+   "note": "sent-mail archive (Q12)"
+  },
+  "/admin/admin_emails": {
+   "class": "personal",
+   "note": "sent-mail archive (Q12)"
+  },
+  "/admin/admin_emails_queue": {
+   "class": "personal"
+  },
+  "/admin/admin_emails_send": {
+   "class": "personal",
+   "note": "sends mail to users"
+  },
+  "/admin/admin_errors": {
+   "class": "restricted"
+  },
+  "/admin/admin_errors_delete": {
+   "class": "restricted"
+  },
+  "/admin/admin_file": {
+   "class": "personal",
+   "note": "private uploads"
+  },
+  "/admin/admin_file_delete": {
+   "class": "personal"
+  },
+  "/admin/admin_file_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_file_upload": {
+   "class": "personal"
+  },
+  "/admin/admin_file_upload_process": {
+   "class": "personal"
+  },
+  "/admin/admin_files": {
+   "class": "personal"
+  },
+  "/admin/admin_form_error": {
+   "class": "restricted"
+  },
+  "/admin/admin_group_edit": {
+   "class": "content",
+   "note": "tags and tier membership; Group is public-read in the API"
+  },
+  "/admin/admin_group_members": {
+   "class": "content",
+   "note": "tier membership grants paid access: write 8"
+  },
+  "/admin/admin_group_permanent_delete": {
+   "class": "content"
+  },
+  "/admin/admin_groups": {
+   "class": "content"
+  },
+  "/admin/admin_help": {
+   "class": "content"
+  },
+  "/admin/admin_help_edit": {
+   "class": "content"
+  },
+  "/admin/admin_log_event": {
+   "class": "restricted"
+  },
+  "/admin/admin_mailing_list": {
+   "class": "personal",
+   "note": "subscriber addresses"
+  },
+  "/admin/admin_mailing_list_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_mailing_lists": {
+   "class": "personal"
+  },
+  "/admin/admin_management_node": {
+   "class": "keys",
+   "note": "node credentials"
+  },
+  "/admin/admin_marketplace": {
+   "class": "config",
+   "note": "installs code (Q8)"
+  },
+  "/admin/admin_message": {
+   "class": "personal",
+   "note": "user messages"
+  },
+  "/admin/admin_notification_preferences": {
+   "class": "content",
+   "note": "own row: the owner rule applies"
+  },
+  "/admin/admin_oauth_providers": {
+   "class": "keys",
+   "note": "client secrets"
+  },
+  "/admin/admin_page": {
+   "class": "content"
+  },
+  "/admin/admin_page_edit": {
+   "class": "content"
+  },
+  "/admin/admin_page_permanent_delete": {
+   "class": "content"
+  },
+  "/admin/admin_pages": {
+   "class": "content"
+  },
+  "/admin/admin_passkey_lab": {
+   "class": "keys",
+   "note": "passkey secrets"
+  },
+  "/admin/admin_phone_edit": {
+   "class": "personal"
+  },
+  "/admin/admin_phone_verify": {
+   "class": "personal"
+  },
+  "/admin/admin_plugins": {
+   "class": "config",
+   "note": "installs and removes code"
+  },
+  "/admin/admin_post": {
+   "class": "content"
+  },
+  "/admin/admin_post_edit": {
+   "class": "content"
+  },
+  "/admin/admin_post_permanent_delete": {
+   "class": "content"
+  },
+  "/admin/admin_posts": {
+   "class": "content"
+  },
+  "/admin/admin_problem_reports": {
+   "class": "personal",
+   "note": "user reports"
+  },
+  "/admin/admin_public_menu": {
+   "class": "config"
+  },
+  "/admin/admin_public_menu_edit": {
+   "class": "config"
+  },
+  "/admin/admin_question": {
+   "class": "content"
+  },
+  "/admin/admin_question_edit": {
+   "class": "content"
+  },
+  "/admin/admin_questions": {
+   "class": "content"
+  },
+  "/admin/admin_recovery_readiness": {
+   "class": "keys",
+   "note": "shows recovery material"
+  },
+  "/admin/admin_require_second_factor": {
+   "class": "config"
+  },
+  "/admin/admin_sandbox_approve": {
+   "class": "config"
+  },
+  "/admin/admin_sandbox_log": {
+   "class": "restricted",
+   "note": "was router only"
+  },
+  "/admin/admin_sandbox_page": {
+   "class": "config",
+   "note": "was router only"
+  },
+  "/admin/admin_scheduled_tasks": {
+   "class": "config",
+   "note": "runs code on a schedule"
+  },
+  "/admin/admin_sealed_secrets": {
+   "class": "keys"
+  },
+  "/admin/admin_seo_page_edit": {
+   "class": "content"
+  },
+  "/admin/admin_seo_pages": {
+   "class": "content"
+  },
+  "/admin/admin_settings": {
+   "class": "config",
+   "note": "key fields need 10: see notes"
+  },
+  "/admin/admin_settings_email": {
+   "class": "config",
+   "note": "secret settings are keys columns, masked below 10 (3.3)"
+  },
+  "/admin/admin_settings_plugins": {
+   "class": "config",
+   "note": "plugin keys need 10: see notes"
+  },
+  "/admin/admin_softdelete": {
+   "class": "config",
+   "note": "unclear page; see B14"
+  },
+  "/admin/admin_spec_view": {
+   "class": "config"
+  },
+  "/admin/admin_static_cache": {
+   "class": "config"
+  },
+  "/admin/admin_subscription_tier_edit": {
+   "class": "money",
+   "note": "prices and tiers"
+  },
+  "/admin/admin_subscription_tiers": {
+   "class": "money",
+   "note": " Logic gate is 7, not 5 (adm/logic/admin_subscription_tiers_logic.php:11)"
+  },
+  "/admin/admin_survey": {
+   "class": "content"
+  },
+  "/admin/admin_survey_answers": {
+   "class": "personal"
+  },
+  "/admin/admin_survey_edit": {
+   "class": "content"
+  },
+  "/admin/admin_survey_user_answers": {
+   "class": "personal"
+  },
+  "/admin/admin_survey_users": {
+   "class": "personal"
+  },
+  "/admin/admin_surveys": {
+   "class": "content"
+  },
+  "/admin/admin_test_database": {
+   "class": "config"
+  },
+  "/admin/admin_themes": {
+   "class": "config",
+   "note": "installs and activates code"
+  },
+  "/admin/admin_tier_edit": {
+   "class": "money",
+   "note": "prices and tiers (Q6)"
+  },
+  "/admin/admin_updates": {
+   "class": "config",
+   "note": "applies upgrades (Q8)"
+  },
+  "/admin/admin_url": {
+   "class": "config",
+   "note": "redirects can phish"
+  },
+  "/admin/admin_url_edit": {
+   "class": "config"
+  },
+  "/admin/admin_urls": {
+   "class": "config"
+  },
+  "/admin/admin_user": {
+   "class": "personal",
+   "note": "password column restricted, key columns keys; permanent delete is on admin_users_permanent_delete"
+  },
+  "/admin/admin_user_add": {
+   "class": "personal"
+  },
+  "/admin/admin_user_login_as": {
+   "class": "config",
+   "note": "impersonation"
+  },
+  "/admin/admin_users": {
+   "class": "personal",
+   "note": "list shows emails"
+  },
+  "/admin/admin_users_edit": {
+   "class": "personal",
+   "note": "password fields need 9"
+  },
+  "/admin/admin_users_message": {
+   "class": "personal"
+  },
+  "/admin/admin_users_password_edit": {
+   "class": "restricted",
+   "note": "write 9"
+  },
+  "/admin/admin_users_permanent_delete": {
+   "class": "personal",
+   "note": "irreversible erasure (Q7)"
+  },
+  "/admin/admin_users_undelete": {
+   "class": "personal",
+   "note": "undelete takes the soft-delete level (8.3 item 6)"
+  },
+  "/admin/admin_utilities": {
+   "class": "config",
+   "note": "maintenance commands"
+  },
+  "/admin/admin_video": {
+   "class": "content"
+  },
+  "/admin/admin_video_edit": {
+   "class": "content"
+  },
+  "/admin/admin_videos": {
+   "class": "content"
+  },
+  "/admin/admin_webhook": {
+   "class": "keys",
+   "note": "signing secret"
+  },
+  "/admin/admin_webhook_edit": {
+   "class": "keys",
+   "note": "signing secret"
+  },
+  "/admin/admin_webhooks": {
+   "class": "config"
+  },
+  "/plugins/boards/admin/admin_boards": {
+   "class": "content"
+  },
+  "/plugins/bookings/admin/admin_booking": {
+   "class": "personal",
+   "note": "attendee details"
+  },
+  "/plugins/bookings/admin/admin_booking_type_edit": {
+   "class": "content"
+  },
+  "/plugins/bookings/admin/admin_booking_types": {
+   "class": "content"
+  },
+  "/plugins/bookings/admin/admin_bookings": {
+   "class": "personal",
+   "note": "attendee details"
+  },
+  "/plugins/bug_reports/admin/admin_bug_report": {
+   "class": "personal",
+   "note": "may hold user data"
+  },
+  "/plugins/bug_reports/admin/admin_bug_reports": {
+   "class": "personal",
+   "note": "may hold user data"
+  },
+  "/plugins/event_manager/admin/admin_event": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_bundle": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_bundle_edit": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_bundles": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_edit": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_emails": {
+   "class": "personal"
+  },
+  "/plugins/event_manager/admin/admin_event_session_edit": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_type_edit": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_event_types": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_events": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_location": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_location_edit": {
+   "class": "content"
+  },
+  "/plugins/event_manager/admin/admin_locations": {
+   "class": "content"
+  },
+  "/plugins/forum/admin/admin_forum_categories": {
+   "class": "content",
+   "note": "gate is ForumPost model level 5"
+  },
+  "/plugins/forum/admin/admin_forum_category": {
+   "class": "content"
+  },
+  "/plugins/forum/admin/admin_forum_held": {
+   "class": "content",
+   "note": "moderation queue"
+  },
+  "/plugins/forum/admin/admin_forum_topics": {
+   "class": "content"
+  },
+  "/plugins/items/admin/admin_item": {
+   "class": "content"
+  },
+  "/plugins/items/admin/admin_item_edit": {
+   "class": "content"
+  },
+  "/plugins/items/admin/admin_item_relation_types": {
+   "class": "content"
+  },
+  "/plugins/items/admin/admin_items": {
+   "class": "content"
+  },
+  "/plugins/mail_apps/admin/admin_mail_apps": {
+   "class": "restricted",
+   "note": "issues app passwords"
+  },
+  "/plugins/mailbox/admin/admin_mailbox": {
+   "class": "personal"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_accounts": {
+   "class": "config",
+   "note": "renders delivery mode and enabled only (B19, verified 10-20)"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_alias": {
+   "class": "config"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_attachment": {
+   "class": "personal"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_connect": {
+   "class": "restricted"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_domains": {
+   "class": "config",
+   "note": "DKIM keys (Q8)"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_filters": {
+   "class": "personal",
+   "note": "operator mount; gate is logic level 5"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_fleet": {
+   "class": "config"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_imap": {
+   "class": "restricted",
+   "note": "feed credentials"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_imap_delete": {
+   "class": "restricted"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_imap_edit": {
+   "class": "restricted"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_import": {
+   "class": "personal"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_logs": {
+   "class": "restricted"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_message": {
+   "class": "personal",
+   "note": "message content"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_reader": {
+   "class": "personal",
+   "note": "message content"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_reports": {
+   "class": "personal"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_settings": {
+   "class": "config"
+  },
+  "/plugins/mailbox/admin/admin_mailbox_setup": {
+   "class": "restricted"
+  },
+  "/plugins/persona_browser/admin/admin_persona_senders": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_coupon_code": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_coupon_code_edit": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_coupon_codes": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_order": {
+   "class": "personal",
+   "note": "payment details"
+  },
+  "/plugins/store/admin/admin_order_delete": {
+   "class": "personal",
+   "note": "B7: permanent; personal erasure is 9 (8.3 item 6)"
+  },
+  "/plugins/store/admin/admin_order_edit": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_order_item_edit": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_order_refund": {
+   "class": "personal",
+   "note": "money moves"
+  },
+  "/plugins/store/admin/admin_orders": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_ownership_edit": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_ownerships": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_product": {
+   "class": "money",
+   "note": "permanent delete handler runs at 5 today (B8)"
+  },
+  "/plugins/store/admin/admin_product_edit": {
+   "class": "money",
+   "note": "prices"
+  },
+  "/plugins/store/admin/admin_product_group_edit": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_product_groups": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_product_version_edit": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_products": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_settings_payments": {
+   "class": "config",
+   "note": "gateway secrets are keys columns once flagged secret (B11, 3.3)"
+  },
+  "/plugins/store/admin/admin_store_product_mapping_edit": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_store_product_mappings": {
+   "class": "money"
+  },
+  "/plugins/store/admin/admin_stripe_invoices": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_stripe_orders": {
+   "class": "personal"
+  },
+  "/plugins/store/admin/admin_user_payment_methods": {
+   "class": "personal",
+   "note": "brand, last4 and expiry only"
+  },
+  "/plugins/store/admin/admin_yearly_report_donations": {
+   "class": "personal"
+  },
+  "/plugins/support_desk/admin/admin_support_faq_edit": {
+   "class": "content"
+  },
+  "/plugins/support_desk/admin/admin_support_thread": {
+   "class": "personal"
+  },
+  "/plugins/support_desk/admin/admin_support_threads": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/chat": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/chat_cancel": {
+   "class": "personal",
+   "note": "own chats only"
+  },
+  "/admin/joinery_ai/chat_export": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/chat_list": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/chat_poll": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/chat_send": {
+   "class": "personal",
+   "note": "own chats only"
+  },
+  "/admin/joinery_ai/chat_thread_action": {
+   "class": "personal",
+   "note": "own chats only"
+  },
+  "/admin/joinery_ai/chat_turn_action": {
+   "class": "personal",
+   "note": "own chats only"
+  },
+  "/admin/joinery_ai/deleted_conversation_purge": {
+   "class": "config",
+   "note": "other users' chats"
+  },
+  "/admin/joinery_ai/deleted_conversations": {
+   "class": "config",
+   "note": "other users' chats"
+  },
+  "/admin/joinery_ai/edit": {
+   "class": "keys",
+   "note": "tokens and keys"
+  },
+  "/admin/joinery_ai/index": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/memory": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/memory_edit": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/note": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/notes": {
+   "class": "personal"
+  },
+  "/admin/joinery_ai/run": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/run_now": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/runs": {
+   "class": "config"
+  },
+  "/admin/joinery_ai/stop_run": {
+   "class": "config"
+  },
+  "/admin/server_manager/backups": {
+   "class": "config",
+   "note": "redirect stub to node detail",
+   "level": 8
+  },
+  "/admin/server_manager/database": {
+   "class": "config",
+   "note": "redirect stub to node detail",
+   "level": 8
+  },
+  "/admin/server_manager/domains": {
+   "class": "config"
+  },
+  "/admin/server_manager/host_add": {
+   "class": "config",
+   "note": "delete host is destructive (Q8)"
+  },
+  "/admin/server_manager/incident": {
+   "class": "config"
+  },
+  "/admin/server_manager/incidents": {
+   "class": "config"
+  },
+  "/admin/server_manager/index": {
+   "class": "config",
+   "note": "dashboard: status and counts only (Q9); shows addresses today (Q10)"
+  },
+  "/admin/server_manager/install_node_form": {
+   "class": "config",
+   "note": "installs with keys: credential columns are keys (Q8, 3.3)"
+  },
+  "/admin/server_manager/job_detail": {
+   "class": "config",
+   "note": "job output can hold secrets (Q11)"
+  },
+  "/admin/server_manager/jobs": {
+   "class": "config"
+  },
+  "/admin/server_manager/node_add": {
+   "class": "config",
+   "note": "stores node credentials (Q8)"
+  },
+  "/admin/server_manager/node_detail": {
+   "class": "config",
+   "note": "power, restore, decommission, keys: 10 (Q8)"
+  },
+  "/admin/server_manager/nodes": {
+   "class": "config",
+   "note": "redirect stub to node detail",
+   "level": 8
+  },
+  "/admin/server_manager/nodes_edit": {
+   "class": "config",
+   "note": "redirect stub to node detail",
+   "level": 8
+  },
+  "/admin/server_manager/provisioning_setup": {
+   "class": "config",
+   "note": "provisioning credentials are keys columns (Q8, 3.3)"
+  },
+  "/admin/server_manager/publish_upgrade": {
+   "class": "config",
+   "note": "publish is 8; deleting a release is 10 (Q8)"
+  },
+  "/admin/server_manager/rollouts": {
+   "class": "config",
+   "note": "applies updates to nodes"
+  },
+  "/admin/server_manager/service_tenants": {
+   "class": "config"
+  },
+  "/admin/server_manager/specs": {
+   "class": "config"
+  },
+  "/admin/server_manager/target_info": {
+   "class": "keys"
+  },
+  "/admin/server_manager/targets": {
+   "class": "keys",
+   "note": "backup targets hold keys"
+  },
+  "/admin/server_manager/transfers": {
+   "class": "config",
+   "note": "moves a site and may remove the source (Q8)"
+  },
+  "/admin/server_manager/updates": {
+   "class": "config",
+   "note": "redirect stub to node detail",
+   "level": 8
+  }
+ },
+ "models": {
+  "AbTest": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "AbTestVariant": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ActivationCode": {
+   "class": "restricted",
+   "confidence": "instinct",
+   "reason": "one-time code; lean permissive, still a credential"
+  },
+  "AdminMenu": {
+   "class": "config",
+   "confidence": "read",
+   "exceptions": {
+    "write": 10
+   },
+   "reason": "menu rows decide what each level sees"
+  },
+  "AgentFile": {
+   "class": "config",
+   "confidence": "read",
+   "exceptions": {
+    "read": 10,
+    "write": 10
+   },
+   "reason": "AI instruction files (3.1)"
+  },
+  "AgentHeartbeat": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "AgentJoinRequest": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ApiIdempotencyKey": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "ApiKey": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "AppBridgeToken": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "bearer token value is hashed in abt_token_hash"
+  },
+  "Address": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "AiConversation": {
+   "class": "config",
+   "confidence": "read",
+   "reason": "D9: admins only; own chats through the owner rule",
+   "owner_column": "aic_owner_user_id"
+  },
+  "AiConversationMessage": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "AiMemory": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "AiMessageAttachment": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "AiQueuedAction": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "AipRecipeItemLog": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "Board": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "BoardActivity": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardAttachment": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardCard": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "BoardCardLabel": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardCardMember": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "BoardCardWatcher": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "BoardChecklist": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardChecklistItem": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardComment": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardLabel": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardList": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "BoardMember": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "BoardWatcher": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Booking": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "BookingEmail": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "BookingType": {
+   "class": "money",
+   "confidence": "instinct"
+  },
+  "BackupHistory": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "BackupTarget": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "CalendarEmail": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "CalendarPreference": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "CalendarEntry": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "CalEntryException": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ChangeTracking": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "ContactType": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "ContentReport": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ContentVersion": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "Conversation": {
+   "class": "personal",
+   "confidence": "read",
+   "exceptions": {},
+   "reason": "Q13 open: same tables as messages"
+  },
+  "ConversationKeyGrant": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "wrapped key column is keys"
+  },
+  "ConversationParticipant": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ConversationRemotePeer": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "CouponCode": {
+   "class": "money",
+   "confidence": "read"
+  },
+  "CouponCodeProduct": {
+   "class": "money",
+   "confidence": "instinct"
+  },
+  "CouponCodeUse": {
+   "class": "money",
+   "confidence": "instinct"
+  },
+  "CustomerCloudAccount": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "tokens are keys columns"
+  },
+  "CustomerCloudProvision": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "DataRootEscrow": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "escrowed secrets are keys columns"
+  },
+  "DebugEmailLog": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "DeletionRule": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "DeliverabilityReport": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "DeliverabilityReportSource": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "DeviceLink": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "sealed vault key columns are keys"
+  },
+  "DirectCapabilityCache": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "DirectIdentity": {
+   "class": "keys",
+   "confidence": "read"
+  },
+  "DirectNonce": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "DirectSession": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "DirectSpool": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "DirectSpoolPart": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "DriveUsage": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "Email": {
+   "class": "personal",
+   "confidence": "read",
+   "exceptions": {},
+   "reason": "Q12 open: personal or restricted log"
+  },
+  "EmailRecipient": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "EmailRecipientGroup": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "EmailTemplate": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "EntityAttachment": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "EntityPhoto": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "Event": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "EventLog": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "EventRegistrant": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "EventSession": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "EventSessionFile": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "EventType": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "File": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileAccessGrant": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileBlob": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileChange": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileKeyGrant": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "wrapped file key column is keys"
+  },
+  "FileShareLink": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileUpload": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "FileVersion": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Folder": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ForumCategory": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ForumPost": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ForumTopic": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ForumTopicRead": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ForumWatch": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "GeneralError": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "Group": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "GroupMember": {
+   "class": "content",
+   "confidence": "instinct",
+   "exceptions": {
+    "write": 8
+   },
+   "reason": "tier membership grants paid access (M4)"
+  },
+  "IncidentEvent": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "an 8 must acknowledge incidents"
+  },
+  "IncidentRecord": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "InboundBayesToken": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InboundEmailAlias": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "InboundEmailDomain": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "InboundEmailFilter": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundEmailFilterDeviceProgress": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InboundEmailLabel": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundEmailLog": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InboundEmailMailboxGrant": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "InboundEmailMessage": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "InboundForwardDestination": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "InboundImapAccount": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "InboundImapFolder": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundImapIngestFailure": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InboundImapSeedProof": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InboundLabelMember": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundMailboxSearchIndex": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundMessageAttachment": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundPersonalAddress": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "InboundSenderRecord": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Item": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ItemRelation": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "ItemRelationType": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "Location": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "Login": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "LogFormError": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "MachineTransfer": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailAppFolder": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailAppMessage": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailAppUid": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailImportEntry": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailImportRun": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailboxContact": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MailboxContactIndexKey": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "sealed key column is keys"
+  },
+  "MailboxDeviceAiHost": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailboxFleetDomainClaim": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailboxFleetShard": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailboxFleetSlot": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailboxRelay": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MailboxSearchKey": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "sealed key column is keys"
+  },
+  "MailboxSendAttempt": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "MailingList": {
+   "class": "content",
+   "confidence": "read",
+   "reason": "$api_public_read: the list itself is content (M3)"
+  },
+  "MailingListRegistrant": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ManagedDnsRecord": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ManagedHost": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ManagedNode": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "ManagementJob": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "job output is a column question (Q11)"
+  },
+  "Message": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "MessageAttachment": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "MessageReaction": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Migration": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "MobileStoreProduct": {
+   "class": "money",
+   "confidence": "instinct"
+  },
+  "NotificationPreference": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Notification": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "OperatorCloudAccount": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "credential is a keys column"
+  },
+  "Order": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "OrderItem": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "OrderItemRequirement": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Ownership": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Page": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "PageContent": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "PageProbeGrant": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "PasskeyCeremony": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "Passkey": {
+   "class": "restricted",
+   "confidence": "read",
+   "exceptions": {
+    "write": "owner only"
+   },
+   "reason": "passkeys are owner-only (M6)"
+  },
+  "PersonaAdTally": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "PersonaAllowedSender": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "PersonaBlockedSender": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "PersonaFeedItem": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "PersonaStory": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "PhoneNumber": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "Plugin": {
+   "class": "config",
+   "confidence": "read",
+   "exceptions": {
+    "write": 10
+   },
+   "reason": "installing or removing code"
+  },
+  "PluginDependency": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "PluginMigration": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "PluginVersion": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "Post": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "ProblemReport": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "Product": {
+   "class": "money",
+   "confidence": "read"
+  },
+  "ProductGroup": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "ProductRequirement": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "ProductRequirementInstance": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "ProductVersion": {
+   "class": "money",
+   "confidence": "instinct"
+  },
+  "PublicMenu": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "PushDestination": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Question": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "QuestionOption": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "QueuedEmail": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Reaction": {
+   "class": "content",
+   "confidence": "instinct",
+   "reason": "a reaction on public content is public (M5)"
+  },
+  "ReceivedBugReport": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "RecipeNote": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "Recipe": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "RecipeRun": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "RecoveryVerification": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "RegisteredDomain": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ReleaseInstall": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ReleaseLogEntry": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "RelayCloudProvision": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "RelayClientIdentity": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "sealed secret key is a keys column"
+  },
+  "RequestLog": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "SandboxInstall": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SandboxLog": {
+   "class": "restricted",
+   "confidence": "read"
+  },
+  "ScheduleOverride": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ScheduleWindow": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "Schedule": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ScheduledTask": {
+   "class": "config",
+   "confidence": "read",
+   "exceptions": {
+    "write": 10
+   },
+   "reason": "runs code on a schedule"
+  },
+  "SdDevice": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "SdDeviceBackup": {
+   "class": "personal",
+   "confidence": "instinct",
+   "reason": "its PIN column is a keys column"
+  },
+  "SdScheduledBlock": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SdScheduledBlockFilter": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SdScheduledBlockRule": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SdScheduledBlockService": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SealedSecretRegistry": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SeoPageMetadata": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "ServiceTenant": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SessionAnalytic": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Setting": {
+   "class": "config",
+   "confidence": "read"
+  },
+  "SetupDecision": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ShelfObject": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "ShelfRun": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SignalDelivery": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SignalReceiver": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "signing secret is a keys column"
+  },
+  "SiteCopy": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "SiteSupportThread": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "StagedRollout": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "StorageSpace": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "StripeCustomer": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "StripeInvoice": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "SubscriptionTier": {
+   "class": "money",
+   "confidence": "read"
+  },
+  "Survey": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "SurveyAnswer": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "SurveyQuestion": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "SupportDocRelease": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "SupportDocSection": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "SupportFaqEntry": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "SupportThread": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "SupportWordGap": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "SyncDevice": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "Theme": {
+   "class": "config",
+   "confidence": "read",
+   "exceptions": {
+    "write": 10
+   },
+   "reason": "theme code runs on every page"
+  },
+  "Upgrade": {
+   "class": "config",
+   "confidence": "instinct",
+   "exceptions": {
+    "write": 10
+   },
+   "reason": "publishes upgrades"
+  },
+  "Url": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "User": {
+   "class": "personal",
+   "confidence": "read"
+  },
+  "UserEncryptionVault": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "public keys and salt only; secrets are in wrappings"
+  },
+  "UserEncryptionWrapping": {
+   "class": "config",
+   "confidence": "instinct",
+   "reason": "wrapped secret column is keys"
+  },
+  "Video": {
+   "class": "content",
+   "confidence": "read"
+  },
+  "VaultEntry": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "VaultKeyring": {
+   "class": "keys",
+   "confidence": "instinct"
+  },
+  "VisitorEvent": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "VisitorStatsRollup": {
+   "class": "content",
+   "confidence": "instinct"
+  },
+  "WaitingList": {
+   "class": "personal",
+   "confidence": "instinct"
+  },
+  "WebhookLog": {
+   "class": "restricted",
+   "confidence": "instinct"
+  },
+  "InstanceTransfer": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "HostedTrial": {
+   "class": "config",
+   "confidence": "instinct"
+  },
+  "Comment": {
+   "class": "content",
+   "confidence": "instinct",
+   "reason": "author name shown with the comment; lean permissive"
+  },
+  "Component": {
+   "class": "content",
+   "confidence": "read"
+  }
+ },
+ "columns": {
+  "AiConversation.aic_max_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversation.aic_total_input_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversation.aic_total_output_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversationMessage.aim_cache_read_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversationMessage.aim_cache_write_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversationMessage.aim_input_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AiConversationMessage.aim_output_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "Recipe.rcp_max_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "Recipe.rcp_monthly_token_cap": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RecipeRun.rcr_cache_read_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RecipeRun.rcr_cache_write_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RecipeRun.rcr_input_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RecipeRun.rcr_output_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SupportThread.sth_input_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SupportThread.sth_output_tokens": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "InboundEmailMessage.iem_learned_tokenizer": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "CustomerCloudAccount.cca_token_expires": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "OperatorCloudAccount.oca_token_expires": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "InboundImapAccount.iia_oauth_token_expires": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "InstanceTransfer.itx_token_expiry": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RelayCloudProvision.rcl_run_token_expires": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RelayCloudProvision.rcl_run_token_spent": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "ShelfRun.svr_token_expires_time": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "MailboxFleetDomainClaim.mfd_txt_token": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "Passkey.pkc_credential_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "Passkey.pkc_passkey_credential_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "PushDestination.psh_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "ApiKey.apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AppBridgeToken.abt_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AppBridgeToken.abt_app_bridge_token_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "DeviceLink.dlk_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SandboxInstall.sbi_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "ServiceTenant.svt_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SupportThread.sth_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SyncDevice.sde_apk_api_key_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "RequestLog.rql_api_key_type": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "SealedSecretRegistry.ssr_sealed_secret_registry_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "InboundBayesToken.ibt_inbound_bayes_token_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "InboundBayesToken.ibt_token": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "ApiIdempotencyKey.aik_credential_scope": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "UserEncryptionWrapping.uew_pkc_passkey_credential_id": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "User.usr_force_password_change": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "User.usr_password_recovery_disabled": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "User.usr_totp_enabled_time": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "User.usr_totp_last_used_step": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "CustomerCloudProvision.cvp_install_password": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "UserEncryptionVault.uev_salt": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "UserEncryptionWrapping.uew_salt": {
+   "class": "none",
+   "note": "reviewed: identifier, counter, state or salt, not a secret"
+  },
+  "AppBridgeToken.abt_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "DeviceLink.dlk_poll_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "FileShareLink.fsl_password_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "FileShareLink.fsl_token_sha256": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "FileUpload.fup_token_sha256": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "InboundForwardDestination.ifd_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "PageProbeGrant.ppg_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "ShelfRun.svr_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "SupportThread.sth_token_hash": {
+   "class": "restricted",
+   "note": "stored hash of a token or password; never rendered",
+   "confidence": "read"
+  },
+  "User.usr_password": {
+   "class": "restricted",
+   "note": "password hash; never rendered",
+   "confidence": "traced"
+  },
+  "User.usr_totp_backup_codes": {
+   "class": "restricted",
+   "note": "Argon2id hashes per the write comment (data/users_class.php:895)",
+   "confidence": "traced"
+  },
+  "User.usr_remember_tokens": {
+   "class": "restricted",
+   "note": "already on the API unreadable floor; hashing not verified",
+   "confidence": "read"
+  },
+  "User.usr_authhash": {
+   "class": "restricted",
+   "note": "PLAINTEXT auth hash used in contact-preference links (logic/contact_preferences_logic.php:18); see B29",
+   "confidence": "traced"
+  },
+  "OrderItem.odi_play_purchase_token": {
+   "class": "restricted",
+   "note": "PLAINTEXT Google Play purchase token; not sealed; see B28",
+   "confidence": "traced"
+  },
+  "InboundPersonalAddress.ipa_token": {
+   "class": "restricted",
+   "note": "routing token that is part of the address; not sealed",
+   "confidence": "read"
+  },
+  "Booking.bkn_action_token": {
+   "class": "restricted",
+   "note": "bearer token in the manage URL (plugins/bookings/views/booking_manage.php:52)",
+   "confidence": "read"
+  },
+  "SiteSupportThread.spt_token": {
+   "class": "restricted",
+   "note": "support thread token (data/site_support_threads_class.php:125)",
+   "confidence": "read"
+  },
+  "User.usr_totp_secret": {
+   "class": "keys",
+   "note": "PLAINTEXT TOTP seed (data/users_class.php:816); no sealed locator; see B24",
+   "confidence": "traced"
+  },
+  "User.usr_second_factor_hmac_key": {
+   "class": "keys",
+   "note": "PLAINTEXT second-factor HMAC key (data/users_class.php:830); no sealed locator; see B25",
+   "confidence": "traced"
+  },
+  "ManagedNode.mgn_api_secret_key": {
+   "class": "keys",
+   "note": "PLAINTEXT node API secret (plugins/server_manager/logic/node_detail_actions_logic.php:993); see B26",
+   "confidence": "traced"
+  },
+  "DirectIdentity.jdi_sealed_secret_key": {
+   "class": "keys",
+   "note": "sealed by the DEK path (includes/joinery_direct/DirectIdentity.php:173)",
+   "confidence": "traced"
+  },
+  "UserEncryptionWrapping.uew_wrapped_secret_key": {
+   "class": "keys",
+   "note": "wrapped secret key",
+   "confidence": "read"
+  },
+  "ApiKey.apk_secret_key": {
+   "class": "keys",
+   "note": "secret half of the API key; confirm stored hashed or sealed",
+   "confidence": "instinct"
+  },
+  "CustomerCloudProvision.cvp_root_ssh_keys": {
+   "class": "keys",
+   "note": "provisioning SSH keys; confirm public-only",
+   "confidence": "instinct"
+  },
+  "ManagedNode.mgn_ssh_key_path": {
+   "class": "config",
+   "note": "path to a key file, not the key",
+   "confidence": "read"
+  },
+  "ManagedNode.mgn_api_public_key": {
+   "class": "config",
+   "note": "public half of a pair",
+   "confidence": "read"
+  },
+  "ManagedNode.mgn_agent_public_key": {
+   "class": "config",
+   "note": "public half of a pair",
+   "confidence": "read"
+  },
+  "ManagedNode.mgn_backup_recovery_public_key": {
+   "class": "config",
+   "note": "public half of a pair",
+   "confidence": "read"
+  },
+  "ApiKey.apk_public_key": {
+   "class": "config",
+   "note": "public identifier; the list shows it",
+   "confidence": "traced"
+  },
+  "User.usr_allowed_ips": {
+   "class": "config",
+   "note": "IP allowlist; raise from personal",
+   "confidence": "traced"
+  },
+  "AiConversation.aic_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "AiConversationMessage.aim_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "AiQueuedAction.aqa_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "CalendarEntry.cal_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "ApiIdempotencyKey.aik_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "DeviceLink.dlk_sealed_vault_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "File.fil_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "FileKeyGrant.fkg_wrapped_file_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "InboundEmailDomain.ied_dkim_pending_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "InboundEmailDomain.ied_dkim_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "InboundEmailMessage.iem_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "InboundMailboxSearchIndex.imi_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "MailboxContact.imc_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "MailboxContactIndexKey.mck_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "MailboxSearchKey.msk_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "MailboxSendAttempt.mst_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "Message.msg_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "RecipeRun.rcr_sealed_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "ConversationKeyGrant.ckg_wrapped_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "DataRootEscrow.dre_identity_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "ShelfObject.svo_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "ShelfRun.svr_base_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "StorageSpace.sps_base_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "Ownership.own_license_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "InboundImapAccount.iia_provider_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "RecoveryVerification.rcv_item_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "FileBlob.fbb_encrypted_variant_key": {
+   "class": "keys",
+   "note": "key material stored sealed or wrapped by name; confirm a SecretBox write",
+   "confidence": "instinct"
+  },
+  "AgentJoinRequest.ajr_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "CustomerCloudProvision.cvp_expected_host_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "CustomerCloudProvision.cvp_expected_site_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "CustomerCloudProvision.cvp_recovery_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "SiteCopy.scp_expected_site_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "RelayClientIdentity.rci_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "MailboxRelay.mrl_identity_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "MailboxRelay.mrl_transport_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "MailboxFleetSlot.mft_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "DirectIdentity.jdi_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "UserEncryptionVault.uev_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "UserEncryptionVault.uev_pending_public_key": {
+   "class": "config",
+   "note": "public key or expected fingerprint; not secret",
+   "confidence": "instinct"
+  },
+  "CalendarEmail.cme_dedup_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "CalendarEmail.cme_period_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "PersonaAdTally.pat_author_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "PersonaFeedItem.pfi_dedup_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "PersonaStory.pss_story_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "Recipe.rcp_declared_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "Recipe.rcp_template_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "Component.com_type_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "AipRecipeItemLog.aip_item_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "SdScheduledBlockFilter.sbf_filter_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "SdScheduledBlockService.sbs_service_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "SetupDecision.sud_step_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "RequestLog.rql_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "InboundEmailMessage.iem_raw_remote_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "InboundEmailMessage.iem_raw_storage_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "InboundEmailMessage.iem_source_message_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "InboundEmailMessage.iem_thread_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "FileBlob.fbb_remote_key": {
+   "class": "none",
+   "note": "identifier or storage path, not a secret"
+  },
+  "DeviceLink.dlk_sealed_vault_keys": {
+   "class": "keys",
+   "note": "sealed vault key set",
+   "confidence": "instinct"
+  },
+  "DeviceLink.dlk_code_hash": {
+   "class": "restricted",
+   "note": "hash of the link code",
+   "confidence": "read"
+  },
+  "SdDeviceBackup.sbk_deactivation_pin": {
+   "class": "keys",
+   "note": "plaintext PIN copied from the device; see B27 (to verify)",
+   "confidence": "traced"
+  }
+ },
+ "actions": {
+  "account_summary": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "admin_booking_type_edit": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "ai_action_resolve": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "ai_actions_list": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "ai_device_recipes": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "ai_device_record": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "ai_panel_state": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "ai_panel_toggle": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "ai_status": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "app_password_create": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "app_store_claim": {
+   "proposed": "money:write",
+   "confidence": "instinct"
+  },
+  "attachment_text": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "availability_preview": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "backup_actions": {
+   "proposed": 8,
+   "confidence": "instinct",
+   "reason": "S1 asks for 7 on the read sub-ops; the action also runs backups, so it stays 8 until split"
+  },
+  "backup_recovery_prove": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "backup_recovery_save": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "billing_catalog": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "block_filter_set": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "block_rule_add": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "block_rule_delete": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "boards_board": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "boards_board_save": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "boards_card": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "boards_card_save": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "boards_checklist_save": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "boards_comment_save": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "boards_email": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "boards_import": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "boards_my_cards": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "boards_poll": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "booking": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "booking_slots": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "calendar_feed": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "calendar_level_batch": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "calendar_level_change": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "calendar_settings": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "cart": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "cart_clear": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "catalog": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "chat_controls": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "chat_list": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "chat_poll": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "chat_send": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "chat_turn_action": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "check_mail": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "checkout_apply_coupon": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "checkout_check_email": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "checkout_remove_coupon": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "checkout_submit_survey": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "consent_record": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "contact_delete": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "contact_preferences": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "contact_save": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "contacts": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "contacts_import": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "conversation_action": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "conversation_list": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "conversation_thread": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "create_calendar_entry": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "desk_ask": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "desk_cancel": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "desk_escalate": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "desk_feedback": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "desk_poll": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "desk_threads": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "device_ai_entries": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "device_ai_host": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "device_ai_test_prompt": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "device_ai_verdict": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "device_delete": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "device_edit": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "device_key_enroll": {
+   "proposed": "keys:write",
+   "confidence": "instinct"
+  },
+  "device_rules": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "device_soft_delete": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "devices_link": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "domain_check": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "domain_setup_check": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "draft_attachment_delete": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "draft_delete": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "draft_get": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "draft_save": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "drive_changes": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_delete_forever": {
+   "proposed": "personal:permanent_delete",
+   "confidence": "instinct"
+  },
+  "drive_device_link_approve": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_device_link_deny": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_device_link_info": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_device_revoke": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_devices": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_index": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_key_grants": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_key_grants_reseal": {
+   "proposed": "keys:write",
+   "confidence": "instinct"
+  },
+  "drive_key_grants_sync": {
+   "proposed": "keys:write",
+   "confidence": "instinct"
+  },
+  "drive_level_batch": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_level_change": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_link_create": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "drive_list": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_move": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "drive_public_keys": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_rename": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "drive_restore": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "drive_stat": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_trash": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "drive_upload_complete": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "drive_versions": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "email_available": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "entries_list": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "event_sessions": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "event_sessions_course": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "event_waiting_list": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "event_withdraw": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "fleet_claim_domain": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "fleet_enroll": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "fleet_release": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "fleet_status": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "fortress_backlog": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "fortress_parse_store": {
+   "proposed": "config:write",
+   "confidence": "instinct"
+  },
+  "fortress_pending": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "forum_like": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "forum_post_create": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "forum_post_delete": {
+   "proposed": "content:soft_delete",
+   "confidence": "instinct"
+  },
+  "forum_post_edit": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "forum_post_moderate": {
+   "proposed": "content:write",
+   "across_users": true,
+   "confidence": "instinct",
+   "reason": "moderation works across users"
+  },
+  "forum_post_source": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "forum_search": {
+   "proposed": "content:read",
+   "confidence": "instinct"
+  },
+  "forum_topic_create": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "forum_upload": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "forum_watch_set": {
+   "proposed": "content:write",
+   "confidence": "instinct"
+  },
+  "forward_confirm": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "image_list": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "incident_triage": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "keyring_get": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "keyring_replace": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "mail_append": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_changes": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mail_copy": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_expunge": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "mail_fetch": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mail_folder_create": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_folder_delete": {
+   "proposed": "personal:soft_delete",
+   "confidence": "instinct"
+  },
+  "mail_folder_rename": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_folders": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mail_import_discard": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "mail_import_select": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "mail_import_start": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "mail_import_status": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "mail_import_undo": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "mail_login": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mail_move": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_search": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mail_store": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "mail_submit": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "mail_sync": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "mailboxes": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "markdown_preview": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "marketplace_catalog": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "marketplace_install": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "mention_search": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "messenger_group": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "messenger_people": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "messenger_poll": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "messenger_send": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "messenger_thread": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "messenger_upload": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "my_events": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "notification_mark_all_read": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "notification_unread_count": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "passkey_client_report": {
+   "proposed": "restricted:read",
+   "confidence": "instinct"
+  },
+  "passkey_lab_report": {
+   "proposed": "restricted:read",
+   "confidence": "instinct"
+  },
+  "passkey_login_options": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "passkey_login_verify": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "password_reset_1": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "password_reset_passkey_options": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "password_reset_passkey_verify": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "password_reset_totp": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "play_claim": {
+   "proposed": "money:write",
+   "confidence": "instinct"
+  },
+  "plugin_provisioning_check": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "private_ai_consent": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "profile_dashboard": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "push_config": {
+   "proposed": "config:write",
+   "confidence": "instinct"
+  },
+  "push_subscribe": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "push_test": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "push_unsubscribe": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "reaction_count": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "reaction_status": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "reaction_toggle": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "register": {
+   "proposed": 0,
+   "confidence": "traced"
+  },
+  "relay_pin_set": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "relay_pins": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "relay_seal_target": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "release_notes_draft": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "releases": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "report_problem_submit": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "report_submit": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "resolver_key_revoke": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "resolver_snapshot": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "root_request_status": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "rule_backlog": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "rule_outcomes": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "scheduled_block_edit": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "seal_batch": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "search_entries": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "security": {
+   "proposed": "config:write",
+   "confidence": "instinct"
+  },
+  "send": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "sender_context": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "services_enroll": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "services_release": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "services_status": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "setup_https_check": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "setup_status": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "shelf_begin_run": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "shelf_finish_run": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "shelf_list": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "shelf_sign": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "shelf_status": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "shelf_verified_run": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "signature_save": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "subscription_summary": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "support_cancel": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "support_escalate": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "support_feedback": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "support_origin_confirm": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "support_poll": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "support_send": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "support_state": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "support_threads": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "survey": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "test_connection": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "tests_run": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "theme_switch": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "thread": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "thread_action": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "thread_list": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "transfer_operator": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "unseal_batch": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "upload_complete": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "upload_init": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "user_search": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "validate_server_file": {
+   "proposed": "config:read",
+   "confidence": "instinct"
+  },
+  "vault_client_add_wrapping": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_client_consume_recovery": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_client_probe": {
+   "proposed": "keys:read",
+   "confidence": "instinct"
+  },
+  "vault_client_replace_recovery": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_client_reseal_rows": {
+   "proposed": "keys:write",
+   "confidence": "instinct"
+  },
+  "vault_client_rotate_begin": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_client_rotate_commit": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_client_setup": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_custody_rows": {
+   "proposed": "keys:read",
+   "confidence": "instinct"
+  },
+  "vault_deferred_work": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "vault_heartbeat": {
+   "proposed": "keys:read",
+   "confidence": "instinct"
+  },
+  "vault_passkey_deactivate": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "vault_row_custody": {
+   "proposed": "keys:write",
+   "confidence": "instinct"
+  },
+  "vault_row_reseal": {
+   "proposed": 10,
+   "confidence": "instinct"
+  },
+  "widget_ask": {
+   "proposed": 8,
+   "confidence": "instinct"
+  },
+  "widget_poll": {
+   "proposed": "personal:read",
+   "confidence": "instinct"
+  },
+  "change_tier": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "search_key": {
+   "proposed": "keys:read",
+   "confidence": "instinct"
+  },
+  "event_register": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "orders_recurring_action": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "verify_totp": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "transfer_customer": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "account_edit": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "address_edit": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "job_status": {
+   "proposed": 7,
+   "confidence": "traced",
+   "reason": "WP6 dashboard read action at 7 (S1)"
+  },
+  "refresh_node_status": {
+   "proposed": 7,
+   "confidence": "traced",
+   "reason": "WP6 dashboard read action at 7 (S1)"
+  },
+  "probe_api": {
+   "proposed": 7,
+   "confidence": "traced",
+   "reason": "WP6 dashboard read action at 7 (S1)"
+  },
+  "moved_site_check": {
+   "proposed": 7,
+   "confidence": "traced",
+   "reason": "WP6 dashboard read action at 7 (S1)"
+  },
+  "chat_level_batch": {
+   "proposed": "personal:write",
+   "confidence": "instinct"
+  },
+  "resolver_key_issue": {
+   "proposed": "keys:write",
+   "confidence": "instinct",
+   "reason": "issues a key"
+  },
+  "fleet_verify_domain": {
+   "proposed": "config:write",
+   "across_users": true,
+   "confidence": "instinct"
+  },
+  "sandbox_page": {
+   "proposed": "config:write",
+   "confidence": "traced",
+   "reason": "writes plugin settings through SettingsWriter (B21)"
+  },
+  "devices": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "password_set": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "password_edit": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "change_password_required": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "phone_numbers_edit": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "login_2fa_passkey_options": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "login_2fa_passkey_verify": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "passkey_register_options": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "passkey_register_verify": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "passkey_stepup_options": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "passkey_stepup_verify": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "vault_unlock_options": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "chat_thread_action": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows (3.5)"
+  },
+  "message_source": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "message_timeline": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "member runs this on their own rows; the mailbox row gate protects others (3.5)"
+  },
+  "vault_unlock_passkey": {
+   "member_own": true,
+   "confidence": "read",
+   "reason": "a member unlocks their own vault (3.5)"
+  }
+ },
+ "page_writes": {
+  "/admin/admin_plugins": "Plugin",
+  "/admin/admin_themes": "Theme",
+  "/plugins/bug_reports/admin/admin_bug_reports": "ReceivedBugReport",
+  "/admin/admin_cloud_storage": "BackupTarget",
+  "/admin/admin_scheduled_tasks": "ScheduledTask",
+  "/admin/admin_subscription_tier_edit": "SubscriptionTier",
+  "/admin/admin_tier_edit": "SubscriptionTier",
+  "/plugins/bookings/admin/admin_booking_type_edit": "BookingType",
+  "/plugins/mailbox/admin/admin_mailbox_imap_delete": "InboundImapAccount",
+  "/plugins/mailbox/admin/admin_mailbox_domains": "InboundEmailDomain",
+  "/plugins/mailbox/admin/admin_mailbox_fleet": "MailboxFleetShard",
+  "/admin/admin_email_template_edit": "EmailTemplate",
+  "/admin/admin_emails_send": "Email, EmailRecipient",
+  "/plugins/store/admin/admin_order_refund": "Order, OrderItem",
+  "/admin/joinery_ai/chat_thread_action": "AiConversation",
+  "/admin/joinery_ai/deleted_conversations": "AiConversation",
+  "/admin/server_manager/host_add": "ManagedHost",
+  "/admin/server_manager/index": "AgentJoinRequest, CustomerCloudProvision",
+  "/admin/admin_settings": "Setting"
+ }
+}

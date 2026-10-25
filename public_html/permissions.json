@@ -1,0 +1,19 @@
+{
+  "levels": {
+    "0": "Regular User",
+    "5": "Assistant",
+    "6": "Editor",
+    "7": "Manager",
+    "8": "Admin",
+    "9": "Senior Admin",
+    "10": "Master Admin"
+  },
+  "classes": {
+    "content":    { "read": 5,  "write": 6,  "soft_delete": 7,  "permanent_delete": 9 },
+    "money":      { "read": 5,  "write": 7,  "soft_delete": 7,  "permanent_delete": 9 },
+    "personal":   { "read": 6,  "write": 8,  "soft_delete": 8,  "permanent_delete": 9 },
+    "config":     { "read": 8,  "write": 8,  "soft_delete": 8,  "permanent_delete": 9 },
+    "restricted": { "read": 8,  "write": 9,  "soft_delete": 9,  "permanent_delete": 9 },
+    "keys":       { "read": 10, "write": 10, "soft_delete": 10, "permanent_delete": 10 }
+  }
+}

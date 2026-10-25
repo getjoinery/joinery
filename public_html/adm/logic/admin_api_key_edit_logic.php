@@ -7,6 +7,7 @@
  * through the record endpoints (docs/api.md § Scoped machine keys). A key's
  * scope is fixed when it is made; changing it means a new key.
  *
+ * @version 1.2 - an action's level is read through Access::allows(), so class:verb levels count
  * @version 1.1 - scoped keys can be made here; a new key starts Active; saving an edit no longer
  *   hands the key to the admin who saved it (the owner is set on create only)
  */
@@ -149,7 +150,7 @@ function admin_api_key_scope_choices(int $owner_permission): array {
 		if (!ApiLogicEndpoint::machineKeyCanCall($entry['meta'])) {
 			continue;
 		}
-		if ((int)($entry['meta']['auth']['min_user_permission'] ?? 0) > $owner_permission) {
+		if (!Access::allows($entry['meta']['auth']['min_user_permission'] ?? 0, $owner_permission)) {
 			continue;
 		}
 		$description = trim((string)($entry['meta']['description'] ?? ''));

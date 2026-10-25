@@ -5,8 +5,8 @@
 review: named data classes, a read level on models, raise-only column
 classes, page headers, one decision function, a generated inventory
 (sections 3 and 8). Every open question answered 2026-10-23. WP1 built and
-released in log mode (0.8.521); its flip is left (WP1). WP0 and WP2 to WP6
-not started. The research bugs are fixed except those a package fixes (7).
+released in log mode (0.8.521); its flip is left (WP1). WP0 built 2026-10-25
+(docs/permissions.md). WP2 to WP6 not started. The research bugs are fixed except those a package fixes (7).
 
 Running each model's own rules on every save is a separate spec,
 `model_rules_on_every_save`, because it carries its own breakage and testing.
@@ -351,7 +351,7 @@ code runs, the way `@joinery-test` declares a test:
 ### 3.5 Actions declare a level
 
 ```php
-'min_user_permission' => 'personal:write',   // class:verb; verbs read, write, delete, permanent_delete
+'min_user_permission' => 'personal:write',   // class:verb; verbs read, write, soft_delete, permanent_delete
 'min_user_permission' => 8,                  // a side effect with no row: restart, backup, send, publish
 ```
 
@@ -421,7 +421,7 @@ signs in as 10 (B22). The rule covers `admin_users_edit`,
 - A new model: `$access_class`. A new page: the header. A new action:
   `min_user_permission`. The scaffolder (docs/scaffolding.md) takes
   `"access_class"` in its manifest and writes all three.
-- `php maintenance_scripts/dev_tools/permissions_inventory.php [plugin]`
+- `php maintenance_scripts/dev_tools/permissions_inventory.php [--plugin=NAME]`
   prints every page, model, column exception and action with its class and
   levels. Section 8.4 is what it prints; once the tool exists the hand-kept
   table goes.
@@ -456,6 +456,28 @@ signs in as 10 (B22). The rule covers `admin_users_edit`,
 **WP0: the foundation.** `permissions.json`, `Access::decide()`, the
 declaration test (passing on nothing until the later packages declare
 things), the inventory tool.
+
+- Built 2026-10-25. `permissions.json` as 3.1; `Access` (`level()`,
+  `allows()`, `decide()`, `schemaErrors()`); `AccessDeclarations` reads every
+  page header, model class and exception, owner column, column class and
+  action level from the source, and `problems()` is the test's rules
+  (`tests/unit/access_declarations_test.php`; the audit rows in
+  `tests/models/access_audit_test.php`). The inventory tool reads
+  permissions.json and lays the code's declarations over its seed.
+- `ApiAuth::authorize()` and the key page's scope list read an action's level
+  through `Access::allows()`. Before this, `(int)'personal:write'` was 0: the
+  first `class:verb` level declared would have opened its action to everyone.
+- Requirements are a level or `class:verb`. A model or a column as the
+  requirement (3.6), and the log-only mode `[WRITE_AUTH]` uses, come with WP2,
+  their first caller.
+- An anonymous refusal is not audited: it is a sign-in page, and recording it
+  would let any visitor fill the event log (the B32 lesson).
+- The user edit page's level dropdown lists `Access::levels()` (3.1, Q4), and
+  its save refuses a level the file does not name. Before, the dropdown was
+  0/5/8/10 and the save stored whatever was posted (B38).
+- The four rules asking for a declaration everywhere are off in
+  `AccessDeclarations::RULES`; each package turns its own on: page headers
+  and `check_permission()` (WP3), model classes (WP2), action levels (WP4).
 
 **WP1: make "a GET never changes anything" true (B1).** A prerequisite, and a
 security fix by itself. Owner 2026-10-22: one guard at the database layer, not a
@@ -642,6 +664,8 @@ except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
 | B34 | Found by installdefaults in 0.8.535: the action face's executeAction() used $acting_permission without receiving it (B3's fix), so set_api_user() got null and simulated the stored level. Keys were unaffected (their acting level is the stored one), but a browser session whose session level was below its stored level ran actions at the stored level | includes/ApiLogicEndpoint.php | fixed 10-25 (1.8.5): executeAction() takes the acting level |
 | B35 | Why B34 passed every gate: a suite that calls the site over HTTP never sees a PHP warning the request raised; dev's log had about 130 per gate run | tests/run.php, tests/lib/php_warnings.php (new) | fixed 10-25: the runner reads what the site's error log gained during the run, and a PHP warning or fatal in a file under the site root fails the run, once per place |
 | B36 | Found by installdefaults in dev's log (the warning B35 now catches): logout() began with get_user_id(), which ran the session checks; when the app-key check had called logout(), the account-standing check (not yet run) called logout() again inside it, which ended the session, and the outer call's session_destroy() then found none. Both checks fail together after a password change (it bumps the session generation and revokes the app keys): app_platform's password-change step. The three warnings in dev's log came from that step (each client requested only /profile, /profile/profile and /login) | includes/SessionControl.php | fixed 10-25 (1.18): logout() marks both checks done before its own identity calls, and destroys only an active session (a page-probe request has none); app_platform checks the ended session's old cookie is anonymous |
+| B37 | Found building WP0: the API floor cast `min_user_permission` to int, so the first `class:verb` level declared would have read as 0 and opened its action to everyone | includes/ApiAuth.php, adm/logic/admin_api_key_edit_logic.php | fixed 10-25 (WP0): both read the level through `Access::allows()`; a malformed one throws |
+| B38 | Found doing Q4 in WP0: the user edit save stored any posted `usr_permission` (99, text) | adm/logic/admin_users_edit_logic.php | fixed 10-25: only a level permissions.json names; the dropdown lists them |
 
 ## 8. Level scheme and page inventory
 

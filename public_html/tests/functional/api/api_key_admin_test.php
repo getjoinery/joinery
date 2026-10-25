@@ -26,6 +26,7 @@
  *
  * Run: php tests/run.php db --filter=api_key_admin
  *
+ * @version 1.3 - an action's level is read through Access::allows(); a user's level is one permissions.json names
  * @version 1.2 - the key page is level 10 (B16); keys are made by a 10
  * @version 1.1
  */
@@ -62,7 +63,7 @@ try {
 	$offered_to_10 = admin_api_key_scope_choices(10)['actions'];
 	$above_8 = array();
 	foreach (ApiLogicEndpoint::actionCatalog() as $name => $entry) {
-		if ((int)($entry['meta']['auth']['min_user_permission'] ?? 0) > 8 && ApiLogicEndpoint::machineKeyCanCall($entry['meta'])) {
+		if (!Access::allows($entry['meta']['auth']['min_user_permission'] ?? 0, 8) && ApiLogicEndpoint::machineKeyCanCall($entry['meta'])) {
 			$above_8[] = $name;
 		}
 	}
@@ -203,6 +204,30 @@ try {
 	check(!$result->error && $member_reloaded->is_ip_allowed('2001:db8:abcd:9::1') && $member_reloaded->is_ip_allowed('104.23.1.1')
 		&& !$member_reloaded->is_ip_allowed('2001:db8:abce::1'),
 		'good entries of both families and a wildcard save and match', (string)$result->error);
+
+	section('A user\'s level is one permissions.json names');
+	$edit_level = function ($level) use ($member) {
+		return harness_call_logic('adm/logic/admin_users_edit_logic.php', 'admin_users_edit_logic', array(
+			'usr_user_id'     => (int)$member->key,
+			'usr_first_name'  => $member->get('usr_first_name'),
+			'usr_last_name'   => $member->get('usr_last_name'),
+			'usr_password_recovery_disabled' => 0,
+			'usr_timezone'    => $member->get('usr_timezone') ?: 'America/New_York',
+			'usr_nickname'    => '',
+			'usr_organization_name' => '',
+			'usr_permission'  => $level,
+			'usr_allowed_ips' => '',
+		), 'POST');
+	};
+	$result = $edit_level('7');
+	check(!$result->error && (int)(new User((int)$member->key, TRUE))->get('usr_permission') === 7,
+		'a Manager (7) saves', (string)$result->error);
+	foreach (array('4', '99', 'abc', '') as $bad) {
+		$result = $edit_level($bad);
+		check((bool)$result->error && (int)(new User((int)$member->key, TRUE))->get('usr_permission') === 7,
+			"level '$bad' is refused and nothing changes", (string)$result->error);
+	}
+	$edit_level('0');
 
 } catch (\Throwable $e) {
 	check(false, 'suite ran to completion', get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
