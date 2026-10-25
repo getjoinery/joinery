@@ -26613,6 +26613,82 @@ fn a_file_never_sent_and_renamed_to_a_temporary_name_is_not_sent() {
     assert_converged(&world);
 }
 
+/// B7: the walk's sweep of the engine's own leftovers, and a folder set aside
+/// under a working name that a second disk is mounted inside (a rename carries
+/// the mount). Swept, the disk went to the trash still mounted, everything on
+/// it with it. It stays, said, and the device keeps syncing; once the disk is
+/// unmounted the sweep takes the folder and the issue goes. RED with the
+/// folder swept, disk and all.
+#[test]
+fn a_set_aside_folder_holding_a_disk_is_left_and_said() {
+    let world = World::new(9_948, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/report.txt", b"an ordinary file");
+    assert!(world.settle().is_some(), "the tree settles first");
+    laptop.fs.user_mkdir("Work/.jd-swap-abandoned");
+    laptop.fs.user_mkdir("Work/.jd-swap-abandoned/Disk");
+    laptop.fs.user_write("Work/.jd-swap-abandoned/Disk/on-the-disk.txt", b"never synced, on the other disk");
+    laptop.fs.mount_another_disk("Work/.jd-swap-abandoned/Disk");
+    assert!(world.settle().is_some(), "never settled with the disk set aside");
+    assert_eq!(
+        laptop.fs.peek("Work/.jd-swap-abandoned/Disk/on-the-disk.txt").as_deref(),
+        Some(&b"never synced, on the other disk"[..]),
+        "the disk went to the trash: {:?}",
+        laptop.fs.all_paths()
+    );
+    let said = |d: &jd_sim::Device| -> Vec<String> {
+        d.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "leftover_stays").map(|i| i.detail).collect()
+    };
+    assert_eq!(said(laptop).len(), 1, "{:?}", laptop.store.open_issues().unwrap());
+    assert!(said(laptop)[0].contains("a separate disk is mounted at /sync/Work/.jd-swap-abandoned/Disk"), "{:?}", said(laptop));
+
+    laptop.fs.user_unmounts_disk("Work/.jd-swap-abandoned/Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was unmounted");
+    assert!(!laptop.fs.exists("Work/.jd-swap-abandoned"), "{:?}", laptop.fs.all_paths());
+    assert!(said(laptop).is_empty(), "{:?}", said(laptop));
+    assert!(laptop.fs.exists("Work/report.txt"));
+}
+
+/// The folder a disk is mounted at, itself under a working name: a Mac
+/// renames a mount point, and refuses to trash one. Swept, the refusal
+/// failed the whole pass, and every pass after it in the same place. It
+/// stays and is said; the device keeps syncing. RED with the pass failing.
+#[test]
+fn a_set_aside_mount_point_does_not_stop_the_walk() {
+    let world = World::new(9_949, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    assert!(world.settle().is_some(), "the tree settles first");
+    laptop.fs.user_mkdir("Work/.jd-swap-disk");
+    laptop.fs.user_write("Work/.jd-swap-disk/on-the-disk.txt", b"on the other disk");
+    laptop.fs.mount_another_disk("Work/.jd-swap-disk");
+    laptop.fs.user_write("Work/new.txt", b"made after");
+    assert!(world.settle().is_some(), "the walk stopped at the mount point");
+    assert!(world.server.tree().contains_key("Work/new.txt"), "{:?}", world.server.tree());
+    assert!(laptop.fs.exists("Work/.jd-swap-disk/on-the-disk.txt"), "{:?}", laptop.fs.all_paths());
+    assert!(laptop.store.open_issues().unwrap().iter().any(|i| i.kind == "leftover_stays"));
+}
+
+/// A leftover the trash keeps refusing does not stop the walk either: it
+/// stays, said, and the device keeps syncing. RED with the pass failing.
+#[test]
+fn a_leftover_the_trash_refuses_does_not_stop_the_walk() {
+    let world = World::new(9_950, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    assert!(world.settle().is_some(), "the tree settles first");
+    laptop.fs.user_write("Work/.jd-swap-stuck", b"left over");
+    laptop.fs.fail_next(jd_sim::FsOp::Trash, Some("Work/.jd-swap-stuck"), jd_sim::FailureKind::PermissionDenied, 1_000);
+    laptop.fs.user_write("Work/new.txt", b"made after");
+    assert!(world.settle().is_some(), "the walk stopped at the leftover");
+    assert!(world.server.tree().contains_key("Work/new.txt"), "{:?}", world.server.tree());
+    let said: Vec<String> =
+        laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "leftover_stays").map(|i| i.detail).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("/sync/Work/.jd-swap-stuck is left over from sync's own work and could not be put in the trash"), "{said:?}");
+}
+
 /// B6: a peer deletes a folder that holds, here, a system file and a system
 /// folder: Finder's .DS_Store, and a disk's own trash folder with a file in
 /// it. Neither is work. They went to the top of the sync folder as rescued

@@ -1252,7 +1252,12 @@ durable, asks every gate again, because the copy is the widest window the
 commit has, and renames them into place on the target's own volume. A landing
 name that outlives its commit is trashed by the next walk unless its op is
 still open in the journal; the server still holds the bytes, so the download is
-simply planned again.
+simply planned again. What the walk sweeps away like this, a landing name or an
+abandoned scratch name, never takes a disk with it: a folder under a scratch
+name with another disk mounted at it or inside it stays, and a trash the system
+refuses leaves the leftover where it is. Either is said as `leftover_stays`,
+asked again by the next walk and withdrawn once it is gone, and neither stops
+the walk.
 
 A move is a rename, and a rename never crosses either: a file or folder the
 server moved onto that other disk, or off it, stays where it is here, and
@@ -1359,6 +1364,7 @@ tray reads from.
 | `rename_held` | an entry with no key on this device was renamed elsewhere to a name this disk cannot give it, so it keeps its old name here; its detail is the server's name | the entry is no longer held at that name |
 | `store_inconsistent` | items have no way back to the root, and the server's index does not have their folder either | nothing is left stranded |
 | `reserved_prefix` | files here have names beginning `.jd-`, which the client keeps for its own working files | no such file is left; the list in it follows the disk |
+| `leftover_stays` | something under one of the client's working names could not be swept to the trash: a disk is mounted in it, or the trash refused it | nothing is left standing; the list in it follows the disk |
 | `renames_untracked_on_this_drive` | the standing notice on a FAT or exFAT drive | the sync folder is on a drive that keeps file identities |
 | `trash_waits` | a folder's trash here waits for a child that cannot move yet | the trash goes through, or the folder stops being trashable |
 | `park_waits`, `park_unfinished` | a park waits on something inside the folder; a park's finish was overtaken | the park gets past the wait; the park no longer stands |

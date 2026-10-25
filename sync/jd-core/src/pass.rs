@@ -2977,6 +2977,7 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     };
     let mut out = Vec::new();
     let mut reserved: Vec<String> = Vec::new();
+    let mut left: Vec<String> = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
     // Every scratch name the store still has a live entity for. Built once:
     // asking per file would be a query per directory entry, and the answer
@@ -3064,13 +3065,13 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                 if child.name.starts_with(crate::order::SWAP_PREFIX)
                     && !live_swap_names.contains(&child.name)
                 {
-                    env.vfs.trash(&dir.join(&child.name))?;
+                    sweep_away(env, &dir.join(&child.name), &mut left);
                 } else if let Some(op) = jd_vfs::landing_op(&child.name) {
                     // A download copied onto this volume and never renamed
                     // into place: the server still holds the bytes, and the
                     // download is planned again from scratch.
                     if !open_ops.contains(&op) {
-                        env.vfs.trash(&dir.join(&child.name))?;
+                        sweep_away(env, &dir.join(&child.name), &mut left);
                     }
                 } else if !child.name.starts_with(crate::order::SWAP_PREFIX) {
                     // Not the engine's litter -- a file whose name the USER
@@ -3204,7 +3205,9 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         None
     } else {
         Some(format!(
-            "{} file(s) here have names beginning {}, which this client reserves for its              own working files. They cannot be synced and are otherwise invisible to it.              Rename them and they will sync: {}",
+            "{} file(s) here have names beginning {}, which this client reserves for its \
+             own working files. They cannot be synced and are otherwise invisible to it. \
+             Rename them and they will sync: {}",
             reserved.len(),
             jd_vfs::names::INTERNAL_PREFIX,
             reserved.join(", "),
@@ -3223,8 +3226,47 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                 .raise_issue(None, "reserved_prefix", &detail, (env.now_ms)() as i64)?;
         }
     }
+    // What the sweep had to leave, said the same way: a state, withdrawn the
+    // pass it is gone.
+    left.sort();
+    let want = (!left.is_empty()).then(|| left.join("; "));
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == LEFTOVER_STAYS).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(LEFTOVER_STAYS)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, LEFTOVER_STAYS, &detail, (env.now_ms)() as i64)?;
+        }
+    }
 
     Ok(out)
+}
+
+/// The issue for what the walk's sweep had to leave standing (`sweep_away`).
+pub(crate) const LEFTOVER_STAYS: &str = "leftover_stays";
+
+/// Put something the engine left under its own working name in the trash,
+/// for the walk. Never a disk with it: a folder set aside under a working
+/// name with a second disk mounted at it or inside it (a rename carries the
+/// mount) stays where it is ([`jd_vfs::Vfs::disk_mounted_in`]). And never at
+/// the cost of the walk: a trash refused here failed the whole pass, the next
+/// pass met it in the same place, and the device never synced again. What is
+/// left is said (`left`), and asked again by the next walk.
+fn sweep_away(env: &ExecEnv, path: &std::path::Path, left: &mut Vec<String>) {
+    if let Some(mount) = env.vfs.disk_mounted_in(path) {
+        left.push(format!(
+            "{} is a folder sync set aside under a working name, and a separate disk is mounted at {}; \
+             sync never puts a disk in the trash. Unmount that disk and sync puts the folder in the trash",
+            path.display(),
+            mount.display()
+        ));
+        return;
+    }
+    if let Err(e) = env.vfs.trash(path) {
+        left.push(format!(
+            "{} is left over from sync's own work and could not be put in the trash: {e}; sync tries again",
+            path.display()
+        ));
+    }
 }
 
 /// What one look at the disk saw: its files (`observe`), its directories
