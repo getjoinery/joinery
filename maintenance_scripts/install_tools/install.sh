@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#VERSION 3.35 - ensure_placeholder_cert: every certificate attempt mints a site's missing placeholder first, so a
+#VERSION 3.36 - a name that reached this box and failed HTTP-01 is no longer reported as not reaching it, with or
+#               without a DNS-01 provider (reviewer2 on B111).
+#VERSION 3.35 -ensure_placeholder_cert: every certificate attempt mints a site's missing placeholder first, so a
 #               container host (whose proxy vhosts nothing re-renders) never needs an operator step; the reach probe's
 #               'no TLS handshake' advice named a render_vhost.sh a host does not have (B110).
 #VERSION 3.34 -site --beta-root-access: the site offers its owner the emergency root access checkbox
@@ -2072,10 +2074,14 @@ provision_origin_cert() {
                 print_info "  Set the edge to Full (not Full (Strict)) until the first certificate lands; the retry timer issues it on its own once ${domain} reaches here."
             elif [ "$reach" -eq 3 ]; then
                 print_info "  The edge's https hop reached no site here (above); the retry timer issues once ${domain} reaches here."
+            elif [ "$reach" -eq 0 ]; then
+                print_info "  ${domain} reaches this box but HTTP-01 did not validate (above); the retry timer asks again, or drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} for DNS-01."
             else
                 print_info "  The retry timer issues it on its own once ${domain} reaches this box; or drop credentials at ${cred} and re-run sysadmin_tools/setup_ssl.sh ${domain} for DNS-01."
             fi
         fi
+    elif [ "$reach" -eq 0 ]; then
+        print_info "No origin cert issued for ${domain} (HTTP-01 did not validate, and no DNS-01 provider was detected)."
     else
         print_info "No origin cert issued for ${domain} (the name does not reach this box and no DNS-01 provider was detected)."
     fi

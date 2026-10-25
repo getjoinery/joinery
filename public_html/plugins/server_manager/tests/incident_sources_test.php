@@ -434,6 +434,19 @@ $set(array('mgn_cert_problem' => array('reason' => 'expiring', 'title' => 'The T
 check(($cert->evaluate($node)['severity'] ?? '') === 'critical', 'Three days left: critical');
 $set(array('mgn_cert_problem' => array('reason' => 'uncovered', 'title' => 'The origin certificate does not cover sources.example', 'detail' => array())));
 check(($cert->evaluate($node)['severity'] ?? '') === 'warning', 'Another name\'s certificate: a warning');
+$ph = function ($since) {
+	return array('reason' => 'placeholder', 'title' => 'The origin still serves its placeholder certificate for sources.example',
+		'since' => $since, 'detail' => array('Host' => 'sources.example'));
+};
+$set(array('mgn_ssl_state' => 'active', 'mgn_cert_problem' => $ph(time() - 3600)));
+check($cert->evaluate($node) === null, 'The placeholder for an hour: nothing yet, a new site waits for its name (B112)');
+$set(array('mgn_cert_problem' => $ph(time() - IncidentSourceCertificate::PLACEHOLDER_GRACE_SECONDS - 60)));
+$v = $cert->evaluate($node);
+check(($v['severity'] ?? '') === 'warning' && strpos($v['title'] ?? '', 'placeholder certificate') !== false,
+	'The placeholder for over a day: a warning', json_encode($v));
+$set(array('mgn_ssl_state' => 'pending'));
+check($cert->evaluate($node) === null, 'Not while this plane is still provisioning the certificate, which says what it waits on');
+$set(array('mgn_ssl_state' => 'active'));
 $set(array('mgn_uptime_enabled' => false));
 check($cert->evaluate($node) === null && strpos($cert->cleared_text($node), 'turned off') !== false,
 	'Not watched while uptime monitoring (which checks it) is off, and says so when it clears');

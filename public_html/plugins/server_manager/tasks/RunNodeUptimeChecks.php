@@ -18,10 +18,14 @@
  * Each enabled node also gets an independent TLS certificate check (over the
  * wire, pinned to the node's own IP, so it sees the origin certificate whether
  * or not an edge fronts the name) that records when renewal is overdue, when
- * expiry is near, and when www reaches the origin uncovered, as the
- * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
+ * expiry is near, when www reaches the origin uncovered, and when the origin
+ * still answers with its placeholder, as the certificate incident's evidence
+ * (mgn_cert_problem). See check_cert_expiry().
  *
- * @version 2.17 - a machine whose site, or a site container on it, went down or locked after its last host report
+ * @version 2.18 - an origin answering with a self-signed certificate (the placeholder, which names the site and so
+ *                 covered it) is its own problem, 'placeholder', with the time it was first seen; its ten-year expiry
+ *                 is not stored (B112)
+ * @version 2.17 -a machine whose site, or a site container on it, went down or locked after its last host report
  *                 is asked every REBOOT_REFRESH_SECONDS (IncidentSourceDataRootStopped::report_wanted): the report
  *                 says whether its data root was stopped by hand, which the site-down alarm waits for (reviewer2 F1)
  * @version 2.16 - a node in an install state is not asked for its status facts either (ManagedNode::is_operational()):
@@ -578,10 +582,23 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		}
 		if (!$this->cert_covers_host($cert, $hostname)) {
 			// The origin answers TLS but with somebody else's certificate — a
-			// shared fallback vhost, or the placeholder minted at install. Under
-			// Full the site serves; under Full (Strict) it goes dark. Nothing is
-			// stored for a foreign certificate's expiry (it is not this node's).
+			// shared fallback vhost (the placeholder names the site, so it is
+			// never this). Under Full the site serves; under Full (Strict) it
+			// goes dark. Nothing is stored for a foreign certificate's expiry (it
+			// is not this node's).
 			$out['modified'] = $this->set_cert_problem($node, $this->uncovered_problem($hostname, $this->cert_names($cert)));
+			return $out;
+		}
+		if ($this->is_self_signed($cert)) {
+			// The placeholder a site answers TLS with until its real
+			// certificate lands: it names the site, so it covers it, but no CA
+			// signed it and nothing renews it. Its ten-year expiry is not this
+			// node's certificate either, so none is stored.
+			$before = $node->get('mgn_cert_problem');
+			if (is_string($before)) { $before = json_decode($before, true); }
+			$out['modified'] = $this->set_cert_problem($node, $this->placeholder_problem($hostname,
+				self::placeholder_since(is_array($before) ? $before : null, time()),
+				trim((string)$node->get('mgn_container_name')) !== ''));
 			return $out;
 		}
 
@@ -597,6 +614,50 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$this->set_cert_problem($node, ($reason !== null || $www_gap !== '')
 			? $this->expiry_problem($hostname, $cert, $reason, $www_gap) : null);
 		return $out;
+	}
+
+	/** No CA signed it: its issuer is its subject (the placeholder's shape). */
+	private function is_self_signed(array $cert): bool {
+		return !empty($cert['subject']) && isset($cert['issuer']) && $cert['issuer'] == $cert['subject'];
+	}
+
+	/**
+	 * When the origin was first seen on its placeholder: carried over from the
+	 * stored problem while it still says so, so the incident's grace
+	 * (IncidentSourceCertificate::PLACEHOLDER_GRACE_SECONDS) counts from then.
+	 */
+	public static function placeholder_since(?array $before, int $now): int {
+		if (is_array($before) && ($before['reason'] ?? '') === 'placeholder' && (int)($before['since'] ?? 0) > 0) {
+			return (int)$before['since'];
+		}
+		return $now;
+	}
+
+	/**
+	 * The problem for an origin still answering with its placeholder. Pure,
+	 * so it is pinned from injected values. $in_container: the site runs in a
+	 * container, whose certificate is issued on its host.
+	 *
+	 * @return array{reason:string,title:string,since:int,detail:array}
+	 */
+	private function placeholder_problem(string $hostname, int $since, bool $in_container): array {
+		return [
+			'reason' => 'placeholder',
+			'title'  => 'The origin still serves its placeholder certificate for ' . $hostname,
+			'since'  => $since,
+			'detail' => [
+				'Host'  => $hostname,
+				'Since' => gmdate('Y-m-d H:i', $since) . ' UTC',
+				'Why'   => 'No certificate authority signed the certificate the origin answers with: it is the placeholder a site '
+				         . 'is given until its real certificate is issued, and nothing renews it. Behind an edge on Full the site '
+				         . 'serves anyway, which is why nothing else looks wrong; on Full (Strict), or to anyone reaching the origin '
+				         . 'directly, it is refused. The machine\'s retry timer issues the real one once the name reaches it, unless '
+				         . 'the timer could not be armed (the last certificate job says which).',
+				'Fix'   => $in_container
+					? "On the site's host: sudo bash /opt/joinery-agent/tree/maintenance_scripts/sysadmin_tools/setup_ssl.sh {$hostname}"
+					: "sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/setup_ssl.sh {$hostname}",
+			],
+		];
 	}
 
 	/** Store the current certificate problem (or none). True when it changed. */
@@ -626,7 +687,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				'Presented' => "The origin presents a certificate for {$names}, not for {$hostname}; Strict would take the site down.",
 				'Why'       => 'Under Cloudflare Full the site serves anyway, which is why nothing else looks wrong. Under Full (Strict) '
 				             . 'the edge rejects the handshake and the site goes dark. The certificate on the wire is somebody else\'s: '
-				             . 'a shared fallback vhost on this host, or the placeholder minted at install.',
+				             . 'a shared fallback vhost on this host.',
 				'Fix'       => 'Issue the certificate for the apex and www on the box that terminates TLS for it: '
 				             . "sudo /var/www/html/*/maintenance_scripts/sysadmin_tools/issue_origin_cert.sh {$hostname}",
 			],
