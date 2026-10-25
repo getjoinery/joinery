@@ -1,6 +1,6 @@
 {
     "name": "Support Desk",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "Answers questions from the administrators of the sites that upgrade from this one, from the documentation and FAQ for the release each site runs and, for a site joined to this management node, from what the site is doing now. Install it on a management node that serves sites.",
     "author": "System Developer",
     "license": "PolyForm-Noncommercial-1.0.0",
