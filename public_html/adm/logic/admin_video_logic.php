@@ -15,7 +15,7 @@ function admin_video_logic(array $input): LogicResult {
 	$video->assert_found();
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 
-	if($input['action'] == 'remove'){
+	if(($input['action'] ?? null) == 'remove'){
 		$video->assert_can_write($session);
 		$video->permanent_delete();
 
@@ -23,13 +23,13 @@ function admin_video_logic(array $input): LogicResult {
 		return LogicResult::redirect("/admin/admin_videos");
 	}
 
-	if($input['action'] == 'delete'){
+	if(($input['action'] ?? null) == 'delete'){
 		$video->assert_can_write($session);
 		$video->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_videos");
 	}
-	else if($input['action'] == 'undelete'){
+	else if(($input['action'] ?? null) == 'undelete'){
 		$video->assert_can_write($session);
 		$video->undelete();
 

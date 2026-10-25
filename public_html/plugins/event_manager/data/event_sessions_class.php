@@ -363,7 +363,8 @@ public static function GetBySessionNumber($event_id, $session_number){
 		$q->execute();	
 		$counter = $q->fetch();
 		if($counter['count'] == 0){
-			return false;
+			// Every caller iterates the result: no files is an empty collection.
+			return new MultiFile(array('file_ids' => array()));
 		}
 		
 		$q = $dblink->prepare('SELECT esf_fil_file_id FROM esf_event_session_files WHERE esf_evs_event_session_id=?');

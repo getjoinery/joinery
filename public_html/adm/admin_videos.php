@@ -14,7 +14,7 @@
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
 	$sort = LibraryFunctions::fetch_variable('sort', 'video_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'DESC', 0, '');
-	$source = LibraryFunctions::fetch_variable('source', NULL, 0, '');
+	$source = LibraryFunctions::fetch_variable('source', NULL, 0, '', TRUE, 'int');
 
 	$search_criteria = array();
 	if($source){
@@ -71,7 +71,7 @@
 
 		array_push($rowvalues, $video->get_local('vid_create_time'));
 
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
+		array_push($rowvalues, PublicPageBase::admin_user_link($user) . ' ');
 
 		$page->disprow($rowvalues);
 	}

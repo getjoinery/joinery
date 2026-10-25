@@ -55,6 +55,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		RequestLogger::log('register', 'register_attempt', TRUE);
 
+		// The new account is signed in from birth, so another site's form could
+		// sign a visitor into an account it made: the form's token must be one
+		// this session issued.
+		if (!SessionControl::form_token_issued($input['_csrf_token'] ?? '')) {
+			return LogicResult::error('This sign-up form expired. Reload the page and try again.', $page_vars);
+		}
+
 		$formwriter = new FormWriterV2HTML5('form1');
 		if(!$formwriter->honeypot_check($input)){
 			return LogicResult::error('This feature is turned off');

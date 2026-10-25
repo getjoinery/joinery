@@ -64,9 +64,25 @@ function login_cleanup_ip($ip) {
 	});
 }
 
+/** The token a sign-in form on this session carries (FormWriter issues it). */
+function login_form_token($form_id = 'form1') {
+	new FormWriterV2HTML5($form_id);
+	return $_SESSION['csrf_tokens'][$form_id]['token'] ?? '';
+}
+
+/** POST to login_logic in the current session, as its form does. */
+function login_post(array $input) {
+	$input['_csrf_token'] = login_form_token();
+	return harness_call_logic('logic/login_logic.php', 'login_logic', $input, 'POST');
+}
+
 /** Call login_logic from a signed-out session. */
 function login_call(array $input) {
 	$_SESSION = array();
+	// The token the sign-in page's form carries; a case that sets its own keeps it.
+	if (!array_key_exists('_csrf_token', $input)) {
+		$input['_csrf_token'] = login_form_token();
+	}
 	return harness_call_logic('logic/login_logic.php', 'login_logic', $input, 'POST');
 }
 
@@ -94,6 +110,15 @@ $res = login_call(array('email' => $email, 'password' => $password));
 check($res->error === null && !login_is_retry($res) && $res->redirect !== null,
 	'a correct email and password signs in',
 	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
+
+// The sign-in needs no cookie, so only its form token stops another site's
+// form from signing a visitor into an account of its choosing.
+foreach (array('no token' => '', 'a token this session never issued' => str_repeat('ab', 32)) as $what => $token) {
+	$res = login_call(array('email' => $email, 'password' => $password, '_csrf_token' => $token));
+	check($res->redirect === null && $res->error !== null && stripos($res->error, 'expired') !== false,
+		"the right password with $what does not sign in",
+		'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
+}
 
 $res = login_call(array('email' => $email, 'password' => $password . 'X'));
 check(login_is_retry($res), 'a wrong password is refused',
@@ -405,8 +430,7 @@ $dest_pass = 'TestPassword_LoginReturn';
 function login_call_with_return($email, $pass, $returnurl) {
 	$_SESSION = array();
 	if ($returnurl !== null) { $_SESSION['returnurl'] = $returnurl; }
-	return harness_call_logic('logic/login_logic.php', 'login_logic',
-		array('email' => $email, 'password' => $pass), 'POST');
+	return login_post(array('email' => $email, 'password' => $pass));
 }
 
 $res = login_call_with_return($dest_email, $dest_pass, '/admin/admin_users?');
@@ -444,8 +468,7 @@ $res = harness_call_logic('logic/login_logic.php', 'login_logic',
 check($res->redirect === null && ($_SESSION['returnurl'] ?? '') === '/profile/server_manager/configure',
 	'a ?return= handed to the sign-in form is kept for after the sign-in',
 	'slot: ' . var_export($_SESSION['returnurl'] ?? null, true));
-$res = harness_call_logic('logic/login_logic.php', 'login_logic',
-	array('email' => $dest_email, 'password' => $dest_pass), 'POST');
+$res = login_post(array('email' => $dest_email, 'password' => $dest_pass));
 check($res->redirect === '/profile/server_manager/configure',
 	'and the sign-in goes there',
 	'redirect: ' . var_export($res->redirect, true));
@@ -479,8 +502,7 @@ check($totp_user->two_factor_cadence() === 'every_login',
 	'cadence: ' . $totp_user->two_factor_cadence());
 
 $_SESSION = array();
-$res = harness_call_logic('logic/login_logic.php', 'login_logic',
-	array('email' => $totp_email, 'password' => $totp_pass), 'POST');
+$res = login_post(array('email' => $totp_email, 'password' => $totp_pass));
 
 check($res->redirect === '/verify-totp',
 	'a correct password diverts to the second-factor ceremony instead of signing in',
@@ -498,8 +520,7 @@ check(isset($_SESSION['totp_pending_expires']) && $_SESSION['totp_pending_expire
 // A wrong password must not create a pending state — otherwise the divert
 // itself would confirm the account exists and holds a factor.
 $_SESSION = array();
-$res = harness_call_logic('logic/login_logic.php', 'login_logic',
-	array('email' => $totp_email, 'password' => $totp_pass . 'X'), 'POST');
+$res = login_post(array('email' => $totp_email, 'password' => $totp_pass . 'X'));
 check(login_is_retry($res) && empty($_SESSION['totp_pending_user_id']),
 	'a wrong password on a 2FA account is refused without minting a pending state',
 	'redirect: ' . var_export($res->redirect, true));
@@ -510,8 +531,7 @@ $totp_user->set('usr_2fa_cadence', 'sensitive_only');
 $totp_user->save();
 $totp_user->load();
 $_SESSION = array();
-$res = harness_call_logic('logic/login_logic.php', 'login_logic',
-	array('email' => $totp_email, 'password' => $totp_pass), 'POST');
+$res = login_post(array('email' => $totp_email, 'password' => $totp_pass));
 check($res->redirect !== '/verify-totp' && !login_is_retry($res),
 	'cadence sensitive_only signs in without asking the factor at the door',
 	'redirect: ' . var_export($res->redirect, true));

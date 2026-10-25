@@ -47,6 +47,12 @@ $addr = 200;
 function msp_start_call(array $input, string $method = 'POST') {
 	global $addr, $logic;
 	$_SERVER['REMOTE_ADDR'] = '192.0.2.' . (++$addr);
+	// A sign-in or sign-up carries its form's token, as the page's form does.
+	$form_id = array('login' => 'sms_login', 'register' => 'sms_register')[$input['form'] ?? ''] ?? null;
+	if ($method === 'POST' && $form_id && !array_key_exists('_csrf_token', $input)) {
+		new FormWriterV2HTML5($form_id);
+		$input['_csrf_token'] = $_SESSION['csrf_tokens'][$form_id]['token'] ?? '';
+	}
 	return harness_call_logic($logic, 'start_logic', $input, $method);
 }
 

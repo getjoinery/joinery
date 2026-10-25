@@ -88,6 +88,11 @@ function reg_call(array $input) {
 	static $n = 0;
 	$_SESSION = array();
 	$_SERVER['REMOTE_ADDR'] = '192.0.2.' . (100 + (++$n % 120));
+	// The token the sign-up page's form carries; a case that sets its own keeps it.
+	if (!array_key_exists('_csrf_token', $input)) {
+		new FormWriterV2HTML5('form1');
+		$input['_csrf_token'] = $_SESSION['csrf_tokens']['form1']['token'] ?? '';
+	}
 	return harness_call_logic('logic/register_logic.php', 'register_logic', $input, 'POST');
 }
 
@@ -134,6 +139,14 @@ check($res->error !== null && $res->redirect === null,
 	'register_active off refuses registration',
 	'error: ' . var_export($res->error, true));
 harness_set_setting_mem('register_active', '1');
+
+// The new account is signed in from birth, so a form from another site, which
+// carries no token this session issued, must make nothing.
+$forged_email = strtolower(reg_email('forged'));
+reg_cleanup_email($forged_email);
+$res = reg_call(reg_input(array('usr_email' => $forged_email, '_csrf_token' => '')));
+check($res->redirect === null && stripos((string)$res->error, 'expired') !== false && !User::GetByEmail($forged_email),
+	'a sign-up with no form token makes no account', 'error: ' . var_export($res->error, true));
 
 // Deliberately NOT through reg_call(), which clears the session.
 $_SERVER['REMOTE_ADDR'] = '192.0.2.99';
@@ -304,8 +317,9 @@ for ($i = 0; $i < 5; $i++) {
 	$flood_emails[] = $flood_email;
 	reg_cleanup_email($flood_email);
 	$_SERVER['REMOTE_ADDR'] = $flood_ip;
+	new FormWriterV2HTML5('form1');
 	harness_call_logic('logic/register_logic.php', 'register_logic',
-		reg_input(array('usr_email' => $flood_email)), 'POST');
+		reg_input(array('usr_email' => $flood_email, '_csrf_token' => $_SESSION['csrf_tokens']['form1']['token'] ?? '')), 'POST');
 	$_SESSION = array();
 }
 
@@ -358,7 +372,9 @@ reg_cleanup_email($return_email);
 $_SESSION = array();
 $_SESSION['returnurl'] = '/profile/server_manager/configure';
 $_SERVER['REMOTE_ADDR'] = '192.0.2.99';
+new FormWriterV2HTML5('form1');
 $res = harness_call_logic('logic/register_logic.php', 'register_logic', reg_input(array(
+	'_csrf_token'    => $_SESSION['csrf_tokens']['form1']['token'] ?? '',
 	'usr_email'      => $return_email,
 	'usr_first_name' => 'Return',
 	'usr_last_name'  => 'Case',
