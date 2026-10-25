@@ -30,7 +30,9 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.4
+ * @version 1.8.5
+ * @changelog 1.8.5 - executeAction() takes the acting level: the action face simulated its session with an
+ *                undefined variable (null), so a browser session ran at its stored level
  * @changelog 1.8.4 - The level floor and the simulated session use the acting level (actingPermission()):
  *   the session's for the browser credential, the stored one for a key.
  * @changelog 1.8.3 - A declared body that is missing is told apart by size (RequestBody): over
@@ -376,7 +378,7 @@ class ApiLogicEndpoint {
 		// where the state guest actions operate on (e.g. the cart) lives.
 		$acting_user = self::requiresSession($meta) ? $api_user : NULL;
 
-		self::executeAction($action_label, $meta, $logic_function, $acting_user, $api_entry);
+		self::executeAction($action_label, $meta, $logic_function, $acting_user, $api_entry, $acting_permission);
 	}
 
 	/**
@@ -387,8 +389,9 @@ class ApiLogicEndpoint {
 	 * @param string $logic_function
 	 * @param User|null $api_user Acting user for session simulation (null = sessionless)
 	 * @param ApiKey|null $api_entry Presented key, when one was (browser sessions: null)
+	 * @param int|null $acting_permission The level the request was authorized at (actingPermission())
 	 */
-	protected static function executeAction($action_label, $meta, $logic_function, $api_user, $api_entry = NULL) {
+	protected static function executeAction($action_label, $meta, $logic_function, $api_user, $api_entry = NULL, $acting_permission = NULL) {
 		$user_id = $api_user ? $api_user->key : NULL;
 		$raw_input = file_get_contents('php://input');
 

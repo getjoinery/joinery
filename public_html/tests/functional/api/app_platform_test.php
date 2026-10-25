@@ -226,9 +226,20 @@ try {
 	// Key revocation (app logout / App Sessions page)
 	$res = api_request('POST', '/api/v1/auth/logout', $member_headers);
 	check($res['status'] === 200, 'key revoked via auth/logout', 'status ' . $res['status']);
+	// Keep the session's cookie: the response that ends the session also
+	// deletes it from jar1, which would hide a session left alive on the server.
+	$jar1_kept = harness_jar_new('app1kept');
+	copy($jar1, $jar1_kept);
 	$res = web_request('/profile', $jar1, true);
 	check(strpos($res['body'], 'jy-app-mode') === false,
 		'bridged session dead after key revocation', 'status ' . $res['status']);
+	// Ended on the server, not only in that request: with the key check
+	// throttled, a live session would answer the kept cookie without checking.
+	set_setting_raw('app_bridge_key_check_seconds', '3600');
+	$res = web_request('/profile', $jar1_kept, true);
+	check(strpos($res['body'], 'jy-app-mode') === false,
+		'the ended session is gone on the server: its old cookie is anonymous', 'status ' . $res['status']);
+	set_setting_raw('app_bridge_key_check_seconds', '0');
 
 	// Password change (the lost-phone path) — revokes all session keys
 	$res = api_request('POST', '/api/v1/auth/web_session', $admin_headers, array('target' => '/profile'));

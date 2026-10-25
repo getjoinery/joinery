@@ -71,6 +71,12 @@ through `open()`, and acts by kind: heals `regenerable`, flags `operator` and
 of `update_database` (post-deploy — never `upgrade.php`'s pre-deploy pass, which
 runs against the old core) and on demand from the health page.
 
+**Plaintext is sealed.** A cold pass also seals any value of a setting or a bare
+column that is still plaintext (a value written before its locator was
+declared), and counts it: the summary in `update_database`'s output reads
+`healed 0, needs attention: 0, sealed 6 plaintext`. A wrapped column (one with an
+enumerator) is left to its consumer, which seals it on its next save.
+
 **Heal is cold-only.** Re-minting writes a fresh SecretBox blob — a long
 non-vault string — and `SealedEgressGuard` refuses exactly that write once a
 request has opened sealed content. The reconciler runs cold, so its heals are

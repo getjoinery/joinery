@@ -303,10 +303,13 @@ class ErrorManager {
             $context = $this->buildContext($exception);
 
             // Log first: the saved row is the error reference, and the
-            // response rendered next links to it.
-            $context->setErrorReference(null, ErrorReference::hash($exception));
-            $this->logError($exception, $context);
-            ErrorReference::recorded($exception, $context->getErrorId(), $context->getErrorHash());
+            // response rendered next links to it. An exception its thrower
+            // marked as expected (a refused request) is not an error: no row.
+            if (!ErrorStatus::isExpected($exception)) {
+                $context->setErrorReference(null, ErrorReference::hash($exception));
+                $this->logError($exception, $context);
+                ErrorReference::recorded($exception, $context->getErrorId(), $context->getErrorHash());
+            }
 
             $handler = $this->selectHandler($context);
             $response = $handler->handle($exception, $context);

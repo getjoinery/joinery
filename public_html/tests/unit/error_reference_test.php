@@ -192,6 +192,27 @@ if ($recorded && $recorded['id']) {
 }
 check($recorded !== null && $recorded['id'] > 0, 'Any other exception is recorded and becomes the reference');
 
+section('A refused request is not a server fault');
+
+// process_logic() throws a refusal for a LogicResult::error with nothing else to show.
+$refusal = null;
+try { process_logic(LogicResult::error('This link no longer works.')); } catch (Throwable $e) { $refusal = $e; }
+check($refusal instanceof LogicRefusal && $refusal->getMessage() === 'This link no longer works.',
+	'process_logic() throws a LogicRefusal carrying the message', $refusal ? get_class($refusal) : 'nothing thrown');
+check(ErrorStatus::of(new LogicRefusal('x')) === 422, 'a refusal answers 422, as the API answers the same result');
+check(ErrorStatus::isExpected(new LogicRefusal('x')), 'and is expected: no error row, nothing to report');
+check(ErrorStatus::of(new SystemDisplayableError('x')) === 400
+		&& ErrorStatus::of(new SystemDisplayableErrorNoLog('x')) === 400,
+	'an error the user can fix answers 400');
+check(ErrorStatus::of(new SystemAuthenticationError('x')) === 403
+		&& ErrorStatus::of(new AuthorizationException('x')) === 403,
+	'a refused permission answers 403');
+check(ErrorStatus::of(new RuntimeException('x')) === 500
+		&& ErrorStatus::of(new SystemDisplayablePermanentError('x')) === 500,
+	'a fault answers 500');
+check(!ErrorStatus::isExpected(new SystemDisplayableError('x')) && !ErrorStatus::isExpected(new RuntimeException('x')),
+	'anything not marked NoLog is still recorded');
+
 $session->clear_api_user();
 ErrorReference::reset();
 

@@ -1695,7 +1695,7 @@ function process_logic($result) {
 
     if ($result->error) {
         if (empty($result->data) && empty($result->validation_errors)) {
-            throw new SystemDisplayableError($result->error);
+            throw new LogicRefusal($result->error);
         }
         $session = SessionControl::get_instance();
         $session->save_message(new DisplayMessage($result->error, 'Error', NULL, DisplayMessage::MESSAGE_ERROR));

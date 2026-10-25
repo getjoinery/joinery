@@ -9,6 +9,47 @@ require_once(__DIR__ . '/ErrorHandler.php');
  */
 
 // ================================
+// HTTP STATUS
+// ================================
+
+/**
+ * The HTTP status of an uncaught exception: one rule for the web, admin, ajax
+ * and API handlers. A request the server refused answers 4xx; only a fault
+ * answers 500, so uptime checks, logs and clients can tell the two apart.
+ */
+final class ErrorStatus {
+
+    public static function of(\Throwable $exception): int {
+        if ($exception instanceof \LogicRefusal) {
+            return 422;   // the status /api/v1 gives the same LogicResult::error
+        }
+        if ($exception instanceof ValidationException) {
+            return 400;
+        }
+        if ($exception instanceof AuthenticationException) {
+            return 401;
+        }
+        if ($exception instanceof AuthorizationException || $exception instanceof \SystemAuthenticationError) {
+            return 403;
+        }
+        // Marked as an error the user can fix: their request, not a fault.
+        if ($exception instanceof \DisplayableErrorMessage || $exception instanceof \DisplayableErrorMessageNoLog) {
+            return 400;
+        }
+        return 500;
+    }
+
+    /**
+     * Whether the thrower marked it as expected (the NoLog family): it is not
+     * recorded as an error and offers nothing to report.
+     */
+    public static function isExpected(\Throwable $exception): bool {
+        return $exception instanceof \DisplayableErrorMessageNoLog
+            || $exception instanceof \DisplayablePermanentErrorMessageNoLog;
+    }
+}
+
+// ================================
 // BASE EXCEPTION
 // ================================
 
@@ -356,19 +397,7 @@ class WebErrorHandler implements ErrorHandlerInterface {
     }
     
     private function getStatusCode(\Throwable $exception): int {
-        if ($exception instanceof ValidationException) {
-            return 400;
-        }
-        
-        if ($exception instanceof AuthenticationException) {
-            return 401;
-        }
-        
-        if ($exception instanceof AuthorizationException) {
-            return 403;
-        }
-        
-        return 500;
+        return ErrorStatus::of($exception);
     }
     
     private function shouldShowDebug(\Throwable $exception): bool {
@@ -409,7 +438,9 @@ class WebErrorHandler implements ErrorHandlerInterface {
             $html .= '<a href="/" class="btn btn-primary">Home</a>';
         }
 
-        $html .= $this->renderReportAction($context);
+        if (!ErrorStatus::isExpected($exception)) {
+            $html .= $this->renderReportAction($context);
+        }
         $html .= '</div>';
 
         return $html;
@@ -656,7 +687,9 @@ class AdminErrorHandler extends WebErrorHandler {
             $html .= '<a href="/adm" class="btn btn-primary">Admin Dashboard</a>';
         }
 
-        $html .= $this->renderReportAction($context);
+        if (!ErrorStatus::isExpected($exception)) {
+            $html .= $this->renderReportAction($context);
+        }
         $html .= '</div>';
         
         return $html;
@@ -734,19 +767,7 @@ class AjaxErrorHandler implements ErrorHandlerInterface {
     }
     
     private function getStatusCode(\Throwable $exception): int {
-        if ($exception instanceof ValidationException) {
-            return 400;
-        }
-        
-        if ($exception instanceof AuthenticationException) {
-            return 401;
-        }
-        
-        if ($exception instanceof AuthorizationException) {
-            return 403;
-        }
-        
-        return 500;
+        return ErrorStatus::of($exception);
     }
     
     private function shouldIncludeDebugInfo(\Throwable $exception): bool {
@@ -805,16 +826,7 @@ class ApiErrorHandler implements ErrorHandlerInterface {
 	}
 
 	private function statusCode(\Throwable $exception): int {
-		if ($exception instanceof ValidationException) {
-			return 400;
-		}
-		if ($exception instanceof AuthenticationException) {
-			return 401;
-		}
-		if ($exception instanceof AuthorizationException) {
-			return 403;
-		}
-		return 500;
+		return ErrorStatus::of($exception);
 	}
 
 	/** The same user-safe rules the other handlers apply, as one string. */
