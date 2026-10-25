@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.8 - a credential is drawn locked, with no Reset, below SettingsWriter::SECRET_WRITE_PERMISSION
  * @version 1.7 - a setting's rule is checked in the browser only once its value changes
  * @version 1.6
  * @changelog 1.6 - a credential is one passwordinput() with `stored`: FormWriter
@@ -240,6 +241,15 @@ class SettingsFieldRenderer {
 	                                        array $field, array $declaration): void {
 		$field['stored'] = ((string)$stored !== '');
 		unset($field['value']);
+
+		// Below the level that may change a credential, it is drawn locked with no
+		// Reset: it still says whether something is stored, and SettingsWriter
+		// refuses the change anyway.
+		if (!SettingsWriter::maySetSecrets()) {
+			$field['disabled'] = true;
+			$note = 'Only a level ' . SettingsWriter::SECRET_WRITE_PERMISSION . ' admin may change this.';
+			$field['helptext'] = trim(($field['helptext'] ?? '') . ' ' . $note);
+		}
 
 		// A hand-drawn caller gets the declared rules too, so the browser check
 		// on its page matches what SettingsWriter enforces on save.

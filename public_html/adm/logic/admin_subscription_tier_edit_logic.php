@@ -30,8 +30,9 @@ function admin_subscription_tier_edit_logic(array $input): LogicResult {
         $tier = new SubscriptionTier(NULL);
     }
 
-    // Process POST actions
+    // Process POST actions. Tiers and their prices are money: 5 reads, 7 changes.
     if(LibraryFunctions::isFormSubmission()){
+        $session->check_permission(7);
         try {
             // Process features
             $features = array();

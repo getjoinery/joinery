@@ -257,6 +257,14 @@ factor-removal event rotates it: forgetting trusted devices, turning off the
 authenticator app, and revoking a passkey. Removing a factor is the moment
 device trust re-earns.
 
+**Second-factor secrets are sealed at rest.** The authenticator app's shared
+secret (`usr_totp_secret`) and the trusted-device key are SecretBox blobs,
+declared in `settings.json` `sealed_secrets`; `User::totp_secret()` and
+`User::second_factor_hmac_key()` open them. A key that can no longer be opened
+(the database moved to a site with another `secret_box_key`) reads as not set:
+trusted devices ask for the second factor again and the next trust grant mints a
+new key; an authenticator app has to be enrolled again.
+
 **Enrollment flips the ask.** When enrolling a passkey makes
 `user_has_second_factor()` flip from false to true, the enrollment response
 carries `became_second_factor` and the security page says so inline — the

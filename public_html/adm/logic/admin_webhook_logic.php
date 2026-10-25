@@ -9,7 +9,7 @@
 
 function admin_webhook_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
+	$session->check_permission(10); // API keys and webhook signing secrets are keys: 10 to read and change
 	$session->set_return();
 
 	$receiver = new SignalReceiver((int)($input['sgr_signal_receiver_id'] ?? 0), TRUE);

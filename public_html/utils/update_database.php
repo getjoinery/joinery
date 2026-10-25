@@ -145,8 +145,10 @@
 	 * failed (getjoinery, 0.8.520 and 0.8.521: each agent check-in in that
 	 * window, 'Undefined column mgn_agent_test_build').
 	 *
-	 * Additive only. Type changes, keys, constraints, indexes, migrations and
-	 * drops wait for the full run after the swap, as they always have. A lock
+	 * Additive only, plus widening a character column the new spec makes longer
+	 * (DatabaseUpdater::widenCharacterColumn()), which old code cannot notice.
+	 * Other type changes, keys, constraints, indexes, migrations and drops wait
+	 * for the full run after the swap, as they always have. A lock
 	 * it cannot have within a few seconds is given up rather than queued in
 	 * front of the live site's requests; the full run then adds what this did
 	 * not. Prints its changes and one UPDATE_DATABASE_RESULT line.

@@ -416,7 +416,7 @@ function catalog_logic_descriptor(): array {
             'requires_person_credential' => false, // browser session or an app session key; refuse machine keys
             'allow_guest'              => false,   // accept the anonymous browser principal (valid CSRF, no signed-in user)
             'session_write'            => false,   // re-open the session so the action's $_SESSION writes persist (browser credential only)
-            'min_user_permission'      => 0,       // usr_permission floor
+            'min_user_permission'      => 0,       // permission floor: the session's level for the browser credential, the key user's usr_permission for a key
             'requires_scoped_key'      => false,   // admit only a machine key whose apk_scope names this action
         ],
     ];

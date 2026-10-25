@@ -6,6 +6,7 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.8 - a character column the spec makes longer is widened on every pass, --schema-ahead included
  * @version 1.7 - a new NOT NULL column's 'will be set to NOT NULL' line is a note: it was counted as a schema
  *   change beside the column it describes (0.8.525's apply said Schema changes (2) for one column)
  * @version 1.6 - a new table whose serial column does not say is_nullable is created: its DEFAULT
@@ -744,7 +745,7 @@ class DatabaseUpdater {
                 if (!in_array($field_name, $existing_column_names)) {
                     // Add missing column
                     $this->addMissingColumn($table_name, $field_name, $field_specs, $dblink, $results);
-                } else {
+                } elseif (!$this->widenCharacterColumn($table_name, $field_name, $field_specs, $live_column_info[$field_name], $dblink, $results)) {
                     // Validate existing column
                     $this->validateExistingColumn($table_name, $field_name, $field_specs, $live_column_info[$field_name], $results, $dblink);
                 }
@@ -762,6 +763,40 @@ class DatabaseUpdater {
         return $results;
     }
     
+    /**
+     * Widen a character column the spec makes longer: a varchar(n) to a longer
+     * varchar or to text. Older code still serving writes only what fit before,
+     * and PostgreSQL makes the change without rewriting the table, so it runs on
+     * every pass, --schema-ahead included: new code that writes a longer value
+     * (a sealed secret where plain text was) finds the room from its first
+     * request, not after the full run that follows the swap.
+     *
+     * @return bool True when the column was widened.
+     */
+    private function widenCharacterColumn($table_name, $field_name, $field_specs, $live_column, $dblink, &$results) {
+        if (!preg_match('/^(varchar|text)(?:\((\d+)\))?$/i', trim((string)$field_specs['type']), $m)) {
+            return false;
+        }
+        if (($live_column['data_type'] ?? '') !== 'character varying' || $live_column['character_maximum_length'] === null) {
+            return false;
+        }
+        $live_length = (int)$live_column['character_maximum_length'];
+        $to_text = strtolower($m[1]) === 'text';
+        $spec_length = isset($m[2]) ? (int)$m[2] : null;
+        if (!$to_text && ($spec_length === null || $spec_length <= $live_length)) {
+            return false;
+        }
+        $type = $to_text ? 'text' : "varchar({$spec_length})";
+        try {
+            $dblink->exec("ALTER TABLE \"{$table_name}\" ALTER COLUMN \"{$field_name}\" TYPE {$type}");
+        } catch (PDOException $e) {
+            $results['errors'][] = "Could not widen {$table_name}.{$field_name} to {$type}: " . $e->getMessage();
+            return true;
+        }
+        $results['messages'][] = "Widened column: {$table_name}.{$field_name} from varchar({$live_length}) to {$type}";
+        return true;
+    }
+
     /**
      * The live default rendered the way defaultToSqlLiteral() renders the
      * spec's, when both are plain booleans or numbers; NULL otherwise, so

@@ -317,7 +317,7 @@
 			} else {
 				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid Format</strong></div>';
 				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Stripe webhook secrets should start with "whsec_"</div>';
-				echo '<strong>Current value:</strong> ' . htmlspecialchars(substr($stripe_endpoint_secret, 0, 10)) . '...<br>';
+				echo '<strong>Length:</strong> ' . strlen($stripe_endpoint_secret) . ' characters<br>';
 			}
 		} else {
 			echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ No Webhook Secret</strong></div>';
@@ -413,7 +413,7 @@
 					$http_code = 200;
 					$response = json_encode(array(
 						'success' => true,
-						'access_token' => substr($token_data['access_token'], 0, 20) . '...',
+						'access_token' => 'received',
 						'token_type' => $token_data['token_type'],
 						'expires_in' => $token_data['expires_in']
 					));
@@ -455,7 +455,7 @@
 					echo '<div style="background: #f8d7da; padding: 10px; border-radius: 3px; margin-top: 10px; font-size: 10px; color: #721c24;">';
 					echo '<strong>Debug Info:</strong><br>';
 					echo 'Client ID: ' . htmlspecialchars(substr($paypal_api_key, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_key, -4)) . '<br>';
-					echo 'Client Secret: ' . htmlspecialchars(substr($paypal_api_secret, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_secret, -4)) . '<br>';
+					echo 'Client Secret: set, ' . strlen($paypal_api_secret) . ' characters<br>';
 					echo 'Endpoint: ' . htmlspecialchars($endpoint) . '<br>';
 					
 					// Check if this might be a credential mismatch
@@ -556,7 +556,7 @@
 					$http_code = 200;
 					$response = json_encode(array(
 						'success' => true,
-						'access_token' => substr($token_data['access_token'], 0, 20) . '...',
+						'access_token' => 'received',
 						'token_type' => $token_data['token_type'],
 						'expires_in' => $token_data['expires_in']
 					));
@@ -598,9 +598,8 @@
 					echo '<div style="background: #e9ecef; padding: 10px; border-radius: 3px; margin-top: 10px; font-size: 10px; color: #495057;">';
 					echo '<strong>Debug Info:</strong><br>';
 					echo 'Client ID: ' . htmlspecialchars(substr($paypal_api_key_test, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_key_test, -4)) . '<br>';
-					echo 'Client Secret: ' . htmlspecialchars(substr($paypal_api_secret_test, 0, 8)) . '...' . htmlspecialchars(substr($paypal_api_secret_test, -4)) . '<br>';
+					echo 'Client Secret: set, ' . strlen($paypal_api_secret_test) . ' characters<br>';
 					echo 'Endpoint: ' . htmlspecialchars($endpoint_test) . '<br>';
-					echo 'Basic Auth: ' . htmlspecialchars(substr($basic_auth_test, 0, 20)) . '...<br>';
 					
 					// Check if this might be a credential mismatch
 					if (strpos($paypal_api_key_test, 'sb-') !== 0 && strpos($paypal_api_key_test, 'ATF') !== 0) {

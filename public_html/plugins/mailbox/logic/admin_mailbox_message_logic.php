@@ -9,6 +9,7 @@
  * the HTML body are rewritten to short-lived signed URLs by the shared
  * MailboxService::resolveInlineImages(), scoped to this message only.
  *
+ * @version 1.6 - a message opens only for a viewer with a grant on its mailbox (MailboxViewer::canReadMessage); delete is a POST
  * @version 1.5 - a Fortress message renders locked, with fortress set
  * @version 1.4
  */
@@ -36,7 +37,14 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
 	}
 
-	if (isset($input['action']) && $input['action'] === 'delete') {
+	// The same rule as the reader: a grant on the message's mailbox, or all-access for
+	// mail that belongs to no mailbox. The permission-5 gate above only admits staff.
+	$viewer = MailboxViewer::fromSession($session);
+	if (!$viewer->canReadMessage($message)) {
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+	}
+
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'delete') {
 		$message->soft_delete();
 		$session->save_message(new DisplayMessage(
 			'Message deleted.',
@@ -100,7 +108,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	}
 
 	// Inline images: rewrite cid: references in the HTML body to short-lived
-	// signed URLs (shared resolver — the permission-5 gate above is the
+	// signed URLs (shared resolver — the mailbox grant check above is the
 	// authorization statement for the mint).
 	if ($body_html !== '' && !$locked) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));

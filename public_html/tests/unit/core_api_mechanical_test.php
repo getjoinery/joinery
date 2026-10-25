@@ -275,7 +275,8 @@ $permitted = array(
 	'plugins/server_manager/views/admin/job_detail.php'       => 'the page-load tick starts the rollout a deploy-all publish asked for, as the AdvanceStagedRollouts task would',
 	'plugins/server_manager/views/admin/fleet_security.php'   => 'the page-load tick moves a security run a person started, as the AdvanceFleetSecurityRuns task would',
 	'plugins/store/logic/cart_charge_logic.php'               => 'payment gateway return — persisting the order IS the request',
-	'plugins/store/includes/StripeHelper.php'                 => 'a subscription row reconciled with the status Stripe just returned, on a page that shows or checks it',
+	'plugins/store/includes/StripeHelper.php'                 => 'a subscription row or an order\'s refund total reconciled with what Stripe just returned, on a page that shows or checks it',
+	'plugins/joinery_ai/includes/ChatAsync.php'               => 'a chat turn whose worker died marked failed, on whatever poll noticed it',
 	'plugins/store/includes/AppStoreHelper.php'               => 'a subscription row reconciled with the status the App Store just returned, on a page that checks it',
 	'plugins/store/includes/GooglePlayHelper.php'             => 'a subscription row reconciled with the status Google Play just returned, on a page that checks it',
 );

@@ -3,7 +3,6 @@
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
-	require_once(PathHelper::getIncludePath('data/items_class.php'));
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
@@ -63,7 +62,7 @@
 			//$item->save_tags($tags_array);
 		}
 */
-		LibraryFunctions::redirect('/admin/admin_item?itm_item_id='. $item->key);
+		LibraryFunctions::redirect('/plugins/items/admin/admin_item?itm_item_id='. $item->key);
 		exit;
 	}
 
@@ -81,7 +80,7 @@
 	array(
 		'menu-id'=> 'blog-items',
 		'breadcrumbs' => array(
-			'Items'=>'/admin/admin_items',
+			'Items'=>'/plugins/items/admin/admin_items',
 			'Edit Item' => '',
 		),
 		'session' => $session,
@@ -97,7 +96,7 @@
 
 	// Editing an existing item
 	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/admin/admin_item_edit'
+		'action' => '/plugins/items/admin/admin_item_edit'
 	]);
 
 
@@ -164,7 +163,7 @@
 
 	if(count($optionvals)){
 		$formwriter = $page->getFormWriter('form_load_version', [
-			'action' => '/admin/admin_item_edit',
+			'action' => '/plugins/items/admin/admin_item_edit',
 			'method' => 'GET'
 		]);
 		$formwriter->begin_form();

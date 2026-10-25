@@ -292,7 +292,7 @@
             "title": "API Keys",
             "url": "admin_api_keys",
             "order": 4,
-            "permission": 8,
+            "permission": 10,
             "parent": "system"
         },
         {

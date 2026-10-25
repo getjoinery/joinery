@@ -64,7 +64,8 @@ class SdDevice extends SystemBase {
 	}
 
 	static function createDevice($device, $user, $post_vars){
-		$deactivation_pin = rand(100000, 999999);
+		// The owner types this on the device to turn filtering off, so it must not be guessable.
+		$deactivation_pin = random_int(100000, 999999);
 
 		$device_name = 'user'.$user->key . '-' . trim(preg_replace("/[^a-zA-Z0-9\s'-]/", "", $post_vars['device_name']));
 		$device_type = trim(preg_replace("/[^a-zA-Z0-9\s'-]/", "", $post_vars['device_type']));

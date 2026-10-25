@@ -13,30 +13,33 @@
 	$session->set_return();
 	$settings = Globalvars::get_instance();
 
-	$post = new Post($_GET['pst_post_id'], TRUE);
+	// The Actions menu's buttons post the id in the body; opening the page carries it in the URL.
+	$post = new Post($_REQUEST['pst_post_id'] ?? NULL, TRUE);
 
-	if($_REQUEST['action'] == 'delete'){
+	// Every action is a POST button on this page; opening it is a GET.
+	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
+	if($action == 'delete'){
 		$post->assert_can_write($session);
 		$post->soft_delete();
 
 		header("Location: /admin/admin_posts");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if($action == 'undelete'){
 		$post->assert_can_write($session);
 		$post->undelete();
 
 		header("Location: /admin/admin_posts");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'set_primary_photo'){
+	else if($action == 'set_primary_photo'){
 		$post->assert_can_write($session);
 		$post->set_primary_photo((int)$_POST['photo_id']);
 
 		header("Location: /admin/admin_post?pst_post_id=" . $post->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'clear_primary_photo'){
+	else if($action == 'clear_primary_photo'){
 		$post->assert_can_write($session);
 		$post->clear_primary_photo();
 

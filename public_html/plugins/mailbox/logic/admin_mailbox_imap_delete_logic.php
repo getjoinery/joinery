@@ -17,11 +17,13 @@
  * The same page serves the alias permanent-delete cascade (also_permadelete_alias_id):
  * the choice runs first, then the alias is permanently deleted.
  *
+ * @version 1.1 - every delete is the confirm form's POST; opening the page (a GET) never deletes
  * @version 1.0
  */
 
 function admin_mailbox_imap_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
@@ -43,14 +45,15 @@ function admin_mailbox_imap_delete_logic(array $input): LogicResult {
 	$ref_ids = _imap_del_reference_backed_ids($account_id);
 	$ref_count = count($ref_ids);
 
-	// Nothing reference-backed → no choice needed; fall through to the plain delete
-	// (and the alias cascade if requested).
-	if ($ref_count === 0) {
-		return _imap_del_finish_plain($session, $account, $cascade_alias_id, $accounts_url);
-	}
+	// --- confirm submitted --- Only the form's POST deletes: opening the page is a GET,
+	// and a link is a GET any site can make a browser follow.
+	if (LibraryFunctions::isFormSubmission() && !empty($input['_submitted'])) {
+		// Nothing reference-backed (any that were are gone since the page opened) →
+		// no choice needed; the plain delete (and the alias cascade if requested).
+		if ($ref_count === 0) {
+			return _imap_del_finish_plain($session, $account, $cascade_alias_id, $accounts_url);
+		}
 
-	// --- confirm submitted ---
-	if (!empty($input['_submitted'])) {
 		$mode = ($input['delete_mode'] ?? 'keep') === 'remove' ? 'remove' : 'keep';
 
 		if ($mode === 'keep') {

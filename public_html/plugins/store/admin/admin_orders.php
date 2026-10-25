@@ -8,7 +8,7 @@
 	$PRODUCT_ID_TO_NAME_CACHE = array();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+	$session->check_permission(6); // the list shows buyer addresses: personal, 6 to read
 	$session->set_return();
 	
 	$settings = Globalvars::get_instance();

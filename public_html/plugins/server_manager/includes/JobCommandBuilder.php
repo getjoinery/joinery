@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.144 - the node's API secret is read sealed (ManagedNode::api_secret_key()): the probe, the status fetch
+ *                 and has_api_creds(), where a secret that no longer opens counts as none
  * @version 1.142 - build_install_node passes --keep-root-login to install.sh docker and server, which turn root SSH
  *                 login off by default (specs/beta_break_glass_root_access.md section 2)
  * @version 1.141 - net_health and web_workers (agent 1.93.0, specs/slow_request_diagnosis_words.md WP2/WP3):
@@ -396,7 +398,7 @@ class JobCommandBuilder {
 
 	public static function has_api_creds($node) {
 		return !empty($node->get('mgn_api_public_key'))
-			&& !empty($node->get('mgn_api_secret_key'))
+			&& $node->api_secret_key() !== null
 			&& !empty($node->get('mgn_site_url'));
 	}
 
@@ -791,7 +793,7 @@ class JobCommandBuilder {
 		$start = microtime(true);
 		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
 		$public_key = (string)$node->get('mgn_api_public_key');
-		$secret_key = (string)$node->get('mgn_api_secret_key');
+		$secret_key = (string)$node->api_secret_key();
 
 		if ($site_url === '' || $public_key === '' || $secret_key === '') {
 			return [
@@ -889,7 +891,7 @@ class JobCommandBuilder {
 		$start = microtime(true);
 		$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
 		$public_key = (string)$node->get('mgn_api_public_key');
-		$secret_key = (string)$node->get('mgn_api_secret_key');
+		$secret_key = (string)$node->api_secret_key();
 
 		if ($site_url === '' || $public_key === '' || $secret_key === '') {
 			return [

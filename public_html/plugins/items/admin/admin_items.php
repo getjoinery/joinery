@@ -44,7 +44,7 @@
 	);	
 
 	$headers = array("Item",  "Created", "Published", "By", "Item Status");
-	$altlinks = array('New Item'=>'/admin/admin_item_edit');
+	$altlinks = array('New Item'=>'/plugins/items/admin/admin_item_edit');
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
@@ -69,7 +69,7 @@
 		}
 		
 		$rowvalues = array();
-		array_push($rowvalues, "<a href='/admin/admin_item?itm_item_id=$item->key'>".$title."</a>". $deleted);	
+		array_push($rowvalues, "<a href='/plugins/items/admin/admin_item?itm_item_id=$item->key'>".$title."</a>". $deleted);	
 		array_push($rowvalues, $item->get_local('itm_create_time'));
 		array_push($rowvalues, $item->get_local('itm_published_time'));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');

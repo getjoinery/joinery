@@ -23,8 +23,9 @@
 		exit();
 	}
 
-	// Handle form submission
+	// Handle form submission. A user's tier is money: 5 reads, 7 changes.
 	if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+		$session->check_permission(7);
 		if (isset($_POST['tier_id'])) {
 			try {
 				// Get current tier before making changes

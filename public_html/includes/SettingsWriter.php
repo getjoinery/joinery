@@ -38,6 +38,8 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
+ * @version 1.5 - a credential (a `secret` setting) changes only at SECRET_WRITE_PERMISSION; a web save
+ *   below it is refused, naming the field
  * @version 1.4 - a secret is compared by what it holds (stored sealed; Setting::openStored()); an active
  *   sandboxed plugin's settings are writable like an active native plugin's
  * @version 1.3 - a setting's declared clearsPages leave the static page cache when it changes
@@ -56,6 +58,22 @@ class SettingsWriter {
 	 * setting this back to false; nothing else changes with it.
 	 */
 	const ENFORCE_SCOPE = true;
+
+	/**
+	 * The level that may set, replace or remove a credential: keys are 10 to read
+	 * and change (spec declared_permissions 3.1). A gateway secret replaced by
+	 * someone below it would send the site's payments or mail elsewhere.
+	 */
+	const SECRET_WRITE_PERMISSION = 10;
+
+	/**
+	 * Whether this request may change a credential. CLI, cron and scheduled
+	 * tasks have no session and are the server's own.
+	 */
+	public static function maySetSecrets(): bool {
+		if (PHP_SAPI === 'cli') return true;
+		return (int)SessionControl::get_instance()->get_permission() >= self::SECRET_WRITE_PERMISSION;
+	}
 
 	/**
 	 * Write the declared settings found in a submitted request.
@@ -195,6 +213,7 @@ class SettingsWriter {
 		}
 
 		$changes = array();
+		$key_refusals = array();
 		foreach ($candidates as $name => $value) {
 			$current = isset($stored[$name]) ? (string)$stored[$name]->get('stg_value') : null;
 			// A secret is stored sealed: what counts is what it holds, the
@@ -212,6 +231,11 @@ class SettingsWriter {
 				list($action, $secret) = FormWriterV2Base::process_secretinput(
 					array($name => $value), $name, $current !== null && $current !== '');
 				if ($action === FormWriterV2Base::SECRET_KEEP) continue;
+				if (!self::maySetSecrets()) {
+					$key_refusals[$name] = array('Only a level ' . self::SECRET_WRITE_PERMISSION
+						. ' admin may change this credential. Nothing was saved.');
+					continue;
+				}
 				if ($action === FormWriterV2Base::SECRET_CLEAR) {
 					$result['cleared_secrets'][] = $name;
 					$changes[$name] = '';
@@ -223,6 +247,13 @@ class SettingsWriter {
 			if ($current !== null && (string)$value === $current) continue;
 
 			$changes[$name] = $value;
+		}
+
+		// A refused credential refuses the whole save: dropping just that field
+		// would report the rest as saved and hide the field that was posted.
+		if (!empty($key_refusals)) {
+			$result['errors'] = $key_refusals;
+			return $result;
 		}
 
 		if (empty($changes)) {

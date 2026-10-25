@@ -3150,6 +3150,18 @@
       "kind": "regenerable",
       "locator": "sbi_sandbox_installs.sbi_api_secret",
       "reprovision": "SandboxCredentials::reprovision"
+    },
+    {
+      "label": "Authenticator app secrets",
+      "feature": "Two-step sign-in (authenticator app)",
+      "kind": "regenerable-breaks-things",
+      "locator": "usr_users.usr_totp_secret"
+    },
+    {
+      "label": "Trusted-device signing keys",
+      "feature": "Two-step sign-in (trusted devices)",
+      "kind": "ephemeral",
+      "locator": "usr_users.usr_second_factor_hmac_key"
     }
   ]
 }

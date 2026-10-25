@@ -17,6 +17,7 @@
  *                the card, and where the install password stands; approval checks it with the provider
  * @version 1.5 - switched-off nodes read as switched off, not as broken: the going-quiet stamp is
  *                compared against the last poll rather than cleared, so a returning node needs no write
+ * @version 1.5 - the secret counts as set only when it opens (ManagedNode::api_secret_key())
  * @version 1.4 - turn the agent on for a node from here, over the SSH this plane already has:
  *                the node is administered from both ends and the fleet should not need a visit each
  * @version 1.3 - the routing checkbox is gone: connected = routed (hard cutover, owner-set)
@@ -26,7 +27,8 @@
  */
 
 	$has_api_pub = (bool)$node->get('mgn_api_public_key');
-	$has_api_sec = (bool)$node->get('mgn_api_secret_key');
+	// A secret that can no longer be opened reads as not set, as everywhere else.
+	$has_api_sec = $node->api_secret_key() !== null;
 	$api_tls_insecure = (bool)$node->get('mgn_tls_insecure');
 
 	$pageoptions = ['title' => 'API Credential'];

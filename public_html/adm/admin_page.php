@@ -14,16 +14,20 @@
 	$session->check_permission(5);
 	$session->set_return();
 
-	// Require page ID - redirect to list if not provided
-	if (empty($_GET['pag_page_id'])) {
+	// Require page ID - redirect to list if not provided. The Actions menu's
+	// buttons post it in the body; opening the page carries it in the URL.
+	if (empty($_REQUEST['pag_page_id'])) {
 		header("Location: /admin/admin_pages");
 		exit();
 	}
 
-	$page = new Page($_GET['pag_page_id'], TRUE);
+	$page = new Page($_REQUEST['pag_page_id'], TRUE);
+
+	// Every action is a POST button on this page; opening it is a GET.
+	$action = LibraryFunctions::isFormSubmission() ? ($_POST['action'] ?? '') : '';
 
 	// Handle layout save from the drag-reorder picker
-	if (isset($_POST['action']) && $_POST['action'] === 'save_layout') {
+	if ($action === 'save_layout') {
 		$page->assert_can_write($session);
 		$ids = isset($_POST['layout']) && is_array($_POST['layout'])
 			? array_values(array_map('intval', $_POST['layout']))
@@ -34,21 +38,21 @@
 		exit();
 	}
 
-	if($_REQUEST['action'] == 'delete'){
+	if($action == 'delete'){
 		$page->assert_can_write($session);
 		$page->soft_delete();
 
 		header("Location: /admin/admin_pages");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if($action == 'undelete'){
 		$page->assert_can_write($session);
 		$page->undelete();
 
 		header("Location: /admin/admin_pages");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'remove_component'){
+	else if($action == 'remove_component'){
 		// Remove a component from this page's layout (keeps the component itself)
 		$page->assert_can_write($session);
 		$remove_id = intval($_POST['pac_page_content_id'] ?? 0);
@@ -61,7 +65,7 @@
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'add_component'){
+	else if($action == 'add_component'){
 		// Append an existing component to this page's layout
 		$page->assert_can_write($session);
 		$add_id = intval($_POST['pac_page_content_id'] ?? 0);
@@ -76,13 +80,15 @@
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'set_primary_photo'){
+	else if($action == 'set_primary_photo'){
+		$page->assert_can_write($session);
 		$page->set_primary_photo((int)$_POST['photo_id']);
 
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'clear_primary_photo'){
+	else if($action == 'clear_primary_photo'){
+		$page->assert_can_write($session);
 		$page->clear_primary_photo();
 
 		header("Location: /admin/admin_page?pag_page_id=" . $page->key);
@@ -232,8 +238,12 @@
 			<a href="/admin/admin_component_edit?pag_page_id=<?php echo (int)$page->key; ?>" class="btn btn-sm btn-outline-primary">New Component</a>
 		</div>
 		<div class="card-body">
+			<?php // The order inputs join this form by its id (form="layoutForm"), so each
+			      // row's Remove button can be a form of its own: a form inside a form is
+			      // dropped by the browser, and Remove then posted the whole layout. ?>
 			<form method="post" id="layoutForm">
 				<input type="hidden" name="action" value="save_layout">
+			</form>
 				<ul id="layoutList" class="list-group mb-3">
 					<?php if (empty($layout_components)): ?>
 						<li class="list-group-item text-muted text-center py-3" id="layoutEmpty">
@@ -252,7 +262,7 @@
 								<small class="text-muted ms-2">&middot; <?php echo htmlspecialchars($type_label); ?></small>
 							</span>
 							<span>
-								<input type="hidden" name="layout[]" value="<?php echo (int)$component->key; ?>">
+								<input type="hidden" name="layout[]" form="layoutForm" value="<?php echo (int)$component->key; ?>">
 								<?php
 								echo AdminPage::action_button('Remove', '', [
 									'hidden' => ['action' => 'remove_component', 'pac_page_content_id' => $component->key, 'pag_page_id' => $page->key],
@@ -265,9 +275,8 @@
 					<?php endforeach; endif; ?>
 				</ul>
 				<?php if (!empty($layout_components)): ?>
-					<button type="submit" class="btn btn-primary btn-sm">Save Order</button>
+					<button type="submit" form="layoutForm" class="btn btn-primary btn-sm">Save Order</button>
 				<?php endif; ?>
-			</form>
 
 			<?php if (empty($layout_components)): ?>
 			<hr>

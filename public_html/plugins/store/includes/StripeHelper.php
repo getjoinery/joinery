@@ -828,7 +828,8 @@ class StripeHelper {
 			$order->set('ord_refund_amount', $charge->amount_refunded/100);
 			//$order->set('ord_refund_note', $_POST['ord_refund_note']);
 
-			$order->save();
+			// The refund total Stripe just reported, folded in on the order page's view.
+			SystemBase::server_initiated_write(function () use ($order) { $order->save(); });
 	
 		}	
 		return $charge;		
