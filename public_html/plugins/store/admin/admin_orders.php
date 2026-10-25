@@ -135,7 +135,7 @@
 			}
 			
 			if($order_item->get('odi_usr_user_id')){
-				$this_out = $title . ' - <a href="/admin/admin_user?usr_user_id=' . $order_item_user->key . '">' . $order_item_user->display_name() . '</a>';
+				$this_out = $title . ' - ' . PublicPageBase::admin_user_link($order_item_user);
 				if($address_id){
 					$address = new Address($address_id, TRUE);
 					$this_out .= ' '.$address->get('usa_city') . ', '.$address->get('usa_zip_code_id'). ' ' . Address::GetCountryAbbrFromCountryCode($address->get('usa_cco_country_code_id'));
@@ -163,7 +163,7 @@
 
 		array_push($rowvalues,'<a href="/plugins/store/admin/admin_order?ord_order_id='.$order->key.'">Order '.$order->key.'</a>');
 
-		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id=' . $order_user->key . '">' . $order_user->display_name() . '</a>');
+		array_push($rowvalues, PublicPageBase::admin_user_link($order_user));
 
 		array_push($rowvalues,  LibraryFunctions::convert_time($order->get('ord_timestamp'), "UTC", $session->get_timezone(), 'M j, Y'));
 		array_push($rowvalues, implode('<br>',$order_items_out));

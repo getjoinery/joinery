@@ -65,7 +65,7 @@ foreach ($conversations as $cnv) {
 	foreach ($participants as $p) {
 		try {
 			$user = new User($p->get('cnp_usr_user_id'), TRUE);
-			$participant_names[] = '<a href="/admin/admin_user?usr_user_id=' . (int)$p->get('cnp_usr_user_id') . '">' . htmlspecialchars($user->display_name(), ENT_QUOTES, 'UTF-8') . '</a>';
+			$participant_names[] = PublicPageBase::admin_user_link($user);
 		} catch (Exception $e) {
 			$participant_names[] = 'User #' . (int)$p->get('cnp_usr_user_id');
 		}

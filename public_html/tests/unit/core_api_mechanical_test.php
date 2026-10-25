@@ -375,6 +375,7 @@ $rule_permitted = array(
 	'logic/drive_version_restore_logic.php' => 'an editor restoring a version behind can_write',
 	'logic/list_logic.php' => 'visitor newsletter signup (new account + registrant), admitted by honeypot, anti-spam and CAPTCHA',
 	'logic/lists_logic.php' => 'visitor newsletter signup (new account + registrants), admitted by honeypot, anti-spam and CAPTCHA',
+	'plugins/event_manager/logic/event_waiting_list_logic.php' => 'a visitor joins a waiting list (new account, its list subscription, its waiting-list row), admitted by honeypot, anti-spam and CAPTCHA',
 	'plugins/boards/includes/Boards.php' => 'deleteFile behind its callers\' board role',
 	'plugins/boards/includes/BoardsCards.php' => 'card, card member and label, checklist, comment and attachment deletes behind the board role',
 	'plugins/boards/includes/BoardsEmail.php' => 'an editor\'s own board email address',

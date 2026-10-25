@@ -21,6 +21,7 @@
  *
  * Run: php tests/run.php --filter=model_access
  *
+ * @version 1.5 - a user's name links to their user page only where the reader may open it
  * @version 1.4 - the CLI rule as it is: checked while a person is signed in, under the harness
  * @version 1.3 - a refused write always throws: the log mode is gone
  * @version 1.2 - the surfaces: the REST shape, FormWriter, the admin table, the buttons
@@ -250,6 +251,12 @@ check(strpos(AdminPage::action_button('Edit', '/x', array('model' => $target, 'v
 $look = AdminPage::api_action_button('Look', 'user_search');
 check(strpos($look, 'data-jy-api-action="user_search"') !== false,
 	'an API action button the reader may use carries the action (user_search, personal:read)', $look);
+$link = PublicPageBase::admin_user_link($target, '<b>Name</b>');
+check(strpos($link, 'href="/admin/admin_user?usr_user_id=' . $target->key . '"') !== false && strpos($link, '&lt;b&gt;Name') !== false,
+	'at 6 a user\'s name links to their user page (personal, 6 to open), escaped', $link);
+$session->set_api_user($admin->key, null, 5);
+$link = PublicPageBase::admin_user_link($target, '<b>Name</b>');
+check(strpos($link, '<a ') === false && $link === '&lt;b&gt;Name&lt;/b&gt;', 'at 5 it is the name alone, not a link to a page that refuses', $link);
 $session->set_api_user($admin->key, null, 8);
 check(array_key_exists('usr_allowed_ips', $target->export_for_api()), 'at 8 the column is there');
 $session->set_api_user($other->key, null, 0);

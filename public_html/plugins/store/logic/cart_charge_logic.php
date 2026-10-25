@@ -953,6 +953,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					$order_item->set('odi_subscription_status', $subscription_result['status']);
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
 					$order_item->save();
+					// A cart of subscriptions alone has no card charge above to
+					// mark its order paid: the subscription's first invoice is
+					// the payment, so a live subscription marks it.
+					if((int)$order->get('ord_status') === Order::STATUS_UNPAID
+						&& in_array($subscription_result['status'], array('active', 'trialing'), true)){
+						$order->set('ord_status', Order::STATUS_PAID);
+						$order->save();
+					}
 				}
 				else if($payment_service == 'stripe_checkout'){
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);

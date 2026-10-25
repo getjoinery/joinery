@@ -36,8 +36,7 @@ $page->begin_box(array('title' => 'Ownership'));
 
 echo '<p><strong>Owner:</strong> ';
 if ($owner->key) {
-	echo '<a href="/admin/admin_user?usr_user_id=' . $owner->key . '">'
-		. htmlspecialchars($owner->display_name()) . '</a> ('
+	echo PublicPageBase::admin_user_link($owner) . ' ('
 		. htmlspecialchars($owner->login_label()) . ')';
 }
 else {

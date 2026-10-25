@@ -37,6 +37,7 @@ function event_waiting_list_logic(array $input): LogicResult {
 	if (!empty($_POST)) {
 
 		$user = NULL;
+		$guest = false;
 		if($session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
 		}
@@ -57,33 +58,43 @@ function event_waiting_list_logic(array $input): LogicResult {
 				return LogicResult::error($errormsg);
 			}
 
-			if(!$user = User::GetByEmail($_POST['usr_email'])){
-				$data = array(
+			$existing = User::GetByEmail($_POST['usr_email'] ?? '');
+			if($existing && $existing->get('usr_delete_time')){
+				return LogicResult::error(User::CLOSED_ACCOUNT_MESSAGE);
+			}
+			if($existing){
+				// Typing an address proves nothing about owning it: a visitor never
+				// acts for an existing account, whose owner signs in to join.
+				return LogicResult::error('An account already uses that email address. Please sign in to join the waiting list.');
+			}
+
+			// A visitor's signup: no one is signed in to own the new account, its
+			// list subscription or its waiting-list row. The honeypot, anti-spam
+			// question and CAPTCHA above admitted this request.
+			$guest = true;
+			$user = SystemBase::rule_checked_write(function () use ($settings) {
+				$user = User::CreateNew(array(
 					'usr_first_name' => $_POST['usr_first_name'],
 					'usr_last_name' => $_POST['usr_last_name'],
 					'usr_email' => $_POST['usr_email'],
 					'password' => NULL,
 					'send_emails' => true
-				);
-				$user = User::CreateNew($data);
+				));
 				if (!empty($_POST['privacy'])) {
 					$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 				}
-			}
-
-			if($_POST['usr_nickname']){
-				$user->set('usr_nickname', $_POST['usr_nickname']);
-			}
-
-			$user->set('usr_timezone', $_POST['usr_timezone']);
-			$user->prepare();
-			$user->save();
-
-			if($_POST['newsletter']){
-				if($settings->get_setting('default_mailing_list')){
-					$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+				if(!empty($_POST['usr_nickname'])){
+					$user->set('usr_nickname', $_POST['usr_nickname']);
 				}
-			}
+				$user->set('usr_timezone', $_POST['usr_timezone'] ?? '');
+				$user->prepare();
+				$user->save();
+
+				if(!empty($_POST['newsletter']) && $settings->get_setting('default_mailing_list')){
+					$user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+				}
+				return $user;
+			});
 		}
 
 		//ADD TO WAITING LIST
@@ -96,7 +107,12 @@ function event_waiting_list_logic(array $input): LogicResult {
 			$page_vars['message_type'] = 'success';
 		}
 		else{
-			$waiting_list->save();
+			if($guest){
+				SystemBase::rule_checked_write(function () use ($waiting_list) { $waiting_list->save(); });
+			}
+			else{
+				$waiting_list->save();
+			}
 
 			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 			SignalBus::dispatch('event.waitlisted', array(

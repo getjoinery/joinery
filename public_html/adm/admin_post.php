@@ -143,7 +143,7 @@
 							<?php
 							$author = new User($post->get('pst_usr_user_id'), TRUE);
 							?>
-							<a href="/admin/admin_user?usr_user_id=<?php echo $author->key; ?>"><?php echo htmlspecialchars($author->display_name()); ?></a>
+							<?php echo PublicPageBase::admin_user_link($author); ?>
 						</td>
 					</tr>
 					<?php endif; ?>

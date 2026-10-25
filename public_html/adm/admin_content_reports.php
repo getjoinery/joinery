@@ -49,8 +49,7 @@ foreach ($page_vars['rows'] as $row) {
 		}
 		if (!empty($preview['author_user_id'])) {
 			$author = new User((int)$preview['author_user_id'], TRUE);
-			$content .= '<br><small>By <a href="/admin/admin_user?usr_user_id=' . (int)$author->key . '">'
-				. htmlspecialchars($author->display_name()) . '</a></small>';
+			$content .= '<br><small>By ' . PublicPageBase::admin_user_link($author) . '</small>';
 		}
 	} elseif (!$row['active']) {
 		$content = '<strong>' . htmlspecialchars($row['label']) . ' #' . (int)$report->get('rpt_entity_id') . '</strong>'
@@ -68,8 +67,7 @@ foreach ($page_vars['rows'] as $row) {
 	$reporter = $row['reporter'];
 	$reported = htmlspecialchars(LibraryFunctions::convert_time($report->get('rpt_create_time'), 'UTC', $tz, 'M j, g:i A'));
 	if ($reporter && $reporter->key) {
-		$reported .= '<br><small>by <a href="/admin/admin_user?usr_user_id=' . (int)$reporter->key . '">'
-			. htmlspecialchars($reporter->display_name()) . '</a></small>';
+		$reported .= '<br><small>by ' . PublicPageBase::admin_user_link($reporter) . '</small>';
 	}
 
 	$status = htmlspecialchars($report->status_label());

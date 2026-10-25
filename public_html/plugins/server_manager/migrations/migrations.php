@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.12 - sm_027 raises a provisioning service account sm_026 cannot find (no id setting) to 8
  * @version 1.11 - sm_020 drops sm_001's full unique index on mgn_slug: the column's partial index (unique among
  *                live nodes) is the rule, and the full one refused a new node the name of a removed one (B52)
  * @version 1.10 - sm_017 moves the fleet verify interval, and node policies, still at 30 days to the weekly default
@@ -777,6 +778,26 @@ return [
 					WHERE stg_name = 'server_manager_provisioning_service_user_id' AND stg_value ~ '^[0-9]+$' LIMIT 1)");
 			$q->execute();
 			error_log('sm_026: ' . (int)$q->rowCount() . ' provisioning service account(s) raised to 8.');
+		},
+	],
+	[
+		// sm_026 finds the service account by the id setting, which a site whose
+		// account predates it never wrote (found on a live 0.8.535 site, 10-25):
+		// that account stays at 5 and the pipeline is refused. Raise the account
+		// ProvisioningSetup::adoptableServiceUser() trusts too: at the
+		// provisioning@ address, owning the active key the pipeline is
+		// configured with.
+		'id' => 'sm_027_legacy_provisioning_service_user_at_8',
+		'version' => '1.30.114',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare("UPDATE usr_users SET usr_permission = 8
+				WHERE usr_permission < 8 AND usr_delete_time IS NULL AND usr_email ILIKE 'provisioning@%'
+				AND usr_user_id IN (SELECT apk_usr_user_id FROM apk_api_keys
+					WHERE apk_is_active AND apk_public_key = (SELECT stg_value FROM stg_settings
+						WHERE stg_name = 'server_manager_getjoinery_api_public_key' AND stg_value <> '' LIMIT 1))");
+			$q->execute();
+			error_log('sm_027: ' . (int)$q->rowCount() . ' legacy provisioning service account(s) raised to 8.');
 		},
 	],
 ];

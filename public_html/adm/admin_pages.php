@@ -52,7 +52,7 @@
 		$user_id = $page->get('pag_usr_user_id');
 		if ($user_id) {
 			$user = new User($user_id, TRUE);
-			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
+			array_push($rowvalues, PublicPageBase::admin_user_link($user) . ' ');
 		} else {
 			array_push($rowvalues, '—');
 		}

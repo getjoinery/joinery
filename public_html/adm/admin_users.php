@@ -48,7 +48,7 @@
 
 		$rowvalues = array();
 
-		array_push($rowvalues, "<a href='/admin/admin_user?usr_user_id=$user->key'>".$user->display_name()."</a> ".$deleted_status);
+		array_push($rowvalues, PublicPageBase::admin_user_link($user) . ' '.$deleted_status);
 		array_push($rowvalues, htmlspecialchars($user->login_label()));
 		array_push($rowvalues, LibraryFunctions::convert_time($user->get('usr_signup_date'), "UTC", $session->get_timezone(), 'M j, Y'));
 

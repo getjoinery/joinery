@@ -1540,6 +1540,21 @@ abstract class PublicPageBase {
 		return Access::allows($level, (int)SessionControl::get_instance()->get_permission());
 	}
 
+	/**
+	 * A user's name for an admin page: a link to their user page when the
+	 * session may open it, else the name alone. $user is a User or a user id;
+	 * $label is plain text (escaped here), the user's display name when null.
+	 */
+	public static function admin_user_link($user, ?string $label = null): string {
+		$id = is_object($user) ? (int)$user->key : (int)$user;
+		if ($label === null) {
+			$label = is_object($user) ? $user->display_name() : 'User #' . $id;
+		}
+		$text = htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
+		if (!$id || !self::may_open('/admin/admin_user')) return $text;
+		return '<a href="/admin/admin_user?usr_user_id=' . $id . '">' . $text . '</a>';
+	}
+
 	/** "Needs level 8 (Admin)." */
 	private static function needs_level_note(int $level): string {
 		return 'Needs level ' . $level . ' (' . Access::levelName($level) . ').';
