@@ -369,7 +369,12 @@ pub fn run_pass(
     // the scan pairs what is on disk against where the engine believes each
     // entry is, and a stand-in the server has renamed is renamed here first so
     // that belief and the disk agree.
-    placeholders_follow_the_server(env, key_for)?;
+    //
+    // Not one on a disk that is not there (`disks_not_there`), asked first,
+    // from the store and the mount table alone.
+    let away = disks_not_there(env)?;
+    let away_paths: Vec<String> = away.iter().map(|(_, rel)| rel.clone()).collect();
+    placeholders_follow_the_server(env, key_for, &away_paths)?;
 
     // ---- what this computer did --------------------------------------------
     // Files and directories from one look, checked against the disk before
@@ -378,7 +383,11 @@ pub fn run_pass(
     // and neither is a record that last stood there or whose own file does.
     let look = look_at_the_disk(env)?;
     say_which_folders_would_not_hold_still(env, &look.unsettled)?;
-    let unsettled = look.unsettled;
+    // A folder whose disk is not there is held the same way, and from the
+    // server below (`disks_not_there`).
+    say_which_disks_are_not_there(env, &away)?;
+    let mut unsettled = look.unsettled;
+    unsettled.extend(away.iter().map(|(_, rel)| rel.clone()));
     let (held_files, observed): (Vec<ObservedFile>, Vec<ObservedFile>) =
         look.files.into_iter().partition(|o| under_unsettled(&unsettled, &o.path));
     let held_identities: std::collections::HashSet<jd_vfs::FileIdentity> =
@@ -844,6 +853,67 @@ pub fn run_pass(
     }
     let mut inputs: Vec<RoundInput> = Vec::new();
     let resolve = |path: &str| placement_of(path, &folder_ids);
+    // Every folder on a disk not there (`disks_not_there`), by where it is
+    // here.
+    let on_a_disk_not_there: std::collections::HashSet<i64> = {
+        let mut set: std::collections::HashSet<i64> = away.iter().map(|(id, _)| *id).collect();
+        let folders: Vec<Entry> = if away.is_empty() {
+            Vec::new()
+        } else {
+            all_entries(env)?.into_iter().filter(|e| e.id.entity_type == EntityType::Folder).collect()
+        };
+        while !set.is_empty() {
+            let grown: Vec<i64> = folders
+                .iter()
+                .filter(|e| !set.contains(&e.id.server_id) && e.local_placement().parent.is_some_and(|p| set.contains(&p)))
+                .map(|e| e.id.server_id)
+                .collect();
+            if grown.is_empty() {
+                break;
+            }
+            set.extend(grown);
+        }
+        set
+    };
+    // And where each such folder stands, by its parent and its name as this
+    // disk compares names: a folder the server moves onto that name would
+    // take the place of the empty folder the disk was mounted at (a rename
+    // replaces an empty directory), and the disk, mounted again, covers it.
+    let personality = env.vfs.personality();
+    let away_slots: std::collections::HashSet<(Option<i64>, String)> = if away.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        all_entries(env)?
+            .into_iter()
+            .filter(|e| e.id.entity_type == EntityType::Folder && away.iter().any(|(id, _)| *id == e.id.server_id))
+            .map(|e| (e.local_placement().parent, jd_vfs::comparison_key(e.effective_local_name(), &personality)))
+            .collect()
+    };
+    let on_a_disk_not_there_now = |entry: &Entry| {
+        (entry.id.entity_type == EntityType::Folder && on_a_disk_not_there.contains(&entry.id.server_id))
+            || entry.local_placement().parent.is_some_and(|p| on_a_disk_not_there.contains(&p))
+            || entry.remote.parent.is_some_and(|p| on_a_disk_not_there.contains(&p))
+            || (!away_slots.is_empty()
+                && away_slots.contains(&(entry.remote.parent, jd_vfs::comparison_key(&entry.remote.name, &personality))))
+    };
+    // What an earlier pass queued to write here, under a disk that is not
+    // there now, waits with it: run, it lands in the folder the disk covers
+    // once mounted, a trash finds nothing and forgets a file that is on the
+    // disk, and a park sets the folder the disk is mounted at aside under a
+    // working name, where the disk cannot be mounted again. Dropped, not held: the round below declines the entry until
+    // the disk is back, and then plans it again from what it finds.
+    if !on_a_disk_not_there.is_empty() {
+        for op in env.store.queued_ops()? {
+            let writes_here = matches!(
+                op.kind.as_str(),
+                "download" | "create_local_folder" | "move_local" | "park_local" | "preserve_local_as" | "adopt_placement" | "trash_local"
+            );
+            if writes_here && env.store.get_entry(op.entity)?.is_some_and(|e| on_a_disk_not_there_now(&e)) {
+                env.store.drop_op(op.op_id)?;
+            }
+        }
+    }
+
     // Anything already in the journal is spoken for. Deciding about it again
     // would queue a second operation doing the same job, once per pass, for as
     // long as the first one kept failing.
@@ -1022,6 +1092,14 @@ pub fn run_pass(
         // its move would land on the holder's directory before the holder's
         // own op has said where that directory goes.
         if out.naming.pending.contains(&entry.id) {
+            declined!(traced_id);
+        }
+        // On a disk that is not there, or moved onto it on the server: what is
+        // on that disk is not on this one, and the folder standing in its
+        // place is the empty one it was mounted at. Neither side is judged
+        // until the disk is back, nor anything put where the disk will cover
+        // it.
+        if on_a_disk_not_there_now(&entry) {
             declined!(traced_id);
         }
         // Nothing on the server, and now nothing on the disk either: there is
@@ -4678,6 +4756,7 @@ fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<usize, ExecError> {
 fn placeholders_follow_the_server(
     env: &ExecEnv,
     key_for: &mut dyn FnMut() -> String,
+    away: &[String],
 ) -> Result<(), ExecError> {
     let Some(root) = env.vfs.root() else {
         return Ok(());
@@ -4716,6 +4795,14 @@ fn placeholders_follow_the_server(
             env.store.put_entry(&entry)?;
             continue;
         };
+        // On a disk that is not there: its directory is on that disk, not
+        // gone. Lapsed, the tie left the directory to be adopted as a plain
+        // folder of the vault's name once the disk was back, and what is held
+        // in it went up in the clear. It waits, as everything on the disk
+        // does, and follows the server once the disk is back.
+        if !away.is_empty() && under_unsettled(away, &here) {
+            continue;
+        }
         if env.vfs.read_dir(&root.join(&here)).is_err() {
             entry.stand_in = None;
             env.store.put_entry(&entry)?;
@@ -5000,6 +5087,155 @@ fn say_which_folders_would_not_hold_still(env: &ExecEnv, unsettled: &[String]) -
 
 /// The state issue `say_which_folders_would_not_hold_still` raises.
 pub const UNSETTLED: &str = "folder_would_not_hold_still";
+
+/// Store meta: every folder a second disk has been seen mounted at, by its
+/// server id, with the identity of the disk's own top folder when it was.
+const DISKS_META: &str = "disks_mounted";
+
+/// The state issue `say_which_disks_are_not_there` raises.
+pub const DISK_NOT_THERE: &str = "disk_not_there";
+
+/// The folders whose disk is not there now: the folder a second disk was
+/// mounted at, and nothing is mounted there now, nor has the disk turned up
+/// at another folder (a Mac renames a folder a disk is mounted at, disk and
+/// all). By server id and relative path.
+///
+/// The disk's files are not on this disk, and they are not deleted: an
+/// unmounted disk leaves the empty folder it was mounted at, and read as it
+/// stands, every file that was on it is deleted here, from the server and
+/// from every other device, with nothing asked under the mass-delete guard
+/// for a disk of a few files. The sync root has the same rule
+/// (`root_unavailable`). So what is under the folder is held, here and from
+/// the server, until the disk is back.
+///
+/// Remembered from the system's mount table (`Vfs::disks_mounted_inside`);
+/// where it cannot be read nothing is held, and nothing remembered is
+/// forgotten. Not held: a folder the server deleted, or one it is in. That
+/// is how a disk gone for good leaves the sync folder.
+fn disks_not_there(env: &ExecEnv) -> Result<Vec<(i64, String)>, ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(Vec::new());
+    };
+    let Some(mounted) = env.vfs.disks_mounted_inside(&root) else {
+        return Ok(Vec::new());
+    };
+    let personality = env.vfs.personality();
+    let key = |rel: &str| rel.split('/').map(|n| jd_vfs::comparison_key(n, &personality)).collect::<Vec<_>>().join("/");
+    let identity = |path: &std::path::Path| -> (u64, u64) {
+        match env.vfs.directory_identity(path) {
+            Ok(Some(i)) => (i.file_id, i.birth_ns),
+            _ => (0, 0),
+        }
+    };
+    let mounted_now: HashMap<String, (u64, u64)> = mounted
+        .iter()
+        .filter_map(|m| {
+            let rel = m.strip_prefix(&root).ok()?.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+            Some((key(&rel), identity(m)))
+        })
+        .collect();
+    let before: std::collections::BTreeMap<i64, (u64, u64)> =
+        env.store.get_meta(DISKS_META)?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    // Almost every sync folder: no disk in it, now or ever.
+    if mounted_now.is_empty() && before.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut after = std::collections::BTreeMap::new();
+    let mut away = Vec::new();
+    let folders: HashMap<i64, Entry> = all_entries(env)?
+        .into_iter()
+        .filter(|e| e.id.entity_type == EntityType::Folder)
+        .map(|e| (e.id.server_id, e))
+        .collect();
+    let mut paths: HashMap<i64, Option<String>> = HashMap::new();
+    let mut ids: Vec<i64> = folders.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let entry = &folders[&id];
+        if entry.id.is_provisional() {
+            continue;
+        }
+        let Some(rel) = path_here(id, &folders, &mut paths) else { continue };
+        if let Some(disk) = mounted_now.get(&key(&rel)) {
+            after.insert(entry.id.server_id, *disk);
+            continue;
+        }
+        let Some(disk) = before.get(&entry.id.server_id) else { continue };
+        if deleted_on_the_server_with_what_holds_it(entry, &folders) {
+            continue;
+        }
+        after.insert(entry.id.server_id, *disk);
+        let moved_with_its_folder = disk.0 != 0 && disk.1 != 0 && mounted_now.values().any(|d| d == disk);
+        if !moved_with_its_folder {
+            away.push((entry.id.server_id, rel));
+        }
+    }
+    if after != before {
+        if after.is_empty() {
+            env.store.delete_meta(DISKS_META)?;
+        } else {
+            env.store.set_meta(DISKS_META, &serde_json::to_string(&after).unwrap_or_default())?;
+        }
+    }
+    away.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(away)
+}
+
+/// Has the server deleted this folder, or a folder it is in here?
+fn deleted_on_the_server_with_what_holds_it(entry: &Entry, folders: &HashMap<i64, Entry>) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut at = Some(entry);
+    while let Some(e) = at {
+        if e.remote_deleted {
+            return true;
+        }
+        let Some(parent) = e.local_placement().parent.filter(|p| seen.insert(*p)) else { break };
+        at = folders.get(&parent);
+    }
+    false
+}
+
+/// A folder's path here, as `relative_path` reads it, from the folders
+/// read once (`folders`), each worked out once (`paths`). `None` for a folder
+/// with no way back to the root.
+fn path_here(id: i64, folders: &HashMap<i64, Entry>, paths: &mut HashMap<i64, Option<String>>) -> Option<String> {
+    if let Some(known) = paths.get(&id) {
+        return known.clone();
+    }
+    // Marked first, so a loop in the parents reads as no way back.
+    paths.insert(id, None);
+    let entry = folders.get(&id)?;
+    let name = entry.effective_local_name().to_string();
+    let path = match entry.local_placement().parent {
+        None => Some(name),
+        Some(parent) => path_here(parent, folders, paths).map(|p| format!("{p}/{name}")),
+    };
+    paths.insert(id, path.clone());
+    path
+}
+
+/// A state: the disks not there (`disks_not_there`), said for as long as
+/// they are not, and withdrawn the pass they are back.
+fn say_which_disks_are_not_there(env: &ExecEnv, away: &[(i64, String)]) -> Result<(), ExecError> {
+    let root = env.vfs.root().unwrap_or_default();
+    let want = (!away.is_empty()).then(|| {
+        let folders: Vec<String> = away.iter().map(|(_, rel)| root.join(rel).display().to_string()).collect();
+        format!(
+            "The separate disk mounted at {} is not there now, so sync leaves what is on it as it is, \
+             here and on the server, until the disk is mounted there again. If it is gone for good, \
+             delete the folder on the web",
+            folders.join(", ")
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == DISK_NOT_THERE).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(DISK_NOT_THERE)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, DISK_NOT_THERE, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+    Ok(())
+}
 
 /// What the local scan found out about folders.
 ///

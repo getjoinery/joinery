@@ -818,9 +818,8 @@ fn classify(e: &ExecError) -> OpOutcome {
         // Held and said the same way.
         ExecError::Vfs(jd_vfs::VfsError::MountPoint { from, to }) => OpOutcome::Withdrawn(format!(
             "{} stays where it is, not at {}: a separate disk is mounted at {}, and this computer \
-             cannot rename or move a folder while a disk is mounted at it. Pause syncing, unmount the \
-             disk, move the folder, mount the disk again and resume syncing, or take that disk out of \
-             the sync folder",
+             cannot rename or move a folder while a disk is mounted at it. Unmount the disk, move the \
+             folder, and mount the disk again there, or take that disk out of the sync folder",
             from.display(),
             to.display(),
             from.display()

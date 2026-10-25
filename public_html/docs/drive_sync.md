@@ -471,7 +471,9 @@ not counted. The records it would remove are held with it, and named with it.
 
 Only deletes are withheld, and only in the blocked direction; ordinary transfers
 in the same round still run. An unavailable sync root is a separate case: it
-hard-pauses rather than reading as a mass local delete. Each device's guard
+hard-pauses rather than reading as a mass local delete. A disk mounted inside
+the sync root that is not there is the same case for what was on it
+(`disk_not_there`, under *Crash consistency*). Each device's guard
 answers for its own side, so a large delete approved on one device is asked
 about again on every other device that would remove it.
 
@@ -1276,10 +1278,9 @@ server stays put, with nothing at its new name set aside
 (`Vfs::is_a_fixed_mount_point`, asked first of the kernel's mount table, so a
 btrfs subvolume, which has a device of its own and renames like any folder, is
 not taken for one; `VfsError::MountPoint`). It is held and said the same way,
-naming the folder. The issue asks the person to pause syncing, unmount the
-disk, move the folder, mount the disk again and resume, since a pass that ran
-while the disk was unmounted would find the folder empty. Once that is done,
-the folder is read where it now stands and the hold lifts. A folder above a
+naming the folder. The issue asks the person to unmount the disk, move the
+folder, and mount the disk again there. Once that is done, the folder is read
+where it now stands and the hold lifts. A folder above a
 mount point still moves, and the disk with it.
 
 Nor does a disk go to the trash. A folder the server deleted, or one this
@@ -1292,6 +1293,30 @@ deleted with it still go to the trash one by one, each into its own disk's
 trash. The folder is held and said the same way, naming where the disk is
 mounted; once the person unmounts the disk, the hold lifts within the hour and
 the folder goes to the trash, or they delete it themselves.
+
+An unmounted disk leaves behind the empty folder it was mounted at. Read as it
+stands, every file that was on it is deleted here, on the server and on every
+other device, and a disk of a few files is too few for the mass-delete guard
+to ask. So each pass reads the system's mount table
+(`Vfs::disks_mounted_inside`) and remembers each folder a disk is mounted at,
+by its id and the identity of the disk's top folder (store meta
+`disks_mounted`). A folder remembered so, with no disk mounted at it now and
+its disk mounted at no other folder (a Mac renames a folder a disk is mounted
+at, disk and all), is a disk that is not there (`pass::disks_not_there`). A
+disk is followed to another folder only by an identity with both halves: the
+top folders of two disks of one filesystem share an inode, and without birth
+times they read alike. Nothing under it is read: it is held as a folder that
+would not hold still is, and nothing in it, moved into it on the server, or
+moved onto its name (a rename replaces an empty directory) is planned, so
+nothing is put where the disk covers it once mounted. A download, local move,
+park or local trash an earlier pass queued for it is dropped, and planned
+again from what is found once the disk is back. A vault's placeholder
+directory on it keeps its tie to the vault, and follows the server once the
+disk is back. It is said as
+`disk_not_there`, and withdrawn the pass the disk is back, when what is on it
+is read again as it stands. A disk gone for good leaves with its folder
+deleted on the web: a folder the server deleted, or one it is in, is not
+held. Where the system has no mount table to read (Windows), nothing is held.
 
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification
@@ -1364,6 +1389,7 @@ tray reads from.
 | `rename_held` | an entry with no key on this device was renamed elsewhere to a name this disk cannot give it, so it keeps its old name here; its detail is the server's name | the entry is no longer held at that name |
 | `store_inconsistent` | items have no way back to the root, and the server's index does not have their folder either | nothing is left stranded |
 | `reserved_prefix` | files here have names beginning `.jd-`, which the client keeps for its own working files | no such file is left; the list in it follows the disk |
+| `disk_not_there` | a disk mounted inside the sync folder is not there, so what was on it is held, here and from the server | the disk is mounted there again, or the server deletes its folder |
 | `leftover_stays` | something under one of the client's working names could not be swept to the trash: a disk is mounted in it, or the trash refused it | nothing is left standing; the list in it follows the disk |
 | `renames_untracked_on_this_drive` | the standing notice on a FAT or exFAT drive | the sync folder is on a drive that keeps file identities |
 | `trash_waits` | a folder's trash here waits for a child that cannot move yet | the trash goes through, or the folder stops being trashable |

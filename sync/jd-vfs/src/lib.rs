@@ -406,6 +406,14 @@ pub trait Vfs: Send + Sync {
     fn disk_mounted_in(&self, _path: &Path) -> Option<PathBuf> {
         None
     }
+    /// Every folder strictly inside `path` a second disk is mounted at now,
+    /// from the system's mount table, or `None` where the system cannot tell.
+    /// Asked once a pass, so a disk that was mounted inside the root and is
+    /// not now is known for one that is not there, rather than read as every
+    /// file on it deleted.
+    fn disks_mounted_inside(&self, _path: &Path) -> Option<Vec<PathBuf>> {
+        None
+    }
     /// Rename within the sync root. The folder `to` goes into must already be
     /// on this disk; a missing one is refused (`NoFolder`), never made, for
     /// the reason [`Vfs::create_dir`] gives.
