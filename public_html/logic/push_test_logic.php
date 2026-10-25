@@ -38,6 +38,7 @@ function push_test_logic_descriptor(): array {
 		'description' => 'Send a test push notification to this browser.',
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'requires_browser_session' => true,
 		],
 		'input'       => [

@@ -26,6 +26,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class DriveUsage extends SystemBase {
 	public static $prefix = 'dru';
 	public static $tablename = 'dru_drive_usage';
+	public static $access_class = 'config';
 	public static $pkey_column = 'dru_drive_usage_id';
 
 	protected static $foreign_key_actions = array(
@@ -55,7 +56,10 @@ class DriveUsage extends SystemBase {
 		$usage = new self(NULL);
 		$usage->set('dru_usr_user_id', $user_id);
 		$usage->set('dru_bytes_used', 0);
-		$usage->save();
+		// The row a derived figure lives in, made on first need, whoever's
+		// request needed it (a collaborator's upload into the owner's tree):
+		// the server's own write, as recompute()'s save is.
+		SystemBase::server_initiated_write(function () use ($usage) { $usage->save(); });
 		$usage->load();
 		return $usage;
 	}
@@ -125,7 +129,10 @@ class DriveUsage extends SystemBase {
 		$usage = self::for_user($user_id);
 		$usage->set('dru_bytes_used', $total);
 		$usage->set('dru_update_time', gmdate('Y-m-d H:i:s'));
-		$usage->save();
+		// A derived figure reconciled with the files it counts, whoever's
+		// request moved them (a member uploading to a shared folder moves its
+		// owner's total): the server's own write.
+		SystemBase::server_initiated_write(function () use ($usage) { $usage->save(); });
 		return $total;
 	}
 

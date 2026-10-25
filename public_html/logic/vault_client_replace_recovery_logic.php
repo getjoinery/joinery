@@ -82,7 +82,7 @@ function vault_client_replace_recovery_logic(array $input): LogicResult {
 function vault_client_replace_recovery_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Replace all recovery-key wrappings on a client-custody vault with a fresh browser-produced set; requires a recent step-up',
 		'input' => [
 			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],

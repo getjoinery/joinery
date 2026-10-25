@@ -58,6 +58,7 @@ class RelayCloudProvisionException extends SystemBaseException {}
 class RelayCloudProvision extends SystemBase {
 	public static $prefix = 'rcl';
 	public static $tablename = 'rcl_relay_cloud_provisions';
+	public static $access_class = 'config';
 	public static $pkey_column = 'rcl_relay_cloud_provision_id';
 
 	protected static $foreign_key_actions = array(

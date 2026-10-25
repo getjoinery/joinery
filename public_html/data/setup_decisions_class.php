@@ -15,6 +15,7 @@ class SetupDecisionException extends SystemBaseException {}
 class SetupDecision extends SystemBase {
 	public static $prefix = 'sud';
 	public static $tablename = 'sud_setup_decisions';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sud_setup_decision_id';
 
 	protected static $foreign_key_actions = [

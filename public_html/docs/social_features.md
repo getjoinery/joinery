@@ -588,7 +588,7 @@ both would grow an option flag per difference.
 
 Members report other people's content — a forum post, a chat message — for an
 admin to look at, and admins settle the reports in one queue at
-`/admin/admin_content_reports` (menu: Users → Content Reports, permission 5; the
+`/admin/admin_content_reports` (menu: Users → Content Reports, permission 6; the
 entry shows how many reports are open). The queue knows nothing about any one
 feature: each feature that lets members report something registers a
 **handler** for its content, and the queue asks the handler everything about

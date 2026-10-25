@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Run Detail
  * URL: /admin/joinery_ai/run?rcr_recipe_run_id=N
@@ -9,7 +10,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $run_id = (int)LibraryFunctions::fetch_variable_local($_GET, 'rcr_recipe_run_id', 0);

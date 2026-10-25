@@ -196,6 +196,9 @@ BackupObjectsStatus::$test_hooks = array(
 );
 $computed = BackupObjectsStatus::compute();
 check($computed['waiting']['count'] === 3 && $computed['same_account'] === true, 'compute() reads every hook');
+// A level belongs to a signed-in user: get_permission() is 0 without one.
+$_SESSION['loggedin'] = true;
+$_SESSION['usr_user_id'] = 1;
 $_SESSION['permission'] = 5;
 check(BackupObjectsNotice::render() === '', 'an admin below permission 10 sees no notice');
 $_SESSION['permission'] = 10;

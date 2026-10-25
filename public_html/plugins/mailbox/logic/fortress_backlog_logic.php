@@ -35,7 +35,7 @@ function fortress_backlog_logic(array $input): LogicResult {
 function fortress_backlog_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => false,
 		'description' => 'Count the caller\'s stored mail still to move onto their device key (all, and what can move now) and off it: {raise_remaining, raise_ready, lower_remaining, window_open}',
 		'input' => [

@@ -56,6 +56,7 @@ function play_claim_logic(array $input): LogicResult {
 
 function play_claim_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Validate a Google Play purchase token and grant the mapped subscription plan.',
 		'requires_session' => true,
 		'mutates'          => true,

@@ -32,6 +32,10 @@ class AgentFileDriftException extends AgentFileException {
 class AgentFile extends SystemBase {
 	public static $prefix = 'agf';
 	public static $tablename = 'agf_agent_files';
+	public static $access_class = 'config';
+	public static $read_permission = 10;
+	public static $write_permission = 10;
+	public static $delete_permission = 10;   // every verb is 10: these files steer the agents that change the tree
 	public static $pkey_column = 'agf_agent_file_id';
 
 	public static $ai_readable    = true;
@@ -244,6 +248,9 @@ class AgentFile extends SystemBase {
 	}
 
 	public function write_to_disk($force = false) {
+		// It writes into the code tree. Root's runner and update_database run it
+		// with no session; a web request asks the level, as a save would.
+		if (self::access_enforced()) Access::demand(static::access_level('write'));
 		if ($this->get('agf_delete_time')) {
 			throw new AgentFileException('Cannot write to disk: this agent file is deleted.');
 		}
@@ -323,14 +330,6 @@ class AgentFile extends SystemBase {
 		return PathHelper::getRootDir();
 	}
 
-	public function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '.static::$tablename
-			);
-		}
-	}
-
 	// ------------------------------------------------------------------
 	// Template upgrade machinery (see specs/agent_files_upgrade_strategy.md)
 	// ------------------------------------------------------------------
@@ -392,6 +391,7 @@ class AgentFile extends SystemBase {
 	 * row must be this row's current_candidate(). Throws otherwise.
 	 */
 	public function switch_to_candidate() {
+		if (self::access_enforced()) Access::demand(static::access_level('write'));   // it ends with write_to_disk()
 		$candidate = $this->current_candidate();
 		if (!$candidate) {
 			throw new AgentFileException('No candidate to switch to.');

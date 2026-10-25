@@ -88,13 +88,14 @@ function change_password_required_logic(array $input): LogicResult{
 	// being thrown into a settings form reads as a bug. Shown unconditionally
 	// rather than only when email looks unconfigured — an owner who already set
 	// it up sees one extra line, once, on a page they see once.
-	$page_vars['show_email_setup_hint'] = ($session->get_permission() >= 10);
+	$page_vars['show_email_setup_hint'] = Access::permits(10, $session);
 
 	return LogicResult::render($page_vars);
 }
 
 function change_password_required_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Satisfy a forced password-change requirement for admin users.',
 		'requires_session' => true,
 		'mutates'          => true,

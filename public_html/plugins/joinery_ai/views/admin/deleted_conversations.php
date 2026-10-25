@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Deleted Chats
  * URL: /admin/joinery_ai/deleted_conversations

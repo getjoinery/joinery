@@ -43,6 +43,7 @@ class UserEncryptionWrappingException extends SystemBaseException {}
  * in it (`uew_code_index`): one code makes a wrapping on the account vault
  * and one on the root vault, and using it spends both together.
  *
+ * @version 1.5 - access_owner_is(): a wrapping is its vault owner's, so a member enrols and stores their own unlockers
  * @version 1.4 - TYPE_ROOT; uew_code_set / uew_code_index pair a code's wrappings
  * @version 1.3 - reserved (empty) rows are excluded by default and swept by the
  *   next reserve() for the same unlocker; storeWrapped() refuses a row that was
@@ -55,6 +56,7 @@ class UserEncryptionWrappingException extends SystemBaseException {}
 class UserEncryptionWrapping extends SystemBase {
 	public static $prefix = 'uew';
 	public static $tablename = 'uew_user_encryption_wrappings';
+	public static $access_class = 'config';
 	public static $pkey_column = 'uew_user_encryption_wrapping_id';
 
 	protected static $foreign_key_actions = [
@@ -77,7 +79,7 @@ class UserEncryptionWrapping extends SystemBase {
 			'foreign_key'=>array('table'=>'uev_user_encryption_vaults', 'column'=>'uev_user_encryption_vault_id', 'on_delete'=>'CASCADE')),
 		'uew_unlocker_type'      => array('type'=>'varchar(16)', 'is_nullable'=>false),
 		'uew_pkc_passkey_credential_id'  => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
-		'uew_wrapped_secret_key' => array('type'=>'text', 'is_nullable'=>false),
+		'uew_wrapped_secret_key' => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>false),
 		'uew_salt'               => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'uew_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uew_is_used'            => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
@@ -91,6 +93,21 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_used_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'uew_delete_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
+
+	/**
+	 * A wrapping is its vault owner's: the person whose vault it opens may
+	 * enrol, store and retire it. The stored vault id decides, so pointing a
+	 * row at someone else's vault makes it theirs, not yours.
+	 */
+	public function access_owner_is($user_id): bool {
+		$vault_id = (int)$this->access_stored('uew_uev_user_encryption_vault_id');
+		if ((int)$user_id <= 0 || $vault_id <= 0) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		$vault = new UserEncryptionVault($vault_id, TRUE);
+		return $vault->key && $vault->access_owner_is($user_id);
+	}
 
 	/** The row-binding AD every wrapping is sealed with - splices a wrapping's
 	 *  ciphertext onto a different row and it fails to open. */

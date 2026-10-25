@@ -1,11 +1,11 @@
 <?php
+/** @joinery-admin class=money */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 // Check permissions
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $page = new AdminPage();
 

@@ -13,6 +13,7 @@
  * it is their file, it counts against their quota, and they may well want it. The
  * importer only reclaims what the importer created.
  *
+ * @version 1.1 - discarding runs as rule_checked_write(): loadRun() checked the caller holds the mailbox
  * @version 1.0
  */
 
@@ -38,7 +39,10 @@ function mail_import_discard_logic(array $input): LogicResult {
 		return LogicResult::error('Wait for the import to finish before discarding its archive.');
 	}
 
-	$result = (new MailArchiveImporter($run))->discardArchive();
+	// loadRun() above admitted the caller: an operator, or a holder of the run's mailbox (canTarget).
+	$result = SystemBase::rule_checked_write(function () use ($run) {
+		return (new MailArchiveImporter($run))->discardArchive();
+	});
 	if (empty($result['ok'])) {
 		return LogicResult::error($result['message']);
 	}
@@ -57,6 +61,7 @@ function mail_import_discard_logic(array $input): LogicResult {
  */
 function mail_import_discard_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Delete the source archive of a finished mail import, keeping the imported mail and the run record.',
 		'requires_session' => true,
 		'mutates'          => true,

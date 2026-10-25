@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -17,7 +18,6 @@
 	}
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// FormWriter V2 uses 'edit_primary_key_value' for the primary key hidden field
 	// Check POST first (form submission), then GET (initial page load)

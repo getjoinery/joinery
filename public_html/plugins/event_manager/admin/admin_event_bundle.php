@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,10 +9,9 @@
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
-	if($_POST['action'] == 'remove'){
+	if(($_POST['action'] ?? null) == 'remove'){
 		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 		$groupmember->remove();
 		header("Location: /plugins/event_manager/admin/admin_event_bundle?grp_group_id=".$_REQUEST['grp_group_id']);
@@ -77,6 +77,7 @@
 		$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event_bundle', [
 			'hidden'  => ['action' => 'remove', 'grm_group_member_id' => $group_member->key, 'grp_group_id' => $group->key],
 			'confirm' => 'Remove this event from the bundle?',
+			'model'   => $group_member, 'verb' => 'soft_delete',
 		]);
 		array_push($rowvalues, $delform);
 

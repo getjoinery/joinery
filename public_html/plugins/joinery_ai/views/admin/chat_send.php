@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — chat send endpoint (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_send  (POST)

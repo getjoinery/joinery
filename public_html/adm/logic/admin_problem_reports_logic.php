@@ -15,7 +15,6 @@
 
 function admin_problem_reports_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);
 	$session->set_return();
 
 	// Action first, before anything renders.

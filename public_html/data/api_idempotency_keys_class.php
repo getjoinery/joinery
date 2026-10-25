@@ -42,6 +42,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class ApiIdempotencyKey extends SystemBase {
 	public static $prefix = 'aik';
 	public static $tablename = 'aik_api_idempotency_keys';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'aik_api_idempotency_key_id';
 
 	// Retention: a key only has to outlive the retry window a client would use.
@@ -73,7 +74,7 @@ class ApiIdempotencyKey extends SystemBase {
 		// produced from protected content is sealed, and an ordinary API replay
 		// stays plaintext and free to read.
 		'aik_content_sealed' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'aik_sealed_key' => array('type'=>'text'),
+		'aik_sealed_key' => array('access_class' => 'keys', 'type'=>'text'),
 		'aik_sealed_owner_user_id' => array('type'=>'int8'),
 		'aik_key_generation' => array('type'=>'int4'),
 	);

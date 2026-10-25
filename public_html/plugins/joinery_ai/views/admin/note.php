@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI - Note Edit
  * URL: /admin/joinery_ai/note?rcn_note_id=N

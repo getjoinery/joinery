@@ -63,7 +63,7 @@ function drive_device_revoke_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => true,
-		'auth'             => array('capability' => 'delete'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'delete'),
 		'input'            => array(
 			'device_id' => array('type' => 'int', 'required' => true, 'min' => 1, 'label' => 'Device id'),
 		),

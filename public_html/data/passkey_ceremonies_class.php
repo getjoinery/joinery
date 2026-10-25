@@ -29,6 +29,7 @@ class PasskeyCeremonyException extends SystemBaseException {}
 class PasskeyCeremony extends SystemBase {
 	public static $prefix = 'pks';
 	public static $tablename = 'pks_passkey_ceremonies';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'pks_passkey_ceremony_id';
 
 	public static $api_readable = false;

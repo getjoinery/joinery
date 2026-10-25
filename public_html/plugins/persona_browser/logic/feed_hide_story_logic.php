@@ -37,6 +37,7 @@ function feed_hide_story_logic(array $input): LogicResult {
 
 function feed_hide_story_logic_descriptor(): array {
     return array(
+        'auth' => array('min_user_permission' => 0),
         'description'      => 'Hide one persona story so it never shows in the feed again.',
         'requires_session' => true,
         'mutates'          => true,

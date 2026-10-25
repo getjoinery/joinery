@@ -48,7 +48,8 @@ function mailbox_filters_logic(array $input, array $mount = array()): LogicResul
 	$list_url = (string)($mount['base'] ?? '/plugins/mailbox/admin/admin_mailbox_filters');
 	$operator = !empty($mount['operator']);
 	if ($operator) {
-		$session->check_permission(5);
+		// The operator's view is an admin page: its header (the filters' write
+		// level, for domain-wide filters no one owns) is the gate.
 		$viewer = null;
 	} else {
 		if (!intval($session->get_user_id())) {

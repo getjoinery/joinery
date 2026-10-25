@@ -18,6 +18,7 @@ class MessageAttachmentException extends SystemBaseException {}
 class MessageAttachment extends SystemBase {
 	public static $prefix = 'msa';
 	public static $tablename = 'msa_message_attachments';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'msa_message_attachment_id';
 
 	// Not REST-exposed on its own: an attachment is only ever meaningful through

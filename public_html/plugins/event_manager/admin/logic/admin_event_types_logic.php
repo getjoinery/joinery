@@ -5,7 +5,6 @@ function admin_event_types_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_types_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(7);
 	$session->set_return();
 
 	$event_types = new MultiEventType();

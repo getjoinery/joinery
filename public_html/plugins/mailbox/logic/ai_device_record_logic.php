@@ -30,7 +30,7 @@ function ai_device_record_logic(array $input): LogicResult {
 function ai_device_record_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'Record that the caller\'s own model gave an invalid verdict for one of their Fortress messages, so the recipe skips it',
 		'input' => [
 			'recipe_id' => ['type' => 'int', 'required' => true, 'label' => 'Recipe ID (the caller\'s own)'],

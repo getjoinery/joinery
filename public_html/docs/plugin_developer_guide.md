@@ -197,7 +197,7 @@ often needs:
 | `is_logged_in()` | bool | Gate member-only behaviour |
 | `get_user_id()` | int user id (0/none if not logged in) | Scope queries to the current member — essential for any member-owned plugin data |
 | `get_permission()` | int permission level | Compare against the [permission ladder](#) (0 any member, 5+ admin) |
-| `check_permission($level)` | void (redirects/401s if unauthorized) | First line of an admin page — redirects to `/login` if not logged in, throws 401 if under-ranked |
+| `check_permission($level)` | void (redirects/401s if unauthorized) | Redirects to `/login` if not logged in, throws 401 if under-ranked. An admin page does not call it: its `@joinery-admin` header is checked by the router ([Permissions](permissions.md#pages)) |
 | `get_timezone($default = NULL)` | IANA tz string | Pass to `LibraryFunctions::convert_time()` for display |
 | `set_return()` / `get_return()` | void / url | Remember where to send the user back after login |
 | `get_shopping_cart()` | cart object | Commerce flows |
@@ -600,11 +600,14 @@ collection class additionally needs `$model_class` (see [Writing a Multi (collec
 **REST API exposure & per-record scope.** A core model is a CRUD resource only if it opts in with
 `public static $api_readable = true;` and/or `$api_writable = true;` (both default `false`); plugin
 models are never exposed to CRUD — expose plugin behaviour through action endpoints instead. For an
-exposed model, the default row scope is **owner-or-staff (deny)**: a caller may touch a row only if
-they own it (the `{prefix}_usr_user_id` column matches the acting user) or they are staff
-(permission ≥ 5). Set `public static $api_public_read = true;` to make a resource world-readable
-(catalog content), or override `authenticate_read($data)` / `authenticate_write($data)` for a custom
-rule — copy the pattern from `data/orders_class.php`. See
+exposed model, the row scope is **the owner, else the class's level (deny)**: a caller may touch a
+row only if they own it (the `{prefix}_usr_user_id` column, or the model's `$owner_column`, matches
+the acting user) or their level meets the model's level for the verb. Every model declares its data
+class, `public static $access_class = 'personal';` ([Permissions](permissions.md)); the class sets
+its read, write and delete levels, and the same rule runs on every write a web request makes. Set
+`public static $api_public_read = true;` to make a resource world-readable (catalog content), or
+override `authenticate_read($data)` / `authenticate_write($data)` for a real rule of the model's
+own — copy the pattern from `data/messages_class.php`. See
 [REST API → Per-record authorization](api.md#per-record-authorization).
 
 **Deletion Behavior**: For complete documentation on defining foreign key actions, cascading deletes, soft-delete cascading patterns, and undelete strategies, see the [Deletion System Documentation](deletion_system.md).
@@ -718,7 +721,7 @@ The `input` schema drives boundary validation and appears in discovery — see [
 The action is addressed under the plugin's namespace — `POST /api/v1/action/my-plugin/my_feature` — and listed in `GET /api/v1/actions` as `my-plugin/my_feature`. Resolution goes directly to `plugins/{plugin}/logic/{action}_logic.php`; only active plugins resolve, and the namespace means a plugin action can never collide with a core action or another plugin's.
 
 - `requires_session => true` actions run under session simulation as the API key's user, so `SessionControl` works exactly as it does on the web. Use `$session->is_api_context()` when a function needs to return a JSON-clean payload instead of view-shaped objects.
-- **Authorization** defaults to the action surface's standard: the key needs the write capability (`apk_permission >= 2`). To override — e.g. a read-only action, or one requiring a higher user role — add an `'auth'` block to the descriptor: `'auth' => ['capability' => 'read', 'min_user_permission' => 5]`. The contract is enforced by `ApiAuth::authorize()`; see [docs/api.md](api.md#declaring-endpoint-authorization).
+- **Authorization**: every descriptor declares its level in an `'auth'` block, `'auth' => ['min_user_permission' => 'content:write']` (a class and verb, or a level; `0` for an action a member runs on their own rows; [Permissions](permissions.md)); the declaration test fails one without it. The key needs the write capability by default (`apk_permission >= 2`); a read-only action says `'capability' => 'read'` in the same block. The contract is enforced by `ApiAuth::authorize()`; see [docs/api.md](api.md#declaring-endpoint-authorization).
 - An optional `{action}_logic_form()` companion exposes a server-driven form definition at `GET /api/v1/form/{plugin}/{action}` — see [docs/api.md](api.md) and [docs/formwriter.md](formwriter.md#11-json-output-mode-server-driven-forms).
 - Inputs arrive through the `$input` parameter (merged GET + JSON body). Do not read `$_REQUEST` — it never sees the JSON body.
 
@@ -730,6 +733,7 @@ Plugin admin pages are accessed via the plugin admin discovery route:
 ```php
 // plugins/my-plugin/admin/admin_my_plugin.php
 <?php
+/** @joinery-admin class=config */
 // Core files are already available - no need to require them
 // PathHelper, Globalvars, and SessionControl are pre-loaded
 
@@ -737,7 +741,6 @@ Plugin admin pages are accessed via the plugin admin discovery route:
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $page = new AdminPage();
 $page->admin_header([
@@ -858,7 +861,6 @@ A `profileMenu` entry is the single way onto the member nav, everywhere: every t
       "slug": "my-plugin",
       "title": "My Plugin",
       "icon": "plug",
-      "permission": 8,
       "order": 15,
       "items": [
         { "slug": "my-plugin-dashboard", "title": "Dashboard", "url": "/admin/my_plugin", "order": 1 },
@@ -869,7 +871,7 @@ A `profileMenu` entry is the single way onto the member nav, everywhere: every t
 }
 ```
 
-Children inherit the parent's `permission` unless they override it.
+Who sees an entry is whoever may open the page it links to: the page's `@joinery-admin` header ([Permissions](permissions.md#pages)). A section with no page of its own shows when one of its entries does. An entry carries no permission of its own.
 
 **2. Child attachment** -- attaches to any existing menu by slug:
 
@@ -881,7 +883,6 @@ Children inherit the parent's `permission` unless they override it.
       "title": "Mailbox",
       "url": "/plugins/mailbox/admin/admin_mailbox_reader",
       "parent": "emails",
-      "permission": 5,
       "order": 10,
       "settingActivate": "mailbox_enabled"
     }
@@ -896,7 +897,7 @@ The `parent` value is the `amu_slug` of any menu in the system -- core menus, ot
 ```json
 {
   "adminMenu": [
-    { "slug": "my-tool", "title": "My Tool", "url": "/admin/my_tool", "icon": "wrench", "permission": 10, "order": 16 }
+    { "slug": "my-tool", "title": "My Tool", "url": "/admin/my_tool", "icon": "wrench", "order": 16 }
   ]
 }
 ```
@@ -910,7 +911,6 @@ The `parent` value is the `amu_slug` of any menu in the system -- core menus, ot
 | `order` | Yes | -- | Sort position within parent level |
 | `url` | No | `""` | Target page. URLs starting with `/` are stored as-is |
 | `icon` | No | null | Icon identifier |
-| `permission` | No | 10 | Min permission level (1-10) |
 | `settingActivate` | No | null | Setting that must be truthy for menu to display |
 | `disabled` | No | false | Whether disabled by default |
 | `parent` | No | null | Slug of parent menu to attach under |
@@ -931,7 +931,6 @@ Profile menu items appear in the member section nav (logged-in) or as auth links
       "url": "/profile/scrolldaddy",
       "icon": "shield",
       "visibility": "in",
-      "permission": 1,
       "order": 75
     }
   ]
@@ -948,7 +947,6 @@ Profile menu items appear in the member section nav (logged-in) or as auth links
 | `order` | Yes | -- | Sort position in the dropdown. Core slots: home=10, profile=50, signout=200. |
 | `icon` | No | null | Icon identifier passed through to theme renderers. |
 | `visibility` | No | `"in"` | One of `"in"` (logged-in), `"out"` (logged-out), `"both"`. |
-| `permission` | No | 0 | Min permission level (0-10). Only applies when logged in. |
 | `settingActivate` | No | null | Setting that must be truthy for the row to display. |
 | `disabled` | No | false | Whether disabled by default. |
 
@@ -974,7 +972,6 @@ Settings menu entries are sections on the member settings hub's left rail, rende
       "title": "My Plugin",
       "url": "/profile/myplugin/preferences",
       "icon": "cog",
-      "permission": 0,
       "order": 85,
       "settingActivate": "myplugin_active"
     }

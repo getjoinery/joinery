@@ -12,6 +12,7 @@ class SubscriptionTierException extends SystemBaseException {}
 class SubscriptionTier extends SystemBase {
     public static $prefix = 'sbt';
     public static $tablename = 'sbt_subscription_tiers';
+    public static $access_class = 'money';
     public static $pkey_column = 'sbt_subscription_tier_id';
 
     protected static $foreign_key_actions = [

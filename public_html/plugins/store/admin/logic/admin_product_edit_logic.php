@@ -13,7 +13,6 @@ function admin_product_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('/plugins/store/data/order_items_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
@@ -194,7 +193,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 			$product->set($field, $input[$field]);
 		}
 
-		if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
+		if(!$product->get('pro_link') || Access::permits(10, $session)){
 			if($input['pro_link']){
 				$product->set('pro_link', $product->create_url($input['pro_link']));
 			}
@@ -204,6 +203,8 @@ function admin_product_edit_logic(array $input): LogicResult {
 		}
 
 		$product->prepare();
+		// Asked before Stripe is told about the product, so a refused save leaves nothing there.
+		$product->assert_can_write($session);
 
 		//IF STRIPE IS ENABLED, CREATE A PRODUCT
 		if($settings->get_setting('checkout_type') != 'none'){

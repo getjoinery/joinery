@@ -16,6 +16,7 @@ class ForumTopic extends SystemBase {
 
 	public static $prefix = 'ftp';
 	public static $tablename = 'ftp_forum_topics';
+	public static $access_class = 'content';
 	public static $pkey_column = 'ftp_forum_topic_id';
 
 	public static $field_specifications = array(
@@ -115,7 +116,7 @@ class ForumTopic extends SystemBase {
 	// A topic changes only through ForumPosting, which checks the rules itself;
 	// a direct write (REST, AI) is a moderator's.
 	function authenticate_write($data) {
-		if ((int)($data['current_user_permission'] ?? 0) < ForumPost::$write_permission) {
+		if (!Access::allows(ForumPost::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
 			throw new SystemAuthenticationError('Only a forum moderator can change a topic directly.');
 		}
 	}

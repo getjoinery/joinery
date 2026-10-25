@@ -25,6 +25,7 @@ class InboundImapIngestFailureException extends SystemBaseException {}
 class InboundImapIngestFailure extends SystemBase {
 	public static $prefix = 'ifl';
 	public static $tablename = 'ifl_inbound_imap_ingest_failures';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'ifl_inbound_imap_ingest_failure_id';
 
 	/** Polls a message may fail on before the walk moves past it. */
@@ -47,13 +48,6 @@ class InboundImapIngestFailure extends SystemBase {
 		'ifl_create_time'                    => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ifl_update_time'                    => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/**
 	 * Count one failed attempt at (folder, uidvalidity, uid). Returns TRUE when the

@@ -84,7 +84,7 @@ function transfer_customer_logic_descriptor(): array {
 		'description' => 'A Managed site\'s buyer moving its server into their own Linode account: request, get the transfer code, see it, cancel, or stop our management afterwards.',
 		'mutates'     => true,
 		'requires_session' => true,
-		'auth'        => ['requires_browser_session' => true],
+		'auth'        => ['min_user_permission' => 0, 'requires_browser_session' => true],
 		'input'       => [
 			'do'           => ['type' => 'string', 'required' => true,
 				'enum' => ['request', 'get_code', 'reveal_code', 'cancel', 'stop_managing'], 'label' => 'Action'],

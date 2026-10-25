@@ -43,6 +43,7 @@ class PersonaFeedItem extends SystemBase {
 
     public static $prefix = 'pfi';
     public static $tablename = 'pfi_persona_feed_items';
+    public static $access_class = 'content';
     public static $pkey_column = 'pfi_persona_feed_item_id';
 
     const OWNER_INSTANCE = 0;

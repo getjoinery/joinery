@@ -61,6 +61,6 @@ function boards_import_logic_descriptor(): array {
 			'json'       => array('type' => 'text', 'required' => false, 'label' => 'Export JSON'),
 			'member_map' => array('type' => 'object', 'required' => false, 'label' => 'Export member id → site member id'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 	);
 }

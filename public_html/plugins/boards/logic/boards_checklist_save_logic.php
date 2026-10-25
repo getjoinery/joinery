@@ -134,7 +134,7 @@ function boards_checklist_save_logic_descriptor(): array {
 			'prev_id'      => array('type' => 'int', 'required' => false, 'label' => 'Above'),
 			'next_id'      => array('type' => 'int', 'required' => false, 'label' => 'Below'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		'ai_agent'         => 'confirm',
 	);
 }

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
@@ -7,11 +8,10 @@
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$settings = Globalvars::get_instance();
 
-	$location = new Location($_REQUEST['loc_location_id'], TRUE);
+	$location = new Location($_REQUEST['loc_location_id'] ?? null, TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
 		$location->assert_can_write($session);
@@ -36,7 +36,7 @@
 		$options['altlinks'] += array('Edit Location' => '/plugins/event_manager/admin/admin_location_edit?loc_location_id='.$location->key);
 	}
 
-	if(!$location->get('loc_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$location->get('loc_delete_time') && $location->can_delete(SessionControl::get_instance())) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_location', 'hidden' => array('action' => 'delete', 'loc_location_id' => $location->key));
 	}
 

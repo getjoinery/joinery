@@ -29,7 +29,7 @@ function device_rules_logic(array $input): LogicResult {
 function device_rules_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'One of the caller\'s mailboxes\' enabled mail rules, as a device evaluates them on end-to-end mail it opens: {alias_id, rules: [{id, match, forwards}]}',
 		'input' => [

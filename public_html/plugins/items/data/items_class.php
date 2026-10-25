@@ -12,6 +12,7 @@ class ItemException extends SystemBaseException {}
 class Item extends SystemBase {
 	public static $prefix = 'itm';
 	public static $tablename = 'itm_items';
+	public static $access_class = 'content';
 	public static $pkey_column = 'itm_item_id';
 
 	protected static $foreign_key_actions = [

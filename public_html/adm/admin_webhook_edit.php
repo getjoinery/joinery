@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Admin: add or edit a webhook. See adm/logic/admin_webhook_edit_logic.php.
  *

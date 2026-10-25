@@ -86,7 +86,7 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 function vault_add_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Complete adding a vault wrapping for another PRF-capable passkey; takes the new passkey\'s derivation (credential) and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) in the same request',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],

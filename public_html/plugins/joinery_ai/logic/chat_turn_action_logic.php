@@ -62,6 +62,7 @@ function chat_turn_action_logic(array $input): LogicResult {
 
 function chat_turn_action_logic_descriptor() {
     return ['requires_session' => true,
+            'auth' => ['min_user_permission' => 0],
             'description' => 'Delete one AI chat turn (a deleted user turn also removes its paired reply).',
             'input' => [
                 'message_id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],

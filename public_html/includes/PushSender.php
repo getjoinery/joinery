@@ -32,6 +32,7 @@
  *
  * See docs/push_notifications.md.
  *
+ * @version 1.0.2 - another account's endpoint moves only from the same device cookie (flip re-read V9)
  * @version 1.0.1 - a queued message is sent only from the database that queued it: one queued in a
  *                  test-db suite and sent at shutdown, after test mode closed, read the live
  *                  database's destinations for the test database's member id
@@ -92,7 +93,8 @@ class PushSender {
 	 * Register (or refresh) a destination for a member. An endpoint already
 	 * registered — to this member or, after a sign-out and a different sign-in
 	 * on the same browser, to someone else — becomes this member's: whoever
-	 * holds the browser is the one alerted.
+	 * holds the browser is the one alerted. Another account's endpoint moves
+	 * only from the browser holding it (the same device cookie).
 	 *
 	 * @param string      $kind         a PushDestination kind with a driver
 	 * @param array       $input        the client's registration fields (the driver checks them)
@@ -111,6 +113,14 @@ class PushSender {
 		if ($destination === null) {
 			$destination = new PushDestination(null);
 			$destination->set('psh_endpoint', $checked['endpoint']);
+		} elseif ((int)$destination->get('psh_usr_user_id') !== $user_id) {
+			// Another account's endpoint moves only from the browser that holds
+			// it: the same device cookie. Knowing the endpoint URL is not enough.
+			$stored = (string)$destination->get('psh_device_hash');
+			if ($stored === '' || $device_token === null || $device_token === ''
+					|| !hash_equals($stored, hash('sha256', $device_token))) {
+				throw new InvalidArgumentException('That notification address is registered to another account on another device.');
+			}
 		}
 		$destination->set('psh_usr_user_id', $user_id);
 		$destination->set('psh_kind', $kind);
@@ -119,7 +129,9 @@ class PushSender {
 		$destination->set('psh_apk_api_key_id', $api_key_id);
 		$destination->set('psh_failure_count', 0);
 		$destination->set('psh_last_seen_time', gmdate('Y-m-d H:i:s'));
-		$destination->save();
+		// An endpoint is the browser's: whoever registers it from that browser
+		// (checked above) is who it notifies, even when it last named another account.
+		SystemBase::rule_checked_write(function () use ($destination) { $destination->save(); });
 
 		// Keep a member's list bounded: the least recently seen go first.
 		$q = DbConnector::GetPreparedStatement(

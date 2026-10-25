@@ -106,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.48 - access_owner_is(): a message is its mailbox's grant holders' and its sealed owner's (a draft its author's),
+ *               so a holder below the personal level may change their own mail (MailboxViewer::holdsMessageRow)
  * @version 1.47 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.46 - senderDomainDisowns(): a DMARC fail under an enforcing policy, which no allow rule lifts
  * @version 1.45 - iem_dmarc_policy: the DMARC policy the verifier read; authRuleSaysSpam() exempts a fail under p=none
@@ -225,7 +227,22 @@ class InboundEmailMessage extends SystemBase {
 
 	public static $prefix = 'iem';
 	public static $tablename = 'iem_inbound_email_messages';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'iem_inbound_email_message_id';
+
+	/**
+	 * The owner rule (spec declared_permissions 3.2): a message belongs to the
+	 * holders of a grant on its mailbox and to the owner whose vault it is sealed
+	 * to (as $ai_owner_field says), and a draft to its author alone. Unmatched
+	 * mail sealed to no one has no owner and is level-only.
+	 */
+	public function access_owner_is($user_id): bool {
+		return MailboxViewer::holdsMessageRow((int)$user_id,
+			(int)$this->access_stored('iem_iea_inbound_email_alias_id'),
+			(string)$this->access_stored('iem_direction'),
+			(int)$this->access_stored('iem_draft_author_user_id'),
+			(int)$this->access_stored('iem_sealed_owner_user_id'));
+	}
 
 	// Retention: two windows, because this table holds two kinds of row an
 	// operator would answer "how long do we keep it?" about differently. Mail a
@@ -392,7 +409,7 @@ class InboundEmailMessage extends SystemBase {
 		// iem_content_sealed = false and empty content columns mid-ingest (the crash
 		// window InboundEmailRouter::storeMessage's UPDATE closes) or permanently for a
 		// Standard-tier message, which is never sealed and holds plaintext throughout.
-		'iem_sealed_key'          => array('type'=>'text', 'is_nullable'=>true),
+		'iem_sealed_key'          => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'iem_key_generation'      => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'iem_content_sealed'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Whose vault this row's DEK is sealed to, recorded AT SEAL TIME — the
@@ -669,13 +686,6 @@ class InboundEmailMessage extends SystemBase {
 		array('columns' => array('iem_iia_inbound_imap_account_id', 'iem_source_message_key'),
 			'where' => 'iem_source_message_key IS NOT NULL'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	// ---------------------------------------------------------- encryption at rest
 

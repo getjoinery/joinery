@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/admin/logic/admin_order_logic.php'));
@@ -72,7 +73,7 @@
 									<a href="/admin/admin_user?usr_user_id=<?php echo $order_user->key; ?>"><?php echo htmlspecialchars($order_user->display_name()); ?> (User #<?php echo $order_user->key; ?>)</a>
 								</td>
 							</tr>
-							<?php if($_SESSION['permission'] == 10): ?>
+							<?php if(Access::permits(10, $session)): ?>
 							<tr>
 								<td class="p-1" style="width: 35%;">Status:</td>
 								<td class="p-1">
@@ -175,7 +176,7 @@
 								<?php endif; ?>
 
 								<div class="fs-11 mt-2">
-									<?php if($_SESSION['permission'] >= 8 && ($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))): ?>
+									<?php if($order->can_write($session) && ($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))): ?>
 									<a href="/plugins/store/admin/admin_order_refund?oi=<?php echo $order_item->key; ?>" class="me-3">[refund]</a>
 									<?php endif; ?>
 									<a href="/plugins/store/admin/admin_order_item_edit?odi_order_item_id=<?php echo $order_item->key; ?>">[edit]</a>
@@ -329,7 +330,7 @@
 				</div>
 			</div>
 
-			<?php if($_SESSION['permission'] == 10 && $order->get('ord_raw_cart')): ?>
+			<?php if(Access::permits(10, $session) && $order->get('ord_raw_cart')): ?>
 			<!-- Raw Cart Data Card (Superadmin Only) -->
 			<div class="card mt-3">
 				<div class="card-header bg-body-tertiary">

@@ -15,7 +15,6 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	// Revenue attribution reads ord_orders, which only exists with the store plugin.
 	if (!PluginHelper::isPluginActive('store')) {

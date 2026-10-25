@@ -8,7 +8,6 @@ function admin_api_keys_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	$numperpage = 30;

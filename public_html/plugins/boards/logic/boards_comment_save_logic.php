@@ -53,7 +53,7 @@ function boards_comment_save_logic_descriptor(): array {
 			'body'       => array('type' => 'text', 'required' => false, 'label' => 'Comment'),
 			'mentions'   => array('type' => 'array', 'required' => false, 'items' => array('type' => 'int'), 'max_items' => 50, 'label' => 'Mentioned people'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		'ai_agent'         => 'confirm',
 	);
 }

@@ -9,9 +9,8 @@ require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php
 
 function admin_mailing_list_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
-	$mailing_list = new MailingList($input['mlt_mailing_list_id'], TRUE);
+	$mailing_list = new MailingList($input['mlt_mailing_list_id'] ?? null, TRUE);
 
 	if($input['action'] == 'delete'){
 		$mailing_list->assert_can_write($session);
@@ -56,7 +55,7 @@ function admin_mailing_list_logic(array $input): LogicResult {
 		$options['altlinks'] += array('Edit Mailing List' => '/admin/admin_mailing_list_edit?mlt_mailing_list_id='.$mailing_list->key);
 	}
 
-	if($_SESSION['permission'] >= 8){
+	if($mailing_list->can_delete($session)){
 		if($mailing_list->get('mlt_delete_time')) {
 			$options['altlinks']['Undelete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'undelete', 'mlt_mailing_list_id' => $mailing_list->key));
 		}

@@ -16,6 +16,7 @@ class OrderException extends SystemBaseException {}
 
 class Order extends SystemBase {	public static $prefix = 'ord';
 	public static $tablename = 'ord_orders';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ord_order_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -143,28 +144,6 @@ function is_stripe_order(){
 		return $order;
 	}	
 
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to view this entry in '. $this->tablename);
-			}
-		}
-	}	
-	
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}	
-	
 	function permanent_delete($debug = false){
 		//REMOVE ALL ORDER ITEMS FIRST
 		$order_items = $this->get_order_items();

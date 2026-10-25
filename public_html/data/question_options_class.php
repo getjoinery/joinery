@@ -15,6 +15,7 @@ class QuestionOptionException extends SystemBaseException {}
 
 class QuestionOption extends SystemBase {	public static $prefix = 'qop';
 	public static $tablename = 'qop_question_options';
+	public static $access_class = 'content';
 	public static $pkey_column = 'qop_question_option_id';
 
 	protected static $foreign_key_actions = [
@@ -56,13 +57,6 @@ class QuestionOption extends SystemBase {	public static $prefix = 'qop';
 	    'qop_edited_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'qop_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 }
 

@@ -13,7 +13,6 @@
             "slug": "persona-browser",
             "title": "Persona Browser",
             "icon": "rss_feed",
-            "permission": 5,
             "order": 40,
             "items": [
                 {
@@ -32,7 +31,6 @@
             "url": "/profile/persona_browser/feed",
             "icon": "rss_feed",
             "visibility": "in",
-            "permission": 0,
             "order": 80
         }
     ],

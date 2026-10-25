@@ -36,6 +36,7 @@ class DirectSession extends SystemBase {
 	}
 
 	public static $tablename = 'jds_direct_sessions';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'jds_direct_session_id';
 
 	/** Open and awaiting its content transfer. */

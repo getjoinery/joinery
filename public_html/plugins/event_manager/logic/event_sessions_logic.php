@@ -45,7 +45,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::redirect('/profile/event_sessions_course?event_id='.$event->key);
 	}
 
-	if ($event && $session->get_user_id() && $session->get_permission() > 4) {
+	if ($event && $session->get_user_id() && $event->can_read($session)) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
@@ -59,13 +59,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $event->key);
 
-	if($_SESSION['permission'] < 5 && !$event_registrant){
+	if(!$event->can_read($session) && !$event_registrant){
 		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>You are not registered for this event, so you cannot access the event materials.</strong></p>
 		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
 	}
 
-	if($_SESSION['permission'] < 5 && $event_registrant){
+	if(!$event->can_read($session) && $event_registrant){
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
 		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>
@@ -125,6 +125,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 function event_sessions_logic_descriptor() {
     return [
+        'auth' => ['min_user_permission' => 0],
         'requires_session' => true,
         'description' => 'Select event sessions',
         'input' => [

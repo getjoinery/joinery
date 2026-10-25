@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Inbound Email - Per-attachment download endpoint
  *

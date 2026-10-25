@@ -53,6 +53,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.28 - a sent Fortress draft's delete runs as rule_checked_write() (loadDraftInScope checked it)
  * @version 1.27 - a carried-over header keeps its raw UTF-8 (MailHeaderText, B30)
  * @version 1.26 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.25 - sendRaw(): send what a mail program composed (whole MIME + envelope) through
@@ -404,7 +405,10 @@ class MailboxSender {
 		$this->storeCopyParts($stored, $uploads, $from_address, $subject, $email);
 		if ($fortress_draft !== null) {
 			try {
-				$fortress_draft->permanent_delete();
+				// loadDraftInScope() checked the mailbox grant and that the viewer wrote it.
+				SystemBase::rule_checked_write(function () use ($fortress_draft) {
+					$fortress_draft->permanent_delete();
+				});
 			} catch (Throwable $e) {
 				error_log('MailboxSender: sent draft ' . $fortress_draft->key . ' could not be deleted: ' . $e->getMessage());
 			}

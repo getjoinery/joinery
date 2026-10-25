@@ -14,15 +14,8 @@ class AddressTravelMismatchException extends DisplayableAddressException {}
 
 class Address extends SystemBase {	public static $prefix = 'usa';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'usa_users_addrs';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'usa_users_addr_id';
 
 	protected static $foreign_key_actions = array(
@@ -213,7 +206,8 @@ private static function UcAddress($string) {
 		}
 
 		$country_code = $q->fetch();
-		return $country_code->cco_iso_code_2;			
+		// An address with no country, or a code the table does not hold, has no ISO code.
+		return $country_code ? $country_code->cco_iso_code_2 : null;
 	}
 
 	public static function CreateAddressFromForm($form, $user_id, $address = NULL, $and_save=TRUE, $use_transaction=TRUE, $strict_checks=TRUE) {
@@ -513,17 +507,6 @@ private static function UcAddress($string) {
 		$this->set('usa_address1', Address::UcAddress($this->get('usa_address1')));
 		$this->set('usa_address2', Address::UcAddress($this->get('usa_address2')));
 
-	}
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
 	}
 
 	function is_owner($session) {

@@ -176,10 +176,16 @@ try {
 	check((int)$again->key === (int)$dest->key, 'registering the same browser again keeps one row');
 
 	$shared = $make_browser('shared');
-	PushSender::register((int)$other->key, 'web', $shared['input']);
-	$moved = PushSender::register((int)$member->key, 'web', $shared['input']);
+	$shared_device = bin2hex(random_bytes(32));
+	PushSender::register((int)$other->key, 'web', $shared['input'], $shared_device);
+	$refused = null;
+	try { PushSender::register((int)$member->key, 'web', $shared['input'], bin2hex(random_bytes(32))); }
+	catch (InvalidArgumentException $e) { $refused = $e->getMessage(); }
+	check($refused !== null && count($destinations_of($other->key)) === 1,
+		'another device that knows the endpoint cannot take it over', (string)$refused);
+	$moved = PushSender::register((int)$member->key, 'web', $shared['input'], $shared_device);
 	check($destinations_of($other->key) === array() && in_array((int)$moved->key, $destinations_of($member->key), true),
-		'an endpoint registered by someone else becomes the new registrant\'s');
+		'the same browser, signed in as someone else, moves the endpoint to them');
 	PushSender::retire(array((int)$moved->key), 'test');
 
 	for ($i = 0; $i < PushSender::MAX_PER_USER + 2; $i++) {

@@ -32,7 +32,7 @@ function fortress_pending_logic(array $input): LogicResult {
 function fortress_pending_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'The newest relay-sealed end-to-end message the caller still has to parse in the browser, as ciphertext, and how many remain: {remaining, item}',
 		'input' => [

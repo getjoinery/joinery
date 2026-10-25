@@ -29,7 +29,7 @@ function boards_my_cards_logic_descriptor(): array {
 		'input'            => array(
 			'window' => array('type' => 'string', 'required' => false, 'enum' => array('week'), 'label' => 'Window'),
 		),
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'ai_agent'         => 'auto',
 	);
 }

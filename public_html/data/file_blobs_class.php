@@ -51,6 +51,7 @@ class FileBlobException extends SystemBaseException {}
 class FileBlob extends SystemBase {
 	public static $prefix = 'fbb';
 	public static $tablename = 'fbb_file_blobs';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fbb_file_blob_id';
 
 	// Physical storage: not user-facing, not API-exposed, not AI-readable. A
@@ -82,7 +83,7 @@ class FileBlob extends SystemBase {
 		// client-produced thumbnail). Durable variant inventory: cloud-side
 		// lifecycle ops can't scan a disk, and the value must survive later
 		// image-size-registry changes. Null for every other blob.
-		'fbb_encrypted_variant_key' => array('type'=>'varchar(32)','is_nullable'=>true),
+		'fbb_encrypted_variant_key' => array('access_class' => 'keys', 'type'=>'varchar(32)','is_nullable'=>true),
 		'fbb_sync_failed_count' => array('type'=>'int4','is_nullable'=>false,'default'=>0,'zero_on_create'=>true),
 		'fbb_sync_last_attempt' => array('type'=>'timestamp(6)','is_nullable'=>true),
 		'fbb_sync_last_error'   => array('type'=>'varchar(255)','is_nullable'=>true),
@@ -341,7 +342,9 @@ class FileBlob extends SystemBase {
 		$blob->set('fbb_is_private', $is_private);
 		$blob->set('fbb_reference_count', 1);
 		$blob->set('fbb_storage_driver', 'local');
-		$blob->save();
+		// A blob is the store's own bookkeeping, shared by whoever's files hold
+		// these bytes; the caller's Drive access decided the upload.
+		SystemBase::rule_checked_write(function () use ($blob) { $blob->save(); });
 		$blob->load();
 		return $blob;
 	}
@@ -1055,7 +1058,7 @@ class FileBlob extends SystemBase {
 		@chmod($path, 0666);
 		if ((string)$this->get('fbb_encrypted_variant_key') !== (string)$size_key) {
 			$this->set('fbb_encrypted_variant_key', $size_key);
-			$this->save();
+			SystemBase::rule_checked_write(function () { $this->save(); });
 		}
 		return true;
 	}

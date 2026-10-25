@@ -27,6 +27,7 @@
  *
  * See specs/inbound_email_labels.md and ImapSyncer.
  *
+ * @version 1.2 - access_owner_is(): a membership is its message's holders' (MailboxViewer::holdsMessage)
  * @version 1.1 - apply() adds only a live label of the message's own mailbox
  * @version 1.0
  */
@@ -38,7 +39,16 @@ class InboundLabelMemberException extends SystemBaseException {}
 class InboundLabelMember extends SystemBase {
 	public static $prefix = 'ilm';
 	public static $tablename = 'ilm_inbound_label_members';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ilm_inbound_label_member_id';
+
+	/**
+	 * The owner rule (spec declared_permissions 3.2): whoever holds the labelled
+	 * message. apply() only ever pairs a message with a label of its own mailbox.
+	 */
+	public function access_owner_is($user_id): bool {
+		return MailboxViewer::holdsMessage((int)$user_id, (int)$this->access_stored('ilm_iem_inbound_email_message_id'));
+	}
 
 	protected static $foreign_key_actions = array(
 		'ilm_iem_inbound_email_message_id' => array('action' => 'cascade'),
@@ -61,13 +71,6 @@ class InboundLabelMember extends SystemBase {
 		'ilm_create_time'                  => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ilm_update_time'                  => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('ilm_update_time', gmdate('Y-m-d H:i:s'));

@@ -46,6 +46,7 @@ class DirectSpool extends SystemBase {
 	}
 
 	public static $tablename = 'jdp_direct_spool';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'jdp_direct_spool_id';
 
 	/**

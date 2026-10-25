@@ -67,6 +67,7 @@ function order_list_logic(array $input): LogicResult {
 
 function order_list_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Paginated order history for the signed-in owner, with line item summaries',
 		'input' => [

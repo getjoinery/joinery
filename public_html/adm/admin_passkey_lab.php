@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_passkey_lab_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

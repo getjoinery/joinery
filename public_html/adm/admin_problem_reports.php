@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=9 */
 /**
  * Admin: Problem Reports. See adm/logic/admin_problem_reports_logic.php.
  *

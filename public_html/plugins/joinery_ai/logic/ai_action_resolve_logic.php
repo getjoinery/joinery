@@ -44,6 +44,7 @@ function ai_action_resolve_logic_descriptor(): array {
 		'mutates'     => true,
 		'requires_session' => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability'       => 'write',
 		],
 		'input'       => [

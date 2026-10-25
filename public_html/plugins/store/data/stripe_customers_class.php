@@ -22,6 +22,8 @@ class StripeCustomerException extends SystemBaseException {}
 class StripeCustomer extends SystemBase {
 	public static $prefix = 'stc';
 	public static $tablename = 'stc_stripe_customers';
+	public static $access_class = 'personal';
+	public static $owner_column = false;
 	public static $pkey_column = 'stc_stripe_customer_id';
 
 	protected static $foreign_key_actions = array(
@@ -64,12 +66,6 @@ class StripeCustomer extends SystemBase {
 		return ($data && isset($data->stc_usr_user_id)) ? $data->stc_usr_user_id : null;
 	}
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 }
 
 class MultiStripeCustomer extends SystemMultiBase {

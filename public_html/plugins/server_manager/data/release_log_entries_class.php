@@ -28,6 +28,7 @@ class ReleaseLogEntryException extends SystemBaseException {}
 class ReleaseLogEntry extends SystemBase {
 	public static $prefix = 'rle';
 	public static $tablename = 'rle_release_log_entries';
+	public static $access_class = 'config';
 	public static $pkey_column = 'rle_release_log_entry_id';
 
 	public static $test_fixture = array(

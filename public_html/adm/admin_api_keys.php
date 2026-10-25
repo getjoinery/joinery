@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_api_keys_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

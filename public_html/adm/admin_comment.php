@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
@@ -8,9 +9,8 @@
 	require_once(PathHelper::getIncludePath('data/posts_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
-	$comment = new Comment($_REQUEST['cmt_comment_id'], TRUE);
+	$comment = new Comment($_REQUEST['cmt_comment_id'] ?? null, TRUE);
 
 	if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);
@@ -76,7 +76,7 @@
 		$options['altlinks'] += array('Edit Comment' => '/admin/admin_comment_edit?cmt_comment_id='.$comment->key);
 	}
 
-	if(!$comment->get('cmt_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$comment->get('cmt_delete_time') && $comment->can_delete($session)) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_comment', 'hidden' => array('action' => 'delete', 'cmt_comment_id' => $comment->key));
 	}
 

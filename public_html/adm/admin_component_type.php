@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin Component Type View
  *
@@ -12,7 +13,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/components_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10); // Superadmin only
 $session->set_return();
 
 // Load component

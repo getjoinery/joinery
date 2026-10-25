@@ -30,6 +30,7 @@ class MailboxDeviceAiHostException extends SystemBaseException {}
 class MailboxDeviceAiHost extends SystemBase {
 	public static $prefix = 'mdh';
 	public static $tablename = 'mdh_mailbox_device_ai_hosts';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mdh_mailbox_device_ai_host_id';
 
 	public static $api_readable = false;

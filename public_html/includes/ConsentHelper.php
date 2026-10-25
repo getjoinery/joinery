@@ -392,7 +392,8 @@ HTML;
             'm' => $marketing ? 1 : 0,
             'v' => '1'
         ]));
-        $event->save();
+        // An observation of what the visitor chose, recorded like any visitor event.
+        SystemBase::server_initiated_write(function () use ($event) { $event->save(); });
     }
 
     /**

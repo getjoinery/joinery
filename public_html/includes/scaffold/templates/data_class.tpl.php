@@ -12,6 +12,12 @@ class <?= $exception ?> extends SystemBaseException {}
 class <?= $entity ?> extends SystemBase {
 	public static $prefix = '<?= $prefix ?>';
 	public static $tablename = '<?= $table ?>';
+	// Who may read, change and delete these rows — docs/permissions.md
+	public static $access_class = '<?= $access_class ?>';
+<?php if ($owner_field !== null && $owner_field !== $prefix . '_usr_user_id'): ?>
+	// Rows are owned via <?= $owner_field ?>, not the default <?= $prefix ?>_usr_user_id.
+	public static $owner_column = '<?= $owner_field ?>';
+<?php endif; ?>
 	public static $pkey_column = '<?= $pkey ?>';
 <?php if ($api !== null): ?>
 
@@ -67,26 +73,6 @@ class <?= $entity ?> extends SystemBase {
 
 	// What happens to these rows when a referenced parent is deleted — docs/deletion_system.md
 	protected static $foreign_key_actions = <?= ScaffoldGenerator::phpValue($delete['foreign_key_actions'], 1) ?>;
-<?php endif; ?>
-<?php if ($owner_field !== null && $owner_field !== $prefix . '_usr_user_id'): ?>
-
-	// Non-standard ownership: rows are owned via <?= $owner_field ?>, not the
-	// default <?= $prefix ?>_usr_user_id. TODO: confirm this row-scope rule is correct.
-	function authenticate_read($data) {
-		if ($this->get('<?= $owner_field ?>') != $data['current_user_id']
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($this->get('<?= $owner_field ?>') != $data['current_user_id']
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 <?php endif; ?>
 
 	// Business-rule extension point. TODO: add cross-field validation, computed

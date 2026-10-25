@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Add / Edit Host
  * URL: /admin/server_manager/host_add
@@ -13,7 +14,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $is_edit = isset($_GET['mgh_managed_host_id']) && (int)$_GET['mgh_managed_host_id'] > 0;
 $host = $is_edit ? new ManagedHost((int)$_GET['mgh_managed_host_id'], TRUE) : new ManagedHost(NULL);

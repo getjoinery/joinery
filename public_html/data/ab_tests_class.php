@@ -10,6 +10,8 @@
  *
  * @version 1.1 - prefix abx, table abx_ab_tests, primary key abx_ab_test_id: abt is
  *   AppBridgeToken's alone (specs/implemented/shared_prefixes_first_three.md)
+ * @version 1.2 - AbTestVersionsPanel's actions need the right to edit the entity, not
+ *   level 5 (spec declared_permissions)
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -24,6 +26,7 @@ class AbTestException extends SystemBaseException {}
 class AbTest extends SystemBase {
 	public static $prefix = 'abx';
 	public static $tablename = 'abx_ab_tests';
+	public static $access_class = 'content';
 	public static $pkey_column = 'abx_ab_test_id';
 
 	const STATUS_DRAFT    = 'draft';
@@ -383,20 +386,27 @@ class AbTestVersionsPanel {
 		$entity_id = (int)$entity_id;
 		if ($entity_id <= 0) return;
 
+		// The host page decides who sees the panel. Its actions change what the
+		// entity shows (crown copies a variant into it), so they need the right
+		// to edit the entity.
 		$session = SessionControl::get_instance();
-		$session->check_permission(5);
+		$entity = new $entity_class($entity_id, true);
 
 		// Handle POST actions — all actions are namespaced with abtest_action.
 		if (!empty($_POST['abtest_action'])
 			&& (string)($_POST['abtest_entity_class'] ?? '') === $entity_class
 			&& (int)($_POST['abtest_entity_id'] ?? 0) === $entity_id) {
-			self::handle_post($entity_class, $entity_id);
-			// Any action redirects; if we return, something went wrong and we
-			// fall through to render the panel with a user-visible message.
+			if ($entity->can_write($session)) {
+				self::handle_post($entity_class, $entity_id);
+				// Any action redirects; if we return, something went wrong and we
+				// fall through to render the panel with a user-visible message.
+			} else {
+				$level = $entity_class::access_level('write');
+				$_SESSION['abtest_flash_error'] = 'Changing an A/B test needs level ' . $level . ' (' . Access::levelName($level) . ').';
+			}
 		}
 
 		$test = AbTest::get_active_test_for_entity($entity_class, $entity_id);
-		$entity = new $entity_class($entity_id, true);
 
 		echo '<div class="card mt-3"><div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center">';
 		echo '<h5 class="mb-0">A/B Test</h5>';

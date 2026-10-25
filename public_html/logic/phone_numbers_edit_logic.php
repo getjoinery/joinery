@@ -14,17 +14,11 @@ function phone_numbers_edit_logic(array $input): LogicResult{
 	if (isset($input['edit_primary_key_value'])) {
 		$phone_number = new PhoneNumber($input['edit_primary_key_value'], TRUE);
 		// Verify user owns this phone number
-		$phone_number->authenticate_write(array(
-			'current_user_id' => $user_id,
-			'current_user_permission' => $session->get_permission()
-		));
+		$phone_number->assert_can_write($session);
 	} elseif (isset($input['phn_phone_number_id'])) {
 		$phone_number = new PhoneNumber($input['phn_phone_number_id'], TRUE);
 		// Verify user owns this phone number
-		$phone_number->authenticate_write(array(
-			'current_user_id' => $user_id,
-			'current_user_permission' => $session->get_permission()
-		));
+		$phone_number->assert_can_write($session);
 	} else {
 		// Load user's first phone number or create new
 		$phone_numbers = new MultiPhoneNumber(array('user_id' => $user_id));
@@ -107,6 +101,7 @@ function phone_numbers_edit_logic_form($formwriter, $user = null, $input = []) {
 
 function phone_numbers_edit_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Create or update the current user\'s phone number.',
 		'requires_session' => true,
 		'mutates'          => true,

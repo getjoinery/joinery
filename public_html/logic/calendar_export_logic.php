@@ -37,6 +37,7 @@ function calendar_export_logic(array $input): LogicResult {
 
 function calendar_export_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'mutates' => false,
 		'description' => 'Download the signed-in member\'s own calendar as an iCalendar (.ics) file',

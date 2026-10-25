@@ -41,7 +41,7 @@ function vault_client_rotate_begin_logic(array $input): LogicResult {
 function vault_client_rotate_begin_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => true,
 		'description' => 'Begin rotating a client-custody vault key: the new public key and its browser-produced wrappings are stored as the pending generation; requires a recent step-up',
 		'input' => [

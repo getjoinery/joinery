@@ -11,6 +11,7 @@ class CommentNotSentException extends CommentException {};
 
 class Comment extends SystemBase {	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
+	public static $access_class = 'content';
 	public static $pkey_column = 'cmt_comment_id';
 
 	protected static $foreign_key_actions = array(
@@ -76,19 +77,16 @@ function display_title(){
 		return $body;
 	}
 
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
-
 	static function add_comment($post_id, $session, $data){
 		$settings = Globalvars::get_instance();
+		// The post page hides the form when comments are off, or off for
+		// visitors; a post made anyway gets the same answer here.
+		if(!$settings->get_setting('comments_active')){
+			throw new SystemDisplayableError('Comments are turned off.');
+		}
+		if(!$session->get_user_id() && !$settings->get_setting('comments_unregistered_users')){
+			throw new SystemDisplayableError('Please sign in to comment.');
+		}
 		if(!$session->get_user_id()){
 			if(!empty($data['email'])){
 				LibraryFunctions::display_404_page();
@@ -135,8 +133,11 @@ function display_title(){
 		else{
 			$comment->set('cmt_is_approved', FALSE);
 		}
-		$comment->prepare();	
-		$comment->save();	
+		$comment->prepare();
+		// A member's comment is theirs (cmt_usr_user_id). A visitor's has no
+		// owner: the comments settings, honeypot, anti-spam question and
+		// CAPTCHA above admitted it.
+		SystemBase::rule_checked_write(function () use ($comment) { $comment->save(); });
 
 		return $comment;
 	}

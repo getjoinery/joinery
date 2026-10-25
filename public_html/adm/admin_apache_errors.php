@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -30,7 +30,7 @@
 
 	$headers = array("Error");
 	$altlinks = array();
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
+	$pager = new Pager(array('numrecords'=>0, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 		'altlinks' => $altlinks,

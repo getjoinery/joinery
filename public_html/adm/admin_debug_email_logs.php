@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 /**
  * admin_debug_email_logs — the lines EmailSender wrote while email_debug_mode
  * was on: which service each message went to, dry-run and test-mode
@@ -11,7 +12,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(8);
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && ($_POST['action'] ?? '') === 'delete_all') {
 	DebugEmailLog::deleteAll();

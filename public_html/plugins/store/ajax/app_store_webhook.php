@@ -8,6 +8,7 @@
  * webhook. Provider webhooks are the documented /ajax/ exception — they
  * authenticate by payload signature, not session (docs/api.md).
  *
+ * @version 1.1.0 - writes after verification are the server's own (declared_permissions 3.2)
  * @version 1.0.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/AppStoreHelper.php'));
@@ -31,6 +32,11 @@ try {
     echo 'Signature verification failed';
     exit();
 }
+
+// The notification Apple signed verified above is the authority: no person is behind what this
+// writes, so every write from here on is the server's own (spec
+// declared_permissions 3.2).
+SystemBase::$allow_get_mutation = true;
 
 $notification_type = $payload['notificationType'] ?? '';
 $subtype = $payload['subtype'] ?? null;

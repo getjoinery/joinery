@@ -118,7 +118,7 @@ function _passkey_register_try_vault_activation($user, $passkey, string $prf_out
 function passkey_register_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Complete passkey enrollment and persist the new credential; with unlocker ({credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) also activates it for the vault',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],

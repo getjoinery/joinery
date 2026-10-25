@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Forum categories admin — every category with who may read and post in it,
  * its topic count and its place in the list. Create and edit on the category

@@ -48,7 +48,7 @@ function product_logic(array $input): LogicResult {
 		}
 	}
 
-	if ($product && $session->get_user_id() && $session->get_permission() > 4) {
+	if ($product && $session->get_user_id() && Access::permits(Access::staffLevel(), $session)) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {

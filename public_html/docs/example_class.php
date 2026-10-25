@@ -38,6 +38,18 @@ class Example extends SystemBase
     // REQUIRED: Table configuration
     public static $prefix = 'exm';                   // 3-character prefix for field names (always 3 chars)
     public static $tablename = 'exm_examples';       // Actual database table name
+
+    // Who may read, change and delete these rows (docs/permissions.md): the
+    // model's data class in permissions.json. Every model declares one; the
+    // declaration test fails without it. The row's owner ({prefix}_usr_user_id)
+    // may read and write their own row whatever the level.
+    public static $access_class = 'personal';
+    // Only for a verb that differs from the class: a level.
+    // public static $delete_permission = 9;
+    // When the owner column has another name, or the user column records who
+    // acted (a log) and the model is level-only:
+    // public static $owner_column = 'exm_owner_id';
+    // public static $owner_column = false;
     public static $pkey_column = 'exm_example_id';  // {prefix}_{singular}_id — the column names its table
 
     // ====================================================================
@@ -60,7 +72,7 @@ class Example extends SystemBase
     // Layer 2 — public read. Set true ONLY for world-readable catalog content
     // (events, posts, pages): it skips the per-record scope AND the collection
     // owner-filter. Leave false (default) for user-owned data — SystemBase's
-    // authenticate_read/write then default to owner-or-staff (deny). You only
+    // authenticate_read/write then allow the owner, else the class's level. You only
     // ever override the row-scope hooks to OPEN access, never to close it
     // (see the authenticate_read note further down).
     // public static $api_public_read = true;
@@ -467,25 +479,29 @@ class Example extends SystemBase
     // Row-scope authorization (REST API Layer 2) — override ONLY when needed
     // ====================================================================
     //
-    // The SystemBase default is owner-or-staff (deny): a caller may touch a row
-    // only if they own it (the {prefix}_usr_user_id column == current_user_id)
-    // or they are staff (permission >= 5). A model with no owner column defaults
-    // to staff-only. The contract is THROW-to-deny (return nothing to allow).
+    // The SystemBase rule is the owner, else the class's level (deny): a caller
+    // may touch a row only if they own it (access_owner_is(): the owner column
+    // == current_user_id) or their level meets access_level() for the verb.
+    // A model with no owner column is level-only. The contract is THROW-to-deny
+    // (return nothing to allow). save(), soft_delete(), undelete(),
+    // permanent_delete() and updateColumns() run the same rule on every web
+    // request (docs/permissions.md).
     //
     // Do NOT override for the common cases:
-    //   - public content      -> set $api_public_read = true (above), not here
-    //   - standard ownership   -> the default already handles it
-    // Override ONLY for non-standard ownership (e.g. sender/recipient columns,
-    // or a model owned by its own id like User):
+    //   - public content       -> set $api_public_read = true (above), not here
+    //   - standard ownership    -> the default already handles it
+    //   - another owner column  -> $owner_column (above)
+    //   - an owner that is not a column (a model owned by its own id, like
+    //     User, or a polymorphic subject) -> override access_owner_is()
+    // Override ONLY for a real rule of the model's own (a conversation's
+    // participants, a board role), comparing levels through Access:
     //
-    // function authenticate_read($data) {
-    //     if ($this->get('exm_owner_id') != $data['current_user_id']
-    //         && (int)$data['current_user_permission'] < 5) {
-    //         throw new SystemAuthenticationError(
-    //             'Current user does not have permission to view this entry in ' . static::$tablename);
+    // function authenticate_write($data) {
+    //     if (!$this->access_owner_is($data['current_user_id'] ?? 0)
+    //         && !Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
+    //         throw new SystemAuthenticationError('Changing this example needs level ' . static::access_level('write') . '.');
     //     }
     // }
-    // authenticate_write($data) is identical in shape (wording: 'edit').
 
     // ====================================================================
     // Custom API export (REST API Layer 3) — derived keys & child embeds

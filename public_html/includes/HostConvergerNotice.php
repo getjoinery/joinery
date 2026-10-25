@@ -48,7 +48,7 @@ class HostConvergerNotice {
 	const UNIT_FILES = array('/etc/systemd/system/joinery-host-converger.timer', '/etc/cron.d/joinery-host-converger');
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		$facts = self::facts();

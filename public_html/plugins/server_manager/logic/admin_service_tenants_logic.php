@@ -31,7 +31,6 @@ const ADMIN_SERVICE_TENANTS_LIMIT = 300;
 
 function admin_service_tenants_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_url = '/admin/server_manager/service_tenants';
 	$page_regex = '/\/admin\/server_manager\/service_tenants/';
@@ -49,6 +48,7 @@ function admin_service_tenants_logic(array $input): LogicResult {
 		if ($row === null) {
 			$error = 'That tenant row no longer exists.';
 		} elseif ($action === 'grant') {
+			Access::demand(10, $session);   // reopens the tenant's mail subaccount
 			$formwriter = new FormWriterV2HTML5('grant_' . (int)$row->key);
 			if (!$formwriter->validateCSRF($input)) {
 				$error = 'That request token has expired. Try again.';
@@ -78,6 +78,7 @@ function admin_service_tenants_logic(array $input): LogicResult {
 				}
 			}
 		} elseif ($action === 'release') {
+			Access::demand(10, $session);   // closes its subaccount and releases its services
 			try {
 				JoineryServices::releaseRow($row);
 				$message = $row->get('svt_host') . ' (' . $row->get('svt_service') . ') is released.';

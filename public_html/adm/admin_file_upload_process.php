@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -12,7 +13,12 @@
 		$file = $page_vars['file'];
 		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 		$page = new AdminPage();
-		$page->admin_header(2);
+		$page->admin_header(array(
+			'menu-id' => 'files',
+			'page_title' => 'File upload',
+			'readable_title' => 'File upload',
+			'session' => SessionControl::get_instance(),
+		));
 
 		echo '<h3>File upload</h3>';
 		echo '<p>'.$file->get('fil_name'). ' uploaded successfully.</p>';

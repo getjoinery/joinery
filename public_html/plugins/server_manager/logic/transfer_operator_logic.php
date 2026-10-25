@@ -23,7 +23,7 @@ function transfer_operator_logic(array $input): LogicResult {
 		return LogicResult::error('This is a POST.');
 	}
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only a superadmin can move a site between accounts.');
 	}
 	$do = trim((string)($input['do'] ?? ''));

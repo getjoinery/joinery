@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('/plugins/store/data/stripe_invoices_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 	
 	$settings = Globalvars::get_instance();
@@ -21,12 +21,9 @@
 	
 	$user_id = LibraryFunctions::fetch_variable('u', NULL, 0, '');
 	
-	$search_criteria = NULL;
+	$search_criteria = array();
 	if($user_id){
-		$search_criteria = array();
-		if($user_id){
-			$search_criteria['user_id'] = $user_id;
-		}
+		$search_criteria['user_id'] = $user_id;
 	}
 
 	$stripe_invoices = new MultiStripeInvoice(

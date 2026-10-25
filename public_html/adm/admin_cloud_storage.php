@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Cloud Storage Admin Page
  *

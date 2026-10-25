@@ -71,7 +71,7 @@ function boards_list_save_logic_descriptor(): array {
 			'prev_id'  => array('type' => 'int', 'required' => false, 'label' => 'List above'),
 			'next_id'  => array('type' => 'int', 'required' => false, 'label' => 'List below'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		'ai_agent'         => 'confirm',
 	);
 }

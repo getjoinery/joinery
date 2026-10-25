@@ -18,7 +18,8 @@
  * brings it back. Leaving a group is a membership change and lives in
  * messenger_group.
  *
- * @version 1.2.0
+ * @version 1.2.1
+ * @changelog 1.2.1 - opening a conversation, reacting and delete-for-everyone run under rule_checked_write()
  * @changelog 1.2.0 - protection turns on the Nothing leaves unsealed add-on (sealed_exits_only)
  * @changelog 1.1.0 - Reachability spec: local addresses resolve internally (R1), `fresh` re-checks past the capability cache (rate-limited)
  */
@@ -45,7 +46,11 @@ function messenger_action_logic(array $input): LogicResult {
 			return LogicResult::error('That member does not exist.');
 		}
 		try {
-			$conversation = Conversation::get_or_create_conversation($user_id, $to);
+			// requireMember() and the recipient check above admit opening a 1:1;
+			// the conversation and the other person's row are not the caller's.
+			$conversation = SystemBase::rule_checked_write(function () use ($user_id, $to) {
+				return Conversation::get_or_create_conversation($user_id, $to);
+			});
 		} catch (ConversationException $e) {
 			return LogicResult::error($e->getMessage());
 		}
@@ -88,7 +93,10 @@ function messenger_action_logic(array $input): LogicResult {
 				return LogicResult::error('You cannot message yourself.');
 			}
 			try {
-				$conversation = Conversation::get_or_create_conversation($user_id, $member['user_id']);
+				$local_id = (int)$member['user_id'];
+				$conversation = SystemBase::rule_checked_write(function () use ($user_id, $local_id) {
+					return Conversation::get_or_create_conversation($user_id, $local_id);
+				});
 			} catch (ConversationException $e) {
 				return LogicResult::error($e->getMessage());
 			}
@@ -155,7 +163,10 @@ function messenger_action_logic(array $input): LogicResult {
 		$conversation = Conversation::find_remote_conversation($user_id, $address);
 		if ($conversation === null) {
 			try {
-				$conversation = Conversation::create_remote_conversation($user_id, $address);
+				// Reachability and the member's own address are checked above.
+				$conversation = SystemBase::rule_checked_write(function () use ($user_id, $address) {
+					return Conversation::create_remote_conversation($user_id, $address);
+				});
 			} catch (ConversationException $e) {
 				return LogicResult::error($e->getMessage());
 			}
@@ -227,7 +238,12 @@ function messenger_action_react(Conversation $conversation, int $user_id, array 
 	}
 
 	try {
-		$now_on = MessageReaction::toggle($message_id, $user_id, $input['emoji'] ?? '');
+		// The caller is in the conversation (conversationFor()) and the message
+		// is in it (above); toggling off destroys their own reaction row, which
+		// an owner's level does not reach.
+		$now_on = SystemBase::rule_checked_write(function () use ($message_id, $user_id, $input) {
+			return MessageReaction::toggle($message_id, $user_id, $input['emoji'] ?? '');
+		});
 	} catch (MessageReactionException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -275,13 +291,19 @@ function messenger_action_delete_message(Conversation $conversation, int $user_i
 
 	if (!$message->get('msg_delete_time')) {
 		$message->set('msg_delete_time', gmdate('Y-m-d H:i:s'));
-		$message->save();
 
 		// The conversation changed, so its list row has to be recomputed — a
 		// preview still quoting a deleted message is the one place a tombstone
 		// would fail to hide what it says.
 		$conversation->set('cnv_update_time', gmdate('Y-m-d H:i:s'));
-		$conversation->save();
+
+		// The sender's own message (checked above) in a conversation they are
+		// in (conversationFor()); the conversation row has no owner, and a
+		// protected conversation's message takes no generic write.
+		SystemBase::rule_checked_write(function () use ($message, $conversation) {
+			$message->save();
+			$conversation->save();
+		});
 
 		messenger_action_federate_control($conversation, $user_id, array(
 			'type'     => MessengerFederation::TYPE_DELETE,
@@ -368,6 +390,7 @@ function messenger_action_protection(Conversation $conversation, int $user_id, a
 
 function messenger_action_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'Open a 1:1, mute/unmute, remove a conversation from your own inbox, mark it read, react to a message, delete your own message for everyone, or raise a conversation\'s protection (level, and the Nothing leaves unsealed add-on).',

@@ -30,6 +30,7 @@ class StagedRolloutException extends SystemBaseException {}
 class StagedRollout extends SystemBase {
 	public static $prefix = 'srl';
 	public static $tablename = 'srl_staged_rollouts';
+	public static $access_class = 'config';
 	public static $pkey_column = 'srl_staged_rollout_id';
 
 	public static $json_vars = array('srl_steps', 'srl_probe_pages');

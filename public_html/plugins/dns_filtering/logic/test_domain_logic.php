@@ -144,6 +144,7 @@ function test_domain_logic(array $input): LogicResult{
 
 function test_domain_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Test one domain against a device\'s filter (device_id, domain)',
 		'mutates'     => false,
 		'requires_session'        => true,

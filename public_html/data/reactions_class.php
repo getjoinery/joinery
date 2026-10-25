@@ -18,6 +18,7 @@ class ReactionException extends SystemBaseException {}
 class Reaction extends SystemBase {
 	public static $prefix = 'rct';
 	public static $tablename = 'rct_reactions';
+	public static $access_class = 'content';
 	public static $pkey_column = 'rct_reaction_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable

@@ -13,7 +13,6 @@ function admin_order_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
@@ -33,11 +32,11 @@ function admin_order_logic(array $input): LogicResult {
 
 	// Build dropdown actions
 	$options['altlinks'] = array();
-	if ($_SESSION['permission'] >= 8) {
+	if ($order->can_write($session)) {
 		$options['altlinks']['Edit Order'] = '/plugins/store/admin/admin_order_edit?ord_order_id=' . $order->key;
 		$options['altlinks']['Add Order Item'] = '/plugins/store/admin/admin_order_item_edit?ord_order_id='.$order->key;
 	}
-	if ($_SESSION['permission'] == 10) {
+	if ($order->can_delete($session, true)) {
 		$options['altlinks']['Permanent Delete'] = '/plugins/store/admin/admin_order_delete?ord_order_id=' . $order->key;
 	}
 

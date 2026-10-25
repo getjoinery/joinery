@@ -15,7 +15,6 @@
 
 function admin_sandbox_page_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(SandboxPluginManager::ADMIN_PERMISSION);
 	$session->set_return();
 
 	$plugin = (string)($input['plugin'] ?? '');

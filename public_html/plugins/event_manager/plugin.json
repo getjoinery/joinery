@@ -19,7 +19,6 @@
             "title": "Events",
             "icon": "calendar",
             "order": 5,
-            "permission": 8,
             "settingActivate": "events_active",
             "items": [
                 {
@@ -27,7 +26,6 @@
                     "title": "Events List",
                     "url": "/plugins/event_manager/admin/admin_events",
                     "order": 1,
-                    "permission": 5,
                     "settingActivate": "events_active"
                 },
                 {
@@ -35,7 +33,6 @@
                     "title": "Event Bundles",
                     "url": "/plugins/event_manager/admin/admin_event_bundles",
                     "order": 10,
-                    "permission": 8,
                     "settingActivate": "events_active"
                 },
                 {
@@ -43,7 +40,6 @@
                     "title": "Event Types",
                     "url": "/plugins/event_manager/admin/admin_event_types",
                     "order": 5,
-                    "permission": 8,
                     "settingActivate": "events_active"
                 },
                 {
@@ -51,7 +47,6 @@
                     "title": "Locations",
                     "url": "/plugins/event_manager/admin/admin_locations",
                     "order": 5,
-                    "permission": 5,
                     "settingActivate": "events_active"
                 }
             ]
@@ -63,7 +58,6 @@
             "title": "Events",
             "url": "/profile/events",
             "order": 80,
-            "permission": 0,
             "icon": "calendar",
             "nativeScreen": "events",
             "settingActivate": "events_active"

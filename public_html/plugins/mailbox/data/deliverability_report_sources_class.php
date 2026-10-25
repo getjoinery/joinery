@@ -22,6 +22,7 @@ class DeliverabilityReportSourceException extends SystemBaseException {}
 class DeliverabilityReportSource extends SystemBase {
 	public static $prefix = 'dvs';
 	public static $tablename = 'dvs_deliverability_report_sources';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'dvs_deliverability_report_source_id';
 
 	protected static $foreign_key_actions = [

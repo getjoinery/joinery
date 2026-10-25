@@ -19,6 +19,8 @@
  *
  * Run: php tests/run.php --filter=access_declarations
  *
+ * @version 1.2 - a level compared in code; every rule is on
+ * @version 1.1 - a descriptor builder's level; a misplaced min_permission
  * @version 1.0
  */
 
@@ -152,6 +154,26 @@ function readmut_logic_descriptor() { return array('auth' => array('min_user_per
 function dquote_logic_descriptor() { return array('auth' => array('min_user_permission' => "money:write"), 'mutates' => true); }
 function readonly_logic_descriptor() { return array('auth' => array('min_user_permission' => 'content:read'), 'mutates' => false); }
 function none_logic_descriptor() { return array('auth' => array()); }
+function misplaced_logic_descriptor() { return array('auth' => array('min_user_permission' => 0), 'min_permission' => 8); }
+function built_logic_descriptor() { return DemoAction::descriptor(array('mutates' => true)); }
+PHP);
+$put('logic/inline_logic.php', <<<'PHP'
+<?php
+function inline_logic($session) {
+	if ($session->get_permission() >= 10) {}
+	if ($_SESSION['permission'] == 10) {}
+	if ((int)$user->get('usr_permission') < 5) {}
+	if (10 <= $session->get_permission()) {}
+	$identity = array('current_user_permission' => $session->get_permission());
+	// a comment: get_permission() >= 10
+	if (Access::permits(10, $session)) {}
+}
+PHP);
+$put('plugins/demo/includes/DemoAction.php', <<<'PHP'
+<?php
+class DemoAction {
+	public static function descriptor(array $d) { return array_merge(array('auth' => array('min_user_permission' => 'content:write')), $d); }
+}
 PHP);
 
 $models = AccessDeclarations::models($root);
@@ -167,6 +189,8 @@ check(isset($pages['/admin/admin_good'], $pages['/plugins/demo/admin/admin_thing
 check($pages['/admin/admin_level']['header'] === array('level' => 8), 'a level header', json_encode($pages['/admin/admin_level']['header']));
 check((AccessDeclarations::actions($root)['dquote']['level'] ?? null) === 'money:write', 'a double-quoted level reads as one',
 	json_encode(AccessDeclarations::actions($root)['dquote'] ?? null));
+check((AccessDeclarations::actions($root)['built']['level'] ?? null) === 'content:write', 'a builder\'s level is the descriptor\'s',
+	json_encode(AccessDeclarations::actions($root)['built'] ?? null));
 
 $found = array();
 foreach (AccessDeclarations::problems($root, array('thg_things.thg_secret', 'thg_things.thg_hash')) as $p) {
@@ -192,6 +216,11 @@ $want = array(
 	'action_level_invalid constant',
 	'action_mutates_on_read readmut',
 	'action_undeclared none',
+	'action_level_misplaced misplaced',
+	'level_compared_inline logic/inline_logic.php:3',
+	'level_compared_inline logic/inline_logic.php:4',
+	'level_compared_inline logic/inline_logic.php:5',
+	'level_compared_inline logic/inline_logic.php:6',
 );
 foreach ($want as $key) {
 	check(isset($found[$key]), "the rule fires: $key", $found[$key] ?? 'not reported');

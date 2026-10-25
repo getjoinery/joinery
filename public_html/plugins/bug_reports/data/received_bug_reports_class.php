@@ -45,6 +45,7 @@ class ReceivedBugReportException extends SystemBaseException {}
 class ReceivedBugReport extends SystemBase {
 	public static $prefix = 'rbr';
 	public static $tablename = 'rbr_received_bug_reports';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'rbr_received_bug_report_id';
 
 	const VERDICT_VERIFIED   = 'verified';
@@ -106,18 +107,6 @@ class ReceivedBugReport extends SystemBase {
 	);
 
 	const PURGE_MAX_PER_RUN = 500;
-
-	function authenticate_read($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/** The bundle, decoded; an empty array when it does not decode. */
 	public function bundle(): array {
@@ -260,18 +249,18 @@ class ReceivedBugReport extends SystemBase {
 	/**
 	 * The admin notice: "N new problem reports" above every admin page while
 	 * any report has not been opened yet. Silent otherwise. Shown to the
-	 * admins who can read the reports (permission 9). Registered by the
+	 * admins who can read the reports (their read level). Registered by the
 	 * plugin's bootstrap.
 	 */
 	public static function admin_notice(): string {
 		try {
 			$session = SessionControl::get_instance();
-			if ((int)$session->get_permission() < 9) {
+			if (!Access::permits(self::access_level('read'), $session)) {
 				return '';
 			}
 			// On a management node, the incident line counts new reports for
 			// superadmins beside the fleet's incidents: one line, not two.
-			if (class_exists('IncidentNotice') && (int)$session->get_permission() >= 10) {
+			if (class_exists('IncidentNotice') && Access::permits(10, $session)) {
 				return '';
 			}
 			$new = count(new MultiReceivedBugReport(array('status' => self::STATUS_NEW)));

@@ -49,6 +49,7 @@ function booking_slots_logic(array $input): LogicResult {
 
 function booking_slots_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Public open booking slots for a booking type over a UTC range.',
 		'mutates'     => false,
 		'requires_session'        => false,

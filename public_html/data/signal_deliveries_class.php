@@ -17,6 +17,7 @@ class SignalDeliveryException extends SystemBaseException {}
 class SignalDelivery extends SystemBase {
 	public static $prefix = 'sgd';
 	public static $tablename = 'sgd_signal_deliveries';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sgd_signal_delivery_id';
 
 	/** Waiting for its first or next attempt. */

@@ -19,6 +19,9 @@ class Booking extends SystemBase {
 
 	public static $prefix = 'bkn';
 	public static $tablename = 'bkn_bookings';
+	public static $access_class = 'personal';
+	// The host owns a booking; the invitee acts through the action token, not auth.
+	public static $owner_column = 'bkn_usr_user_id_booked';
 	public static $pkey_column = 'bkn_booking_id';
 
 	protected static $foreign_key_actions = [
@@ -57,7 +60,7 @@ class Booking extends SystemBase {
 	    'bkn_status' => array('type'=>'int4', 'zero_on_create'=>true),
 	    'bkn_location' => array('type'=>'text'),
 	    'bkn_invitee_timezone' => array('type'=>'varchar(64)'),
-	    'bkn_action_token' => array('type'=>'varchar(64)'),
+	    'bkn_action_token' => array('access_class' => 'restricted', 'type'=>'varchar(64)'),
 	    'bkn_hold_expires_time' => array('type'=>'timestamp(6)'),
 	    'bkn_canceled_by' => array('type'=>'varchar(16)'),   // invitee | host | admin | system
 	    'bkn_cancel_reason' => array('type'=>'text'),
@@ -114,15 +117,6 @@ class Booking extends SystemBase {
 			return $exp && $exp > gmdate('Y-m-d H:i:s');
 		}
 		return false;
-	}
-
-	function authenticate_write($data) {
-		// Host or staff may write; invitee acts through the action token, not auth.
-		if ($this->get('bkn_usr_user_id_booked') != $data['current_user_id']
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 }

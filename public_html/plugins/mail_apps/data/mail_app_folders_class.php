@@ -26,6 +26,7 @@ class MailAppFolderException extends SystemBaseException {}
 class MailAppFolder extends SystemBase {
 	public static $prefix = 'maf';
 	public static $tablename = 'maf_mail_app_folders';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'maf_mail_app_folder_id';
 
 	protected static $foreign_key_actions = array(

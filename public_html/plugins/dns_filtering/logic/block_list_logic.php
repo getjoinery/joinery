@@ -58,6 +58,7 @@ function block_list_logic(array $input): LogicResult{
 
 function block_list_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'List a device\'s always-on and scheduled blocks with full contents (device_id)',
 		'input' => [

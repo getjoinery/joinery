@@ -26,6 +26,7 @@
  *
  * Run: php tests/run.php db --filter=api_key_admin
  *
+ * @version 1.4 - the page's level is its header, which the router asks
  * @version 1.3 - an action's level is read through Access::allows(); a user's level is one permissions.json names
  * @version 1.2 - the key page is level 10 (B16); keys are made by a 10
  * @version 1.1
@@ -74,14 +75,10 @@ try {
 
 	section('Only a level 10 opens the page');
 	// Keys are 10 to read and change (spec declared_permissions 3.1, B16).
-	$sign_in(make_user('KeyAdmin8', 8));
-	$refused = false;
-	try {
-		harness_call_logic('adm/logic/admin_api_key_edit_logic.php', 'admin_api_key_edit_logic', array(), 'GET');
-	} catch (SystemAuthenticationError $e) {
-		$refused = true;
-	}
-	check($refused, 'A permission-8 admin is refused');
+	// The router asks the page's header before its logic runs (3.4).
+	check(AdminPageAccess::levelForPath('/admin/admin_api_key_edit') === 10
+		&& AdminPageAccess::levelForPath('/admin/admin_api_key') === 10,
+		'A permission-8 admin is refused: the key pages declare keys (10)');
 
 	section('Making a scoped key');
 	$admin = make_user('KeyAdmin', 10);

@@ -7,7 +7,6 @@ function admin_form_error_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);
 	$session->set_return();
 
 	$form_error = new LogFormError($input['lfe_log_form_error_id'] ?? NULL, TRUE);

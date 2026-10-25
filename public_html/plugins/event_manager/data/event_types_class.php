@@ -11,6 +11,7 @@ class EventTypeException extends SystemBaseException {}
 
 class EventType extends SystemBase {	public static $prefix = 'ety';
 	public static $tablename = 'ety_event_types';
+	public static $access_class = 'content';
 	public static $pkey_column = 'ety_event_type_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,

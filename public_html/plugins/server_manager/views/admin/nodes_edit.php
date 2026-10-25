@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 /**
  * Redirect stub — nodes_edit is now split into node_detail (edit) and node_add (add).
  */

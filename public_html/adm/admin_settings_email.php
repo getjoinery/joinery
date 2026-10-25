@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -57,7 +58,7 @@
 
 	$formwriter->begin_form();
 
-	if($_SESSION['permission'] == 10){
+	if(Access::permits(10, $session)){
 
 		if((isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || $settings->get_setting('debug')){
 			echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Test or debug mode is on.</div>';

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Relay fleet console (operator side).
  *

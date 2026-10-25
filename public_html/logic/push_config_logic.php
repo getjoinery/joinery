@@ -29,6 +29,7 @@ function push_config_logic_descriptor(): array {
 		'description' => "Whether this site can send browser push, its public key, and whether this browser's subscription is registered to you.",
 		'mutates'     => false,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability'               => 'read',
 			'requires_browser_session' => true,
 		],

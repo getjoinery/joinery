@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Admin Help - Documentation Viewer
  *

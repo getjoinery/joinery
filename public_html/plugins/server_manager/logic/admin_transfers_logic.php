@@ -18,7 +18,6 @@ const ADMIN_TRANSFERS_LIMIT = 200;
 
 function admin_transfers_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$filter = (string)($input['filter'] ?? 'open');
 	if (!in_array($filter, array('open', 'done', 'all'), true)) {

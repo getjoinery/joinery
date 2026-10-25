@@ -15,7 +15,6 @@
 
 function admin_content_reports_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$back = '/admin/admin_content_reports';

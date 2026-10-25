@@ -73,6 +73,7 @@ function event_withdraw_logic(array $input): LogicResult {
 
 function event_withdraw_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Withdraw the current user from an event registration.',
 		'requires_session' => true,
 		'mutates'          => true,

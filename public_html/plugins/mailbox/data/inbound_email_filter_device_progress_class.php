@@ -22,6 +22,7 @@ class InboundEmailFilterDeviceProgressException extends SystemBaseException {}
 class InboundEmailFilterDeviceProgress extends SystemBase {
 	public static $prefix = 'ifp';
 	public static $tablename = 'ifp_inbound_email_filter_device_progress';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'ifp_inbound_email_filter_device_progress_id';
 
 	protected static $foreign_key_actions = array(
@@ -41,13 +42,6 @@ class InboundEmailFilterDeviceProgress extends SystemBase {
 		'ifp_done'          => array('type'=>'bool', 'default'=>'false', 'is_nullable'=>false),
 		'ifp_update_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/**
 	 * Record $user_id's place in $filter_id's walk for the request made at

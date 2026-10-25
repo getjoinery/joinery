@@ -102,7 +102,7 @@ function devices_link_logic_descriptor(): array {
 		'description'      => 'The device-approval page: resolves whether to offer the encrypted-folders handoff and carries the arriving link code.',
 		'requires_session' => true,
 		'mutates'          => false,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input'            => array(
 			'code' => array('type' => 'string', 'required' => false, 'max_length' => 32, 'label' => 'Link code'),
 		),

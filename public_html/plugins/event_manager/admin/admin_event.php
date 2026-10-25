@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('plugins/event_manager/admin/logic/admin_event_logic.php'));
@@ -43,7 +44,7 @@
 								<td class="p-1" style="width: 35%;">Event Name:</td>
 								<td class="p-1 text-600">
 									<strong><?php echo htmlspecialchars($event->get('evt_name')); ?></strong>
-									<?php if(!$event->get('evt_delete_time') && $_SESSION['permission'] > 7): ?>
+									<?php if(!$event->get('evt_delete_time') && $event->can_write(SessionControl::get_instance())): ?>
 										<a href="/plugins/event_manager/admin/admin_event_edit?evt_event_id=<?php echo $event->key; ?>" class="fs-11 ms-2">[edit]</a>
 									<?php endif; ?>
 								</td>
@@ -290,7 +291,7 @@
 			<!-- Event Photos Card -->
 			<?php
 			require_once(PathHelper::getIncludePath('includes/PhotoHelper.php'));
-			$photo_editable = !$event->get('evt_delete_time') && $_SESSION['permission'] > 7;
+			$photo_editable = !$event->get('evt_delete_time') && $event->can_write(SessionControl::get_instance());
 			PhotoHelper::render_photo_card('grid', 'event', $event->key, $event_photos, [
 				'set_primary_url' => '/plugins/event_manager/admin/admin_event?evt_event_id=' . $event->key,
 				'card_title' => 'Event Photos',
@@ -479,10 +480,13 @@
 	?>
 
 	<?php
+	// Who registered is personal data, read at its own level; the event is content.
+	$may_see_people = Access::permits(EventRegistrant::access_level('read'));
+	if ($may_see_people) {
 	$headers = array("Registrant", "Registered on", "Order", "Email Verified",  "Expires", "Action");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {
-		if($_SESSION['permission'] >= 8){
+		if(Access::allows('personal:write', (int)SessionControl::get_instance()->get_permission())){
 			$altlinks +=  array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
 		}
 	}
@@ -496,12 +500,9 @@
 	// Initialize FormWriter for form buttons
 	$formwriter = $page->getFormWriter('form2');
 
-	$registrant_emails = '';
 	foreach($event_registrants as $event_registrant){
 
 		$registrant = new User($event_registrant->get('evr_usr_user_id'), TRUE);
-
-		$registrant_emails .= $registrant->display_name() . ' &lt;'.$registrant->get('usr_email'). '&gt;, ';
 
 		$rowvalues=array();
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
@@ -541,6 +542,7 @@
 		$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event', [
 			'hidden'  => ['action' => 'remove_from_event', 'evr_event_registrant_id' => $event_registrant->key, 'evt_event_id' => $event->key],
 			'confirm' => 'Remove this registrant from the event?',
+			'model'   => $event_registrant, 'verb' => 'soft_delete',
 		]);
 		array_push($rowvalues, $delform);
 
@@ -548,13 +550,14 @@
 	}
 
 	$page->endtable($rpager);
+	}
 
-	if($numwaitinglist){
+	if($may_see_people && $numwaitinglist){
 
 		$headers = array("User", "Registered on", "Action");
 		$altlinks = array();
 		if(!$event->get('evt_delete_time')) {
-			if($_SESSION['permission'] >= 8){
+			if(Access::allows('personal:write', (int)SessionControl::get_instance()->get_permission())){
 				$altlinks +=  array('Email waiting list' => '/admin/admin_users_message?waiting_list=1&evt_event_id='.$event->key);
 			}
 		}
@@ -576,6 +579,7 @@
 			$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event', [
 				'hidden'  => ['action' => 'remove_from_waiting_list', 'ewl_waiting_list_id' => $waiting_list->key, 'evt_event_id' => $event->key],
 				'confirm' => 'Remove from waiting list?',
+				'model'   => $waiting_list, 'verb' => 'soft_delete',
 			]);
 			array_push($rowvalues, $delform);
 
@@ -589,7 +593,7 @@
 	$headers = array("Session #", "Title", "Start Time", "Duration", "Action");
 	$altlinks = array();
 	if(!$event->get('evt_delete_time')) {
-		if($_SESSION['permission'] >= 8){
+		if(Access::allows(EventSession::access_level('write'), (int)SessionControl::get_instance()->get_permission())){
 			$altlinks +=  array('Create Session' => '/plugins/event_manager/admin/admin_event_session_edit?evt_event_id='.$event->key);
 		}
 	}
@@ -654,8 +658,9 @@
 	$page->endtable($spager);
 
 	//EMAILS TO REGISTRANTS
+	if ($may_see_people) {
 	$altlinks = array();
-	if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8){
+	if(!$event->get('evt_delete_time') && Access::allows('personal:write', (int)SessionControl::get_instance()->get_permission())){
 		$altlinks += array('Email registrants' => '/admin/admin_users_message?evt_event_id='.$event->key);
 	}
 	$page->email_audience_table($registrant_emails, array(
@@ -666,7 +671,7 @@
 
 	//EMAILS TO THE WAITING LIST
 	$altlinks = array();
-	if(!$event->get('evt_delete_time') && $_SESSION['permission'] >= 8){
+	if(!$event->get('evt_delete_time') && Access::allows('personal:write', (int)SessionControl::get_instance()->get_permission())){
 		$altlinks += array('Email waiting list' => '/admin/admin_users_message?waiting_list=1&evt_event_id='.$event->key);
 	}
 	$page->email_audience_table($waiting_list_emails, array(
@@ -674,6 +679,7 @@
 		'title' => 'Emails to Waiting List',
 		'card' => true,
 	), $lpager);
+	}
 
 	?>
 	<?php if($photo_editable): ?>

@@ -19,6 +19,7 @@ class PersonaAdTallyException extends SystemBaseException {}
 class PersonaAdTally extends SystemBase {
     public static $prefix = 'pat';
     public static $tablename = 'pat_persona_ad_tallies';
+    public static $access_class = 'content';
     public static $pkey_column = 'pat_persona_ad_tally_id';
 
     public static $field_specifications = array(

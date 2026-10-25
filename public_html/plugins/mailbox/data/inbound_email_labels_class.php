@@ -20,6 +20,7 @@
  *
  * See mailbox_per_mailbox_labels.md.
  *
+ * @version 2.1 - access_owner_is(): a label is its mailbox's grant holders' (MailboxViewer::holdsMailbox)
  * @version 2.0 - a label belongs to one mailbox: ilb_iea_inbound_email_alias_id, ilb_label_name
  *   unique within the mailbox; getByName()/findOrCreate() take the mailbox; belongsTo()
  * @version 1.0
@@ -32,7 +33,13 @@ class InboundEmailLabelException extends SystemBaseException {}
 class InboundEmailLabel extends SystemBase {
 	public static $prefix = 'ilb';
 	public static $tablename = 'ilb_inbound_email_labels';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ilb_inbound_email_label_id';
+
+	/** The owner rule (spec declared_permissions 3.2): the holders of a grant on the label's mailbox. */
+	public function access_owner_is($user_id): bool {
+		return MailboxViewer::holdsMailbox((int)$user_id, (int)$this->access_stored('ilb_iea_inbound_email_alias_id'));
+	}
 
 	protected static $foreign_key_actions = array(
 		// A mailbox's labels go with it; permanent_delete so each label's own rules
@@ -52,13 +59,6 @@ class InboundEmailLabel extends SystemBase {
 		'ilb_update_time' => array('type'=>'timestamp(6)'),
 		'ilb_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('ilb_update_time', gmdate('Y-m-d H:i:s'));

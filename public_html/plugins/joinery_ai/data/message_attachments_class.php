@@ -25,7 +25,23 @@ class AiMessageAttachment extends SystemBase {
 
     public static $prefix = 'aia';
     public static $tablename = 'aia_message_attachments';
+    public static $access_class = 'config';
     public static $pkey_column = 'aia_message_attachment_id';
+
+    /**
+     * An attachment is its message's, so its chat's: the conversation's owner
+     * (aic_owner_user_id) owns it. Read through the stored message id.
+     */
+    public function access_owner_is($user_id): bool {
+        $message_id = (int)$this->access_stored('aia_aim_conversation_message_id');
+        if ((int)$user_id <= 0 || $message_id <= 0) return false;
+        $stmt = DbConnector::get_instance()->get_db_link()->prepare(
+            'SELECT aic.aic_owner_user_id FROM aim_conversation_messages aim
+               JOIN aic_conversations aic ON aic.aic_conversation_id = aim.aim_aic_conversation_id
+              WHERE aim.aim_conversation_message_id = ?');
+        $stmt->execute(array($message_id));
+        return (int)$stmt->fetchColumn() === (int)$user_id;
+    }
 
     /**
      * Deleting the underlying File cascades the link row away.
@@ -91,13 +107,6 @@ class AiMessageAttachment extends SystemBase {
         }
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
         return ChatSeal::openAttachmentText($this, $ciphertext);
-    }
-
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 5) {
-            throw new SystemAuthenticationError(
-                'Joinery AI chat attachments require permission level 5 to write.');
-        }
     }
 
     /**

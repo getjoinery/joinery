@@ -1,10 +1,10 @@
 <?php
+/** @joinery-admin class=content */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_analytics_attribution_logic.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $page_vars = process_logic(admin_analytics_attribution_logic(array_merge($_GET, $_POST)));
 

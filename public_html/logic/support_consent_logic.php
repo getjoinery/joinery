@@ -21,7 +21,7 @@ function support_consent_logic(array $input): LogicResult {
 	Setting::put('support_chat_consent', $bundle);
 	if ($bundle === 'no') {
 		Setting::put('support_chat_live_reads', 'no');
-	} elseif (isset($input['live_reads']) && (int)$session->get_permission() >= SupportChatClient::LIVE_READS_PERMISSION) {
+	} elseif (isset($input['live_reads']) && Access::decide(SupportChatClient::LIVE_READS_PERMISSION, $session)) {
 		Setting::put('support_chat_live_reads', (string)$input['live_reads'] === 'yes' ? 'yes' : 'no');
 	}
 	Globalvars::get_instance()->forget_setting('support_chat_consent');

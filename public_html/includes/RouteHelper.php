@@ -394,6 +394,36 @@ class RouteHelper {
     }
     
     /**
+     * Refuse an admin page below its level (AdminPageAccess), as
+     * check_permission() refuses: the sign-in page when no one is signed in,
+     * the IP-change logout (an admin session used from another network is
+     * ended and sent to sign in), a 401 below the level. A dynamic route that
+     * names its view is checked against that file; a route that says
+     * 'admin_page_check' => false is public by its own declaration (other
+     * sites fetch publish_theme with no session). A path that serves no page
+     * file is left to 404.
+     */
+    private static function enforceAdminPage(string $path, array $routes, $session): void {
+        $view = null;
+        foreach (array('custom', 'dynamic') as $type) {
+            foreach (($routes[$type] ?? array()) as $pattern => $config) {
+                if (!self::matchesPattern($pattern, $path)) continue;
+                if (is_array($config) && array_key_exists('admin_page_check', $config) && $config['admin_page_check'] === false) {
+                    return;
+                }
+                if ($type === 'dynamic' && is_array($config) && !empty($config['view']) && strpos($config['view'], '{') === false) {
+                    $view = $config['view'];
+                }
+                break 2;
+            }
+        }
+        $level = AdminPageAccess::levelForPath($path, $view);
+        if ($level !== null) {
+            $session->check_permission($level);
+        }
+    }
+
+    /**
      * Handle static file routes with caching and plugin activation checks
      * 
      * Processes ONLY static asset files (CSS, JS, images, fonts, etc.) with proper
@@ -1323,6 +1353,13 @@ class RouteHelper {
             }
         }
         
+        // 3.5 Admin pages (spec declared_permissions 3.4): before any page
+        // code runs, an admin page needs the level its header declares, in
+        // every URL family and in a plugin's dynamic routes inside /admin/.
+        if (!self::$match_only_mode && AdminPageAccess::isAdminPath($full_path)) {
+            self::enforceAdminPage($full_path, $routes, $session);
+        }
+
         // 4. Check custom routes (complex logic)
         self::debugLog('route_matching', "Starting custom route processing", [
             'available_routes' => array_keys($routes['custom'] ?? []),

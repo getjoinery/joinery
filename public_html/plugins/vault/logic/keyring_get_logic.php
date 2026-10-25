@@ -21,7 +21,7 @@ function keyring_get_logic(array $input): LogicResult {
 function keyring_get_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Return the password store DEK sealed to the vault public key (opaque blob) - never inspected server-side',
 	];
 }

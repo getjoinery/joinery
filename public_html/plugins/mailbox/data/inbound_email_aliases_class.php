@@ -43,6 +43,7 @@ class InboundEmailAlias extends SystemBase {
 	use NotifiesRelayMapOnChange;
 	public static $prefix = 'iea';
 	public static $tablename = 'iea_inbound_email_aliases';
+	public static $access_class = 'config';
 	public static $pkey_column = 'iea_inbound_email_alias_id';
 
 	// Delivery mode values
@@ -165,13 +166,6 @@ class InboundEmailAlias extends SystemBase {
 		}
 
 		$this->set('iea_update_time', gmdate('Y-m-d H:i:s'));
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
 	}
 
 	/**

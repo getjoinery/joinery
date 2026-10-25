@@ -56,6 +56,7 @@ function mail_export_list_rows(int $uid): array {
 
 function mail_export_list_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description' => 'The caller\'s mailbox downloads: progress, and the link once each is ready',
 		'requires_session' => true,
 		'input' => array(),

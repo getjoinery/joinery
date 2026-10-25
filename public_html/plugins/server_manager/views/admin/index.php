@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=7 */
 /**
  * Server Manager Dashboard
  * URL: /admin/server_manager
@@ -98,9 +99,10 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobComm
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
 
+// The dashboard opens at 7 (its header; Q9, Q10); each action on it needs its own level.
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
+SmActionLevels::refuse_post('index', $session, '/admin/server_manager');
 
 // Approve or reject a join request from the banner. Approval makes the node
 // record from the request and binds the key to it — the same act as approval

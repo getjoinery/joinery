@@ -67,6 +67,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 function password_set_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Set an initial password for an account that has none.',
 		'requires_session' => true,
 		'mutates'          => true,

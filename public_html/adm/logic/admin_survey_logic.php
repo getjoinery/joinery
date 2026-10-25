@@ -13,7 +13,6 @@ require_once(PathHelper::getIncludePath('data/questions_class.php'));
 function admin_survey_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
-    $session->check_permission(5);
     $session->set_return();
 
     // Handle POST actions

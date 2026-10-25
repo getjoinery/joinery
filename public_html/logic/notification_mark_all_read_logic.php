@@ -30,6 +30,7 @@ function notification_mark_all_read_logic_descriptor(): array {
 		'description' => 'Mark all the signed-in owner\'s unread notifications read.',
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'session_write' => true,
 		],
 		'input'       => [],

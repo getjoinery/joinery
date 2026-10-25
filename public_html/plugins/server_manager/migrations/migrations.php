@@ -763,4 +763,20 @@ return [
 			error_log('sm_025: mgn_uptime_check_type defaults to http_status.');
 		},
 	],
+	[
+		// The provisioning service account reads other buyers' order items and
+		// queues their mail over the REST API. Those models are personal: 6 to
+		// read, 8 to write (declared_permissions WP2), so an account made at 5
+		// is refused. Raise the configured one to 8.
+		'id' => 'sm_026_provisioning_service_user_at_8',
+		'version' => '1.30.112',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare("UPDATE usr_users SET usr_permission = 8
+				WHERE usr_permission < 8 AND usr_user_id = (SELECT NULLIF(stg_value, '')::int FROM stg_settings
+					WHERE stg_name = 'server_manager_provisioning_service_user_id' AND stg_value ~ '^[0-9]+$' LIMIT 1)");
+			$q->execute();
+			error_log('sm_026: ' . (int)$q->rowCount() . ' provisioning service account(s) raised to 8.');
+		},
+	],
 ];

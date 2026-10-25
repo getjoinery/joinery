@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -29,7 +30,7 @@
 
 	$options['title'] = 'Question '.$question->key;
 	$options['altlinks'] = array('Edit Question' => '/admin/admin_question_edit?qst_question_id='.$question->key);
-	if(!$question->get('qst_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$question->get('qst_delete_time') && $question->can_delete($session)) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_question', 'hidden' => array('action' => 'delete', 'qst_question_id' => $question->key));
 	}
 

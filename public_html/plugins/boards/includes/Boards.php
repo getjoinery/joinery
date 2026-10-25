@@ -18,7 +18,8 @@
  * below MIN_POSITION_GAP the whole list is renumbered 1024, 2048, … in the same
  * transaction.
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - deleteFile() runs under rule_checked_write() behind its callers' board role
  */
 
 /** A refusal with a message the member can read. */
@@ -182,7 +183,7 @@ class Boards {
 		}
 
 		$role = null;
-		if (self::userPermission($user_id) >= self::SUPERADMIN_PERMISSION) {
+		if (Access::allows(self::SUPERADMIN_PERMISSION, (int)self::userPermission($user_id))) {
 			$role = self::ROLE_ADMIN;
 		} else {
 			$q = DbConnector::GetPreparedStatement(
@@ -628,7 +629,10 @@ class Boards {
 		}
 		try {
 			$file = new File($file_id, TRUE);
-			$file->permanent_delete();
+			// Every caller holds the board role for the change that drops the
+			// file (a board admin's new background, an editor's removed
+			// attachment, a refused upload, the row's own delete).
+			SystemBase::rule_checked_write(function () use ($file) { $file->permanent_delete(); });
 		} catch (Throwable $e) {
 			error_log('[Boards] could not remove file ' . $file_id . ': ' . $e->getMessage());
 		}

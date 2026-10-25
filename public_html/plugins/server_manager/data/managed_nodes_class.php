@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.69 - mgn_agent_test_build also marks the site copy live test's nodes (SiteCopyLiveRun): the test cloud's
+ *                cleanup takes them with their servers when a run is killed before its teardown
  * @version 1.68 - mgn_api_secret_key is stored sealed (API_SECRET_LOCATOR): api_secret_key() opens it,
  *                 set_api_secret_key() seals it
  * @version 1.67 - mgn_agent_root_access: the owner's emergency root access answer as the node last reported it at
@@ -150,6 +152,7 @@ class ManagedNodeException extends SystemBaseException {}
 class ManagedNode extends SystemBase {
 	public static $prefix = 'mgn';
 	public static $tablename = 'mgn_managed_nodes';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mgn_managed_node_id';
 
 	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report', 'mgn_cert_problem');
@@ -191,7 +194,7 @@ class ManagedNode extends SystemBase {
 		'mgn_last_host_report_time' => array('type'=>'timestamp(6)'),
 		'mgn_api_public_key'      => array('type'=>'varchar(255)'),
 		// A SecretBox blob (API_SECRET_LOCATOR), never plain text: api_secret_key() opens it.
-		'mgn_api_secret_key'      => array('type'=>'text'),
+		'mgn_api_secret_key'      => array('access_class' => 'keys', 'type'=>'text'),
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Fingerprint of the backup recovery public key this node is holding, as
@@ -405,11 +408,13 @@ class ManagedNode extends SystemBase {
 		'mgn_agent_left_time'          => array('type'=>'timestamp(6)'),
 		'mgn_agent_left_to'            => array('type'=>'varchar(255)'),
 
-		// A throwaway test server running a live-proof build of the agent
-		// (AgentLiveProofRun, fleet_security_patching WP7): built from the
-		// source being prepared with a key made for the run, it trusts only
-		// that key. The plane offers it none of its own agents or bundles,
-		// which it would refuse, each refusal an incident, and the test
+		// A node a live test made on a throwaway test server: a live-proof
+		// build of the agent (AgentLiveProofRun, fleet_security_patching WP7),
+		// built from the source being prepared with a key made for the run and
+		// trusting only that key; or the site copy live test's source and
+		// copy (SiteCopyLiveRun), each running its release's own agent. The
+		// plane offers it none of its own agents or bundles (a live-proof
+		// build would refuse them, each refusal an incident), and the test
 		// cloud's cleanup removes it with its server.
 		'mgn_agent_test_build'         => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 

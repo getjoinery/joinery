@@ -224,7 +224,7 @@ function drive_changes_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'cursor' => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Last seen change id (0 for a cold start, answered with a reset)'),
 			'scope'  => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'all'), 'label' => "'mine' (entities the caller owns) or 'all' (the default: everything the caller may see)"),

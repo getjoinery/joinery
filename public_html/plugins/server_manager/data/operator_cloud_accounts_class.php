@@ -47,6 +47,7 @@ class OperatorCloudAccountException extends SystemBaseException {}
 class OperatorCloudAccount extends SystemBase {
 	public static $prefix = 'oca';
 	public static $tablename = 'oca_operator_cloud_accounts';
+	public static $access_class = 'config';
 	public static $pkey_column = 'oca_operator_cloud_account_id';
 
 	const METHOD_KEY = 'key';

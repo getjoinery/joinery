@@ -17,7 +17,6 @@ function admin_help_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/DocsScanner.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	$docs_dir = PathHelper::getIncludePath('docs');

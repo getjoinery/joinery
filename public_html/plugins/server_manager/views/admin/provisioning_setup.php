@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Server Manager - Provisioning Setup
  * URL: /admin/server_manager/provisioning_setup?tab=setup|hosting|hosted|shop|domains|cleanup

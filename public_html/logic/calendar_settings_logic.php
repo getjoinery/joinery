@@ -79,6 +79,7 @@ function calendar_settings_logic(array $input): LogicResult {
 
 function calendar_settings_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Read or save the signed-in member\'s calendar preferences (summaries and reminder default; the read also reports the protection level, changed through calendar_level_change).',
 		'mutates'     => true,
 		'requires_session'        => true,

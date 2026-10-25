@@ -9,7 +9,6 @@ require_once(PathHelper::getIncludePath('data/question_options_class.php'));
 
 function admin_question_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	// Get question ID from GET or POST (POST when form is submitted)

@@ -21,6 +21,7 @@ function desk_poll_logic(array $input): LogicResult {
 
 function desk_poll_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Poll one support answer: partial text while it is written, the answer when done.',
 		'requires_session' => false,
 		'input'            => SupportApi::siteInput() + array(

@@ -22,7 +22,7 @@ function vault_lock_logic(array $input): LogicResult {
 function vault_lock_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Explicitly lock the vault (close the unlock window) for the current session',
 	];
 }

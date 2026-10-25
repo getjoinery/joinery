@@ -58,7 +58,7 @@ function markdown_preview_logic(array $input): LogicResult {
 
 	$markdown = (string)($input['markdown'] ?? '');
 
-	$max = (int)$session->get_permission() >= 5 ? MARKDOWN_PREVIEW_MAX_BYTES : MARKDOWN_PREVIEW_MEMBER_MAX_BYTES;
+	$max = Access::permits(Access::staffLevel(), $session) ? MARKDOWN_PREVIEW_MAX_BYTES : MARKDOWN_PREVIEW_MEMBER_MAX_BYTES;
 	if (strlen($markdown) > $max) {
 		return LogicResult::error('That document is too large to preview.');
 	}

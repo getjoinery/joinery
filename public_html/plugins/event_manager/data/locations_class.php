@@ -11,6 +11,7 @@ class LocationException extends SystemBaseException {}
 
 class Location extends SystemBase {	public static $prefix = 'loc';
 	public static $tablename = 'loc_locations';
+	public static $access_class = 'content';
 	public static $pkey_column = 'loc_location_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -58,13 +59,6 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 	    'loc_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'loc_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 	function save($debug=false) {
 		if ($this->key) {

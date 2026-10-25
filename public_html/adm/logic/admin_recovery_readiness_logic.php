@@ -21,7 +21,6 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
 
-	$session->check_permission(10);
 
 	$page_vars = array();
 	$page_vars['settings'] = $settings;

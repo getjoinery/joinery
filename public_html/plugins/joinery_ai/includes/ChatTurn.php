@@ -173,7 +173,7 @@ class ChatTurn {
             return false;
         }
         try {
-            return (int)(new User($owner, TRUE))->get('usr_permission') >= 5;
+            return Access::allows(Access::staffLevel(), (int)(new User($owner, TRUE))->get('usr_permission'));
         } catch (Throwable $e) {
             return false;
         }

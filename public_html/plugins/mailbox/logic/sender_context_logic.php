@@ -46,9 +46,9 @@ function sender_context_logic(array $input): LogicResult {
 	if (!$session->get_user_id()) {
 		return LogicResult::error('Sign in required.');
 	}
-	// Member records are operator data — the site-account half is admins only (level 5+).
+	// Member records are operator data — the site-account half needs personal:read.
 	// The contact half is the caller's own data and needs no such gate.
-	$can_see_account = (intval($session->get_permission()) >= 5);
+	$can_see_account = Access::permits('personal:read', $session);
 
 	$message_id = intval($input['message_id'] ?? 0);
 	if ($message_id <= 0) {
@@ -272,6 +272,7 @@ function sender_context_logic(array $input): LogicResult {
 
 function sender_context_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus everyone else on the message, plus their member record (admin only)',
 		'input' => [

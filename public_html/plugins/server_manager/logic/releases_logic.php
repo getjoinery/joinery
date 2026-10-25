@@ -91,6 +91,7 @@ function releases_logic_descriptor(): array {
 		'description' => 'Every release statement logged under the Joinery release key, and how far the public log has been read for any it does not account for.',
 		'mutates'     => false,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability'       => null,
 			'requires_session' => false,
 			'allow_guest'      => true,

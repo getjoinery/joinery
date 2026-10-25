@@ -6,7 +6,6 @@ function admin_event_type_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_types_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(7);
 
 	if (isset($input['ety_event_type_id'])) {
 		$event_type = new EventType($input['ety_event_type_id'], TRUE);

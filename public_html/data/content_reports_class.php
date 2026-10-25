@@ -31,6 +31,7 @@ class ContentReportException extends SystemBaseException {}
 class ContentReport extends SystemBase {
 	public static $prefix = 'rpt';
 	public static $tablename = 'rpt_content_reports';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'rpt_content_report_id';
 
 	const STATUS_OPEN      = 'open';
@@ -112,18 +113,14 @@ class ContentReport extends SystemBase {
 		return ContentReportRegistry::get((string)$this->get('rpt_entity_type'));
 	}
 
-	// A reporter may see their own reports; admins see every report. Only
-	// admins change one — the reporter's part ends when they file it.
-	function authenticate_read($data) {
-		if ((int)($data['current_user_permission'] ?? 0) < 5
-				&& (int)($data['current_user_id'] ?? 0) !== (int)$this->get('rpt_usr_user_id')) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
+	// A reporter may see their own reports (the owner rule); admins see every
+	// report. Only admins change one: the reporter's part ends when they file it.
 	function authenticate_write($data) {
-		if ((int)($data['current_user_permission'] ?? 0) < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
+		if ($this->key === NULL && $this->access_owner_is($data['current_user_id'] ?? 0)) {
+			return;
+		}
+		if (!Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
+			throw new SystemAuthenticationError('Changing a report needs level ' . static::access_level('write') . '.');
 		}
 	}
 

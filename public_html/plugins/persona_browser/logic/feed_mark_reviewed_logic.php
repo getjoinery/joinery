@@ -39,6 +39,7 @@ function feed_mark_reviewed_logic(array $input): LogicResult {
 
 function feed_mark_reviewed_logic_descriptor(): array {
     return array(
+        'auth' => array('min_user_permission' => 0),
         'description'      => 'Record that the owner reviewed a run of persona feed posts: each one not already given a verdict is recorded as not an ad.',
         'requires_session' => true,
         'mutates'          => true,

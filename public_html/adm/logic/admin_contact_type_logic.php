@@ -7,9 +7,8 @@ require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
 
 function admin_contact_type_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
-	$contact_type = new ContactType($input['ctt_contact_type_id'], TRUE);
+	$contact_type = new ContactType($input['ctt_contact_type_id'] ?? null, TRUE);
 
 	if($input['action'] == 'delete'){
 		$contact_type->assert_can_write($session);

@@ -38,6 +38,6 @@ function boards_poll_logic_descriptor(): array {
 			'after_activity_id' => array('type' => 'int', 'required' => false, 'default' => 0, 'label' => 'Cursor'),
 			'people_stamp'      => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'People stamp'),
 		),
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 	);
 }

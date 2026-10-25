@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -6,7 +7,6 @@
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
@@ -68,18 +68,19 @@
 		$video->set('vid_description', $_POST['vid_description']);
 
 		try {
-			$video->assert_can_write($session);
-			$video->save();
-			$video->load();
-
-			if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
-				if($_POST['vid_link']){
+			// The link is set before the save, so it is stored with the video.
+			if(!$video->get('vid_link') || Access::permits(10, $session)){
+				if(!empty($_POST['vid_link'])){
 					$video->set('vid_link', $video->create_url($_POST['vid_link']));
 				}
 				else{
 					$video->set('vid_link', $video->create_url($video->get('vid_title')));
 				}
 			}
+
+			$video->assert_can_write($session);
+			$video->save();
+			$video->load();
 		} catch (TTClassException $e) {
 			require_once(__DIR__ . '/../includes/Exceptions/SystemException.php');
 			throw new SystemException($e->getMessage());
@@ -132,8 +133,8 @@
 		$formwriter->textinput('vid_title', 'Video title', [
 			'validation' => ['required' => true]
 		]);
-		if(!$video->get('vid_link') || $_SESSION['permission'] == 10){
-			$formwriter->textinput('pag_link', 'Link (no spaces, optional)', [
+		if(!$video->get('vid_link') || Access::permits(10, $session)){
+			$formwriter->textinput('vid_link', 'Link (no spaces, optional)', [
 				'prepend' => $settings->get_setting('webDir').'/video/'
 			]);
 		}

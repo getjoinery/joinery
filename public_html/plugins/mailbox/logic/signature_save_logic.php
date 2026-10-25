@@ -46,6 +46,7 @@ function signature_save_logic(array $input): LogicResult {
 
 function signature_save_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Save the compose signature for one of the caller\'s mailboxes',
 		'input' => [

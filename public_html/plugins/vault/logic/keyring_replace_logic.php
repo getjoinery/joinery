@@ -42,7 +42,7 @@ function keyring_replace_logic(array $input): LogicResult {
 function keyring_replace_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => true,
 		'description' => 'Replace the password store DEK sealed copy with one sealed to the vault\'s new key, only while a rotation of the passwords vault key is pending',
 		'input' => [

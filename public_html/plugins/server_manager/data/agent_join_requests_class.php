@@ -31,6 +31,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class AgentJoinRequest extends SystemBase {
 	public static $prefix = 'ajr';
 	public static $tablename = 'ajr_agent_join_requests';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ajr_agent_join_request_id';
 
 	/** A pending request older than this is expired, not approvable. */

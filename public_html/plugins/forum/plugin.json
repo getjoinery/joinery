@@ -30,7 +30,6 @@
             "url": "/forum",
             "icon": "comments",
             "visibility": "in",
-            "permission": 0,
             "order": 58,
             "settingActivate": "forum_active"
         }
@@ -40,7 +39,6 @@
             "slug": "forum-admin",
             "title": "Forum",
             "icon": "comments",
-            "permission": 5,
             "order": 18,
             "settingActivate": "forum_active",
             "items": [
@@ -48,21 +46,18 @@
                     "slug": "forum-admin-categories",
                     "title": "Categories",
                     "url": "/plugins/forum/admin/admin_forum_categories",
-                    "permission": 5,
                     "order": 1
                 },
                 {
                     "slug": "forum-admin-held",
                     "title": "Posts awaiting approval",
                     "url": "/plugins/forum/admin/admin_forum_held",
-                    "permission": 5,
                     "order": 2
                 },
                 {
                     "slug": "forum-admin-topics",
                     "title": "Topics",
                     "url": "/plugins/forum/admin/admin_forum_topics",
-                    "permission": 5,
                     "order": 3
                 }
             ]

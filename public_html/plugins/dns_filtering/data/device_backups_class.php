@@ -12,6 +12,7 @@ class SdDeviceBackup extends SystemBase {
 
 	public static $prefix = 'sbk';
 	public static $tablename = 'sbk_device_backups';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'sbk_device_backup_id';
 
 	protected static $foreign_key_actions = array(
@@ -39,7 +40,7 @@ class SdDeviceBackup extends SystemBase {
 	    'sbk_usr_user_id' => array('type'=>'int4'),
 	    'sbk_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'sbk_delete_time' => array('type'=>'timestamp(6)'),
-	    'sbk_deactivation_pin' => array('type'=>'varchar(10)'),
+	    'sbk_deactivation_pin' => array('access_class' => 'keys', 'type'=>'varchar(10)'),
 	);
 
 	function get_readable_name(){

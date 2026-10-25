@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Memory Edit
  * URL: /admin/joinery_ai/memory_edit?mem_memory_id=N   (no id = new shared memory)

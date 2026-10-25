@@ -6,6 +6,7 @@ require_once(PathHelper::getIncludePath('data/entries_class.php'));
 class CalEntryException extends SystemBase {
     public static $prefix = 'cex';
     public static $tablename = 'cex_entry_exceptions';
+    public static $access_class = 'personal';
     public static $pkey_column = 'cex_entry_exception_id';
 
     public static $field_specifications = array(
@@ -19,6 +20,20 @@ class CalEntryException extends SystemBase {
     protected static $foreign_key_actions = array(
         'cex_cal_entry_id' => array('action' => 'cascade'),
     );
+
+    /**
+     * An exception is its entry owner's: the person whose recurring entry it
+     * skips may add and remove it. The stored entry id decides, so pointing a
+     * row at someone else's entry makes it theirs, not yours.
+     */
+    public function access_owner_is($user_id): bool {
+        $entry_id = (int)$this->access_stored('cex_cal_entry_id');
+        if ((int)$user_id <= 0 || $entry_id <= 0) {
+            return false;
+        }
+        $entry = new CalendarEntry($entry_id, TRUE);
+        return $entry->key && $entry->access_owner_is($user_id);
+    }
 
 }
 

@@ -23,6 +23,7 @@ class GroupException extends SystemBaseException {}
 class Group extends SystemBase {
 	public static $prefix = 'grp';
 	public static $tablename = 'grp_groups';
+	public static $access_class = 'content';
 	public static $pkey_column = 'grp_group_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -401,17 +402,6 @@ class Group extends SystemBase {
 	}				
 
 	// prepare() method now inherited from SystemBase with automatic unique constraint checking
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
 
 }
 

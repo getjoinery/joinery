@@ -12,14 +12,18 @@
  * their own. permanent_delete() removes every row under the board and the
  * Files its attachments hold.
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - the owner column is bbd_usr_user_id_owner; board admins write the board
  */
 
 class Board extends SystemBase {
 
 	public static $prefix = 'bbd';
 	public static $tablename = 'bbd_boards';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bbd_board_id';
+	/** The person who made the board owns it. */
+	public static $owner_column = 'bbd_usr_user_id_owner';
 
 	const VISIBILITY_INVITE_ONLY = 'invite_only';
 	const VISIBILITY_ALL_MEMBERS = 'all_members';
@@ -95,6 +99,7 @@ class Board extends SystemBase {
 
 	/** Bring the board back, with exactly the cards its delete took. */
 	function undelete() {
+		$this->guard_raw_write('soft_delete');
 		$db = DbConnector::get_instance()->get_db_link();
 		$own_transaction = !$db->inTransaction();
 		if ($own_transaction) {
@@ -119,6 +124,34 @@ class Board extends SystemBase {
 		}
 		$this->load();
 		return true;
+	}
+
+	/**
+	 * Writers: the board's owner (a new board is its creator's), the model's
+	 * level, or anyone the board makes an admin. Running a board is a role on
+	 * it, as everything under the board is (BoardCard::authenticate_write()).
+	 */
+	/** Readers: the owner, the model's level, or anyone with a role on the board. */
+	function authenticate_read($data) {
+		try {
+			parent::authenticate_read($data);
+		} catch (SystemAuthenticationError $e) {
+			if (!$this->key) {
+				throw $e;
+			}
+			Boards::assertRoleForBoardId((int)$this->key, $data, 'viewer');
+		}
+	}
+
+	function authenticate_write($data) {
+		try {
+			parent::authenticate_write($data);
+		} catch (SystemAuthenticationError $e) {
+			if (!$this->key) {
+				throw $e;
+			}
+			Boards::assertRoleForBoardId((int)$this->key, $data, 'admin');
+		}
 	}
 
 	/**

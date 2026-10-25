@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
@@ -17,7 +18,6 @@
 	$session = SessionControl::get_instance();
 	//$session->set_return();
 	if (!defined('SCHEDULED_TASK_CONTEXT')) {
-		$session->check_permission(8);
 		// Sending is a button (POST): a link is a GET any other site can make the browser follow.
 		if (!LibraryFunctions::isFormSubmission()) {
 			throw new SystemDisplayableError('Send emails with the buttons on the Emails pages.');

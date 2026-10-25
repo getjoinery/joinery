@@ -43,6 +43,7 @@ class MailboxSendAttemptException extends SystemBaseException {}
 class MailboxSendAttempt extends SystemBase {
 	public static $prefix = 'mst';
 	public static $tablename = 'mst_mailbox_send_attempts';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'mst_mailbox_send_attempt_id';
 
 	const KIND_COMPOSE = 'compose';
@@ -107,7 +108,7 @@ class MailboxSendAttempt extends SystemBase {
 		// Sealing metadata (SystemBase conventions): the flag, the wrapped DEK, the
 		// owner whose vault wraps it, and their key generation at seal time.
 		'mst_content_sealed'          => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'mst_sealed_key'              => array('type'=>'text'),
+		'mst_sealed_key'              => array('access_class' => 'keys', 'type'=>'text'),
 		'mst_key_generation'          => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'mst_sealed_owner_user_id'    => array('type'=>'int8'),
 		'mst_create_time'             => array('type'=>'timestamp(6)', 'default'=>'now()'),

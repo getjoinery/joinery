@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Forum category edit — name, address, description, order, and who may read
  * and who may post. The tier and group choices apply when a rule asks for them.

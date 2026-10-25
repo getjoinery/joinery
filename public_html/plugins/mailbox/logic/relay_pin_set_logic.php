@@ -36,7 +36,7 @@ function relay_pin_set_logic(array $input): LogicResult {
 function relay_pin_set_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Store the relay pin the caller\'s browser made for one of their mailboxes; another relay identity needs a recent step-up',
 		'input' => [
 			'alias_id' => ['type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'],

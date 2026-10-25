@@ -27,7 +27,6 @@
             "nativeScreen": "ai_chat",
             "icon": "robot",
             "visibility": "in",
-            "permission": 0,
             "order": 72
         },
         {
@@ -36,7 +35,6 @@
             "url": "/profile/joinery_ai/memory",
             "icon": "memory",
             "visibility": "in",
-            "permission": 0,
             "order": 73,
             "parent": "joinery-ai-member-chat"
         }
@@ -46,7 +44,6 @@
             "slug": "joinery-ai",
             "title": "Joinery AI",
             "icon": "smart_toy",
-            "permission": 10,
             "order": 16,
             "items": [
                 {

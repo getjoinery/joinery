@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * admin_notification_preferences.php
  *

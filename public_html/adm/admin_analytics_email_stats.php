@@ -1,9 +1,9 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -18,6 +18,8 @@ $dblink = $dbhelper->get_db_link();
 		'session' => $session,
 	)
 	);
+
+$altlinks = array();
 
 $today = date("m-d-Y");
 $startdate = LibraryFunctions::fetch_variable('startdate', date("m-d-Y", strtotime("-1 months")), 0, '');

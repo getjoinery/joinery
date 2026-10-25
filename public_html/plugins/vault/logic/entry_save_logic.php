@@ -37,7 +37,7 @@ function entry_save_logic(array $input): LogicResult {
 function entry_save_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Create or update one encrypted password entry (opaque blob)',
 		'input' => [
 			'ciphertext' => ['type' => 'text', 'required' => true, 'label' => 'Encrypted entry blob'],

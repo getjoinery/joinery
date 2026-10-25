@@ -33,6 +33,7 @@ class MachineTransferException extends SystemBaseException {}
 class MachineTransfer extends SystemBase {
 	public static $prefix = 'mtr';
 	public static $tablename = 'mtr_machine_transfers';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mtr_machine_transfer_id';
 
 	protected static $foreign_key_actions = array(

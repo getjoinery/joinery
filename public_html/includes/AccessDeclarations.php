@@ -47,11 +47,23 @@ final class AccessDeclarations {
 		'sealed_column_below_keys' => true,   // a sealed column declared as anything but keys
 		'action_level_invalid'     => true,   // min_user_permission is not a level or class:verb
 		'action_mutates_on_read'   => true,   // a mutating action on a :read level (3.5)
-		'page_undeclared'          => false,  // WP3 turns this on
-		'admin_check_permission'   => false,  // WP3 turns this on
-		'model_undeclared'         => false,  // WP2 turns this on
-		'action_undeclared'        => false,  // WP4 turns this on
+		'action_level_misplaced'   => true,   // 'min_permission' in a descriptor: nothing reads it (min_user_permission, in 'auth')
+		'page_undeclared'          => true,   // every admin page has a header (WP3)
+		'admin_check_permission'   => true,   // a page or its logic calls check_permission(): the header is the gate
+		'model_undeclared'         => true,   // every model declares $access_class (WP2)
+		'action_undeclared'        => true,   // every descriptor declares its level (WP4)
+		'level_compared_inline'    => true,   // a session's or user's level compared in code: ask Access, a row or a model
 	);
+
+	/**
+	 * A level compared in code: the session's (get_permission(), $_SESSION's),
+	 * a stored user's (usr_permission) or a rule's identity array's. Access
+	 * itself is the one place that compares.
+	 */
+	const INLINE_LEVEL = '/(?:get_permission\(\)|\$_SESSION\[\s*\'permission\'\s*\](?:\s*\?\?\s*\d+)?|usr_permission\'\s*\)|\[\s*\'current_user_permission\'\s*\](?:\s*\?\?\s*\d+)?)\s*\)?\s*(?:===?|!==?|<=?|>=?)(?!>)|(?<![=\-])(?:<=?|>=?)\s*\(?\s*(?:\(int\)\s*)?\$\w+->get_permission\(\)/';
+
+	/** Files that may compare a level: Access decides, and the ladder's own tests. */
+	const INLINE_LEVEL_ALLOWED = array('includes/Access.php');
 
 	/** Directories never scanned for descriptors. */
 	const SKIP_DIRS = array('vendor', 'tests', 'node_modules', 'specs', 'docs', 'logs', 'cache', 'uploads');
@@ -97,7 +109,9 @@ final class AccessDeclarations {
 	 */
 	public static function pageHeader(string $file): ?array {
 		$head = (string)@file_get_contents($file, false, null, 0, 4096);
-		if (!preg_match_all('/@joinery-admin\b([^\n*]*)/', $head, $all)) {
+		// The header is a line of its own; a docblock that mentions the tag in
+		// prose is not one.
+		if (!preg_match_all('#^[ \t]*/\*\*[ \t]*@joinery-admin\b([^\n*]*)\*/[ \t]*$#m', $head, $all)) {
 			return null;
 		}
 		if (count($all[1]) > 1) {
@@ -115,7 +129,8 @@ final class AccessDeclarations {
 
 	/**
 	 * Every model, class name => ['file', 'plugin', 'table', 'access_class'
-	 * (null when undeclared), 'owner_column' (null when undeclared),
+	 * (null when undeclared), 'owner_column' (null when undeclared, false when
+	 * the model says it has none),
 	 * 'exceptions' (verb => int), 'fields' (every column), 'columns'
 	 * (column => class, for the columns that declare one)].
 	 */
@@ -137,7 +152,8 @@ final class AccessDeclarations {
 					'plugin'       => preg_match('#^plugins/([^/]+)/#', $rel, $pm) ? $pm[1] : 'core',
 					'table'        => self::staticString($body, 'tablename'),
 					'access_class' => self::staticString($body, 'access_class'),
-					'owner_column' => self::staticString($body, 'owner_column'),
+					'owner_column' => preg_match('/static\s+\$owner_column\s*=\s*false\s*;/i', $body)
+						? false : self::staticString($body, 'owner_column'),
 					'exceptions'   => array(),
 				);
 				foreach (self::EXCEPTIONS as $prop => $verb) {
@@ -194,6 +210,12 @@ final class AccessDeclarations {
 			foreach ($dm[1] as $i => $fn) {
 				$desc = self::block($src, $dm[0][$i][1], '{', '}');
 				$level = null;
+				// A descriptor a builder makes (ForumAction::memberDescriptor())
+				// declares its level in the builder, unless it says its own.
+				if (!preg_match('/[\'"]min_user_permission[\'"]/', $desc)
+						&& preg_match('/\breturn\s+(\w+)::(\w+)\s*\(/', $desc, $bm)) {
+					$desc .= self::builderSource($root, $bm[1], $bm[2]);
+				}
 				if (preg_match('/[\'"]min_user_permission[\'"]\s*=>\s*([^,\]\)\n]+)/', $desc, $mm)) {
 					$raw = trim($mm[1]);
 					if (preg_match('/^\d+$/', $raw)) {
@@ -210,11 +232,34 @@ final class AccessDeclarations {
 					'plugin'  => preg_match('#^plugins/([^/]+)/#', $rel, $pm) ? $pm[1] : 'core',
 					'level'   => $level,
 					'mutates' => $mutates,
+					'misplaced' => (bool)preg_match('/[\'"]min_permission[\'"]\s*=>/', $desc),
 				);
 			}
 		}
 		ksort($out);
 		return $out;
+	}
+
+	/** @var array "Class::method" => its source, for builders found once */
+	private static $builders = array();
+
+	/**
+	 * The source of a descriptor builder method, found by its class's file
+	 * (includes/ and every plugin's includes/), or '' when there is none.
+	 */
+	private static function builderSource(string $root, string $class, string $method): string {
+		$key = "$root|$class::$method";
+		if (isset(self::$builders[$key])) return self::$builders[$key];
+		$files = array_merge((array)glob("$root/includes/$class.php"), (array)glob("$root/plugins/*/includes/$class.php"));
+		$out = '';
+		foreach ($files as $f) {
+			$src = self::withoutComments((string)file_get_contents($f));
+			if (preg_match('/function\s+' . preg_quote($method, '/') . '\s*\(/', $src, $m, PREG_OFFSET_CAPTURE)) {
+				$out = self::block($src, $m[0][1], '{', '}');
+				break;
+			}
+		}
+		return self::$builders[$key] = $out;
 	}
 
 	/**
@@ -266,7 +311,7 @@ final class AccessDeclarations {
 					$add('model_exception_invalid', $name, "its $verb level $n is outside 0 to 10");
 				}
 			}
-			if ($m['owner_column'] !== null && !in_array($m['owner_column'], $m['fields'], true)) {
+			if (is_string($m['owner_column']) && !in_array($m['owner_column'], $m['fields'], true)) {
 				$add('owner_column_missing', $name, "owner column {$m['owner_column']} is not one of its columns");
 			}
 			// An undeclared model behaves as keys (3.2), so nothing on it is stricter.
@@ -289,6 +334,9 @@ final class AccessDeclarations {
 		}
 
 		foreach (self::actions($root) as $name => $a) {
+			if (!empty($a['misplaced'])) {
+				$add('action_level_misplaced', $name, "'min_permission' in " . $a['file'] . " is read by nothing: the level is 'auth' => ['min_user_permission' => ...]");
+			}
 			$level = $a['level'];
 			if ($level === null) {
 				$add('action_undeclared', $name, 'no min_user_permission in ' . $a['file']);
@@ -302,6 +350,18 @@ final class AccessDeclarations {
 			}
 			if ($a['mutates'] === true && is_string($level) && substr($level, -5) === ':read') {
 				$add('action_mutates_on_read', $name, "it mutates, so '$level' is too low a verb");
+			}
+		}
+
+		foreach (self::phpFiles($root) as $path) {
+			$rel = substr($path, strlen($root) + 1);
+			if (in_array($rel, self::INLINE_LEVEL_ALLOWED, true)) continue;
+			$src = (string)file_get_contents($path);
+			if (strpos($src, 'permission') === false) continue;
+			foreach (explode("\n", self::withoutComments($src)) as $i => $line) {
+				if (preg_match(self::INLINE_LEVEL, $line)) {
+					$add('level_compared_inline', $rel . ':' . ($i + 1), trim($line));
+				}
 			}
 		}
 		return $out;

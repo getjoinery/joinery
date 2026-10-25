@@ -30,6 +30,7 @@
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.3 - writes after the secret checks are the server's own (declared_permissions 3.2)
  * @version 1.2 - a delivery for a services tenant's SMTP user moves that tenant's figure (E4)
  * @version 1.1
  */
@@ -91,6 +92,11 @@ if (!hash_equals($expected, $supplied)) {
 	echo 'Unauthorized';
 	exit();
 }
+
+// The webhook secret verified above is the authority: no person is behind what this
+// writes, so every write from here on is the server's own (spec
+// declared_permissions 3.2).
+SystemBase::$allow_get_mutation = true;
 
 $payload = json_decode((string)file_get_contents('php://input'), true);
 if (!is_array($payload)) {

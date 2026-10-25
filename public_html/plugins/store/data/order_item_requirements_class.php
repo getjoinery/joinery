@@ -15,6 +15,7 @@ class DisplayablePermanentOrderItemRequirementException extends OrderItemRequire
 
 class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 	public static $tablename = 'oir_order_item_requirements';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'oir_order_item_requirement_id';
 
 	protected static $foreign_key_actions = [
@@ -25,7 +26,7 @@ class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 
 	// REST CRUD exposure (Layer 1): the provisioning management node polls
 	// these rows (checkout answers, e.g. the hosting domain question) over
-	// the API. Read-only surface; reads require permission >= 5.
+	// the API. Read-only surface; reads need the class read level (personal, 6).
 	public static $api_readable = true;
 
 		/**
@@ -52,13 +53,6 @@ class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 	    'oir_answer' => array('type'=>'text'),
 	    'oir_submit_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	); 
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}	
 
 }
 

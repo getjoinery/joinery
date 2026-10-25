@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php test-db --filter=email_settings_first_save
  *
+ * @version 1.1 - its own superadmin: the test database has no users
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -29,12 +30,13 @@ $snapshot = harness_settings_snapshot();
 harness_defer(function () use ($snapshot) { harness_settings_restore($snapshot); });
 $gv = Globalvars::get_instance();
 
+// The test database carries no users: the suite makes its own superadmin.
+$esfs_admin_id = (int)make_user('EsfsAdmin' . strtoupper(LibraryFunctions::random_string(6)), 10)->key;
+
 /** Post the Email settings page as a superadmin; returns the LogicResult. */
 function esfs_post(array $fields) {
-	$admin = new MultiUser(array('usr_permission' => 10, 'deleted' => false), array('usr_user_id' => 'ASC'), 1);
-	$admin_id = 0;
-	foreach ($admin as $u) { $admin_id = (int)$u->key; }
-	$_SESSION = array('usr_user_id' => $admin_id, 'loggedin' => true, 'permission' => 10);
+	global $esfs_admin_id;
+	$_SESSION = array('usr_user_id' => $esfs_admin_id, 'loggedin' => true, 'permission' => 10);
 	return harness_call_logic('adm/logic/admin_settings_email_logic.php', 'admin_settings_email_logic', $fields, 'POST');
 }
 function esfs_stored(string $name): string {

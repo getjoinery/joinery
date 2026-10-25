@@ -39,6 +39,7 @@ class InboundImapSeedProofException extends SystemBaseException {}
 class InboundImapSeedProof extends SystemBase {
 	public static $prefix = 'isp';
 	public static $tablename = 'isp_inbound_imap_seed_proofs';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'isp_inbound_imap_seed_proof_id';
 
 	protected static $foreign_key_actions = array(
@@ -75,13 +76,6 @@ class InboundImapSeedProof extends SystemBase {
 	public static $index_specifications = array(
 		array('columns' => array('isp_iia_inbound_imap_account_id', 'isp_create_time')),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/**
 	 * Did the seek skip mail the window claims?

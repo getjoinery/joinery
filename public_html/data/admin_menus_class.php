@@ -13,6 +13,8 @@ class AdminMenuException extends SystemBaseException {}
 
 class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	public static $tablename = 'amu_admin_menus';
+	public static $access_class = 'config';
+	public static $write_permission = 10;
 	public static $pkey_column = 'amu_admin_menu_id';
 
 	protected static $foreign_key_actions = [
@@ -46,7 +48,9 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	    'amu_parent_menu_id' => array('type'=>'int4'),
 	    'amu_defaultpage' => array('type'=>'varchar(255)', 'required'=>true),
 	    'amu_order' => array('type'=>'int2', 'required'=>true),
-	    'amu_min_permission' => array('type'=>'int4', 'required'=>true),
+	    // Not read: an entry shows to whoever may open its page
+	    // (visible_entries()). Written 0; existing tables hold it NOT NULL.
+	    'amu_min_permission' => array('type'=>'int4', 'default'=>0),   // not read or written: who sees an entry is who may open its page; old migrations still name it
 	    'amu_disable' => array('type'=>'int2', 'default'=>0),
 	    'amu_icon' => array('type'=>'varchar(16)'),
 	    // App platform (docs/mobile_apps.md): a non-empty value flips this
@@ -62,15 +66,6 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 
 	const LOCATIONS = array('admin_sidebar', 'user_dropdown', 'member_settings');
 	const VISIBILITIES = array('in', 'out', 'both');
-
-function authenticate_write($data) {
-		// If the user's ID doesn't match, we have to make
-		// sure they have admin access, otherwise denied.
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 }
 
@@ -101,14 +96,11 @@ class MultiAdminMenu extends SystemMultiBase {
 			$sql = "SELECT * FROM amu_admin_menus WHERE amu_location = :location ORDER BY amu_admin_menus.amu_order ASC";
 		}
 		else{
-			$sql = "SELECT * FROM amu_admin_menus WHERE amu_min_permission <= :currpermission AND amu_disable=0 AND amu_location = :location ORDER BY amu_admin_menus.amu_order ASC";
+			$sql = "SELECT * FROM amu_admin_menus WHERE amu_disable=0 AND amu_location = :location ORDER BY amu_admin_menus.amu_order ASC";
 		}
 
 		try{
 			$q = $dblink->prepare($sql);
-			if(!$get_all){
-				$q->bindParam(':currpermission', $user_permission, PDO::PARAM_INT);
-			}
 			$q->bindParam(':location', $location, PDO::PARAM_STR);
 			$count = $q->execute();
 			$q->setFetchMode(PDO::FETCH_OBJ);
@@ -117,6 +109,9 @@ class MultiAdminMenu extends SystemMultiBase {
 			$dbhelper->handle_query_error($e);
 		}
 		$entries = $q->fetchAll();
+		if (!$get_all) {
+			$entries = self::visible_entries($entries, (int)$user_permission);
+		}
 		$entries2 = $entries;
 
 		$finalmenu = array();
@@ -174,7 +169,40 @@ class MultiAdminMenu extends SystemMultiBase {
 	}
 
 	/**
-	 * Get user dropdown menu items filtered by login state, permission, setting, and disable.
+	 * The entries a reader at $permission sees (spec declared_permissions 3.4):
+	 * an entry shows to whoever may open the page it links to
+	 * (AdminPageAccess::levelForMenuUrl()), and an entry with no page of its
+	 * own, a section, shows when one of its entries does. The menu editor can
+	 * hide, order and rename an entry; who sees it is the page's.
+	 *
+	 * @param object[] $entries amu_admin_menus rows
+	 * @return object[] the visible ones, in their order
+	 */
+	public static function visible_entries(array $entries, int $permission): array {
+		$opens = array();
+		$children = array();
+		foreach ($entries as $e) {
+			$page = trim((string)$e->amu_defaultpage);
+			$opens[$e->amu_admin_menu_id] = $page === '' ? null
+				: AdminPageAccess::levelForMenuUrl($page) <= $permission;
+			if ($e->amu_parent_menu_id) {
+				$children[$e->amu_parent_menu_id][] = $e->amu_admin_menu_id;
+			}
+		}
+		$visible = function ($id) use (&$visible, $opens, $children) {
+			if ($opens[$id] === true) return true;
+			foreach ($children[$id] ?? array() as $child) {
+				if (isset($opens[$child]) && $visible($child)) return true;
+			}
+			return false;
+		};
+		return array_values(array_filter($entries, function ($e) use ($visible) {
+			return $visible($e->amu_admin_menu_id);
+		}));
+	}
+
+	/**
+	 * Get user dropdown menu items filtered by login state, the page each links to, setting, and disable.
 	 * Returns AdminMenu objects ordered by amu_order ASC, amu_slug ASC.
 	 *
 	 * @param bool $is_logged_in Whether the current session is authenticated
@@ -192,21 +220,20 @@ class MultiAdminMenu extends SystemMultiBase {
 		$allowed_visibilities = $is_logged_in ? array('in', 'both') : array('out', 'both');
 		$placeholders = implode(',', array_fill(0, count($allowed_visibilities), '?'));
 
-		// Permission gate only applies when logged in
+		// Who sees an entry is who may open its page (visible_entries()).
 		$permission_value = $is_logged_in ? (int)$user_permission : 0;
 
 		$sql = "SELECT * FROM amu_admin_menus
 				WHERE amu_location = ?
 				AND amu_disable = 0
 				AND amu_visibility IN ({$placeholders})
-				AND amu_min_permission <= ?
 				ORDER BY amu_order ASC, amu_slug ASC";
 
-		$params = array_merge([$location], $allowed_visibilities, [$permission_value]);
+		$params = array_merge([$location], $allowed_visibilities);
 
 		$q = $dblink->prepare($sql);
 		$q->execute($params);
-		$rows = $q->fetchAll(PDO::FETCH_OBJ);
+		$rows = self::visible_entries($q->fetchAll(PDO::FETCH_OBJ), $permission_value);
 
 		$results = array();
 		foreach ($rows as $row) {

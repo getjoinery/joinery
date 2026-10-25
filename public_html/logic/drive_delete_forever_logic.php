@@ -44,7 +44,11 @@ function drive_delete_forever_logic(array $input): LogicResult {
 		));
 	}
 
-	DriveHelper::permanent_delete_tree($entity_type, $entity);
+	// The owner's own purge (owns() above): destroying rows is past an owner's
+	// level, so the right checked here is what admits it.
+	SystemBase::rule_checked_write(function () use ($entity_type, $entity) {
+		DriveHelper::permanent_delete_tree($entity_type, $entity);
+	});
 	DriveUsage::recompute($user_id);
 
 	FileChange::record(FileChange::KIND_DELETED, $entity_type, $entity_id, $user_id, $user_id);
@@ -58,6 +62,7 @@ function drive_delete_forever_logic(array $input): LogicResult {
 
 function drive_delete_forever_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Permanently delete a Drive file or folder subtree. Owner only. Call once for an impact preview, then again with confirm=true.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

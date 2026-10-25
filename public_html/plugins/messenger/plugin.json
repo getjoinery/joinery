@@ -43,7 +43,6 @@
             "url": "/profile/messenger",
             "icon": "chat",
             "visibility": "in",
-            "permission": 0,
             "order": 53
         }
     ],

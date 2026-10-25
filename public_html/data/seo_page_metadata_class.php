@@ -8,6 +8,7 @@ class SeoPageMetadataException extends SystemBaseException {}
 class SeoPageMetadata extends SystemBase {
 	public static $prefix = 'spm';
 	public static $tablename = 'spm_seo_page_metadata';
+	public static $access_class = 'content';
 	public static $pkey_column = 'spm_seo_page_metadata_id';
 
 	public static $ai_readable    = true;

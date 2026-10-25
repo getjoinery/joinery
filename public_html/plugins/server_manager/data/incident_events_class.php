@@ -20,6 +20,7 @@ class IncidentEventException extends SystemBaseException {}
 class IncidentEvent extends SystemBase {
 	public static $prefix = 'ine';
 	public static $tablename = 'ine_incident_events';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ine_incident_event_id';
 
 	public static $json_vars = array('ine_data');

@@ -106,7 +106,8 @@ class SandboxPluginManager {
 	/**
 	 * The menus a sandboxed plugin declares, in the shape
 	 * PluginManager::syncMenus() takes: one admin entry titled by its menu,
-	 * holding a link to each of its admin pages.
+	 * holding a link to each of its admin pages. Who sees an entry is whoever
+	 * may open admin_sandbox_page (MultiAdminMenu::visible_entries()).
 	 */
 	public static function menus(string $name): array {
 		$out = array('admin' => array(), 'profile' => array());
@@ -123,7 +124,6 @@ class SandboxPluginManager {
 					'slug'       => 'sbx-' . $name . '-' . $page['slug'],
 					'title'      => $page['title'],
 					'url'        => self::adminPageUrl($name, $page['slug']),
-					'permission' => self::ADMIN_PERMISSION,
 					'order'      => $i + 1,
 				);
 			}
@@ -131,7 +131,6 @@ class SandboxPluginManager {
 				'slug'       => 'sbx-' . $name,
 				'title'      => $menu['title'],
 				'icon'       => 'puzzle-piece',
-				'permission' => self::ADMIN_PERMISSION,
 				'order'      => 60,
 				'items'      => $items,
 			);
@@ -150,7 +149,6 @@ class SandboxPluginManager {
 				'title'      => $page['title'],
 				'url'        => SandboxPages::profilePageUrl($name, $page['slug']),
 				'visibility' => 'in',
-				'permission' => 0,
 				'order'      => 70 + $i,
 			);
 		}

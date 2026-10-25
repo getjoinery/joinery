@@ -12,19 +12,9 @@ class LogFormErrorException extends SystemBaseException {}
 
 class LogFormError extends SystemBase {	public static $prefix = 'lfe';
 
-	// REST API: audit/log table — admin-only (permission >= 5) read and write via the API; not user-scoped content.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 	public static $tablename = 'lfe_log_form_errors';
+	public static $access_class = 'restricted';
+	public static $owner_column = false;
 	public static $pkey_column = 'lfe_log_form_error_id';
 
 	protected static $foreign_key_actions = [

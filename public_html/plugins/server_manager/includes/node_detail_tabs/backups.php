@@ -856,7 +856,7 @@ function refreshBackupList() {
 	status.style.display = 'block';
 	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Scanning backup files...</span>';
 
-	smApiPost('backup_actions', { action: 'refresh_list', node_id: backupNodeId })
+	smApiPost('backup_list', { action: 'refresh_list', node_id: backupNodeId })
 		.then(function(data) {
 			if (!data.success) {
 				btn.disabled = false;
@@ -884,7 +884,7 @@ function pollBackupList(jobId, retries) {
 	var btn = document.getElementById('refreshBackupsBtn');
 	var status = document.getElementById('backupScanStatus');
 
-	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
+	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
 		.then(function(data) {
 			if (data.status === 'pending' || data.status === 'running') {
 				setTimeout(function() { pollBackupList(jobId, 0); }, 2000);
@@ -1200,7 +1200,7 @@ function verifyBackupFailed(btn, html) {
 function pollTransferJob(jobId, btn, label, doneMessage, onDone) {
 	var status = document.getElementById('backupScanStatus');
 
-	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
+	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
 		.then(function(data) {
 			if (data.status === 'pending' || data.status === 'running') {
 				setTimeout(function() { pollTransferJob(jobId, btn, label, doneMessage, onDone); }, 3000);
@@ -1236,7 +1236,7 @@ function pollUploadJob(jobId, btn, retries) {
 	retries = retries || 0;
 	var status = document.getElementById('backupScanStatus');
 
-	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
+	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
 		.then(function(data) {
 			if (data.status === 'pending' || data.status === 'running') {
 				setTimeout(function() { pollUploadJob(jobId, btn, 0); }, 3000);

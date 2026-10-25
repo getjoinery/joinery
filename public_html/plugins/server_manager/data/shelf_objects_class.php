@@ -38,6 +38,7 @@ class ShelfObjectException extends SystemBaseException {}
 class ShelfObject extends SystemBase {
 	public static $prefix = 'svo';
 	public static $tablename = 'svo_shelf_objects';
+	public static $access_class = 'config';
 	public static $pkey_column = 'svo_shelf_object_id';
 
 	protected static $foreign_key_actions = array(
@@ -66,7 +67,7 @@ class ShelfObject extends SystemBase {
 		'svo_svr_shelf_run_id'      => array('type'=>'int8'),
 		// The space the object is in, and so the target that holds it.
 		'svo_sps_storage_space_id'  => array('type'=>'int8'),
-		'svo_key'                   => array('type'=>'varchar(1024)', 'is_nullable'=>false),
+		'svo_key'                   => array('access_class' => 'keys', 'type'=>'varchar(1024)', 'is_nullable'=>false),
 		'svo_bytes'                 => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
 		// The sha256 the writer reported when the run finished: the management
 		// node's record of what these bytes are.

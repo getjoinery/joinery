@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,9 +9,9 @@
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
+	$group = NULL;
 	if (isset($_POST['edit_primary_key_value'])) {
 		$group = new Group($_POST['edit_primary_key_value'], TRUE);
 	} elseif (isset($_GET['grp_group_id'])) {

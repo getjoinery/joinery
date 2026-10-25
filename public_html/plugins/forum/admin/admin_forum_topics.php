@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Forum topics admin — every topic, and the removed ones a moderator can
  * restore or remove for good. Day-to-day moderation (pin, lock, move, remove)

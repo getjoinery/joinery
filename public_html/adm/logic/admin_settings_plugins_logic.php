@@ -19,7 +19,6 @@ function admin_settings_plugins_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// A plugin contributes a section because it declares settings. A
 	// deactivated plugin's stored rows persist untouched but are neither shown

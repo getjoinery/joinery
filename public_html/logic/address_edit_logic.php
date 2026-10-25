@@ -117,6 +117,7 @@ function address_edit_logic_form($formwriter, $user = null, $input = []) {
 
 function address_edit_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Create or update the current user\'s address.',
 		'requires_session' => true,
 		'mutates'          => true,

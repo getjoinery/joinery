@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 

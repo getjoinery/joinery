@@ -61,6 +61,7 @@ class ServiceTenantException extends SystemBaseException {}
 class ServiceTenant extends SystemBase {
 	public static $prefix = 'svt';
 	public static $tablename = 'svt_service_tenants';
+	public static $access_class = 'config';
 	public static $pkey_column = 'svt_service_tenant_id';
 
 	const SERVICE_MAIL  = 'mail';

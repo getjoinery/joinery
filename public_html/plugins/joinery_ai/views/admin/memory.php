@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Memory List
  * URL: /admin/joinery_ai/memory
@@ -14,7 +15,6 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $numperpage = 30;

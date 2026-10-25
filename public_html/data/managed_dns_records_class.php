@@ -36,6 +36,7 @@ class ManagedDnsRecordException extends SystemBaseException {}
  */
 class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	public static $tablename = 'dnr_managed_dns_records';
+	public static $access_class = 'config';
 	public static $pkey_column = 'dnr_managed_dns_record_id';
 
 	/** Nothing references an ownership row; it is a leaf. */
@@ -55,19 +56,6 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	    'dnr_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	// Admin-only: the table says what the platform may overwrite in someone's
-	// DNS, so it is never part of a member-facing surface.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 	/**
 	 * The live ownership row for one record slot, or null.

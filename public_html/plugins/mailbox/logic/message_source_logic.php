@@ -91,6 +91,7 @@ function message_source_logic(array $input): LogicResult {
 
 function message_source_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Return the original RFC822 source of one mail message',
 		'input' => [

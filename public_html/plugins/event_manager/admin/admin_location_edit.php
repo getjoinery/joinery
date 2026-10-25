@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance(); 
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
@@ -32,7 +32,7 @@
 			$location->set($field, $_POST[$field]);
 		}
 
-		if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+		if(!$location->get('loc_link') || Access::permits(10)){
 			if($_POST['loc_link']){
 				$location->set('loc_link', $location->create_url($_POST['loc_link']));
 			}
@@ -53,7 +53,7 @@
 	$content = $location->get('loc_description');
 
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cvn_content_version_id']){
+	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
@@ -106,7 +106,7 @@
 
 	$formwriter->textinput('loc_website', 'Location website');
 
-	if(!$location->get('loc_link') || $_SESSION['permission'] == 10){
+	if(!$location->get('loc_link') || Access::permits(10)){
 		$formwriter->textinput('loc_link', 'Link (optional)', [
 			'prepend' => $settings->get_setting('webDir').'/location/'
 		]);

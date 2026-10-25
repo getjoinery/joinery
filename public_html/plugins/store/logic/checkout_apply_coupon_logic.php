@@ -42,6 +42,7 @@ function checkout_apply_coupon_logic_descriptor(): array {
 		'requires_session' => true,
 		'mutates'          => true,
 		'auth'             => [
+			'min_user_permission' => 0,
 			// The cart lives in the visitor's web session: guests may call
 			// (anonymous browser credential), API keys may not (no session),
 			// and the session must be re-opened so the cart mutation persists.

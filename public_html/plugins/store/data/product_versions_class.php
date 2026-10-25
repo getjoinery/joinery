@@ -11,6 +11,7 @@ class ProductVersionException extends SystemBaseException {}
 
 class ProductVersion extends SystemBase {	public static $prefix = 'prv';
 	public static $tablename = 'prv_product_versions';
+	public static $access_class = 'money';
 	public static $pkey_column = 'prv_product_version_id';
 
 	protected static $foreign_key_actions = [

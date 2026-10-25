@@ -39,7 +39,7 @@ function drive_share_sync_logic(array $input): LogicResult {
 		return LogicResult::error('Item not found.');
 	}
 	// Share is owner-only (staff may manage on a member's behalf).
-	if (!DriveHelper::owns($entity_type, $entity, $user_id) && (int)$session->get_permission() < 5) {
+	if (!DriveHelper::owns($entity_type, $entity, $user_id) && !$entity->can_write($session)) {
 		return LogicResult::error('Only the owner can share this item.');
 	}
 
@@ -84,7 +84,11 @@ function drive_share_sync_logic(array $input): LogicResult {
 	// The owner never holds a grant row on their own entity; don't count one.
 	unset($desired[$owner_id]);
 	$revoked = array();
-	$newly = FileAccessGrant::sync_for_entity($entity_type, $entity_id, $desired, $owner_id, $revoked);
+	// The owner (or staff) decided this share above; each grant row is its
+	// grantee's, and a grant taken away is removed outright.
+	$newly = SystemBase::rule_checked_write(function () use ($entity_type, $entity_id, $desired, $owner_id, &$revoked) {
+		return FileAccessGrant::sync_for_entity($entity_type, $entity_id, $desired, $owner_id, $revoked);
+	});
 
 	FileChange::record(FileChange::KIND_GRANT_CHANGED, $entity_type, $entity_id, $owner_id, $user_id);
 
@@ -131,6 +135,7 @@ function drive_share_sync_logic(array $input): LogicResult {
 
 function drive_share_sync_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Reconcile the member grants on a Drive file or folder (owner only). Body carries `grants`: a JSON object mapping each grantee (user id or email) to a role (viewer|editor). It is a map rather than a list, so it is validated in the logic (not the descriptor schema) and passes through the boundary untouched.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

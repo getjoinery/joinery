@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 /**
  * Admin: Mail Apps — let members use Thunderbird and other mail programs.
  *
@@ -23,7 +24,6 @@
  * @version 1.0.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 $session->set_return();
 $self = '/plugins/mail_apps/admin/admin_mail_apps';
 
@@ -34,6 +34,9 @@ $flash = function (string $text, string $title) use ($session) {
 
 $round_trip = null;
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+	// Every action changes the host's mail gateway (sudo, the relay, settings) or
+	// mints an app password: restricted work.
+	Access::demand('restricted:write', $session);
 	$action = $_POST['action'] ?? '';
 	if ($action === 'allow' || $action === 'disallow' || $action === 'switch') {
 		// Switch is Allow again: on by the route and name the rule picks now,

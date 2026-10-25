@@ -7,7 +7,6 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();

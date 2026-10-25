@@ -11,6 +11,7 @@ class ProductGroupException extends SystemBaseException {}
 
 class ProductGroup extends SystemBase {	public static $prefix = 'prg';
 	public static $tablename = 'prg_product_groups';
+	public static $access_class = 'content';
 	public static $pkey_column = 'prg_product_group_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,

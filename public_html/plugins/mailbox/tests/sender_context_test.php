@@ -52,7 +52,7 @@ $run = function ($actor_uid, $message_id) use ($session) {
 };
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
-$admin = make_user('CtxAdmin', 5);          // admin, not superadmin (perm 5 < 10)
+$admin = make_user('CtxAdmin', 6);          // reads personal data (6), not superadmin
 $plain = make_user('CtxPlain', 0);          // non-admin
 $admin_uid = (int)$admin->key; $plain_uid = (int)$plain->key;
 

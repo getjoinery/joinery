@@ -8,7 +8,6 @@
 
 function admin_forum_categories_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(ForumPost::$write_permission);
 
 	if (LibraryFunctions::isFormSubmission() && !empty($_POST['action']) && !empty($_POST['fcg_forum_category_id'])) {
 		$id = (int)$_POST['fcg_forum_category_id'];

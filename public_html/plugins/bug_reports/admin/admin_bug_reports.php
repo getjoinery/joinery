@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Admin: Bug Reports — problem reports received from sites that upgrade from
  * this one.
@@ -17,7 +18,6 @@
  * @version 1.0.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 $session->set_return();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'mark_all_seen') {
@@ -29,6 +29,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
 	exit;
 }
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && in_array($_POST['action'] ?? '', array('mute_group', 'unmute_group'), true)) {
+	// One UPDATE across every report of the fault: the reports' own write level.
+	Access::demand(ReceivedBugReport::access_level('write'), $session);
 	$group = (string)($_POST['group'] ?? '');
 	if ($_POST['action'] === 'mute_group') {
 		ReceivedBugReport::mute_group($group);

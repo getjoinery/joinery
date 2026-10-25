@@ -13,6 +13,7 @@ class ItemRelationException extends SystemBaseException {}
 class ItemRelation extends SystemBase {
 	public static $prefix = 'itr';
 	public static $tablename = 'itr_item_relations';
+	public static $access_class = 'content';
 	public static $pkey_column = 'itr_item_relation_id';
 
 	// AI auto-discovery (read)

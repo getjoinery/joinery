@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Inbound Email - Accounts
  *

@@ -11,7 +11,7 @@
 class OutboundTransferNotice {
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10 || !OutboundTransferMeter::over()) {
+		if (!Access::permits(10) || !OutboundTransferMeter::over()) {
 			return '';
 		}
 		return self::html(OutboundTransferMeter::month());

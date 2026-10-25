@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -52,7 +53,7 @@
 		$options['altlinks']['Regenerate Secret'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'regenerate_secret', 'apk_api_key_id' => $api_key->key));
 	}
 
-	if($sandbox_plugin === null && $_SESSION['permission'] >= 8) {
+	if($sandbox_plugin === null && $api_key->can_delete($session, true)) {
 		$options['altlinks'] += array('Permanent Delete' => array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'permanent_delete', 'apk_api_key_id' => $api_key->key)));
 	}
 

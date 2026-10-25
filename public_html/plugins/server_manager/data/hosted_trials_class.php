@@ -49,6 +49,7 @@ class HostedTrialException extends SystemBaseException {}
 class HostedTrial extends SystemBase {
 	public static $prefix = 'htr';
 	public static $tablename = 'htr_hosted_trials';
+	public static $access_class = 'config';
 	public static $pkey_column = 'htr_hosted_trial_id';
 
 	// A trial row is meaningless without its provision: it describes the

@@ -24,7 +24,10 @@ function shelf_finish_run_logic(array $input): LogicResult {
 	}
 	try {
 		$row = ShelfBroker::tenantFor($user_id, intval($session->get_api_key_id()));
-		$data = ShelfBroker::finishRun($row, intval($input['run_id'] ?? 0), is_array($completed) ? $completed : array());
+		// tenantFor() proved this is the caller's own tenant; the broker's records follow.
+		$data = SystemBase::rule_checked_write(function () use ($row, $input, $completed) {
+			return ShelfBroker::finishRun($row, intval($input['run_id'] ?? 0), is_array($completed) ? $completed : array());
+		});
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -33,6 +36,7 @@ function shelf_finish_run_logic(array $input): LogicResult {
 
 function shelf_finish_run_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Close a backup storage run, naming the objects the site completed ([{name, bytes, sha256}]). The ledger marks them complete with their hashes, cancels the rest, and the figure is refreshed.',
 		'requires_session' => true,
 		'mutates'          => true,

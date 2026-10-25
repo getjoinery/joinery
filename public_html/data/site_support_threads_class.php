@@ -21,6 +21,7 @@ class SiteSupportThreadException extends SystemBaseException {}
 class SiteSupportThread extends SystemBase {
 	public static $prefix = 'spt';
 	public static $tablename = 'spt_support_threads';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'spt_support_thread_id';
 
 	/** Threads the panel lists and the unread check asks about. */
@@ -32,7 +33,7 @@ class SiteSupportThread extends SystemBase {
 		'spt_destination'       => array('type' => 'varchar(255)', 'is_nullable' => false),
 		'spt_remote_id'         => array('type' => 'int8', 'is_nullable' => true),
 		// The desk's token for the thread: what proves a later call is this site's.
-		'spt_token'             => array('type' => 'varchar(128)', 'is_nullable' => true),
+		'spt_token'             => array('access_class' => 'restricted', 'type' => 'varchar(128)', 'is_nullable' => true),
 		// The one-time code the first question carried, hashed, and when it was issued.
 		'spt_nonce_hash'        => array('type' => 'varchar(64)', 'is_nullable' => true, 'index' => true),
 		'spt_nonce_time'        => array('type' => 'timestamp(6)', 'is_nullable' => true),
@@ -49,12 +50,6 @@ class SiteSupportThread extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'spt_usr_user_id' => array('action' => 'null'),
 	);
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 5) {
-			throw new SystemAuthenticationError('Support threads are for this site\'s administrators.');
-		}
-	}
 
 	/** Start a thread's row before its first question goes out. */
 	public static function begin(int $user_id, string $destination, string $first_message): SiteSupportThread {

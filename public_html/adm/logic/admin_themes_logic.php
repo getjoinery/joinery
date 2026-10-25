@@ -23,7 +23,6 @@ function admin_themes_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10); // System admin only
 	$session->set_return();
 
 	$theme_manager = ThemeManager::getInstance();
@@ -42,6 +41,7 @@ function admin_themes_logic(array $input): LogicResult {
 	$action = LibraryFunctions::isFormSubmission() ? ($input['action'] ?? null) : null;
 	if (isset($input['unsigned'])) {
 		// Root refused an upload as not ours: show the warning for it.
+		Access::demand(10, $session);
 		$why = '';
 		$unsigned_warning = PackageInstallPage::refused('theme', (string)$input['unsigned'], $session, $why);
 		if ($unsigned_warning === null) {
@@ -50,6 +50,10 @@ function admin_themes_logic(array $input): LogicResult {
 	} elseif ($action || $input) {
 		try {
 			if ($action) {
+				// Every action but a look installs, activates or removes code.
+				if (!in_array($action, array('apply_look', 'remove_look'), true)) {
+					Access::demand(10, $session);
+				}
 				switch ($action) {
 					case 'activate':
 						$theme_name = $input['theme_name'];

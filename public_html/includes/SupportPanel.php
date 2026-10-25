@@ -36,7 +36,7 @@ class SupportPanel {
 		if (!$session->is_logged_in()) {
 			return LogicResult::error('Sign in required.');
 		}
-		if ((int)$session->get_permission() < SupportChatClient::ASK_PERMISSION) {
+		if (!Access::decide(SupportChatClient::ASK_PERMISSION, $session)) {
 			return LogicResult::error('The Help panel is for this site\'s administrators.');
 		}
 		if (!SupportChatClient::enabled()) {
@@ -57,7 +57,7 @@ class SupportPanel {
 			'destination'     => SupportChatClient::destinationHost(),
 			'consent'         => $consent,
 			'joined'          => $joined,
-			'may_live_reads'  => $joined && (int)$session->get_permission() >= SupportChatClient::LIVE_READS_PERMISSION,
+			'may_live_reads'  => $joined && Access::permits(SupportChatClient::LIVE_READS_PERMISSION, $session),
 			'live_reads_text' => self::LIVE_READS_TEXT,
 			'docs_url'        => SupportChatClient::PUBLIC_DOCS_URL,
 			'unread'          => SiteSupportThread::unreadCount(),

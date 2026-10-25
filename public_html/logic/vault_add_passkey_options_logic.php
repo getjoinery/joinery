@@ -53,7 +53,7 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 function vault_add_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); pass credential_id to scope the ceremony to one passkey; the verify step also takes a fresh unlocker',
 		'input' => [
 			'credential_id' => ['type' => 'int', 'required' => false, 'label' => 'Scope the ceremony to one passkey'],

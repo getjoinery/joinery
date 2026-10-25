@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
@@ -9,17 +10,16 @@
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	if($_REQUEST['op'] == 'remove'){
+	if(($_REQUEST['op'] ?? null) == 'remove'){
 		$op = 'remove';
 	}
 	else{
 		$op = 'add';
 	}
 
-	$email = new Email($_REQUEST['eml_email_id'], TRUE);
+	$email = new Email($_REQUEST['eml_email_id'] ?? null, TRUE);
 
 	$recipient_groups = $email->get_recipient_groups();
 
@@ -32,7 +32,14 @@
 	}
 	else if($_REQUEST['action'] == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
-		$email_recipient_group->permanent_delete();
+		// A recipient group is part of its email: the email's write rule decides.
+		if ((int)$email_recipient_group->get('erg_eml_email_id') !== (int)$email->key) {
+			throw new SystemDisplayableError('That recipient group is not on this email.');
+		}
+		$email->assert_can_write($session);
+		SystemBase::rule_checked_write(function () use ($email_recipient_group) {
+			$email_recipient_group->permanent_delete();
+		});
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
 		exit();

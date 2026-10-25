@@ -26,17 +26,12 @@ class DirectCapabilityCacheException extends SystemBaseException {}
 class DirectCapabilityCache extends SystemBase {
 	public static $prefix = 'jdc';
 
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
-
 	function authenticate_write($data) {
 		throw new SystemAuthenticationError('The Direct capability cache is filled from DNS, never through the API.');
 	}
 
 	public static $tablename = 'jdc_direct_capability_cache';
+	public static $access_class = 'config';
 	public static $pkey_column = 'jdc_direct_capability_cache_id';
 
 	public static $field_specifications = array(

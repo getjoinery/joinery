@@ -12,6 +12,8 @@ class StripeInvoiceException extends SystemBaseException {}
 
 class StripeInvoice extends SystemBase {	public static $prefix = 'siv';
 	public static $tablename = 'siv_stripe_invoices';
+	public static $access_class = 'personal';
+	public static $owner_column = false;
 	public static $pkey_column = 'siv_stripe_invoice_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -61,22 +63,6 @@ public static function GetByStripeSession($session_id) {
 		$stripe_invoice = new StripeInvoice($data->siv_stripe_invoice_id);
 		$stripe_invoice->load_from_data($data, array_keys(StripeInvoice::$field_specifications));
 		return $stripe_invoice;
-	}
-
-	function authenticate_read($data) {
-		// If the user's ID doesn't match, we have to make
-		// sure they have admin access, otherwise denied.
-		if ($data['current_user_permission'] < 8) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to view this entry in '. $this->tablename);
-		}
-	}
-	
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 8) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 }

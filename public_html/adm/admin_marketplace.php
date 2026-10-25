@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 // PathHelper, Globalvars, SessionControl are pre-loaded by the front controller.
 // @version 1.2 - no menu entry of its own: reached from Add New on Plugins and Themes, so the sidebar shows Plugins
 // @version 1.1 - shows the root request panel for a queued install (specs/package_signing.md WP4)

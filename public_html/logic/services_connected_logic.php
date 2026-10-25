@@ -27,7 +27,7 @@ function services_connected_logic(array $input): LogicResult {
 			array_flip(array('public_key', 'secret_key', 'state', 'error')))));
 		return LogicResult::redirect('/login');
 	}
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::render(array('error' => 'Only the site\'s owner can connect it to a getjoinery account.'));
 	}
 	if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'GET') {

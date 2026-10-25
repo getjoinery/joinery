@@ -55,7 +55,7 @@ function boards_email_logic_descriptor(): array {
 			'list_id'   => array('type' => 'int', 'required' => false, 'label' => 'List email cards land in'),
 			'position'  => array('type' => 'string', 'required' => false, 'enum' => array('top', 'bottom'), 'label' => 'Top or bottom of the list'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		// No 'ai_agent': the AI is default-deny, and a person's secret address is not something
 		// an agent reads or resets on their behalf.
 	);

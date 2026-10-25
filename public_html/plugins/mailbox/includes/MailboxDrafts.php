@@ -28,6 +28,8 @@
  * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
  * cannot land there.
  *
+ * @version 1.7 - a draft's own purges (discard, a removed part, a dropped inline image) run as
+ *               rule_checked_write(): the viewer's grant and authorship are checked first
  * @version 1.6 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.5 - saveDraft() takes parts given as bytes ({name, type, bytes, content_id}) as well
  *   as HTTP uploads: a mail program's draft, parsed from its MIME
@@ -433,10 +435,13 @@ class MailboxDrafts {
 			$db->commit();
 		} catch (Throwable $e) {
 			if ($db->inTransaction()) { $db->rollBack(); }
-			foreach ($made as $m) {
-				try { $m['file']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
-				try { $m['att']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
-			}
+			// The parts this save just made; the mailbox grant is checked above.
+			SystemBase::rule_checked_write(function () use ($made) {
+				foreach ($made as $m) {
+					try { $m['file']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
+					try { $m['att']->permanent_delete(); } catch (Throwable $e2) { /* best-effort */ }
+				}
+			});
 			error_log('MailboxDrafts: Fortress draft ' . $message_id . ' refused: ' . $e->getMessage());
 			throw new MailboxDraftsException('The draft could not be saved.');
 		}
@@ -558,18 +563,30 @@ class MailboxDrafts {
 			if (isset($keep[(string)$r['ima_mime_part']])) {
 				continue;
 			}
-			$fil_id = intval($r['ima_fil_file_id']);
+			// The caller (saveFortressDraft) checked the grant and the draft's author.
+			self::purgePart(intval($r['ima_inbound_message_attachment_id']), intval($r['ima_fil_file_id']));
+		}
+	}
+
+	/**
+	 * Permanently delete one of a draft's parts: its File, then its manifest row.
+	 * Only for a draft whose mailbox grant and author the caller has checked
+	 * (saveDraft, saveFortressDraft, loadDraftInScope): a member may not destroy
+	 * rows by level, so their own draft's purge says that rule decided it.
+	 */
+	private static function purgePart(int $attachment_id, int $fil_id): void {
+		SystemBase::rule_checked_write(function () use ($attachment_id, $fil_id) {
 			if ($fil_id > 0) {
 				$file = new File($fil_id, TRUE);
 				if ($file->key) {
 					try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
 				}
 			}
-			$att = new InboundMessageAttachment(intval($r['ima_inbound_message_attachment_id']), TRUE);
+			$att = new InboundMessageAttachment($attachment_id, TRUE);
 			if ($att->key) {
 				try { $att->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
 			}
-		}
+		});
 	}
 
 	/** A Fortress draft's parts, as the browser needs them to fetch and open each. */
@@ -661,7 +678,10 @@ class MailboxDrafts {
 		if ($row === null) {
 			return false;
 		}
-		$row->permanent_delete();
+		// loadDraftInScope() checked the mailbox grant and that the viewer wrote it.
+		SystemBase::rule_checked_write(function () use ($row) {
+			$row->permanent_delete();
+		});
 		return true;
 	}
 
@@ -682,14 +702,17 @@ class MailboxDrafts {
 			|| $this->isInline($att)) {
 			return false;
 		}
+		// loadDraftInScope() checked the mailbox grant and that the viewer wrote it.
 		$fil_id = intval($att->get('ima_fil_file_id'));
-		if ($fil_id > 0) {
-			$file = new File($fil_id, TRUE);
-			if ($file->key) {
-				try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
+		SystemBase::rule_checked_write(function () use ($att, $fil_id) {
+			if ($fil_id > 0) {
+				$file = new File($fil_id, TRUE);
+				if ($file->key) {
+					try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
+				}
 			}
-		}
-		$att->permanent_delete();
+			$att->permanent_delete();
+		});
 		return true;
 	}
 
@@ -797,17 +820,8 @@ class MailboxDrafts {
 			if ($cid !== '' && strpos($sanitized_html, 'cid:' . $cid) !== false) {
 				continue; // still referenced by the body
 			}
-			$fil_id = intval($r['ima_fil_file_id']);
-			if ($fil_id > 0) {
-				$file = new File($fil_id, TRUE);
-				if ($file->key) {
-					try { $file->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
-				}
-			}
-			$att = new InboundMessageAttachment(intval($r['ima_inbound_message_attachment_id']), TRUE);
-			if ($att->key) {
-				try { $att->permanent_delete(); } catch (Throwable $e) { /* best-effort */ }
-			}
+			// The caller (saveDraft) checked the grant and the draft's author.
+			self::purgePart(intval($r['ima_inbound_message_attachment_id']), intval($r['ima_fil_file_id']));
 		}
 	}
 

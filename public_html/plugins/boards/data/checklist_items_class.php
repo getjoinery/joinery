@@ -14,6 +14,7 @@ class BoardChecklistItem extends SystemBase {
 
 	public static $prefix = 'bci';
 	public static $tablename = 'bci_checklist_items';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bci_checklist_item_id';
 
 	public static $field_specifications = array(

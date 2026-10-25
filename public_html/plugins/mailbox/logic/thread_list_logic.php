@@ -91,6 +91,7 @@ function thread_list_logic(array $input): LogicResult {
 
 function thread_list_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'List mail threads for a mailbox view (inbox/all/sent/spam/trash, search, labels), paged. '
 			. 'A thread whose newest message is end-to-end (Fortress) has empty subject/sender/snippet and a '

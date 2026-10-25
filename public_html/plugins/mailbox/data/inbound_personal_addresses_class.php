@@ -27,6 +27,8 @@ class InboundPersonalAddress extends SystemBase {
 
 	public static $prefix = 'ipa';
 	public static $tablename = 'ipa_inbound_personal_addresses';
+	public static $access_class = 'personal';
+	public static $owner_column = 'ipa_usr_user_id';   // a member's own address
 	public static $pkey_column = 'ipa_inbound_personal_address_id';
 
 	const TOKEN_LENGTH = 26;
@@ -49,7 +51,7 @@ class InboundPersonalAddress extends SystemBase {
 
 	public static $field_specifications = array(
 		'ipa_inbound_personal_address_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
-		'ipa_token'       => array('type' => 'varchar(32)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'ipa_token'       => array('access_class' => 'restricted', 'type' => 'varchar(32)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'ipa_handler'     => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true,
 			'unique_with' => array('ipa_usr_user_id', 'ipa_ref_type', 'ipa_ref_id')),
 		// The database constraint is what removes a deleted person's addresses where no
@@ -61,13 +63,6 @@ class InboundPersonalAddress extends SystemBase {
 		'ipa_create_time' => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 		'ipa_delete_time' => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Personal addresses are created and revoked by the plugin that owns them.');
-		}
-	}
 
 	/** Base32 (RFC 4648 alphabet, lowercased): letters and 2-7, safe in a local part. */
 	private static function newToken(): string {

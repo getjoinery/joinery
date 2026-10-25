@@ -823,7 +823,7 @@ class MailArchiveImportTest {
 		}
 
 		$service = new MailImportService(
-			MailboxViewer::forUser(User::USER_SYSTEM, MailImportService::OPERATOR_PERMISSION));
+			MailboxViewer::forUser(User::USER_SYSTEM, Access::staffLevel()));
 
 		check($service->activeRun() === null,
 			'one at a time: with nothing going, the start form is offered');

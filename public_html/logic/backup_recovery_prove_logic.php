@@ -19,7 +19,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function backup_recovery_prove_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only a superadmin can verify the backup recovery key.');
 	}
 
@@ -37,6 +37,7 @@ function backup_recovery_prove_logic(array $input): LogicResult {
 
 function backup_recovery_prove_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Record possession proof for the backup recovery key; may switch nightly backups on.',
 		'mutates'     => true,
 		'requires_session' => true,

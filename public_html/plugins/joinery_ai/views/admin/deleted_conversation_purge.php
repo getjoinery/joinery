@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Joinery AI - Purge Deleted Conversation
  * URL: /admin/joinery_ai/deleted_conversation_purge?aic_conversation_id=N

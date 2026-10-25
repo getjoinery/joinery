@@ -1,11 +1,11 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	//$session->set_return();
 
 	$numperpage = 30;
@@ -20,8 +20,8 @@
 		$search_criteria['filename_like'] = $searchterm;
 	}
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//SHOW DELETED ONLY TO THOSE WHO MAY UNDELETE
+	if(!Access::permits(File::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 
@@ -76,7 +76,7 @@
 	$dblink = DbConnector::get_instance()->get_db_link();
 	$count_sql = "SELECT COALESCE(fil_source, " . $dblink->quote(File::SOURCE_UNCLASSIFIED) . ") AS src, COUNT(*) AS n
 	              FROM fil_files";
-	if($_SESSION['permission'] < 10){
+	if(!Access::permits(File::access_level('soft_delete'), $session)){
 		$count_sql .= " WHERE fil_delete_time IS NULL";
 	}
 	$count_sql .= " GROUP BY 1";

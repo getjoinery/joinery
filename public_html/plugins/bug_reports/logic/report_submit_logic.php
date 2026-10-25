@@ -58,6 +58,7 @@ function report_submit_logic(array $input): LogicResult {
 
 function report_submit_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Receive a problem report from a site that upgrades from this one. Multipart form data: bundle (JSON), comment, optional image. Sessionless and rate-limited per address.',
 		'requires_session' => false,
 		'mutates'          => true,

@@ -27,7 +27,7 @@ function vault_client_reseal_rows_logic(array $input): LogicResult {
 function vault_client_reseal_rows_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => false,
 		'description' => 'Page the caller\'s rows whose DEK is sealed to a client-custody scope\'s rotating key: {rows:[{model,id,sealed_dek}], next:{model,after_id}|null, remaining}',
 		'input' => [

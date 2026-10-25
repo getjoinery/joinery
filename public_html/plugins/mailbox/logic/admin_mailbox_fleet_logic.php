@@ -18,7 +18,6 @@ function admin_mailbox_fleet_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	// Running a fleet needs server_manager (shards are managed nodes and
 	// provisioning runs as its jobs); without it there is no console.
@@ -67,6 +66,7 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 	}
 
 	if ($action === 'provision_shard') {
+		Access::demand(10, $session);   // queues a paid cloud server
 		$result = admin_mailbox_relay_provision_shard($input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
 		return LogicResult::redirect($self_url);

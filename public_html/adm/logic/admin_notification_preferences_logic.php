@@ -20,7 +20,6 @@ function admin_notification_preferences_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	$session  = SessionControl::get_instance();
 
-	$session->check_permission(5);
 	$session->set_return();
 
 	$page_vars = array();

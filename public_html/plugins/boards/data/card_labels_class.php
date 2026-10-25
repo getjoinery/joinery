@@ -9,6 +9,7 @@ class BoardCardLabel extends SystemBase {
 
 	public static $prefix = 'bcl';
 	public static $tablename = 'bcl_card_labels';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bcl_card_label_id';
 
 	public static $field_specifications = array(

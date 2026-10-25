@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 /**
  * Joinery AI - Run Recipe Now (async)
  * URL: /admin/joinery_ai/run_now
@@ -14,7 +15,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeWorkerSpawner.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $recipe_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcp_recipe_id', 0);
 if ($recipe_id <= 0) {

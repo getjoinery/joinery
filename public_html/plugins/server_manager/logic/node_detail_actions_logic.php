@@ -603,7 +603,7 @@ class NodeDetailActions {
 				// Tier 2 (D3): the owner says they caused what refused its boot
 				// (a rescue boot they ran). Superadmin-only, and recorded with
 				// their name: it trusts a root disk nothing else can vouch for.
-				if ($session->get_permission() < 10) {
+				if (!Access::decide(10, $session)) {
 					self::fail($session, $page_regex, 'Only a superadmin can say they caused it.');
 					return $base_url;
 				}
@@ -1085,7 +1085,7 @@ class NodeDetailActions {
 			case 'copy_retry_settle':
 			case 'copy_go_back':
 			case 'copy_finish': {
-				if ($session->get_permission() < 10) {
+				if (!Access::decide(10, $session)) {
 					self::fail($session, $page_regex, 'Copying a site is superadmin-only.');
 					return $base_url . '&tab=copy';
 				}
@@ -1218,7 +1218,7 @@ class NodeDetailActions {
 				// node's own panel is the entire trust decision. Superadmin-only,
 				// and the binding is stamped visibly below so an approval nobody
 				// expected is seen rather than silent.
-				if ($session->get_permission() < 10) {
+				if (!Access::decide(10, $session)) {
 					self::fail($session, $page_regex, 'Approving an agent join request is superadmin-only.');
 					return $base_url . '&tab=api_keys';
 				}
@@ -1273,7 +1273,7 @@ class NodeDetailActions {
 			}
 
 			case 'reject_join': {
-				if ($session->get_permission() < 10) {
+				if (!Access::decide(10, $session)) {
 					self::fail($session, $page_regex, 'Rejecting an agent join request is superadmin-only.');
 					return $base_url . '&tab=api_keys';
 				}

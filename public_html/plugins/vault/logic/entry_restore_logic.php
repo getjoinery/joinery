@@ -28,7 +28,7 @@ function entry_restore_logic(array $input): LogicResult {
 function entry_restore_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Restore one trashed encrypted password entry',
 		'input' => [
 			'id' => ['type' => 'int', 'required' => true, 'label' => 'Entry ID'],

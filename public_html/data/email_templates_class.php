@@ -13,6 +13,7 @@ class EmailTemplateException extends SystemBaseException {}
 
 class EmailTemplate extends SystemBase {	public static $prefix = 'emt';
 	public static $tablename = 'emt_email_templates';
+	public static $access_class = 'content';
 	public static $pkey_column = 'emt_email_template_id';
 
 	const TEMPLATE_TYPE_OUTER = 1;
@@ -67,13 +68,6 @@ private function _check_for_duplicate_email_template() {
 			}
 		}
 
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 	function save($debug=false) {

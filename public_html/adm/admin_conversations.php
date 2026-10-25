@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Admin conversation list
  *
@@ -16,7 +17,6 @@ require_once(PathHelper::getIncludePath('data/messages_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(8);
 $session->set_return();
 
 $numperpage = 25;

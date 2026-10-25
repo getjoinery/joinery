@@ -60,6 +60,7 @@ function login_2fa_passkey_verify_logic(array $input): LogicResult {
 
 function login_2fa_passkey_verify_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Complete passkey second-factor confirmation and finish password sign-in',
 		'input' => [

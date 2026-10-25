@@ -21,6 +21,8 @@ class ContentVersionException extends SystemBaseException {}
 class ContentVersion extends SystemBase {
 	public static $prefix = 'cvn';
 	public static $tablename = 'cvn_content_versions';
+	public static $access_class = 'content';
+	public static $owner_column = false;
 	public static $pkey_column = 'cvn_content_version_id';
 
 	protected static $foreign_key_actions = array(
@@ -148,16 +150,11 @@ function get_previous_version(){
 			for ($i = 0; $i < $to_delete; $i++) {
 				$old_version = $versions->get($i);
 				if ($old_version) {
-					$old_version->permanent_delete();
+					// Keeping the history to its cap is the platform's bookkeeping,
+					// whoever's save added the newest version.
+					SystemBase::server_initiated_write(function () use ($old_version) { $old_version->permanent_delete(); });
 				}
 			}
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
 

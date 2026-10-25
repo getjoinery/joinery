@@ -16,6 +16,7 @@ class MessageReactionException extends SystemBaseException {}
 class MessageReaction extends SystemBase {
 	public static $prefix = 'msr';
 	public static $tablename = 'msr_message_reactions';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'msr_message_reaction_id';
 
 	// Reactions are read and written through the messenger's own actions, which

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 /**
  * Inbound Email - Settings (server-wide delivery policy).

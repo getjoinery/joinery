@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Boards admin — every board on the site, for superadmins.
  *

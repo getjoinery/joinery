@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -6,7 +7,6 @@
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$numperpage = 30;

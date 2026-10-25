@@ -98,7 +98,7 @@ function vault_client_probe_logic_descriptor(): array {
 		'description'      => 'Whether the caller has a client-custody vault for a scope (drive by default), its public key, its key generation, a rotation\'s pending public key, and whether the calling device is still listed as holding the scope — the lean probe native clients use. Carries no wrappings, salts, or KDF parameters: those are unlock material and stay on the browser-only vault_client_status action.',
 		'requires_session' => true,
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'scope' => array('type' => 'string', 'required' => false, 'max_length' => 32, 'label' => 'Client-custody vault scope (default drive)'),
 		),

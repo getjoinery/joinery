@@ -11,11 +11,11 @@ function admin_marketplace_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
 
-	$session->check_permission(10);
 	$session->set_return();
 
 	// Process the install action before loading display data.
 	if (($input['action'] ?? '') === 'install') {
+		Access::demand(10, $session);   // installs code
 		return admin_marketplace_handle_install($input, $session);
 	}
 

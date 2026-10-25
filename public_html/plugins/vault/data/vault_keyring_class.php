@@ -27,6 +27,7 @@ class VaultKeyringException extends SystemBaseException {}
 class VaultKeyring extends SystemBase {
 	public static $prefix = 'vlk';
 	public static $tablename = 'vlk_vault_keyring';
+	public static $access_class = 'keys';
 	public static $pkey_column = 'vlk_vault_keyring_id';
 
 	protected static $foreign_key_actions = array(

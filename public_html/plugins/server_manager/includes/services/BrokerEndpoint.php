@@ -15,6 +15,7 @@
  * address and sized for a fleet behind one address: a run signs one link per
  * object it stores, and a batch of part links per ten parts of a large one.
  *
+ * @version 1.2 - the channel writes as the server (server_initiated_write): the run's token is the authority
  * @version 1.1 - finish and abort reach a run already closed, so a node asking again after a lost reply is
  *                answered; a space that cannot be reached is a refusal, not a server error
  * @version 1.0
@@ -54,7 +55,11 @@ class BrokerEndpoint {
 		if (!is_array($body)) {
 			api_error('The backup broker takes a JSON object.', 'ActionError', 400);
 		}
-		$result = self::handle($action, $body, self::headerValue(NodeBroker::TOKEN_HEADER));
+		// No person is behind the channel: the run's token is the authority, so
+		// what it writes is the server's own (spec declared_permissions 3.2).
+		$result = SystemBase::server_initiated_write(function () use ($action, $body) {
+			return self::handle($action, $body, self::headerValue(NodeBroker::TOKEN_HEADER));
+		});
 		if ($result['status'] !== 200) {
 			api_error($result['error'], $result['status'] === 403 ? 'AuthenticationError' : 'ActionError', $result['status']);
 		}

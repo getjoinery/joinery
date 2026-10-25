@@ -61,6 +61,7 @@ class MailboxRelayException extends SystemBaseException {}
 class MailboxRelay extends SystemBase {
 	public static $prefix = 'mrl';
 	public static $tablename = 'mrl_mailbox_relays';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mrl_mailbox_relay_id';
 
 	protected static $foreign_key_actions = [
@@ -158,13 +159,6 @@ class MailboxRelay extends SystemBase {
 		'mrl_update_time'        => array('type'=>'timestamp(6)'),
 		'mrl_delete_time'        => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('mrl_update_time', gmdate('Y-m-d H:i:s'));

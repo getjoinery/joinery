@@ -9,7 +9,8 @@
  * of the legacy /ajax/conversations_ajax.php endpoint; participant
  * authorization matches it exactly (sender or recipient).
  *
- * @version 1.0.1
+ * @version 1.0.2
+ * @changelog 1.0.2 - opening a new 1:1 runs under rule_checked_write()
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -45,7 +46,12 @@ function conversation_send_logic(array $input): LogicResult {
 			if ($to == $current_user_id) {
 				return LogicResult::error('Cannot message yourself.');
 			}
-			$conversation = Conversation::get_or_create_conversation($current_user_id, $to);
+			// Any signed-in member may open a 1:1 with another (checked above);
+			// the conversation and the other person's membership row are not
+			// the sender's own rows. Blocks are refused inside.
+			$conversation = SystemBase::rule_checked_write(function () use ($current_user_id, $to) {
+				return Conversation::get_or_create_conversation($current_user_id, $to);
+			});
 		} elseif ($conversation_id) {
 			if (!Conversation::check_if_exists($conversation_id)) {
 				return LogicResult::error('Conversation not found.');
@@ -73,6 +79,7 @@ function conversation_send_logic(array $input): LogicResult {
 
 function conversation_send_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Send a message in a conversation (conversation_id or to for a new/existing 1:1)',
 		'input' => [

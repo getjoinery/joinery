@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 // @version 1.7 - Waiting for approval says why: a lapsed approval (access off) or a newer version asking for more
 // @version 1.6 - a sandboxed plugin: the Sandboxed badge, Waiting for approval, Review and activate / What it may do
 //               (admin_sandbox_approve) in place of Activate while it waits on an approval; never a fork

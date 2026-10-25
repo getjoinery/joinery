@@ -62,7 +62,7 @@ function app_password_create_logic(array $input): LogicResult {
 function app_password_create_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Make an app password for one declared app purpose (such as mail apps) and one named device; answers the password once',
 		'input' => array(
 			'purpose'     => array('type' => 'string', 'required' => true, 'label' => 'Purpose'),

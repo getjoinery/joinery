@@ -9,7 +9,6 @@
 
 function admin_webhook_edit_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10); // API keys and webhook signing secrets are keys: 10 to read and change
 
 	$id = (int)($input['edit_primary_key_value'] ?? $input['sgr_signal_receiver_id'] ?? 0);
 	if ($id > 0) {

@@ -26,6 +26,6 @@ function widget_poll_logic_descriptor(): array {
 			'thread_id'  => array('type' => 'int', 'required' => true, 'label' => 'Conversation'),
 			'message_id' => array('type' => 'int', 'required' => true, 'label' => 'Answer'),
 		),
-		'auth'             => array('allow_guest' => true, 'capability' => null, 'requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'allow_guest' => true, 'capability' => null, 'requires_browser_session' => true),
 	);
 }

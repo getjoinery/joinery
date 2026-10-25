@@ -7,7 +7,6 @@ function admin_products_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$searches = array();
@@ -36,7 +35,7 @@ function admin_products_logic(array $input): LogicResult {
 	}
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	if(!Access::permits(Product::access_level('soft_delete'), $session)){
 		$searches['deleted'] = false;
 	}
 

@@ -352,7 +352,8 @@ class DriveSealed {
 		}
 		if ((string)$blob->get('fbb_mime_type') !== 'application/octet-stream') {
 			$blob->set('fbb_mime_type', 'application/octet-stream');
-			$blob->save();
+			// The bytes are this file's alone (split above); its level change was the decision.
+			SystemBase::rule_checked_write(function () use ($blob) { $blob->save(); });
 		}
 	}
 

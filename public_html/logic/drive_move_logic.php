@@ -305,9 +305,13 @@ function _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $actor_i
 		return DriveHelper::reparent_and_tell($entity_type, $entity_id, $from_id, $parent_id, $owner_id, $actor_id,
 			function () use ($entity_type, $entity, $parent_id, $parent_column) {
 				$entity->set($parent_column, $parent_id > 0 ? $parent_id : null);
-				return ($entity_type === DriveHelper::ENTITY_FOLDER)
-					? DriveHelper::save_folder_unless_name_taken($entity)
-					: DriveHelper::save_file_unless_name_taken($entity);
+				// The caller's can_write() on the item and on the destination
+				// admitted the move; the row is the tree owner's.
+				return SystemBase::rule_checked_write(function () use ($entity_type, $entity) {
+					return ($entity_type === DriveHelper::ENTITY_FOLDER)
+						? DriveHelper::save_folder_unless_name_taken($entity)
+						: DriveHelper::save_file_unless_name_taken($entity);
+				});
 			},
 			FileChange::KIND_MOVED);
 	});
@@ -315,6 +319,7 @@ function _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $actor_i
 
 function drive_move_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Move a Drive file or folder to another folder (or the root).',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

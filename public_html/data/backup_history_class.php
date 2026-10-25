@@ -51,6 +51,7 @@ class BackupHistoryException extends SystemBaseException {}
 class BackupHistory extends SystemBase {
 	public static $prefix = 'bkh';
 	public static $tablename = 'bkh_backup_history';
+	public static $access_class = 'config';
 	public static $pkey_column = 'bkh_backup_history_id';
 
 	public static $json_vars = array('bkh_artifacts');

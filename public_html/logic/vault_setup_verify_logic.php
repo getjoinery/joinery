@@ -76,7 +76,7 @@ function vault_setup_verify_logic(array $input): LogicResult {
 function vault_setup_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Complete Sealed Vault setup: generate the keypair, wrap it under the enrolling passkey and a browser-made recovery code set (account halves of each code KEK), and open the unlock window',
 		'input' => [
 			'acknowledged' => ['type' => 'bool', 'required' => true, 'label' => 'Acknowledge the consequences'],

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);
 
 	$usr_user_id = LibraryFunctions::fetch_variable('usr_user_id', NULL, 1, 'You must provide a user to edit.');
 	$log_type = LibraryFunctions::fetch_variable('log_type', NULL, 1, 'You must provide a log_type.');
@@ -44,7 +44,12 @@ else{
 	$user = new User($usr_user_id, TRUE);
 
 	$page = new AdminPage();
-	$page->admin_header(10);
+	$page->admin_header(array(
+		'menu-id' => 'users-list',
+		'page_title' => 'Event Log',
+		'readable_title' => 'Event Log',
+		'session' => $session,
+	));
 
 	echo '<h1>Event Log</h1>';
 	$formwriter = $page->getFormWriter('form1', ['action' => '/admin/admin_log_event', 'method' => 'POST']);

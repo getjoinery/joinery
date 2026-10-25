@@ -12,6 +12,7 @@ class SdScheduledBlockRule extends SystemBase {
 
 	public static $prefix = 'sbr';
 	public static $tablename = 'sbr_scheduled_block_rules';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sbr_scheduled_block_rule_id';
 
 	protected static $foreign_key_actions = array(
@@ -28,6 +29,12 @@ class SdScheduledBlockRule extends SystemBase {
 	    // The DNS resolver ignores this column.
 	    'sbr_hard_block' => array('type'=>'int2', 'default'=>0),
 	);
+
+	/** A rule of a block is the block's device owner's (SdScheduledBlock::ownerOfBlock()). */
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0
+			&& SdScheduledBlock::ownerOfBlock((int)$this->access_stored('sbr_sdb_scheduled_block_id')) === (int)$user_id;
+	}
 
 }
 

@@ -98,6 +98,7 @@ function verify_totp_logic(array $input): LogicResult{
 
 function verify_totp_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Verify a TOTP or backup code to complete two-factor login.',
 		'requires_session' => false,
 		'mutates'          => true,

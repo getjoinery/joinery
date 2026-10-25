@@ -35,7 +35,6 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	$reader_url = '/plugins/mailbox/admin/admin_mailbox_reader';

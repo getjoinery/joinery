@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.14 - the backups actions forward only at the backups page's level (its header, 10): the logic no longer checks itself
  * @version 2.13 - action beta_permissions_save: the Beta permissions step's answer (emergency root access, one-way, and
  *                 log access), written with Setting::put as the Management Node page writes it
  * @version 2.12 - every action, and the DNS box's, runs only on a POST: opening a step changes nothing
@@ -113,7 +114,7 @@ function setup_logic(array $input): LogicResult {
 	// The Secure connection screen's DNS publish box: the site's own address
 	// record, written through the domain's DNS host. The box's actions arrive
 	// as dns_action; the plan is built only when one does.
-	if (!empty($input['dns_action']) && (string)($input['step'] ?? '') === 'https' && $permission >= 10) {
+	if (!empty($input['dns_action']) && (string)($input['step'] ?? '') === 'https' && Access::decide(10, $session)) {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
 		$dns_redirect = DnsPublishBox::handle($input, 'setup_https_dns_plan', '/setup?step=https');
@@ -131,7 +132,7 @@ function setup_logic(array $input): LogicResult {
 			$viewer->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
 			$viewer->save();
 			SetupSteps::invalidateSessionCache();
-			return LogicResult::redirect($permission >= 10 ? '/admin' : '/profile');
+			return LogicResult::redirect(Access::permits(10, $session) ? '/admin' : '/profile');
 		}
 	}
 
@@ -144,7 +145,7 @@ function setup_logic(array $input): LogicResult {
 			$viewer->save();
 			SetupSteps::invalidateSessionCache();
 		}
-		return LogicResult::redirect($permission >= 10 ? '/admin' : '/profile');
+		return LogicResult::redirect(Access::permits(10, $session) ? '/admin' : '/profile');
 	}
 
 	// "Not now" on an optional step: records a decision, never completion.
@@ -192,7 +193,7 @@ function setup_logic(array $input): LogicResult {
 			$viewer->set('usr_timezone', $tz);
 			$viewer->save();
 			$session->set_timezone($tz);
-			if ($permission >= 10) {
+			if (Access::permits(10, $session)) {
 				$site_name = trim((string)($input['site_name'] ?? ''));
 				if ($site_name !== '') {
 					require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
@@ -217,7 +218,7 @@ function setup_logic(array $input): LogicResult {
 	// refuses, so the step has its own action (BetaPermissions holds the
 	// rules: emergency root access is shown only where the install offered
 	// it, and never turns back on once off).
-	if ($action === 'beta_permissions_save' && $permission >= 10) {
+	if ($action === 'beta_permissions_save' && Access::decide(10, $session)) {
 		require_once(PathHelper::getIncludePath('includes/BetaPermissions.php'));
 		if (BetaPermissions::root_access_offered()) {
 			$refusal = BetaPermissions::set_root_access(!empty($input['keep_root_access']));
@@ -235,11 +236,13 @@ function setup_logic(array $input): LogicResult {
 
 	// Backups: the wizard submits the backups page's own actions — including
 	// the RecoveryKeySetupPanel's unproven-state forms — and this forwards
-	// them whole. The logic enforces permission 10 itself; return_to bounces
-	// its redirect back here.
+	// them whole, to whoever may open the backups page (its header, which the
+	// router asks of the page and nothing asks here); return_to bounces its
+	// redirect back here.
 	$backup_actions = array('save_target', 'test_target',
 		'verify_recovery_key', 'clear_recovery_key');
-	if (in_array($action, $backup_actions, true)) {
+	if (in_array($action, $backup_actions, true)
+			&& Access::decide(AdminPageAccess::levelForFile('adm/admin_backups.php'), $session)) {
 		require_once(PathHelper::getIncludePath('adm/logic/admin_backups_logic.php'));
 		$result = admin_backups_logic(array_merge($input, array('return_to' => '/setup')));
 		// A first target becomes the scheduled one inside save_target itself,
@@ -332,14 +335,14 @@ function setup_logic(array $input): LogicResult {
 	// single-use state, then the operator's authorise page); Disconnect
 	// deactivates this site's key there and forgets the pair here. Both
 	// are the owner's acts (specs/services_phase2_platform.md §4).
-	if ($action === 'services_connect' && $permission >= 10) {
+	if ($action === 'services_connect' && Access::decide(10, $session)) {
 		try {
 			return LogicResult::redirect(ServicesClient::connectUrl((string)($input['step'] ?? 'mail_send')));
 		} catch (\Throwable $e) {
 			$error = $e->getMessage();
 		}
 	}
-	if ($action === 'services_disconnect' && $permission >= 10) {
+	if ($action === 'services_disconnect' && Access::decide(10, $session)) {
 		if (ServicesClient::mailEnrolled()) {
 			$error = 'This site still sends its email through getjoinery. Switch to your own provider first; the release happens when the new one is proven.';
 		} else {
@@ -433,7 +436,7 @@ function setup_logic(array $input): LogicResult {
 	// always re-derived on render — nothing here trusts the POST beyond which
 	// button was pressed.
 	if (in_array($action, array('mail_send_register', 'mail_send_verify', 'mail_send_publish',
-			'mail_send_move', 'mail_send_move_cancel'), true) && $permission >= 10) {
+			'mail_send_move', 'mail_send_move_cancel'), true) && Access::decide(10, $session)) {
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		$notice = array('registered' => null, 'register_error' => '',
 			'publish_summary' => '', 'publish_error' => '', 'checked_state' => '', 'move' => null);
@@ -703,7 +706,7 @@ function setup_logic(array $input): LogicResult {
 	// the network and take a few seconds. "Check again" is simply a reload of
 	// this page: every render re-runs the checks fresh.
 	$https_diagnosis = null;
-	if ($current_key === 'https' && $permission >= 10
+	if ($current_key === 'https' && Access::permits(10, $session)
 		&& (($statuses['https'] ?? '') !== SetupSteps::STATUS_GREEN || !empty($declined['https']))) {
 		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
 		$https_diagnosis = setup_https_diagnose();

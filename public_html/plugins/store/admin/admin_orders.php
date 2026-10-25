@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -8,7 +9,6 @@
 	$PRODUCT_ID_TO_NAME_CACHE = array();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(6); // the list shows buyer addresses: personal, 6 to read
 	$session->set_return();
 	
 	$settings = Globalvars::get_instance();
@@ -25,6 +25,8 @@
 
 	$search_criteria = NULL;
 	$search_criteria = array();
+	$display_startdate = '';
+	$display_enddate = '';
 	
 	if($startdate){
 		$display_startdate = $startdate;	
@@ -47,7 +49,7 @@
 	}
 	
 	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	if(!Access::permits(10, $session)){
 		//$search_criteria['deleted'] = false;
 		$search_criteria['test_mode'] = false;
 	}
@@ -144,7 +146,7 @@
 				$this_out = $title . ' ('.$currency_symbol. $order_item->get('odi_price') .')';
 			}
 			
-			if($product_data['comment']){
+			if(!empty($product_data['comment'])){
 				$this_out .= '<br /><b> (Note: '.$product_data['comment'].')</b>';
 			}
 

@@ -79,6 +79,7 @@ class SiteCopyException extends SystemBaseException {}
 class SiteCopy extends SystemBase {
 	public static $prefix = 'scp';
 	public static $tablename = 'scp_site_copies';
+	public static $access_class = 'config';
 	public static $pkey_column = 'scp_site_copy_id';
 
 	public static $json_vars = array('scp_steps', 'scp_census', 'scp_switch');

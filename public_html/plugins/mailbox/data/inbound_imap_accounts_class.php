@@ -60,6 +60,7 @@ class InboundImapAccountException extends SystemBaseException {}
 class InboundImapAccount extends SystemBase {
 	public static $prefix = 'iia';
 	public static $tablename = 'iia_inbound_imap_accounts';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'iia_inbound_imap_account_id';
 
 	// Auth methods
@@ -171,7 +172,7 @@ class InboundImapAccount extends SystemBase {
 	public static $field_specifications = array(
 		'iia_inbound_imap_account_id'   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iia_label'                     => array('type'=>'varchar(255)'),
-		'iia_provider_key'              => array('type'=>'varchar(40)', 'default'=>'imap_generic', 'is_nullable'=>false),
+		'iia_provider_key'              => array('access_class' => 'keys', 'type'=>'varchar(40)', 'default'=>'imap_generic', 'is_nullable'=>false),
 		'iia_iea_inbound_email_alias_id'=> array('type'=>'int4'),
 		'iia_imap_host'                 => array('type'=>'varchar(255)'),
 		'iia_imap_port'                 => array('type'=>'int4', 'default'=>'993'),
@@ -218,13 +219,6 @@ class InboundImapAccount extends SystemBase {
 		'iia_update_time'               => array('type'=>'timestamp(6)'),
 		'iia_delete_time'               => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		// Provider must be a known preset.

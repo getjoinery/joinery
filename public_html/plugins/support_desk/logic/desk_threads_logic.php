@@ -11,7 +11,8 @@
  * A connected site that signs with its key also gets every thread its account
  * opened from this host, so a reinstalled site still sees its history.
  *
- * @version 0.1.0
+ * @version 0.1.1
+ * @changelog 0.1.1 - the asker's write runs under rule_checked_write() behind the token proof
  */
 function desk_threads_logic(array $input): LogicResult {
 	if ($limited = SupportApi::limit('desk_threads')) {
@@ -46,7 +47,10 @@ function desk_threads_logic(array $input): LogicResult {
 		if ((int)($input['thread_id'] ?? 0) > 0) {
 			$thread = SupportIntake::openThread((int)$input['thread_id'], (string)($input['token'] ?? ''), $host, $key);
 			if ((bool)$thread->get('sth_unread_reply')) {
-				SupportThread::updateColumns((int)$thread->key, array('sth_unread_reply' => false));
+				// openThread() just proved the token or account key.
+				SystemBase::rule_checked_write(function () use ($thread) {
+					SupportThread::updateColumns((int)$thread->key, array('sth_unread_reply' => false));
+				});
 				$thread->set_as_stored('sth_unread_reply', false);
 			}
 			$out['thread'] = SupportIntake::summary($thread);
@@ -61,6 +65,7 @@ function desk_threads_logic(array $input): LogicResult {
 
 function desk_threads_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'A site\'s support threads, their state and unread replies; with thread_id, that thread\'s transcript.',
 		'requires_session' => false,
 		'input'            => SupportApi::siteInput() + array(

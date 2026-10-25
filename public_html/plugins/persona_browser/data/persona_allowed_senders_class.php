@@ -19,6 +19,7 @@ class PersonaAllowedSenderException extends SystemBaseException {}
 class PersonaAllowedSender extends SystemBase {
     public static $prefix = 'pas';
     public static $tablename = 'pas_persona_allowed_senders';
+    public static $access_class = 'personal';
     public static $pkey_column = 'pas_persona_allowed_sender_id';
 
     public static $field_specifications = array(

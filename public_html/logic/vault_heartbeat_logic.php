@@ -45,7 +45,7 @@ function vault_heartbeat_logic(array $input): LogicResult {
 function vault_heartbeat_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Heartbeat to keep the vault unlock window alive while a mail surface is visible',
 	];
 }

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -6,7 +7,6 @@
 	require_once(PathHelper::getIncludePath('data/urls_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -17,8 +17,8 @@
 	$search_criteria = array();
 	//$search_criteria['source'] = $url_source;
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//SHOW DELETED ONLY TO THOSE WHO MAY UNDELETE
+	if(!Access::permits(Url::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

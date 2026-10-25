@@ -21,6 +21,7 @@ class AbTestVariantException extends SystemBaseException {}
 class AbTestVariant extends SystemBase {
 	public static $prefix = 'abv';
 	public static $tablename = 'abv_variants';
+	public static $access_class = 'content';
 	public static $pkey_column = 'abv_variant_id';
 
 	protected static $foreign_key_actions = array(

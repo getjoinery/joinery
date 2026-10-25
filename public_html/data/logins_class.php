@@ -24,24 +24,14 @@ class LoginException extends SystemBaseException {}
 class Login extends SystemBase {
 	public static $prefix = 'log';
 	public static $tablename = 'log_logins';
+	public static $access_class = 'restricted';
+	public static $owner_column = false;
 	public static $pkey_column = 'log_login_id';
 
 	const LOGIN_FORM = 1;
 	const LOGIN_COOKIE = 2;
 	const LOGIN_LOGOUT = 3;
 	const LOGIN_FACEBOOK_CONNECT = 4;
-
-	// An audit table: staff read it, nothing edits it. Not a REST or AI resource.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	protected static $foreign_key_actions = [
 		// A person's sign-in history goes with the person.

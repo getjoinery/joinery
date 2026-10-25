@@ -6,7 +6,6 @@ function admin_joinery_ai_note_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
         $note = new RecipeNote($input['edit_primary_key_value'], TRUE);
@@ -15,6 +14,10 @@ function admin_joinery_ai_note_logic(array $input): LogicResult {
     } else {
         $note = new RecipeNote(NULL);
         $note->set('rcn_owner_user_id', $session->get_user_id());
+    }
+    // A note is its owner's; anyone else reads it at the model's level.
+    if ($note->key) {
+        $note->assert_can_read($session);
     }
 
     // Gate on the POST method, not a specific button name: the Delete button

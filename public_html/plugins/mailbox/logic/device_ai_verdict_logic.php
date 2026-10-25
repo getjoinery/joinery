@@ -35,7 +35,7 @@ function device_ai_verdict_logic(array $input): LogicResult {
 function device_ai_verdict_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'Store a device-computed AI verdict, sealed by the browser under a Fortress message\'s own key, with the recipe\'s done mark, atomically',
 		'input' => [
 			'id'           => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],

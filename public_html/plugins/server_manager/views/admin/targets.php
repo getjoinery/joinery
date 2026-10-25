@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Server Manager - Backup Targets
  * URL: /admin/server_manager/targets
@@ -55,7 +56,6 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/Recover
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 // Load or create target

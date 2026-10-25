@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Add Node
  * URL: /admin/server_manager/node_add
@@ -25,7 +26,6 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $node = new ManagedNode(NULL);

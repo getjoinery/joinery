@@ -78,7 +78,7 @@ class ApprovedActionContext implements ToolContext {
     }
 
     /** The owner acts on their own data. */
-    public function ownerScopedReads(): bool {
+    public function ownerScopedReads(?string $model_class = null): bool {
         return true;
     }
 

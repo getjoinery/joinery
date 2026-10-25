@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager — one incident
  * URL: /admin/server_manager/incident?id=N
@@ -21,7 +22,6 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $page_regex = '/\/admin\/server_manager/';
@@ -33,6 +33,9 @@ $flash = function ($text, $ok) use ($session, $page_regex) {
 		$ok ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
 		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 };
+
+// Each action needs its own level (SmActionLevels), whatever the page's.
+SmActionLevels::refuse_post('incident', $session, $self_url);
 
 if ($_POST) {
 	if (!SmAdminCsrf::valid()) { header('Location: ' . $self_url); exit; }

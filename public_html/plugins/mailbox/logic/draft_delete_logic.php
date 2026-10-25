@@ -40,6 +40,7 @@ function draft_delete_logic(array $input): LogicResult {
 
 function draft_delete_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Discard a saved draft (row + attachments + files)',
 		'input' => [

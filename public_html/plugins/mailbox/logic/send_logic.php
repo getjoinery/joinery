@@ -103,6 +103,7 @@ function send_logic(array $input): LogicResult {
 
 function send_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Send a reply, reply-all, or forward as the mailbox',
 		'input' => [

@@ -27,6 +27,7 @@
  * by anything on the box during the boot window, so nothing here may teach a
  * holder of the token which check it failed beyond what its own request shows.
  *
+ * @version 1.3 - the channel writes as the server (server_initiated_write): the run token is the authority
  * @version 1.2 - sameAddress() is IpAddress::same()
  * @version 1.1 - a birth report may arrive from the instance's IPv6 as well as its IPv4 (sameAddress)
  * @version 1.0
@@ -68,7 +69,11 @@ class RelayBirthEndpoint {
 				if ($method !== 'GET') {
 					api_error('The bundle is fetched with GET.', 'ActionError', 405);
 				}
-				$result = self::processBundle((string)($_GET['run'] ?? ''), (string)($_GET['sha256'] ?? ''), $token);
+				// No person is behind the channel: the run token is the authority,
+				// so what it writes is the server's own (spec declared_permissions 3.2).
+				$result = SystemBase::server_initiated_write(function () use ($token) {
+					return self::processBundle((string)($_GET['run'] ?? ''), (string)($_GET['sha256'] ?? ''), $token);
+				});
 				if ($result['status'] !== 200) {
 					api_error($result['error'], 'AuthenticationError', $result['status']);
 				}
@@ -80,7 +85,9 @@ class RelayBirthEndpoint {
 					api_error('The birth report is posted.', 'ActionError', 405);
 				}
 				$raw = (string)file_get_contents('php://input');
-				$result = self::processBorn($raw, $token, $remote);
+				$result = SystemBase::server_initiated_write(function () use ($raw, $token, $remote) {
+					return self::processBorn($raw, $token, $remote);
+				});
 				if ($result['status'] !== 200) {
 					api_error($result['error'], 'AuthenticationError', $result['status']);
 				}

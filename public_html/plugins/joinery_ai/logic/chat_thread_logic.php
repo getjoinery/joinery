@@ -56,6 +56,7 @@ function chat_thread_logic(array $input): LogicResult {
 
 function chat_thread_logic_descriptor() {
     return ['requires_session' => true,
+            'auth' => ['min_user_permission' => 0],
             'description' => 'Load one AI chat conversation and its messages as structured turns.',
             'input' => [
                 'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],

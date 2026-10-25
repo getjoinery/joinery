@@ -22,20 +22,19 @@ function admin_event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/entity_photos_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$evt_event_id = !empty($input['evt_event_id']) ? $input['evt_event_id'] : (!empty($input['evt_event_id']) ? $input['evt_event_id'] : null);
 	$event = new Event($evt_event_id, TRUE);
 
 	// Handle actions
-	if($input['action'] == 'delete'){
+	if(($input['action'] ?? null) == 'delete'){
 		$event->assert_can_write($session);
 		$event->soft_delete();
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_events');
 	}
-	else if($input['action'] == 'undelete'){
+	else if(($input['action'] ?? null) == 'undelete'){
 		$event->assert_can_write($session);
 		$event->undelete();
 
@@ -43,7 +42,7 @@ function admin_event_logic(array $input): LogicResult {
 	}
 
 	// Recurring event actions
-	if($input['action'] == 'cancel_instance'){
+	if(($input['action'] ?? null) == 'cancel_instance'){
 		$event->assert_can_write($session);
 		$instance = $event->materialize_instance($input['instance_date']);
 		$instance->set('evt_status', Event::STATUS_CANCELED);
@@ -51,7 +50,7 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($input['action'] == 'revert_instance'){
+	if(($input['action'] ?? null) == 'revert_instance'){
 		$event->assert_can_write($session);
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
@@ -61,7 +60,7 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($input['action'] == 'delete_instance'){
+	if(($input['action'] ?? null) == 'delete_instance'){
 		$event->assert_can_write($session);
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
@@ -71,13 +70,13 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($input['action'] == 'end_series'){
+	if(($input['action'] ?? null) == 'end_series'){
 		$event->assert_can_write($session);
 		$event->end_series();
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($input['action'] == 'remove_from_event'){
+	if(($input['action'] ?? null) == 'remove_from_event'){
 
 		$eventregistrant = new EventRegistrant($input['evr_event_registrant_id'], TRUE);
 		$eventregistrant->remove();
@@ -86,7 +85,7 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect($returnurl);
 	}
 
-	if($input['action'] == 'remove_from_waiting_list'){
+	if(($input['action'] ?? null) == 'remove_from_waiting_list'){
 
 		$waiting_list = new WaitingList($input['ewl_waiting_list_id'], TRUE);
 		$waiting_list->remove();
@@ -95,14 +94,14 @@ function admin_event_logic(array $input): LogicResult {
 		return LogicResult::redirect($returnurl);
 	}
 
-	if($input['action'] == 'set_primary_photo'){
+	if(($input['action'] ?? null) == 'set_primary_photo'){
 		$event->assert_can_write($session);
 		$event->set_primary_photo((int)$input['photo_id']);
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
-	if($input['action'] == 'clear_primary_photo'){
+	if(($input['action'] ?? null) == 'clear_primary_photo'){
 		$event->assert_can_write($session);
 		$event->clear_primary_photo();
 
@@ -161,16 +160,18 @@ function admin_event_logic(array $input): LogicResult {
 	$options['altlinks'] = array();
 
 	if(!$event->get('evt_delete_time')) {
-		if($_SESSION['permission'] > 7){
+		if($event->can_write(SessionControl::get_instance())){
 			$options['altlinks']['Edit Event'] = '/plugins/event_manager/admin/admin_event_edit?evt_event_id='.$event->key;
 		}
-		if($_SESSION['permission'] >= 8) {
+		if(Access::permits(8)) {
 			$options['altlinks']['Email Registrants'] = '/plugins/event_manager/admin/admin_event_emails?evt_event_id='.$event->key;
+		}
+		if($event->can_delete(SessionControl::get_instance())) {
 			$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'delete', 'evt_event_id' => $event->key));
 		}
 	}
 	else {
-		if($_SESSION['permission'] >= 8) {
+		if($event->can_delete(SessionControl::get_instance())) {
 			$options['altlinks']['Undelete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'undelete', 'evt_event_id' => $event->key));
 		}
 	}

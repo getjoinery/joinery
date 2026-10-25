@@ -6,7 +6,12 @@ review: named data classes, a read level on models, raise-only column
 classes, page headers, one decision function, a generated inventory
 (sections 3 and 8). Every open question answered 2026-10-23. WP1 built and
 released in log mode (0.8.521); its flip is left (WP1). WP0 built 2026-10-25
-(docs/permissions.md). WP2 to WP6 not started. The research bugs are fixed except those a package fixes (7).
+(docs/permissions.md). WP2 built 2026-10-25 and flipped the same day on the
+owner's word: a refused save throws, and the log mode is gone. WP3 built
+2026-10-25; every page-top check is gone (section 5, WP3 Flip). WP4 built
+2026-10-25. WP5 built 2026-10-25, and every inline level comparison is
+converted (WP5 Flip). WP6 built 2026-10-25. The research bugs are fixed except
+B1, WP1's flip (7).
 
 Running each model's own rules on every save is a separate spec,
 `model_rules_on_every_save`, because it carries its own breakage and testing.
@@ -525,6 +530,116 @@ POST check in each of the ~60 handlers.
   `[WRITE_AUTH]`; turn on refusal.
 - The user target rule.
 
+- Built 2026-10-25, log mode (docs/permissions.md § Models). Every one of the
+  254 models declares `$access_class` from the seed; the declaration test's
+  `model_undeclared` rule is on. 143 boilerplate `authenticate_read/write()`
+  overrides are gone; the kept ones read levels through `access_level()`
+  (User, Message, ContentReport, SpaceAccess's moderator level) or override
+  `access_owner_is()` (User, Entry, Schedule). 54 column classes from 8.6;
+  a sealed column is keys by `column_access_class()`.
+- Exceptions added beside the seed's: Message and Conversation read 8 (Q13);
+  Recipe and the three plugin-record models write 10 (3.1, code); joinery_ai's
+  AiMemory, RecipeNote, RecipeRun and AipRecipeItemLog write 10. The verbs an
+  override held above its class, confirmed at the class (8.3 item 6; the owner
+  may raise any back to an exception):
+
+  | Model | Verb | Was | Now (class) |
+  |---|---|---|---|
+  | AppBridgeToken | read / write | 10 | 6 / 8 (personal; the token is a hash, restricted) |
+  | EmailTemplate | write | 10 | 6 (content) |
+  | ProblemReport | read / write | 9 | 6 / 8 (personal) |
+  | ReceivedBugReport | read / write | 9 | 6 / 8 (personal) |
+  | PushDestination | read / write | 10 | 6 / 8 (personal) |
+  | InboundPersonalAddress | write | 10 | 8 (personal) |
+  | SupportThread | read / write | 9 | 6 / 8 (personal) |
+  | SupportDocRelease, SupportDocSection, SupportFaqEntry, SupportWordGap | write | 9 | 6 (content) |
+  | StripeInvoice | read | 8 | 6 (personal) |
+  | Setting | write | 10 | 8 (config; a secret setting is keys, B20) |
+  | PublicMenu | write | 10 | 8 (config) |
+  | RelayClientIdentity | read / write | 10 | 8 (config; its secret is sealed, so keys) |
+  | InboundBayesToken | write | 10 | 9 (restricted) |
+
+  Raised by the class: SiteSupportThread write 5 to 8; every "below 5" model
+  to its class's levels (a 5 no longer edits content).
+- `$owner_column = false`: a user column that records who acted is not an
+  owner (EventLog, GeneralError, Login, RequestLog, VisitorEvent and nine
+  more). Without it, removing a "below 5" override would have let a user
+  read and write their own log rows.
+- The write paths: `save()` and `updateColumns()` ask the write and column
+  rules, `soft_delete()`/`undelete()` the soft-delete level,
+  `permanent_delete()` its own; a web request only. `Access::$model_enforcement`
+  is `'log'`: a refusal writes one `[WRITE_AUTH]` line per place per request
+  (the trail from `GuardedPdo::writer()`) and the write goes ahead.
+- Explicit asks (`assert_can_*`, the REST record surface, the AI chat) follow
+  the class at once, not log-first: they already threw, and every class's
+  level is at least today's 5, so the change is only tighter (B23 closed:
+  a 5 no longer reads personal or config rows over the REST API or the AI
+  chat), plus the owner rule on models that gained a declared owner column.
+- **A second marker, `rule_checked_write()`** (deviation from 3.2's "server
+  writes run inside `server_initiated_write()`"): some writes have a person
+  behind them that a rule of the caller's own already admitted (the messenger
+  posting a participant's message into a protected conversation, a
+  notification to another user, Drive's blob, change-feed and key-grant
+  rows). `server_initiated_write()` would also lift the page-view guard, which
+  must still hold for them. Callers listed in core_api_mechanical_test.
+- **The REST record surface ran with an anonymous session** (found by the
+  burn-down): only actions called `set_api_user()`. Every route family past
+  the action dispatch now runs as its caller, so the model check sees the
+  person ApiAuth authorized.
+- Server writes marked from dev's `[WRITE_AUTH]` lines (other sessions' gates
+  and live tests, 05:35 to 06:00): the agent channel, relay birth, backup
+  broker, Direct receiver, auth/login and device_link, the password rehash,
+  API idempotency rows, cookie consent, and the six webhook receivers (marked
+  after their signature check).
+- Review (reviewer2, 2026-10-25): `updateColumns()` asked only an owner
+  column, so a member's own write on a model whose owner is not a column
+  (User, CalendarEntry, InboundEmailMessage, AiConversationMessage) was
+  refused; it now loads the row on the below-level branch and asks the rules
+  `save()` asks. A permanent delete's cascade asked each dependent again as the
+  user; dependents now follow the parent's decision (`rule_checked_write`).
+  Sign-up and the password reset write before anyone is signed in and are
+  marked. `SystemMultiBase::assert_can_read()` called itself (since
+  e9d32f5c8). The provisioning service account reads and queues mail for
+  other people's orders: personal, so it is created at 8 and migration
+  sm_026 raises an existing one from 5.
+- **Flipped 2026-10-25** on the owner's word, before a release in log mode:
+  `Access::$model_enforcement` and the `[WRITE_AUTH]` log mode are gone; a
+  refused write records `access_refused`, logs `[WRITE_REFUSED]` with the code
+  that wrote, and throws. Dev's log held 227 `[WRITE_AUTH]` lines that day, all
+  from before the server writes were marked or from tests; none came from the
+  fresh full gate run that afternoon, or from dev's traffic, before the flip. A model helper that writes with its own
+  SQL asks `guard_raw_write()` (B46); the owner rule reads the stored owner
+  (B45). Risk carried into the release: a server write a dev path never takes
+  is refused on a node; `[WRITE_REFUSED]` with user 0 names it (live
+  verification queue).
+- **Flip review (reviewer2, 2026-10-25), 5 NEEDED, all taken.** N1: the flip
+  refused every member and visitor write to a row with no owner (163 of 261
+  models): passkey ceremonies, the hosted mailbox, tier changes, a first
+  message, forum topics, boards, AI chat, the support desk, bookings, calendar
+  exceptions, newsletter signup, comments, notification mail, profile photos,
+  Drive collaborators. Dev went back to logging within the hour; each flow now
+  says why it may write (a real owner rule where one exists: Board, schedule
+  windows and overrides, entry exceptions, vault wrappings, entity photos,
+  mailbox rows by grant, AI chat by its owner, DNS blocks by device; else
+  `rule_checked_write()` after the flow's own check, or
+  `server_initiated_write()` before sign-in and for the platform's own mail,
+  logs and drains), every caller listed in core_api_mechanical_test, and dev
+  refuses again. The gate could not see N1 because the CLI was exempt: a test
+  now checks every write made while a simulated person is signed in
+  (`Access::$check_cli_persons`, set by harness_boot), refusing. N2 (owner
+  decision): the owner rule covers read, write and soft delete; a permanent
+  delete is the level's alone, and a member's own purge says so. N3: agent
+  files are 10 throughout (their pages, `$delete_permission`, and
+  `write_to_disk()` itself). N4: `updateColumns()` asks a model's own write
+  rule always. N5: the coupon's links and an email's recipient groups follow
+  their parent's rule; removal buttons draw disabled below the row's rule.
+  V1-V5 taken (the request-wide flag documented, one audit row per guarded
+  delete).
+- The 173 `assert_can_write()` callers are redundant
+  and go as their files are touched. joinery_ai's AiMemory, RecipeRun, RecipeNote and AipRecipeItemLog
+  overrides that compared 10 became a write exception of 10 (and an owner
+  column for the first and third).
+
 **WP3: pages (3.4).**
 
 - A header on every admin page, from 8.4.
@@ -536,12 +651,114 @@ POST check in each of the ~60 handlers.
   forbids it.
 - The user edit page offers every level in `permissions.json` (Q4).
 
+- Built 2026-10-25 (docs/permissions.md § Pages). Every one of the 253 admin
+  pages carries its header from 8.4 (the three Server Manager pages 8.4 lacks
+  are config; WP6 sets the dashboard's 7); `page_undeclared` is on.
+  `/admin/server_manager/publish`'s script, `includes/publish_upgrade.php`, says
+  `level=8`.
+- The check is `RouteHelper::enforceAdminPage()` with `AdminPageAccess`: before
+  custom, dynamic and fallback routes, for the three URL families and a
+  plugin's dynamic route inside `/admin/` (checked against its `view`).
+  `check_permission()` does the refusing, so the sign-in redirect and the
+  IP-change logout are unchanged. The opt-out is `'admin_page_check' => false`
+  on publish_theme's route. The joinery_ai chat endpoints need none: their
+  `/profile/` copies are not admin paths, and under `/admin/` they are
+  checked like any page.
+- Menus derive (B15 closed): `MultiAdminMenu::visible_entries()` shows an
+  entry to whoever may open its page and a section when one of its entries
+  shows, for the admin sidebar and the member menus. `permission` left
+  admin_menus.json, every plugin.json, the sandbox manifest's menus and the
+  menu editor; `syncMenus()` ignores one still sent. `amu_min_permission`
+  stays in the table (NOT NULL in existing tables), written 0, never read;
+  `update_database --cleanup` can drop it.
+- Page-top `check_permission()`: the 94 at or below their page's level are
+  gone.
+- **Flip, 2026-10-25:** the other 147 went with WP2's flip, each read for what
+  its page does that no model check covers. Most were write proxies and were
+  deleted: the page opens at its class. Seventeen pages whose every action
+  needs more declare it: `class=keys` for the mailbox credential pages and
+  provisioning setup; `level=10` for run-now, stop-run, install-node, help
+  edit and login-as; `level=9` for error delete, the static cache, problem
+  reports and a bug report; `class=config` for the support threads (their
+  transcript is AI conversation data); `level=8` for the user edit page. One
+  action needing more than its page asks `Access::demand()`: installing,
+  activating or removing code (plugins, themes, marketplace, sandbox
+  approval, updates), running a task or a dry run, rebuilding the test
+  database, writing agent files to disk, a domain retry (it buys the domain),
+  a service tenant's grant and release, a mail shard, the mail-apps gateway
+  (restricted write), a DKIM-carrying domain's permanent delete (keys), the
+  2FA resets (keys), activating a user (restricted write), and a tier change
+  (money write). A Stripe refund and a product's Stripe create ask the row's
+  rule before the provider is called. The `admin_check_permission` rule is
+  on; `AdminPageAccess::levelForFile()` reads the header alone.
+  `admin_page_content_permanent_delete_logic.php`, whose page was deleted
+  earlier, went too.
+- The scaffolder writes the header (`class={access_class}`) on its admin views,
+  no `check_permission()` in its admin logic, an `assert_can_write()` before
+  the edit save, and `'{access_class}:write'` on the admin edit action
+  (`admin_permission` left the manifest).
+- Test: `tests/functional/admin_page_access_test.php` (33 checks: the mapping,
+  the levels, the menu rule, and over HTTP signed out, at 6 and at 10).
+- Review (reviewer2, 2026-10-25): `/setup` forwarded four backups actions to
+  admin_backups_logic, whose own `check_permission(10)` this package removed;
+  the forwarding now asks the backups page's level. A kept higher check is the
+  page's level while it stays (`AdminPageAccess::levelForFile()` reads it, cached
+  by mtime in APCu), so menus and pages agree. An inactive plugin's admin pages
+  map to no file and 404 as before. The header is matched on a line of its own.
+  The adminMenu report-problem entry links to a member page, so it shows to
+  everyone who sees the admin sidebar (it said 5). A newer plugin.json meeting
+  an older core's syncMenus (which required `permission`) is not a real path:
+  plugins ship with their release, and the marketplace builds sandboxed
+  plugins' menus from their manifests.
+
 **WP4: API action levels (3.5).**
 
 - Every descriptor declares its level, and the test enforces it.
 - Fix B3 in both places: the floor check, and the session the action or form
   runs under.
 - List legacy page handlers with non-row side effects; move them to actions.
+
+- Built 2026-10-25. Every descriptor outside Server Manager (WP6) declares
+  `'auth' => ['min_user_permission' => …]` (357 declare; 303 were written here
+  from 8.7's proposals);
+  `action_undeclared` is on. A descriptor made by a builder declares its level
+  in the builder, and `AccessDeclarations` follows `return Class::method(`
+  (`ForumAction::memberDescriptor()` already said 0; `MailAppAction::descriptor()`
+  now does).
+- Where a proposal would have locked members out it was 0 instead, the logic's
+  own rule being the gate: the joinery_ai panel and chat actions
+  (ai_action_resolve, ai_actions_list, ai_panel_state, ai_panel_toggle,
+  ai_status, chat_level_batch, and chat_set_capabilities, which the shared
+  chat body offers on both the admin and the /profile/ chat), the mailbox's
+  attachment_text, send, setup_status and direct_status,
+  forum_post_moderate (moderators are ForumPost's write level, 5),
+  office_editor_create, passkey_client_report, vault_heartbeat,
+  support_origin_confirm, resolver_snapshot (a DNS server's key) and the three
+  fleet_* actions a fleet member calls.
+- Raised from a declared level: plugin_provisioning_check 5 to 8,
+  user_search 5 to personal:read, validate_server_file 5 to config:read,
+  resolver_key_issue 8 to keys:write, resolver_key_revoke 8 to 10 (an 8 on the
+  config plugin-settings page sees them refuse until WP5 draws them disabled;
+  key-changing is 10, Q8), test_connection 8 to 10 (its logic refused below
+  10). **Left for
+  the owner** (never lowered here): email_available and image_list declare 5,
+  8.7 proposes 0; the support desk's eight support_* actions declare 5, 8.7
+  proposes 0 (assets/js/support_panel.js calls them from member pages, so 0
+  moves nothing else); marketplace_catalog declares 10, 8.7 proposes 8.
+- B41 (found here): root_request_status's descriptor said
+  `'min_permission' => 8`, a key nothing reads, so its floor was 0 (the logic
+  checks 8 itself). It declares config:read; the declaration test's
+  `action_level_misplaced` rule refuses that key.
+- B3 was fixed in both places on 2026-10-24 (`ApiLogicEndpoint::actingPermission()`).
+- Legacy page handlers with a side effect that is not a row write (to move to
+  an action when touched, 3.5): admin_backups (exec), admin_plugins and its
+  logic (activate, deactivate, uninstall), admin_themes (activate),
+  admin_sandbox_approve (activate), admin_scheduled_tasks, admin_static_cache
+  (cache clear), admin_emails_send, admin_settings_email (test send),
+  admin_debug_email_logs (resend), admin_user (mail), admin_problem_reports
+  (send), bookings' admin_booking_type_edit (mail), the mailbox setup page
+  (test mail), admin_apache_errors (shell), and Server Manager's index,
+  node_detail, job_detail, install_node_form and publish_upgrade pages (jobs).
 
 **WP5: surfaces (3.3, 3.7),** plus a test per plugin and per core section:
 
@@ -550,6 +767,71 @@ POST check in each of the ~60 handlers.
   and the JavaScript button helper take a model or action.
 - Every page is reachable at its level and refused below it; every model and
   action a page changes refuses a user below its level.
+
+- Built 2026-10-25 (docs/permissions.md § Surfaces). The column rules:
+  `columns_hidden_from_session()` and `columns_locked_for_session()` on a row
+  (none on the CLI; the owner sees their own). The REST serializer omits a
+  hidden column in all three shapes; FormWriter handed a saved row does not
+  draw a hidden input or its value, disables a locked one, and draws a row the
+  reader may not change read only with a "needs level N" note (a new row is
+  left to its save, which knows its owner); `tableheader()` takes
+  `'columns' => [position => 'Class.column']` and drops that column; the AI
+  executor excludes a hidden column unless the reads are owner-scoped.
+- Controls: `action_button()` and `renderActionEntry()` take `'requires'`
+  (a level, `class:verb` or `api:{action}`) or `'model'` + `'verb'`
+  (`action_refusal()`), and below it draw the button disabled with the note;
+  `api_action_button()` reads an action's declared level from its descriptor
+  and carries `data-jy-api-action`. Converted to the row's rule or the model's
+  level: admin_page, admin_post, admin_survey, admin_message (delete, undelete,
+  permanent delete, photos), admin_event (edit, photos, emailing registrants,
+  new session), store admin_products, admin_product_edit, admin_product_groups,
+  event_manager admin_event_types.
+- Until WP2's flip a hidden control's handler may still accept the POST (the
+  model check only logs): the page then shows the rule that the flip enforces.
+- Tests: `tests/functional/admin_page_levels_test.php`, one check per core
+  section and active plugin (14): every admin page opens at its level and
+  refuses (401) the level below; it found admin_emails_send, a send handler
+  declared as a personal page, now `level=8`. The surfaces are in
+  model_access_test (47).
+- Review (reviewer2, 2026-10-25), all taken: a link or POST entry that targets
+  another page asks that page's level (`'requires' => 'page:{path}'`,
+  `PublicPageBase::may_open()`): admin_page's and admin_post's Permanent
+  Delete, admin_survey's Edit, and the two send buttons to admin_emails_send.
+  A refusal by the row's own rule at the reader's level says "Not allowed for
+  this row.". The two classes are styled in joinery-styles.css. A 500 now
+  fails admin_page_levels.
+- **A 5 stops editing content in the UI with this package** (the owner's
+  scheme, 8.3 item 1): seven edit pages that open at 5 hand FormWriter a row
+  whose model writes at 6 or 7, so a non-owner 5 sees them read only where they
+  could save before: admin_post_edit, admin_page_edit, admin_component_edit
+  (authors keep theirs), admin_email_template_edit, admin_question_edit,
+  admin_subscription_tier_edit (B17) and forum's admin_forum_category.
+- B42 (found by admin_page_levels): 39 admin pages answered 500 when opened
+  without their row id, and two at any time. A record loaded with no key
+  answers 404 (`ErrorStatus::of()`), a missing or malformed request variable
+  read by `LibraryFunctions::fetch_variable()` answers 400 (it threw a
+  permanent error); admin_surveys sorted its question counts by a column that
+  does not exist; admin_stripe_invoices handed its collection null options
+  without `?u=`; admin_order_refund threw a permanent error for a missing item.
+  Opening every page that way also showed 64 PHP warnings in 45 pages (missing
+  request keys, uninitialised variables), fixed at each.
+- **Flip, 2026-10-25:** every inline level comparison (about 190 in 150
+  files) asks `Access` (`permits()` for what a page shows, `decide()` or
+  `demand()` for an action, `allows()` for a stored level), a row's rule or a
+  model's level; the `level_compared_inline` rule fails a new one. Levels that
+  moved with their meaning: deleted rows in a list show at the model's
+  soft-delete level (7 or 8, was 10); Delete, Undelete and Edit controls follow
+  the row's rule (content soft delete 7, was 8; permanent delete 9, was 10 or
+  8; Add User 8, was 10); Drive sharing, key grants and link revocation for
+  another member's item, and a DNS filter on another member's device, take the
+  row's write rule (8, was 5); the IMAP feed controls take the account's
+  write level (9, was 10); the mailbox and domain trash its soft-delete level
+  (8, was 10); the test-mode coupon list money read (5, was 8); a bug report
+  notice the reports' read level (6, was 9); the sender's member account
+  personal read (6, was 5). `Access` gained `permits()`, `demand()` and
+  `staffLevel()`. A read of a keys column is not yet
+  audited (3.6). No admin list page passes `'columns'` yet: none shows a
+  column stricter than its model.
 
 **WP6: Server Manager adopts it.**
 
@@ -565,6 +847,47 @@ POST check in each of the ~60 handlers.
   read sub-ops (`refresh_list`, `list_status`) into their own action at 7; the
   run and restore sub-ops stay at 8 (destructive restores at 10, Q8). Until the
   split lands the whole action is 8 (8.7).
+
+- Built 2026-10-25 (plugins/server_manager/docs/overview.md, Pages). The
+  dashboard, node detail, jobs and job detail open at 7 (`level=7`); their
+  blanket `check_permission(10)` is gone, and so is that of publish_upgrade,
+  rollouts, fleet_security, incident, incidents, machines and specs (8). Every
+  POST on those pages asks `SmActionLevels::refuse_post()` first: the node
+  detail actions (76: the looks at 7, changes at 8, destructive and
+  key-changing at 10), the dashboard's join, escrow and break-glass actions
+  (10), job cancel and rerun (8), deleting a release and pruning archives (10),
+  triage, rollouts and security runs (8). An action not placed needs 10; the
+  test fails a page action without one. Below 8 node detail shows only its
+  overview, jobs and backups tabs, and the DNS publish box is not offered.
+- Pages that keep a 10 of their own (the router reads it): host_add, node_add,
+  machine_edit and install_node_form (credentials, a server bought), and the
+  domains, transfers, service tenants and provisioning setup logic; targets and
+  target_info are keys.
+- Actions: job_status, refresh_node_status, probe_api and moved_site_check
+  at 7; **the split**: `backup_list` (refresh_list, list_status) at 7, and
+  backup_actions at 8 with delete_file and restore_objects at 10 in the logic
+  (`Access::decide(10)`); incident_triage and release_notes_draft at 8 (their
+  logic no longer checks 10 itself); transfer_operator 10; releases (public),
+  domain_check (guest checkout), the services_* and shelf_* actions (another
+  site's key) and transfer_customer (the buyer's own page) at 0.
+- Models are config with node and provisioning credentials as keys columns
+  (WP2: mgn_api_secret_key and the other credentials are sealed, so keys).
+- The provisioning service account is 8 (WP2's review: it reads and queues
+  mail for other people's orders); migration sm_026.
+- Q11's job output reaches 7 through job_detail, redacted on the node and by
+  `SmSecretRedactor` on the page.
+- Test: plugins/server_manager/tests/sm_action_levels_test.php (70).
+- Review (reviewer2, 2026-10-25): 0 NEEDED. The services_* and shelf_* actions
+  are 0 because the tenant is the calling key's (`ShelfBroker::tenantFor()`,
+  `JoineryServices::enrol()` refuse a tenant whose user is not the caller).
+  backup_list declares `mutates` (refresh_list files a job), so the AI
+  assistant asks before that look. **For the owner (Q8):** hold_container
+  (stopping a container is an outage, reversible) and apply_update_all_on_host
+  (one click upgrades every site on a host) are at 8 as changes; say if either
+  is "destructive" and belongs at 10.
+- **Left:** node detail's tabs still draw a 7 the buttons for 8 and 10 actions,
+  which refuse with the level when pressed; drawing them disabled
+  (`action_refusal()`) goes with each tab as it is touched.
 
 ## 6. Open questions
 
@@ -624,7 +947,8 @@ POST check in each of the ~60 handlers.
 
 Each is tracked in memory `project_todo_admin_access_research_bugs`. They need
 fixing whatever happens to this spec. Status as of 2026-10-24: every one is fixed
-except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
+except B1 (WP1's flip), whose fix is that package; B15 and B23 were fixed by WP3
+and WP2 on 2026-10-25.
 
 | ID | Bug | Where | Status |
 |---|---|---|---|
@@ -642,7 +966,7 @@ except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
 | B12 | File upload widget posts to `/admin/admin_file_upload_process` without a CSRF header | FormWriterV2Base.php | not a bug: no CSRF in admin (owner, settled) |
 | B13 | Store order page and joinery_ai sweep write on page view without `server_initiated_write` | StripeHelper::update_order_refund_amount_from_stripe(); ChatAsync::sweepMessage | fixed 10-24: both marked, listed in core_api_mechanical_test |
 | B14 | User permanent-delete confirmation unreachable; admin_softdelete never deletes; admin_page form nested in `#layoutForm`; items admin links to missing `/admin/admin_item*` | various | fixed 10-24: permanent delete reachable (WP1); admin_softdelete removed (nothing linked to it); admin_page's order inputs join `#layoutForm` by its id so each Remove is its own form (Remove and Save Order both removed the last component); items links point at `/plugins/items/admin/`, and the item pages no longer require a missing core file |
-| B15 | Menu permission and page check disagree in 33 places | admin_menus.json, plugin.json vs pages | WP3 (menus derive from the page) |
+| B15 | Menu permission and page check disagree in 33 places | admin_menus.json, plugin.json vs pages | fixed 10-25 (WP3): a menu entry shows to whoever may open its page |
 | B16 | The single API key page and the key create and edit pages, and the webhook pages, are gated at 8, but they issue or show secrets | adm/logic/admin_api_key_logic.php, admin_api_key_edit_logic.php, admin_webhook_logic.php, admin_webhook_edit_logic.php | fixed 10-24: 10 (8.4); the webhook list stays 8; API Keys menu entry 10 |
 | B17 | Subscription tier edit and tier edit write prices at 5 | adm/logic/admin_subscription_tier_edit_logic.php, adm/admin_tier_edit.php | fixed 10-24: open at 5, save at 7 |
 | B18 | Store orders list is gated at 5 and renders buyer addresses | plugins/store/admin/admin_orders.php | fixed 10-24: 6 |
@@ -650,7 +974,7 @@ except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
 | B20 | Settings pages take secret fields at 8; keys need 10 | SettingsWriter, SettingsFieldRenderer | fixed 10-24: a credential is drawn locked below 10 and `SettingsWriter` refuses its change, naming it |
 | B21 | Sandbox page accepts POST with only the router gate at 5 | adm/logic/admin_sandbox_page_logic.php | fixed before 10-24 (`SandboxPluginManager::ADMIN_PERMISSION`, 8) |
 | B22 | Password edit has no guard on the target user's level: an 8 resets a 10's password; users edit lets an 8 change a 10's email and allowed IPs | data/users_class.php authenticate_write | fixed 10-24: the target rule (3.8) in `User::authenticate_write()`, asked by password edit, users edit (incl. 2FA reset), activate, soft delete and undelete |
-| B23 | Any level 5 reads every row of every model through the REST API and the AI chat | SystemBase is_owner_or_admin(); data/users_class.php; api/apiv1.php; ChatTurnContext.php | WP2 (model read levels) |
+| B23 | Any level 5 reads every row of every model through the REST API and the AI chat | SystemBase is_owner_or_admin(); data/users_class.php; api/apiv1.php; ChatTurnContext.php | fixed 10-25 (WP2): the REST record surface and the AI chat read at each model's read level |
 | B24 | `User.usr_totp_secret` holds the TOTP seed in plaintext | data/users_class.php | fixed 10-24: sealed (`usr_users.usr_totp_secret`); the reconciler sealed the stored ones |
 | B25 | `User.usr_second_factor_hmac_key` holds a second-factor HMAC key in plaintext | data/users_class.php | fixed 10-24: sealed (`usr_users.usr_second_factor_hmac_key`, ephemeral) |
 | B26 | `ManagedNode.mgn_api_secret_key` stores the node's API secret in plaintext | plugins/server_manager | fixed 10-24: sealed (`ManagedNode::set_api_secret_key()` / `api_secret_key()`) |
@@ -666,6 +990,33 @@ except B1 (WP1's flip), B15 (WP3) and B23 (WP2), whose fix is that package.
 | B36 | Found by installdefaults in dev's log (the warning B35 now catches): logout() began with get_user_id(), which ran the session checks; when the app-key check had called logout(), the account-standing check (not yet run) called logout() again inside it, which ended the session, and the outer call's session_destroy() then found none. Both checks fail together after a password change (it bumps the session generation and revokes the app keys): app_platform's password-change step. The three warnings in dev's log came from that step (each client requested only /profile, /profile/profile and /login) | includes/SessionControl.php | fixed 10-25 (1.18): logout() marks both checks done before its own identity calls, and destroys only an active session (a page-probe request has none); app_platform checks the ended session's old cookie is anonymous |
 | B37 | Found building WP0: the API floor cast `min_user_permission` to int, so the first `class:verb` level declared would have read as 0 and opened its action to everyone | includes/ApiAuth.php, adm/logic/admin_api_key_edit_logic.php | fixed 10-25 (WP0): both read the level through `Access::allows()`; a malformed one throws |
 | B38 | Found doing Q4 in WP0: the user edit save stored any posted `usr_permission` (99, text) | adm/logic/admin_users_edit_logic.php | fixed 10-25: only a level permissions.json names; the dropdown lists them |
+| B39 | Found by WP2's burn-down: the REST record surface (CRUD, drive upload, auth, app, management) ran with the anonymous session, so anything below it that asked the session (the model write check, a model's own rule) saw nobody | api/apiv1.php | fixed 10-25 (2.31): every route family past the action dispatch runs as its caller (`set_api_user()`) |
+| B43 | Found by WP5's admin_page_levels (every admin page asked with a GET): admin_file_upload_process imported every loose file in uploads/ as a new File row on a GET (WP1's guard logged it, in log mode, and it went ahead: 935 rows on dev, fil_files 132429-133463, owner user 3, 06:42-06:44 UTC 10-25); admin_errors_delete ran its DELETE on a GET | adm/logic/admin_file_upload_process_logic.php, adm/admin_errors_delete.php | fixed 10-25: both are POST-only. **Owner:** the 935 dev rows are test debris, not yet removed (a DB write) |
+| B44 | Found by a sweep for leftover check_permission(5) floors after WP3: AbTestVersionsPanel ran its actions for anyone at 5, and an admin_page or admin_component_edit reader at 5 could crown a variant into the page (content write is 6; the model writes only log); DnsPublishBox::handle's own floor was 5 for a config write (every caller gates at 8 or 10 first, so no hole) | data/ab_tests_class.php, includes/dns/DnsPublishBox.php | fixed 10-25: the panel's actions need can_write on the entity; the box's floor is config:write |
+| B45 | Found classifying the page-top checks: the owner rule read the row's owner after set(), so a 5 who set a booking type's owner column to themselves passed BookingType's money write (7) as its owner | includes/SystemBase.php access_owner_is(), data/entries_class.php, data/schedules_class.php | fixed 10-25: a saved row's owner is the stored one (access_stored()) |
+| B46 | Model helpers that write their row with their own SQL skipped the model check and the GET guard: GroupMember, EventRegistrant and WaitingList remove(), Board::undelete(), and File and User permanent_delete()'s cleanup before the parent's check (photo links, mailing-list unsubscribes) | data/group_members_class.php, plugins/event_manager/data/{event_registrants,waiting_lists}_class.php, plugins/boards/data/boards_class.php, data/files_class.php, data/users_class.php | fixed 10-25: each asks guard_raw_write() first |
+| B47 | admin_page_edit built an empty link from $event, which the page never defines: saving a page with no link fatalled | adm/admin_page_edit.php | fixed 10-25 |
+| B48 | admin_video_edit named its link field pag_link and set the link after the save, so a video's link was never stored | adm/admin_video_edit.php | fixed 10-25 |
+| B49 | create_install_sql read each admin menu entry's permission, which WP3 removed from admin_menus.json (an undefined key per entry) | utils/create_install_sql.php | fixed 10-25: the menu rows carry no level |
+| B50 | The coupon edit's clear step filtered MultiCouponCodeProduct by 'coupon_id', an option it does not implement, so it threw on every coupon save that reached it (since 2052690b8) | plugins/store/admin/logic/admin_coupon_code_edit_logic.php | fixed 10-25: 'coupon_code_id' |
+| B51 | Three admin pages called admin_header() with a bare number, a fatal on PHP 8 when the page reached its header | adm/admin_email_view.php, adm/admin_log_event.php, adm/admin_file_upload_process.php | fixed 10-25: real options |
+| B52 | Removing a recipient group from an email never checked the group was that email's: any group id posted was deleted | adm/logic/admin_email_logic.php, adm/admin_email_recipients_modify.php | fixed 10-25: the group must be the email's, and the email's write rule decides |
+| B53 | /lists: a visitor who typed someone's email unsubscribed that person from every other list, private ones included, and a member's save took them off private lists they cannot see; /list let a visitor unsubscribe any address and made an account doing it | logic/lists_logic.php, logic/list_logic.php | fixed 10-25: only the public lists shown are touched; a visitor's post only adds |
+| B54 | Contact preferences: a member could post a private list's id and subscribe themselves, and a save unsubscribed them from lists the form never showed | logic/contact_preferences_logic.php, data/users_class.php | fixed 10-25: add_user_to_mailing_lists() takes the offered lists as its scope |
+| B55 | Blog comments: the server never checked comments_active or comments_unregistered_users; only the view hid the form | data/comments_class.php | fixed 10-25 |
+| B56 | A failed send was never queued for retry when the message had no display name (equ_from_name required) | includes/EmailSender.php | fixed 10-25: the address stands in |
+| B57 | Checkout stored a coupon-discounted Stripe price as the plan's price (get_or_create_price overwrote prv_stripe_price_id), so later tier changes billed at the coupon amount; prices matched on amount only, first 10, any interval | plugins/store/includes/StripeHelper.php | fixed 10-25: the canonical price comes only from prv_version_price, matched in cents, paged, by interval and trial; any other amount gets its own price and never writes the version |
+| B58 | A free cart completed on a GET to /cart_charge (any link could finish it), and a non-gateway GET made an unpaid order | plugins/store/logic/cart_charge_logic.php, checkout_logic.php, views/checkout.php | fixed 10-25: the billing form posts; a non-gateway GET redirects and writes nothing |
+| B59 | /cart_charge?subscription=1 with no PayPal subscription id marked the order paid unverified; a PayPal one-time payment's amount was never checked and its id could be replayed onto another order | plugins/store/logic/cart_charge_logic.php | fixed 10-25: a verified subscription id on a recurring cart; amount and currency must match the cart; an id already on another order is refused |
+| B60 | A guest could check out as an existing account by its email: the card, customer id and order were written to that account | plugins/store/logic/cart_charge_logic.php | fixed 10-25: refused before any write, except a gateway return |
+| B61 | A first App Store or Play claim never compared the receipt's account token with the caller: a member could claim another member's purchase | plugins/store/includes/MobileBilling.php | fixed 10-25: the token must name the caller; a receipt without one is refused (the owner decided 10-25: keep the refusal) |
+| B62 | Public booking had no spam gate, and a visitor typing a member's email filed the booking and answers under that account and got its manage token | plugins/bookings/logic/book_logic.php, views/book.php | fixed 10-25: register's gates and a rate limit; an existing account's email needs that account signed in |
+| B63 | Newsletter signup subscribed an existing account by its typed email | logic/list_logic.php, logic/lists_logic.php | fixed 10-25: a visitor is asked to sign in for that address (lands with misc4's optional_username commit) |
+| B64 | isSecure() believed X-Forwarded-Proto/-Ssl/-Port from any client, which flipped protocol_observed_scheme and the session cookie's Secure flag | includes/LibraryFunctions.php, includes/SessionControl.php, api/apiv1.php, includes/UploadHandler.php, maintenance_scripts/install_tools/host_housekeeping.sh | fixed 10-25: believed only from a proxy Apache trusts (JOINERY_FORWARDER_TRUSTED), loopback or a Cloudflare edge |
+| B65 | Another device that knew a member's push endpoint URL could take it over | includes/PushSender.php | fixed 10-25: another account's endpoint moves only with the same device cookie |
+| B42 | Found by WP5's admin_page_levels: an admin page opened without its row id answered 500 (39 pages), admin_surveys and admin_stripe_invoices always did, and 45 pages logged PHP warnings | includes/ErrorClasses.php, includes/LibraryFunctions.php, adm/admin_surveys.php, plugins/store/admin/admin_stripe_invoices.php and others | fixed 10-25: a no-key load answers 404, a bad request variable 400; the two lists fixed; the warnings fixed at each page |
+| B41 | Found doing WP4: root_request_status's descriptor declared `'min_permission' => 8`, which nothing reads; its floor was 0 and only the logic's own check held | logic/root_request_status_logic.php | fixed 10-25: `config:read` in `auth`; the declaration test refuses the misplaced key |
+| B40 | Found doing WP2: `SpaceAccess::moderatorLevel()` read `$post_model::$write_permission` directly; once every model has that property (null unless declared), a post model with no exception would have made everyone a moderator | includes/SpaceAccess.php | fixed 10-25 (1.2.0): it reads `access_level('write')` |
 
 ## 8. Level scheme and page inventory
 

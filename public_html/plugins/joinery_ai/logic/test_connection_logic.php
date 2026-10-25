@@ -16,7 +16,7 @@ function test_connection_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only the site owner can test the AI provider.');
 	}
 
@@ -66,6 +66,7 @@ function test_connection_logic_descriptor(): array {
 		'mutates'     => false,
 		'requires_session' => true,
 		'auth'        => [
+			'min_user_permission' => 10,   // owner only, as the logic says
 			'requires_browser_session' => true,
 		],
 		'input'       => [],

@@ -8,6 +8,7 @@
  * delegates signature verification + payload extraction to the provider,
  * and then hands off to InboundEmailRouter::processEmail().
  *
+ * @version 1.1 - writes after verification are the server's own (declared_permissions 3.2)
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -75,6 +76,11 @@ if ($result === null) {
 	echo 'Rejected';
 	exit();
 }
+
+// The provider's signature verified above is the authority: no person is behind what this
+// writes, so every write from here on is the server's own (spec
+// declared_permissions 3.2).
+SystemBase::$allow_get_mutation = true;
 
 try {
 	$router = new InboundEmailRouter();

@@ -29,14 +29,17 @@ function shelf_sign_logic(array $input): LogicResult {
 	}
 	try {
 		$row = ShelfBroker::tenantFor($user_id, intval($session->get_api_key_id()));
-		$data = ShelfBroker::sign($row, intval($input['run_id'] ?? 0), (string)($input['name'] ?? ''),
-			trim((string)($input['operation'] ?? '')), array(
-				'bytes'     => intval($input['bytes'] ?? 0),
-				'upload_id' => (string)($input['upload_id'] ?? ''),
-				'first'     => intval($input['first'] ?? 1),
-				'count'     => intval($input['count'] ?? ShelfBroker::PARTS_PER_BATCH),
-				'space_id'  => intval($input['space_id'] ?? 0),
-			));
+		// tenantFor() proved this is the caller's own tenant; the broker's records follow.
+		$data = SystemBase::rule_checked_write(function () use ($row, $input) {
+			return ShelfBroker::sign($row, intval($input['run_id'] ?? 0), (string)($input['name'] ?? ''),
+				trim((string)($input['operation'] ?? '')), array(
+					'bytes'     => intval($input['bytes'] ?? 0),
+					'upload_id' => (string)($input['upload_id'] ?? ''),
+					'first'     => intval($input['first'] ?? 1),
+					'count'     => intval($input['count'] ?? ShelfBroker::PARTS_PER_BATCH),
+					'space_id'  => intval($input['space_id'] ?? 0),
+				));
+		});
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (S3SignerException $e) {
@@ -47,6 +50,7 @@ function shelf_sign_logic(array $input): LogicResult {
 
 function shelf_sign_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside one of the site\'s storage spaces (run_id 0, space_id from shelf_list) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete. A write for a key a finished run completed answers {exists, bytes, sha256} instead of a link.',
 		'requires_session' => true,
 		'mutates'          => true,

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_subscription_tier_edit_logic.php'));

@@ -53,7 +53,11 @@ function drive_trash_logic(array $input): LogicResult {
 			}
 		}
 		if ($entity_type === DriveHelper::ENTITY_FOLDER) {
-			DriveHelper::soft_delete_folder_cascade($entity);
+			// owns() above: the owner of the folder trashes all it holds,
+			// whichever row in the subtree the cascade reaches.
+			SystemBase::rule_checked_write(function () use ($entity) {
+				DriveHelper::soft_delete_folder_cascade($entity);
+			});
 		} else {
 			$entity->soft_delete();
 		}
@@ -71,6 +75,7 @@ function drive_trash_logic(array $input): LogicResult {
 
 function drive_trash_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Move a Drive file or folder to the trash (soft delete). Owner only.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

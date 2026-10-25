@@ -22,6 +22,7 @@ class FolderException extends SystemBaseException {}
 class Folder extends SystemBase {
 	public static $prefix = 'fol';
 	public static $tablename = 'fol_folders';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fol_folder_id';
 
 	// Not a REST/AI resource — all access flows through the drive_* actions.

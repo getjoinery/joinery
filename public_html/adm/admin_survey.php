@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_survey_logic.php'));
@@ -8,10 +9,13 @@ $page_vars = process_logic(admin_survey_logic(array_merge($_GET, $_POST)));
 extract($page_vars);
 
 // Build dropdown actions
-$options['altlinks'] = array('Edit Survey' => '/admin/admin_survey_edit?svy_survey_id=' . $survey->key);
-if (!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
+$options['altlinks'] = array();
+if ($survey->can_write(SessionControl::get_instance()) && PublicPageBase::may_open('/admin/admin_survey_edit')) {
+    $options['altlinks']['Edit Survey'] = '/admin/admin_survey_edit?svy_survey_id=' . $survey->key;
+}
+if (!$survey->get('svy_delete_time') && $survey->can_delete(SessionControl::get_instance())) {
     $options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_survey', 'hidden' => array('action' => 'delete', 'svy_survey_id' => $survey->key));
-} else if ($_SESSION['permission'] >= 8) {
+} else if ($survey->get('svy_delete_time') && $survey->can_delete(SessionControl::get_instance())) {
     $options['altlinks']['Undelete'] = array('post' => '/admin/admin_survey', 'hidden' => array('action' => 'undelete', 'svy_survey_id' => $survey->key));
 }
 

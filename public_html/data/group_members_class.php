@@ -14,6 +14,8 @@ class GroupMemberException extends SystemBaseException {}
 
 class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	public static $tablename = 'grm_group_members';
+	public static $access_class = 'content';
+	public static $write_permission = 8;
 	public static $pkey_column = 'grm_group_member_id';
 
 	protected static $foreign_key_actions = [
@@ -51,6 +53,7 @@ class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	);	
 
 function remove(){
+		$this->guard_raw_write('soft_delete');
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -63,13 +66,6 @@ function remove(){
 	}	
 
 	// Unique constraints now handled automatically by SystemBase
-	
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 	
 }
 

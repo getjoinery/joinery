@@ -27,7 +27,7 @@ function event_waiting_list_logic(array $input): LogicResult {
 	$event = new Event($event_id, TRUE);
 
 	if(!$event || !$event->get('evt_visibility') || $event->get('evt_delete_time')){
-		if($session->get_permission() < 5){
+		if(!$event->can_read($session)){
 			require_once(LibraryFunctions::display_404_page());
 		}
 	}
@@ -118,6 +118,7 @@ function event_waiting_list_logic(array $input): LogicResult {
 
 function event_waiting_list_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Add the current user (or a guest) to an event\'s waiting list.',
 		'requires_session' => false,
 		'mutates'          => true,

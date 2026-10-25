@@ -12,6 +12,7 @@ class SdScheduledBlockFilter extends SystemBase {
 
 	public static $prefix = 'sbf';
 	public static $tablename = 'sbf_scheduled_block_filters';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sbf_scheduled_block_filter_id';
 
 	protected static $foreign_key_actions = array(
@@ -24,6 +25,12 @@ class SdScheduledBlockFilter extends SystemBase {
 	    'sbf_filter_key' => array('type'=>'varchar(32)'),
 	    'sbf_action' => array('type'=>'int2'),
 	);
+
+	/** A rule of a block is the block's device owner's (SdScheduledBlock::ownerOfBlock()). */
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0
+			&& SdScheduledBlock::ownerOfBlock((int)$this->access_stored('sbf_sdb_scheduled_block_id')) === (int)$user_id;
+	}
 
 }
 

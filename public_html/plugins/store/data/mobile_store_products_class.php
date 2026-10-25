@@ -25,6 +25,7 @@ class MobileStoreProductException extends SystemBaseException {}
 class MobileStoreProduct extends SystemBase {
 	public static $prefix = 'msp';
 	public static $tablename = 'msp_mobile_store_products';
+	public static $access_class = 'money';
 	public static $pkey_column = 'msp_mobile_store_product_id';
 
 	// Admin-only configuration — not exposed to the REST API or AI surface.

@@ -18,6 +18,7 @@ class BoardCard extends SystemBase {
 
 	public static $prefix = 'bcd';
 	public static $tablename = 'bcd_cards';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bcd_card_id';
 
 	const SOURCE_WEB = 'web';

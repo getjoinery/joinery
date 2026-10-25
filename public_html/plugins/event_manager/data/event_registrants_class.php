@@ -35,15 +35,8 @@ class EventRegistrantUnviewableDisplayException extends EventRegistrantException
 
 class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'evr_event_registrants';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'evr_event_registrant_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -120,6 +113,7 @@ static function check_if_registrant_exists($userid, $eventid){
 	}
 
 	function remove(){
+		$this->guard_raw_write('soft_delete');
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -142,17 +136,6 @@ static function check_if_registrant_exists($userid, $eventid){
 		return $output_array;
 	}
 
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 8) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}	
-	
 	function save($debug=false) {
 		if(!$this->key){
 			$dbhelper = DbConnector::get_instance();

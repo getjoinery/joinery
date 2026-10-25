@@ -19,6 +19,7 @@ class DebugEmailLogException extends SystemBaseException {}
 class DebugEmailLog extends SystemBase {
 	public static $prefix = 'dbl';
 	public static $tablename = 'dbl_debug_email_logs';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'dbl_debug_email_log_id';
 
 	public static $field_specifications = array(

@@ -9,7 +9,16 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/UploadHandler.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
+
+	// Only a POST carries an upload. Any other method would make UploadHandler
+	// list upload_dir, and the loop below would take each listed file as new.
+	if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+		http_response_code(405);
+		header('Allow: POST');
+		header('Content-Type: application/json; charset=utf-8');
+		echo json_encode(array('files' => array()));
+		return LogicResult::render(array());
+	}
 
 	$settings = Globalvars::get_instance();
 

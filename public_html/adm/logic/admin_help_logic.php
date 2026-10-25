@@ -14,7 +14,6 @@ require_once(PathHelper::getIncludePath('includes/DocsScanner.php'));
 function admin_help_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
@@ -59,7 +58,7 @@ function admin_help_logic(array $input): LogicResult {
 	// with nothing to show for it. Only the origin -- the deployment the code is
 	// written on -- offers the editor, and only to a superadmin.
 	$edit_url = '';
-	if (empty($error) && DeploymentHelper::isOriginNode() && $session->get_permission() >= 10) {
+	if (empty($error) && DeploymentHelper::isOriginNode() && Access::permits(10, $session)) {
 		// No ?doc= is the Overview, which renders docs/index.md.
 		$edit_key = empty($selected_doc) ? 'index' : $selected_doc;
 		$resolved = DocsScanner::resolve_path($edit_key, $docs_dir);

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 /**
  * Redirect stub — database ops is now a tab on node_detail.
  */

@@ -24,7 +24,7 @@ function plugin_provisioning_check_logic_descriptor(): array {
 		'mutates'     => false,
 		'auth'        => [
 			'capability'          => 'read',
-			'min_user_permission' => 5,
+			'min_user_permission' => 8,
 		],
 		'input'       => [],
 	];

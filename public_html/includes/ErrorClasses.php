@@ -36,6 +36,13 @@ final class ErrorStatus {
         if ($exception instanceof \DisplayableErrorMessage || $exception instanceof \DisplayableErrorMessageNoLog) {
             return 400;
         }
+        // A record asked for with no key: a page opened without the row it
+        // shows (an edit link without its id). Nothing there to show, not a
+        // server fault; it is still recorded, so a code path that loads with
+        // no key is seen.
+        if ($exception instanceof \SystemBaseNoKeyError) {
+            return 404;
+        }
         return 500;
     }
 

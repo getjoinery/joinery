@@ -16,7 +16,6 @@
  */
 function admin_updates_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	$managed = ManagementNodeStatus::is_managed();
@@ -25,6 +24,7 @@ function admin_updates_logic(array $input): LogicResult {
 	// Only a POST asks for an update: a link is a GET, and a browser follows
 	// one from any site with this admin's session cookie attached.
 	if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($input['action'] ?? '') === 'queue_upgrade') {
+		Access::demand(10, $session);   // root runs the upgrade
 		if ($managed || $origin) {
 			return LogicResult::redirect('/admin/admin_updates');
 		}

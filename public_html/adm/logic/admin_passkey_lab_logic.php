@@ -8,7 +8,6 @@ function admin_passkey_lab_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$settings = Globalvars::get_instance();
 	$passkeys_enabled = (bool)$settings->get_setting('passkeys_enabled');

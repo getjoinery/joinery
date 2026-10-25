@@ -113,7 +113,7 @@ function mail_export_start_logic_descriptor(): array {
 		'description' => 'Ask for a download of a mailbox, or one folder, as a zip of mbox files',
 		'mutates' => true,
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input' => array(
 			'alias_id' => array('type' => 'int', 'required' => true, 'label' => 'Mailbox alias ID'),
 			'folder'   => array('type' => 'string', 'required' => false, 'label' => 'One folder (omit for the whole mailbox)'),

@@ -7,7 +7,6 @@ function admin_locations_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(7);
 	$session->set_return();
 
 	$numperpage = 30;

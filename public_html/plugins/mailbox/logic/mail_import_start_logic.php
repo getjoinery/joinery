@@ -171,6 +171,7 @@ function mail_import_too_large_message(int $posted_bytes): string {
  */
 function mail_import_start_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Queue a mail archive (mbox, .eml folder, zip, tar) for import into a mailbox.',
 		'requires_session' => true,
 		'mutates'          => true,

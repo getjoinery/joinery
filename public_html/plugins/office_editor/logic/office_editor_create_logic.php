@@ -133,6 +133,7 @@ function office_editor_create_logic(array $input): LogicResult {
 
 function office_editor_create_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Make a blank document (.docx) or spreadsheet (.xlsx) in a Drive folder and return the page that opens it in the document editor.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Test Database Management
  *
@@ -13,7 +14,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10); // Superadmin only
 
 $settings = Globalvars::get_instance();
 $page = new AdminPage();
@@ -36,6 +36,8 @@ $message = '';
 $message_type = '';
 
 if ($action === 'copy_live_to_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // It runs dropdb and pg_dump, and copies every live row, keys included.
+    Access::demand(10, $session);
     if (!$debug_on) {
         $message = 'Refused: rebuilding the test database is a development action, and the '
                  . 'debug setting is off on this site. A test database here would be a second '

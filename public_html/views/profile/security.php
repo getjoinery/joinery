@@ -562,7 +562,7 @@
                 // authenticator fails here rather than silently activating it.
                 function activationFailureMessage(passkey, err) {
                     var label = passkey.pkc_label || 'this passkey';
-                    var labHint = <?php echo (int)SessionControl::get_instance()->get_permission() >= 10
+                    var labHint = <?php echo Access::permits(10)
                         ? "' Test the authenticator one variable at a time at /admin/admin_passkey_lab.'"
                         : "''"; ?>;
                     if (err && err.fromServer) {

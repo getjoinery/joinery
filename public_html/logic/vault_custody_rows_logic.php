@@ -23,7 +23,7 @@ function vault_custody_rows_logic(array $input): LogicResult {
 function vault_custody_rows_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => false,
 		'description' => 'Page the caller\'s rows leaving a client-custody scope: {rows:[{model,id,sealed_dek,target_scope,target_public_key}], next:{model,after_id}|null, remaining|null}',
 		'input' => [

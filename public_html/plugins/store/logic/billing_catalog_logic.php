@@ -93,6 +93,7 @@ function billing_catalog_logic(array $input): LogicResult {
 
 function billing_catalog_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Purchasable mobile subscription plans for one store, with the caller\'s active billing source.',
 		'requires_session' => true,
 		'mutates'          => false,

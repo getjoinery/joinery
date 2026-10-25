@@ -19,7 +19,6 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	$base = '/plugins/mailbox/admin/admin_mailbox_settings';

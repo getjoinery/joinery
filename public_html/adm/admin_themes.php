@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 // @version 1.4 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited theme (specs/local_edits_detected.md)
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Allow upgrade asks first (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Kind column, the two slot lines, Apply and Remove for a style theme; the Unsigned badge on page themes only (specs/style_themes.md WP4)

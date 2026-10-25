@@ -59,6 +59,13 @@ $end = strpos($view, "<?php endforeach; ?>", $start);
 check($start !== false && $end !== false, 'the Groups loop is findable in the view');
 $loop = '<?php ' . substr($view, $start, $end - $start) . '<?php endforeach; ?>';
 
+// The page is read by an admin who may remove members: below the membership's
+// level the button is drawn disabled (spec declared_permissions 3.7).
+$admin = make_user_row('grpadmin' . $suffix, 10);
+$_SESSION['usr_user_id'] = (int)$admin->key;
+$_SESSION['loggedin'] = true;
+$_SESSION['permission'] = 10;
+
 $render = function ($the_user) use ($loop) {
 	$groups = Group::get_groups_for_member($the_user->key, 'user', false, 'objects');
 	$group_member_ids = Group::get_member_ids_for_member($the_user->key);

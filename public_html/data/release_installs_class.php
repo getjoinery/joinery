@@ -14,6 +14,7 @@
 class ReleaseInstall extends SystemBase {
 	public static $prefix = 'rin';
 	public static $tablename = 'rin_release_installs';
+	public static $access_class = 'config';
 	public static $pkey_column = 'rin_release_install_id';
 
 	/** The release was deployed and passed its checks. */

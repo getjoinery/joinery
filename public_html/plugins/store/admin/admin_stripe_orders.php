@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -11,7 +12,6 @@
 	require_once(PathHelper::getIncludePath('/data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	
 	$settings = Globalvars::get_instance();
 	
@@ -57,7 +57,7 @@
 		//$charges = $stripe->charges->all(['limit' => $numperpage, 'created' => $created]);
 	}
 
-	if(!$_GET['print-format']){
+	if(empty($_GET['print-format'])){
 		$page = new AdminPage();
 		$page->admin_header(
 		array(
@@ -151,7 +151,7 @@
 			if($order_items){
 				foreach($order_items as $order_item) {
 					$product_data = $order_item->get_data();
-					if($product_data['comment']){
+					if(!empty($product_data['comment'])){
 						$description .= '<br /><b> (Note: '.$product_data['comment'].')</b>';
 					}
 				}
@@ -214,7 +214,7 @@
 	
 	//echo '<a style="text-align:center" href="/plugins/store/admin/admin_stripe_orders?offset='.$offset .'">Next 100 >></a>';
 
-	if(!$_GET['print-format']){
+	if(empty($_GET['print-format'])){
 		$page->admin_footer();
 	}
 ?>

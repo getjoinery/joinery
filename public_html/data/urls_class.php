@@ -13,6 +13,7 @@ class UrlException extends SystemBaseException {}
 class Url extends SystemBase {
 	public static $prefix = 'url';
 	public static $tablename = 'url_urls';
+	public static $access_class = 'config';
 	public static $pkey_column = 'url_url_id';
 
 		/**
@@ -47,17 +48,6 @@ function get_type_text() {
 		else if($this->get('url_type') == 302){
 			return 'HTTP/1.1 302 Found';
 		}		
-	}
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
 	}
 
 }

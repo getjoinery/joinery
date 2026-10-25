@@ -46,6 +46,7 @@ function feed_block_sender_logic(array $input): LogicResult {
 
 function feed_block_sender_logic_descriptor(): array {
     return array(
+        'auth' => array('min_user_permission' => 0),
         'description'      => 'Block the author of a persona feed post so their posts never show in the feed again. Takes the id of one of their posts; returns the blocked author name.',
         'requires_session' => true,
         'mutates'          => true,

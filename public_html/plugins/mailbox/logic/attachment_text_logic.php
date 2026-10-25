@@ -178,6 +178,7 @@ function _attachment_text_max_bytes(): int {
 
 function attachment_text_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Return one mail attachment as plain text, without opening the file',
 		'input' => [

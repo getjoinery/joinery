@@ -103,7 +103,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 			}
 			$folder->set('fol_name', $name);
 			$folder->set('fol_protection_level', $level);
-			if (!DriveHelper::save_folder_unless_name_taken($folder)) {
+			// can_write() on the parent admitted the actor; the new folder is
+			// the parent's owner's (single-owner tree).
+			if (!SystemBase::rule_checked_write(function () use ($folder) { return DriveHelper::save_folder_unless_name_taken($folder); })) {
 				return null;
 			}
 			$folder->load(); // repopulate serial pkey + default columns for the export
@@ -127,6 +129,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 
 function drive_folder_create_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Create a folder in the parent folder\'s owner\'s Drive (the caller\'s, at the top level). `protection_level` is one of standard / private / fortress and is accepted only at the root: a folder under a protected parent inherits that parent\'s level, and raising the level part-way down a tree is refused (a protected tree is a top-level tree). `encrypted` is the older spelling for fortress and still works. A private folder requires the owner to have a vault.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

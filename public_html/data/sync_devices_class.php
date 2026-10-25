@@ -30,6 +30,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class SyncDevice extends SystemBase {
 	public static $prefix = 'sde';
 	public static $tablename = 'sde_sync_devices';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'sde_sync_device_id';
 
 	// The device is meaningless without its owner or its credential; either one

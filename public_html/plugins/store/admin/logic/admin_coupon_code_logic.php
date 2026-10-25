@@ -7,10 +7,9 @@ require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php')
 
 function admin_coupon_code_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	$coupon_code = new CouponCode($input['ccd_coupon_code_id'], TRUE);
+	$coupon_code = new CouponCode($input['ccd_coupon_code_id'] ?? null, TRUE);
 
 	if($input['action'] == 'remove'){
 		$coupon_code->assert_can_write($session);

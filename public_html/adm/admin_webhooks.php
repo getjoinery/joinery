@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin: Webhooks — the list. See adm/logic/admin_webhooks_logic.php.
  *

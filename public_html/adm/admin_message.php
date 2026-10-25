@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -9,10 +10,9 @@
 	require_once(PathHelper::getIncludePath('/includes/MessageContextRegistry.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	$message = new Message($_REQUEST['msg_message_id'], TRUE);
+	$message = new Message($_REQUEST['msg_message_id'] ?? null, TRUE);
 	$sender = new User($message->get('msg_usr_user_id_sender'), TRUE);
 	if($message->get('msg_usr_user_id_recipient')){
 		$recipient = new User($message->get('msg_usr_user_id_recipient'), TRUE);
@@ -50,10 +50,10 @@
 
 	$options['title'] = 'Message';
 
-	if(!$message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$message->get('msg_delete_time') && $message->can_delete(SessionControl::get_instance())) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_message', 'hidden' => array('action' => 'delete', 'msg_message_id' => $message->key));
 	}
-	else if($message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
+	else if($message->get('msg_delete_time') && $message->can_delete(SessionControl::get_instance())) {
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_message', 'hidden' => array('action' => 'undelete', 'msg_message_id' => $message->key));
 	}
 	$page->begin_box($options);

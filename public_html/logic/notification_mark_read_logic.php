@@ -46,6 +46,7 @@ function notification_mark_read_logic_descriptor(): array {
 		'description' => 'Mark a single notification read (owner only).',
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'session_write' => true,
 		],
 		'input'       => [

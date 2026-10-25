@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_form_error_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

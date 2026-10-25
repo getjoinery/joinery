@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Machines
  * URL: /admin/server_manager/machines
@@ -18,7 +19,6 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $now = time();
 $snap = MachineInventory::snapshot();

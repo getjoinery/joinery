@@ -36,6 +36,7 @@ class AiQueuedAction extends SystemBase {
 
     public static $prefix = 'aqa';
     public static $tablename = 'aqa_ai_queued_actions';
+    public static $access_class = 'personal';
     public static $pkey_column = 'aqa_ai_queued_action_id';
 
     const STATUS_PENDING  = 'pending';
@@ -77,7 +78,7 @@ class AiQueuedAction extends SystemBase {
         // Layer 0 sealing columns — per row, like the idempotency cache: only a
         // proposal born of a hot turn is sealed; an ordinary one stays plaintext.
         'aqa_content_sealed'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-        'aqa_sealed_key'          => array('type'=>'text'),
+        'aqa_sealed_key'          => array('access_class' => 'keys', 'type'=>'text'),
         'aqa_sealed_owner_user_id'=> array('type'=>'int8'),
         'aqa_key_generation'      => array('type'=>'int4'),
         'aqa_delete_time'         => array('type'=>'timestamp(6)'),

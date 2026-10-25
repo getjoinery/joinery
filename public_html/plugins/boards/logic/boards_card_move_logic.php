@@ -56,7 +56,7 @@ function boards_card_move_logic_descriptor(): array {
 			'prev_id' => array('type' => 'int', 'required' => false, 'label' => 'Card above'),
 			'next_id' => array('type' => 'int', 'required' => false, 'label' => 'Card below'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		'ai_agent'         => 'confirm',
 	);
 }

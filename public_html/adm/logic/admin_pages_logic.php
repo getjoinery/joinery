@@ -8,7 +8,6 @@ function admin_pages_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -19,8 +18,8 @@ function admin_pages_logic(array $input): LogicResult {
 
 	$search_criteria = array();
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//SHOW DELETED ONLY TO THOSE WHO MAY UNDELETE
+	if(!Access::permits(Page::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

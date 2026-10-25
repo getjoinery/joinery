@@ -9,6 +9,7 @@
  * there. Superadmin only (floor 10). Not callable by the AI agent: an analysis
  * recommends, and a person acts.
  *
+ * @version 1.2.0 - the action's level (8) is who may triage; the logic does not check a number of its own
  * @version 1.1.0 - looking is no longer a triage
  * @version 1.0.0
  */
@@ -17,10 +18,8 @@ function incident_triage_logic(array $input): LogicResult {
 	if (!LibraryFunctions::isFormSubmission()) {
 		return LogicResult::error('Incident triage is a POST.');
 	}
+	// Who may triage is the action's level (8: a change, not a destructive one).
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
-		return LogicResult::error('Only a superadmin can triage incidents.');
-	}
 	$inc = IncidentTriage::load((int)($input['id'] ?? 0));
 	if ($inc === null) {
 		return LogicResult::error('There is no such incident.');
@@ -56,7 +55,7 @@ function incident_triage_logic_descriptor(): array {
 		'description' => 'Set an incident\'s triage (resolved, ignored, new to reopen it, or a snooze) and/or add a note.',
 		'mutates'     => true,
 		'requires_session' => true,
-		'auth'        => ['min_user_permission' => 10],
+		'auth'        => ['min_user_permission' => 8],
 		'input'       => [
 			'id'   => ['type' => 'int', 'required' => true, 'label' => 'Incident'],
 			'do'   => ['type' => 'string', 'required' => false, 'enum' => array_keys(IncidentTriage::do_options()), 'label' => 'Set it to'],

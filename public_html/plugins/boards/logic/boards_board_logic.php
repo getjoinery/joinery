@@ -56,7 +56,7 @@ function boards_board_logic_descriptor(): array {
 			'include_archived' => array('type' => 'bool', 'required' => false, 'label' => 'Include archived'),
 			'with_members'     => array('type' => 'bool', 'required' => false, 'label' => 'Include membership rows'),
 		),
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'ai_agent'         => 'auto',
 	);
 }

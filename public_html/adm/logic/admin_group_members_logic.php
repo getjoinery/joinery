@@ -8,16 +8,15 @@ require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
 function admin_group_members_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
-	if($input['action'] == 'add_to_group'){
+	if(($input['action'] ?? null) == 'add_to_group'){
 		//ADD THE USER TO A GROUP
 		$group = new Group($input['grp_group_id'], TRUE);
 		$group->add_member($user->key);
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$group->key);
 	}
-	else if($input['action'] == 'remove_from_group'){
+	else if(($input['action'] ?? null) == 'remove_from_group'){
 		$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
 		$groupmember->remove();
 		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));

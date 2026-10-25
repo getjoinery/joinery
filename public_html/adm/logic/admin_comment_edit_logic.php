@@ -7,7 +7,6 @@ function admin_comment_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/comments_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	if (isset($input['edit_primary_key_value'])) {
 		$comment = new Comment($input['edit_primary_key_value'], TRUE);

@@ -69,6 +69,10 @@ class VaultDeferredWork {
 	 * @param callable $drain     fn(int $user_id, VaultKey $key, float $deadline): int
 	 *                            — do work until $deadline (a microtime(true)
 	 *                            value), return how many items were completed.
+	 *                            It runs as the server's own write
+	 *                            (server_initiated_write): the model check does
+	 *                            not apply, so a drain that acts for a person
+	 *                            asks that person's rules itself.
 	 */
 	public static function register(string $id, callable $has_work, callable $drain): void {
 		self::$consumers[$id] = array('has_work' => $has_work, 'drain' => $drain);
@@ -190,7 +194,11 @@ class VaultDeferredWork {
 			return 0;
 		}
 		try {
-			$count = (int)call_user_func(self::$consumers[$id]['drain'], $user_id, $key, $turn_end);
+			// A drain is the platform finishing work that waited for the vault
+			// (a reseal, a backfill), not an act of the person whose page is open.
+			$count = (int)SystemBase::server_initiated_write(function () use ($id, $user_id, $key, $turn_end) {
+				return call_user_func(self::$consumers[$id]['drain'], $user_id, $key, $turn_end);
+			});
 			if ($count > 0) {
 				$done[$id] = ($done[$id] ?? 0) + $count;
 			}

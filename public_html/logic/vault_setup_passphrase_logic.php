@@ -99,7 +99,7 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 function vault_setup_passphrase_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Set up a Sealed Vault unlocked by a passphrase, for an account whose passkeys cannot derive a key. The browser derives the phrase and makes the recovery codes; only the account halves of their KEKs are sent',
 		'input' => array(
 			'passphrase_kek'     => array('type' => 'password', 'required' => true, 'label' => 'Account half of the passphrase KEK (base64url, 32 bytes)'),

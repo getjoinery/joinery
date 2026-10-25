@@ -44,7 +44,11 @@ function drive_version_restore_logic(array $input): LogicResult {
 	$owner_id = (int)$file->get('fil_usr_user_id');
 	DriveHelper::owner_write_lock($owner_id);
 	try {
-		FileVersion::restore_version($file, $version, $user_id);
+		// can_write() above: an editor restores a version of the owner's file,
+		// and pruning old versions destroys rows.
+		SystemBase::rule_checked_write(function () use ($file, $version, $user_id) {
+			FileVersion::restore_version($file, $version, $user_id);
+		});
 		DriveUsage::recompute($owner_id);
 		FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $file->key, $owner_id, $user_id);
 	} finally {
@@ -58,6 +62,7 @@ function drive_version_restore_logic(array $input): LogicResult {
 
 function drive_version_restore_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Restore a saved version as a Drive file\'s current content.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

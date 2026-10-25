@@ -45,7 +45,6 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$settings = Globalvars::get_instance();
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));

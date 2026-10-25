@@ -12,6 +12,7 @@ class BoardLabel extends SystemBase {
 
 	public static $prefix = 'blb';
 	public static $tablename = 'blb_labels';
+	public static $access_class = 'content';
 	public static $pkey_column = 'blb_label_id';
 
 	/** The ten colour tokens, in the order the picker offers them. */

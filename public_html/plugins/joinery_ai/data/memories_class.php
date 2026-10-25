@@ -26,6 +26,11 @@ class AiMemory extends SystemBase {
 
     public static $prefix = 'mem';
     public static $tablename = 'mem_memories';
+    public static $access_class = 'config';
+    // A member touches only their own user-scope rows; a shared row has no
+    // owner, so it and another user's rows need the write level.
+    public static $owner_column = 'mem_owner_user_id';
+    public static $write_permission = 10;
     public static $pkey_column = 'mem_memory_id';
 
     public static $ai_readable = false;
@@ -127,17 +132,6 @@ class AiMemory extends SystemBase {
     function save($debug = false) {
         $this->validateRow();
         return parent::save($debug);
-    }
-
-    function authenticate_write($data) {
-        // Shared rows and cross-user edits are admin-only; a member (or the
-        // owner-scoped API surface) may only touch their own user-scope rows.
-        if ($data['current_user_permission'] >= 10) return;
-        if ((string)$this->get('mem_scope') === self::SCOPE_SHARED
-                || (int)$this->get('mem_owner_user_id') !== (int)$data['current_user_id']) {
-            throw new SystemAuthenticationError(
-                'Cannot edit a memory you do not own.');
-        }
     }
 
 }

@@ -25,6 +25,7 @@ class FleetSecurityRunException extends SystemBaseException {}
 class FleetSecurityRun extends SystemBase {
 	public static $prefix = 'fsr';
 	public static $tablename = 'fsr_fleet_security_runs';
+	public static $access_class = 'config';
 	public static $pkey_column = 'fsr_fleet_security_run_id';
 
 	public static $json_vars = array('fsr_steps');

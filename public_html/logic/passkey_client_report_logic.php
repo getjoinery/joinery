@@ -40,7 +40,7 @@ function passkey_client_report_logic(array $input): LogicResult {
 function passkey_client_report_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Record a browser-side passkey ceremony failure (error name, surface, timing) for diagnostics',
 		'input' => [
 			'context' => ['type' => 'string', 'required' => false, 'max_length' => 80, 'label' => 'Ceremony surface'],

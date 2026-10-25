@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager — Upgrades
  * URL: /admin/server_manager/publish_upgrade
@@ -43,9 +44,10 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobComm
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/UpgradeRetention.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
+// Opens at 8 (its header); deleting a release or pruning archives needs 10 (Q8).
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
+SmActionLevels::refuse_post('publish_upgrade', $session, '/admin/server_manager/publish_upgrade');
 
 $page_regex = '/\/admin\/server_manager/';
 $static_dir = dirname(PathHelper::getIncludePath('')) . '/static_files';

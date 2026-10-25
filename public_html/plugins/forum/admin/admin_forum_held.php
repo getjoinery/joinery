@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Posts awaiting approval — the posts held while their authors are new.
  * Nobody but the author and the moderators sees them until they are approved.

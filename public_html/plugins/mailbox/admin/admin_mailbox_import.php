@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Inbound Email - Import a mail archive.
  *
@@ -20,7 +21,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/logic/mailbox_import_pa
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mail_import_panel.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $page_vars = process_logic(mailbox_import_page_logic(
 	array_merge($_GET, $_POST, $params ?? array(),

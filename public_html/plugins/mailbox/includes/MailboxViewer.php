@@ -17,6 +17,9 @@
  * the reader decides visibility. Both reader mounts — the admin page and the
  * member page at /profile/mailbox/mailbox — sit on this one seam.
  *
+ * @version 1.3 - holdsMailbox() / holdsMessage(): the owner rule of the mailbox's rows
+ *               (InboundEmailMessage, its labels, filters, attachments and folders), so a
+ *               grant holder below the model's level may change their own mailbox's rows
  * @version 1.2 - canReadMessage(): the one rule for "may this viewer read this stored message"
  * @version 1.1
  */
@@ -59,7 +62,7 @@ final class MailboxViewer {
 	 * "Unmatched" views without needing a grant per address.
 	 */
 	public function isAllAccess(): bool {
-		return $this->permission >= 10;
+		return Access::allows(10, (int)$this->permission);
 	}
 
 	/**
@@ -159,6 +162,67 @@ final class MailboxViewer {
 	 */
 	public function canCompose(): bool {
 		return count($this->accessibleAliasIds()) > 0;
+	}
+
+	/** Mailboxes each user was found to hold this request: user id => alias id => true. */
+	private static $held = array();
+
+	/**
+	 * Does $user_id hold a grant on mailbox $alias_id (a live alias)? This is the
+	 * owner rule of every row that belongs to a mailbox (a message, a label, a
+	 * filter, an attachment, a feed folder: their access_owner_is()), so a grant
+	 * holder below the model's level may change their own mailbox's rows, as the
+	 * reader, the composer and the filters page already let them. Only a holding
+	 * is remembered for the request; a miss asks again, so a grant made earlier
+	 * in the same request counts.
+	 */
+	public static function holdsMailbox(int $user_id, int $alias_id): bool {
+		if ($user_id <= 0 || $alias_id <= 0) {
+			return false;
+		}
+		if (isset(self::$held[$user_id][$alias_id])) {
+			return true;
+		}
+		if (!self::forUser($user_id, 0)->canAccess($alias_id)) {
+			return false;
+		}
+		self::$held[$user_id][$alias_id] = true;
+		return true;
+	}
+
+	/**
+	 * Does $user_id hold the stored message $message_id: a grant on its mailbox,
+	 * or being the owner whose vault it is sealed to (who alone can open it, and
+	 * whose unlocked browser and window parse, seal and sort it); and for a
+	 * draft, being its author (a draft is its author's alone, never a
+	 * co-grantee's)? Read straight from the row, so no sealed column is touched.
+	 */
+	public static function holdsMessage(int $user_id, int $message_id): bool {
+		if ($user_id <= 0 || $message_id <= 0) {
+			return false;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT iem_iea_inbound_email_alias_id, iem_direction, iem_draft_author_user_id, iem_sealed_owner_user_id
+			 FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+		$q->execute(array($message_id));
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			return false;
+		}
+		return self::holdsMessageRow($user_id, (int)$row['iem_iea_inbound_email_alias_id'],
+			(string)$row['iem_direction'], (int)$row['iem_draft_author_user_id'], (int)$row['iem_sealed_owner_user_id']);
+	}
+
+	/** holdsMessage() over values already in hand (the message model's own stored columns). */
+	public static function holdsMessageRow(int $user_id, int $alias_id, string $direction, int $draft_author,
+			int $sealed_owner = 0): bool {
+		if ($user_id <= 0) {
+			return false;
+		}
+		if ($direction === 'draft') {
+			return $draft_author === $user_id && self::holdsMailbox($user_id, $alias_id);
+		}
+		return $sealed_owner === $user_id || self::holdsMailbox($user_id, $alias_id);
 	}
 
 	public function getUserId(): int {

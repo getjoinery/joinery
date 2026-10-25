@@ -146,6 +146,7 @@ function devices_logic(array $input): LogicResult{
 
 function devices_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'List DNS-filtering devices with DoH/DoT endpoints, block summaries, and hard-block hostnames',
 	];

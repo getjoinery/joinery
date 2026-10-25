@@ -33,7 +33,7 @@ class SiteBackupNotice {
 	const STALE_RUN_HOURS = 6;
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		$last = self::lastFinishedRun();

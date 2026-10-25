@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,10 +9,9 @@
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
-	$email_template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
+	$email_template = new EmailTemplate($_GET['emt_email_template_id'] ?? null, TRUE);
 
 	$page = new AdminPage();
 	$page->admin_header(

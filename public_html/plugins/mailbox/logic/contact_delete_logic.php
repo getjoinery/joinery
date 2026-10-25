@@ -31,6 +31,7 @@ function contact_delete_logic(array $input): LogicResult {
 
 function contact_delete_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Delete one of the caller\'s contacts',
 		'input' => [

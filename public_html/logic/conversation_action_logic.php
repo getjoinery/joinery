@@ -65,6 +65,7 @@ function conversation_action_logic(array $input): LogicResult {
 
 function conversation_action_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Mute, unmute, or delete a conversation for the signed-in owner',
 		'input' => [

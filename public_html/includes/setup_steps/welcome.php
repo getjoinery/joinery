@@ -15,7 +15,7 @@
 require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 $setup_tz_current = (string)$viewer->get('usr_timezone');
-$setup_install_outcomes = ($permission >= 10) ? InstallReport::outcomes() : array();
+$setup_install_outcomes = Access::permits(10) ? InstallReport::outcomes() : array();
 if ($setup_install_outcomes) {
 ?>
 <div class="jy-fieldset">
@@ -49,7 +49,7 @@ echo $formwriter->dropinput('usr_timezone', 'Your timezone', array(
 	'options' => Address::get_timezone_drop_array(),
 	'value' => $setup_tz_current,
 ));
-if ($permission >= 10) {
+if (Access::permits(10)) {
 	// A blank site name is the field people stall on. The domain the site
 	// already answers to is a name they recognize, and it saves on submit.
 	$setup_site_name = trim((string)$settings->get_setting('site_name'));

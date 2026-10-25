@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_user_login_as_logic.php'));
 

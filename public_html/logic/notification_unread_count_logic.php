@@ -26,6 +26,7 @@ function notification_unread_count_logic_descriptor(): array {
 		'description' => 'Unread notification count for the signed-in owner.',
 		'mutates'     => false,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability' => 'read',
 		],
 		'input'       => [],

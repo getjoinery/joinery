@@ -179,7 +179,7 @@ switch ($command) {
 				$approver = $u;
 			}
 		}
-		if (!$approver || !$approver->key || (int)$approver->get('usr_permission') < SandboxConsent::APPROVER_PERMISSION) {
+		if (!$approver || !$approver->key || !Access::allows(SandboxConsent::APPROVER_PERMISSION, (int)$approver->get('usr_permission'))) {
 			sbx_fail('No superadmin to approve it as; pass --approve-as=USER_ID.');
 		}
 		try {

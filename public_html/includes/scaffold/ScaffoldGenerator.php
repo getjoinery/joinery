@@ -109,6 +109,12 @@ class ScaffoldGenerator {
             }
         }
 
+        // --- access_class: the model's data class (docs/permissions.md) ---
+        $access_class = $m['access_class'] ?? null;
+        if (!is_string($access_class) || !in_array($access_class, Access::classes(), true)) {
+            $errors[] = "access_class: required, one of " . implode(', ', Access::classes()) . ".";
+        }
+
         // --- into: plugin dir must exist ---
         $into = $m['into'] ?? 'core';
         if ($into !== 'core') {
@@ -619,7 +625,7 @@ class ScaffoldGenerator {
             'api'           => $m['api'] ?? null,
             'ai'            => $m['ai'] ?? null,
             'owner_field'   => $m['owner_field'] ?? null,
-            'admin_permission'  => $m['admin_permission'] ?? 5,
+            'access_class'  => $m['access_class'] ?? null,
             'public_permission' => array_key_exists('public_permission', $m) ? $m['public_permission'] : 0,
             'delete'        => $m['delete'] ?? [],
             'surfaces'      => $surfaces,

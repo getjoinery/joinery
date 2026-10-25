@@ -50,7 +50,7 @@ function vault_unlock_options_logic(array $input): LogicResult {
 function vault_unlock_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Begin unlocking the vault with a passkey (returns WebAuthn PRF request options, userVerification required). with_root also asks the same touch for the root vault\'s secret, which the browser keeps and must strip before posting the assertion',
 		'input' => [
 			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],

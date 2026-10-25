@@ -25,7 +25,7 @@ function video_logic(array $input): LogicResult {
 	}
 	$page_vars['video'] = $video;
 
-	if ($session->get_user_id() && $session->get_permission() > 4) {
+	if ($session->get_user_id() && $video->can_read($session)) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {

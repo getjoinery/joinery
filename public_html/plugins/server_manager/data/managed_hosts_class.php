@@ -31,6 +31,7 @@ class ManagedHostException extends SystemBaseException {}
 class ManagedHost extends SystemBase {
 	public static $prefix = 'mgh';
 	public static $tablename = 'mgh_managed_hosts';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mgh_managed_host_id';
 
 	protected static $foreign_key_actions = [

@@ -125,6 +125,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 function survey_logic_descriptor() {
     return [
+        'auth' => ['min_user_permission' => 0],
         'requires_session' => true,
         'description' => 'Submit survey response',
         'input' => [

@@ -7,7 +7,6 @@ function admin_contact_type_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	if (isset($input['edit_primary_key_value'])) {
 		$contact_type = new ContactType($input['edit_primary_key_value'], TRUE);

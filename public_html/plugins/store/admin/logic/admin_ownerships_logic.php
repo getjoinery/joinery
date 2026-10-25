@@ -10,7 +10,6 @@ function admin_ownerships_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$self = '/plugins/store/admin/admin_ownerships';

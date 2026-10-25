@@ -112,6 +112,7 @@ function querylog_logic(array $input): LogicResult {
 
 function querylog_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Fetch a device\'s DNS query log (device_id, optional lines: 100/250/500)',
 		'input' => [

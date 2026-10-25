@@ -12,6 +12,7 @@ class SdScheduledBlockService extends SystemBase {
 
 	public static $prefix = 'sbs';
 	public static $tablename = 'sbs_scheduled_block_services';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sbs_scheduled_block_service_id';
 
 	protected static $foreign_key_actions = array(
@@ -24,6 +25,12 @@ class SdScheduledBlockService extends SystemBase {
 	    'sbs_service_key' => array('type'=>'varchar(32)'),
 	    'sbs_action' => array('type'=>'int2'),
 	);
+
+	/** A rule of a block is the block's device owner's (SdScheduledBlock::ownerOfBlock()). */
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0
+			&& SdScheduledBlock::ownerOfBlock((int)$this->access_stored('sbs_sdb_scheduled_block_id')) === (int)$user_id;
+	}
 
 }
 

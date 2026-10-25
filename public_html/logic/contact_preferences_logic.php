@@ -27,7 +27,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	if (!empty($_POST)) {
-		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
+		// Only the lists this page offers: a private list's id posted by hand
+		// subscribes no one, and a list the page does not show is left alone.
+		$offered = array_keys(contact_preferences_form_options($user)['options']);
+		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes'] ?? array(), $offered);
 
 	}
 
@@ -98,6 +101,7 @@ function contact_preferences_logic_form($formwriter, $user = null, $input = []) 
 
 function contact_preferences_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Update the user\'s mailing list subscriptions.',
 		'requires_session' => true,
 		'mutates'          => true,

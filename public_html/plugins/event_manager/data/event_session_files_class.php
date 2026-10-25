@@ -11,6 +11,7 @@ class EventSessionFileException extends SystemBaseException {}
 
 class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	public static $tablename = 'esf_event_session_files';
+	public static $access_class = 'content';
 	public static $pkey_column = 'esf_event_session_file_id';
 
 	// AI auto-discovery (read)

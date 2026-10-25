@@ -30,7 +30,10 @@ function services_enroll_logic(array $input): LogicResult {
 	$host = trim((string)($input['host'] ?? ''));
 
 	try {
-		$data = JoineryServices::enrol($user_id, $key_id, $service, $host);
+		// enrol() finds or makes the tenant of this caller and key only.
+		$data = SystemBase::rule_checked_write(function () use ($user_id, $key_id, $service, $host) {
+			return JoineryServices::enrol($user_id, $key_id, $service, $host);
+		});
 	} catch (JoineryServicesException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -39,6 +42,7 @@ function services_enroll_logic(array $input): LogicResult {
 
 function services_enroll_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Enrol this site for one of the operator\'s services (mail or shelf, which is backup storage). Answers the tenant\'s state and, when entitled, what the site writes: SMTP send values and DNS records for mail, backup storage slug and prefix for backups.',
 		'requires_session' => true,
 		'mutates'          => true,

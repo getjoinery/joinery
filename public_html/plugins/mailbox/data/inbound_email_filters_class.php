@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.11 - access_owner_is(): a mailbox's filter is its grant holders'; a domain-wide one is level-only
  * @version 1.10 - a filter removed with its mailbox or domain goes through its own permanent_delete(),
  *                so its per-device progress rows go with it rather than naming a filter that is gone
  * @version 1.9 - a filter's label is applied only to messages of the label's own mailbox
@@ -67,7 +68,17 @@ class InboundEmailFilterException extends SystemBaseException {}
 class InboundEmailFilter extends SystemBase {
 	public static $prefix = 'ief';
 	public static $tablename = 'ief_inbound_email_filters';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ief_inbound_email_filter_id';
+
+	/**
+	 * The owner rule (spec declared_permissions 3.2): a mailbox's filter belongs
+	 * to the holders of a grant on that mailbox. A domain-wide filter (no
+	 * mailbox) has no owner and is level-only.
+	 */
+	public function access_owner_is($user_id): bool {
+		return MailboxViewer::holdsMailbox((int)$user_id, (int)$this->access_stored('ief_iea_inbound_email_alias_id'));
+	}
 
 	const SIZE_OP_GT = 'gt';
 	const SIZE_OP_LT = 'lt';
@@ -140,13 +151,6 @@ class InboundEmailFilter extends SystemBase {
 		'ief_update_time' => array('type'=>'timestamp(6)'),
 		'ief_delete_time' => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	// --------------------------------------------------- forwarding consent
 

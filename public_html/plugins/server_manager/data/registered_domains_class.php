@@ -44,6 +44,7 @@ class RegisteredDomain extends SystemBase {
 
 	public static $prefix = 'rdm';
 	public static $tablename = 'rdm_registered_domains';
+	public static $access_class = 'config';
 	public static $pkey_column = 'rdm_registered_domain_id';
 
 	/** Fulfillment axis. */

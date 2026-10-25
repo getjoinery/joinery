@@ -20,6 +20,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class DeletionRule extends SystemBase {
     public static $prefix = 'del';
     public static $tablename = 'del_deletion_rules';
+    public static $access_class = 'config';
     public static $pkey_column = 'del_deletion_rule_id';
 
     public static $field_specifications = [

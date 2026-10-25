@@ -589,13 +589,10 @@ class Product extends SystemBase {
 
 ```php
 <?php
-// /adm/admin_product_edit.php
-
-require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('data/product_class.php'));
+/** @joinery-admin class=money */
+// /plugins/store/admin/admin_product_edit.php
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 $session->set_return();
 
 // Handle form submission

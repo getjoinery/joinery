@@ -17,7 +17,6 @@
             "title": "Orders",
             "icon": "shopping-cart",
             "order": 4,
-            "permission": 5,
             "settingActivate": "products_active",
             "items": [
                 {
@@ -25,7 +24,6 @@
                     "title": "Orders list",
                     "url": "/plugins/store/admin/admin_orders",
                     "order": 1,
-                    "permission": 5,
                     "settingActivate": "products_active"
                 },
                 {
@@ -33,7 +31,6 @@
                     "title": "Stripe Payments",
                     "url": "/plugins/store/admin/admin_stripe_orders",
                     "order": 2,
-                    "permission": 5,
                     "settingActivate": "products_active"
                 }
             ]
@@ -43,7 +40,6 @@
             "title": "Products",
             "icon": "box",
             "order": 3,
-            "permission": 8,
             "settingActivate": "products_active",
             "items": [
                 {
@@ -51,7 +47,6 @@
                     "title": "Products list",
                     "url": "/plugins/store/admin/admin_products",
                     "order": 1,
-                    "permission": 8,
                     "settingActivate": "products_active"
                 },
                 {
@@ -59,7 +54,6 @@
                     "title": "Product Groups",
                     "url": "/plugins/store/admin/admin_product_groups",
                     "order": 2,
-                    "permission": 9,
                     "settingActivate": "products_active"
                 },
                 {
@@ -67,7 +61,6 @@
                     "title": "Coupon codes",
                     "url": "/plugins/store/admin/admin_coupon_codes",
                     "order": 10,
-                    "permission": 5,
                     "settingActivate": "products_active"
                 },
                 {
@@ -75,7 +68,6 @@
                     "title": "Ownership",
                     "url": "/plugins/store/admin/admin_ownerships",
                     "order": 11,
-                    "permission": 5,
                     "settingActivate": "products_active"
                 },
                 {
@@ -83,7 +75,6 @@
                     "title": "Mobile Store Products",
                     "url": "/plugins/store/admin/admin_store_product_mappings",
                     "order": 12,
-                    "permission": 8,
                     "settingActivate": "subscriptions_active"
                 }
             ]
@@ -95,7 +86,6 @@
             "title": "Billing",
             "url": "/profile/billing",
             "order": 80,
-            "permission": 0,
             "icon": "credit-card",
             "settingActivate": "products_active"
         },
@@ -104,7 +94,6 @@
             "title": "Orders",
             "url": "/profile/orders",
             "order": 82,
-            "permission": 0,
             "icon": "shopping-bag",
             "settingActivate": "products_active"
         },
@@ -113,7 +102,6 @@
             "title": "Subscriptions",
             "url": "/profile/subscriptions",
             "order": 84,
-            "permission": 0,
             "icon": "refresh",
             "settingActivate": "subscriptions_active"
         }

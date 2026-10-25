@@ -5,7 +5,8 @@
  * POST { site, thread_id, token, message_id, verdict: up|down, note? }.
  * Stored on the message; a thumbs-down lands the turn on the gap report.
  *
- * @version 0.1.0
+ * @version 0.1.1
+ * @changelog 0.1.1 - the asker's write runs under rule_checked_write() behind the token proof
  */
 function desk_feedback_logic(array $input): LogicResult {
 	if ($limited = SupportApi::limit('desk_feedback')) {
@@ -19,10 +20,14 @@ function desk_feedback_logic(array $input): LogicResult {
 		}
 		$msg = SupportIntake::answerIn($thread, (int)($input['message_id'] ?? 0));
 		$note = trim((string)($input['note'] ?? ''));
-		AiConversationMessage::updateColumns((int)$msg->key, array(
-			'aim_feedback'      => $verdict,
-			'aim_feedback_note' => $note !== '' ? mb_substr($note, 0, 1000) : null,
-		));
+		// The thread's token (SupportApi::thread()) and the answer's place in
+		// it (answerIn()) are proven above; nobody is signed in.
+		SystemBase::rule_checked_write(function () use ($msg, $verdict, $note) {
+			AiConversationMessage::updateColumns((int)$msg->key, array(
+				'aim_feedback'      => $verdict,
+				'aim_feedback_note' => $note !== '' ? mb_substr($note, 0, 1000) : null,
+			));
+		});
 		return SupportApi::ok('desk_feedback', array('saved' => true));
 	} catch (SupportRefusal $e) {
 		return SupportApi::fail('desk_feedback', $e);
@@ -31,6 +36,7 @@ function desk_feedback_logic(array $input): LogicResult {
 
 function desk_feedback_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Thumbs up or down on a support answer, with an optional line.',
 		'requires_session' => false,
 		'mutates'          => true,

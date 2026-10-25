@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_agent_files_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

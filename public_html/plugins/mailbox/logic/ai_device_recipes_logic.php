@@ -30,7 +30,7 @@ function ai_device_recipes_logic(array $input): LogicResult {
 function ai_device_recipes_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'The caller\'s device-capable AI recipes on one mailbox, with the full system prompt, nonce and verdict shape their browser judges with',
 		'input' => [
 			'mailbox' => ['type' => 'string', 'required' => true, 'label' => 'Mailbox address'],

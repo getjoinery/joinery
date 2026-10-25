@@ -14,6 +14,7 @@ class BookingType extends SystemBase {
 
 	public static $prefix = 'bty';
 	public static $tablename = 'bty_booking_types';
+	public static $access_class = 'money';
 	public static $pkey_column = 'bty_booking_type_id';
 
 	const BOOKING_STATUS_INACTIVE = 0;
@@ -90,14 +91,6 @@ class BookingType extends SystemBase {
 			if ($n > 0) { $out[] = $n; }
 		}
 		return $out;
-	}
-
-	function authenticate_write($data) {
-		if ($this->get('bty_usr_user_id') != $data['current_user_id']
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 }

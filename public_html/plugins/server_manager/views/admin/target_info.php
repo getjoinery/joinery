@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Server Manager - Backup Target Info
  * URL: /admin/server_manager/target_info?bkt_backup_target_id=N
@@ -12,7 +13,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $bkt_backup_target_id = intval($_GET['bkt_backup_target_id'] ?? 0);
 if (!$bkt_backup_target_id) {

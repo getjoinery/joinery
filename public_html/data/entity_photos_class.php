@@ -6,6 +6,7 @@
  * via entity_type + entity_id pattern. Supports ordering, primary flag,
  * and captions.
  *
+ * @version 1.1.0 - access_owner_is(): a user's own photo, and a photo of a file they uploaded, are theirs
  * @version 1.0.0
  * @see /specs/pictures_refactor_spec.md
  */
@@ -16,6 +17,7 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 class EntityPhoto extends SystemBase {
 	public static $prefix = 'eph';
 	public static $tablename = 'eph_entity_photos';
+	public static $access_class = 'content';
 	public static $pkey_column = 'eph_entity_photo_id';
 
 	protected static $foreign_key_actions = array(
@@ -38,6 +40,30 @@ class EntityPhoto extends SystemBase {
 		'eph_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'eph_delete_time' => array('type'=>'timestamp(6)'),
 	);
+
+	/**
+	 * Whose photo row this is (the owner rule, docs/permissions.md § Models):
+	 * a user's own photo is theirs, and so is a saved photo of a file they
+	 * uploaded, the same two rights the photos endpoint grants a member. A saved
+	 * row's stored values decide, not ones set() gave it in this request. Your
+	 * own file does not make a NEW photo of someone else's thing yours: attaching
+	 * to it is that thing's owner's or staff's to decide.
+	 */
+	public function access_owner_is($user_id): bool {
+		$user_id = (int)$user_id;
+		if ($user_id <= 0) {
+			return false;
+		}
+		if ($this->access_stored('eph_entity_type') === 'user' && (int)$this->access_stored('eph_entity_id') === $user_id) {
+			return true;
+		}
+		$file_id = (int)$this->access_stored('eph_fil_file_id');
+		if ($this->key !== NULL && $file_id > 0) {
+			$file = new File($file_id, TRUE);
+			return $file->key && (int)$file->get('fil_usr_user_id') === $user_id;
+		}
+		return false;
+	}
 
 	/**
 	 * Override save to enforce per-entity-type photo limits and validate file exists
@@ -73,7 +99,7 @@ class EntityPhoto extends SystemBase {
 					if ($count >= $max) {
 						// Allow admins to bypass
 						$session = SessionControl::get_instance();
-						if (!$session->is_logged_in() || $session->get_permission() < 5) {
+						if (!$session->is_logged_in() || !Access::permits(Access::staffLevel(), $session)) {
 							throw new DisplayableUserException("Maximum of {$max} photos allowed for this item.");
 						}
 					}

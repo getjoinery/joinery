@@ -8,10 +8,9 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 function admin_api_key_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10); // API keys and webhook signing secrets are keys: 10 to read and change
 	$session->set_return();
 
-	$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
+	$api_key = new ApiKey($input['apk_api_key_id'] ?? null, TRUE);
 
 	// A sandboxed plugin's credential is made and removed with the plugin.
 	$sandbox_plugin = $api_key->sandbox_plugin();

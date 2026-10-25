@@ -23,6 +23,7 @@ class MailboxFleetShardException extends SystemBaseException {}
 class MailboxFleetShard extends SystemBase {
 	public static $prefix = 'mfs';
 	public static $tablename = 'mfs_mailbox_fleet_shards';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mfs_mailbox_fleet_shard_id';
 
 	protected static $foreign_key_actions = [
@@ -66,13 +67,6 @@ class MailboxFleetShard extends SystemBase {
 		'mfs_update_time'            => array('type'=>'timestamp(6)'),
 		'mfs_delete_time'            => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('mfs_update_time', gmdate('Y-m-d H:i:s'));

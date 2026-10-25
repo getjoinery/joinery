@@ -13,7 +13,6 @@
 
 function admin_boards_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$flash = null;
 	if (!empty($_POST['action']) && !empty($_POST['bbd_board_id'])) {

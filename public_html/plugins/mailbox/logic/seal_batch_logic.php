@@ -22,7 +22,9 @@ function seal_batch_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 5) {
+	// It re-encrypts or decrypts the mail of every mailbox in scope: the
+	// messages' own write level.
+	if (!Access::decide(InboundEmailMessage::access_level('write'), $session)) {
 		return LogicResult::error('Not authorized.');
 	}
 
@@ -66,7 +68,7 @@ function seal_batch_logic(array $input): LogicResult {
 function seal_batch_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Seal one bounded batch of a protected domain or mailbox\'s unsealed messages; returns sealed and remaining counts',
 		'input' => [
 			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],

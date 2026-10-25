@@ -38,6 +38,7 @@ class DirectNonce extends SystemBase {
 	}
 
 	public static $tablename = 'jdn_direct_nonces';
+	public static $access_class = 'config';
 	public static $pkey_column = 'jdn_direct_nonce_id';
 
 	public static $field_specifications = array(

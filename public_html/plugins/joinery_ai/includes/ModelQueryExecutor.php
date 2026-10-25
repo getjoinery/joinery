@@ -44,6 +44,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
  *
+ * @version 1.4 - a column stricter than its model is left out below its read level
+ * @version 1.3 - owner scoping is per model: staff below a model's read level read only their own rows of it
  * @version 1.2 - browser-format values under a server key (a row moved back off
  *   end-to-end) open like any sealed value; only a client-custody key excludes
  * @version 1.1 - a row holding browser-sealed (`v1.edge.`) values is excluded, never opened
@@ -80,6 +82,19 @@ class ModelQueryExecutor {
         $field_specs = $class::$field_specifications;
         $all_fields = array_keys($field_specs);
 
+        // A column stricter than its model (spec declared_permissions 3.3) is
+        // left out for a reader below its read level, unless the reads are
+        // scoped to the reader's own rows, whose columns are theirs.
+        if (!$ctx->ownerScopedReads($class)) {
+            $acting_level = self::actingLevel($ctx->actingUserId());
+            foreach ($all_fields as $field) {
+                if ($class::column_access_class($field) !== null
+                        && $acting_level < $class::column_access_level($field, 'read')) {
+                    $excluded[] = $field;
+                }
+            }
+        }
+
         $select_fields = self::resolveOutputFields($output_fields, $all_fields, $excluded);
         if (empty($select_fields)) {
             throw new InvalidArgumentException("No selectable fields for '$class'.");
@@ -93,7 +108,7 @@ class ModelQueryExecutor {
         // A model that can't be contained (ambiguous/undeclared ownership) is
         // refused — defense in depth behind allowedModels(), which already
         // drops it from a member's scope. Admins skip this entirely.
-        if ($ctx->ownerScopedReads()) {
+        if ($ctx->ownerScopedReads($class)) {
             $scope = $info['owner_scope'] ?? ['mode' => 'hidden'];
             if ($scope['mode'] === 'hidden') {
                 throw new InvalidArgumentException("Model '$class' is not available.");
@@ -188,6 +203,13 @@ class ModelQueryExecutor {
 
     /** Rows dropped from the most recent query() because their vault was locked. */
     private static $last_locked_excluded = 0;
+
+    /** The acting user's stored level, as the chat context reads it. */
+    private static function actingLevel(int $user_id): int {
+        if ($user_id <= 0) return 0;
+        $user = new User($user_id, TRUE);
+        return $user->key ? (int)$user->get('usr_permission') : 0;
+    }
 
     /** How many rows the last query() excluded as locked (partial-result signal). */
     public static function lastLockedExcluded(): int {

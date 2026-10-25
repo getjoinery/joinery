@@ -23,6 +23,7 @@ class AppBridgeTokenException extends SystemBaseException {}
  */
 class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 	public static $tablename = 'abt_app_bridge_tokens';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'abt_app_bridge_token_id';
 
 	// Seconds from mint to expiry. The webview loads the bridge URL immediately
@@ -40,7 +41,7 @@ class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 	    'abt_app_bridge_token_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'abt_apk_api_key_id' => array('type'=>'int8', 'is_nullable'=>false),
 	    'abt_usr_user_id' => array('type'=>'int4', 'is_nullable'=>false),
-	    'abt_token_hash' => array('type'=>'varchar(64)', 'is_nullable'=>false, 'unique'=>true),
+	    'abt_token_hash' => array('access_class' => 'restricted', 'type'=>'varchar(64)', 'is_nullable'=>false, 'unique'=>true),
 	    'abt_target_path' => array('type'=>'varchar(512)', 'is_nullable'=>false),
 	    'abt_client_app' => array('type'=>'varchar(64)'),
 	    'abt_expires_time' => array('type'=>'timestamp(6)', 'is_nullable'=>false),
@@ -49,18 +50,6 @@ class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 	    'abt_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	// Staff-only if ever exposed; the API surface never reads these rows directly.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 	/**
 	 * Mint a bridge token for an authenticated session key. Returns the token

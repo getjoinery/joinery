@@ -14,6 +14,7 @@ class QueuedEmailException extends SystemBaseException {}
 
 class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	public static $tablename = 'equ_queued_emails';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'equ_queued_email_id';
 
 	// REST CRUD exposure (Layer 1): the provisioning management node queues

@@ -30,6 +30,8 @@ class Plugin extends SystemBase {
 
 	public static $prefix = 'plg';
 	public static $tablename = 'plg_plugins';
+	public static $access_class = 'config';
+	public static $write_permission = 10;
 	public static $pkey_column = 'plg_plugin_id';
 
 		/**
@@ -74,13 +76,6 @@ class Plugin extends SystemBase {
 	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'plg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-function authenticate_write($data) {
-			if ($data['current_user_permission'] < 10) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-	}
 
 	/**
 	 * Check if plugin is currently active

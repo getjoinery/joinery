@@ -37,6 +37,11 @@ try {
     exit();
 }
 
+// The event is Stripe's, verified above: no person is behind what it writes
+// (orders, subscriptions, the log), so every write from here on is the
+// server's own (spec declared_permissions 3.2).
+SystemBase::$allow_get_mutation = true;
+
 // Idempotency check
 $event_id = $event->id ?? null;
 if ($event_id && WebhookLog::isDuplicate($event_id)) {

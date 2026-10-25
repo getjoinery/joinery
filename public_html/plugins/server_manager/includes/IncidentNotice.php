@@ -21,7 +21,7 @@
 class IncidentNotice {
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		$counts = IncidentRecord::needs_you_counts();
@@ -38,7 +38,7 @@ class IncidentNotice {
 
 	/** The number beside Server Manager → Incidents: incidents that need a person. */
 	public static function menu_count(): int {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return 0;
 		}
 		return IncidentRecord::needs_you_counts()['needs_you'];

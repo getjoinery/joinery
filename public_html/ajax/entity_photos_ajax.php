@@ -40,7 +40,7 @@ if (!$entity_type || !$entity_id) {
  */
 function check_photo_permission($session, $file_id = null, $entity_type = null, $entity_id = null) {
 	// Admin always allowed
-	if ($session->get_permission() >= 5) {
+	if (Access::permits(Access::staffLevel(), $session)) {
 		return true;
 	}
 	// File owner check (for delete, update_caption)

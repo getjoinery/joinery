@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin: review what a sandboxed plugin asks for, and approve it.
  * See adm/logic/admin_sandbox_approve_logic.php.

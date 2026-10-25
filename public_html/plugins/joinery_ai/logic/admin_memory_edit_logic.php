@@ -13,7 +13,6 @@ function admin_joinery_ai_memory_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/memories_class.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
         $memory = new AiMemory($input['edit_primary_key_value'], TRUE);

@@ -38,7 +38,7 @@ class BackupObjectsNotice {
 	const STALE_DAYS = 7;
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		return self::forStatus(BackupObjectsStatus::compute(), time());

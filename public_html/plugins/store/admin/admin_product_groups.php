@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 require_once(PathHelper::getIncludePath('plugins/store/admin/logic/admin_product_groups_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -24,7 +25,7 @@ array(
 
 $headers = array('Name');
 $altlinks = array();
-if($session->get_permission() > 7){
+if(Access::allows(ProductGroup::access_level('write'), (int)$session->get_permission())){
 	$altlinks['New Product Group'] = '/plugins/store/admin/admin_product_group_edit';
 }
 $box_vars = array(

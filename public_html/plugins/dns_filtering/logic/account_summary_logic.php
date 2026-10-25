@@ -48,6 +48,7 @@ function account_summary_logic(array $input): LogicResult{
 
 function account_summary_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Subscription tier, ScrollDaddy feature flags, and device count vs. limit for the acting user',
 	];

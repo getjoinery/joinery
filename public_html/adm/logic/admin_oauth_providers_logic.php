@@ -22,7 +22,6 @@ function admin_oauth_providers_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderConfig.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     // Somewhere else sent the admin here to finish one thing — an IMAP feed that
     // cannot connect until its provider is registered, say. Saving returns them

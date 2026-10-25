@@ -15,7 +15,6 @@ function admin_users_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_vars = array();
 

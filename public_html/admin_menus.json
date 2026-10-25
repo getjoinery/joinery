@@ -6,7 +6,6 @@
             "title": "Users",
             "url": "",
             "order": 1,
-            "permission": 5,
             "icon": "users"
         },
         {
@@ -14,7 +13,6 @@
             "title": "Videos",
             "url": "admin_videos",
             "order": 6,
-            "permission": 8,
             "icon": "video",
             "settingActivate": "videos_active"
         },
@@ -23,7 +21,6 @@
             "title": "Files",
             "url": "admin_files",
             "order": 5,
-            "permission": 5,
             "icon": "file-pdf",
             "settingActivate": "files_active"
         },
@@ -32,7 +29,6 @@
             "title": "Groups",
             "url": "admin_groups",
             "order": 2,
-            "permission": 5,
             "parent": "users"
         },
         {
@@ -40,7 +36,6 @@
             "title": "Content Reports",
             "url": "admin_content_reports",
             "order": 3,
-            "permission": 5,
             "parent": "users"
         },
         {
@@ -48,7 +43,6 @@
             "title": "Emails",
             "url": "",
             "order": 2,
-            "permission": 10,
             "icon": "envelope",
             "settingActivate": "emails_active"
         },
@@ -57,7 +51,6 @@
             "title": "Statistics",
             "url": "",
             "order": 15,
-            "permission": 5,
             "icon": "chart-bar"
         },
         {
@@ -65,7 +58,6 @@
             "title": "Web Statistics",
             "url": "admin_analytics_stats",
             "order": 1,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -73,7 +65,6 @@
             "title": "Errors",
             "url": "admin_errors",
             "order": 77,
-            "permission": 10,
             "parent": "statistics"
         },
         {
@@ -81,7 +72,6 @@
             "title": "Users list",
             "url": "admin_users",
             "order": 1,
-            "permission": 5,
             "parent": "users"
         },
         {
@@ -89,7 +79,6 @@
             "title": "Emails list",
             "url": "admin_emails",
             "order": 1,
-            "permission": 10,
             "settingActivate": "emails_active",
             "parent": "emails"
         },
@@ -98,7 +87,6 @@
             "title": "Pages",
             "url": "",
             "order": 8,
-            "permission": 5,
             "icon": "file-alt",
             "settingActivate": "page_contents_active"
         },
@@ -107,7 +95,6 @@
             "title": "Blog",
             "url": "admin_posts",
             "order": 9,
-            "permission": 10,
             "icon": "copy",
             "settingActivate": "blog_active"
         },
@@ -116,7 +103,6 @@
             "title": "Blog Posts",
             "url": "admin_posts",
             "order": 1,
-            "permission": 10,
             "settingActivate": "blog_active",
             "parent": "blog"
         },
@@ -125,7 +111,6 @@
             "title": "Email Templates",
             "url": "admin_email_templates",
             "order": 5,
-            "permission": 10,
             "settingActivate": "emails_active",
             "parent": "emails"
         },
@@ -134,7 +119,6 @@
             "title": "Signups by Date",
             "url": "admin_analytics_activitybydate",
             "order": 10,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -142,7 +126,6 @@
             "title": "Email Deliverability",
             "url": "admin_analytics_users",
             "order": 15,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -150,7 +133,6 @@
             "title": "Urls",
             "url": "admin_urls",
             "order": 20,
-            "permission": 10,
             "icon": "link",
             "settingActivate": "urls_active"
         },
@@ -159,7 +141,6 @@
             "title": "Comments",
             "url": "admin_comments",
             "order": 10,
-            "permission": 5,
             "settingActivate": "blog_active",
             "parent": "blog"
         },
@@ -168,7 +149,6 @@
             "title": "Email debug logs",
             "url": "admin_debug_email_logs",
             "order": 10,
-            "permission": 10,
             "parent": "statistics"
         },
         {
@@ -176,7 +156,6 @@
             "title": "Surveys",
             "url": "",
             "order": 7,
-            "permission": 5,
             "icon": "list",
             "settingActivate": "surveys_active"
         },
@@ -185,7 +164,6 @@
             "title": "Survey questions",
             "url": "admin_questions",
             "order": 2,
-            "permission": 5,
             "settingActivate": "surveys_active",
             "parent": "surveys-parent"
         },
@@ -194,7 +172,6 @@
             "title": "Surveys",
             "url": "admin_surveys",
             "order": 1,
-            "permission": 5,
             "settingActivate": "surveys_active",
             "parent": "surveys-parent"
         },
@@ -203,7 +180,6 @@
             "title": "Mailing Lists",
             "url": "admin_mailing_lists",
             "order": 7,
-            "permission": 8,
             "parent": "emails"
         },
         {
@@ -211,7 +187,6 @@
             "title": "Email Statistics",
             "url": "admin_analytics_email_stats",
             "order": 2,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -219,7 +194,6 @@
             "title": "Funnels",
             "url": "admin_analytics_funnels",
             "order": 5,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -227,7 +201,6 @@
             "title": "System",
             "url": "",
             "order": 80,
-            "permission": 9,
             "icon": "cog"
         },
         {
@@ -235,7 +208,6 @@
             "title": "Plugins",
             "url": "admin_plugins",
             "order": 1,
-            "permission": 9,
             "parent": "system"
         },
         {
@@ -243,7 +215,6 @@
             "title": "Themes",
             "url": "admin_themes",
             "order": 2,
-            "permission": 9,
             "parent": "system"
         },
         {
@@ -251,7 +222,6 @@
             "title": "Updates",
             "url": "admin_updates",
             "order": 3,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -259,7 +229,6 @@
             "title": "Static Cache",
             "url": "admin_static_cache",
             "order": 3,
-            "permission": 9,
             "parent": "system"
         },
         {
@@ -267,7 +236,6 @@
             "title": "OAuth Providers",
             "url": "admin_oauth_providers",
             "order": 4,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -275,7 +243,6 @@
             "title": "Subscription Tiers",
             "url": "admin_subscription_tiers",
             "order": 10,
-            "permission": 5,
             "settingActivate": "subscriptions_active",
             "parent": "users"
         },
@@ -284,7 +251,6 @@
             "title": "Contact Types",
             "url": "admin_contact_types",
             "order": 3,
-            "permission": 8,
             "parent": "emails"
         },
         {
@@ -292,7 +258,6 @@
             "title": "API Keys",
             "url": "admin_api_keys",
             "order": 4,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -300,7 +265,6 @@
             "title": "Webhooks",
             "url": "admin_webhooks",
             "order": 4,
-            "permission": 8,
             "parent": "system"
         },
         {
@@ -308,7 +272,6 @@
             "title": "Test Database",
             "url": "admin_test_database",
             "order": 5,
-            "permission": 10,
             "parent": "system",
             "settingActivate": "debug"
         },
@@ -317,7 +280,6 @@
             "title": "Agent Files",
             "url": "admin_agent_files",
             "order": 6,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -325,7 +287,6 @@
             "title": "Management Node",
             "url": "admin_management_node",
             "order": 7,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -333,7 +294,6 @@
             "title": "Pages list",
             "url": "admin_pages",
             "order": 1,
-            "permission": 5,
             "settingActivate": "page_contents_active",
             "parent": "pages"
         },
@@ -342,7 +302,6 @@
             "title": "Page Components",
             "url": "admin_components",
             "order": 2,
-            "permission": 5,
             "settingActivate": "page_contents_active",
             "parent": "pages"
         },
@@ -351,7 +310,6 @@
             "title": "Component Types",
             "url": "admin_component_types",
             "order": 6,
-            "permission": 9,
             "icon": "puzzle-piece",
             "parent": "system"
         },
@@ -360,7 +318,6 @@
             "title": "Scheduled Tasks",
             "url": "admin_scheduled_tasks",
             "order": 7,
-            "permission": 10,
             "icon": "clock",
             "parent": "system"
         },
@@ -369,7 +326,6 @@
             "title": "Attribution",
             "url": "admin_analytics_attribution",
             "order": 6,
-            "permission": 5,
             "parent": "statistics"
         },
         {
@@ -377,7 +333,6 @@
             "title": "Notification Prefs",
             "url": "admin_notification_preferences",
             "order": 8,
-            "permission": 9,
             "parent": "system"
         },
         {
@@ -385,7 +340,6 @@
             "title": "Recovery Readiness",
             "url": "admin_recovery_readiness",
             "order": 9,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -393,7 +347,6 @@
             "title": "Backups",
             "url": "admin_backups",
             "order": 10,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -401,7 +354,6 @@
             "title": "Problem Reports",
             "url": "admin_problem_reports",
             "order": 12,
-            "permission": 9,
             "parent": "system"
         },
         {
@@ -409,7 +361,6 @@
             "title": "Cloud Storage",
             "url": "admin_cloud_storage",
             "order": 11,
-            "permission": 10,
             "parent": "system"
         },
         {
@@ -417,7 +368,6 @@
             "title": "Report a problem",
             "url": "/report_problem",
             "order": 90,
-            "permission": 5,
             "icon": "question-circle"
         }
     ],
@@ -427,7 +377,6 @@
             "title": "Home",
             "url": "/",
             "order": 10,
-            "permission": 0,
             "icon": "home",
             "visibility": "both"
         },
@@ -436,7 +385,6 @@
             "title": "Sign in",
             "url": "/login",
             "order": 20,
-            "permission": 0,
             "icon": "sign-in",
             "visibility": "out"
         },
@@ -445,7 +393,6 @@
             "title": "Forgot Password",
             "url": "/password-reset-1",
             "order": 30,
-            "permission": 0,
             "icon": "key",
             "visibility": "out"
         },
@@ -454,7 +401,6 @@
             "title": "Sign up",
             "url": "/register",
             "order": 40,
-            "permission": 0,
             "icon": "user-plus",
             "settingActivate": "register_active",
             "visibility": "out"
@@ -464,7 +410,6 @@
             "title": "Dashboard",
             "url": "/profile",
             "order": 50,
-            "permission": 0,
             "icon": "user",
             "nativeScreen": "profile"
         },
@@ -473,7 +418,6 @@
             "title": "Calendar",
             "url": "/profile/calendar",
             "order": 55,
-            "permission": 0,
             "icon": "calendar",
             "nativeScreen": "calendar"
         },
@@ -482,7 +426,6 @@
             "title": "Drive",
             "url": "/drive",
             "order": 56,
-            "permission": 0,
             "icon": "folder",
             "settingActivate": "drive_active",
             "visibility": "in"
@@ -492,7 +435,6 @@
             "title": "Admin Dashboard",
             "url": "/admin/admin_users",
             "order": 100,
-            "permission": 5,
             "icon": "dashboard"
         },
         {
@@ -500,7 +442,6 @@
             "title": "Admin Help",
             "url": "/admin/admin_help",
             "order": 110,
-            "permission": 5,
             "icon": "question-circle"
         },
         {
@@ -508,7 +449,6 @@
             "title": "Admin Settings",
             "url": "/admin/admin_settings",
             "order": 120,
-            "permission": 6,
             "icon": "wrench"
         },
         {
@@ -516,7 +456,6 @@
             "title": "SEO Pages",
             "url": "/admin/admin_seo_pages",
             "order": 125,
-            "permission": 10,
             "icon": "search"
         },
         {
@@ -524,7 +463,6 @@
             "title": "Admin Utilities",
             "url": "/admin/admin_utilities",
             "order": 130,
-            "permission": 10,
             "icon": "tools"
         },
         {
@@ -532,7 +470,6 @@
             "title": "Sign out",
             "url": "/logout",
             "order": 200,
-            "permission": 0,
             "icon": "sign-out"
         }
     ],
@@ -542,7 +479,6 @@
             "title": "Account",
             "url": "/profile/account_edit",
             "order": 10,
-            "permission": 0,
             "icon": "user"
         },
         {
@@ -550,7 +486,6 @@
             "title": "Password",
             "url": "/profile/password_edit",
             "order": 20,
-            "permission": 0,
             "icon": "key"
         },
         {
@@ -558,7 +493,6 @@
             "title": "Address",
             "url": "/profile/address_edit",
             "order": 30,
-            "permission": 0,
             "icon": "home"
         },
         {
@@ -566,7 +500,6 @@
             "title": "Phone Numbers",
             "url": "/profile/phone_numbers_edit",
             "order": 40,
-            "permission": 0,
             "icon": "phone"
         },
         {
@@ -574,7 +507,6 @@
             "title": "Contact Preferences",
             "url": "/profile/contact_preferences",
             "order": 50,
-            "permission": 0,
             "icon": "envelope"
         },
         {
@@ -582,7 +514,6 @@
             "title": "Notifications",
             "url": "/profile/notification_preferences",
             "order": 60,
-            "permission": 0,
             "icon": "bell"
         },
         {
@@ -590,7 +521,6 @@
             "title": "Calendar",
             "url": "/profile/calendar_settings",
             "order": 65,
-            "permission": 0,
             "icon": "calendar"
         },
         {
@@ -598,7 +528,6 @@
             "title": "Security",
             "url": "/profile/security",
             "order": 70,
-            "permission": 0,
             "icon": "shield"
         }
     ]

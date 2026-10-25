@@ -12,6 +12,7 @@ class VideoException extends SystemBaseException {}
 
 class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $tablename = 'vid_videos';
+	public static $access_class = 'content';
 	public static $pkey_column = 'vid_video_id';
 
 	// AI auto-discovery (read)
@@ -224,17 +225,6 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 		return $vid_video_number;	
 	}	
 
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
-	
 	/**
 	 * Content-visibility gate for the video-serving path — NOT API row authorization.
 	 * Returns bool: may this session view the video, given min-permission, group
@@ -255,7 +245,7 @@ function get_embed($vidwidth = 560, $vidheight = 315) {
 			if (!$session->get_permission()) {
 				return false;
 			}
-			if ($session->get_permission() < $this->get('vid_min_permission')){
+			if (!Access::permits((int)$this->get('vid_min_permission'), $session)){
 				return false;
 			}
 	

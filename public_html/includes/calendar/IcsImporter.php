@@ -17,7 +17,9 @@
  * Import is one-directional, manual, owner-scoped: each VEVENT becomes a native
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - the import's run record (an EventLog row) is the server's own
+ *   bookkeeping, written in server_initiated_write(): a member's import was refused it.
  * @changelog 1.4 - nativeToRrule(), the inverse of translateRecurrence(). A UTC UNTIL,
  *   EXDATE or RECURRENCE-ID counts in the series' zone: read as a UTC date it could
  *   land a day off. STATUS maps to cal_status. An entry downloaded from this calendar
@@ -547,7 +549,9 @@ class IcsImporter {
 			if ($subject->type === CalendarSubject::TYPE_USER) {
 				$log->set('evl_usr_user_id', $subject->id);
 			}
-			$log->save();
+			// The audit row no person asked for; the member's own import above
+			// is what they did.
+			SystemBase::server_initiated_write(function () use ($log) { $log->save(); });
 		} catch (Throwable $e) {
 			// The import itself succeeded; losing its audit row must not fail it.
 			error_log('calendar_ics_import: could not write the run record — ' . $e->getMessage());

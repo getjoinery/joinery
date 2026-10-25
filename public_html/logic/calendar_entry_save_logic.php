@@ -232,6 +232,7 @@ function calendar_entry_save_logic_descriptor(): array {
 	// times, and ownership and returns friendly ActionErrors, so boundary
 	// validation stays out of the way (no new rejections for existing callers).
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Create or update a native calendar entry (recurrence and scope aware).',
 		'mutates'     => true,
 		'requires_session'        => true,

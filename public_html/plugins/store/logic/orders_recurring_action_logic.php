@@ -50,6 +50,7 @@ function orders_recurring_action_logic(array $input): LogicResult {
 
 function orders_recurring_action_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Execute a recurring-order action (cancel, reactivate, etc.) for an order item.',
 		'requires_session' => true,
 		'mutates'          => true,

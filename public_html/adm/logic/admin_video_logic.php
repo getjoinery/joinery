@@ -9,10 +9,9 @@ require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 function admin_video_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	$video = new Video($input['vid_video_id'], TRUE);
+	$video = new Video($input['vid_video_id'] ?? null, TRUE);
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 
 	if($input['action'] == 'remove'){

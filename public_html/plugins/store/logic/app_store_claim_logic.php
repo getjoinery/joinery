@@ -51,6 +51,7 @@ function app_store_claim_logic(array $input): LogicResult {
 
 function app_store_claim_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Validate a StoreKit 2 transaction JWS and grant the mapped subscription plan.',
 		'requires_session' => true,
 		'mutates'          => true,

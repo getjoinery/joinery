@@ -23,7 +23,6 @@ function admin_sealed_secrets_logic(array $input): LogicResult {
 
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_vars = array('settings' => $settings, 'session' => $session, 'flash' => null, 'flash_kind' => 'success');
 

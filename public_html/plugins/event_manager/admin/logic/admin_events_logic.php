@@ -10,7 +10,6 @@ function admin_events_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$searches = array();
@@ -21,8 +20,8 @@ function admin_events_logic(array $input): LogicResult {
 	$searchterm = LibraryFunctions::fetch_variable('searchterm', '', 0, '', $input);
 	$filter = LibraryFunctions::fetch_variable('filter', 'active', 0, '', $input);
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//ONLY SHOW DELETED TO WHO MAY UNDELETE
+	if(!Access::permits(Event::access_level('soft_delete'))){
 		$searches['deleted'] = false;
 	}
 

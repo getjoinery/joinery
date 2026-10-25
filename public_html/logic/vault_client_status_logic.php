@@ -41,7 +41,7 @@ function vault_client_status_logic(array $input): LogicResult {
 function vault_client_status_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Client-custody vault keyring status for a scope (public key, KDF params, opaque wrapping blobs) - no secret material. '
 			. 'Also returns label (the scope\'s display name), passkeys_enabled (setup is refused while it is false) '
 			. 'and has_second_factor (a vault needs one on the account).',

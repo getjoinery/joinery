@@ -15,7 +15,6 @@ function admin_joinery_ai_deleted_conversation_purge_logic(array $input): LogicR
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     $aic_conversation_id = LibraryFunctions::fetch_variable(
         'aic_conversation_id', NULL, 1, 'You must provide a conversation to purge.', $input

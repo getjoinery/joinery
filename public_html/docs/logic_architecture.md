@@ -167,22 +167,26 @@ function feature_logic(array $input): LogicResult {
 
 ### Permission Check Pattern
 
+An admin page's header decides who opens it, and every save is checked by its
+model, so an admin logic function asks a level only for one action that needs
+more than the page ([Permissions](permissions.md)):
+
 ```php
-function admin_page_logic(array $input): LogicResult {
+function admin_thing_logic(array $input): LogicResult {
     $session = SessionControl::get_instance();
 
-    if (!$session->is_logged_in()) {
-        return LogicResult::redirect('/login');
+    if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'rebuild') {
+        Access::demand(10, $session);   // a 401 naming the level when refused
+        // ...
     }
 
-    if ($session->get_permission() < 5) {
-        return LogicResult::error('You do not have permission to access this page');
-    }
-
-    // Admin logic continues...
+    $page_vars['can_undelete'] = Access::permits(Thing::access_level('soft_delete'));
     return LogicResult::render($page_vars);
 }
 ```
+
+A member page's logic asks for a signed-in visitor with
+`$session->check_permission(0)`.
 
 ### Form Processing Pattern
 

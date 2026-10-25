@@ -9,7 +9,6 @@ function admin_order_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('/plugins/store/data/products_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Load or create order
 	if (isset($input['ord_order_id']) || isset($input['ord_order_id'])) {

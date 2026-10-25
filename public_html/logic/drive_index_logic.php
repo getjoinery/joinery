@@ -288,7 +288,7 @@ function drive_index_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'after_id' => array('type' => 'string', 'required' => false, 'max_length' => 32, 'label' => 'Cursor from the previous page (omit to start)'),
 			'scope'    => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'shared'), 'label' => 'Own entities, or entities shared with the caller'),

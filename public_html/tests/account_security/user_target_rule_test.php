@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=user_target_rule
  *
+ * @version 1.1 - changing a user needs User's write level (personal, 8), not 5
  * @version 1.0
  */
 
@@ -56,7 +57,8 @@ try {
 	check(!utr_may($ten, 9), 'a 9 may not change a 10');
 	check(utr_may($ten, 10), 'a 10 may change another 10');
 	check(!utr_may($eight, 8), 'an 8 may not change another 8');
-	check(utr_may($zero, 8) && utr_may($zero, 5), 'an 8 or a 5 may change a 0');
+	check(utr_may($zero, 8), 'an 8 may change a 0');
+	check(!utr_may($zero, 5) && !utr_may($zero, 7), 'below User\'s write level (personal, 8) a 5 or a 7 may not');
 	check(!utr_may($zero, 0), 'a member may not change another member');
 
 	$unloaded = new User((int)$ten->key);

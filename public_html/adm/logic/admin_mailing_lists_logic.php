@@ -8,7 +8,6 @@ function admin_mailing_lists_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -17,7 +16,7 @@ function admin_mailing_lists_logic(array $input): LogicResult {
 	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC');
 
 	$search_criteria = array();
-	if($session->get_permission() < 10){
+	if(!Access::permits(MailingList::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

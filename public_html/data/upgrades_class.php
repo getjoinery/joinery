@@ -10,6 +10,8 @@ class UpgradeNotSentException extends UpgradeException {};
 
 class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	public static $tablename = 'upg_upgrades';
+	public static $access_class = 'config';
+	public static $write_permission = 10;
 	public static $pkey_column = 'upg_upgrade_id';
 
 	protected static $foreign_key_actions = [
@@ -51,17 +53,6 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	    'upg_keep' => array('type'=>'bool', 'default'=>false),
 	    'upg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 8) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
 
 }
 

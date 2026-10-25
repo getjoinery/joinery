@@ -21,7 +21,7 @@ function root_request_status_logic(array $input) {
 	// Everything a request does is an operator action — upgrading the site,
 	// installing a plugin, writing a doc — so reading one's transcript is an
 	// administrator's business and nobody else's.
-	if (!$session->is_logged_in() || (int)$session->get_permission() < 8) {
+	if (!$session->is_logged_in() || !Access::decide('config:read', $session)) {
 		return LogicResult::error('You do not have permission to read root requests.');
 	}
 
@@ -49,10 +49,10 @@ function root_request_status_logic(array $input) {
 
 function root_request_status_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 'config:read'],
 		'description' => 'Progress and transcript of a queued root request (upgrade, extension install, docs save).',
 		'mutates'     => false,
 		'requires_session' => true,
-		'min_permission'   => 8,
 		'input'       => [
 			'id' => ['type' => 'string', 'required' => true, 'label' => 'Request id'],
 		],

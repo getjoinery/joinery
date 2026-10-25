@@ -20,6 +20,10 @@
  * request was authorized at (SessionControl::get_permission(); for an API call,
  * the acting level set_api_user() simulated), never the user's stored one.
  * allows() is the same comparison for a caller that already holds that level.
+ * demand() is decide() for an action: it throws the page's 401 refusal.
+ * permits() asks it of the session without recording anything: for what a page
+ * shows (a column, a button, deleted rows in a list), never for what it does.
+ * staffLevel() is the lowest level above a member's.
  *
  * decide() is where the audit lives. Each of these lands in the event log
  * (evl_event_logs) with who, what, the level asked for and the request:
@@ -29,7 +33,12 @@
  *   access_granted   allowed work that needs 9 or above, and any allowed use
  *                    of the keys class, reads included
  *
- * @version 1.0
+ * The model write paths (SystemBase::enforce_access(), spec 3.2) report here
+ * too, through writeRefused() and writeGranted(). A refused write is an
+ * access_refused event, a [WRITE_REFUSED] line naming the code that wrote, and
+ * SystemAuthenticationError.
+ *
+ * @version 1.3
  */
 final class Access {
 
@@ -37,6 +46,17 @@ final class Access {
 
 	/** Allowed work at or above this level is recorded. */
 	const AUDIT_LEVEL = 9;
+
+	/**
+	 * The test harness sets this: on the CLI, a write made while a person is
+	 * signed in (a suite's simulated session) is checked as a web request's
+	 * would be. A real CLI run (cron, root, update_database) has no one signed
+	 * in and stays exempt.
+	 */
+	public static $check_cli_persons = false;
+
+	/** The SAPI the write-path check sees; CLI is exempt. A test stands in a web one. */
+	public static $sapi = PHP_SAPI;
 
 	/** @var array|null ['levels' => int => name, 'classes' => name => verb => int] */
 	private static $table = null;
@@ -104,6 +124,34 @@ final class Access {
 	}
 
 	/**
+	 * Whether the session meets the requirement, not recorded: what a page
+	 * shows. $session defaults to the request's.
+	 */
+	public static function permits($requirement, $session = null): bool {
+		$session = $session ?? SessionControl::get_instance();
+		return self::allows($requirement, (int)$session->get_permission());
+	}
+
+	/**
+	 * decide(), throwing the refusal a page gives when it says no: a 401 that
+	 * names the level. For one action that needs more than its page's level.
+	 */
+	public static function demand($requirement, $session = null): void {
+		if (!self::decide($requirement, $session)) {
+			$level = self::level($requirement);
+			throw new SystemAuthenticationError('That needs level ' . $level . ' (' . self::levelName($level) . ').');
+		}
+	}
+
+	/** The lowest level above a member's (0): the first staff level. */
+	public static function staffLevel(): int {
+		foreach (array_keys(self::levels()) as $level) {
+			if ($level > 0) return $level;
+		}
+		return 10;
+	}
+
+	/**
 	 * Whether the session meets the requirement, recorded as the class
 	 * comment says. $session defaults to the request's.
 	 */
@@ -114,12 +162,42 @@ final class Access {
 		$allowed = $permission >= $needed;
 
 		$user_id = (int)$session->get_user_id();
+		$what = is_int($requirement) ? 'level ' . $requirement : $requirement;
 		if (!$allowed && $user_id > 0) {
-			self::record('access_refused', false, $requirement, $needed, $permission, $user_id);
+			self::record('access_refused', false, $what, $needed, $permission, $user_id);
 		} elseif ($allowed && self::audited($requirement, $needed)) {
-			self::record('access_granted', true, $requirement, $needed, $permission, $user_id);
+			self::record('access_granted', true, $what, $needed, $permission, $user_id);
 		}
 		return $allowed;
+	}
+
+	/**
+	 * A model write path refused a write ($op on $what, e.g. 'User#12'): an
+	 * access_refused event for a signed-in user, a [WRITE_REFUSED] line with
+	 * the request and the code that wrote (so a server write nobody marked is
+	 * found from the log), and SystemAuthenticationError.
+	 */
+	public static function writeRefused(string $op, string $what, string $why, int $user_id, int $permission, int $needed): void {
+		if ($user_id > 0) {
+			self::record('access_refused', false, "$op $what", $needed, $permission, $user_id);
+		}
+		$trail = GuardedPdo::writer(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS));
+		error_log(sprintf('[WRITE_REFUSED] %s for user %d (level %d, needs %d): %s %s %s from %s',
+			"$op $what", $user_id, $permission, $needed, $why,
+			$_SERVER['REQUEST_METHOD'] ?? 'CLI', self::path(), $trail ? implode(' < ', $trail) : '?'));
+		throw new SystemAuthenticationError($why);
+	}
+
+	/** A model write path allowed a write the audit records (a permanent delete). */
+	public static function writeGranted(string $op, string $what, int $user_id, int $permission, int $needed): void {
+		if ($needed >= self::AUDIT_LEVEL) {
+			self::record('access_granted', true, "$op $what", $needed, $permission, $user_id);
+		}
+	}
+
+	/** The request's path; never its query string, which can carry a signature (signed file URLs). */
+	private static function path(): string {
+		return (string)strtok((string)($_SERVER['REQUEST_URI'] ?? ($_SERVER['SCRIPT_NAME'] ?? '')), '?');
 	}
 
 	/** Whether allowed work under this requirement is recorded. */
@@ -136,13 +214,9 @@ final class Access {
 	 * The audit row. The server's own write, so a GET may make it; a failed
 	 * write is logged and never changes the decision.
 	 */
-	private static function record(string $event, bool $success, $requirement, int $needed, int $permission, int $user_id): void {
+	private static function record(string $event, bool $success, string $what, int $needed, int $permission, int $user_id): void {
 		$note = sprintf('%s (needs %d, has %d) %s %s',
-			is_int($requirement) ? 'level ' . $requirement : $requirement,
-			$needed, $permission,
-			$_SERVER['REQUEST_METHOD'] ?? 'CLI',
-			// The path only: a query string can carry a signature (signed file URLs).
-			strtok((string)($_SERVER['REQUEST_URI'] ?? ($_SERVER['SCRIPT_NAME'] ?? '')), '?'));
+			$what, $needed, $permission, $_SERVER['REQUEST_METHOD'] ?? 'CLI', self::path());
 		try {
 			SystemBase::server_initiated_write(function () use ($event, $success, $note, $user_id) {
 				$log = new EventLog(NULL);

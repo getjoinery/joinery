@@ -5,6 +5,8 @@ class MessageNotSentException extends MessageException {};
 
 class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $tablename = 'msg_messages';
+	public static $access_class = 'personal';
+	public static $read_permission = 8;   // another person's messages (Q13)
 	public static $pkey_column = 'msg_message_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -94,7 +96,7 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	    // single-owner wrapping are declared anyway, because the generic
 	    // machinery reads them by name, and left null.
 	    'msg_content_sealed' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-	    'msg_sealed_key' => array('type'=>'text', 'is_nullable'=>true),
+	    'msg_sealed_key' => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 	    'msg_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
 	    // Which conversation key sealed this body. One key per conversation
 	    // today, so always 0; the column is what a future re-key writes into.
@@ -215,12 +217,12 @@ function display_title(){
 		}
 	}
 
-	// REST API per-record read scope: a message is readable by staff
-	// (permission >= 5) and by anyone in its conversation. Membership, not the
+	// REST API per-record read scope: a message is readable at the model's read
+	// level (8, Q13) and by anyone in its conversation. Membership, not the
 	// sender column, is what admits a reader: a group thread's messages belong
 	// to every participant, whoever wrote each one.
 	function authenticate_read($data) {
-		if ($data['current_user_permission'] >= 5) {
+		if (Access::allows(static::access_level('read'), (int)($data['current_user_permission'] ?? 0))) {
 			return;
 		}
 		$uid = (int)$data['current_user_id'];
@@ -239,14 +241,14 @@ function display_title(){
 	}
 
 	// REST API per-record write scope: a message is owned by its sender, so only
-	// the sender (or staff, permission >= 5) may create/update/delete it. There
+	// the sender (or the model's write level) may create/update/delete it. There
 	// is no bare msg_usr_user_id column — the owner is msg_usr_user_id_sender.
 	function authenticate_write($data) {
 		if ($this->get('msg_usr_user_id_sender') != $data['current_user_id']) {
-			// Not the sender — require staff access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
+			// Not the sender: the model's write level, otherwise denied.
+			if (!Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
 				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
+					'Changing another person\'s message needs level ' . static::access_level('write') . '.');
 			}
 		}
 
@@ -265,7 +267,7 @@ function display_title(){
 				throw new SystemAuthenticationError(
 					'This conversation is protected — its messages are written only through Messages.');
 			}
-			if ($data['current_user_permission'] < 5
+			if (!Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))
 					&& !$conversation->has_participant($data['current_user_id'])) {
 				throw new SystemAuthenticationError(
 					'Current user is not a participant in this conversation.');

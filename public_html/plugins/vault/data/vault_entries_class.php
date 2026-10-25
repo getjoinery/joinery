@@ -28,6 +28,7 @@ class VaultEntryException extends SystemBaseException {}
 class VaultEntry extends SystemBase {
 	public static $prefix = 'vle';
 	public static $tablename = 'vle_vault_entries';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'vle_vault_entry_id';
 
 	protected static $foreign_key_actions = array(

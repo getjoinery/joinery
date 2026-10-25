@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class AgentHeartbeat extends SystemBase {
 	public static $prefix = 'ahb';
 	public static $tablename = 'ahb_agent_heartbeats';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ahb_agent_heartbeat_id';
 
 	public static $field_specifications = array(

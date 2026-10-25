@@ -21,6 +21,7 @@ class InboundEmailLogException extends SystemBaseException {}
 class InboundEmailLog extends SystemBase {
 	public static $prefix = 'iel';
 	public static $tablename = 'iel_inbound_email_logs';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'iel_inbound_email_log_id';
 
 	// Retention: a delivery log, kept for troubleshooting rather than for the

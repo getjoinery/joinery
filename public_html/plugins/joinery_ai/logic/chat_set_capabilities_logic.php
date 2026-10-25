@@ -89,6 +89,9 @@ function chat_set_capabilities_logic(array $input): LogicResult {
 
 function chat_set_capabilities_logic_descriptor() {
     return ['requires_session' => true,
+            // The conversation's owner sets their own chat's controls (the
+            // logic's rule): signed in is enough, admin or member.
+            'auth' => ['min_user_permission' => 0],
             'description' => 'Set one AI chat control (model, temperature, thinking level, or a capability toggle) on an existing conversation.',
             'input' => [
                 'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],

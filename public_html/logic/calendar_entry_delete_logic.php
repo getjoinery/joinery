@@ -69,6 +69,7 @@ function calendar_entry_delete_logic_descriptor(): array {
 	// entry_id stays optional at the boundary so the logic's own "entry_id is
 	// required" ActionError remains the single source of that behavior.
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Delete a native calendar entry (scope aware for recurring series).',
 		'mutates'     => true,
 		'requires_session'        => true,

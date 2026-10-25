@@ -40,6 +40,7 @@ function terms_accept_logic(array $input): LogicResult {
 
 function terms_accept_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Capture acceptance of the Terms of Use and Privacy Policy.',
 		'requires_session' => true,
 		'mutates'          => true,

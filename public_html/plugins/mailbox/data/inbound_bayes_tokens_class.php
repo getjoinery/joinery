@@ -24,6 +24,7 @@ class InboundBayesTokenException extends SystemBaseException {}
 class InboundBayesToken extends SystemBase {
 	public static $prefix = 'ibt';
 	public static $tablename = 'ibt_inbound_bayes_tokens';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'ibt_inbound_bayes_token_id';
 
 	public static $field_specifications = array(
@@ -40,12 +41,6 @@ class InboundBayesToken extends SystemBase {
 		array('columns' => array('ibt_last_seen_time')),
 	);
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 }
 
 class MultiInboundBayesToken extends SystemMultiBase {

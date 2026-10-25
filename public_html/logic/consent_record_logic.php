@@ -33,6 +33,7 @@ function consent_record_logic_descriptor(): array {
 		'requires_session' => true,
 		'mutates'          => true,
 		'auth'             => [
+			'min_user_permission' => 0,
 			'allow_guest'              => true,
 			'requires_browser_session' => true,
 		],

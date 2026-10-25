@@ -35,6 +35,7 @@ function push_subscribe_logic_descriptor(): array {
 		'description' => "Turn on push notifications in this browser: register its push subscription to you.",
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'requires_browser_session' => true,
 		],
 		'input'       => [

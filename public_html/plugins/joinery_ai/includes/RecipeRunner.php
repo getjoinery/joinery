@@ -245,7 +245,7 @@ class RecipeRunner {
             return "Recipe owner (user $owner_id) has been deleted. Transfer ownership "
                  . "to an active permission-10 admin before re-running.";
         }
-        if ((int)$user->get('usr_permission') < 10) {
+        if (!Access::allows(10, (int)$user->get('usr_permission'))) {
             return "Recipe owner (user $owner_id) is no longer a permission-10 admin. "
                  . "Transfer ownership to an active admin before re-running.";
         }

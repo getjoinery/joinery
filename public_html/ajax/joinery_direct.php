@@ -25,6 +25,7 @@
  * recipient, a WAF, a proxy and a dead host all mean the same thing to a
  * correctly written client, which is to fall back.
  *
+ * @version 1.1 - the receiver writes as the server (server_initiated_write)
  * @version 1.0
  */
 
@@ -55,62 +56,67 @@ $step = isset($_GET['step']) ? strtolower(trim((string)$_GET['step'])) : '';
 $receiver = new DirectReceiver();
 
 try {
-	if ($step === 'preflight') {
-		$payload = json_decode((string)file_get_contents('php://input'), true);
-		if (!is_array($payload)) {
-			joinery_direct_answer(400, array('error' => 'Malformed preflight'));
-		}
-		$answer = $receiver->preflight(
-			is_array($payload['envelope'] ?? null) ? $payload['envelope'] : array(),
-			is_array($payload['manifest'] ?? null) ? $payload['manifest'] : array(),
-			array('signature' => (string)($payload['signature'] ?? ''))
-		);
-
-		if ($answer['answer'] === 'refused') {
-			// The STATUS is request-level and may be signalled (see DirectProtocol:
-			// a refusal is an HTTP status, never a gate answer, so it never discloses
-			// a recipient's existence or contacts). The internal reason string must
-			// NOT reach the wire: to a correct client every refusal means one thing —
-			// fall back — and a Joinery-specific reason would only fingerprint the box
-			// and name the exact stage it tripped. It is logged; the body stays as
-			// generic as an unaware deployment's 404.
-			$status = (int)($answer['status'] ?? 400);
-			if (!empty($answer['error'])) {
-				error_log('joinery_direct preflight refused (' . $status . '): ' . (string)$answer['error']);
+	// No person is behind a delivery: another instance's signature and the
+	// part nonce are the authority, so what the receiver writes is the
+	// server's own (spec declared_permissions 3.2).
+	SystemBase::server_initiated_write(function () use ($step, $receiver) {
+		if ($step === 'preflight') {
+			$payload = json_decode((string)file_get_contents('php://input'), true);
+			if (!is_array($payload)) {
+				joinery_direct_answer(400, array('error' => 'Malformed preflight'));
 			}
-			joinery_direct_answer($status, array('error' => 'Refused'));
-		}
-		unset($answer['status'], $answer['error']);
-		joinery_direct_answer(200, $answer);
-	}
+			$answer = $receiver->preflight(
+				is_array($payload['envelope'] ?? null) ? $payload['envelope'] : array(),
+				is_array($payload['manifest'] ?? null) ? $payload['manifest'] : array(),
+				array('signature' => (string)($payload['signature'] ?? ''))
+			);
 
-	if ($step === 'part') {
-		$nonce = (string)($_GET['nonce'] ?? '');
-		$index = (int)($_GET['index'] ?? -1);
-		$bytes = (string)file_get_contents('php://input');
-		if ($index < 0 || !$receiver->acceptPart($nonce, $index, $bytes)) {
-			joinery_direct_answer(409, array('error' => 'Part refused'));
+			if ($answer['answer'] === 'refused') {
+				// The STATUS is request-level and may be signalled (see DirectProtocol:
+				// a refusal is an HTTP status, never a gate answer, so it never discloses
+				// a recipient's existence or contacts). The internal reason string must
+				// NOT reach the wire: to a correct client every refusal means one thing —
+				// fall back — and a Joinery-specific reason would only fingerprint the box
+				// and name the exact stage it tripped. It is logged; the body stays as
+				// generic as an unaware deployment's 404.
+				$status = (int)($answer['status'] ?? 400);
+				if (!empty($answer['error'])) {
+					error_log('joinery_direct preflight refused (' . $status . '): ' . (string)$answer['error']);
+				}
+				joinery_direct_answer($status, array('error' => 'Refused'));
+			}
+			unset($answer['status'], $answer['error']);
+			joinery_direct_answer(200, $answer);
 		}
-		joinery_direct_answer(200, array('ok' => true));
-	}
 
-	if ($step === 'commit') {
-		$payload = json_decode((string)file_get_contents('php://input'), true);
-		if (!is_array($payload)) {
-			joinery_direct_answer(400, array('error' => 'Malformed commit'));
+		if ($step === 'part') {
+			$nonce = (string)($_GET['nonce'] ?? '');
+			$index = (int)($_GET['index'] ?? -1);
+			$bytes = (string)file_get_contents('php://input');
+			if ($index < 0 || !$receiver->acceptPart($nonce, $index, $bytes)) {
+				joinery_direct_answer(409, array('error' => 'Part refused'));
+			}
+			joinery_direct_answer(200, array('ok' => true));
 		}
-		$committed = $receiver->commit(
-			(string)($payload['nonce'] ?? ''),
-			is_array($payload['hashes'] ?? null) ? $payload['hashes'] : array(),
-			!empty($payload['sealed']),
-			(int)($payload['key_generation'] ?? 0),
-			array('signature' => (string)($payload['signature'] ?? ''))
-		);
-		if (!$committed) {
-			joinery_direct_answer(409, array('error' => 'Commit refused'));
+
+		if ($step === 'commit') {
+			$payload = json_decode((string)file_get_contents('php://input'), true);
+			if (!is_array($payload)) {
+				joinery_direct_answer(400, array('error' => 'Malformed commit'));
+			}
+			$committed = $receiver->commit(
+				(string)($payload['nonce'] ?? ''),
+				is_array($payload['hashes'] ?? null) ? $payload['hashes'] : array(),
+				!empty($payload['sealed']),
+				(int)($payload['key_generation'] ?? 0),
+				array('signature' => (string)($payload['signature'] ?? ''))
+			);
+			if (!$committed) {
+				joinery_direct_answer(409, array('error' => 'Commit refused'));
+			}
+			joinery_direct_answer(200, array('ok' => true));
 		}
-		joinery_direct_answer(200, array('ok' => true));
-	}
+	});
 } catch (\Throwable $e) {
 	// Never let an internal failure become a distinguishable answer: it is a
 	// temporary failure, the same thing an overloaded box says.

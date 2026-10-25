@@ -12,12 +12,14 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * assembled bytes into a File (or a new FileVersion) and deletes the row. Stale
  * rows + part-files are swept by the retention sweep (see $retention_policy).
  *
+ * @version 1.3.0 - discard() removes the uploader's own scratch row under rule_checked_write()
  * @version 1.2.0 - space_refusal() also refuses past the site's disk allowance (DiskAllowance)
  * @version 1.1.0
  */
 class FileUpload extends SystemBase {
 	public static $prefix = 'fup';
 	public static $tablename = 'fup_file_uploads';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fup_file_upload_id';
 
 	protected static $foreign_key_actions = array(
@@ -36,7 +38,7 @@ class FileUpload extends SystemBase {
 
 	public static $field_specifications = array(
 		'fup_file_upload_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'fup_token_sha256'   => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'fup_token_sha256'   => array('access_class' => 'restricted', 'type' => 'varchar(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'fup_usr_user_id'    => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fup_fol_folder_id'  => array('type' => 'int8', 'is_nullable' => true),
 		'fup_fil_file_id'    => array('type' => 'int8', 'is_nullable' => true),
@@ -123,7 +125,10 @@ class FileUpload extends SystemBase {
 		if (is_file($part)) {
 			@unlink($part);
 		}
-		$this->permanent_delete();
+		// A pending upload is scratch, removed outright once it lands or fails.
+		// Its callers hold it: drive_upload_complete matched it to the uploader
+		// (fup_usr_user_id), and the stale-upload sweep runs from cron.
+		SystemBase::rule_checked_write(function () { $this->permanent_delete(); });
 	}
 
 	/**

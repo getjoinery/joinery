@@ -26,10 +26,6 @@ class ChatTurnContext implements ToolContext {
      *  indicator meanwhile. */
     const PER_TURN_SECONDS = 240;
 
-    /** Permission floor for unscoped (cross-user) reads. At or above this the
-     *  caller is an admin and reads everyone's rows; below it the caller is a
-     *  member and reads only their own. Matches the 5 = admin convention. */
-    const ADMIN_PERMISSION = 5;
 
     /** @var AiConversation */
     private $conversation;
@@ -124,12 +120,12 @@ class ChatTurnContext implements ToolContext {
     public function allowedModels(): array {
         if (!$this->conversation->get('aic_data_access')) return [];
         $models = ModelRegistry::all();
-        if (!$this->ownerScopedReads()) {
-            return array_keys($models);
-        }
         $out = [];
         foreach ($models as $name => $info) {
-            if (($info['owner_scope']['mode'] ?? 'hidden') !== 'hidden') $out[] = $name;
+            if (!$this->ownerScopedReads($name)
+                    || ($info['owner_scope']['mode'] ?? 'hidden') !== 'hidden') {
+                $out[] = $name;
+            }
         }
         return $out;
     }
@@ -206,8 +202,10 @@ class ChatTurnContext implements ToolContext {
 
     /** A non-admin member's reads are contained to their own rows; an admin
      *  reads cross-user, exactly as the admin-only chat always has. */
-    public function ownerScopedReads(): bool {
-        return $this->acting_permission < self::ADMIN_PERMISSION;
+    public function ownerScopedReads(?string $model_class = null): bool {
+        if (!Access::allows(Access::staffLevel(), (int)$this->acting_permission)) return true;
+        return $model_class !== null && is_subclass_of($model_class, 'SystemBase')
+            && !Access::allows($model_class::access_level('read'), (int)$this->acting_permission);
     }
 
     /** Per-turn continuation guard: the user's mid-flight Cancel (checked first,

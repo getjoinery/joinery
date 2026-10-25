@@ -65,7 +65,6 @@
             "title": "Mail Apps",
             "url": "/plugins/mail_apps/admin/admin_mail_apps",
             "parent": "emails",
-            "permission": 9,
             "order": 40
         }
     ],
@@ -75,7 +74,6 @@
             "title": "Mail apps",
             "url": "/profile/mail_apps",
             "icon": "envelope",
-            "permission": 0,
             "order": 89
         }
     ]

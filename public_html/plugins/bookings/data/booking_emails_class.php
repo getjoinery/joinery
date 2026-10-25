@@ -10,6 +10,7 @@ class BookingEmailException extends SystemBaseException {}
 class BookingEmail extends SystemBase {
 	public static $prefix = 'bke';
 	public static $tablename = 'bke_booking_emails';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'bke_booking_email_id';
 
 	public static $field_specifications = array(

@@ -55,7 +55,7 @@ if (!$is_cli) {
     }
 
     // Check permission level
-    if ($session->get_permission() < 10) {
+    if (!Access::decide(10, $session)) {
         http_response_code(403);
         echo "<h1>403 Forbidden</h1>";
         echo "<p>Access denied. Administrator permissions (level 10) required to access this utility.</p>";

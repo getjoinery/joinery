@@ -8,12 +8,13 @@ function admin_seo_pages_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	// Actions
 	if (isset($input['action'])) {
 		if ($input['action'] === 'scan_now') {
+			// The scan adds, updates and soft-deletes rows in one raw pass.
+			Access::demand(SeoPageMetadata::access_level('soft_delete'), $session);
 			try {
 				$result = SeoPageMetadata::sync_inventory();
 				$summary = sprintf(

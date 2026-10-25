@@ -8,6 +8,8 @@ class RecipeRun extends SystemBase {
 
     public static $prefix = 'rcr';
     public static $tablename = 'rcr_recipe_runs';
+    public static $access_class = 'config';
+    public static $write_permission = 10;   // written by the runner; a manual edit is 10
     public static $pkey_column = 'rcr_recipe_run_id';
 
     protected static $foreign_key_actions = array(
@@ -72,7 +74,7 @@ class RecipeRun extends SystemBase {
         // Sealed Vault columns (docs/sealed_vault.md). A run that read protected
         // material is protected material; see $sealed_fields below.
         'rcr_content_sealed'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-        'rcr_sealed_key'           => array('type'=>'text', 'is_nullable'=>true),
+        'rcr_sealed_key'           => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
         'rcr_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
         'rcr_key_generation'       => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
         'rcr_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -106,13 +108,6 @@ class RecipeRun extends SystemBase {
     // output) and re-seals each column under that same key as the run produces
     // it, so the sealing path is the run's, not save()'s.
     public static $seal_on_save = false;
-
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Joinery AI run rows are written by the runner; manual edits require permission level 10.');
-        }
-    }
 
     /** The row DEK for this run, held for the run's duration. Never persisted. */
     private $content_dek = null;
