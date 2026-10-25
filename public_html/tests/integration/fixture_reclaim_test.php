@@ -35,7 +35,7 @@ harness_boot();
 
 $db = DbConnector::get_instance()->get_db_link();
 $two_hours_ago = gmdate('Y-m-d H:i:s', time() - 7200);
-$live_dir = harness_scratch_dir('live');
+$live_dir = harness_shared_dir('live');   // the folder every run's lock is in, not this run's scratch
 
 /** A token no real run holds. */
 $other_token = function () { return bin2hex(random_bytes(4)); };
