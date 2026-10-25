@@ -786,6 +786,7 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 | `data_root_migrate` | Move a host's data onto its data root, `/srv/joinery`, as the `data_root_migrate` **operate primitive** (agent 1.69.0+, `install_tools/joinery_data_root.sh migrate`; specs/one_data_root.md D5). No parameters: the host finds what moves (PostgreSQL, the Postfix queue, rspamd, each site's six folders, Docker's data-root) and sizes the data root from it, refusing with every reason before anything changes. Its sites, database and mail stop for as long as one copy of the data takes; a move that does not finish puts everything back. The move runs in a systemd unit of its own (`joinery-data-root-migrate.service`, log `/var/log/joinery-data-root-migrate.log`), so a job that times out ends only its transcript. The copies from before stay on the host until its data root passes check after a reboot. Offered on a host with no data root as **Move its data onto the data root** under Health; never on a site container, whose data is its volumes | No |
 | `data_root_enrol` | Enrol the node's encrypted data root with this management node as its escrow holder, as the `data_root_enrol` **operate primitive** (`joinery-agent data-root enrol`): the node signs with its unlock identity and vouches with its node key, so the holder hands over the escrow secret at once; the secret goes to the node in the holder's answer, never into the job. Sent by `DataRootEscrowSync` when a host report shows an open encrypted data root not enrolled here, a dormant copy included once its agent is 1.75.5 or newer (it takes this word and `data_root_recipient` on a quiet site); a job not yet succeeded holds the next back an hour. Offered as **Enrol with this management node** on the node page's encryption card ([Encrypted data root](/docs/encrypted_data_root.md)) | No |
 | `data_root_recipient` | Set the recovery public key the node's break-glass copy is sealed to, as the `data_root_recipient` **operate primitive** (`joinery_data_root.sh recipient --set-by=operator KEY`): this management node's own proven key, for a machine in one of our accounts. Sent before an encryption, and again by `DataRootEscrowSync` to every such machine whose host report names an older key, or names this key as set by anyone but the operator (`recipient_set_by`: a server made here is given it at its install, and its site would otherwise call it another key); the node seals its copy again on its next tick | No |
+| `data_root_provider_layer` | Record on the machine the provider's own disk encryption under it, as the `data_root_provider_layer` **operate primitive** (agent 1.96.0+, `joinery_data_root.sh provider-layer enabled\|disabled`, into `/etc/joinery/data-root/provider_layer`). Sent by `DataRootLayers::push_provider_layer` when a host report's `data_root_provider_layer` is not what this management node knows: never unknown, to a machine with a data root (a container's is its host's) whose release's script is 1.32 or newer, the same value once an hour at most. The script then refuses `encrypt` while it says enabled, unless `--keep-provider-layer` | No |
 | `data_root_encrypt`, `data_root_decrypt` | Encrypt the node's data root where it stands, or undo it, as **operate primitives** (`joinery_data_root.sh encrypt [--keep-provider-layer]` / `decrypt`): the start stops its services for seconds, then `joinery-data-encrypt.service` runs for hours at idle priority, reported in the host report (`reencrypt`, `reencrypt_percent`). Queued by **Encrypt the data root** (`DataRootEncryptionOffer`: a machine in one of our accounts, the recovery key proven, a verified backup under a day old, one layer unless the provider's is kept) and **Decrypt (undo)** | No |
 | `data_root_rekey` | Re-encrypt the node's data root under a new volume key, as the `data_root_rekey` **operate primitive** (`joinery_data_root.sh rekey`), after a recovery key that may have been seen: online, for hours, and its escrow slot made again with a new secret through the holder's `rekey` action. **Re-encrypt under a new key…**; one machine at a time | No |
 | `site_limits` | Change one of a host's sites' memory, CPU ceiling and disk allowance without rebuilding it, as the `site_limits` **operate primitive** on the host's own agent (agent 1.63.0+, `sysadmin_tools/site_limits.sh`): `name` is a site slug, and `memory`, `cpus` and `disk` are each a figure, `none`, or `keep` (an empty field on the node page). Memory and CPU change on the running container (`docker update`, swap held to the memory figure), the disk allowance on the host's disk pool (`docker_disk_pool.sh allow`, `release` for none), and the run spec records each, so a rebuild keeps them. A memory change restarts the site, so PostgreSQL and PHP-FPM size themselves to it. The host refuses what `install.sh site` would, a CPU ceiling above its own, an allowance on a host with no pool, and lifting a running container's memory limit or CPU ceiling (Docker keeps a CPU ceiling in the container's configuration and puts it back at the next start): a rebuild with `--memory=none` or `--cpus=none` does that. Offered on a Docker host's Site containers as **Change a site's limits**. `install.sh site-limits SITENAME [--memory=] [--cpus=] [--disk=]` runs the same script on the host | No |
@@ -1345,12 +1346,15 @@ provider's default. `cvp_data_root_encrypted` decides it, set when the
 provision is created and only where the core setting
 `data_root_encryption_offered` is on (off by default): a hosted order or an
 activated Managed draft on our account, Remote Install into one of our
-accounts, and a site copy, whose new-server form offers a **Data root
-encrypted** tick (ticked when the first account offered is ours). A server in a
-customer's own account is born unencrypted. For such a provision the task
-refuses, before anything is created, when this management node's recovery key
-is not proven or the region is a distributed one (where Linode's layer cannot
-be turned off); creates the instance with `disk_encryption: disabled` (sent
+accounts, and a site copy onto a new server, whose layer the Copy tab decides
+from where it is born (`SiteCopyRunner::copy_encryption()`): in one of our
+accounts, ours; in its owner's account, ours sealed to the site's own proven
+recovery key (`cvp_recovery_public_key`), or the provider's default where none
+is proven. Any other server in a customer's own account is born unencrypted.
+For such a provision the task refuses, before anything is created, when the
+key it is sealed to is not proven (this management node's, unless the
+provision names the site's own) or the region is a distributed one (where
+Linode's layer cannot be turned off); creates the instance with `disk_encryption: disabled` (sent
 only where the region lists Linode's "Disk Encryption" capability) and
 `swap_size: 0`; saves `cvp_instance_id`, then records the provider's answer in
 `cvp_provider_disk_encryption` (`enabled`, `disabled`, or `unknown` when it
@@ -1358,11 +1362,23 @@ gave none) at create and again at `booting`. A layer reported on fails the
 provision before anything is installed, leaving the instance for its owner to
 delete; unknown proceeds. The install then runs `install.sh docker` or
 `install.sh server` with `--encrypted-data-root
---recovery-public-key=<this management node's proven recovery public key>`.
+--recovery-public-key=<that key>`.
 An adopted server records what the provider's listing said and is never marked
 encrypted by us; relays are born with the provider's defaults. The node page
 says it in one line under the address: "Data root: encrypted by us · provider's
 disk encryption: off" (or on, or unknown).
+
+**Encrypting in place keeps to one layer too.** The node page's **Encrypt the
+data root** refuses a machine whose provider's layer is on, except a management
+node, which never copies itself and may keep both. What it says to do instead is
+`DataRootEncryptionOffer::provider_layer_fix()`: copy the site onto a new
+server, into its owner's account once the site's recovery key is proven where it
+is not. A site's own Backups page asks root to encrypt in place and cannot read
+the provider, so this management node records the layer on each machine (the
+`data_root_provider_layer` word, sent by `DataRootLayers::push_provider_layer`
+whenever a host report's `data_root_provider_layer` says otherwise than it
+knows); `joinery_data_root.sh encrypt` then refuses there as well, unless
+`--keep-provider-layer`, and the page says to copy the site instead.
 
 **The escrow holder.** This management node holds the escrow secret of each
 encrypted node enrolled with it (`dre_data_root_escrows`, `EscrowEndpoint` at

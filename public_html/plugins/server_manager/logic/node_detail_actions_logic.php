@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.79 - copy_new_server no longer reads a copy_data_root_encrypted field: the Copy tab decides the layer
+ *                 (SiteCopyRunner::copy_encryption()) and renders no such tick (reviewer2 F3 on B114)
  * @version 1.78 - disable_root_login (agent 1.95.0): root SSH login off for good, through the machine's own agent
  * @version 1.77 - Retry Install on a box whose password is kept for the beta says so, and names the holder's Retire (reviewer2 B2)
  * @version 1.76 - the node API secret is stored sealed (ManagedNode::set_api_secret_key())
@@ -1101,7 +1103,6 @@ class NodeDetailActions {
 						'type'    => (string)($_POST['copy_type_' . $copy_provider] ?? ''),
 						'carry_root_keys'  => !empty($_POST['copy_carry_root_keys']),
 						'key_fingerprints' => (string)($_POST['copy_key_fingerprints'] ?? ''),
-						'data_root_encrypted' => !empty($_POST['copy_data_root_encrypted']),
 					], $uid, $copy_from);
 					self::ok($session, $page_regex, 'The new server is being created. Its install takes a few minutes; '
 						. 'the copy starts once its agent has joined.');

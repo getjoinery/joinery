@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,php_workers,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_provider_layer,data_root_script,data_root_stopped,memory,swap,cpus,php_workers,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -842,6 +842,20 @@ dre() { printf 'public_key=x\nfingerprint=%s\nset_by=%s\n' "$(printf 'ab%.0s' {1
 chk "the key a management node named is marked as the operator's" "$(dre operator)" "64|operator"
 chk "the key the install was given is marked as the install's" "$(dre install)" "64|install"
 chk "anything but letters is dropped" "$(dre 'op\"erator;')" "64|operator"
+
+echo "=== The provider's disk encryption as its management node recorded it (host_report 1.41, B114) ==="
+eval "$(sed -n -e '/^emit_data_root_provider_layer() {/,/^}/p' "$SCRIPT")"
+mkdir -p "$T/drpl"
+drpl() { HOST_REPORT_DATA_ROOT_DIR="$T/drpl" emit_data_root_provider_layer; }
+chk "nothing recorded: unknown" "$(drpl)" '"unknown"'
+printf '# x\nlayer=enabled\n' > "$T/drpl/provider_layer"
+chk "recorded enabled: enabled" "$(drpl)" '"enabled"'
+printf 'layer=disabled\n' > "$T/drpl/provider_layer"
+chk "recorded disabled: disabled" "$(drpl)" '"disabled"'
+printf 'layer=en"abled\n' > "$T/drpl/provider_layer"
+chk "anything else: unknown, never echoed" "$(drpl)" '"unknown"'
+chk "the real run carries the key, as one of the three (a managed machine's is what its management node told it)" \
+    "$(jv "$T/real.json" data_root_provider_layer | grep -cx -e enabled -e disabled -e unknown)" "1"
 
 echo "=== A command that hangs costs its key, not the report ==="
 cat > "$T/bin/fail2ban-client" <<'STUB'

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.148 - build_data_root_provider_layer (agent 1.96.0): the machine is told the provider's own disk
+ *                 encryption under it, enabled or disabled (specs/site_copy_final_test.md E2, B114)
  * @version 1.147 - a copy's install passes --keep-root-login only to a release that knows it (keep_root_login_flag,
  *                 KEEP_ROOT_LOGIN_MIN_VERSION 0.8.535), and both copy floors are COPY_INSTALL_MIN_VERSION 0.8.497, the
  *                 first install.sh that takes every other option a copy's install passes (B115)
@@ -3757,6 +3759,33 @@ class JobCommandBuilder {
 
 	public static function build_data_root_recipient_primitive($node, string $public_key = '') {
 		return ['primitive' => 'data_root_recipient', 'params' => ['public_key' => $public_key]];
+	}
+
+	/**
+	 * The provider's own disk encryption under a machine, as this management
+	 * node knows it (E2, B114): the data_root_provider_layer word. Its
+	 * joinery_data_root.sh then refuses to encrypt the data root in place
+	 * while it is enabled, unless this side keeps both layers on a management
+	 * node, and its site's Backups page says why. DataRootLayers::push_provider_layer
+	 * sends it.
+	 */
+	public static function build_data_root_provider_layer($node, string $layer) {
+		if (!in_array($layer, array('enabled', 'disabled'), true)) {
+			throw new Exception("The provider's disk encryption is told as enabled or disabled, not '{$layer}'.");
+		}
+		if (self::container_node_host($node) !== null) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' is a site in a container: its host's machine is told the provider's layer.");
+		}
+		if (!self::has_primitive($node, 'data_root_provider_layer')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be told the provider's disk encryption under it. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_provider_layer']));
+		}
+		return self::build_data_root_provider_layer_primitive($node, $layer);
+	}
+
+	public static function build_data_root_provider_layer_primitive($node, string $layer = '') {
+		return ['primitive' => 'data_root_provider_layer', 'params' => ['layer' => $layer]];
 	}
 
 	/**

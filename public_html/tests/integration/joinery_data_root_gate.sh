@@ -37,6 +37,8 @@
 #   - the image stays whole: tick stops the loop device passing discards to
 #     the file (Ubuntu's weekly fstrim would punch holes in it) and allocates
 #     again any space one already took back.
+#   - provider-layer (E2, B114): recorded, shown, in the site's status file; encrypt
+#     refused while it says enabled, unless --keep-provider-layer.
 #   - encrypted (hosted_data_promise_disk_encryption WP1): create --encrypted
 #     refuses without a recovery recipient, seals the key before the volume is
 #     written, formats LUKS2 in the standard configuration, enrols a TPM2 chip,
@@ -1206,6 +1208,35 @@ chk "a TERM while cryptsetup's start opens the volume: the mapping closed before
     "143|close,detach|closed|1|1|1|none|0|1"
 cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"
 truncate -s $(( 8 * G )) "$R/srv/joinery.img"
+# The provider's own disk encryption (specs/site_copy_final_test.md E2, B114):
+# its management node records it here, and encrypt refuses while it says
+# enabled, unless --keep-provider-layer (a management node). Every reason is
+# said at once, before anything stops, so a run refused for another reason
+# still shows whether this one holds.
+PL_REASON="the provider's own disk encryption is on under this machine"
+out="$(run provider-layer maybe 2>&1)"; rc=$?
+chk "provider-layer: a value that is not enabled or disabled is refused, nothing written" \
+    "$rc|$(grep -c 'provider-layer is enabled or disabled' <<< "$out")|$( [ -e "$R/etc/joinery/data-root/provider_layer" ] && echo written || echo none)" "1|1|none"
+chk "provider-layer: unknown until it is told" "$(run provider-layer)" "provider's disk encryption: unknown"
+out="$(run provider-layer enabled 2>&1)"; rc=$?
+chk "provider-layer enabled: recorded, shown, and in the status file the site reads" \
+    "$rc|$(grep -c '^layer=enabled$' "$R/etc/joinery/data-root/provider_layer")|$(run provider-layer)|$(grep -c '^provider_layer=enabled$' "$R/run/joinery/data-root.status")" \
+    "0|1|provider's disk encryption: enabled|1"
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "encrypt while it says enabled: refused, naming why, nothing stopped or written" \
+    "$rc|$(grep -c "$PL_REASON" <<< "$out")|$(grep -c -e '^systemctl stop' -e '^cryptsetup reencrypt' -e '^fallocate' -e '^agent data-root seal' "$LOG")" "1|1|0"
+mv "$R/etc/joinery/data-root/recovery_recipient" "$T/recipient.held"
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt --keep-provider-layer 2>&1)"; rc=$?
+chk "encrypt --keep-provider-layer while it says enabled: not this reason (refused here for its missing recipient)" \
+    "$rc|$(grep -c "$PL_REASON" <<< "$out")|$(grep -c 'no recovery recipient is set' <<< "$out")" "1|0|1"
+run provider-layer disabled >/dev/null 2>&1
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "provider-layer disabled: encrypt is not refused for it" \
+    "$rc|$(grep -c "$PL_REASON" <<< "$out")|$(grep -c '^layer=disabled$' "$R/etc/joinery/data-root/provider_layer")|$(grep -c '^provider_layer=disabled$' "$R/run/joinery/data-root.status")" "1|0|1|1"
+mv "$T/recipient.held" "$R/etc/joinery/data-root/recovery_recipient"
 held_binds; touch "$T/mounted"
 printf 'url=https://holder.example\nslot=0\n' > "$R/etc/joinery/data-root/holder"
 # What opened a volume earlier this boot (a decrypt before this fix left it).

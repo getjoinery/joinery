@@ -22,6 +22,12 @@
  * only (encrypt without it, or stop it opening an encrypted one); letting the
  * chip back in is root's own command on the server.
  *
+ * ONE LAYER (specs/site_copy_final_test.md E2). A server whose provider
+ * encrypts its disk is not encrypted here as well: its management node
+ * records that provider's layer on the server (provider_layer in the status
+ * file), and encrypt_offer says to copy the site onto a new server instead.
+ *
+ * @version 1.2 - encrypt_offer refuses while the provider's own disk encryption is on (provider_layer, B114)
  * @version 1.1 - tpm2_chip() and tpm2_off(): whether the server has a TPM2 chip, and whether it is kept from
  *               opening the data root (B43); TPM2_TEXT says what a chip's slot does and does not protect.
  * @version 1.0
@@ -140,6 +146,14 @@ class DataRootStatus {
 			}
 			if (!self::verified_backup_recent()) {
 				$reasons[] = 'Verify a backup first: one verified within the last day.';
+			}
+			// One layer is the rule (specs/site_copy_final_test.md E2, B114): its
+			// management node records the provider's own encryption here, and
+			// root refuses to add ours under it (joinery_data_root.sh 1.32).
+			if (($st['provider_layer'] ?? '') === 'enabled') {
+				$reasons[] = 'This server\'s provider already encrypts its disk, and one layer of encryption is the rule, so it is '
+					. 'not encrypted again where it stands. Copy the site onto a new server instead, made with our encryption '
+					. 'and the provider\'s off: its management node makes the copy.';
 			}
 		}
 		return array('offered' => $offered, 'ready' => $offered && !$reasons, 'reasons' => $reasons);
