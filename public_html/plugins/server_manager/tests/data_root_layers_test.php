@@ -24,6 +24,7 @@
  *  - the machine is told the provider's layer when it reports another, so its
  *    own data root script refuses as the node page does (B114).
  *
+ * @version 1.2 - the node page's Encrypt button stays off where the one-layer rule always refuses (B148)
  * @version 1.1 - the one fix while the provider's layer is on, and the machine told the layer (B114)
  * @version 1.0
  */
@@ -126,6 +127,9 @@ section('Keeping the provider\'s layer in place is a management node\'s alone (E
 
 check(DataRootEncryptionOffer::may_keep_provider_layer($mgmt) && !DataRootEncryptionOffer::may_keep_provider_layer($linode),
 	'a management node may keep both; a site\'s server may not');
+check(!DataRootEncryptionOffer::layer_permits($linode) && !DataRootEncryptionOffer::layer_permits($brought)
+	&& DataRootEncryptionOffer::layer_permits($one) && DataRootEncryptionOffer::layer_permits($mgmt),
+	'the Encrypt button can be live only where the provider\'s layer is off, or on a management node (B148)');
 harness_set_setting_mem('data_root_encryption_offered', '1');
 $threw = '';
 try { DataRootEncryptionOffer::queue($linode, true, 1); } catch (Exception $e) { $threw = $e->getMessage(); }
