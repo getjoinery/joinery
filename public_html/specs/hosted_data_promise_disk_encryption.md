@@ -6,7 +6,8 @@ T-K5, T-P5) passed on throwaway management nodes on 2026-10-13, and the fixes
 it found are released by 0.8.503 (B86, committed after it, is not). What is
 left is D7 steps 3-8 on the real machines, timed by the owner: dev encrypts in
 place (step 3), then `release_key_rotation`'s ceremony (step 4), getjoinery
-(5), the mutual escrow (6), the other three (7), and the launch release (8).
+(5), the mutual escrow (6), the other three by copy (7, in
+`site_copy_production_moves.md`), and the launch release (8).
 T-P1 passed on 2026-10-17: a Managed order paid on dev with a test card was
 born on a 1 GB Nanode with the provider's layer reported disabled, its data
 root encrypted and sealed to dev's recovery key, escrow enrolled with dev, and
@@ -426,10 +427,11 @@ machine's `disk_encryption`:
 - **off** — the move runs in place.
 - **on** — the move runs in place only when the operator ticks "keep the
   provider's layer as well", and the node page then says the machine has two
-  layers until it is replaced. This exists for the five machines that
-  predate this spec (D-L, D7); every machine born after WP3 has the
-  provider's layer off and never meets it. Without the tick, the move is
-  refused and points at a site copy onto a new machine.
+  layers until it is replaced. This exists for dev and getjoinery, the two
+  management nodes that predate this spec (D-L, D7), and is offered on a
+  management node only (`site_copy_final_test.md` E2); every machine born
+  after WP3 has the provider's layer off and never meets it. Without the
+  tick, the move is refused and points at a site copy onto a new machine.
 - **unknown** (bare metal, a provider we have no driver for, a node with no
   instance on record) — the move runs; the node page says the provider
   layer is unknown.
@@ -1097,10 +1099,12 @@ vault and to `release_transparency`.
 The five machines that exist today (getjoinery, dev, docker-prod,
 joinerydemo, jeremytunnell-vps) were all born with Linode's layer on, and
 Linode refuses to clone between machines with different encryption settings
-(T-L6). So they are encrypted **in place** and keep Linode's layer as well
-(D-L, O8). Linode's layer drops away when each is next replaced for another
-reason. All five are our own machines; every machine born after WP3 has one
-layer. Each is encrypted where it stands by D5's `encrypt`, not by the move
+(T-L6). So dev and getjoinery, the two management nodes, which never copy
+themselves live, are encrypted **in place** and keep Linode's layer as well
+(D-L, O8); Linode's layer drops away when each is next replaced for another
+reason. The other three move by copy onto new servers born with one layer, ours
+(step 7, `site_copy_production_moves.md`). All five are our own machines; every
+machine born after WP3 has one layer. The two are encrypted where they stand by D5's `encrypt`, not by the move
 `one_data_root` ran, which copies folders into a data root and has nothing to
 do once they are all there.
 
@@ -1138,10 +1142,13 @@ without the owner at hand.
    getjoinery's node page shows, and approves (C-3). Then the same the other
    way. A planned reboot of each, one at a time, must open hands-off from the
    other.
-7. **The other three**, lowest stakes first: joinerydemo, jeremytunnell-vps,
-   docker-prod. Each is encrypted in place, then enrols with getjoinery, which
-   mints and holds its escrow. docker-prod's move covers all seven of its
-   container sites at once, since they share its data root.
+7. **The other three move by copy** (`site_copy_production_moves.md`; owner,
+   2026-10-18: one layer by copy wherever a copy can do it): joinerydemo,
+   jeremytunnell-vps and docker-prod's sites each move onto a new server born
+   with our layer and Linode's off, lowest stakes first, and enrol with
+   getjoinery, which mints and holds their escrow. Their old servers are
+   retired at Keep and deleted at the provider. Only dev and getjoinery, which
+   never copy themselves live, keep two layers until each is replaced.
 8. **The launch release** removes `data_root_encryption_offered` and its
    checks and adds the installer's offer ("How it is built").
 

@@ -16,7 +16,8 @@
  *    their events, its provisioning record with its trial and transfer, its
  *    backup space with its runs and ledger rows. A copy, and a copy's
  *    provision, stop naming it. No column the deletion rules know names it.
- *  - The guards: backups that cannot be checked, a container not verified
+ *  - The guards: a copy under way, of the site or as its copy's row (B116),
+ *    backups that cannot be checked, a container not verified
  *    gone, a machine the provider still has (or cannot be asked about), an
  *    attestation typed wrong. A matching attestation passes and is logged;
  *    a node hosted elsewhere has no machine guard. A container site whose
@@ -384,6 +385,29 @@ $g_space = nhr_node('gspace', array('mgn_cloud_account' => CloudAccounts::EXTERN
 nhr_space((int)$g_space->key);
 check(strpos(NodeRemoval::refusal($g_space, '', null, $no_dns, 'tok'), 'could not be checked') !== false,
 	'a backup space that cannot be listed refuses: none is taken for empty on no answer');
+
+// B116: a copy under way keeps both sides. Removing the site left its copy live
+// with no source, its server's provision advancing every tick.
+$cp_src = nhr_node('cpsrc', array('mgn_cloud_account' => CloudAccounts::EXTERNAL));
+$cp_row = nhr_node('cprow', array('mgn_cloud_account' => CloudAccounts::EXTERNAL, 'mgn_install_state' => 'copy',
+	'mgn_copy_of_node_id' => $cp_src->key));
+$cp = new SiteCopy(NULL);
+$cp->set('scp_source_node_id', (int)$cp_src->key);
+$cp->set('scp_copy_node_id', (int)$cp_row->key);
+$cp->set('scp_release', '0.8.497');
+$cp->set('scp_status', SiteCopy::STATUS_DORMANT);
+$cp->save();
+harness_register_row('scp_site_copies', 'scp_site_copy_id', $cp->key);
+$cp_why = NodeRemoval::refusal($cp_src, '', null, $no_dns, 'tok');
+check(strpos($cp_why, 'has a copy under way') !== false && strpos($cp_why, 'Copy tab') !== false,
+	'a site with a copy under way is refused until the copy is discarded or kept (B116)', $cp_why);
+$cp_why = NodeRemoval::refusal($cp_row, '', null, $no_dns, 'tok');
+check(strpos($cp_why, 'This is the copy of \'HarnessTest NHR cpsrc\'') !== false,
+	'and so is the copy\'s own row, naming the site whose Copy tab discards it', $cp_why);
+$cp->set('scp_status', SiteCopy::STATUS_DISCARDED);
+$cp->save();
+check(NodeRemoval::refusal($cp_src, '', null, $no_dns, 'tok') === '' && NodeRemoval::refusal($cp_row, '', null, $no_dns, 'tok') === '',
+	'a discarded copy keeps neither');
 
 $c_live = nhr_node('cont', array('mgn_cloud_account' => $ours, 'mgn_container_name' => 'nhrc', 'mgn_joinery_version' => '0.8.1'));
 check(NodeRemoval::machine_kind($c_live, 'tok') === NodeRemoval::MACHINE_CONTAINER, 'a container site of ours waits for its container');

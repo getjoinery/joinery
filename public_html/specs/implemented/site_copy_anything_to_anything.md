@@ -1,13 +1,17 @@
 # Site Copy — Anything to Anything, and Done
 
-**Status:** Building, 2026-10-18 (one-data-root). WP0–WP5 built and gated, released in 0.8.505 and 0.8.506.
+**Status:** Built, and passed live on the test plane (2026-10-25; one-data-root); moved to implemented with
+`site_copy.md` and `site_copy_final_test.md`. WP0–WP5 built and gated, released in 0.8.505 and 0.8.506. WP6 is
+the final test's: every run C1–C19 passed, which covers the proofs below but L4, and
+`plugins/server_manager/tests/site_copy_live_test.php` is the repeatable one. L4 (jeremytunnell) is the second
+move of `site_copy_production_moves.md`.
 WP6's rig: `seed_copy_source.php` and `check_copy_target.php` (plugins/server_manager/tests/lib), proven on node-n
 and src1 on 2026-10-19; `CopySecurityCheck` with `utils/copy_security_check.php`; and the probes, which became the
 `copy_probes` agent word (agent 1.84.2, `sysadmin_tools/copy_probes.sh`; owner's decision 2026-10-19, since a
 plane-made copy has root login off), with the B37 loosening alone left to `tests/lib/check_loosen_restored.sh`
 over the test plane's own login. The seed leaves
-out the vault (the live test's browser makes it, with the passkey) and the custom theme (not yet seeded).
-The live test per run is not written.
+out the vault (each run's browser made it, with the passkey) and the custom theme (not seeded). The runs were
+driven by hand on the rig, each on record; the one declared live test is the smoke test (owner, 2026-10-25).
 Code review by reviewer2 (2026-10-18, B1-B14) all fixed: the resolvers asked in RFC 8484 wire format on 443
 (Quad9's JSON port 5053 is closed from dev); the watch ends at MAX_WAIT whatever they say; the copy proven at
 its own address whether or not anything forwards; a halted settle can be retried or kept; TTLs lowered last
@@ -35,8 +39,8 @@ shared and reserved IPv4 refused as a forward address.
   take-over on a host (B7). Gates: the site copy suites, updated.
 - **WP5:** `HetznerComputeDriver`; a Hetzner account on the Hosting tab. Gate:
   `hetzner_compute_driver_test.php`. Needs Q1 for its live proof.
-- **Not built:** WP6 (the rig and live proofs, now in `site_copy_final_test.md`), WP7 (the move to
-  implemented).
+- **WP6** (the rig and live proofs) is `site_copy_final_test.md`'s, done; **WP7** is this move to
+  implemented.
 
 **Where the build differs from the design, decided while building (2026-10-18):**
 
@@ -401,8 +405,9 @@ land.
 **In the gate (db tier), one suite per package, named above.** The matrix test is the
 one that says the end-state table is the code's table.
 
-**Live, each a declared `live` test on the rig (D10), recorded in the live
-verification queue under this spec's name when it passes.** Every run: census equal,
+**Live, on the rig (D10), each recorded in the live verification queue when it
+passes:** the final test's runs C1–C19 cover every proof but L4, and the one declared
+`live` test is `site_copy_live_test.php` (L0, with the way back and Keep). Every run: census equal,
 0 dead secrets, the checker all green, the same browser signs in with the passkey and
 unlocks the vault, the copy's backup runs under the same node with one agent polling,
 the source is left stopped and whole, the certificate unchanged, the downtime
@@ -420,7 +425,7 @@ Keep.
 | L2b | container on a Podman host, alive | container on another engine host | proxy or DNS |
 | L2c | container on a Podman host, alive | own server | DNS |
 | L3 | dead site of each kind | each target kind | proxy, DNS, manual; the recovery-key ceremony on the copy's page; the key appears nowhere the management node stores |
-| L4 | jeremytunnell | Ubuntu 26.04 server | proxy; the first real use (`standalone_boxes_ubuntu_2604.md`) |
+| L4 | jeremytunnell | Ubuntu 26.04 server | proxy; the first real use (`standalone_boxes_ubuntu_2604.md`); `site_copy_production_moves.md` |
 | L5 | another management node, alive | any | refused at preflight with the reason; from backups passes as L3 |
 
 A cell the table refuses is proven by the matrix test, not live.

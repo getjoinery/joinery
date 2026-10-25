@@ -1,11 +1,20 @@
 # Site Copy — The Final Test
 
-**Status:** Building, 2026-10-18. Written by one-data-root with multi-tenant-security
+**Status:** Done, 2026-10-25; moved to implemented with `site_copy.md` and
+`site_copy_anything_to_anything.md`. Written by one-data-root with multi-tenant-security
 (the security checks, the record of what copies today); reviewed by
 multi-tenant-security (R1–R6) and reviewer2 (F1–F22), all applied. E1, E2 and E4 are
-built and gated, uncommitted (`data_root_layers_test.php`, `provision_one_layer_test.php`);
-E3 is this spec's Part P. The rig's scripts are written but unproven (see the build spec's status); the runs are not built; nothing has run live. When every run below has passed, copy is declared complete, and this spec,
-`site_copy.md` and `site_copy_anything_to_anything.md` move to implemented together.
+built, gated (`data_root_layers_test.php`, `provision_one_layer_test.php`) and released.
+Every run C1–C19 (with C4b, C11b and C15b) passed live on the test plane, 2026-10-19 to
+2026-10-25, on record in the live verification queue. B114, found running C15b (E2's
+refusal held on the management node only, not on a site's own Backups page), is built:
+the management node records the provider's layer on each machine (agent 1.96.0's
+`data_root_provider_layer`), and the data root script and the Backups page refuse by it;
+its live proof waits for the agent and core releases, in the queue. The runs were driven
+by hand on the rig; the owner chose one repeatable smoke test over a live test per run
+(2026-10-25), `plugins/server_manager/tests/site_copy_live_test.php`, which passed on
+dev 2026-10-25 (31 checks). Part P, E3 and the two-layer check of Done when moved to
+`site_copy_production_moves.md`.
 
 ## The owner's goal in plain terms
 
@@ -47,7 +56,10 @@ only that the site arrived:
   joinerytest2.com on Cloudflare for C2, C4b, C14, C15 and C19; a token scoped to
   that zone alone is on dev at `/home/user1/.config/joinery-test/cloudflare_test_token` (user1 only, outside the site).
 - **Q2 — A second Linode account for C15**, granted to the test plane by OAuth as a
-  customer's own account. C15 needs it.
+  customer's own account. C15 needs it. **Answered 2026-10-25:** no second account;
+  the TEST Linode account itself, connected by OAuth as a customer user's on mgr-a
+  (`/profile/server_manager/connect_cloud`), with mgr-a's own key for that account
+  switched off for the run.
 
 ## What is built for this test (beyond `site_copy_anything_to_anything.md`)
 
@@ -62,6 +74,10 @@ only that the site arrived:
     our accounts.
   - **Its owner's account, no proven key:** born with the provider's default and
     none of ours. The tab says to prove a recovery key first to get ours instead.
+    No copy reaches this case today: a copy runs through the site's backups, and
+    backups refuse to run until the recovery key is proven (`RecoveryKeyFleet`), so
+    the copy is refused at preflight and the tab shows this line beside the refusal
+    (found running C15b, 2026-10-25).
 
   The tab says which in one line before the copy is made. Requires
   `data_root_encryption_offered`, which the launch release removes; until then the
@@ -71,8 +87,9 @@ only that the site arrived:
   refusal offers a copy onto a new server instead, which is born with one layer by
   E1 (in an owner's account, once the site's recovery key is proven). dev and
   getjoinery are the only machines that ever see the tick.
-- **E3 — The encryption spec's D7 follows the decision.** Step 7 becomes: joinerydemo,
-  jeremytunnell-vps and docker-prod's sites move by copy (this spec, Part P). Their old
+- **E3 — The encryption spec's D7 follows the decision** (moved to
+  `site_copy_production_moves.md`, which made the edit). Step 7 becomes: joinerydemo,
+  jeremytunnell-vps and docker-prod's sites move by copy (that spec). Their old
   servers are retired at Keep and deleted at the provider (Done when). The node
   pages of dev and getjoinery keep "two layers until replaced".
 - **E4 — One layer is checked after every birth, and on every host report.** The
@@ -147,9 +164,14 @@ Gate for E1–E4 in `site_copy_matrix_test.php` (the encryption column) and
   mailbox, a DKIM key and a relay pickup, so mail is proven on the test plane before
   jeremytunnell-vps is the first mail site ever switched.
 
-Every run is a declared `live` test (`tier: live`, `env: dev-only`) on the test
-plane (mgr-a and its nodes in the TEST Linode account). Part P is the exception: it
-runs on getjoinery's plane.
+Each run was driven by hand on the test plane (mgr-a and its nodes in the TEST Linode
+account) with the rig above, and recorded in the live verification queue. One path is a
+declared `live` test, re-run after copy code changes and before the release that carries
+them: `plugins/server_manager/tests/site_copy_live_test.php` (`SiteCopyLiveRun`), on the
+management node's own code. Its source is a test server at the oldest release that node
+serves and a copy accepts, behind the Cloudflare test zone; the copy goes onto a Linode
+made there; it goes back at ready, then switches over by the proxy and is kept. The
+production moves run on getjoinery's plane (`site_copy_production_moves.md`).
 
 ## What every run checks
 
@@ -238,7 +260,7 @@ layer" run. The encryption column says what the copy must end with.
 | C13 | another management node, alive | each target column, a container on an engine host among them | refused at preflight with the reason, the node never frozen | — | — | — |
 | C14 | another management node, from backups | Linode made here | proxy | ours | none | Keep |
 | C15 | own server, alive, in its owner's Linode account, its recovery key proven | its owner's account | proxy | ours sealed to the site's key, Linode's off (E1) | mid-switch | Keep |
-| C15b | as C15, no recovery key | its owner's account | proxy | Linode's only; the tab says so; encrypting in place refused while Linode's is on, pointing at a copy once a key is proven (E2) | — | Keep |
+| C15b | as C15, no recovery key | its owner's account | — | the copy refused at preflight (no backups run without a proven key), the tab naming the fix and the provider's-only layer a copy would get; encrypting in place refused while Linode's is on, pointing at a copy once a key is proven (E2) | — | — |
 | C16 | own server, alive | container on an engine host | proxy or DNS | the host's | mid-switch | Keep |
 | C17 | own server, dead (backups only) | container on an engine host | manual | the host's | none | Keep |
 | C18 | container, dead (backups only) | Linode made here | DNS | ours, Linode's off | none | Keep |
@@ -340,56 +362,9 @@ From multi-tenant-security, 2026-10-18.
 
 ## Part P — the production moves
 
-**Gate.** Part P starts only after the encryption spec's D7 steps 3–6 are done:
-
-- dev is encrypted;
-- the release keys are rotated;
-- getjoinery is encrypted;
-- dev and getjoinery hold each other's escrow.
-
-Until then no management node may hold an escrow slot (D7, O4), and an IP swap onto
-a copy born with our layer is refused while nobody holds its key. getjoinery must
-also carry the release with WP0–WP5 and E1–E4, with `data_root_encryption_offered`
-on.
-
-**Where it runs.** All three machines are on getjoinery's plane, not dev's. Part P
-is driven by hand from getjoinery's Copy tab. `CopySecurityCheck` runs on getjoinery
-from its CLI, and each result is recorded in the live verification queue. No probe
-(‡) runs.
-
-The runs go in this order, each only after the one before has been kept for a day:
-
-1. **joinerydemo** (own server, alive) → Linode made here, IP swap (as C1).
-   - First confirm its server has a provision row on getjoinery's plane with an
-     instance id.
-   - Confirm no AAAA record names it; the swap's preflight refuses one.
-2. **jeremytunnell-vps** (own server, alive, mail) → Linode made here in our
-   account, **proxy** (as C2).
-   - Not the IP swap. It sits in the owner's personal Linode account (customer cloud
-     account 7) with no provision row, and a swap never crosses accounts.
-   - A copy made in that account would be born with Linode's layer and none of ours.
-     The proxy lets the copy be born in our account with ours, and `site_copy.md` Q4
-     chose it for this site already.
-   - The mail checks of C1 and C3 run here too.
-3. **docker-prod's sites** (containers, alive) → containers on one new engine host
-   born with our layer, its container storage on the data root (as C8), one at a
-   time.
-   - First, an inventory of what lives on docker-prod today: which site containers
-     are left (getjoinery and joinerydemo have gone), and what else answers on its
-     address (developers.getjoinery.com and demo.getjoinery.com, `site_copy.md`
-     B46).
-   - Its agent must run `site_quiet_host` and `hold_container`; record its version.
-   - docker-prod is retired when the last site is kept and nothing else answers on
-     it.
-
-Each is checked as every run is, and afterwards the machine's layer line says one.
-
-**After Keep,** each old server is deleted at its provider, with its provider
-backups and snapshots, within a day. It holds live production secrets under Linode's
-layer only: `secret_box_key`, the DKIM private key, the ACME account, the DNS-01 zone
-credential, and `relay_pull_key`.
-
-dev and getjoinery are not copied: they follow the encryption spec's D7 steps 3–6.
+Moved to `site_copy_production_moves.md` (2026-10-25): joinerydemo, jeremytunnell-vps
+and docker-prod's sites by copy onto servers with our layer only, on getjoinery's plane,
+behind the encryption spec's D7 steps 3–6, with E3 and the two-layer check of Done when.
 
 ## Open copy bugs closed before the test
 
@@ -424,10 +399,8 @@ as no longer true, before the first run:
 - Every run C1–C19 (with C4b, C11b and C15b) has passed, on record in the live
   verification queue under this spec's name. Every refused cell and every D8 refusal
   is pinned by `site_copy_matrix_test.php`.
-- Part P is done: joinerydemo, jeremytunnell-vps and docker-prod's sites are each on
-  one layer, and their old servers are deleted at the provider with their backups.
-  dev and getjoinery are on the encryption spec's path.
-- No machine but dev and getjoinery reports two layers.
+- Part P, and the check that no machine but dev and getjoinery reports two layers:
+  moved to `site_copy_production_moves.md`.
 - `site_copy.md`, `site_copy_anything_to_anything.md` and this spec are in
   implemented. The docs list of `site_copy_anything_to_anything.md` is done,
   including the Copy tab's one-line encryption statement and the layer line in

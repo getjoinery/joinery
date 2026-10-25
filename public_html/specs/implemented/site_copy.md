@@ -1,6 +1,12 @@
 # Site Copy — The Same Site on a New Server
 
-**Status:** Building (started 2026-09-28).
+**Status:** Built, and passed live on the test plane (2026-10-25); moved to implemented with
+`site_copy_anything_to_anything.md` and `site_copy_final_test.md`. Every work package below is built and
+released: WP7 and WP13 by `site_copy_anything_to_anything.md` (its WP3 and WP5), WP15 by
+`root_ssh_login_and_keys`. WP11's live proofs are the final test's runs C1–C19, all passed 2026-10-19 to
+2026-10-25 and on record in the live verification queue; `plugins/server_manager/tests/site_copy_live_test.php`
+is the repeatable one. The production moves (jeremytunnell's L4 among them) are `site_copy_production_moves.md`.
+The record of each package as it was built follows.
 - **WP1 built:** the five documents, `reconcile_site.sh`, the scrub header and the Clone form label
   say what is true today (no faithful move exists; a restore onto another machine kills every
   sealed value).
