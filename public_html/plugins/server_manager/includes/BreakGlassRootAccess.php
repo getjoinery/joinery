@@ -15,6 +15,8 @@
  * kept password: it is sealed to the holder's vault, not under SecretBox,
  * whose key sits in the config.
  *
+ * @version 1.2 - confirm_first_url(): where the holder confirms their second factor before Reveal or Retire, so a click is
+ *                never spent on the confirmation and lost
  * @version 1.1 - break_glass_root_login_off: a machine whose root login its own agent turned off (disable_root_login,
  *                5.3), listed with the reveals and retires
  * @version 1.0
@@ -212,6 +214,21 @@ class BreakGlassRootAccess {
 			return array('refusal' => 'confirm your second factor first', 'stepup' => true);
 		}
 		return array('refusal' => null, 'stepup' => false);
+	}
+
+	/**
+	 * Where the holder confirms their second factor before Reveal or Retire,
+	 * returning to $return, or null when no confirmation is owed now. A page
+	 * offers this link in place of the buttons, so the click that would have
+	 * asked is not spent on the confirmation and lost: back on the page, the
+	 * buttons are the real ones.
+	 */
+	public static function confirm_first_url($session, string $return): ?string {
+		$user = new User((int)$session->get_user_id(), TRUE);
+		if (!$user->key || !$session->user_has_second_factor($user) || $session->has_recent_second_factor()) {
+			return null;
+		}
+		return SessionControl::stepup_redirect($return)->redirect;
 	}
 
 	/**
