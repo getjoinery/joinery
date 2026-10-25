@@ -510,12 +510,18 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 35 && array_key_exists('php_workers', $capped) && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
+check(!isset($capped['surprise']) && count($capped) === 36 && array_key_exists('php_workers', $capped) && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
 	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
-	&& array_key_exists('hardening', $capped) && array_key_exists('site_refresh', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening, site_refresh, security_pending, services_needing_restart, sites among them)', var_export(array_keys($capped), true));
+	&& array_key_exists('hardening', $capped) && array_key_exists('site_refresh', $capped)
+	&& array_key_exists('data_root_provider_layer', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, data_root_provider_layer, boot_id, site_engine, hardening, site_refresh, security_pending, services_needing_restart, sites among them)', var_export(array_keys($capped), true));
+check($capped['data_root_provider_layer'] === null, 'a node that sends no data_root_provider_layer: not reported (null), never unknown (B114)');
+$layer_of = function ($v) { return JobResultProcessor::sanitise_host_report(array('data_root_provider_layer' => $v))['data_root_provider_layer']; };
+check($layer_of('enabled') === 'enabled' && $layer_of('disabled') === 'disabled' && $layer_of('unknown') === 'unknown'
+	&& $layer_of('ENABLED') === 'unknown' && $layer_of('enabled; reboot') === 'unknown' && $layer_of(array('enabled')) === 'unknown',
+	'data_root_provider_layer is enabled or disabled as sent, and anything else is unknown (B114)');
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',

@@ -24,6 +24,10 @@
  *     new server born with one layer instead.
  * The 32 MiB past the end of the backing the script checks for itself.
  *
+ * @version 1.4 - provider_layer_fix(): what to do while the provider's layer is on, one answer for the refusal,
+ *                the checklist and the node page; a machine in its owner's account is pointed at a copy into
+ *                that account, after its recovery key is proven where it is not, never at its own Backups
+ *                page as well (B114)
  * @version 1.3 - "keep the provider's layer as well" only on a management node; anywhere else the refusal says to copy
  *                the site onto a new server born with one layer (specs/site_copy_final_test.md E2)
  * @version 1.2 - provider_layer(): a data root on a storage volume is under the volume's encryption, which the
@@ -115,7 +119,8 @@ class DataRootEncryptionOffer {
 		$ours = DataRootEscrowSync::sealed_to_operator($node);
 		$out[] = array('label' => 'In one of our accounts', 'ok' => $ours,
 			'note' => $ours ? 'its break-glass copy is sealed to this management node\'s recovery key'
-				: 'it is in its owner\'s account: it is encrypted from its own Backups page, sealed to its owner\'s recovery key');
+				: (self::provider_layer($node) === 'enabled' ? 'it is in its owner\'s account, where its provider already encrypts its disk'
+					: 'it is in its owner\'s account: it is encrypted from its own Backups page, sealed to its owner\'s recovery key'));
 		$out[] = array('label' => 'A data root, not encrypted',
 			'ok' => is_array($pool) && $enc === 'none',
 			'note' => is_array($pool) ? ($enc === 'none' ? '' : 'it is encrypted already, or its host report does not say') : 'this host has no data root (move its data there first)');
@@ -132,6 +137,27 @@ class DataRootEncryptionOffer {
 		$out[] = array('label' => 'A verified backup, newer than a day', 'ok' => $backup_ok,
 			'note' => $backup_ok ? '' : 'run a backup from the Backups tab and let it verify first');
 		return $out;
+	}
+
+	/**
+	 * What to do while the provider's own layer is on (E2), one answer for the
+	 * refusal, the checklist and the node page: copy the site onto a new
+	 * server born with ours and the provider's off. In one of our accounts,
+	 * sealed to this management node's key; in its owner's, sealed to the
+	 * site's own proven key, which a copy needs first (no backup runs without
+	 * it). COPY_TAB is how the page names the Copy tab (a link there).
+	 */
+	public static function provider_layer_fix(ManagedNode $node, string $copy_tab = 'its Copy tab'): string {
+		if (DataRootEscrowSync::sealed_to_operator($node)) {
+			return 'Copy the site onto a new server from ' . $copy_tab . ': it is born encrypted by us with the provider\'s layer off.';
+		}
+		if (trim((string)$node->get('mgn_backup_recovery_public_key')) !== '') {
+			return 'Copy the site onto a new server in its owner\'s account from ' . $copy_tab . ': it is born encrypted by us, '
+				. 'sealed to its owner\'s recovery key, with the provider\'s layer off.';
+		}
+		return 'Prove this site\'s recovery key on its own Backups page first (until then no backup of it runs, so no copy '
+			. 'either); then copy the site onto a new server in its owner\'s account from ' . $copy_tab . ': it is born '
+			. 'encrypted by us, sealed to that key, with the provider\'s layer off.';
 	}
 
 	/**
@@ -168,8 +194,8 @@ class DataRootEncryptionOffer {
 		}
 		if (self::provider_layer($node) !== 'disabled' && (!$keep_provider_layer || !self::may_keep_provider_layer($node))) {
 			$why[] = 'The provider\'s disk encryption ' . (self::provider_layer($node) === 'enabled' ? 'is on for' : 'is not known to be off for')
-				. ' this machine: one layer only. Copy the site onto a new server from its Copy tab: it is born encrypted by us with'
-				. ' the provider\'s layer off.' . ($keep_provider_layer ? ' Keeping the provider\'s layer as well is only for a management'
+				. ' this machine: one layer only. ' . self::provider_layer_fix($node)
+				. ($keep_provider_layer ? ' Keeping the provider\'s layer as well is only for a management'
 				. ' node, which never copies itself.' : '');
 		}
 		if ($why) {

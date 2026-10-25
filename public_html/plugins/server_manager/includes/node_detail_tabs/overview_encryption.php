@@ -17,6 +17,8 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.10 - what to do while the provider's layer is on is DataRootEncryptionOffer::provider_layer_fix(): a machine
+ *                in its owner's account is told to prove its recovery key first where it has none (B114)
  * @version 1.9 - copy-key.js carries its file time, so a changed one is never served from a cache
  * @version 1.8 - the "keep the provider's layer as well" tick only on a management node; any other machine whose
  *                provider layer is on is pointed at its Copy tab (specs/site_copy_final_test.md E2)
@@ -56,7 +58,7 @@ if ($dre_offer && !$dre_row) {
 		: ($layer === 'enabled' ? '<strong>on</strong>' : '<strong>not known</strong>')
 		. ': one layer is the rule. ' . (DataRootEncryptionOffer::may_keep_provider_layer($node)
 			? 'A management node never copies itself, so it may keep both until it is replaced.'
-			: 'Copy the site onto a new server from its <a href="' . $base_url . '&tab=copy">Copy tab</a>: it is born encrypted by us with the provider\'s layer off.')) . '</li>';
+			: DataRootEncryptionOffer::provider_layer_fix($node, 'its <a href="' . $base_url . '&tab=copy">Copy tab</a>'))) . '</li>';
 	echo '</ul>';
 	$ready = DataRootEncryptionOffer::ready($node);
 	echo '<form id="data_root_encrypt_form" method="post" action="' . $base_url . '">'

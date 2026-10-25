@@ -4,6 +4,10 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.32 - provider-layer records what its management node knows of the provider's own disk
+#                encryption under this machine; encrypt refuses while it says enabled, unless
+#                --keep-provider-layer (a management node), and the status file says it for the
+#                site's own Backups page (specs/site_copy_final_test.md E2, B114)
 # Version: 1.31 - the log move never restarts podman-restart.service or docker.service: the site container
 #                engine keeps the monitor of every site it started at boot in podman-restart.service, and
 #                that unit's stop stops every site (as Docker's restart does), so a monitor holding a
@@ -144,6 +148,13 @@
 #                     Root. The existing data root is encrypted where it
 #                     stands (D5): down for the seconds of the start, then
 #                     online at idle priority in joinery-data-encrypt.service.
+#                     Refused while provider-layer says enabled, unless
+#                     --keep-provider-layer: one layer is the rule, and only a
+#                     management node keeps the provider's as well.
+#   joinery_data_root.sh provider-layer [enabled|disabled]
+#                     The provider's own disk encryption under this machine,
+#                     as its management node knows it: shown, or, as root, set.
+#                     Nothing on the machine can read it from the provider.
 #   joinery_data_root.sh decrypt
 #                     Root. Undo: back to plain, online, from wherever an
 #                     encryption stands.
@@ -357,6 +368,9 @@ DATA_ROOT_DIR="${ROOT}/etc/joinery/data-root"
 RECIPIENT="${DATA_ROOT_DIR}/recovery_recipient"
 # Every recovery key this machine was moved off, one fingerprint and when per line.
 RETIRED_RECIPIENTS="${DATA_ROOT_DIR}/retired_recipients"
+# The provider's own disk encryption under this machine, as its management
+# node knows it (provider-layer): enabled or disabled; absent is unknown.
+PROVIDER_LAYER="${DATA_ROOT_DIR}/provider_layer"
 # The break-glass copy: beside the image, or, for a device, on the root disk.
 SIDECAR_FILE_REAL="${IMAGE_REAL}.recovery"
 SIDECAR_DEVICE_REAL="/etc/joinery/data-root/volume.recovery"
@@ -472,6 +486,13 @@ luks_source() {
 mapping_open() { [[ -e "${ROOT}${MAPPER_REAL}" ]]; }
 
 recipient_get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$RECIPIENT" 2>/dev/null || true; }
+
+# enabled, disabled, or unknown when nothing has said.
+provider_layer_get() {
+    local v
+    v="$(awk -F= '$1 == "layer" { print $2; exit }' "$PROVIDER_LAYER" 2>/dev/null || true)"
+    case "$v" in enabled|disabled) printf '%s' "$v" ;; *) printf 'unknown' ;; esac
+}
 
 # A key slot this platform did not make, or nothing (D1): every slot is ours
 # (PBKDF2-SHA256 at a count in LUKS_ITERATIONS_MADE) or systemd's TPM2 token
@@ -1329,6 +1350,29 @@ do_recipient() {
         "$key" "$fpr" "$set_by" > "${RECIPIENT}.tmp.$$" && chmod 644 "${RECIPIENT}.tmp.$$" && mv -f "${RECIPIENT}.tmp.$$" "$RECIPIENT" \
         || { rm -f "${RECIPIENT}.tmp.$$"; die "could not write ${RECIPIENT}"; }
     say "recovery recipient: ${fpr}"
+}
+
+# The provider's own disk encryption under this machine (E2): shown, or set by
+# its management node, which reads it from the provider (nothing on the
+# machine can). encrypt refuses while it says enabled, unless the management
+# node keeps both layers on itself (--keep-provider-layer). It works where the
+# host has no data root yet.
+do_provider_layer() {
+    local v="${1:-}"
+    if [[ -z "$v" ]]; then
+        say "provider's disk encryption: $(provider_layer_get)"
+        return 0
+    fi
+    case "$v" in enabled|disabled) ;; *) die "provider-layer is enabled or disabled" ;; esac
+    need_root
+    mkdir -p "$DATA_ROOT_DIR"
+    if [[ "$(provider_layer_get)" != "$v" ]]; then
+        printf '# Written by joinery_data_root.sh provider-layer (specs/site_copy_final_test.md E2).\n# The provider'"'"'s own disk encryption under this machine, as its management node knows it.\nlayer=%s\n' \
+            "$v" > "${PROVIDER_LAYER}.tmp.$$" && chmod 644 "${PROVIDER_LAYER}.tmp.$$" && mv -f "${PROVIDER_LAYER}.tmp.$$" "$PROVIDER_LAYER" \
+            || { rm -f "${PROVIDER_LAYER}.tmp.$$"; die "could not write ${PROVIDER_LAYER}"; }
+    fi
+    write_public_status
+    say "provider's disk encryption: ${v}"
 }
 
 # ---------------------------------------------------------------------------
@@ -2527,6 +2571,12 @@ do_encrypt() {
     # D5 step 1: everything that would stop it, said at once, nothing changed.
     do_check ready >/dev/null 2>&1 || why+=("the data root is not ready: $(ready_reason)")
     [[ -f "$RECIPIENT" ]] && recipient_ok || why+=("no recovery recipient is set (joinery_data_root.sh recipient PUBLIC_KEY)")
+    # One layer is the rule (specs/site_copy_final_test.md E2): a machine whose
+    # provider encrypts its disk is copied onto a new server born with ours and
+    # the provider's off. Only a management node, which never copies itself,
+    # keeps both, and its management node says so with --keep-provider-layer.
+    [[ "$(provider_layer_get)" != enabled || "$keep_layer" -eq 1 ]] \
+        || why+=("the provider's own disk encryption is on under this machine: one layer is the rule, so copy the site onto a new server instead (its management node's Copy tab), which is born encrypted by us with the provider's off")
     "$AGENT_BIN" data-root check-recipient "$RECIPIENT" >/dev/null 2>&1 || why+=("the joinery-agent at ${AGENT_BIN#"$ROOT"} cannot seal to the recovery key")
     command -v cryptsetup >/dev/null 2>&1 || why+=("cryptsetup is not installed")
     [[ ! -e "${ROOT}${MAPPER_REAL}" ]] || why+=("${MAPPER_REAL} is already open")
@@ -3504,7 +3554,8 @@ write_public_status() {
 backing=$(conf_get backing)
 tpm2_chip=$(tpm2_present && echo 1 || echo 0)
 tpm2=$( [[ "$(conf_get tpm2)" == off ]] && echo off || echo auto)
-stopped_by_hand=$(stopped_at)"
+stopped_by_hand=$(stopped_at)
+provider_layer=$(provider_layer_get)"
     if is_luks; then
         sidecar="${ROOT}$(conf_get sidecar)"
         [[ -f "$sidecar" ]] && sfpr="$(grep -o '"fingerprint": *"[0-9a-f]*"' "$sidecar" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' || true)"
@@ -3839,6 +3890,7 @@ do_status() {
         return 1
     fi
     say "state: mounted, XFS, project quotas on"
+    say "provider's disk encryption: $(provider_layer_get)"
     if is_luks; then
         luks_status
     fi
@@ -3877,6 +3929,7 @@ do_status() {
 case "${1:-}" in
     create) shift; do_create "$@" ;;
     recipient) shift; do_recipient "$@" ;;
+    provider-layer) do_provider_layer "${2:-}" ;;
     check)  do_check ;;
     grow)   do_grow "${2:-}" ;;
     status) do_status ;;
@@ -3893,5 +3946,5 @@ case "${1:-}" in
     stop)    do_stop; write_public_status ;;
     start)   do_start; write_public_status ;;
     tpm2)    do_tpm2 "${2:-}" ;;
-    *) die "usage: joinery_data_root.sh create [--encrypted [--no-tpm2]] [SIZE] [DEVICE] | recipient [--set-by=site|operator] [PUBLIC_KEY] | check | grow [SIZE] | status | tick | bind REL TARGET | move-in REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE] | encrypt [--keep-provider-layer] [--no-tpm2] | decrypt | rekey | stop | start | tpm2 on|off" ;;
+    *) die "usage: joinery_data_root.sh create [--encrypted [--no-tpm2]] [SIZE] [DEVICE] | recipient [--set-by=site|operator] [PUBLIC_KEY] | provider-layer [enabled|disabled] | check | grow [SIZE] | status | tick | bind REL TARGET | move-in REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE] | encrypt [--keep-provider-layer] [--no-tpm2] | decrypt | rekey | stop | start | tpm2 on|off" ;;
 esac

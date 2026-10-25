@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.109 - a host report's data_root_provider_layer (host_report 1.41) is kept, and the machine is told
+ *                 the provider's layer this side knows when it differs (DataRootLayers::push_provider_layer);
+ *                 data_root_provider_layer asks for the next host report as it ends (B114)
  * @version 1.108 - disable_root_login results (agent 1.95.0): held to the script's shape; a completed run whose sshd
  *                 reads no retires the machine's kept or retire_failed install password, with an event naming who
  *                 asked (specs/implemented/beta_break_glass_root_access.md 5.3)
@@ -3504,6 +3507,7 @@ HTML;
 	private static function process_data_root_rekey($job) { self::report_after_data_root_job($job); }
 	private static function process_data_root_migrate($job) { self::report_after_data_root_job($job); }
 	private static function process_data_root_recipient($job) { self::report_after_data_root_job($job); }
+	private static function process_data_root_provider_layer($job) { self::report_after_data_root_job($job); }
 
 	/**
 	 * A data root job ended, so the machine's data root, its escrow holder or
@@ -4306,6 +4310,9 @@ HTML;
 				} elseif (($report['data_root_encryption'] ?? null) === 'none') {
 					DataRootEscrowSync::from_plain_report($node, $report['disk_pool'] ?? null);
 				}
+				// The provider's own layer, as the machine last recorded it: told
+				// again when this side knows otherwise (E2, B114).
+				DataRootLayers::push_provider_layer($node, $report);
 				// A reboot this plane asked for, seen to have happened: the boot
 				// id is not the one the reboot_machine job recorded.
 				self::reboot_seen($node, $report, $read_at);
@@ -4440,6 +4447,10 @@ HTML;
 			// never shows it filling.
 			'disk_pool'                    => array_key_exists('disk_pool', $in) ? self::host_report_disk_pool($in['disk_pool']) : null,
 			'data_root_encryption'         => array_key_exists('data_root_encryption', $in) ? self::host_report_data_root_encryption($in['data_root_encryption']) : null,
+			// The provider's own disk encryption as the machine's management node
+			// last recorded it there (host_report 1.41); null from an older node.
+			'data_root_provider_layer'     => array_key_exists('data_root_provider_layer', $in)
+				? (in_array($in['data_root_provider_layer'], array('enabled', 'disabled'), true) ? $in['data_root_provider_layer'] : 'unknown') : null,
 			// The data root script's version beside the release's, and each service it orders
 			// after the data root (host_report 1.23); null from an older node.
 			'data_root_script'             => array_key_exists('data_root_script', $in) ? self::host_report_data_root_script($in['data_root_script']) : null,

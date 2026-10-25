@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.41 - data_root_provider_layer: the provider's own disk encryption under this machine as its
+#                management node last recorded it (joinery_data_root.sh provider-layer), so it can tell
+#                when the record is out of date (specs/site_copy_final_test.md E2, B114)
 # Version: 1.40 - php_workers.pg_pending_restart is read with no database login (postgres -C and
 #                postmaster.pid): the local postgres role takes a password, so 1.39's psql read
 #                always said unknown (jeremytunnell, 2026-10-24)
@@ -530,6 +533,16 @@ emit_data_root_encryption() {
     fi
     printf '{"backing":%s,"open":%s,"opened_by":"%s","identity":"%s","holder":"%s","slot":%s,"recipient_fingerprint":"%s","recipient_set_by":"%s","box_fingerprint":"%s","box_sealed":"%s","reboot_held":"%s","reencrypt":"%s","reencrypt_percent":"%s"}' \
         "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$set_by" "$fpr" "$sealed" "$held" "$mode" "$pct"
+}
+
+# The provider's own disk encryption under this machine, as its management node
+# last recorded it here (joinery_data_root.sh provider-layer): "enabled",
+# "disabled", or "unknown" where nothing has. Its management node compares it
+# with what it knows and records it again when they differ.
+emit_data_root_provider_layer() {
+    local dir="${HOST_REPORT_DATA_ROOT_DIR:-/etc/joinery/data-root}" v
+    v="$(awk -F= '$1 == "layer" { print $2; exit }' "$dir/provider_layer" 2>/dev/null)"
+    case "$v" in enabled|disabled) printf '"%s"' "$v" ;; *) printf '"unknown"' ;; esac
 }
 
 # A data root stopped by hand (joinery_data_root.sh stop; reviewer2 B17 D2):
@@ -1743,6 +1756,7 @@ printf '"root_ssh":%s,' "$(emit_root_ssh)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"disk_pool":%s,' "$(emit_disk_pool)"
 printf '"data_root_encryption":%s,' "$(emit_data_root_encryption)"
+printf '"data_root_provider_layer":%s,' "$(emit_data_root_provider_layer)"
 printf '"data_root_script":%s,' "$(emit_data_root_script)"
 printf '"data_root_stopped":%s,' "$(emit_data_root_stopped)"
 printf '"memory":%s,' "$(emit_memory)"

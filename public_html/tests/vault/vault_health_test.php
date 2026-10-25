@@ -12,6 +12,7 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.8 - encrypt_offer refuses while the provider's own disk encryption is on (provider_layer, B114)
  * @version 1.7 - DataRootStatus's TPM2 chip and choice (B43)
  * @version 1.6 - the unsigned-extensions row (specs/package_signing.md WP6)
  * @version 1.5 - the release-key row counts among the host facts, and is
@@ -320,6 +321,15 @@ $offer = DataRootStatus::encrypt_offer(array('backing' => 'file', 'encrypted' =>
 check($offer['offered'] && ($offer['ready'] === ($offer['reasons'] === array())), 'on: offered, ready exactly when nothing is missing', implode(' | ', $offer['reasons']));
 $offer = DataRootStatus::encrypt_offer(array('backing' => 'luks-file', 'encrypted' => '1'));
 check(!$offer['offered'], 'on, but encrypted already: not offered');
+// One layer is the rule (E2, B114): its management node records the provider's own encryption in the status file.
+$offer = DataRootStatus::encrypt_offer(array('backing' => 'file', 'encrypted' => '0', 'provider_layer' => 'enabled'));
+$pl = array_values(array_filter($offer['reasons'], function ($r) { return strpos($r, 'provider already encrypts its disk') !== false; }));
+check($offer['offered'] && !$offer['ready'] && count($pl) === 1 && strpos($pl[0], 'Copy the site onto a new server') !== false,
+	'the provider\'s layer on: offered but not ready, saying to copy the site onto a new server instead', implode(' | ', $offer['reasons']));
+foreach (array('disabled', 'unknown') as $v) {
+	$offer = DataRootStatus::encrypt_offer(array('backing' => 'file', 'encrypted' => '0', 'provider_layer' => $v));
+	check(strpos(implode(' ', $offer['reasons']), 'provider already encrypts') === false, "the provider's layer {$v}: no such reason");
+}
 harness_set_setting_mem('data_root_encryption_offered', '0');
 
 harness_finish();
