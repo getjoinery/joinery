@@ -7,26 +7,33 @@
  * is leave a machine of ours running with nothing watching it, so the guards
  * run in this order and each refusal says what to do:
  *
- *   1. Its backup storage holds nothing: removing it would leave the backups
+ *   1. No copy is under way: neither one of this site (being made, dormant,
+ *      or in its switch-over) nor the one this node is the copy's row of.
+ *      Removing either side leaves the other running alone, its server's
+ *      provision still advancing. The copy is discarded, or its switch-over
+ *      kept, on the site's Copy tab first.
+ *   2. Its backup storage holds nothing: removing it would leave the backups
  *      unclaimed on the target.
- *   2. A site in a container on a server of ours: its host verified the
+ *   3. A site in a container on a server of ours: its host verified the
  *      container gone (Permanently Delete Site stamps mgn_site_removed_time),
  *      or no site was ever seen there. When its host has no node here (never
  *      paired, or removed for good, its machine with it), nothing can remove
  *      the container from here: the person types the host machine's address
  *      to say they deleted it, logged as [NODE_REMOVE_ATTEST].
- *   3. A machine of ours: the provider says the instance is gone, asked with
+ *   4. A machine of ours: the provider says the instance is gone, asked with
  *      the credential of the account the machine is in (its provision record
  *      names it). Where this management node does not hold that account (no
  *      record names one, or it was removed or its sign-in expired), the
  *      person types the instance ID, or the machine's address when no instance
  *      is recorded, to say they deleted it; that is logged as
  *      [NODE_REMOVE_ATTEST] before the delete, since the node's own record goes.
- *   4. A node not hosted by us has no machine guard: it keeps running, and is
+ *   5. A node not hosted by us has no machine guard: it keeps running, and is
  *      simply no longer managed.
  *
  * The platform never deletes an instance itself.
  *
+ * @version 1.5 - a node with a copy under way, of it or as its copy's row, is refused until the copy is discarded or
+ *               kept (copy_refusal, B116): the copy was left live with no source, its provision advancing every tick
  * @version 1.4 - the backups refusal names each target and folder holding them and the page where Delete all is, and
  *               says to hide the node first: Delete all is offered only once new backups stop going there
  * @version 1.3 - the provider is asked with the driver of the machine's own account's provider
@@ -310,6 +317,23 @@ class NodeRemoval {
 			. ($where ? ': ' . implode('; ', $where) : '') . '. ' . $first . 'Remove it once they are gone.';
 	}
 
+	/** The copy under way that keeps this node, or ''. */
+	public static function copy_refusal(ManagedNode $node): string {
+		$copy = SiteCopy::live_for_source((int)$node->key);
+		if ($copy) {
+			return 'This site has a copy under way (' . $copy->status_label() . '). Discard it, or keep its switch-over, '
+				. 'on this site\'s Copy tab first; then remove it.';
+		}
+		$copy = SiteCopy::live_for_copy_node((int)$node->key);
+		if ($copy) {
+			$source = (int)$copy->get('scp_source_node_id') > 0 ? new ManagedNode((int)$copy->get('scp_source_node_id'), TRUE) : null;
+			$name = $source && $source->key ? '\'' . $source->get('mgn_name') . '\'' : 'its site';
+			return 'This is the copy of ' . $name . ', under way (' . $copy->status_label() . '). Discard it, or keep its '
+				. 'switch-over, on ' . ($source && $source->key ? 'that site\'s' : 'the site\'s') . ' Copy tab first.';
+		}
+		return '';
+	}
+
 	public static function backups_refusal(ManagedNode $node): string {
 		try {
 			$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
@@ -335,6 +359,10 @@ class NodeRemoval {
 	 */
 	public static function refusal(ManagedNode $node, string $typed_attest = '', $driver = null,
 			?callable $resolve = null, ?string $account_token = null): string {
+		$why = self::copy_refusal($node);
+		if ($why !== '') {
+			return $why;
+		}
 		$why = self::backups_refusal($node);
 		if ($why !== '') {
 			return $why;

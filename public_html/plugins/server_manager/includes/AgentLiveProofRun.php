@@ -54,6 +54,8 @@
  * A changed word in neither list (publish_upgrade, which only the publishing
  * box runs) is proven by hand with record_live_proof.php.
  *
+ * @version 1.5 - wait_ssh(), ssh(), scp(), must() and run_local() are public: the site copy live test
+ *                (SiteCopyLiveRun) reaches its servers with them too
  * @version 1.4 - install.sh server --keep-root-login: the run logs in with the root password after the install
  * @version 1.3 - net_health and web_workers are words a bare machine proves; site_log is proven on the upgraded site
  * @version 1.2 - a site run: the newest published release installed, upgraded through apply_update onto a candidate
@@ -664,7 +666,7 @@ class AgentLiveProofRun {
 	}
 
 	/** Wait up to seven minutes for the server to answer SSH. */
-	private static function wait_ssh(array $server): void {
+	public static function wait_ssh(array $server): void {
 		for ($i = 0; $i < 40; $i++) {
 			if (self::ssh($server, 'true', 20)['exit'] === 0) {
 				return;
@@ -690,20 +692,20 @@ class AgentLiveProofRun {
 		return array('-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=15');
 	}
 
-	/** Run a command on the server as root. */
-	private static function ssh(array $server, string $command, int $timeout = 120): array {
+	/** Run a command on the server as root: {exit, out}. */
+	public static function ssh(array $server, string $command, int $timeout = 120): array {
 		return self::run_local(array_merge(self::ssh_base($server), array('ssh'), self::ssh_opts(),
 			array('root@' . $server['ipv4'], $command)), $timeout);
 	}
 
-	/** Copy local files to a directory on the server. */
-	private static function scp(array $server, array $files, string $to): array {
+	/** Copy local files to a directory on the server: {exit, out}. */
+	public static function scp(array $server, array $files, string $to): array {
 		return self::run_local(array_merge(self::ssh_base($server), array('scp', '-q'), self::ssh_opts(), $files,
 			array('root@' . $server['ipv4'] . ':' . $to)), 300);
 	}
 
 	/** The output of a step that must succeed, or an exception naming it. */
-	private static function must(array $r, string $what): string {
+	public static function must(array $r, string $what): string {
 		if ($r['exit'] !== 0) {
 			throw new Exception($what . ' failed (exit ' . $r['exit'] . '): ' . trim(substr($r['out'], -600)));
 		}
@@ -711,7 +713,7 @@ class AgentLiveProofRun {
 	}
 
 	/** Run a local command (an argument list, never a shell string), bounded: {exit, out}. */
-	private static function run_local(array $argv, int $timeout): array {
+	public static function run_local(array $argv, int $timeout): array {
 		$cmd = 'timeout ' . (int)$timeout . ' ' . implode(' ', array_map('escapeshellarg', $argv)) . ' 2>&1';
 		exec($cmd, $out, $rc);
 		return array('exit' => $rc, 'out' => implode("\n", $out));
