@@ -153,6 +153,15 @@
             "where": "test server wp7-proof-5ad2ee (Linode 109093176), site wp7proof5ad2ee installed at 0.8.529, agent built for the run from b513695b3250",
             "what": "job 179252: answered with file, lines_returned, modified_time, present, previous, size_bytes, text, truncated, unparsed_lines, the access log of the site upgraded to 0.8.530 (agent_live_proofs_site_live)",
             "date": "2026-10-24"
+        },
+        {
+            "word": "disable_root_login",
+            "agent_version": "1.95.0",
+            "script": "maintenance_scripts/sysadmin_tools/disable_root_login.sh",
+            "script_sha256": "8391ebbca208fa64682f5eda343ef6709d5cba7f85703c0c1fc76fcb50393175",
+            "where": "test server bg-live2 (Linode 109130618, Ubuntu, bare metal), a fresh install by dev's Install New Node form, agent 1.95.0 from the 0.8.535 release",
+            "what": "job 184913 through the agent from the node page's Turn off root login: completed; sshd permitrootlogin yes -> no, own drop-in written, ssh reloaded, no Match blocks; the kept install password retired with a break_glass_root_login_off event",
+            "date": "2026-10-25"
         }
     ]
 }

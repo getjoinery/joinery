@@ -38,6 +38,7 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
+ * @version 1.6 - a user setting saves only an existing user's id, or nothing
  * @version 1.5 - a credential (a `secret` setting) changes only at SECRET_WRITE_PERMISSION; a web save
  *   below it is refused, naming the field
  * @version 1.4 - a secret is compared by what it holds (stored sealed; Setting::openStored()); an active
@@ -321,6 +322,17 @@ class SettingsWriter {
 	 * @return array name => list of messages (empty when everything passes)
 	 */
 	public static function validate(array $values): array {
+		// A user setting holds an existing user's id, or nothing.
+		$type_errors = array();
+		foreach ($values as $name => $value) {
+			$declaration = SettingsDeclarations::get($name);
+			if (($declaration['type'] ?? '') !== 'user' || (string)$value === '' || (string)$value === '0') continue;
+			$user = ctype_digit((string)$value) ? new User((int)$value, TRUE) : null;
+			if (!$user || !$user->key || $user->get('usr_delete_time')) {
+				$type_errors[$name][] = 'Choose a user from the list.';
+			}
+		}
+
 		$rules = array();
 		foreach ($values as $name => $unused) {
 			$declaration = SettingsDeclarations::get($name);
@@ -331,7 +343,7 @@ class SettingsWriter {
 				'label' => $declaration['label'] ?? $name,
 			);
 		}
-		if (empty($rules)) return array();
+		if (empty($rules)) return $type_errors;
 
 		require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 		$validator = new FormWriterV2HTML5('settings_writer', array('csrf' => false));
@@ -339,7 +351,7 @@ class SettingsWriter {
 			$validator->registerValidationField($name, $spec['rules'], $spec['label']);
 		}
 		$validator->validate($values);
-		return $validator->getErrors();
+		return array_merge_recursive($type_errors, $validator->getErrors());
 	}
 
 	/**
