@@ -58,7 +58,7 @@ $page->public_header([
                     </div>
                     <h3 class="jy-pricing-name"><?php echo htmlspecialchars($product->get('pro_name')); ?></h3>
                     <div class="jy-pricing-price">
-                        <?php echo $product->get_readable_price($version->key); ?>
+                        <?php echo $product->get_readable_price($version->key) . htmlspecialchars($version->price_period_suffix(), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
                     <p class="jy-pricing-tier"><?php echo htmlspecialchars($tier->get('sbt_display_name')); ?></p>
                 </div>

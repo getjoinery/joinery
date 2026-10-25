@@ -229,7 +229,7 @@ function billing_logic(array $input): LogicResult {
 
                     // Update local record
                     $current_subscription->set('odi_prv_product_version_id', $new_version->key);
-                    $current_subscription->set('odi_amount', $new_version->get('prv_version_price'));
+                    $current_subscription->set('odi_price', $new_version->get('prv_version_price'));
                     $current_subscription->save();
 
                     $session->save_message(new DisplayMessage(

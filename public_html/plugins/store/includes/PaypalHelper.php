@@ -35,6 +35,12 @@ class PaypalHelper{
 			exit();			
 		}
 		
+		// Every amount sent to PayPal is in the site's currency, as Stripe's are.
+		$site_currency = strtoupper(trim((string)$settings->get_setting('site_currency')));
+		if ($site_currency !== '') {
+			$this->currency = $site_currency;
+		}
+
 		$this->return_url = LibraryFunctions::get_absolute_url('/cart_charge');
 		$this->cancel_url = LibraryFunctions::get_absolute_url('/checkout');
 
@@ -104,7 +110,7 @@ class PaypalHelper{
 			<div id="paypal-button-container"></div>
 		  </div></div>
 
-		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.$venmo_param.'&disable-funding=paylater"></script>
+		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&currency='.urlencode($this->currency).$venmo_param.'&disable-funding=paylater"></script>
 		  <script>
 			var selectedFundingSource = "paypal";
 			let paypalData = '. json_encode($data) .';
@@ -139,7 +145,7 @@ class PaypalHelper{
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
 		  </div></div>
- <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&intent=subscription&vault=true&disable-funding=paylater">
+ <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&currency='.urlencode($this->currency).'&intent=subscription&vault=true&disable-funding=paylater">
    </script>
  
    <script>
@@ -424,7 +430,7 @@ class PaypalHelper{
 					"pricing_scheme" => array(
 						"fixed_price" => array(
 							"value" => $amount, 
-							"currency_code" => "USD"
+							"currency_code" => $this->currency
 						)
 					)
 				)

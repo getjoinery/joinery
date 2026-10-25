@@ -1829,3 +1829,14 @@
 	$migration['migration_file'] = 'user_authhash_random.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The Cayman Islands carried the calling code -344, so its phone numbers
+	// showed as "+-344" and a domain registrant phone was read as Spain's +34.
+	// It is +1 345, written 1345 like the other North American Numbering Plan
+	// islands (Anguilla 1264, Montserrat 1664).
+	$migration = array();
+	$migration['database_version'] = '224';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM cco_country_codes WHERE cco_code < 1) THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "UPDATE cco_country_codes SET cco_code = 1345 WHERE cco_iso_code_2 = 'KY' AND cco_code = -344";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

@@ -24,6 +24,7 @@ class BasicProductRequirementException extends SystemBaseException {}
 /**
  * Product - a store product.
  *
+ * @version 1.2 - price_period_suffix(): the period a product's price is shown with ('/month')
  * @version 1.1 - assemble_validation_rules(): the client-side rule assembly is
  *                pure and per-constraint, so a Question requirement keeps its
  *                own rule whatever precedes it (specs/post_release_fleet_defects.md B4.8)
@@ -318,6 +319,21 @@ public function get_requirement_info($output='text') {
 	
 	}
 	
+	/**
+	 * The period every active version of this product bills on, as a price
+	 * suffix ('/month'), for a price shown without a chosen version. '' when
+	 * the product is one-time or its versions bill on different periods.
+	 */
+	public function price_period_suffix(): string {
+		$suffixes = array();
+		foreach ($this->get_product_versions() as $version) {
+			if ($version->get('prv_status')) {
+				$suffixes[$version->price_period_suffix()] = true;
+			}
+		}
+		return count($suffixes) === 1 ? (string)array_key_first($suffixes) : '';
+	}
+
 	public function get_price($product_version, $data){
 		//HANDLE PRICES
 		$settings = Globalvars::get_instance(); 

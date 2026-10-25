@@ -9,6 +9,7 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.6 - the bucket note says the form takes any listed service, not only the three it names
  * @version 2.5 - the target form is BackupTargetForm (every catalogue provider); a wizard target is saved enabled
  *                and becomes the scheduled one as it is saved; the step shows that target, never the newest enabled.
  *                The form posted no Enabled box, so the target it saved was disabled and never scheduled
@@ -48,7 +49,7 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 	</div>
 <?php } else { ?>
 <?php if ($setup_bk_target === null) { ?>
-	<p class="mb-1">You need a bucket at one of these services — all three work the same here:</p>
+	<p class="mb-1">You need a bucket at a storage service. Any service in the list below works the same here; these three are the most common:</p>
 	<ul class="small">
 		<li><a href="https://www.backblaze.com/sign-up/cloud-storage" target="_blank" rel="noopener">Backblaze B2</a>
 			(recommended) — the first 10&nbsp;GB are free, then about $0.006 per GB per month.</li>

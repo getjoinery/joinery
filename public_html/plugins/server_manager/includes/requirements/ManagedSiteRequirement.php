@@ -30,6 +30,8 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.2 - the draft id and its freeze time are marked internal: the cart shows the site, the
+ *                admin's order page still shows all three
  * @version 1.1 - every stored key is question/answer-shaped with a label a person can read, and the
  *                site's domain travels as its own answer, so the cart and the order show the site
  *                and never a bare draft id or a raw timestamp
@@ -212,12 +214,15 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		}
 		$draft = $this->draft;
 		// Every key is stored on the order item as a labelled answer and shown
-		// on the order, so each carries a label a person can read.
+		// on the admin's order page, so each carries a label a person can read.
+		// The draft id and its freeze time are bookkeeping: the buyer's cart
+		// shows the site and skips them.
 		$data = array(
 			self::SUMMARY_FIELD => array('question' => 'Site', 'answer' => self::summary($draft)),
-			self::FIELD         => array('question' => 'Site setup', 'answer' => (string)$draft->key),
+			self::FIELD         => array('question' => 'Site setup', 'answer' => (string)$draft->key,
+				'internal' => true),
 			self::FROZEN_FIELD  => array('question' => 'Site setup frozen at',
-				'answer' => (string)$draft->get('cvp_update_time')),
+				'answer' => (string)$draft->get('cvp_update_time'), 'internal' => true),
 		);
 		if ((string)$draft->get('cvp_domain_source') === 'register') {
 			// The same keys the registration guard and the orphan sweep read:

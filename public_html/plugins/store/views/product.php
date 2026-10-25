@@ -76,7 +76,7 @@
                     <div class="alert alert-warning jy-product-block"><strong>Sold Out</strong></div>
                 <?php elseif ($product->get_readable_price()): ?>
                     <div class="jy-product-price">
-                        <?php echo $product->get_readable_price(); ?>
+                        <?php echo $product->get_readable_price() . htmlspecialchars($product->price_period_suffix(), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
                 <?php endif; ?>
 

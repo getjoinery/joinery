@@ -59,7 +59,7 @@ foreach ($cart->items as $cart_item) {
         </div>
         <div class="jy-cart-item-pricecol">
             <div class="jy-cart-item-price">
-                <?php echo $currency_symbol . number_format($price, 2, '.', ','); ?>
+                <?php echo $currency_symbol . number_format($price, 2, '.', ',') . htmlspecialchars($product_version->price_period_suffix(), ENT_QUOTES, 'UTF-8'); ?>
             </div>
             <?php if ($discount): ?>
             <div class="jy-cart-item-coupon">
@@ -94,9 +94,11 @@ foreach ($cart->items as $cart_item) {
     }
     // Answers stored as arrays with 'question' and 'answer' keys — a Question's
     // answer (question_N) and anything a requirement stored in that shape (a
-    // registered domain, a configured site).
+    // registered domain, a configured site). An answer marked 'internal' is
+    // kept on the order for the admin and not shown to the buyer.
     foreach ($data as $field_key => $field_val) {
-        if (is_array($field_val) && isset($field_val['question'], $field_val['answer'])) {
+        if (is_array($field_val) && isset($field_val['question'], $field_val['answer'])
+            && empty($field_val['internal'])) {
             $q_label = isset($field_val['question']) ? $field_val['question'] : $field_key;
             $q_answer = isset($field_val['answer']) ? $field_val['answer'] : '';
             if ($q_answer !== '') {

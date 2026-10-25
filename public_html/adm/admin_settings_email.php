@@ -165,7 +165,13 @@
 			if ($primary_validation['valid']) {
 				echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
 			} else {
-				echo '<span class="text-danger">✗ ' . ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors']) . '</span>';
+				echo '<span class="text-danger">✗ ' . htmlspecialchars(ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors'])) . '</span>';
+				// A service set up somewhere other than this page (connecting an
+				// account) says where; its fields here cannot finish it.
+				$primary_class = EmailSender::getDiscoveredProviders()[$current_service] ?? null;
+				if ($primary_class && method_exists($primary_class, 'getSetupUrl')) {
+					echo ' <a href="' . htmlspecialchars($primary_class::getSetupUrl()) . '">Set it up</a>';
+				}
 			}
 		}
 		echo '<br/>';
@@ -183,7 +189,11 @@
 			if ($fallback_validation['valid']) {
 				echo '<span class="text-success">✓ ' . ucfirst($fallback_service) . ' configured</span>';
 			} else {
-				echo '<span class="text-warning">⚠ ' . ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors']) . '</span>';
+				echo '<span class="text-warning">⚠ ' . htmlspecialchars(ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors'])) . '</span>';
+				$fallback_class = EmailSender::getDiscoveredProviders()[$fallback_service] ?? null;
+				if ($fallback_class && method_exists($fallback_class, 'getSetupUrl')) {
+					echo ' <a href="' . htmlspecialchars($fallback_class::getSetupUrl()) . '">Set it up</a>';
+				}
 			}
 		}
 		echo '</div>';
