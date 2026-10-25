@@ -22,7 +22,9 @@
  *
  * Result contract (consumed by run.php and the dashboard, nothing else):
  *   {name, tier, stats: {total, passed, failed, skipped},
- *    sections: [{title, checks: [{label, passed, detail?}]}], duration_ms}
+ *    sections: [{title, checks: [{label, passed, detail?}]}], duration_ms,
+ *    files: [repo files the process loaded],
+ *    functions?: [functions the process ran, when the runner traced it]}
  */
 
 if (!defined('JOINERY_HARNESS_LOADED')) {
@@ -30,6 +32,14 @@ if (!defined('JOINERY_HARNESS_LOADED')) {
 	// Marks the start of the JSON result contract on a CLI --json run, so the
 	// discovery runner can locate it even after fatal-error output pollution.
 	define('JOINERY_RESULT_SENTINEL', '@@JOINERY_TEST_RESULT@@');
+
+	// The longest a suite may declare in its timeout: header, in seconds, and
+	// the longer one a live suite may (harness_parse_metadata). A fixture row
+	// that carries no run token is reclaimed only once it is older than any
+	// suite can live (harness_cleanup_stale_fixtures).
+	define('HARNESS_TIMEOUT_MAX', 1800);
+	define('HARNESS_TIMEOUT_MAX_LIVE', 5400);
+	define('HARNESS_STALE_FIXTURE_SECONDS', 7200);
 
 	// The one domain a fixture address is ever minted at. Shared deliberately by
 	// harness_fixture_email() and by the cleanup patterns that recognise its
@@ -127,8 +137,9 @@ function harness_parse_metadata($filepath) {
 			$meta[$key] = $val === '' ? array()
 				: array_values(array_filter(array_map('trim', explode(',', $val))));
 		} elseif ($key === 'timeout') {
-			// Per-test wall-clock cap (seconds). Non-numeric → default; clamp 1–1800.
-			$meta['timeout'] = is_numeric($val) ? max(1, min(1800, (int)$val)) : 180;
+			// Per-test wall-clock cap (seconds). Non-numeric → default; clamped
+			// below, once the tier is known (HARNESS_TIMEOUT_MAX).
+			$meta['timeout'] = is_numeric($val) ? max(1, (int)$val) : 180;
 			$meta['timeout_explicit'] = true;
 		} elseif ($key === 'parallel') {
 			// Only the literal `true` opts in; anything else is serial.
@@ -146,6 +157,10 @@ function harness_parse_metadata($filepath) {
 	// fails safe (the test simply won't run until its header is corrected).
 	if (!in_array($meta['env'], array('any', 'prod-verify', 'dev-only'), true)) $meta['env'] = 'dev-only';
 	if (!in_array($meta['tier'], array('safe', 'db', 'test-db', 'live', 'deploy'), true)) $meta['tier'] = 'live';
+	// Thirty minutes at most, ninety for a live suite: one that makes real
+	// servers and waits on their installs (site_copy_live) needs longer, and is
+	// never run unless named.
+	$meta['timeout'] = min($meta['timeout'], $meta['tier'] === 'live' ? HARNESS_TIMEOUT_MAX_LIVE : HARNESS_TIMEOUT_MAX);
 	if ($meta['name'] === '') $meta['name'] = pathinfo($filepath, PATHINFO_FILENAME);
 	return $meta;
 }
@@ -905,8 +920,9 @@ function make_machine_key($user_id, $name, $permission = 4) {
  * token, and every run holds a lock for its token while it lives
  * (harness_hold_run_lock()): a user whose run is dead is reclaimed at once,
  * one whose run is live is never touched, and one whose token has no lock
- * file is reclaimed only past the one-hour floor (no suite process outlives
- * the runner's 1800-second timeout cap). The other families carry no token
+ * file is reclaimed only past the two-hour floor (no suite process outlives
+ * its timeout cap: HARNESS_TIMEOUT_MAX, or HARNESS_TIMEOUT_MAX_LIVE for a live
+ * suite). The other families carry no token
  * in their names and go by the floor alone. Deletion goes through each
  * model's permanent_delete(), so declared cascades run and nothing is
  * orphaned. Gated like the mail sweep: never without debug (production), and
@@ -922,7 +938,7 @@ function harness_cleanup_stale_fixtures() {
 	} catch (\Throwable $e) { return; }
 	if (!class_exists('User')) return;
 
-	$floor = gmdate('Y-m-d H:i:s', time() - 3600);
+	$floor = gmdate('Y-m-d H:i:s', time() - HARNESS_STALE_FIXTURE_SECONDS);
 	$db = DbConnector::get_instance()->get_db_link();
 
 	// The self-labelling families referential_integrity watches, same floor,
@@ -1439,6 +1455,10 @@ function harness_emit_json($sections = null) {
 		// a change can actually affect.
 		'files'       => harness_loaded_repo_files(),
 	);
+	// Finer reach: the functions this process ran, when the runner started the
+	// function trace (tests/lib/function_trace.php).
+	$functions = harness_functions_run();
+	if ($functions !== null) $contract['functions'] = $functions;
 	$json = json_encode($contract);
 	if (php_sapi_name() === 'cli') {
 		echo "\n" . JOINERY_RESULT_SENTINEL . $json . "\n";
@@ -1462,6 +1482,26 @@ function harness_loaded_repo_files() {
 		$out[] = $rel;
 	}
 	return $out;
+}
+
+/**
+ * Stop the function trace and return the distinct functions it saw, or null
+ * when no trace was running. Each key xhprof returns is `caller==>callee`
+ * (or a lone root such as `main()`); the callee is what ran.
+ */
+function harness_functions_run() {
+	if (!defined('JOINERY_FUNCTION_TRACE') || !function_exists('xhprof_disable')) return null;
+	$edges = @xhprof_disable();
+	if (!is_array($edges)) return null;
+	$out = array();
+	foreach ($edges as $edge => $_) {
+		$p = strrpos($edge, '==>');
+		$fn = $p === false ? $edge : substr($edge, $p + 3);
+		// Include and eval markers (run_init::/path, eval::...) name files, not functions.
+		if (strpos($fn, '/') !== false || $fn === 'main()') continue;
+		$out[$fn] = true;
+	}
+	return array_keys($out);
 }
 
 /** Print the human summary (CLI) or emit the JSON contract, then exit. */

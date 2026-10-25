@@ -46,7 +46,7 @@ running anything:
  * env: dev-only         # any | prod-verify | dev-only
  * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl, chrome, test-cloud, agent-source]
  * covers: []            # optional repo-relative globs the suite reaches WITHOUT loading
- * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
+ * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800; 5400 for a live suite)
  * parallel: true        # optional, safe tier only: runs beside other suites
  */
 ```
@@ -141,6 +141,17 @@ the code a shell gate builds — are declared in its header as `covers:` globs
 (`**` crosses directories, `*` stays within one segment); a shell gate's
 `covers:` is its whole declaration.
 
+**Finer reach: the functions a suite ran.** Where the PHP extension xhprof is
+loaded (on dev: `sudo apt install php8.3-xhprof`; nothing installs it
+elsewhere, and a box without it is simply file level), the runner starts each
+PHP suite with `tests/lib/function_trace.php` prepended
+(`-d auto_prepend_file`), which turns on xhprof's function trace before the
+suite's first line. The contract then also carries `functions`: every
+repository function and method the process ran. The runner stores each
+distinct list once, under `{site root}/cache/test_fnsets/<id>.json`; a result
+and a coverage map entry carry only its id (`functions_set`). The trace costs
+a small suite about 5-10% and a long one nothing measurable.
+
 **Selection rules.** A suite in the requested batch runs when any of these
 holds, and the summary names which:
 
@@ -153,10 +164,40 @@ holds, and the summary names which:
   `theme/`, `serve.php`) or its own plugin changed — Apache-side reach is not
   in the process's include list.
 
+**A comment-only edit runs the same code.** A changed PHP file whose tokens,
+minus comments and whitespace, are the same as before (against `HEAD`, and
+against the ref too under `--changed=<ref>`) selects nothing through the code
+that loads or runs it: a suite's recorded `files`, the web-server rule, and
+the harness rule below all pass over it, and it is not listed as uncovered.
+It still selects where its text is the subject — the suite's own file (the
+`@joinery-test` header is a comment), a fixture, a `covers:` glob. Only PHP
+counts; a comment in any other file may be what something reads. The summary
+names such files on a line under `Changed:`, and the JSON `selection` lists
+them as `comment_only`.
+
+**An edit inside function bodies reaches only the suites that ran them.**
+When a changed PHP file differs only inside the bodies of its functions and
+methods, a suite that loaded it is selected only if its function set holds
+one of the changed functions, and the reason says which (`runs
+sessioncontrol::check_permission (public_html/includes/SessionControl.php)`).
+Every other kind of change selects every suite that loaded the file, as
+above: anything outside a body (top-level code, class headers, constants,
+properties, attributes, closures at file scope), a global function added,
+removed or renamed, a method added or removed (code probes for optional
+methods by name — `method_exists($profile, 'backupRow')` — so a method
+appearing or disappearing can change a suite that never ran one of that
+name), and a method's signature changed (an override that no longer matches
+breaks its class at load time). A suite with no function set — untraced, or
+its set pruned — is file level. Names compare in lower case without their
+namespace; a trait's methods, and those of an anonymous class at file scope,
+compare by method name alone, since the trace reports them under the class
+that uses them. A closure belongs to the function whose body holds it.
+
 A change to `tests/run.php`, `tests/lib/harness.php`, `tests/lib/coverage.php`,
-`tests/lib/discovery.php` or `tests/lib/gate.php` runs the whole batch: the
-harness changing invalidates every recorded reach, and no suite loads the
-runner, the selection, the discovery or the gate, so reach cannot see them. Every other file under
+`tests/lib/discovery.php`, `tests/lib/gate.php` or `tests/lib/function_trace.php`
+runs the whole batch: the harness changing invalidates every recorded reach,
+and no suite loads the runner, the selection, the discovery or the gate, so
+reach cannot see them. Every other file under
 `tests/lib/` — a fixture library, the HTTP or logic helpers — is loaded by the
 suites that use it and recorded in their reach, so it selects only those. A
 stale or missing map can therefore only widen a run, never wrongly narrow it.
@@ -203,7 +244,7 @@ What does not queue:
 
 - **A run of ten suites or fewer** — a `--only`, a narrow `--filter`, a
   `--changed` that reaches little. It runs at once, beside whatever holds the
-  gate, so the working loop never waits behind a twelve-minute run. The cutoff
+  gate, so the working loop never waits behind a full run. The cutoff
   is `GATE_QUEUE_CUTOFF` in `tests/lib/gate.php`.
 - **The `deploy` tier**, which runs once on a node after an upgrade swap with
   a rollback hanging on the result.
@@ -246,10 +287,11 @@ when all of these hold:
    borrowed: a red suite is re-proven on the current tree, which is also what
    lets a rerun alone tell a flaky suite from a broken one. A skip, crash or
    timeout is never borrowed either;
-2. none of the files in that reach differ between the record's tree and this
-   run's — one `git diff-tree` per record answers it for every suite at once,
-   and the decision is the `--changed` selection applied to that diff, so the
-   two can never disagree about what a change reaches;
+2. nothing in that reach differs between the record's tree and this run's —
+   one `git diff-tree` per record answers it for every suite at once, and the
+   decision is the `--changed` selection applied to that diff, so the two can
+   never disagree about what a change reaches (comment-only and
+   function-level PHP differences included);
 3. the record's debug environment matches.
 
 The newest valid record wins. A borrowed result counts in the totals exactly
@@ -277,7 +319,12 @@ not touch the coverage map — the map already holds that reach from the run
 that produced it — and a record holds only what its own run ran, so a borrow
 always points at the run that produced the result.
 
-What reuse does not know: it knows what a suite loaded, not what the
+A result's function set travels with it: a borrowed result is spared by an
+edit inside function bodies exactly as `--changed` would spare the suite.
+Sets the coverage map does not name are pruned with the records, after 48
+hours; a record whose set is gone is file level.
+
+What reuse does not know: it knows what a suite loaded and ran, not what the
 database held, what a setting was, or what another process wrote while the
 suite ran. That is the assumption `--changed` already makes when it skips a
 suite, and a result that was wrong for one of those reasons stays wrong when
@@ -327,9 +374,12 @@ currently checks.
 The working loop is a scoped run: `php tests/run.php --changed` executes only
 the safe suites the edited files can reach — typically seconds. Pre-checkin,
 `php tests/run.php db --changed` does the same over the full gate's batch.
-The complete gate, `php tests/run.php db`, is the pre-publish proof: about
-470 tests in about twelve minutes on the dev box (the test-db lane hides
-inside the db batch's wall clock).
+The complete gate, `php tests/run.php db --fresh`, is the pre-publish proof:
+about 810 suites in roughly 35 to 40 minutes on the dev box, half of it in the
+90 shell gates (the test-db lane hides inside the db batch's wall clock).
+Without `--fresh` a run borrows whatever earlier results still hold, so a full
+`db` run takes anywhere from seconds to that, depending on how widely loaded
+the edited files are.
 
 Most suites are cheap — over 200 finish in under a second each. The expensive
 ones are expensive for a legible reason — they drive a real subsystem end to
@@ -487,8 +537,9 @@ very next run with the table named, not later as flakiness in another suite.
 A run killed outright (SIGKILL — a timed-out suite past its grace period, an
 interrupted gate) never reaches teardown, so its fixtures strand. The harness
 collects those itself: `harness_cleanup_stale_fixtures()` runs at every
-db-tier suite's boot and reclaims fixture rows older than an hour — no live
-run can own them, since no suite outlives the runner's timeout cap — deleting
+db-tier suite's boot and reclaims fixture rows older than two hours — no live
+run can own them, since no suite outlives its timeout cap (30 minutes, 90 for a
+`live` suite) — deleting
 through the models so cascades hold. Debug-gated, so it never runs on
 production. The `referential_integrity` gate itself stays read-only; a red
 there points at the run that just happened, and a failed fixture teardown
@@ -526,6 +577,8 @@ deletes. A suite that wants either pass over its nodes calls it with them.
 A gate that stubs a system tool (`pgrep`, `systemctl`, `apt-get`, `docker`) answers as a stock Ubuntu machine would, never as an empty one. A stubbed process table holds what every machine runs: `systemd`, `cron`, the agent, and on Ubuntu `unattended-upgrade-shutdown --wait-for-signal`, whose process name is cut to `unattended-upgr`, the same as `unattended-upgrade`'s. A stub of an engine refuses what the real one refuses: Docker takes one capability per `--cap-add`, where Podman also takes a comma list. A stub that answers "nothing is running" or takes every argument proves only that the script agrees with the stub.
 
 That is not enough for a script the agent runs as root. An agent word that is new or changed runs once on a real test server before the release ships it (`php maintenance_scripts/dev_tools/test_server.php create`, Ubuntu as the fleet runs it). The live-tier test `plugins/server_manager/tests/agent_live_proofs_live_test.php` does the run: it builds the agent being prepared with a key made for the run, makes a test server, installs and joins the agent, runs each changed word a bare machine can prove (or those `LIVE_PROOF_WORDS` names), and records each that passes in `plugins/server_manager/agent_live_proofs.json`, noting the agent version and the script's hash it ran with; then it removes the server, its node and the key. `plugins/server_manager/tests/agent_live_proofs_site_live_test.php` does the same for the words a site runs (`apply_update`, `upgrade_preflight`, `site_log`): it installs the newest published release on a test server, upgrades it through the agent onto a candidate built from this tree, and reads the upgraded site's access log. A word that needs the publishing box is recorded by hand after its run with `php maintenance_scripts/dev_tools/record_live_proof.php WORD --where=... --what=...`. `record_live_proof.php list` says which changed words lack one. The publish page lists those words and publishes them only when the box saying so is ticked (`AgentLiveProofs`).
+
+Site copy has one live test of its own, `plugins/server_manager/tests/site_copy_live_test.php`, run by name after copy code changes and before the release that carries them (`php tests/run.php live --only=plugins/server_manager/tests/site_copy_live_test.php`, about 35 minutes, under its 90-minute cap). It runs on this management node's own code: a source installed on a test server at the oldest release this node serves that a copy accepts, named in the Cloudflare test zone with its records proxied, its recovery key a key made for the run (opened only in the test's own process), its first backup taken; then a copy onto a Linode made here in the test account, the source's export approved once it names the copy's own key; the way back at ready; and the switch-over by the proxy, its seeds, probes and security checked against the source's, kept. The zone's token is read from the runner's `~/.config/joinery-test/cloudflare_test_token`; without it the test makes nothing and skips. Its nodes are marked test builds, so the test cloud's cleanup takes them with their servers if a run is killed before its teardown, and the next run removes a killed run's zone records. `SITE_COPY_LIVE_RELEASE` installs the source at another release this node serves; `SITE_COPY_LIVE_KEEP_ON_FAILURE=1` keeps a failed run's servers to look at.
 
 ### A test never changes the real repository
 
