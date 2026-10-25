@@ -26613,6 +26613,82 @@ fn a_file_never_sent_and_renamed_to_a_temporary_name_is_not_sent() {
     assert_converged(&world);
 }
 
+/// B6: a peer deletes a folder that holds, here, a system file and a system
+/// folder: Finder's .DS_Store, and a disk's own trash folder with a file in
+/// it. Neither is work. They went to the top of the sync folder as rescued
+/// unsent work, said so, and the trashed file came out of its trash folder
+/// under an ordinary name and went up to the server. They go to the trash
+/// with the folder, and nothing is said. RED with them rescued.
+#[test]
+fn a_peers_delete_takes_system_files_to_the_trash_with_the_folder() {
+    let world = World::new(9_947, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    mac.fs.user_mkdir("F");
+    mac.fs.user_write("F/a.txt", b"synced");
+    assert!(world.settle().is_some(), "never settled before the system files");
+    lin.fs.user_write("F/.DS_Store", b"finder");
+    lin.fs.user_mkdir("F/.Trash-1000");
+    lin.fs.user_mkdir("F/.Trash-1000/files");
+    lin.fs.user_write("F/.Trash-1000/files/x.txt", b"put in the trash on this disk");
+    assert!(world.settle().is_some(), "never settled with the system files");
+    mac.fs.user_remove("F");
+    assert!(world.settle().is_some(), "never settled after the delete");
+    assert!(lin.fs.all_paths().is_empty(), "{:?}", lin.fs.all_paths());
+    assert!(world.server.tree().is_empty(), "{:?}", world.server.tree());
+    let rescued: Vec<String> = lin
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "rescued_from_trash")
+        .map(|i| i.detail)
+        .collect();
+    assert!(rescued.iter().all(|d| !d.contains(".DS_Store") && !d.contains("x.txt")), "{rescued:?}");
+}
+
+/// B4: a peer deletes a folder that a second disk is mounted at here. The
+/// file on the disk goes to the trash, as any file does; the folder stays,
+/// said once, and the device is quiet. Once the disk is unmounted the folder
+/// goes to the trash too, the issue with it, and nothing comes back to the
+/// server. RED with the mount point's trash retried for ever.
+#[test]
+fn a_peers_delete_of_a_folder_a_disk_is_mounted_at_settles_and_says_so() {
+    let world = World::new(9_946, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    mac.fs.user_mkdir("Disk");
+    mac.fs.user_write("Disk/a.txt", b"on the other disk");
+    assert!(world.settle().is_some(), "never settled before the delete");
+    assert!(lin.fs.exists("Disk/a.txt"), "{:?}", lin.fs.all_paths());
+    lin.fs.mount_another_disk("Disk");
+
+    mac.fs.user_remove("Disk");
+    world.pass(mac);
+    world.pass(lin);
+    for _ in 0..3 {
+        let again = world.pass(lin);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert!(lin.fs.exists("Disk") && !lin.fs.exists("Disk/a.txt"), "{:?}", lin.fs.all_paths());
+    let said = |d: &jd_sim::Device| -> Vec<String> {
+        d.store
+            .open_issues()
+            .unwrap()
+            .into_iter()
+            .map(|i| i.detail)
+            .filter(|t| t.contains("a separate disk is mounted at /sync/Disk, and sync never puts a disk in the trash"))
+            .collect()
+    };
+    assert_eq!(said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+    assert!(world.server.tree().is_empty(), "{:?}", world.server.tree());
+
+    lin.fs.user_unmounts_disk("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was unmounted");
+    assert!(!lin.fs.exists("Disk"), "{:?}", lin.fs.all_paths());
+    assert!(said(lin).is_empty(), "still said after the disk was unmounted: {:?}", said(lin));
+    assert!(lin.store.open_issues().unwrap().is_empty(), "{:?}", lin.store.open_issues().unwrap());
+    assert!(world.server.tree().is_empty(), "the folder came back to the server: {:?}", world.server.tree());
+}
+
 /// A peer renames the folder a second disk is mounted at here, on a system
 /// that will not rename it while the disk is mounted (Linux). The rename is
 /// said once, naming the folder, the device goes quiet, and nothing on the

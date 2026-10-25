@@ -817,7 +817,9 @@ so the save sends one new version of the document and never the temporary
 file. A file renamed through a temporary name on its way to a new one is still
 followed there. Renamed to an ordinary name, or moved out of a system folder,
 the mark lifts and the file or folder goes on as the new item it now is. A
-system file both sides already agreed on keeps syncing like any other.
+system file both sides already agreed on keeps syncing like any other. A
+folder going to the trash takes its system files and folders with it: none is
+rescued out of it as unsent work.
 
 ### Encrypted files and folders
 
@@ -1274,6 +1276,17 @@ disk, move the folder, mount the disk again and resume, since a pass that ran
 while the disk was unmounted would find the folder empty. Once that is done,
 the folder is read where it now stands and the hold lifts. A folder above a
 mount point still moves, and the disk with it.
+
+Nor does a disk go to the trash. A folder the server deleted, or one this
+device gives up, with another disk mounted at it or anywhere inside it stays
+here (`Vfs::disk_mounted_in`, asked before anything is rescued out of it;
+`VfsError::DiskInside`): macOS refuses to trash the folder a disk is mounted
+at, Linux cannot move it, and a folder above one would go to the trash with
+the disk still mounted inside it and everything on it. The files the server
+deleted with it still go to the trash one by one, each into its own disk's
+trash. The folder is held and said the same way, naming where the disk is
+mounted; once the person unmounts the disk, the hold lifts within the hour and
+the folder goes to the trash, or they delete it themselves.
 
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification

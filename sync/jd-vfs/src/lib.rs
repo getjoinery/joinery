@@ -76,6 +76,14 @@ pub enum VfsError {
     /// the folder changes until the disk is unmounted, so no retry does.
     #[error("{from} cannot be moved to {to}: a separate disk is mounted at it")]
     MountPoint { from: PathBuf, to: PathBuf },
+    /// A trash of a folder a second disk is mounted at, or of one that holds
+    /// such a folder: `mount`, where the disk starts. No system takes the
+    /// folder a disk is mounted at to the trash (macOS refuses it, Linux
+    /// cannot move it), and a folder above one goes there with the disk still
+    /// mounted inside it and everything on it. Nothing changes that until the
+    /// disk is unmounted, so no retry does.
+    #[error("{folder} cannot go to the trash: a separate disk is mounted at {mount}")]
+    DiskInside { folder: PathBuf, mount: PathBuf },
     #[error("io error on {path}: {source}")]
     Io {
         path: PathBuf,
@@ -389,6 +397,14 @@ pub trait Vfs: Send + Sync {
     /// ([`VfsError::MountPoint`]).
     fn is_a_fixed_mount_point(&self, _path: &Path) -> bool {
         false
+    }
+    /// The folder a second disk is mounted at, at `path` or anywhere inside
+    /// it, or `None`. Asked before a folder goes to the trash, and before
+    /// anything is carried out of it first, so no disk goes to the trash and
+    /// nothing is moved for a trash that will not happen
+    /// ([`VfsError::DiskInside`]). `None` where the volume cannot tell.
+    fn disk_mounted_in(&self, _path: &Path) -> Option<PathBuf> {
+        None
     }
     /// Rename within the sync root. The folder `to` goes into must already be
     /// on this disk; a missing one is refused (`NoFolder`), never made, for

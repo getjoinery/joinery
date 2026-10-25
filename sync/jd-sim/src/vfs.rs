@@ -846,6 +846,21 @@ impl MemFs {
         self.state.lock().unwrap().mounts.insert(t);
     }
 
+    /// What a person does to a disk mounted inside the root: unmount it. The
+    /// folder it was mounted at stays, empty, and what is on the disk leaves
+    /// with it.
+    pub fn user_unmounts_disk(&self, path: &str) {
+        let key = self.key_for(&PathBuf::from("/sync").join(path)).unwrap_or_else(|_| self.store_path(path));
+        let on_it: Vec<String> = {
+            let mut st = self.state.lock().unwrap();
+            st.mounts.remove(&key);
+            st.nodes.keys().filter(|k| k.starts_with(&format!("{key}/")) && !k[key.len() + 1..].contains('/')).cloned().collect()
+        };
+        for child in on_it {
+            self.user_remove(&child);
+        }
+    }
+
     /// The disk a path is on: the innermost mount it is strictly under, or
     /// the root's own (`None`). A mount point itself stands on the disk it is
     /// mounted in.
@@ -2322,10 +2337,36 @@ impl Vfs for MemFs {
         (here != there).then(|| PathBuf::from("/sync").join(there.or(here).unwrap_or_default()))
     }
 
+    fn disk_mounted_in(&self, path: &Path) -> Option<PathBuf> {
+        let key = self.key_for(path).ok()?;
+        let st = self.state.lock().unwrap();
+        if !matches!(st.nodes.get(&key), Some(Node::Dir)) {
+            return None;
+        }
+        st.mounts
+            .iter()
+            .filter(|m| **m == key || m.starts_with(&format!("{key}/")))
+            .min_by_key(|m| m.len())
+            .map(|m| PathBuf::from("/sync").join(m))
+    }
+
     fn trash(&self, path: &Path) -> VfsResult<()> {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::Trash, &key, path)?;
         let mut st = self.state.lock().unwrap();
+        // The folder a disk is mounted at does not go to the trash: macOS
+        // refuses it, and Linux cannot move it there (traced on both). A
+        // folder above one goes, and the disk with it, still mounted.
+        if st.mounts.contains(&key) {
+            return Err(VfsError::Io {
+                path: path.to_path_buf(),
+                source: std::io::Error::other("a disk is mounted here"),
+            });
+        }
+        let carried: Vec<String> = st.mounts.iter().filter(|m| m.starts_with(&format!("{key}/"))).cloned().collect();
+        for m in carried {
+            st.mounts.remove(&m);
+        }
         let victims: Vec<String> = st
             .nodes
             .keys()
