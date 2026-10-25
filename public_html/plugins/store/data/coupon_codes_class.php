@@ -13,6 +13,7 @@ class CouponCodeException extends SystemBaseException {}
 
 class CouponCode extends SystemBase {	public static $prefix = 'ccd';
 	public static $tablename = 'ccd_coupon_codes';
+	public static $access_class = 'money';
 	public static $pkey_column = 'ccd_coupon_code_id';
 
 	protected static $foreign_key_actions = [
@@ -136,13 +137,6 @@ function get_discount($full_price){
 		
 	}	
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
-	
 }
 
 class MultiCouponCode extends SystemMultiBase {

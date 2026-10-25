@@ -34,7 +34,7 @@ class DnsPublishConsumer implements OAuth2Consumer {
 
 		// The grant proves control of a DNS account, not of this site. Writing
 		// someone's DNS is an admin act whatever the provider just said.
-		if ((int)$session->get_permission() < 5) {
+		if (!Access::decide(Access::staffLevel(), $session)) {
 			return $return_url;
 		}
 

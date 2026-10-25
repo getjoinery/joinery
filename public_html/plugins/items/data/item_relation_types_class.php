@@ -9,6 +9,7 @@ class ItemRelationTypeException extends SystemBaseException {}
 class ItemRelationType extends SystemBase {
 	public static $prefix = 'itt';
 	public static $tablename = 'itt_item_relation_types';
+	public static $access_class = 'content';
 	public static $pkey_column = 'itt_item_relation_type_id';
 
 	// AI auto-discovery (read)

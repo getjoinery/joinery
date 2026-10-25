@@ -63,6 +63,14 @@ The account token (`MobileBilling::appAccountTokenForUser()`) is a
 deterministic, reversible UUID, so a webhook event that arrives with no prior
 claim can still be linked to its user and create the subscription.
 
+The token is also what binds a purchase to its buyer. The first claim of a
+purchase is refused unless its token names the claiming member: another
+member's token is refused as "belongs to a different account", and a purchase
+with no token (one not made through the app's purchase sheet, such as an
+offer code redeemed in the store) is refused as not linked to an account.
+Once a purchase has an order item, later claims (restore purchases) are
+checked against that item's owner.
+
 ## Verification
 
 **Apple** (`plugins/store/includes/AppStoreHelper.php`): StoreKit 2

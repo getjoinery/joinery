@@ -24,6 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
+ * @version 1.8
+ * @changelog 1.8 - handle() needs config:write, what publishing a site's DNS is: its floor was 5
  * @version 1.7
  * @changelog 1.7 - handle() acts only on a POST: a link could carry the OAuth client dns_oauth_config saves
  * @version 1.6
@@ -73,8 +75,10 @@ class DnsPublishBox {
 		}
 
 		require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+		// Publishing a domain's records changes the site's configuration. The
+		// host page gates first; this is the box's own floor.
 		$session = SessionControl::get_instance();
-		$session->check_permission(5);
+		$session->check_permission(Access::level('config:write'));
 
 		$plan = $plan_factory();
 		if (!($plan instanceof DnsRecordPlan) || $plan->isEmpty()) {
@@ -244,7 +248,7 @@ class DnsPublishBox {
 
 		$session = SessionControl::get_instance();
 		$vars['oauth_needs_config']  = true;
-		$vars['oauth_can_config']    = $session->get_permission() >= self::OAUTH_CONFIG_PERMISSION;
+		$vars['oauth_can_config']    = Access::permits(self::OAUTH_CONFIG_PERMISSION, $session);
 		$vars['oauth_config_fields'] = $provider_class::configFields();
 		$vars['oauth_config_guide']  = $provider_class::configGuide();
 	}
@@ -276,7 +280,7 @@ class DnsPublishBox {
 			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
-		if ($session->get_permission() < self::OAUTH_CONFIG_PERMISSION) {
+		if (!Access::decide(self::OAUTH_CONFIG_PERMISSION, $session)) {
 			self::flash($session, 'Connecting ' . $provider_class::getLabel()
 				. ' for the first time sets an application credential the whole site shares, '
 				. 'so it needs a full administrator.', 'Not permitted', DisplayMessage::MESSAGE_WARNING);

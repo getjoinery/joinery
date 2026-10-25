@@ -19,7 +19,7 @@ $setup_import_vars = $setup_import_result->data;
 <?php } else { ?>
 	<?php mailbox_render_import_panel($page, $setup_import_vars); ?>
 
-<?php if ($permission >= 10) { ?>
+<?php if (Access::permits(InboundImapAccount::access_level('write'))) { ?>
 	<p class="jy-muted jy-mt-2">Prefer to pull from a live account instead? <a href="/plugins/mailbox/admin/admin_mailbox_imap">Connect an IMAP account</a>.</p>
 <?php } ?>
 

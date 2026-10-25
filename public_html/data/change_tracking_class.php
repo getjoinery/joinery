@@ -7,19 +7,9 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class ChangeTracking extends SystemBase {
     public static $prefix = 'cht';
 
-	// REST API: audit/log table — admin-only (permission >= 5) read and write via the API; not user-scoped content.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
     public static $tablename = 'cht_change_tracking';
+    public static $access_class = 'restricted';
+    public static $owner_column = false;
     public static $pkey_column = 'cht_change_tracking_id';
 
     protected static $foreign_key_actions = array(
@@ -61,7 +51,9 @@ class ChangeTracking extends SystemBase {
         $change->set('cht_reference_id', $reference_id);
         $change->set('cht_changed_by_usr_user_id', $changed_by_user_id);
         $change->set('cht_metadata', $metadata);
-        $change->save();
+        // The record of a change the caller's own write was allowed to make:
+        // observation, whoever's request it is.
+        SystemBase::server_initiated_write(function () use ($change) { $change->save(); });
         return $change;
     }
 

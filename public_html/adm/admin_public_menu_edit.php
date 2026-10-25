@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -9,7 +10,6 @@
 	require_once(PathHelper::getIncludePath('/data/page_contents_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {

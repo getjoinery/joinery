@@ -13,6 +13,7 @@ class BoardWatcher extends SystemBase {
 
 	public static $prefix = 'bbw';
 	public static $tablename = 'bbw_board_watchers';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'bbw_board_watcher_id';
 
 	public static $field_specifications = array(

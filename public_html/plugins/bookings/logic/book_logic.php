@@ -46,6 +46,32 @@ function book_logic(array $input): LogicResult {
 	}
 
 	if (isset($_POST['book_submit'])) {
+		// The form is public and every unseen email mints a guest account, so it
+		// carries register's bot defences: a per-network attempt limit (counting
+		// successes too — a flood of real bookings is the abuse), then the
+		// honeypot, anti-spam question and CAPTCHA for a visitor.
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!RequestLogger::check_attempt_limit('booking', 10, 900, NULL)) {
+			$page_vars['errors'][] = 'Too many booking attempts from this location. Please wait a few minutes and try again.';
+			return LogicResult::render($page_vars);
+		}
+		RequestLogger::log('booking', 'booking_attempt', TRUE);
+		if (!$session->get_user_id()) {
+			$formwriter = new FormWriterV2HTML5('bookform');
+			if (!$formwriter->honeypot_check($input)) {
+				$page_vars['errors'][] = 'Could not complete the booking. Please try again.';
+				return LogicResult::render($page_vars);
+			}
+			if (!$formwriter->antispam_question_check($input)) {
+				$page_vars['errors'][] = 'Please type the correct value into the anti-spam field.';
+				return LogicResult::render($page_vars);
+			}
+			if (!$formwriter->captcha_check($input)) {
+				$page_vars['errors'][] = 'Please complete the CAPTCHA to book.';
+				return LogicResult::render($page_vars);
+			}
+		}
+
 		$slot_start = LibraryFunctions::fetch_variable_local($input, 'slot_start', '', '', '', 'safemode', NULL);
 		$name  = trim(LibraryFunctions::fetch_variable_local($input, 'invitee_name', '', '', '', 'safemode', NULL));
 		$email = trim(LibraryFunctions::fetch_variable_local($input, 'invitee_email', '', '', '', 'safemode', NULL));
@@ -72,8 +98,22 @@ function book_logic(array $input): LogicResult {
 		// the specific message rather than the generic one.
 		$client = null;
 		$email_error = false;
+		$account_refusal = null;
+		$session_user_id = (int)$session->get_user_id();
 		try {
-			$booking = DbConnector::transaction(function ($dblink) use ($type, $provider, $slot_start, $email, $name, $invitee_tz, $notes, $input, &$client, &$email_error) {
+			$booking = DbConnector::transaction(function ($dblink) use ($type, $provider, $slot_start, $email, $name, $invitee_tz, $notes, $input, $session_user_id, &$client, &$email_error, &$account_refusal) {
+				// Typing an address proves nothing about owning it. A booking, its
+				// intake answers and its manage link go to an existing account only
+				// when that account is the one signed in; anyone else is asked to
+				// sign in. A brand-new address still books as a guest below.
+				$existing = User::GetByEmail($email);
+				if ($existing && (int)$existing->key !== $session_user_id) {
+					$account_refusal = $existing->get('usr_delete_time')
+						? User::CLOSED_ACCOUNT_MESSAGE
+						: 'An account already uses that email address. Please sign in to book with it.';
+					return null;
+				}
+
 				$lock = $dblink->prepare('SELECT pg_advisory_xact_lock(?)');
 				$lock->execute([(int)$type->get('bty_usr_user_id')]);
 
@@ -85,8 +125,8 @@ function book_logic(array $input): LogicResult {
 					return null;
 				}
 
-				// Match-or-create the invitee by email (an inactive record is fine).
-				$client = User::GetByEmail($email);
+				// The signed-in invitee's own account, or a new guest record.
+				$client = $existing;
 				if (!$client) {
 					$parts = preg_split('/\s+/', $name, 2);
 					$client = new User(NULL);
@@ -96,14 +136,19 @@ function book_logic(array $input): LogicResult {
 					if ($invitee_tz) { $client->set('usr_timezone', $invitee_tz); }
 					$client->set('usr_permission', 0);
 					try {
-						$client->save();
+						// The visitor's booking, admitted above: the type is active and
+						// bookings are on (the page check), the form validated, and the
+						// slot re-checked open under the host's lock.
+						SystemBase::rule_checked_write(function () use ($client) { $client->save(); });
 					} catch (Exception $e) {
 						$email_error = true;
 						throw $e;
 					}
 				}
 
-				return $provider->createBooking($type, array(
+				// The booking is the host's row; the invitee makes it on the same
+				// admission as above.
+				return SystemBase::rule_checked_write(fn() => $provider->createBooking($type, array(
 					'user_id'  => $client->key,
 					'notes'    => $notes,
 					'timezone' => $invitee_tz,
@@ -114,12 +159,16 @@ function book_logic(array $input): LogicResult {
 						'content'  => $input['utm_content'] ?? null,
 						'term'     => $input['utm_term'] ?? null,
 					),
-				), $slot_start);
+				), $slot_start));
 			});
 		} catch (Exception $e) {
 			$page_vars['errors'][] = $email_error
 				? 'We couldn\'t use that email address. Please double-check it.'
 				: 'Could not complete the booking. Please try again.';
+			return LogicResult::render($page_vars);
+		}
+		if ($account_refusal !== null) {
+			$page_vars['errors'][] = $account_refusal;
 			return LogicResult::render($page_vars);
 		}
 		$conflict = ($booking === null);
@@ -167,7 +216,9 @@ function booking_save_survey_answers($survey_id, $user_id, $input) {
 		$sa->set('sva_usr_user_id', $user_id);
 		$sa->set('sva_answer', $answer);
 		$sa->set('sva_create_time', 'now()');
-		try { $sa->save(); } catch (Exception $e) { error_log('booking survey answer failed: ' . $e->getMessage()); }
+		// The invitee's intake answers, part of the booking book_logic() admitted;
+		// the invitee may be a visitor or matched by email, so not the session.
+		try { SystemBase::rule_checked_write(function () use ($sa) { $sa->save(); }); } catch (Exception $e) { error_log('booking survey answer failed: ' . $e->getMessage()); }
 	}
 }
 

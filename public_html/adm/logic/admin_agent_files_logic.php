@@ -8,11 +8,12 @@ function admin_agent_files_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	// Action: write-to-disk on an existing row
 	if (isset($input['action']) && $input['action'] === 'write_to_disk' && !empty($input['agf_agent_file_id'])) {
+		// Root writes the file into the code tree.
+		Access::demand(10, $session);
 		// CLAUDE.md and its siblings live in the code tree, which the web user
 		// cannot write (specs/read_only_tree.md). The write is queued for root;
 		// the drift guard still runs, inside write_to_disk(), so a file edited
@@ -53,7 +54,7 @@ function admin_agent_files_logic(array $input): LogicResult {
 	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'ASC');
 
 	$search_criteria = array();
-	if ($session->get_permission() < 10) {
+	if (!Access::permits(AgentFile::access_level('soft_delete'), $session)) {
 		$search_criteria['deleted'] = false;
 	}
 

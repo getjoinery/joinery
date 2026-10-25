@@ -30,7 +30,6 @@
 
 function admin_cloud_storage_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$profile = new BlobStorageProfile();   // the file-blob profile, whose figures the page shows
 

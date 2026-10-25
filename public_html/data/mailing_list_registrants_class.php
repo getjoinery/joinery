@@ -14,15 +14,8 @@ class MailingListRegistrantException extends SystemBaseException {}
 
 class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'mlr_mailing_list_registrants';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mlr_mailing_list_registrant_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -87,17 +80,6 @@ public static function CheckIfExists($user_id, $mailing_list_id) {
 
 	}
 	
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
-
 	function save($debug=false) {
 		if(!$this->key){
 			if($this->check_for_duplicate(array('mlr_mlt_mailing_list_id', 'mlr_usr_user_id'))){

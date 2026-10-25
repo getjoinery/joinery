@@ -15,6 +15,7 @@ class QuestionException extends SystemBaseException {}
 
 class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $tablename = 'qst_questions';
+	public static $access_class = 'content';
 	public static $pkey_column = 'qst_question_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -446,13 +447,6 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 			}			
 		}*/
 	}	
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 }
 

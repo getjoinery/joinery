@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

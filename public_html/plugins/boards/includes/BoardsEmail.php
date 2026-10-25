@@ -14,6 +14,7 @@
  * Nothing in Boards reads mail addressed to anyone outside the site: only a board
  * member's own address, and only that member's own messages, make cards.
  *
+ * @version 1.0.2 - a member's own address is written under rule_checked_write() behind the board role
  * @version 1.0.1 - an admin whose board's domain went off is offered the eligible domains, even one
  * @version 1.0.0
  */
@@ -82,16 +83,23 @@ class BoardsEmail {
 		if ($state['status'] !== 'ok' || !Boards::roleAtLeast(Boards::roleFor($board, $user_id), Boards::ROLE_EDITOR)) {
 			return null;
 		}
-		$ensured = InboundHandlerRegistry::ensureAlias(self::HANDLER, $state['domain']);
-		if ($ensured['alias'] === null) {
-			return null;
-		}
-		return InboundPersonalAddress::addressFor(self::HANDLER, $user_id, self::REF_TYPE, (int)$board->key, (int)$state['domain']->key);
+		// An editor on the board (checked above) gets their own address; the
+		// address row and the domain's alias are the mailbox's, not theirs.
+		return SystemBase::rule_checked_write(function () use ($board, $user_id, $state) {
+			$ensured = InboundHandlerRegistry::ensureAlias(self::HANDLER, $state['domain'], false);
+			if ($ensured['alias'] === null) {
+				return null;
+			}
+			return InboundPersonalAddress::addressFor(self::HANDLER, $user_id, self::REF_TYPE, (int)$board->key, (int)$state['domain']->key);
+		});
 	}
 
 	/** Revoke the member's address and give them a new one. */
 	public static function resetAddress(Board $board, int $user_id): ?string {
-		InboundPersonalAddress::revoke(self::HANDLER, $user_id, self::REF_TYPE, (int)$board->key);
+		// The member's own address on a board they can open (the caller's boardFor()).
+		SystemBase::rule_checked_write(function () use ($board, $user_id) {
+			InboundPersonalAddress::revoke(self::HANDLER, $user_id, self::REF_TYPE, (int)$board->key);
+		});
 		return self::addressFor($board, $user_id);
 	}
 

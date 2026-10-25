@@ -26,7 +26,8 @@ function device_ai_host_logic(array $input): LogicResult {
 
 	$origin = trim((string)($input['origin'] ?? ''));
 	if ($origin === '') {
-		MailboxDeviceAiHost::setForUser($user_id, '');
+		// Clearing removes the signed-in person's own row: their own setting.
+		SystemBase::rule_checked_write(function () use ($user_id) { MailboxDeviceAiHost::setForUser($user_id, ''); });
 		return LogicResult::render(array('origin' => null));
 	}
 
@@ -49,7 +50,7 @@ function device_ai_host_logic(array $input): LogicResult {
 function device_ai_host_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Set, change or remove the origin of the caller\'s own AI model, where their browser sends end-to-end encrypted mail to be judged; setting it requires a recent step-up',
 		'input' => [
 			'origin' => ['type' => 'string', 'required' => false, 'label' => 'Model origin (scheme://host[:port]); empty removes it'],

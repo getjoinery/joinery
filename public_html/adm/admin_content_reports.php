@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Admin: Content Reports. See adm/logic/admin_content_reports_logic.php.
  *

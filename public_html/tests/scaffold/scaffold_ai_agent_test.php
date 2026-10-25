@@ -19,6 +19,7 @@
  *
  * Nothing is written to disk. Run:  php tests/scaffold/scaffold_ai_agent_test.php
  *
+ * @version 1.2 - admin views carry the @joinery-admin header; the admin edit action declares content:write
  * @version 1.1
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -32,6 +33,7 @@ $gen = new ScaffoldGenerator([
     'prefix'   => 'zqa',
     'plural'   => 'scaffold_ai_agent_probes',
     'surfaces' => ['public', 'admin'],
+    'access_class' => 'content',
     'fields'   => [
         ['name' => 'title', 'type' => 'varchar(255)', 'required' => true],
     ],
@@ -61,5 +63,17 @@ $admin_active = preg_match('/^\s*\'ai_agent\'\s*=>/m', $admin_logic) === 1;
 ok('admin descriptor has NO active ai_agent key (default-deny)', !$admin_active);
 ok('admin descriptor carries the commented opt-in line',
     strpos($admin_logic, "// 'ai_agent'") !== false);
+
+// Pages and actions declare who may use them (docs/permissions.md).
+$admin_view = '';
+foreach ($files as $rel => $src) {
+    if (strpos($rel, 'admin_scaffold_ai_agent_probes.php') !== false) $admin_view = $src;
+}
+ok('the admin list view opens with its header',
+    strpos($admin_view, "<?php\n/** @joinery-admin class=content */") === 0);
+ok('the admin edit action declares the class write level',
+    strpos($admin_logic, "'min_user_permission' => 'content:write'") !== false);
+ok('and no admin logic checks a level itself',
+    strpos($admin_logic, 'check_permission') === false);
 
 harness_finish();

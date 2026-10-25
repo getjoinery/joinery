@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Service Tenants
  * URL: /admin/server_manager/service_tenants

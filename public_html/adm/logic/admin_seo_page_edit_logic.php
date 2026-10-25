@@ -7,7 +7,6 @@ function admin_seo_page_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$spm_id = $input['spm_id'] ?? null;
 	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {

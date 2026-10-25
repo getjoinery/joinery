@@ -106,7 +106,7 @@ function device_ai_test_prompt_sample_digest(): string {
 function device_ai_test_prompt_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'The system prompt and a made-up sample digest the AI panel\'s Test button sends to the caller\'s own model',
 		'input' => [
 			'mailbox' => ['type' => 'string', 'required' => false, 'label' => 'Mailbox address whose scan recipe to use'],

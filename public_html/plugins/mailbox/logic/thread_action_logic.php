@@ -143,6 +143,7 @@ function thread_action_logic(array $input): LogicResult {
 
 function thread_action_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Mutate mail state: read/star/archive/delete/spam, allow a sender, restore/purge from trash, labels, create-folder, delete-label',
 		'input' => [

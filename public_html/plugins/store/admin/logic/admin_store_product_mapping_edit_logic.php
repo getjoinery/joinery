@@ -8,7 +8,6 @@ function admin_store_product_mapping_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$mapping_id = $input['msp_mobile_store_product_id'] ?? NULL;
 

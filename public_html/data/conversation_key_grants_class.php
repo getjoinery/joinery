@@ -24,6 +24,7 @@ class ConversationKeyGrantException extends SystemBaseException {}
 class ConversationKeyGrant extends SystemBase {
 	public static $prefix = 'ckg';
 	public static $tablename = 'ckg_conversation_key_grants';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ckg_conversation_key_grant_id';
 
 	// Never REST-exposed and never AI-readable: a wrapped key is the one thing
@@ -43,7 +44,7 @@ class ConversationKeyGrant extends SystemBase {
 		'ckg_cnv_conversation_id' => array('type' => 'int8', 'is_nullable' => false),
 		'ckg_usr_user_id'         => array('type' => 'int4', 'is_nullable' => false),
 		// The conversation key, sealed to this member's vault public key.
-		'ckg_wrapped_key'         => array('type' => 'text', 'is_nullable' => false),
+		'ckg_wrapped_key'         => array('access_class' => 'keys', 'type' => 'text', 'is_nullable' => false),
 		// The member's VAULT key generation at wrap time. A key rotation drains
 		// exactly the rows sitting on the generation it is retiring.
 		'ckg_key_generation'      => array('type' => 'int4', 'is_nullable' => false, 'default' => 0),

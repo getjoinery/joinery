@@ -26,12 +26,11 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8); // how each mailbox delivers is config: 8
 	$settings = Globalvars::get_instance();
 
-	// IMAP feeds carry full-mailbox credentials — superadmin-only, like the
-	// retired standalone IMAP Accounts page.
-	$can_imap = ($session->get_permission() >= 10);
+	// IMAP feeds carry full-mailbox credentials: shown to whoever may change
+	// an IMAP feed row.
+	$can_imap = Access::permits(InboundImapAccount::access_level('write'), $session);
 
 	// Health of the automatic-fetch scheduled task. IMAP feeds only fetch on their
 	// own if "Fetch inbound IMAP mail" (PollImapAccounts) is scheduled, active, not
@@ -66,9 +65,9 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 		}
 
 		// Soft-deleted mailboxes under this domain — restorable from the same
-		// card, mirroring the deleted-domains trash. Superadmin-only, like it.
+		// card, mirroring the deleted-domains trash, for whoever may undelete them.
 		$deleted_mailboxes = array();
-		if ($session->get_permission() >= 10) {
+		if (Access::permits(InboundEmailAlias::access_level('soft_delete'), $session)) {
 			$mb_trash = new MultiInboundEmailAlias(
 				array('domain_id' => $domain->key, 'deleted' => true),
 				array('iea_alias' => 'ASC')
@@ -86,11 +85,11 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 		);
 	}
 
-	// Soft-deleted domains — a "trash" superadmins can restore from, kept on this
+	// Soft-deleted domains — a "trash" whoever may undelete them can restore from, kept on this
 	// one page rather than a separate list. (Restore/permanent-delete are handled
 	// by the domain action handler.)
 	$deleted_domains = array();
-	if ($session->get_permission() >= 10) {
+	if (Access::permits(InboundEmailDomain::access_level('soft_delete'), $session)) {
 		$trash = new MultiInboundEmailDomain(array('deleted' => true), array('ied_domain' => 'ASC'));
 		$trash->load();
 		foreach ($trash as $d) {

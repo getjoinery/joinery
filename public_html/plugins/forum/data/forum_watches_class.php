@@ -15,6 +15,7 @@ class ForumWatch extends SystemBase {
 
 	public static $prefix = 'fwt';
 	public static $tablename = 'fwt_forum_watches';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fwt_forum_watch_id';
 
 	const TARGET_TOPIC = 'topic';

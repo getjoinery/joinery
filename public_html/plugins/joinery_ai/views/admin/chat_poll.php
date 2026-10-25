@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — chat poll endpoint (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_poll?message_id=N

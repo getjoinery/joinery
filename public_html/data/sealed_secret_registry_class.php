@@ -24,6 +24,7 @@
 class SealedSecretRegistry extends SystemBase {
 	public static $prefix = 'ssr';
 	public static $tablename = 'ssr_sealed_secret_registry';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ssr_sealed_secret_registry_id';
 
 	// The category's aggregate health from the last reconcile.

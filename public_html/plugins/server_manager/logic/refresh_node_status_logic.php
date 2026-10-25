@@ -170,7 +170,7 @@ function refresh_node_status_logic_descriptor(): array {
 		'description' => 'Refresh a managed node\'s live status badge (management/stats or HTTP fallback).',
 		'mutates'     => true,
 		'requires_session'        => true,
-		'auth'        => ['min_user_permission' => 10],
+		'auth'        => ['min_user_permission' => 7],
 		'input'       => [
 			'node_id' => ['type' => 'int', 'required' => false, 'label' => 'Node ID'],
 		],

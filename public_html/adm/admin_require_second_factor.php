@@ -1,16 +1,16 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * admin_require_second_factor — the one-button fix behind the admin-header
  * notice (AdminSecondFactorNotice): switch totp_require_admins on, so every
  * admin without a second factor is sent to enrol one at their next page.
  *
- * A POST from a superadmin, nothing else. It only ever switches the
+ * A POST, nothing else (the page is config). It only ever switches the
  * requirement on; switching it off is a considered act on the settings page.
  *
  * @version 1.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	Setting::put('totp_require_admins', '1');

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 /**
  * Inbound Email - Logs
  *
@@ -11,7 +12,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_logs_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $numperpage = 50;
 $offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');

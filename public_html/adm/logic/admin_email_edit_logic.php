@@ -9,7 +9,6 @@ function admin_email_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('/data/mailing_lists_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$settings = Globalvars::get_instance();
 

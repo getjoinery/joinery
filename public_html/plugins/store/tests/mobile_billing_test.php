@@ -15,6 +15,8 @@
  * traffic. Billing sections drive MobileBilling with verified-payload arrays,
  * the exact shape the webhooks/claim actions hand it.
  *
+ * @version 1.2.0 - a first claim is checked against the receipt's account token: another
+ *   member's receipt and a receipt with no token are refused, the buyer's own claim succeeds
  * @version 1.1.0 - every store product id, transaction id and purchase token is unique per run, so
  *   rows a killed run left behind can never answer for this one; no pro_price (price lives on
  *   the product version)
@@ -204,10 +206,14 @@ check($found !== NULL && (int)$found->key === (int)$apple_mapping->key, 'mapping
 $user1 = make_user('MbtApple');
 $user2 = make_user('MbtToken');
 $user3 = make_user('MbtPlay');
-harness_defer(function () use ($user1, $user2, $user3) {
+$user4 = make_user('MbtBuyer');
+$user5 = make_user('MbtTaker');
+harness_defer(function () use ($user1, $user2, $user3, $user4, $user5) {
 	SubscriptionTier::removeUserFromAllTiers($user1->key);
 	SubscriptionTier::removeUserFromAllTiers($user2->key);
 	SubscriptionTier::removeUserFromAllTiers($user3->key);
+	SubscriptionTier::removeUserFromAllTiers($user4->key);
+	SubscriptionTier::removeUserFromAllTiers($user5->key);
 });
 
 harness_set_setting_mem('store_app_store_bundle_ids', 'com.test.mbt');
@@ -276,6 +282,36 @@ check($threw, 'sandbox purchase rejected when debug is off');
 harness_set_setting_mem('debug', '1');
 
 // ---------------------------------------------------------------------------
+section('App Store account binding');
+// ---------------------------------------------------------------------------
+
+// user4 bought the plan (the receipt carries user4's token); user5 posts it first.
+$bound_txn = array_merge($apple_txn, array(
+	'originalTransactionId' => 'mbt-original-bound-' . $mbt_run,
+	'transactionId'         => 'mbt-txn-bound-' . $mbt_run,
+	'appAccountToken'       => MobileBilling::appAccountTokenForUser($user4->key),
+));
+$threw = false; $bound_message = '';
+try { MobileBilling::claimAppStoreTransaction($user5->key, $bound_txn); }
+catch (MobileBillingException $e) { $threw = true; $bound_message = $e->getMessage(); }
+check($threw && strpos($bound_message, 'different account') !== false, 'a member claiming another member\'s App Store receipt is refused', $bound_message);
+check(SubscriptionTier::GetUserTier($user5->key) === null, 'the refused claim granted no tier');
+check(count(new MultiOrderItem(array('odi_app_store_original_transaction_id' => 'mbt-original-bound-' . $mbt_run))) === 0, 'the refused claim left no order item behind');
+
+$bound_summary = MobileBilling::claimAppStoreTransaction($user4->key, $bound_txn);
+$mbt_register_order_rows($bound_summary['order_item_id']);
+$user4_tier = SubscriptionTier::GetUserTier($user4->key);
+check($user4_tier !== null && (int)$user4_tier->key === (int)$tier->key, 'the buyer\'s own claim of the same receipt succeeds');
+
+$threw = false; $bound_message = '';
+$tokenless_txn = $bound_txn;
+unset($tokenless_txn['appAccountToken']);
+$tokenless_txn['originalTransactionId'] = 'mbt-original-notoken-' . $mbt_run;
+try { MobileBilling::claimAppStoreTransaction($user5->key, $tokenless_txn); }
+catch (MobileBillingException $e) { $threw = true; $bound_message = $e->getMessage(); }
+check($threw && strpos($bound_message, 'not linked') !== false, 'an App Store receipt with no account token is refused', $bound_message);
+
+// ---------------------------------------------------------------------------
 section('Source exclusivity');
 // ---------------------------------------------------------------------------
 
@@ -287,6 +323,7 @@ $play_purchase_u1 = array(
 	'subscriptionState'    => 'SUBSCRIPTION_STATE_ACTIVE',
 	'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
 	'lineItems'            => array(array('productId' => 'mbt_premium_monthly-' . $mbt_run, 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
+	'externalAccountIdentifiers' => array('obfuscatedExternalAccountId' => MobileBilling::appAccountTokenForUser($user1->key)),
 );
 $threw = false; $conflict_message = '';
 try { MobileBilling::claimPlayPurchase($user1->key, 'com.test.mbt.android', 'mbt-token-conflict-' . $mbt_run, $play_purchase_u1); }
@@ -356,6 +393,19 @@ $play_purchase = array(
 	'lineItems'                  => array(array('productId' => 'mbt_premium_monthly-' . $mbt_run, 'expiryTime' => gmdate('Y-m-d\TH:i:s\Z', time() + 30 * 86400))),
 	'externalAccountIdentifiers' => array('obfuscatedExternalAccountId' => MobileBilling::appAccountTokenForUser($user3->key)),
 );
+
+// user3 bought it; user5 posts the purchase token first.
+$threw = false; $bound_message = '';
+try { MobileBilling::claimPlayPurchase($user5->key, 'com.test.mbt.android', 'mbt-play-token-1-' . $mbt_run, $play_purchase); }
+catch (MobileBillingException $e) { $threw = true; $bound_message = $e->getMessage(); }
+check($threw && strpos($bound_message, 'different account') !== false, 'a member claiming another member\'s Play purchase is refused', $bound_message);
+
+$tokenless_purchase = $play_purchase;
+unset($tokenless_purchase['externalAccountIdentifiers']);
+$threw = false; $bound_message = '';
+try { MobileBilling::claimPlayPurchase($user5->key, 'com.test.mbt.android', 'mbt-play-notoken-' . $mbt_run, $tokenless_purchase); }
+catch (MobileBillingException $e) { $threw = true; $bound_message = $e->getMessage(); }
+check($threw && strpos($bound_message, 'not linked') !== false, 'a Play purchase with no account token is refused', $bound_message);
 
 $summary = MobileBilling::claimPlayPurchase($user3->key, 'com.test.mbt.android', 'mbt-play-token-1-' . $mbt_run, $play_purchase);
 $play_item = $mbt_register_order_rows($summary['order_item_id']);

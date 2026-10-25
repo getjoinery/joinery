@@ -30,7 +30,6 @@ function admin_mailbox_imap_delete_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	// Deleting IMAP feeds handles full-mailbox credentials — superadmin only.
-	$session->check_permission(10);
 
 	$accounts_url = '/plugins/mailbox/admin/admin_mailbox_accounts';
 

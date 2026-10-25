@@ -36,6 +36,7 @@ function feed_mark_ad_logic(array $input): LogicResult {
 
 function feed_mark_ad_logic_descriptor(): array {
     return array(
+        'auth' => array('min_user_permission' => 0),
         'description'      => "Record the owner's own verdict on one persona feed post: an ad, or not an ad. The post then counts as reviewed.",
         'requires_session' => true,
         'mutates'          => true,

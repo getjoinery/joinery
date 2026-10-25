@@ -15,6 +15,7 @@ class SdDevice extends SystemBase {
 
 	public static $prefix = 'sdd';
 	public static $tablename = 'sdd_devices';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'sdd_device_id';
 
 	// AI auto-discovery (read)
@@ -44,24 +45,6 @@ class SdDevice extends SystemBase {
 	);
 
 	function prepare() {}
-
-	function authenticate_read($data) {
-		if ($this->get('sdd_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to see this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
-			}
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($this->get('sdd_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename.'-'.$data['current_user_permission'] );
-			}
-		}
-	}
 
 	static function createDevice($device, $user, $post_vars){
 		// The owner types this on the device to turn filtering off, so it must not be guessable.

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Inbound Email - Mailbox Reader (Gmail-style).
  *

@@ -38,6 +38,7 @@ class DirectIdentity extends SystemBase {
 	}
 
 	public static $tablename = 'jdi_direct_identities';
+	public static $access_class = 'keys';
 	public static $pkey_column = 'jdi_direct_identity_id';
 
 	// The column carries an 'owner_' infix, so the naming convention cannot find

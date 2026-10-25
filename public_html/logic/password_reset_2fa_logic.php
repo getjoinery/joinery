@@ -85,6 +85,7 @@ function password_reset_2fa_logic(array $input): LogicResult {
 
 function password_reset_2fa_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Confirm the second factor for a vault-holder passkey password reset (TOTP path)',
 		'input' => [

@@ -19,6 +19,7 @@ class EntityAttachment extends SystemBase {
 
 	public static $prefix = 'eat';
 	public static $tablename = 'eat_entity_attachments';
+	public static $access_class = 'content';
 	public static $pkey_column = 'eat_entity_attachment_id';
 
 	public static $field_specifications = array(

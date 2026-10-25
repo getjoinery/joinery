@@ -46,6 +46,7 @@ class EventUnviewableDisplayException extends EventException implements CustomEr
 
 class Event extends SystemBase {	public static $prefix = 'evt';
 	public static $tablename = 'evt_events';
+	public static $access_class = 'content';
 	public static $pkey_column = 'evt_event_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -532,13 +533,6 @@ function get_leader() {
 		return $output_array;
 	}
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}	
-	
 	function save($debug=false) {
 
 		if ($this->key) {

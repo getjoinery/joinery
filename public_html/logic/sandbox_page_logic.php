@@ -75,7 +75,7 @@ function sandbox_page_logic_descriptor(): array {
 		// A person's credential only (a browser or an app session): a
 		// machine key, a sandboxed plugin's among them, would make another
 		// plugin's handler think its approving admin had asked.
-		'auth'             => ['requires_person_credential' => true, 'capability' => 'write'],
+		'auth'             => ['min_user_permission' => 0, 'requires_person_credential' => true, 'capability' => 'write'],
 		'mutates'          => true,
 		'ai_agent'         => 'confirm',
 		'input'            => [

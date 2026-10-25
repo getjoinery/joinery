@@ -100,7 +100,7 @@ sign-in is withdrawn.
   display, and capability detection.
 
 The model is API-readable **owner-only** — `Passkey::authenticate_read` is
-tightened past the owner-or-staff default because passkeys are authentication
+tightened past the owner-or-class-level default because passkeys are authentication
 credentials: no one but the owner has a reason to read them, staff included
 (admin surfaces manage users, not credentials). Any caller's collection read
 returns only their own rows. Not API-writable — rename and revoke are actions

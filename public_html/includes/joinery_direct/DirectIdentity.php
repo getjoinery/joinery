@@ -123,7 +123,9 @@ class DirectSigningIdentity {
 		if ($existing !== null) {
 			return $existing;
 		}
-		return self::mint($domain);
+		// The site's own signing key, made the first time anything needs it:
+		// no person is its author, whoever's request got here first.
+		return SystemBase::server_initiated_write(function () use ($domain) { return self::mint($domain); });
 	}
 
 	/**

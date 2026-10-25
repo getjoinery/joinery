@@ -8,7 +8,6 @@ function admin_question_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/question_options_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	// ✅ CRITICAL: Check for question ID from multiple sources
 	// Priority: edit_primary_key_value (main form) > qst_question_id in POST (option form) > qst_question_id in GET (page load)

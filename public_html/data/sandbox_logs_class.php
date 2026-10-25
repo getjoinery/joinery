@@ -17,6 +17,7 @@ class SandboxLogException extends SystemBaseException {}
 class SandboxLog extends SystemBase {
 	public static $prefix = 'sbl';
 	public static $tablename = 'sbl_sandbox_logs';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'sbl_sandbox_log_id';
 
 	const KIND_UI       = 'ui';

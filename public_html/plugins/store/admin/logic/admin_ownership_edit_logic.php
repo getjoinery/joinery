@@ -9,7 +9,6 @@ function admin_ownership_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$ownership_id = $input['own_ownership_id'] ?? NULL;

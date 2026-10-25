@@ -109,6 +109,7 @@ function device_edit_logic(array $input): LogicResult{
 
 function device_edit_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Create a DNS-filtering device (omit device_id) or rename/edit one (pass device_id)',
 		'input' => [

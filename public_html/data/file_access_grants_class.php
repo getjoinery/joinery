@@ -18,6 +18,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class FileAccessGrant extends SystemBase {
 	public static $prefix = 'fga';
 	public static $tablename = 'fga_file_access_grants';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fga_file_access_grant_id';
 
 	// The grantee reference cascades on user delete. fga_granted_by_user_id is a

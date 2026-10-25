@@ -1,10 +1,10 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_analytics_users_logic.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $page_vars = process_logic(admin_analytics_users_logic(array_merge($_GET, $_POST)));
 
@@ -21,8 +21,6 @@ array(
 );
 ?>
 
-<script src="/assets/js/form-visibility-helper.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/form-visibility-helper.js')); ?>"></script>
-
 <script type="text/javascript">
 (function() {
 	'use strict';
@@ -34,16 +32,16 @@ array(
 		if (!sqlBtn || !sqlElement) return;
 
 		// Initially hide SQL element
-		FormVisibility.hide('sql');
+		sqlElement.style.display = 'none';
 
 		// Toggle visibility on button click
 		sqlBtn.addEventListener('click', function(e) {
 			e.preventDefault();
 
 			if (sqlElement.style.display === 'none') {
-				FormVisibility.show('sql');
+				sqlElement.style.display = '';
 			} else {
-				FormVisibility.hide('sql');
+				sqlElement.style.display = 'none';
 			}
 		});
 	});

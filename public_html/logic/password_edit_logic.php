@@ -118,6 +118,7 @@ function password_edit_logic_form($formwriter, $user = null, $input = []) {
 
 function password_edit_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Change the current user\'s password.',
 		'requires_session' => true,
 		'mutates'          => true,

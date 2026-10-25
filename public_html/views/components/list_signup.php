@@ -20,7 +20,7 @@
 // Show configuration errors to admins, render nothing for regular visitors
 $config_errors = $component_data['config_errors'] ?? [];
 if (empty($component_data['is_active']) || empty($component_data['mailing_lists'])) {
-	if (!empty($config_errors) && isset($_SESSION['permission']) && $_SESSION['permission'] >= 5) {
+	if (!empty($config_errors) && Access::permits(Access::staffLevel())) {
 		echo '<div class="jy-ui jy-listsignup-error">';
 		echo '<strong>List Signup Component — Configuration Issue</strong>';
 		echo '<ul>';

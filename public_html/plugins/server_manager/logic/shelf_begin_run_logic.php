@@ -23,8 +23,11 @@ function shelf_begin_run_logic(array $input): LogicResult {
 	}
 	try {
 		$row = ShelfBroker::tenantFor($user_id, intval($session->get_api_key_id()));
-		$data = ShelfBroker::beginRun($row, trim((string)($input['profile'] ?? 'site')),
-			trim((string)($input['chain'] ?? '')), is_array($artifacts) ? $artifacts : array());
+		// tenantFor() proved this is the caller's own tenant; the broker's records follow.
+		$data = SystemBase::rule_checked_write(function () use ($row, $input, $artifacts) {
+			return ShelfBroker::beginRun($row, trim((string)($input['profile'] ?? 'site')),
+				trim((string)($input['chain'] ?? '')), is_array($artifacts) ? $artifacts : array());
+		});
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -33,6 +36,7 @@ function shelf_begin_run_logic(array $input): LogicResult {
 
 function shelf_begin_run_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Open a backup run on the operator\'s backup storage: declares the profile, chain and artifacts (names and sizes); answers a run id and base key, or refuses with the cause.',
 		'requires_session' => true,
 		'mutates'          => true,

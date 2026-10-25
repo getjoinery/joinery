@@ -15,6 +15,7 @@ class DisplayablePermanentProductRequirementInstanceException extends ProductReq
 
 class ProductRequirementInstance extends SystemBase {	public static $prefix = 'pri';
 	public static $tablename = 'pri_product_requirement_instances';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'pri_product_requirement_instance_id';
 
 	protected static $foreign_key_actions = [
@@ -55,13 +56,6 @@ class ProductRequirementInstance extends SystemBase {	public static $prefix = 'p
 	);
 
 	public static $json_vars = array('pri_config'); 
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}	
 
 }
 

@@ -10,6 +10,8 @@ class PluginDependencyNotSentException extends PluginDependencyException {}
 
 class PluginDependency extends SystemBase {    public static $prefix = 'pld';
     public static $tablename = 'pld_plugin_dependencies';
+    public static $access_class = 'config';
+    public static $write_permission = 10;
     public static $pkey_column = 'pld_plugin_dependency_id';
 
     protected static $foreign_key_actions = [
@@ -40,12 +42,6 @@ class PluginDependency extends SystemBase {    public static $prefix = 'pld';
         'pld_dependency_type' => array('type'=>'varchar(20)'),
     );
 
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Current user does not have permission to edit this entry in '. static::$tablename);
-        }
-    }
 }
 
 class MultiPluginDependency extends SystemMultiBase {

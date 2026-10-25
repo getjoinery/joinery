@@ -8,7 +8,6 @@
 
 function admin_webhooks_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$receivers = new MultiSignalReceiver(

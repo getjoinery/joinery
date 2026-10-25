@@ -31,7 +31,8 @@
  * Everything the site sends is untrusted text: stored as text, escaped on
  * display, wrapped on the way to the model, never a path.
  *
- * @version 0.1.0
+ * @version 0.1.1
+ * @changelog 0.1.1 - an asker's writes run under rule_checked_write() behind the origin/token proofs
  */
 class SupportRefusal extends Exception {
 	/** @var string a machine reason the panel can act on */
@@ -125,7 +126,11 @@ class SupportIntake {
 			'sth_sender_ip'          => mb_substr($ip, 0, 64),
 			'sth_node_id'            => self::nodeIdForHost($host),
 		);
-		SupportThread::updateColumns((int)$thread->key, $columns);
+		// The thread is the caller's: its token (openThread()) or its origin
+		// (confirmOrigin()) was proven above. Nobody is signed in.
+		SystemBase::rule_checked_write(function () use ($thread, $columns) {
+			SupportThread::updateColumns((int)$thread->key, $columns);
+		});
 		foreach ($columns as $column => $value) {
 			$thread->set_as_stored($column, $value);
 		}
@@ -136,6 +141,12 @@ class SupportIntake {
 	/**
 	 * Add the person's message to a thread and start the model's turn when the
 	 * model is the one to answer. Shared by the site panel and the widget.
+	 *
+	 * Every caller has proven the thread is the asker's first (openThread() by
+	 * token or account key, SupportWidget::open() by the browser's token, or a
+	 * thread createThread() just made for them), so the writes run under
+	 * rule_checked_write(): the asker is not signed in, and the transcript's
+	 * conversation belongs to the desk's system user.
 	 */
 	public static function addQuestion(SupportThread $thread, string $message, string $token = ''): array {
 		$state = (string)$thread->get('sth_state');
@@ -161,14 +172,15 @@ class SupportIntake {
 		$user_msg->set('aim_role', AiConversationMessage::ROLE_USER);
 		$user_msg->set('aim_content', $message);
 		$user_msg->set('aim_status', AiConversationMessage::STATUS_COMPLETE);
-		$user_msg->save();
-		$user_msg->load();
-
 		$columns = array('sth_state' => $next_state, 'sth_unread_reply' => false);
 		if ($state === SupportThread::STATE_CLOSED) {
 			$columns['sth_closed_time'] = null;
 		}
-		SupportThread::touch((int)$thread->key, $columns);
+		SystemBase::rule_checked_write(function () use ($user_msg, $thread, $columns) {
+			$user_msg->save();
+			SupportThread::touch((int)$thread->key, $columns);
+		});
+		$user_msg->load();
 		$thread->set('sth_state', $next_state);
 
 		$out = array(
@@ -183,7 +195,9 @@ class SupportIntake {
 		}
 		if ($for_person) {
 			if (!$pinned) {
-				SupportNotify::escalate($thread, 'The person wrote again while waiting.');
+				SystemBase::rule_checked_write(function () use ($thread) {
+					SupportNotify::escalate($thread, 'The person wrote again while waiting.');
+				});
 			}
 			return $out;
 		}
@@ -192,13 +206,15 @@ class SupportIntake {
 		$assistant->set('aim_aic_conversation_id', (int)$conversation->key);
 		$assistant->set('aim_role', AiConversationMessage::ROLE_ASSISTANT);
 		$assistant->set('aim_status', AiConversationMessage::STATUS_RUNNING);
-		$assistant->save();
+		SystemBase::rule_checked_write(function () use ($assistant) { $assistant->save(); });
 		$assistant->load();
 		$out['message_id'] = (int)$assistant->key;
 		$out['status'] = AiConversationMessage::STATUS_RUNNING;
 
 		if (self::$spawn && !ChatWorkerSpawner::spawnWorker(self::WORKER, (int)$assistant->key)) {
-			SupportTurn::markFailed($assistant, 'The support desk could not start answering. Ask a person, or try again later.');
+			SystemBase::rule_checked_write(function () use ($assistant) {
+				SupportTurn::markFailed($assistant, 'The support desk could not start answering. Ask a person, or try again later.');
+			});
 			throw new SupportRefusal('The support desk is not set up to answer on this node.', 'not_ready', 503);
 		}
 		return $out;
@@ -218,6 +234,12 @@ class SupportIntake {
 	/**
 	 * Make a thread and its transcript. Returns [thread, token]; the token is
 	 * the one time the secret exists outside a hash.
+	 *
+	 * Its callers admit the asker first: ask() confirms the site's origin by
+	 * calling it back (confirmOrigin()), SupportWidget::ask() passes the
+	 * captcha; both pass the budget. The rows are written under
+	 * rule_checked_write() because nobody is signed in and the transcript is
+	 * the desk's system user's.
 	 */
 	public static function createThread(string $surface, array $f): array {
 		$token = bin2hex(random_bytes(24));
@@ -243,16 +265,18 @@ class SupportIntake {
 			$thread->set('sth_bundle', json_encode($f['bundle'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 		}
 		$thread->set('sth_state', SupportThread::STATE_OPEN);
-		$thread->save();
+		SystemBase::rule_checked_write(function () use ($thread) { $thread->save(); });
 		$thread->load();
 
 		$conversation = new AiConversation(NULL);
 		$conversation->set('aic_owner_user_id', $owner);
 		$conversation->set('aic_title', 'Support #' . (int)$thread->key . ': ' . (string)$thread->get('sth_title'));
 		$conversation->set('aic_support_thread_id', (int)$thread->key);
-		$conversation->save();
+		SystemBase::rule_checked_write(function () use ($thread, $conversation) {
+			$conversation->save();
+			SupportThread::updateColumns((int)$thread->key, array('sth_aic_conversation_id' => (int)$conversation->key));
+		});
 		$conversation->load();
-		SupportThread::updateColumns((int)$thread->key, array('sth_aic_conversation_id' => (int)$conversation->key));
 		$thread->set_as_stored('sth_aic_conversation_id', (int)$conversation->key);
 		return array($thread, $token);
 	}

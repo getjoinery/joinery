@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/bookings/logic/admin_booking_type_edit_logic.php'));

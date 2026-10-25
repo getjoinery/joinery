@@ -22,6 +22,7 @@ class FleetHandMachineException extends SystemBaseException {}
 class FleetHandMachine extends SystemBase {
 	public static $prefix = 'fhm';
 	public static $tablename = 'fhm_fleet_hand_machines';
+	public static $access_class = 'config';
 	public static $pkey_column = 'fhm_fleet_hand_machine_id';
 
 	/** A row unconfirmed this long is asked about again. */

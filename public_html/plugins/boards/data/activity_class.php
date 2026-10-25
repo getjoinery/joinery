@@ -14,6 +14,7 @@ class BoardActivity extends SystemBase {
 
 	public static $prefix = 'bac';
 	public static $tablename = 'bac_activity';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bac_activity_id';
 
 	/** Every verb a row may carry. */

@@ -16,6 +16,7 @@ class SdScheduledBlock extends SystemBase {
 
 	public static $prefix = 'sdb';
 	public static $tablename = 'sdb_scheduled_blocks';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sdb_scheduled_block_id';
 
 	protected static $foreign_key_actions = array(
@@ -37,6 +38,35 @@ class SdScheduledBlock extends SystemBase {
 	);
 
 	function prepare() {}
+
+	/** The member a block's device belongs to (sdd_usr_user_id), or 0. */
+	public static function ownerOfBlock(int $block_id): int {
+		if ($block_id <= 0) return 0;
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT sdd.sdd_usr_user_id FROM sdb_scheduled_blocks sdb
+			   JOIN sdd_devices sdd ON sdd.sdd_device_id = sdb.sdb_sdd_device_id
+			  WHERE sdb.sdb_scheduled_block_id = ?');
+		$q->execute(array($block_id));
+		return (int)$q->fetchColumn();
+	}
+
+	/** The member a device belongs to, or 0. */
+	public static function ownerOfDevice(int $device_id): int {
+		if ($device_id <= 0) return 0;
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT sdd_usr_user_id FROM sdd_devices WHERE sdd_device_id = ?');
+		$q->execute(array($device_id));
+		return (int)$q->fetchColumn();
+	}
+
+	/**
+	 * A block is its device's, so its device owner's. Read through the stored
+	 * device id: moving a block onto your own device is the model's level.
+	 */
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0
+			&& self::ownerOfDevice((int)$this->access_stored('sdb_sdd_device_id')) === (int)$user_id;
+	}
 
 	function authenticate_write($data) {
 		// Load the device to verify ownership

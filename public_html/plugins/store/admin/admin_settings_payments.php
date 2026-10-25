@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
@@ -10,7 +11,6 @@
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$settings = Globalvars::get_instance();
 

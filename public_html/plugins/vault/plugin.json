@@ -37,7 +37,6 @@
             "url": "/profile/vault",
             "icon": "lock",
             "visibility": "in",
-            "permission": 0,
             "order": 65
         }
     ]

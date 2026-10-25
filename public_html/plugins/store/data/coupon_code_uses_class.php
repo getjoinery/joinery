@@ -11,6 +11,7 @@ class CouponCodeUseException extends SystemBaseException {}
 
 class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	public static $tablename = 'ccu_coupon_code_uses';
+	public static $access_class = 'money';
 	public static $pkey_column = 'ccu_coupon_code_use_id';
 
 	protected static $foreign_key_actions = [
@@ -49,13 +50,6 @@ class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 
 	}	
 	*/
-	
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 	
 }
 

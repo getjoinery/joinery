@@ -16,7 +16,6 @@ function admin_mailbox_reader_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	// Persistent CSRF token for the reader's action endpoint (validated, not

@@ -77,6 +77,7 @@ function domain_check_logic_descriptor(): array {
 		'mutates'          => false,
 		'requires_setting' => 'server_manager_namecheap_api_user',
 		'auth'             => array(
+			'min_user_permission' => 0,
 			'allow_guest'              => true,
 			'requires_browser_session' => true,
 		),

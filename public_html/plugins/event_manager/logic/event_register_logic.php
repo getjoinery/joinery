@@ -21,6 +21,7 @@ function event_register_logic(array $input): LogicResult {
 
 function event_register_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Register the current user for an event.',
 		'requires_session' => true,
 		'mutates'          => true,

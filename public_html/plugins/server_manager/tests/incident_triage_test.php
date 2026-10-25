@@ -37,6 +37,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_triage_test.php
  *
+ * @version 1.3 - the API action's gate is its declared level (8), asked before the logic
  * @version 1.2 - cleared cases are settled by the reconciler (Resolve all cleared is gone)
  * @version 1.1 - Looking is gone; a fix awaiting its proof; the carry-over maps read and active to new
  * @version 1.0
@@ -202,14 +203,12 @@ if ($svc !== null) {
 		'A long note is capped');
 }
 
-// The API action, with no superadmin signed in (the CLI has no session user).
+// The API action: who may triage is its declared level (8, spec declared_permissions
+// WP6), which ApiAuth::authorize() asks before the logic runs.
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/incident_triage_logic.php'));
-$_SERVER['REQUEST_METHOD'] = 'POST';
-$res = incident_triage_logic(['id' => $svc ? (int)$svc->key : 0, 'do' => 'resolved']);
-unset($_SERVER['REQUEST_METHOD']);
-if ($svc !== null) { $svc->load(); }
-check((string)$res->error !== '' && ($svc === null || $svc->triage() !== IncidentRecord::TRIAGE_RESOLVED),
-	'The API action refuses a caller who is not a superadmin and changes nothing', (string)$res->error);
+$triage_level = incident_triage_logic_descriptor()['auth']['min_user_permission'] ?? null;
+check($triage_level === 8 && !Access::allows($triage_level, 7) && Access::allows($triage_level, 8),
+	'The API action is declared at 8: a 7 is refused before the logic runs, an 8 may triage', var_export($triage_level, true));
 $res = incident_triage_logic(['id' => $svc ? (int)$svc->key : 0, 'do' => 'resolved']);
 check((string)$res->error !== '', 'The API action refuses a GET', (string)$res->error);
 

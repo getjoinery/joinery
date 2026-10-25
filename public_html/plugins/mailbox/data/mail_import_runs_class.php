@@ -39,6 +39,7 @@ class MailImportRunException extends SystemBaseException {}
 class MailImportRun extends SystemBase {
 	public static $prefix = 'mir';
 	public static $tablename = 'mir_mail_import_runs';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mir_mail_import_run_id';
 
 	// Retention: runs age by when they FINISHED, and what is reclaimed is the
@@ -129,13 +130,6 @@ class MailImportRun extends SystemBase {
 		'mir_update_time'                => array('type'=>'timestamp(6)'),
 		'mir_delete_time'                => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('mir_update_time', gmdate('Y-m-d H:i:s'));

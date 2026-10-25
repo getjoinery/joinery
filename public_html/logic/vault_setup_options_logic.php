@@ -54,7 +54,7 @@ function vault_setup_options_logic(array $input): LogicResult {
 function vault_setup_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Begin Sealed Vault setup (returns WebAuthn PRF request options); requires an existing account password. with_root also asks the same touch for the root vault\'s secret, which the browser keeps',
 		'input' => [
 			'with_root' => ['type' => 'bool', 'required' => false, 'label' => 'Also derive the root vault secret (kept in the browser)'],

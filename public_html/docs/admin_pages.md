@@ -24,6 +24,7 @@ The canonical reference implementation is `/adm/admin_user.php` and `/adm/logic/
 3. **`process_logic()` in views** — views wrap the logic call so redirects and errors are handled centrally.
 4. **POST → redirect** — admin actions always redirect after POST; messages flow via session, never via query strings.
 5. **No `.php` in URLs** — all admin URLs are served through the front controller; the `.php` extension breaks routing.
+6. **The page declares who may open it** — its first line after `<?php` is a header, `/** @joinery-admin class=personal */` (its class's read level) or `/** @joinery-admin level=8 */`. The router checks it before any page code runs; a page without one needs 10. See [Permissions](permissions.md#pages).
 
 See [Logic Architecture](logic_architecture.md) for the broader pattern.
 
@@ -71,7 +72,8 @@ function admin_page_logic(array $input): LogicResult {
     $settings = Globalvars::get_instance();
     $session = SessionControl::get_instance();
 
-    $session->check_permission(5);  // 5=admin, 9=super admin, 10=full
+    // Who may open the page is its header (Core Principles 6); the router
+    // has checked it before this runs.
     $session->set_return();
 
     $page_vars = array();
@@ -115,7 +117,7 @@ function admin_page_logic(array $input): LogicResult {
 
 ### Section Notes
 
-- **Permission levels**: `5` = basic admin, `7` = higher admin, `9` = super admin, `10` = full system admin. `check_permission()` redirects unauthorized users automatically.
+- **Who may open the page** is the view's header, not the logic (Core Principles 6). The levels and their names are in `permissions.md`.
 - **Always include `$settings` and `$session`** in `$page_vars`.
 - **Process actions before loading data** — avoids wasted queries when the path ends in a redirect.
 - **Always redirect after POST** — return `LogicResult::redirect(...)` so refresh doesn't re-submit.
@@ -134,6 +136,7 @@ return LogicResult::error('Error msg');  // Failure (404, etc.)
 
 ```php
 <?php
+/** @joinery-admin class=content */
 // PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper,
 // PluginHelper are always pre-loaded — never require them.
 
@@ -806,8 +809,8 @@ try {
 
 ### Security
 
-- Permissions in the logic file, not the view: `$session->check_permission(5);`
-- Authenticate writes on the model: `$user->authenticate_write([...])`.
+- Who may open the page: the view's `@joinery-admin` header.
+- Who may change a row: the model's class, checked on every write ([Permissions](permissions.md#models)); ask early with `$user->assert_can_write($session)`.
 - Always `htmlspecialchars()` user-supplied output.
 - Use model methods or PDO prepared statements — never concatenate into SQL.
 - FormWriter handles CSRF tokens automatically.
@@ -899,7 +902,7 @@ php /var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.ph
 
 - [ ] `php -l` clean on both files
 - [ ] `validate_php_file.php` clean (or false positives understood)
-- [ ] Unauthorized users are redirected by `check_permission()`
+- [ ] The view carries its `@joinery-admin` header; a user below it is refused
 - [ ] Data loads in every section of the page
 - [ ] Sort, search, pagination work (where applicable)
 - [ ] POST forms redirect cleanly (no resubmit on refresh)

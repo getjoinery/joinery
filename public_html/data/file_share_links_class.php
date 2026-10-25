@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class FileShareLink extends SystemBase {
 	public static $prefix = 'fsl';
 	public static $tablename = 'fsl_file_share_links';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fsl_file_share_link_id';
 
 	protected static $foreign_key_actions = array(
@@ -27,10 +28,10 @@ class FileShareLink extends SystemBase {
 		'fsl_file_share_link_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
 		'fsl_entity_type'        => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true, 'index_with' => array('fsl_entity_id')),
 		'fsl_entity_id'          => array('type' => 'int8', 'is_nullable' => false, 'required' => true),
-		'fsl_token_sha256'       => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'fsl_token_sha256'       => array('access_class' => 'restricted', 'type' => 'varchar(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'fsl_usr_user_id'        => array('type' => 'int4', 'is_nullable' => false, 'required' => true),
 		'fsl_expires_time'       => array('type' => 'timestamp(6)', 'is_nullable' => true),
-		'fsl_password_hash'      => array('type' => 'varchar(255)', 'is_nullable' => true),
+		'fsl_password_hash'      => array('access_class' => 'restricted', 'type' => 'varchar(255)', 'is_nullable' => true),
 		'fsl_revoked_time'       => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'fsl_access_count'       => array('type' => 'int4', 'is_nullable' => false, 'default' => 0, 'zero_on_create' => true),
 		'fsl_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),

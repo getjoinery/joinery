@@ -77,7 +77,6 @@ require_once(PathHelper::getIncludePath('includes/BackupObjectRestoreLauncher.ph
 
 function admin_backups_logic($input = array()) {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	// The backup built for download, sent as a file. The whole site in one
 	// file asks for a fresh second factor, as building it did; the ceremony

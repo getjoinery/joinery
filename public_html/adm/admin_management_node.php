@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Management Node — connect this machine's agent to a management node.
  *

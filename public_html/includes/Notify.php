@@ -26,7 +26,8 @@
  * whose notify block says `"push_text": "generic"`, or a dispatch whose
  * payload carries `push_protected` true, is pushed as the generic text only.
  *
- * @version 2.6
+ * @version 2.7
+ * @changelog 2.7 - The queued email saves as the server's own write: a member who causes a signal does not own the recipient's mail.
  * @changelog 2.6 - Push channel through PushSender; a preference carries ntp_push_enabled.
  * @changelog 2.5 - The `admins` and `superadmins` audiences leave out disabled accounts.
  * @changelog 2.4 - An `admins` audience: every admin (permission 5+) who is a person.
@@ -442,6 +443,8 @@ class Notify {
 		$queued->set('equ_body', $html);
 		$queued->set('equ_status', QueuedEmail::READY_TO_SEND);
 		$queued->set('equ_retry_count', 0);
-		$queued->save();
+		// The platform's own mail to a recipient, which the person who caused
+		// the signal neither owns nor asked for: the server's write.
+		SystemBase::server_initiated_write(function () use ($queued) { $queued->save(); });
 	}
 }

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 /**
  * Redirect stub — updates is now a tab on node_detail, publish is on dashboard.
  */

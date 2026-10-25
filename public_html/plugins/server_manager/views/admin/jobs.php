@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=7 */
 /**
  * Server Manager - Job History
  * URL: /admin/server_manager/jobs
@@ -12,8 +13,8 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
 
+// Job pages open at 7 (Q11).
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $numperpage = 30;

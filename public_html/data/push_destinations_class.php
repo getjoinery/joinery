@@ -26,6 +26,7 @@ class PushDestinationException extends SystemBaseException {}
 class PushDestination extends SystemBase {
 	public static $prefix = 'psh';
 	public static $tablename = 'psh_push_destinations';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'psh_push_destination_id';
 
 	const KIND_WEB     = 'web';
@@ -81,17 +82,6 @@ class PushDestination extends SystemBase {
 		return ($id === false) ? null : new self((int)$id, true);
 	}
 
-	function authenticate_read($data) {
-		if ((int)$this->get('psh_usr_user_id') !== (int)$data['current_user_id'] && $data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this push destination.');
-		}
-	}
-
-	function authenticate_write($data) {
-		if ((int)$this->get('psh_usr_user_id') !== (int)$data['current_user_id'] && $data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Current user does not have permission to change this push destination.');
-		}
-	}
 }
 
 class MultiPushDestination extends SystemMultiBase {

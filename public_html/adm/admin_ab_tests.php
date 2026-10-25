@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * A/B Tests — cross-entity list.
  *
@@ -13,7 +14,6 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/ab_tests_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 $session->set_return();
 
 // Sanity check: any entities with more than one active, non-deleted test?

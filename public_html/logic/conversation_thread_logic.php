@@ -168,6 +168,7 @@ function conversation_thread_logic(array $input): LogicResult {
 
 function conversation_thread_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'One conversation\'s messages, cursor-paginated; marks it read. Given `to` instead of conversation_id, dedups to an existing 1:1 conversation for compose mode.',
 		'input' => [

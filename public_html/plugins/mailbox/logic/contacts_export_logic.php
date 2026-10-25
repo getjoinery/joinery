@@ -57,6 +57,7 @@ function contacts_export_logic(array $input): LogicResult {
 
 function contacts_export_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Download one mailbox\'s contacts as a vCard 3.0 file or a Google Contacts CSV',
 		'input' => [

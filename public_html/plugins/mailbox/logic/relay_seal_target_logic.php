@@ -31,7 +31,7 @@ function relay_seal_target_logic(array $input): LogicResult {
 function relay_seal_target_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'The relay\'s signed statement of which key it seals one of the caller\'s end-to-end mailboxes to, unchanged, with the stored pin',
 		'input' => [

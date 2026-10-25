@@ -74,8 +74,10 @@ interface ToolContext {
 
     /** Are reads contained to the acting user's own rows? True for a non-admin
      *  member caller (the read executor adds an owner filter and hides
-     *  ambiguously-owned models); false for an admin, who reads cross-user. */
-    public function ownerScopedReads(): bool;
+     *  ambiguously-owned models); false for an admin, who reads cross-user.
+     *  Given a model class, the answer for that model: an admin below the
+     *  model's read level (spec declared_permissions 3.2) is scoped there too. */
+    public function ownerScopedReads(?string $model_class = null): bool;
 
     /** May this surface open sealed content (protected mail, sealed drive)? A
      *  standard chat answers FALSE: pulling sealed content into a plaintext

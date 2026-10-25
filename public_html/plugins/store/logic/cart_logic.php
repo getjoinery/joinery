@@ -34,7 +34,7 @@ function cart_logic(array $input): LogicResult {
 	$page_vars['currency_symbol'] = $currency_symbol;
 
 	if ($settings->get_setting('coupons_active')) {
-		if (StripeHelper::isTestMode() && $session->get_permission() >= 8) {
+		if (StripeHelper::isTestMode() && Access::permits(CouponCode::access_level('read'), $session)) {
 			$coupon_codes = new MultiCouponCode(array());
 			$coupon_codes->load();
 			$page_vars['all_coupons'] = $coupon_codes;
@@ -57,6 +57,7 @@ function cart_logic(array $input): LogicResult {
 
 function cart_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Cart review page',
 	];

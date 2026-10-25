@@ -32,6 +32,7 @@ class MailboxSearchKeyException extends SystemBaseException {}
 class MailboxSearchKey extends SystemBase {
 	public static $prefix = 'msk';
 	public static $tablename = 'msk_mailbox_search_keys';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'msk_mailbox_search_key_id';
 
 	public static $api_readable = false;
@@ -49,7 +50,7 @@ class MailboxSearchKey extends SystemBase {
 		'msk_usr_user_id'           => array('type'=>'int8', 'is_nullable'=>false, 'unique'=>true),
 		// The four Sealed Vault columns. msk_sealed_key is the sealed search key itself.
 		'msk_content_sealed'        => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'msk_sealed_key'            => array('type'=>'text', 'is_nullable'=>true),
+		'msk_sealed_key'            => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'msk_sealed_owner_user_id'  => array('type'=>'int8', 'is_nullable'=>true),
 		'msk_key_generation'        => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'msk_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * IMAP-feed delete choice — Keep (materialize local) vs Remove (delete rows).
  * Reached when the feed has reference-backed messages that would otherwise be

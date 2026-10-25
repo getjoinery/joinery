@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — pin / rename / delete a chat thread (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_thread_action  (POST)

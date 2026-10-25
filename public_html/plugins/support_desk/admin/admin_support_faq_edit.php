@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Admin: one FAQ entry of this support desk — new, from a thread (Answer
  * once), or an edit (specs/support_chatbot.md, FAQs).
@@ -12,7 +13,6 @@
  * @version 0.1.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 
 $entry_id = (int)($_GET['sfq_faq_entry_id'] ?? $_POST['sfq_faq_entry_id'] ?? 0);
 $thread_id = (int)($_GET['sth_support_thread_id'] ?? $_POST['sth_support_thread_id'] ?? 0);
@@ -30,6 +30,9 @@ if ($thread_id > 0) {
 	$thread = new SupportThread($thread_id, TRUE);
 	if (!$thread->key) {
 		$thread = null;
+	} else {
+		// The page shows the thread's transcript, which is the AI conversation's data.
+		Access::demand(AiConversationMessage::access_level('read'), $session);
 	}
 }
 $list = '/plugins/support_desk/admin/admin_support_threads?view=faq';

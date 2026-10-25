@@ -18,7 +18,7 @@
 class ParserJailNotice {
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		if (DocumentText::jailAvailable()) {

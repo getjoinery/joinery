@@ -68,8 +68,6 @@ pag_template = 'page_register_thanks'
 
 `views/page.php` then delegates to `theme/{theme}/views/page_register_thanks.php`. That template is a normal view with `$page` available and no framework magic — write whatever PHP you need inline.
 
-This replaces the legacy `pag_script_filename` + `{{var}}` placeholder mechanism, which has been removed.
-
 ## Route Configuration Reference
 
 Routes are defined in `serve.php` in three categories:
@@ -124,8 +122,18 @@ URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array t
 | `static_cache` | No | `false` — the response is never written to the static page cache and leaves no index entry (a search page, where every query string is its own page, or a link made for one recipient). A view can do the same with `StaticPageCache::skipThisRequest()` |
 | `min_permission` | No | Minimum permission level required (uses `SessionControl::check_permission()`). **See the ladder below — note `0` requires login; *omit* the key for a truly public page.** |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
+| `admin_page_check` | No | `false` — a route inside an admin URL family that is public by its own declaration (`/admin/server_manager/publish_theme`, which other sites fetch with no session). Every other admin path needs its page's `@joinery-admin` level (below) |
 
 *Exactly one of `view` or `handler`.
+
+#### Admin pages
+
+Before custom, dynamic and fallback routes, the router checks every admin
+path (`/admin/{name}`, `/admin/{plugin}/{name}`, `/plugins/{plugin}/admin/{name}`,
+and a plugin's dynamic route inside `/admin/`, checked against its `view`) against
+its page file's `@joinery-admin` header (`AdminPageAccess`): signed out, the sign-in
+page; below the level, a 401. A page without a header needs 10. See
+[Permissions](permissions.md#pages).
 
 #### Plugin-delegated routes
 

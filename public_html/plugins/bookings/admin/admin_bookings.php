@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -7,7 +8,6 @@ require_once(PathHelper::getIncludePath('plugins/bookings/data/bookings_class.ph
 require_once(PathHelper::getIncludePath('plugins/bookings/data/booking_types_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 $session->set_return();
 
 $status_labels = array(

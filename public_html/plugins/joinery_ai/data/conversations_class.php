@@ -18,6 +18,8 @@ class AiConversation extends SystemBase {
 
     public static $prefix = 'aic';
     public static $tablename = 'aic_conversations';
+    public static $access_class = 'config';
+    public static $owner_column = 'aic_owner_user_id';
     public static $pkey_column = 'aic_conversation_id';
 
     // Per-conversation encryption posture (specs/joinery_ai_chat_encryption.md).
@@ -71,7 +73,7 @@ class AiConversation extends SystemBase {
         // public key (title + instructions seal under it); aic_key_generation
         // matches the vault generation the DEK is sealed to (for rotation);
         // aic_content_sealed marks a row whose title/instructions hold ciphertext.
-        'aic_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
+        'aic_sealed_key'         => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
         'aic_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
         'aic_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         // Whose vault the DEK was wrapped to at seal time (SystemBase writes it
@@ -127,13 +129,6 @@ class AiConversation extends SystemBase {
         'aic_update_time'        => array('type'=>'timestamp(6)'),
         'aic_delete_time'        => array('type'=>'timestamp(6)'),
     );
-
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 5) {
-            throw new SystemAuthenticationError(
-                'Joinery AI chat requires permission level 5 to use.');
-        }
-    }
 
     /** A stored level read as a current one: the legacy value is Private. */
     public static function normalizeLevel($stored): string {

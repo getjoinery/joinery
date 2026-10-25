@@ -53,7 +53,7 @@ function admin_yearly_report_donations_logic(array $input): LogicResult {
 		while($order_item = $r->fetch()){
 			$item_amount = $order_item->odi_price - $order_item->odi_refund_amount;
 			$results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['name'] = $product_array[$order_item->odi_pro_product_id];
-			$results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['amount'] += $item_amount;
+			$results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['amount'] = ($results[$user->usr_user_id]['products'][$order_item->odi_pro_product_id]['amount'] ?? 0) + $item_amount;
 			$total_for_user += $item_amount;
 		}
 		$results[$user->usr_user_id]['total'] = $total_for_user;

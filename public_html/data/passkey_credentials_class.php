@@ -34,6 +34,7 @@ class Passkey extends SystemBase {
 
 	public static $prefix = 'pkc';
 	public static $tablename = 'pkc_passkey_credentials';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'pkc_passkey_credential_id';
 
 	protected static $foreign_key_actions = [

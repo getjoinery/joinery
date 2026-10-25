@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -11,7 +12,6 @@
 	require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	// Require page ID - redirect to list if not provided. The Actions menu's
@@ -97,13 +97,15 @@
 
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
-	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$page->get('pag_delete_time') && $page->can_delete(SessionControl::get_instance())) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'delete', 'pag_page_id' => $page->key));
 	}
-	else if($_SESSION['permission'] >= 8){
+	else if($page->get('pag_delete_time') && $page->can_delete(SessionControl::get_instance())){
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'undelete', 'pag_page_id' => $page->key));
 	}
-	$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
+	if ($page->can_delete(SessionControl::get_instance(), true) && PublicPageBase::may_open('/admin/admin_page_permanent_delete')) {
+		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
+	}
 
 	// Build dropdown button from altlinks
 	$dropdown_button = '';
@@ -342,7 +344,7 @@
 	<?php
 	// Page Photos Card
 	$page_photos = $page->get_photos();
-	$photo_editable = !$page->get('pag_delete_time') && $_SESSION['permission'] > 4;
+	$photo_editable = !$page->get('pag_delete_time') && $page->can_write(SessionControl::get_instance());
 	PhotoHelper::render_photo_card('grid', 'page', $page->key, $page_photos, [
 		'set_primary_url' => '/admin/admin_page?pag_page_id=' . $page->key,
 		'card_title' => 'Page Photos',

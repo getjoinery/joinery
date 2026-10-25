@@ -98,7 +98,7 @@ abstract class PublicPageBase {
 	 */
 	public function render_support_help_slot(string $tag = 'span', string $class = '', ?string $route = null, string $label = 'Help'): void {
 		$session = SessionControl::get_instance();
-		if (!$session->is_logged_in() || (int)$session->get_permission() < 5 || !class_exists('SiteSupportThread')
+		if (!$session->is_logged_in() || !Access::permits(Access::staffLevel(), $session) || !class_exists('SiteSupportThread')
 				|| !SupportChatClient::enabled()) {
 			return;
 		}
@@ -1360,7 +1360,7 @@ abstract class PublicPageBase {
 		// the site (permission 5+) and never to its visitors — a customer's
 		// readers have no business seeing their host's renewal chore. Injected
 		// the same way the admin chip is, so one call site serves every theme.
-		if ($session->get_permission() >= 5 && !$session->is_app_session()
+		if (Access::permits(Access::staffLevel(), $session) && !$session->is_app_session()
 				&& ManagedDomainNotice::applies() && !$this->on_admin_path()) {
 			$notice = ManagedDomainNotice::render();
 			if ($notice !== '') {
@@ -1376,7 +1376,7 @@ abstract class PublicPageBase {
 
 		if(empty($options['noheader']) && !$options['is_404'] && ($options['is_valid_page'] ?? false) ){
 			//TRACKING
-			if(!($_SESSION['permission'] ?? 0) || ($_SESSION['permission'] ?? 0) == 0){
+			if(!Access::permits(Access::staffLevel(), $session)){
 				$session->save_visitor_event(1, $options['is_404']);
 			}
 		}
@@ -1496,15 +1496,114 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Why the session may not use a control, or null when it may (spec
+	 * declared_permissions 3.7). A control names what it acts on, so the page
+	 * offers what the server allows and nothing else:
+	 *
+	 *   'requires' => 8 | 'personal:write' | 'api:{action}' | 'page:{path}'
+	 *                 a level, a class and verb, an API action (its declared
+	 *                 level), or the admin page a POST goes to (its level)
+	 *   'model' => $row, 'verb' => 'write' | 'soft_delete' | 'permanent_delete'
+	 *                 the row's own rule (can_write(), can_delete())
+	 */
+	public static function action_refusal(array $options): ?string {
+		$session = SessionControl::get_instance();
+		if (isset($options['model']) && $options['model'] instanceof SystemBase) {
+			$row = $options['model'];
+			$verb = (string)($options['verb'] ?? 'write');
+			$allowed = $verb === 'write' ? $row->can_write($session) : $row->can_delete($session, $verb === 'permanent_delete');
+			if ($allowed) return null;
+			$needed = $row::access_level($verb === 'write' ? 'write' : $verb);
+			// At the level, it is the row's own rule that said no (a user's target rule, a room's members).
+			return Access::allows($needed, (int)$session->get_permission()) ? 'Not allowed for this row.' : self::needs_level_note($needed);
+		}
+		if (array_key_exists('requires', $options)) {
+			$requirement = $options['requires'];
+			if (is_string($requirement) && strpos($requirement, 'api:') === 0) {
+				$requirement = self::api_action_level(substr($requirement, 4));
+				if ($requirement === null) return 'This action is not available.';
+			} elseif (is_string($requirement) && strpos($requirement, 'page:') === 0) {
+				$requirement = AdminPageAccess::levelForPath(substr($requirement, 5)) ?? AdminPageAccess::UNDECLARED_LEVEL;
+			}
+			$needed = Access::level($requirement);
+			return Access::allows($needed, (int)$session->get_permission()) ? null : self::needs_level_note($needed);
+		}
+		return null;
+	}
+
+	/**
+	 * Whether the session may open an admin page (its level,
+	 * AdminPageAccess::levelForPath()): for a link a page offers to another.
+	 */
+	public static function may_open(string $path): bool {
+		$level = AdminPageAccess::levelForPath($path) ?? AdminPageAccess::UNDECLARED_LEVEL;
+		return Access::allows($level, (int)SessionControl::get_instance()->get_permission());
+	}
+
+	/** "Needs level 8 (Admin)." */
+	private static function needs_level_note(int $level): string {
+		return 'Needs level ' . $level . ' (' . Access::levelName($level) . ').';
+	}
+
+	/** A control the session may not use: drawn disabled, saying why. */
+	private static function refused_button(string $label, string $why, string $class): string {
+		return '<button type="button" class="' . htmlspecialchars($class) . '" disabled title="' . htmlspecialchars($why) . '">'
+			. htmlspecialchars($label) . '</button> <small class="jy-needs-level">' . htmlspecialchars($why) . '</small>';
+	}
+
+	/**
+	 * The level an API action ('{action}' or '{plugin}/{action}') declares,
+	 * read from its descriptor, or null when there is no such action.
+	 */
+	public static function api_action_level(string $action) {
+		static $levels = array();
+		if (array_key_exists($action, $levels)) return $levels[$action];
+		if (!preg_match('#^(?:([a-z0-9_]+)/)?([a-z0-9_]+)$#', $action, $m)) return $levels[$action] = null;
+		$rel = ($m[1] !== '' ? "plugins/{$m[1]}/logic/" : 'logic/') . $m[2] . '_logic.php';
+		$file = PathHelper::getIncludePath($rel);
+		$fn = $m[2] . '_logic_descriptor';
+		if (!is_file($file) || !preg_match('/function\s+' . $fn . '\s*\(/', (string)file_get_contents($file))) {
+			return $levels[$action] = null;
+		}
+		ob_start();
+		try { require_once($file); } finally { ob_end_clean(); }
+		$meta = function_exists($fn) ? $fn() : array();
+		return $levels[$action] = $meta['auth']['min_user_permission'] ?? 0;
+	}
+
+	/**
+	 * A button for JavaScript to wire to an API action (data-jy-api-action):
+	 * drawn disabled, saying why, when the session is below the action's
+	 * declared level. $attrs are more attributes for the button.
+	 */
+	public static function api_action_button(string $label, string $action, array $attrs = array()): string {
+		$class = (string)($attrs['class'] ?? 'btn btn-soft-default btn-sm');
+		$refused = self::action_refusal(array('requires' => 'api:' . $action));
+		if ($refused !== null) {
+			return self::refused_button($label, $refused, $class);
+		}
+		$html = '<button type="button" data-jy-api-action="' . htmlspecialchars($action) . '"';
+		foreach ($attrs as $name => $value) {
+			$html .= ' ' . htmlspecialchars((string)$name) . '="' . htmlspecialchars((string)$value) . '"';
+		}
+		return $html . '>' . htmlspecialchars($label) . '</button>';
+	}
+
+	/**
 	 * A single-button POST form. Options: hidden (name => value), class,
 	 * confirm (a message the system modal, JoineryModal, asks before posting),
 	 * confirm_typed (a phrase the modal makes the person type first),
 	 * confirm_label and confirm_style (the modal's confirm button: its words,
-	 * and its style, e.g. 'danger' or 'primary').
+	 * and its style, e.g. 'danger' or 'primary'), and requires, or model and
+	 * verb (action_refusal(): below them the button is drawn disabled).
 	 *
 	 * @return string HTML
 	 */
 	static function action_button($label, $url, $options = []) {
+		$refused = self::action_refusal($options);
+		if ($refused !== null) {
+			return self::refused_button($label, $refused, isset($options['class']) ? (string)$options['class'] : 'btn btn-soft-default btn-sm');
+		}
 		$hidden_fields = isset($options['hidden']) ? $options['hidden'] : [];
 		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
 		$typed_phrase  = isset($options['confirm_typed']) ? $options['confirm_typed'] : '';
@@ -1599,6 +1698,23 @@ abstract class PublicPageBase {
 
 
 	function tableheader($headers, $options=array(), $pager=NULL){
+		// A column of a model stricter than its model (docs/permissions.md):
+		// 'columns' => array(position => 'Class.column') names which header
+		// shows which column, and a column the reader may not read is left
+		// out, header and every row's cell.
+		$this->current_table_hidden = array();
+		if (!empty($options['columns']) && is_array($options['columns'])) {
+			$permission = (int)SessionControl::get_instance()->get_permission();
+			foreach ($options['columns'] as $position => $locator) {
+				[$class, $column] = array_pad(explode('.', (string)$locator, 2), 2, '');
+				if (is_subclass_of($class, 'SystemBase') && $class::column_access_class($column) !== null
+						&& !Access::allows($class::column_access_level($column, 'read'), $permission)) {
+					$this->current_table_hidden[(int)$position] = true;
+				}
+			}
+			$headers = array_values(array_diff_key(array_values($headers), $this->current_table_hidden));
+			unset($options['columns']);
+		}
 		// Store options for use in endtable
 		$this->current_table_options = $options;
 		// Store headers so disprow() can stamp each cell with its column label,
@@ -1740,6 +1856,9 @@ abstract class PublicPageBase {
 		// are inert at desktop width (no CSS consumes them there) and on themes that
 		// lack the mobile card styles — they only take effect below 767px.
 		$headers = isset($this->current_table_headers) ? $this->current_table_headers : array();
+		if (!empty($this->current_table_hidden)) {
+			$dataarray = array_values(array_diff_key(array_values($dataarray), $this->current_table_hidden));
+		}
 		$i = 0;
 		foreach ($dataarray as $value) {
 			if ($value == "") {
@@ -2040,6 +2159,10 @@ abstract class PublicPageBase {
 				. htmlspecialchars($label) . '</a>';
 		}
 
+		$refused = self::action_refusal($entry);
+		if ($refused !== null) {
+			return self::refused_button($label, $refused, $class);
+		}
 		$action  = isset($entry['post']) ? $entry['post'] : '';
 		$hidden  = isset($entry['hidden']) && is_array($entry['hidden']) ? $entry['hidden'] : array();
 		$confirm = isset($entry['confirm']) ? (string)$entry['confirm'] : '';
@@ -2110,7 +2233,7 @@ abstract class PublicPageBase {
 		if ($session->is_app_session()) {
 			return false;
 		}
-		if ($session->get_permission() < 5) {
+		if (!Access::permits(Access::staffLevel(), $session)) {
 			return false;
 		}
 		if ($this->in_member_area()) {

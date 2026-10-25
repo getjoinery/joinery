@@ -21,6 +21,7 @@ class MailboxFleetDomainClaimException extends SystemBaseException {}
 class MailboxFleetDomainClaim extends SystemBase {
 	public static $prefix = 'mfd';
 	public static $tablename = 'mfd_mailbox_fleet_domain_claims';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mfd_mailbox_fleet_domain_claim_id';
 
 	const STATUS_PENDING  = 'pending';

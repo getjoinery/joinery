@@ -60,6 +60,7 @@ function chat_thread_action_logic(array $input): LogicResult {
 
 function chat_thread_action_logic_descriptor() {
     return ['requires_session' => true,
+            'auth' => ['min_user_permission' => 0],
             'description' => 'Pin, rename, or delete an AI chat conversation.',
             'input' => [
                 'conversation_id' => ['type' => 'int', 'required' => true, 'label' => 'Conversation ID'],

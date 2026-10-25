@@ -149,7 +149,9 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 		$link->set('dlk_sealed_vault_keys', json_encode($sealed_vault_keys));
 	}
 	$link->seal_secret($minted['secret_key']);
-	$link->save();
+	// actionable_by() proved the code is this member's to answer; this save
+	// is what binds the link to them.
+	SystemBase::rule_checked_write(function () use ($link) { $link->save(); });
 
 	return LogicResult::render(array(
 		'ok'          => true,
@@ -204,7 +206,7 @@ function _device_link_approve_bound(DeviceLink $link, int $user_id, string $devi
 	if ($sealed_vault_keys) {
 		$link->set('dlk_sealed_vault_keys', json_encode($sealed_vault_keys));
 	}
-	$link->save();
+	SystemBase::rule_checked_write(function () use ($link) { $link->save(); });   // actionable_by(), as above
 
 	return LogicResult::render(array(
 		'ok'           => true,
@@ -222,7 +224,7 @@ function drive_device_link_approve_logic_descriptor(): array {
 		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential (none for a ceremony a signed-in app opened, which keeps its own), creates or updates its SyncDevice identity, and (optionally) stores browser-sealed vault keys for the device to collect: the drive key in `sealed_vault_key`, any other client-custody vault in `sealed_vault_keys` ({scope: blob}). Requires a signed-in browser session and a recent step-up. Every sealed key is opaque ciphertext produced in the browser — the server cannot open it.',
 		'requires_session' => true,
 		'mutates'          => true,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input'            => array(
 			'code'             => array('type' => 'string', 'required' => true, 'max_length' => 32, 'label' => 'Link code'),
 			'enable_vault'     => array('type' => 'bool', 'required' => false, 'label' => 'Give this device your encrypted folders'),

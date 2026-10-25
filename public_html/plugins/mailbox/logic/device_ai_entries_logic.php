@@ -31,7 +31,7 @@ function device_ai_entries_logic(array $input): LogicResult {
 function device_ai_entries_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'Page the caller\'s end-to-end encrypted messages a device-capable recipe has not judged, newest first, with their sealed columns for the browser to open',
 		'input' => [
 			'recipe_id' => ['type' => 'int', 'required' => true, 'label' => 'Recipe ID (the caller\'s own)'],

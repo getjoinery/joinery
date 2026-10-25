@@ -31,7 +31,7 @@ function passkey_rename_logic(array $input): LogicResult {
 function passkey_rename_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Rename an enrolled passkey',
 		'input' => [
 			'credential_id' => ['type' => 'int', 'required' => true, 'label' => 'Passkey ID'],

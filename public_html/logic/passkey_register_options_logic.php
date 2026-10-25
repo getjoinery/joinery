@@ -56,7 +56,7 @@ function passkey_register_options_logic(array $input): LogicResult {
 function passkey_register_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Begin passkey enrollment (returns WebAuthn creation options, always requesting PRF and credProps); requires a recent step-up',
 		'input' => [
 			'current_password' => ['type' => 'password', 'required' => false, 'label' => 'Current password (first passkey only)'],

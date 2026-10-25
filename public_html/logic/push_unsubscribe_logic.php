@@ -23,6 +23,7 @@ function push_unsubscribe_logic_descriptor(): array {
 		'description' => 'Turn off push notifications in this browser.',
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'requires_browser_session' => true,
 		],
 		'input'       => [

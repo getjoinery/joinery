@@ -18,7 +18,7 @@
 
 function backup_download_start_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only a superadmin can download a backup of this site.');
 	}
 	if ($session->step_up_outstanding(null, 300)) {

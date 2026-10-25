@@ -16,6 +16,7 @@ class CalendarEmailException extends SystemBaseException {}
 class CalendarEmail extends SystemBase {
 	public static $prefix = 'cme';
 	public static $tablename = 'cme_calendar_emails';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'cme_calendar_email_id';
 
 	const KIND_REMINDER       = 'reminder';

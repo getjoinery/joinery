@@ -1,14 +1,14 @@
 <?php
+/** @joinery-admin class=personal */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
 	require_once(PathHelper::getIncludePath('/data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(9);
 	$session->set_return();
 
-	$phone = new PhoneNumber($_GET['phn_phone_number_id'], TRUE);
+	$phone = new PhoneNumber($_GET['phn_phone_number_id'] ?? null, TRUE);
 	$act_result = Activation::CheckForActiveCode($phone->get('phn_usr_user_id'), Activation::PHONE_VERIFY);
 
 	$phone_numbers_unver = new MultiPhoneNumber(

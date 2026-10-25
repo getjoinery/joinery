@@ -11,6 +11,7 @@ class ScheduleException extends SystemBaseException {}
 class Schedule extends SystemBase {
 	public static $prefix = 'sch';
 	public static $tablename = 'sch_schedules';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sch_schedule_id';
 
 	// AI model surface (joinery_ai) — plugins/joinery_ai/docs/overview.md
@@ -43,29 +44,18 @@ class Schedule extends SystemBase {
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
 
 	// Polymorphic ownership. A schedule is owned by a CalendarSubject, not a real
-	// usr_users FK, so the owner-or-staff check resolves the subject first: only a
+	// usr_users FK, so the owner rule resolves the subject first: only a
 	// user-typed subject maps to a user id. Other subject types (resource/team/
-	// venue) are reserved and have no per-user owner yet, so they are staff-only.
-	function authenticate_read($data) {
-		if (!$this->user_owns($data['current_user_id'])
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if (!$this->user_owns($data['current_user_id'])
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
+	// venue) are reserved and have no per-user owner yet, so they are level-only.
+	// The owner rule (spec declared_permissions 3.2) reads the subject.
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0 && $this->user_owns($user_id);
 	}
 
 	/** True when this schedule's subject is the given user. */
 	private function user_owns($user_id) {
-		return $this->get('sch_subject_type') === CalendarSubject::TYPE_USER
-			&& (int)$this->get('sch_subject_id') === (int)$user_id;
+		return $this->access_stored('sch_subject_type') === CalendarSubject::TYPE_USER
+			&& (int)$this->access_stored('sch_subject_id') === (int)$user_id;
 	}
 
 	/** The CalendarSubject this schedule belongs to. */

@@ -10,6 +10,8 @@ class PluginMigrationNotSentException extends PluginMigrationException {}
 
 class PluginMigration extends SystemBase {    public static $prefix = 'plm';
     public static $tablename = 'plm_plugin_migrations';
+    public static $access_class = 'config';
+    public static $write_permission = 10;
     public static $pkey_column = 'plm_plugin_migration_id';
 
         /**
@@ -40,12 +42,6 @@ class PluginMigration extends SystemBase {    public static $prefix = 'plm';
         'plm_error_message' => array('type'=>'text'),
     );
 
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Current user does not have permission to edit this entry in '. static::$tablename);
-        }
-    }
 }
 
 class MultiPluginMigration extends SystemMultiBase {

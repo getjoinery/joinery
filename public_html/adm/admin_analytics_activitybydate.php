@@ -1,11 +1,11 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 	require_once(PathHelper::getIncludePath('data/admin_analytics_activitybydate_data.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -20,8 +20,6 @@ $session->check_permission(10);
 	);
 ?>
 
-<script src="/assets/js/form-visibility-helper.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/form-visibility-helper.js')); ?>"></script>
-
 <script type="text/javascript">
 (function() {
 	'use strict';
@@ -33,16 +31,16 @@ $session->check_permission(10);
 		if (!sqlBtn || !sqlElement) return;
 
 		// Initially hide SQL element
-		FormVisibility.hide('sql');
+		sqlElement.style.display = 'none';
 
 		// Toggle visibility on button click
 		sqlBtn.addEventListener('click', function(e) {
 			e.preventDefault();
 
 			if (sqlElement.style.display === 'none') {
-				FormVisibility.show('sql');
+				sqlElement.style.display = '';
 			} else {
-				FormVisibility.hide('sql');
+				sqlElement.style.display = 'none';
 			}
 		});
 	});
@@ -121,7 +119,6 @@ Number of Logins is the total number of logins (after the initial account creati
 
 	<div id="sql">
 		<p><b>SQL Query:</b> <?php echo $sql; ?></p>
-		<p><b>Dev Query:</b> <?php echo $sqldev; ?></p>
 	</div>
 
 <?php

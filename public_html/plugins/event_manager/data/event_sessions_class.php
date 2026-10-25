@@ -47,6 +47,7 @@ class EventSession extends SystemBase {
 
 	public static $prefix = 'evs';
 	public static $tablename = 'evs_event_sessions';
+	public static $access_class = 'content';
 	public static $pkey_column = 'evs_event_session_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -393,13 +394,6 @@ public static function GetBySessionNumber($event_id, $session_number){
 		//$output_array['travel_text'] = $this->get_travel_text();
 		return $output_array;
 	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}	
 
 }
 

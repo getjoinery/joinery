@@ -17,6 +17,7 @@ class ForumCategory extends SystemBase {
 
 	public static $prefix = 'fcg';
 	public static $tablename = 'fcg_forum_categories';
+	public static $access_class = 'content';
 	public static $pkey_column = 'fcg_forum_category_id';
 
 	/** The posts a category holds; their $write_permission is the moderator level. */
@@ -131,7 +132,7 @@ class ForumCategory extends SystemBase {
 
 	// Categories are an admin's to change.
 	function authenticate_write($data) {
-		if ((int)($data['current_user_permission'] ?? 0) < ForumPost::$write_permission) {
+		if (!Access::allows(ForumPost::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
 			throw new SystemAuthenticationError('Only a forum moderator can change a category.');
 		}
 	}

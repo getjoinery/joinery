@@ -2088,20 +2088,16 @@ class PluginManager extends AbstractExtensionManager {
         $settings_items = $declared['settings'] ?? [];
 
         // === Strict per-entry validation up front (before any DB work). ===
-        // Required fields per entry: slug, title, order, permission.
-        // Nested children may inherit 'permission' from their parent.
-        $validate = function (array $entry, string $kind, string $idx_path, bool $allow_permission_missing) use ($source_name) {
+        // Required fields per entry: slug, title, order. Who sees an entry is
+        // whoever may open the page it links to (MultiAdminMenu::visible_entries()),
+        // so an entry carries no permission; one that still does is ignored.
+        $validate = function (array $entry, string $kind, string $idx_path) use ($source_name) {
             foreach (['slug', 'title', 'order'] as $field) {
                 if (!array_key_exists($field, $entry)) {
                     throw new InvalidArgumentException(
                         "syncMenus('$source_name'): {$kind}[$idx_path] missing required field '$field'"
                     );
                 }
-            }
-            if (!$allow_permission_missing && !array_key_exists('permission', $entry)) {
-                throw new InvalidArgumentException(
-                    "syncMenus('$source_name'): {$kind}[$idx_path] missing required field 'permission'"
-                );
             }
             if (!is_string($entry['slug']) || $entry['slug'] === '') {
                 throw new InvalidArgumentException(
@@ -2118,11 +2114,6 @@ class PluginManager extends AbstractExtensionManager {
                     "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') field 'order' must be an integer"
                 );
             }
-            if (array_key_exists('permission', $entry) && !is_int($entry['permission'])) {
-                throw new InvalidArgumentException(
-                    "syncMenus('$source_name'): {$kind}[$idx_path] (slug='{$entry['slug']}') field 'permission' must be an integer"
-                );
-            }
         };
 
         // Reserved-slug gate: only 'core' may declare core-* slugs.
@@ -2135,21 +2126,21 @@ class PluginManager extends AbstractExtensionManager {
         };
 
         foreach ($admin_items as $idx => $item) {
-            $validate($item, 'adminMenu', (string)$idx, false);
+            $validate($item, 'adminMenu', (string)$idx);
             $reserved_check($item, 'adminMenu', (string)$idx);
             if (!empty($item['items']) && is_array($item['items'])) {
                 foreach ($item['items'] as $cidx => $child) {
-                    $validate($child, 'adminMenu', "$idx.items.$cidx", true);
+                    $validate($child, 'adminMenu', "$idx.items.$cidx");
                     $reserved_check($child, 'adminMenu', "$idx.items.$cidx");
                 }
             }
         }
         foreach ($profile_items as $idx => $item) {
-            $validate($item, 'profileMenu', (string)$idx, false);
+            $validate($item, 'profileMenu', (string)$idx);
             $reserved_check($item, 'profileMenu', (string)$idx);
         }
         foreach ($settings_items as $idx => $item) {
-            $validate($item, 'settingsMenu', (string)$idx, false);
+            $validate($item, 'settingsMenu', (string)$idx);
             $reserved_check($item, 'settingsMenu', (string)$idx);
         }
 
@@ -2162,7 +2153,6 @@ class PluginManager extends AbstractExtensionManager {
                 'title' => $item['title'],
                 'url' => $item['url'] ?? '',
                 'order' => $item['order'],
-                'permission' => $item['permission'],
                 'icon' => $item['icon'] ?? null,
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
@@ -2179,7 +2169,6 @@ class PluginManager extends AbstractExtensionManager {
                         'title' => $child['title'],
                         'url' => $child['url'] ?? '',
                         'order' => $child['order'],
-                        'permission' => $child['permission'] ?? $item['permission'],
                         'icon' => $child['icon'] ?? null,
                         'settingActivate' => $child['settingActivate'] ?? null,
                         'disabled' => $child['disabled'] ?? false,
@@ -2201,7 +2190,6 @@ class PluginManager extends AbstractExtensionManager {
                 'title' => $item['title'],
                 'url' => $item['url'] ?? '',
                 'order' => $item['order'],
-                'permission' => $item['permission'],
                 'icon' => $item['icon'] ?? null,
                 'settingActivate' => $item['settingActivate'] ?? null,
                 'disabled' => $item['disabled'] ?? false,
@@ -2261,7 +2249,6 @@ class PluginManager extends AbstractExtensionManager {
             $existing_id = $q->fetchColumn();
 
             $url = $entry['url'] ?? '';
-            $permission = $entry['permission'];
             $icon = $entry['icon'];
             $setting_activate = $entry['settingActivate'];
             $disabled = (!empty($entry['disabled'])) ? 1 : 0;
@@ -2275,7 +2262,6 @@ class PluginManager extends AbstractExtensionManager {
                         amu_defaultpage = ?,
                         amu_parent_menu_id = ?,
                         amu_order = ?,
-                        amu_min_permission = ?,
                         amu_icon = ?,
                         amu_native_screen = ?,
                         amu_setting_activate = ?,
@@ -2289,7 +2275,6 @@ class PluginManager extends AbstractExtensionManager {
                     $url,
                     $parent_menu_id,
                     $entry['order'],
-                    $permission,
                     $icon,
                     $native_screen,
                     $setting_activate,
@@ -2301,8 +2286,8 @@ class PluginManager extends AbstractExtensionManager {
             } else {
                 $q = $dblink->prepare(
                     "INSERT INTO amu_admin_menus
-                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_min_permission, amu_icon, amu_native_screen, amu_setting_activate, amu_disable, amu_location, amu_visibility)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        (amu_menudisplay, amu_slug, amu_defaultpage, amu_parent_menu_id, amu_order, amu_icon, amu_native_screen, amu_setting_activate, amu_disable, amu_location, amu_visibility)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 );
                 $q->execute([
                     $entry['title'],
@@ -2310,7 +2295,6 @@ class PluginManager extends AbstractExtensionManager {
                     $url,
                     $parent_menu_id,
                     $entry['order'],
-                    $permission,
                     $icon,
                     $native_screen,
                     $setting_activate,

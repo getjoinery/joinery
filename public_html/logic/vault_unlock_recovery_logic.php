@@ -75,7 +75,7 @@ function vault_unlock_recovery_logic(array $input): LogicResult {
 function vault_unlock_recovery_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Unlock the vault with a one-time recovery code: the account half of its KEK, derived in the browser (the code itself is never sent). Spends the code\'s root-vault twin with it and returns that twin as root_wrapping',
 		'input' => [
 			'code_kek' => ['type' => 'password', 'required' => true, 'label' => 'Account half of the recovery code KEK (base64url, 32 bytes)'],

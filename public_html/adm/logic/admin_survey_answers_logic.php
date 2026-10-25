@@ -10,7 +10,6 @@ require_once(PathHelper::getIncludePath('data/survey_answers_class.php'));
 
 function admin_survey_answers_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$numperpage = 30;

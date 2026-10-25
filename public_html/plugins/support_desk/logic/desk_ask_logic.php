@@ -29,6 +29,7 @@ function desk_ask_logic(array $input): LogicResult {
 
 function desk_ask_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Ask the support desk a question from a site. Sessionless; a new thread is confirmed by a call back to the site.',
 		'requires_session' => false,
 		'mutates'          => true,

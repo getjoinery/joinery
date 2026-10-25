@@ -33,6 +33,7 @@ class CalendarEntryException extends SystemBaseException {}
 class CalendarEntry extends SystemBase {
 	public static $prefix = 'cal';
 	public static $tablename = 'cal_entries';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'cal_entry_id';
 
 	/** The content a Private calendar seals; everything else describes the schedule. */
@@ -86,7 +87,7 @@ class CalendarEntry extends SystemBase {
 		// calendar's entries hold ciphertext in the four content columns above,
 		// under a per-row DEK sealed to the owner's vault public key.
 		'cal_content_sealed'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'cal_sealed_key'           => array('type'=>'text', 'is_nullable'=>true),
+		'cal_sealed_key'           => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'cal_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
 		'cal_key_generation'       => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		// A level change stamps a row whose conversion failed, so the next pass
@@ -130,27 +131,16 @@ class CalendarEntry extends SystemBase {
 	// Polymorphic ownership: a native entry is owned by a CalendarSubject, not a
 	// real usr_users FK. Only a user-typed subject maps to a user id; reserved
 	// subject types (resource/team/venue) have no per-user owner yet and are
-	// staff-only. Mirrors Schedule's owner-or-staff scope.
-	function authenticate_read($data) {
-		if (!$this->user_owns($data['current_user_id'])
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if (!$this->user_owns($data['current_user_id'])
-			&& (int)$data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
+	// level-only. Mirrors Schedule.
+	// The owner rule (spec declared_permissions 3.2) reads the subject.
+	public function access_owner_is($user_id): bool {
+		return (int)$user_id > 0 && $this->user_owns($user_id);
 	}
 
 	/** True when this entry's subject is the given user. */
 	private function user_owns($user_id) {
-		return $this->get('cal_subject_type') === CalendarSubject::TYPE_USER
-			&& (int)$this->get('cal_subject_id') === (int)$user_id;
+		return $this->access_stored('cal_subject_type') === CalendarSubject::TYPE_USER
+			&& (int)$this->access_stored('cal_subject_id') === (int)$user_id;
 	}
 
 	/** The CalendarSubject this entry belongs to. */

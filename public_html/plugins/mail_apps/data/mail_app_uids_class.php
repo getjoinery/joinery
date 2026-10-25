@@ -36,6 +36,7 @@ class MailAppUidException extends SystemBaseException {}
 class MailAppUid extends SystemBase {
 	public static $prefix = 'mau';
 	public static $tablename = 'mau_mail_app_uids';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mau_mail_app_uid_id';
 
 	protected static $foreign_key_actions = array(

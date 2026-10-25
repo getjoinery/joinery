@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_surveys_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -35,16 +36,8 @@ $table_options = array(
 $page->tableheader($headers, $table_options, $pager);
 
 foreach ($surveys as $survey){
-	$sort = 'survey_id';
-	$sdirection = 'DESC';
-
-	$survey_questions = new MultiSurveyQuestion(
-		array('survey_id' => $survey->key),
-		array($sort=>$sdirection),
-		$numperpage,
-		0,
-		'AND'
-	);
+	// Only counted, so no order.
+	$survey_questions = new MultiSurveyQuestion(array('survey_id' => $survey->key));
 	$num_questions = $survey_questions->count_all();
 
 	$rowvalues = array();

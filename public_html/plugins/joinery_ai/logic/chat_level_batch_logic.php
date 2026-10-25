@@ -36,6 +36,7 @@ function chat_level_batch_logic(array $input): LogicResult {
 
 function chat_level_batch_logic_descriptor() {
     return ['requires_session' => true,
+            'auth' => ['min_user_permission' => 0],
             'mutates' => true,
             'description' => 'Converge one bounded batch of an AI chat\'s stored content to its current privacy level (owner only). Call repeatedly until `remaining` is 0; a pass that converts nothing while rows remain means those rows cannot be converted now.',
             'input' => [

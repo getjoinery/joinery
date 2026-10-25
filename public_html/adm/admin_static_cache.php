@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=9 */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -6,7 +7,6 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(9); // Super admin only for cache management
 $session->set_return();
 
 $page = new AdminPage();

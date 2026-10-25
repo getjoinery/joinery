@@ -42,7 +42,7 @@ function validate_server_file_logic_descriptor(): array {
 		'mutates'     => false,
 		'auth'        => [
 			'capability'          => 'read',
-			'min_user_permission' => 5,
+			'min_user_permission' => 'config:read',
 		],
 		'input'       => [
 			'field' => ['type' => 'string', 'required' => true, 'enum' => ['apache_error_log', 'preview_image', 'logo_link'], 'label' => 'Settings field'],

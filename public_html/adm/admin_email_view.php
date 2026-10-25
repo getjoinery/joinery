@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_email_view_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -10,7 +11,12 @@ $session = $page_vars['session'];
 $email = $page_vars['email'];
 
 $page = new AdminPage();
-$page->admin_header(31);
+$page->admin_header(array(
+	'menu-id' => 'emails-list',
+	'page_title' => 'Email',
+	'readable_title' => 'Email',
+	'session' => SessionControl::get_instance(),
+));
 
 echo '<h2>Email</h2>';
 echo '<a href="/admin/admin_user?usr_user_id='.$email->get('eml_usr_user_id').'">back to user</a><br /><br />';

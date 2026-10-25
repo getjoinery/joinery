@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 // PathHelper, Globalvars, SessionControl, DbConnector, ThemeHelper,
 // PluginHelper are always pre-loaded — never require them.
 

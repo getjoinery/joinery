@@ -6,7 +6,6 @@ function admin_address_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Load or create address first
 	if (isset($input['edit_primary_key_value'])) {

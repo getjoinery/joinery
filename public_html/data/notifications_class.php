@@ -13,23 +13,9 @@ class NotificationException extends SystemBaseException {}
 class Notification extends SystemBase {
 	public static $prefix = 'ntf';
 
-	// REST API per-record scope: only the owner (or staff, permission >= 5) may read or write this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'ntf_notifications';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ntf_notification_id';
 
 	// Retention: only READ notifications age out. An unread notification is
@@ -92,7 +78,9 @@ class Notification extends SystemBase {
 	}
 
 	/**
-	 * Factory method — creates and saves a notification
+	 * Factory method — creates and saves a notification. Telling a person
+	 * something is the platform's doing whoever's request caused it, so the
+	 * row is written past the model write-path check.
 	 */
 	public static function create_notification($recipient_user_id, $type, $title, $body, $link = null, $source_user_id = null) {
 		require_once(PathHelper::getIncludePath('data/notifications_class.php'));
@@ -103,7 +91,7 @@ class Notification extends SystemBase {
 		$ntf->set('ntf_body', $body);
 		$ntf->set('ntf_link', $link);
 		$ntf->set('ntf_source_usr_user_id', $source_user_id);
-		$ntf->save();
+		SystemBase::rule_checked_write(function () use ($ntf) { $ntf->save(); });
 
 		// Invalidate session cache if the recipient is the current user
 		$session = SessionControl::get_instance();

@@ -13,6 +13,7 @@
 class SupportWordGap extends SystemBase {
 	public static $prefix = 'swg';
 	public static $tablename = 'swg_support_word_gaps';
+	public static $access_class = 'content';
 	public static $pkey_column = 'swg_support_word_gap_id';
 
 	public static $field_specifications = array(
@@ -24,11 +25,6 @@ class SupportWordGap extends SystemBase {
 		'swg_last_time'           => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('Written by the support desk.');
-		}
-	}
 }
 
 class MultiSupportWordGap extends SystemMultiBase {

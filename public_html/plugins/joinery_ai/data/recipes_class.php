@@ -8,6 +8,8 @@ class Recipe extends SystemBase {
 
     public static $prefix = 'rcp';
     public static $tablename = 'rcp_recipes';
+    public static $access_class = 'config';
+    public static $write_permission = 10;
     public static $pkey_column = 'rcp_recipe_id';
 
     // AI auto-discovery (read)
@@ -143,13 +145,6 @@ class Recipe extends SystemBase {
             }
         }
         return parent::save($debug);
-    }
-
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Joinery AI recipes require permission level 10 to edit.');
-        }
     }
 
     /**

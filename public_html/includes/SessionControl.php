@@ -110,6 +110,10 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.20 - the Secure flag on the session cookie and on every set_secure_cookie() cookie asks LibraryFunctions::isSecure(),
+ *                which believes forwarding headers only from a proxy we know
+ * @version 1.19 - check_permission() takes a level or class:verb and asks Access; the staff tests ask
+ *                Access::staffLevel(); store_session_variables() lost its unused 'admin' mode, which set level 10
  * @version 1.18 - logout() marks both session checks done before its own identity calls: the account-standing
  *                check ran inside a logout the app-key check had begun, ended the session there, and the
  *                outer call's session_destroy() then found none; it destroys only an active session
@@ -196,10 +200,8 @@ class SessionControl{
 		}
 
 		// Set secure session cookie parameters before starting the session
-		$is_secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-			|| (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
-			|| (!empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED']))
-			|| (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+		// A proxy's forwarding headers count only from a proxy we know (isSecure()).
+		$is_secure = LibraryFunctions::isSecure();
 		// Keep server-side session files alive for 2 hours so idle carts survive.
 		// The default php.ini gc_maxlifetime of 1440 s (24 min) was silently
 		// expiring sessions while the browser still held a valid cookie.
@@ -333,23 +335,8 @@ class SessionControl{
 	 * @return bool
 	 */
 	private function is_secure_connection() {
-		// Direct HTTPS
-		if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
-			return true;
-		}
-		// Behind load balancer/proxy
-		if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-			return true;
-		}
-		// Forwarded header (RFC 7239)
-		if (!empty($_SERVER['HTTP_FORWARDED']) && preg_match('/proto=https/i', $_SERVER['HTTP_FORWARDED'])) {
-			return true;
-		}
-		// Common port check
-		if (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443) {
-			return true;
-		}
-		return false;
+		// A proxy's forwarding headers count only from a proxy we know.
+		return LibraryFunctions::isSecure();
 	}
 
 	public function save_user_to_cookie() {
@@ -1523,7 +1510,9 @@ class SessionControl{
 		$marker->set('pks_kind', 'stepup');
 		$marker->set('pks_purpose', $purpose);
 		$marker->set('pks_expires_time', gmdate('Y-m-d H:i:s', time() + 3600));
-		$marker->save();
+		// The marker is keyed by the browser session, not a person: the
+		// platform's record that the code was just proved, which no one owns.
+		SystemBase::server_initiated_write(function () use ($marker) { $marker->save(); });
 	}
 
 	/**
@@ -1750,7 +1739,7 @@ class SessionControl{
 			$ipchange = $this->_is_major_ip_change($stored_ip, $client_ip);
 		}
 
-		if(!isset($_SESSION['loggedin']) || ($ipchange && ($_SESSION['permission'] ?? 0) >= 5)){
+		if(!isset($_SESSION['loggedin']) || ($ipchange && Access::allows(Access::staffLevel(), (int)($_SESSION['permission'] ?? 0)))){
 			if ($ipchange && isset($_SESSION['loggedin'])) {
 				error_log(sprintf(
 					'IP_VIOLATION logout: user_id=%s permission=%s stored_ip=%s current_ip=%s page=%s',
@@ -1785,7 +1774,7 @@ class SessionControl{
 		else{
 			$this->enforce_navigation_gates();
 
-			if(!isset($_SESSION['permission']) || $_SESSION['permission'] < $level){
+			if(!isset($_SESSION['permission']) || !Access::allows($level, (int)$_SESSION['permission'])){
 				header("HTTP/1.1 401 Unauthorized");
 				throw new SystemAuthenticationError(
 					'Sorry, you do not have the needed permissions to view this page.');
@@ -1919,7 +1908,7 @@ class SessionControl{
 	 */
 	function must_enable_totp_for_admin() {
 		if (!isset($_SESSION['usr_user_id'])) return false;
-		if (($_SESSION['permission'] ?? 0) < 5) return false;
+		if (!Access::allows(Access::staffLevel(), (int)($_SESSION['permission'] ?? 0))) return false;
 		$settings = Globalvars::get_instance();
 		if (!$settings->get_setting('totp_require_admins')) return false;
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -2024,7 +2013,7 @@ class SessionControl{
 	}
 
 	// Log somebody into the site and store their information in the session
-	function store_session_variables($user, $mode='') {
+	function store_session_variables($user) {
 		if (!$user->actions_allowed()) {
 			throw new SystemDisplayablePermanentError(
 				'This account is currently de-activated.  Please contact us to resolve the situation.');
@@ -2049,13 +2038,9 @@ class SessionControl{
 		$_SESSION['timezone'] = $user->get('usr_timezone');
 		$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
 
-		if ($mode === 'admin') {
-			$_SESSION['permission'] = 10;
-		} else {
-			$_SESSION['permission'] = $user->get('usr_permission');
-			// Store the original user
-			$_SESSION['initial_usr_user_id'] = $user->key;
-		}
+		$_SESSION['permission'] = $user->get('usr_permission');
+		// Store the original user
+		$_SESSION['initial_usr_user_id'] = $user->key;
 	}
 
 

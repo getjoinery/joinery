@@ -6,8 +6,8 @@ function admin_<?= $plural ?>_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
+	// Who may open the page is the view's @joinery-admin header.
 	$session = SessionControl::get_instance();
-	$session->check_permission(<?= $admin_permission ?>);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -17,7 +17,7 @@ function admin_<?= $plural ?>_logic(array $input): LogicResult {
 
 	$search_criteria = array();
 <?php if ($soft_delete): ?>
-	if ($session->get_permission() < 10) {
+	if (!Access::permits(<?= $entity ?>::access_level('soft_delete'), $session)) {
 		$search_criteria['deleted'] = false;
 	}
 <?php endif; ?>

@@ -15,15 +15,8 @@ class EmailNotSentException extends EmailException {};
 
 class Email extends SystemBase {	public static $prefix = 'eml';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'eml_emails';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'eml_email_id';
 
 	protected static $foreign_key_actions = [
@@ -211,17 +204,6 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 
 		return $count;
 	}
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
-	}	
 
 	function get_status_text() {
 		if($this->get('eml_status') == Email::EMAIL_DELETED) {

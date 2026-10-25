@@ -88,6 +88,6 @@ function boards_upload_logic_descriptor(): array {
 			'purpose'  => array('type' => 'string', 'required' => false, 'enum' => array('attachment', 'background'), 'label' => 'Purpose'),
 			'as_cover' => array('type' => 'bool', 'required' => false, 'label' => 'Use as the card cover'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 	);
 }

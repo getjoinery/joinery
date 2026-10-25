@@ -40,6 +40,7 @@ function calendar_level_batch_logic(array $input): LogicResult {
 
 function calendar_level_batch_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'mutates'          => true,
 		'description'      => 'Converge one bounded batch of the signed-in member\'s calendar entries to the calendar\'s current protection level. Call repeatedly until `remaining` is 0; a pass that converts nothing while rows remain means those rows cannot be converted now.',

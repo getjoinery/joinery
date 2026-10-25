@@ -28,6 +28,7 @@ function support_origin_confirm_logic(array $input): LogicResult {
 
 function support_origin_confirm_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Confirm to a support desk that a new thread\'s first question came from this site.',
 		'requires_session' => false,
 		'mutates'          => true,

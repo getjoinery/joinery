@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -50,7 +51,7 @@
 		$rowvalues = array();
 /*
 		$edit_link = '';
-		if($_SESSION['permission'] > 8){
+		if(Access::permits(9, $session)){
 			$edit_link = "<a href='/admin/admin_group_member_edit?grm_group_member_id=$group_member->key' class='sortlink'>[edit]</a>";
 		}
 		array_push($rowvalues, "($group_member->key) <a href='/admin/admin_group_member_users?grm_group_member_id=$group_member->key'>".$group_member->get('grm_name')."</a> ".
@@ -61,6 +62,7 @@
 		$delform = AdminPage::action_button('Remove', '/admin/admin_user', [
 			'hidden'  => ['action' => 'remove_from_group', 'grm_group_member_id' => $group_member->key, 'usr_user_id' => $user->key],
 			'confirm' => 'Remove this user from the group?',
+			'model'   => $group_member, 'verb' => 'soft_delete',
 		]);
 
 		array_push($rowvalues, $delform);

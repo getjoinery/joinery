@@ -62,6 +62,12 @@ echo PublicPage::BeginPage($title, array());
 	$formwriter->textinput('invitee_name', 'Name', ['value' => $old['name'] ?? '', 'required' => true]);
 	$formwriter->textinput('invitee_email', 'Email', ['value' => $old['email'] ?? '', 'required' => true, 'validation' => 'email']);
 	$formwriter->textbox('invitee_notes', 'Anything you\'d like to share?', ['value' => $old['notes'] ?? '']);
+	if (!SessionControl::get_instance()->get_user_id()) {
+		// Bot defences book_logic checks for a visitor.
+		$formwriter->antispam_question_input();
+		$formwriter->honeypot_hidden_input();
+		$formwriter->captcha_hidden_input();
+	}
 
 	// Intake survey questions (rendered inline via Question::output_question).
 	if ($type->get('bty_svy_survey_id')) {

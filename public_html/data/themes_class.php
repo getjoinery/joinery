@@ -11,6 +11,8 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  */
 class Theme extends SystemBase {    public static $prefix = 'thm';
     public static $tablename = 'thm_themes';
+    public static $access_class = 'config';
+    public static $write_permission = 10;
     public static $pkey_column = 'thm_theme_id';
 
     /**

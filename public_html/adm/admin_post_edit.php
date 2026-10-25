@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -10,7 +11,6 @@
 	require_once(PathHelper::getIncludePath('/data/files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
@@ -36,7 +36,7 @@
 			$post->set('pst_fil_file_id', NULL);
 		}
 
-		if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
+		if(!$post->get('pst_link') || Access::permits(10, $session)){
 			if($_POST['pst_link']){
 				$post->set('pst_link', $post->create_url($_POST['pst_link']));
 			}
@@ -81,7 +81,7 @@
 	$title = $post->get('pst_title');
 	$content = $post->get('pst_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cvn_content_version_id']){
+	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
@@ -151,7 +151,7 @@
 
 	$formwriter->textinput('tags', 'Tags (optional, separate with comma)');
 
-	if(!$post->get('pst_link') || $_SESSION['permission'] == 10){
+	if(!$post->get('pst_link') || Access::permits(10, $session)){
 		$formwriter->textinput('pst_link', 'Link (only letters, numbers, and dashes)', [
 			'prepend' => $settings->get_setting('webDir').'/blog/'
 		]);

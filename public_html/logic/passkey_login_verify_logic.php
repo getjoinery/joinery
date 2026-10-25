@@ -71,6 +71,7 @@ function passkey_login_verify_logic(array $input): LogicResult {
 
 function passkey_login_verify_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Complete passwordless passkey sign-in and establish the browser session',
 		'input' => [

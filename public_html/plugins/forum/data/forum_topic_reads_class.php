@@ -15,6 +15,7 @@ class ForumTopicRead extends SystemBase {
 
 	public static $prefix = 'ftr';
 	public static $tablename = 'ftr_topic_reads';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ftr_topic_read_id';
 
 	public static $field_specifications = array(

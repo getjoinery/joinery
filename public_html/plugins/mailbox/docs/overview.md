@@ -5680,8 +5680,7 @@ union (never overwritten), and re-running after a partial failure finishes the
 rest. The protected-domain grant invariant is enforced at the mutation point;
 the vault-unlock gate on routing changes does not apply because these only
 create — they never edit an existing alias's destinations or mode. Callers own
-authorization (every current caller sits behind `check_permission(5)` or
-higher). The setup wizard's one-go apply (`wizard_provision` in
+authorization. The setup wizard's one-go apply (`wizard_provision` in
 `admin_mailbox_setup_logic`) is the primary consumer.
 
 ### Preparing a domain for a management node

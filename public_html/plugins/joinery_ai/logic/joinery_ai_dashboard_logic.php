@@ -6,7 +6,7 @@ function joinery_ai_dashboard_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
     $session = SessionControl::get_instance();
-    if (!$session->is_logged_in() || $session->get_permission() < 10) {
+    if (!$session->is_logged_in() || !Access::decide(10, $session)) {
         return LogicResult::redirect('/login?return=/joinery_ai');
     }
 

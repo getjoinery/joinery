@@ -103,7 +103,7 @@ function device_key_enroll_logic_descriptor(): array {
 		'description'      => 'Open a device-link ceremony bound to the calling app\'s own session key, so a browser can hand this device its vault keys sealed to device_pubkey. Approval mints no credential; the poll (GET /api/v1/auth/device_link/{poll_token}) returns {status, device_id, sealed_vault_keys}. App session key only.',
 		'requires_session' => true,
 		'mutates'          => true,
-		'auth'             => array('requires_person_credential' => true, 'capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'requires_person_credential' => true, 'capability' => 'write'),
 		'input'            => array(
 			'device_pubkey' => array('type' => 'string', 'required' => true, 'max_length' => 64, 'label' => 'Device X25519 public key (standard base64, 32 bytes)'),
 			'platform'      => array('type' => 'string', 'required' => true, 'max_length' => 16, 'label' => 'Platform (ios, android, macos, windows, linux)'),

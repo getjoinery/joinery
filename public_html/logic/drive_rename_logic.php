@@ -87,7 +87,8 @@ function drive_rename_logic(array $input): LogicResult {
 			return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$entity->set('fol_name', $name);
-		if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+		// can_write() above: an editor grant renames the owner's folder.
+		if (!SystemBase::rule_checked_write(function () use ($entity) { return DriveHelper::save_folder_unless_name_taken($entity); })) {
 			$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $name, (int)$entity->get('fol_folder_id'));
 			return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
@@ -107,7 +108,8 @@ function drive_rename_logic(array $input): LogicResult {
 			return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$entity->set('fil_title', $name);
-		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+		// can_write() above: an editor grant renames the owner's file.
+		if (!SystemBase::rule_checked_write(function () use ($entity) { return DriveHelper::save_file_unless_name_taken($entity); })) {
 			$holder = DriveHelper::file_name_holder($owner_id, $folder_id, $name, (int)$entity->key);
 			return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
@@ -126,6 +128,7 @@ function drive_rename_logic(array $input): LogicResult {
 
 function drive_rename_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Rename a Drive file or folder. Plaintext items take `name`. An encrypted file takes `encrypted_metadata` instead (the FK-encrypted metadata blob with the new name, produced in the browser; a plaintext `name` is refused so the secret name never reaches the server).',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

@@ -38,6 +38,7 @@ class StorageSpaceException extends SystemBaseException {}
 class StorageSpace extends SystemBase {
 	public static $prefix = 'sps';
 	public static $tablename = 'sps_storage_spaces';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sps_storage_space_id';
 
 	const STATE_ACTIVE   = 'active';
@@ -70,7 +71,7 @@ class StorageSpace extends SystemBase {
 		'sps_storage_space_id'      => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'sps_bkt_backup_target_id'  => array('type'=>'int8', 'is_nullable'=>false),
 		// {target folder}/{owner folder}/ — every key the space holds starts with it.
-		'sps_base_key'              => array('type'=>'varchar(512)', 'is_nullable'=>false),
+		'sps_base_key'              => array('access_class' => 'keys', 'type'=>'varchar(512)', 'is_nullable'=>false),
 		'sps_mgn_managed_node_id'   => array('type'=>'int8'),
 		'sps_svt_service_tenant_id' => array('type'=>'int8'),
 		'sps_state'                 => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'active',

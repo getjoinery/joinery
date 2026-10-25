@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Server Transfers
  * URL: /admin/server_manager/transfers

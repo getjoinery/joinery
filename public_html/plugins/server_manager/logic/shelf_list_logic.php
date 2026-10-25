@@ -32,6 +32,7 @@ function shelf_list_logic(array $input): LogicResult {
 
 function shelf_list_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'List the objects under a prefix of this site\'s own backup storage, in every storage space it still holds backups in. Each object names its space_id; keys are relative to that space.',
 		'requires_session' => true,
 		'mutates'          => false,

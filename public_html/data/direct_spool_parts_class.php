@@ -42,6 +42,7 @@ class DirectSpoolPart extends SystemBase {
 	}
 
 	public static $tablename = 'jda_direct_spool_parts';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'jda_direct_spool_part_id';
 
 	protected static $foreign_key_actions = array(

@@ -202,7 +202,7 @@ function drive_list_logic(array $input): LogicResult {
 	// so "available" is what can actually still be stored. Null when the host
 	// hides disk_free_space — an unknown is reported as unknown, not as 0.
 	$site_storage = null;
-	if ($session->get_permission() >= 5) {
+	if (Access::permits(Access::staffLevel(), $session)) {
 		require_once(PathHelper::getIncludePath('includes/DiskSpace.php'));
 		$totals = DriveUsage::site_totals();
 		$upload_dir = (string)$settings->get_setting('upload_dir');
@@ -361,7 +361,7 @@ function drive_list_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'folder_id' => array('type' => 'int', 'required' => false, 'label' => 'Folder id (omit for root)'),
 			'view'      => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'starred', 'trash', 'shared', 'folders', 'source'), 'label' => 'View'),

@@ -36,7 +36,7 @@ function setup_https_check_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only the site owner can run this check.');
 	}
 
@@ -229,7 +229,7 @@ function setup_https_public_ip(int $family): string {
 function setup_https_check_logic_descriptor(): array {
 	return array(
 		'requires_session' => true,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates'          => false,
 		'description'      => 'Diagnose the site\'s HTTPS state for the setup wizard: TLS probe, DNS-vs-server comparison, and whether the automatic certificate retry is armed (owner only).',
 	);

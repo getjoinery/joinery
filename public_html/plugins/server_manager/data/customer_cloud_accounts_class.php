@@ -25,6 +25,7 @@ class CustomerCloudAccountException extends SystemBaseException {}
 class CustomerCloudAccount extends SystemBase {
 	public static $prefix = 'cca';
 	public static $tablename = 'cca_customer_cloud_accounts';
+	public static $access_class = 'config';
 	public static $pkey_column = 'cca_customer_cloud_account_id';
 
 	protected static $foreign_key_actions = array(

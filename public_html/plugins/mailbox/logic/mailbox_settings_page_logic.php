@@ -60,7 +60,7 @@ function mailbox_settings_page_logic(array $input): LogicResult {
 		// and only a member with such a mailbox has a reason to.
 		'has_fortress'     => (bool)array_filter(array_column($mailboxes, 'fortress')),
 		'device_ai_origin' => MailboxDeviceAiHost::originForUser($user_id),
-		'device_ai_site_model' => MailboxDeviceAi::siteModel((int)$session->get_permission() >= 5),
+		'device_ai_site_model' => MailboxDeviceAi::siteModel(Access::permits(Access::staffLevel(), $session)),
 	));
 }
 ?>

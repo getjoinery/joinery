@@ -28,6 +28,7 @@ class RelayClientIdentityException extends SystemBaseException {}
 class RelayClientIdentity extends SystemBase {
 	public static $prefix = 'rci';
 	public static $tablename = 'rci_relay_client_identities';
+	public static $access_class = 'config';
 	public static $pkey_column = 'rci_relay_client_identity_id';
 
 	const KIND_CLIENT   = 'client';
@@ -46,18 +47,6 @@ class RelayClientIdentity extends SystemBase {
 		'rci_update_time'       => array('type'=>'timestamp(6)'),
 		'rci_delete_time'       => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Only a superadmin may read relay identities.');
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError('Only a superadmin may edit relay identities.');
-		}
-	}
 
 	function prepare() {
 		$this->set('rci_update_time', gmdate('Y-m-d H:i:s'));

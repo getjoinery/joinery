@@ -70,7 +70,7 @@ class ProblemReportBundle {
 	 * @return array the bundle; only JSON-safe scalars and arrays
 	 */
 	public static function build(int $user_id, int $permission, bool $logged_in_as, ?int $error_id, string $from, string $message): array {
-		$operator = $permission >= self::OPERATOR_PERMISSION;
+		$operator = Access::allows(self::OPERATOR_PERMISSION, (int)$permission);
 		$error_row = self::errorRowFor($error_id, $user_id, $operator);
 
 		$bundle = array(

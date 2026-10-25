@@ -96,6 +96,7 @@ function office_editor_open_logic(array $input): LogicResult {
 
 function office_editor_open_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Open a Drive file in the document editor: starts the editor if needed (status starting; ask again) and returns its address with an access token for this member on this file (status ready).',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

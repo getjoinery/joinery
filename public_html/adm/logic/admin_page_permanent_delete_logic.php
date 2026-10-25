@@ -14,7 +14,6 @@ function admin_page_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_vars = array();
 

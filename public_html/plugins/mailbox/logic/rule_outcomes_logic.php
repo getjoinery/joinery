@@ -34,7 +34,7 @@ function rule_outcomes_logic(array $input): LogicResult {
 function rule_outcomes_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'mutates' => true,
 		'description' => 'Apply a mail rule to the rows of a rule_backlog page the caller\'s device found it matched, and move the rule\'s walk past the page: {applied, cursor}',
 		'input' => [

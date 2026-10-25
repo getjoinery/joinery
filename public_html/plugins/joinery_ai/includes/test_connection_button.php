@@ -17,7 +17,7 @@ $ai_test_configured = (string)$ai_test_settings->get_setting('joinery_ai_anthrop
 	|| (string)$ai_test_settings->get_setting('joinery_ai_fireworks_api_key') !== ''
 	|| (string)$ai_test_settings->get_setting('joinery_ai_local_model') !== '';
 
-if ($ai_test_configured && (int)SessionControl::get_instance()->get_permission() >= 10) { ?>
+if ($ai_test_configured && Access::permits(10)) { ?>
 	<button type="button" class="btn btn-secondary" id="joinery-ai-test">Test it</button>
 	<span class="jy-muted" id="joinery-ai-test-result"></span>
 	<script>

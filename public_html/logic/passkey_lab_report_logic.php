@@ -13,7 +13,7 @@ function passkey_lab_report_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Not authorized.');
 	}
 
@@ -40,7 +40,7 @@ function passkey_lab_report_logic(array $input): LogicResult {
 function passkey_lab_report_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 'restricted:read', 'requires_browser_session' => true),
 		'description' => 'Passkey lab (superadmin): record the browser-side outcome of a diagnostic ceremony',
 		'input' => [
 			'variant' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Options variant name'],

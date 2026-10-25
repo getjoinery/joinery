@@ -50,6 +50,7 @@ function messenger_upload_logic(array $input): LogicResult {
 
 function messenger_upload_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'Store one uploaded photo or file for the messenger composer. Multipart form data with a single `file` field; returns an attachment id that messenger_send claims onto a message.',

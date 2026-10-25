@@ -164,6 +164,7 @@ function _drive_restore_suffixed($title, $suffix) {
 
 function drive_restore_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Restore a Drive file or folder from the trash. Owner only.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

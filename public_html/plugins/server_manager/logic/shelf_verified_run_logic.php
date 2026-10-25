@@ -18,7 +18,10 @@ function shelf_verified_run_logic(array $input): LogicResult {
 	}
 	try {
 		$row = ShelfBroker::tenantFor($user_id, intval($session->get_api_key_id()));
-		$data = ShelfBroker::verifiedRun($row, intval($input['run_id'] ?? 0));
+		// tenantFor() proved this is the caller's own tenant; the broker's records follow.
+		$data = SystemBase::rule_checked_write(function () use ($row, $input) {
+			return ShelfBroker::verifiedRun($row, intval($input['run_id'] ?? 0));
+		});
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -27,6 +30,7 @@ function shelf_verified_run_logic(array $input): LogicResult {
 
 function shelf_verified_run_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Report that a verify of the chain a finished backup storage run belongs to passed. Retention keeps the newest verified chain and everything newer.',
 		'requires_session' => true,
 		'mutates'          => true,

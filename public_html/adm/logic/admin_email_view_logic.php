@@ -7,7 +7,6 @@ function admin_email_view_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$email_id = $input['eml_email_id'] ?? $input['eml_email_id'] ?? NULL;

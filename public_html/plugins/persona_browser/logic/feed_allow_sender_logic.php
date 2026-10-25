@@ -46,6 +46,7 @@ function feed_allow_sender_logic(array $input): LogicResult {
 
 function feed_allow_sender_logic_descriptor(): array {
     return array(
+        'auth' => array('min_user_permission' => 0),
         'description'      => 'Put the author of a persona feed post on the allow list: their posts always show, are never judged as ads, and they are never auto-blocked. Takes the id of one of their posts; returns the allowed author name.',
         'requires_session' => true,
         'mutates'          => true,

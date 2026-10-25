@@ -33,7 +33,7 @@ function search_key_logic(array $input): LogicResult {
 function search_key_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Get, or create once, the caller\'s search key sealed to their mail vault (an opaque blob the server never opens)',
 		'input' => [
 			'op'         => ['type' => 'string', 'required' => false, 'enum' => ['get', 'create'], 'label' => 'get (default) or create'],

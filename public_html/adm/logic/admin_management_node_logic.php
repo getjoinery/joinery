@@ -36,7 +36,6 @@ function admin_management_node_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();

@@ -13,6 +13,7 @@
  * Everything left out is marked skipped rather than deleted, so the run's final
  * reconciliation can still account for every message the scan found.
  *
+ * @version 1.1 - the selection is written as rule_checked_write(): loadRun() checked the caller holds the mailbox
  * @version 1.0
  */
 
@@ -52,7 +53,10 @@ function mail_import_select_logic(array $input): LogicResult {
 	}
 
 	$importer = new MailArchiveImporter($run);
-	$skipped = $importer->applySelection($folders, $include_spam, $include_trash);
+	// loadRun() above admitted the caller: an operator, or a holder of the run's mailbox (canTarget).
+	$skipped = SystemBase::rule_checked_write(function () use ($importer, $folders, $include_spam, $include_trash) {
+		return $importer->applySelection($folders, $include_spam, $include_trash);
+	});
 
 	$run->load();
 	return LogicResult::render(array(
@@ -75,6 +79,7 @@ function mail_import_truthy($value): bool {
  */
 function mail_import_select_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Choose which folders of a scanned mail archive to import, then start importing.',
 		'requires_session' => true,
 		'mutates'          => true,

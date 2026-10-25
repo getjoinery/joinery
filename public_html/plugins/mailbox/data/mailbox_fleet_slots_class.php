@@ -23,6 +23,7 @@ class MailboxFleetSlotException extends SystemBaseException {}
 class MailboxFleetSlot extends SystemBase {
 	public static $prefix = 'mft';
 	public static $tablename = 'mft_mailbox_fleet_slots';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mft_mailbox_fleet_slot_id';
 
 	// The four shared rungs are the core ServiceTenantLadder's vocabulary,

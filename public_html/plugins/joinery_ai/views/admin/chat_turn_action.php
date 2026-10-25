@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — per-turn (per-message) actions (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_turn_action  (POST)

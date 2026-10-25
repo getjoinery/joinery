@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin: Support Desk — the threads sites have opened, and what the desk could
  * not answer (specs/support_chatbot.md, The admin page).
@@ -21,7 +22,6 @@
  * @version 0.1.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 $session->set_return();
 
 $base = '/plugins/support_desk/admin/admin_support_threads';

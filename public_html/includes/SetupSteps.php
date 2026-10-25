@@ -142,7 +142,7 @@ class SetupSteps {
 	public static function stepsForViewer(int $permission, ?User $viewer): array {
 		$out = array();
 		foreach (self::steps() as $step) {
-			if (($step['scope'] ?? 'site') === 'site' && $permission < 10) {
+			if (($step['scope'] ?? 'site') === 'site' && !Access::allows(10, $permission)) {
 				continue;
 			}
 			if (isset($step['active']) && !call_user_func($step['active'], $viewer)) {
@@ -471,7 +471,7 @@ class SetupSteps {
 				}
 				$ok = trim((string)$viewer->get('usr_first_name')) !== ''
 					&& trim((string)$viewer->get('usr_timezone')) !== '';
-				if (SessionControl::get_instance()->get_permission() >= 10) {
+				if (Access::permits(10)) {
 					$ok = $ok && trim((string)Globalvars::get_instance()->get_setting('site_name')) !== '';
 				}
 				return $ok ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;

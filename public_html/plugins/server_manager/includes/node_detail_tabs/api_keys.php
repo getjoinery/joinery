@@ -126,7 +126,7 @@
 		//
 		// The node may still refuse, and that is the primitive working: it
 		// restarts only when it can prove something will start it again.
-		if ($session->get_permission() >= 10 && !$switched_off && $node->get('mgn_agent_last_poll')) {
+		if (Access::permits(10, $session) && !$switched_off && $node->get('mgn_agent_last_poll')) {
 			echo '<form method="post" action="' . $base_url . '" id="restart_agent_form" class="mb-3">'
 			   . '<input type="hidden" name="action" value="restart_agent">'
 			   . SmAdminCsrf::field()
@@ -182,7 +182,7 @@
 			}
 			echo '<div class="small mb-2">Approve <strong>only</strong> if this exactly matches the fingerprint shown on the node\'s own '
 			   . 'Management Node page. The name and address above are claims anyone could make; the fingerprint is the identity.</div>';
-			if ($session->get_permission() >= 10) {
+			if (Access::permits(10, $session)) {
 				$jr_id = (int)$jr->key;
 				echo '<form method="post" action="' . $base_url . '" id="approve_join_' . $jr_id . '" style="display:inline;margin-right:6px;">'
 				   . '<input type="hidden" name="action" value="approve_join">'

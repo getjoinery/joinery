@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.33 - joinery-remoteip.conf tells PHP whether the connection came from a proxy it trusts
+#                (JOINERY_FORWARDER_KNOWN / JOINERY_FORWARDER_TRUSTED), so a client's own X-Forwarded-Proto
+#                is no longer believed (LibraryFunctions::forwarded_headers_trusted())
 # Version: 1.32 - Every run on a machine that is its own site sizes PHP-FPM's workers and PostgreSQL's memory
 #                from the machine (tune_php_fpm.sh, tune_postgres_memory.sh --reload: _memory_plan.sh's
 #                host reserve and 8 workers a CPU). PHP-FPM is reloaded; PostgreSQL is reloaded, never
@@ -345,6 +348,16 @@ if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
         while IFS= read -r range; do
             [[ -n "${range}" ]] && echo "RemoteIPTrustedProxy ${range}"
         done <<< "${RANGES}"
+        echo "</IfModule>"
+        echo "# PHP believes a proxy's X-Forwarded-Proto only from a proxy this file trusts"
+        echo "# (LibraryFunctions::forwarded_headers_trusted()). It cannot see the peer once"
+        echo "# mod_remoteip has put the client in REMOTE_ADDR, so Apache says it here:"
+        echo "# KNOWN on every request, TRUSTED when the connection's address is not the"
+        echo "# client's, which only a proxy trusted above can bring about. A client cannot"
+        echo "# set an environment variable."
+        echo "<IfModule setenvif_module>"
+        echo 'SetEnvIfExpr "true" JOINERY_FORWARDER_KNOWN=1'
+        echo 'SetEnvIfExpr "%{CONN_REMOTE_ADDR} != %{REMOTE_ADDR}" JOINERY_FORWARDER_TRUSTED=1'
         echo "</IfModule>"
         echo "# The stock formats with %a (the client mod_remoteip resolved) for %h (the peer)."
         echo 'LogFormat "%v:%p %a %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"" vhost_combined'

@@ -41,6 +41,7 @@ class UserEncryptionVaultException extends SystemBaseException {}
 class UserEncryptionVault extends SystemBase {
 	public static $prefix = 'uev';
 	public static $tablename = 'uev_user_encryption_vaults';
+	public static $access_class = 'config';
 	public static $pkey_column = 'uev_user_encryption_vault_id';
 
 	protected static $foreign_key_actions = [

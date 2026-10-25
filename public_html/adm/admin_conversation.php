@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Admin conversation view with moderation
  *
@@ -15,7 +16,6 @@ require_once(PathHelper::getIncludePath('data/messages_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(8);
 $session->set_return();
 
 $conversation_id = isset($_GET['cnv_conversation_id']) ? (int)$_GET['cnv_conversation_id'] : 0;

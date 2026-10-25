@@ -47,6 +47,7 @@ function private_ai_consent_logic(array $input): LogicResult {
 
 function private_ai_consent_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'mutates'          => true,
 		'description'      => 'Read or save where the signed-in member\'s Private content may be read by AI: local (default), trusted, or cloud. Loosening is refused with `requires_stepup` when a recent second factor is needed.',

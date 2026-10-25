@@ -177,6 +177,7 @@ function chat_send_logic(array $input): LogicResult {
 
 function chat_send_logic_descriptor() {
     return ['requires_session' => true,
+            'auth' => ['min_user_permission' => 0],
             'description' => 'Send a message to the AI assistant (creates a conversation when conversation_id is omitted); returns a poll handle for the streaming reply.',
             'input' => [
                 'message' => ['type' => 'text', 'required' => false, 'max_length' => 8000, 'label' => 'Message (may be empty when uploads accompany it)'],

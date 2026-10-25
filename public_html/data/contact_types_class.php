@@ -12,6 +12,7 @@ class ContactTypeException extends SystemBaseException {}
 
 class ContactType extends SystemBase {	public static $prefix = 'ctt';
 	public static $tablename = 'ctt_contact_types';
+	public static $access_class = 'content';
 	public static $pkey_column = 'ctt_contact_type_id';
 
 		/**
@@ -42,13 +43,6 @@ public static function ToReadable($ctt_contact_type_id){
 		return $contact_type->get('ctt_name');
 	}
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
-	
 }
 
 class MultiContactType extends SystemMultiBase {

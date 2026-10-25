@@ -14,6 +14,7 @@ class SurveyQuestionException extends SystemBaseException {}
 
 class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	public static $tablename = 'srq_survey_questions';
+	public static $access_class = 'content';
 	public static $pkey_column = 'srq_survey_question_id';
 
 	protected static $foreign_key_actions = [
@@ -72,13 +73,6 @@ private function _check_for_duplicates() {
 			}
 		}
 		
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 	function save($debug=false) {

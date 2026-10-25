@@ -17,6 +17,7 @@ class ForumPost extends SystemBase {
 
 	public static $prefix = 'fpo';
 	public static $tablename = 'fpo_forum_posts';
+	public static $access_class = 'content';
 	public static $pkey_column = 'fpo_forum_post_id';
 
 	/** Who moderates the forum: changes or removes any post. */
@@ -113,7 +114,7 @@ class ForumPost extends SystemBase {
 	function authenticate_write($data) {
 		$user_id = (int)($data['current_user_id'] ?? 0);
 		$is_author = $user_id > 0 && (int)$this->get('fpo_usr_user_id') === $user_id;
-		if (!$is_author && (int)($data['current_user_permission'] ?? 0) < static::$write_permission) {
+		if (!$is_author && !Access::allows(static::access_level('write'), (int)($data['current_user_permission'] ?? 0))) {
 			throw new SystemAuthenticationError('You can only change your own posts.');
 		}
 	}

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Scheduled Tasks Admin Page
  *

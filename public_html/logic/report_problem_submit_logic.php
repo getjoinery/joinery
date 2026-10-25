@@ -53,6 +53,7 @@ function report_problem_submit_logic_descriptor(): array {
 		'description' => 'Save a problem report (comment, optional image, and the error reference the report page was opened with) and send it to the upgrade source. Multipart form data; the image field is `image`.',
 		'mutates'     => true,
 		'auth'        => array(
+			'min_user_permission' => 0,
 			'requires_browser_session' => true,
 		),
 		'input'       => array(

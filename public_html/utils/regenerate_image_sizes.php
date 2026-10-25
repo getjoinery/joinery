@@ -27,7 +27,7 @@ $is_cli = (php_sapi_name() === 'cli');
 if (!$is_cli) {
 	// Web mode - require admin login
 	$session = SessionControl::get_instance();
-	if (!$session->is_logged_in() || $session->get_permission() < 5) {
+	if (!$session->is_logged_in() || !Access::decide(Access::staffLevel(), $session)) {
 		http_response_code(403);
 		echo "Permission denied. Admin access required.";
 		exit;

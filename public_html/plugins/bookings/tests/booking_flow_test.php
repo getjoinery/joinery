@@ -139,11 +139,20 @@ function bk_slots($type, $day) {
 	return array_column($slots, 'start');
 }
 
-/** Submit the public booking form. Returns the LogicResult. */
+/**
+ * Submit the public booking form. Returns the LogicResult.
+ *
+ * Booking is rate limited per network and this suite books far more often than
+ * a person would, so each call comes from its own documentation-range address
+ * unless $extra names one ('_remote_addr'). The anti-spam answer is supplied the
+ * way a person types it.
+ */
 function bk_submit($slug, $slot_start, array $extra = array()) {
 	global $RUN;
 	static $n = 0;
 	$n++;
+	$_SERVER['REMOTE_ADDR'] = $extra['_remote_addr'] ?? ('198.51.100.' . (1 + ($n % 200)));
+	unset($extra['_remote_addr']);
 	$data = array_merge(array(
 		'slug'             => $slug,
 		'book_submit'      => '1',
@@ -152,6 +161,7 @@ function bk_submit($slug, $slot_start, array $extra = array()) {
 		'invitee_email'    => 'bkflow_' . $RUN . '_' . $n . '@dev.getjoinery.com',
 		'invitee_notes'    => '',
 		'invitee_timezone' => 'UTC',
+		'antispam_question' => (string)Globalvars::get_instance()->get_setting('anti_spam_answer'),
 	), $extra);
 	return harness_call_logic('plugins/bookings/logic/book_logic.php', 'book_logic', $data, 'POST');
 }
@@ -186,6 +196,20 @@ function bk_signin($user) {
 	$_SESSION['permission'] = (int)$user->get('usr_permission');
 }
 
+// Bot defences: the honeypot on (an empty field passes it), the CAPTCHA off —
+// it would call out to its provider. In memory only, restored at teardown.
+harness_set_setting_mem('use_honeypot', '1');
+harness_set_setting_mem('use_captcha', '0');
+
+// The request-log rows the booking rate limit wrote for this suite's addresses.
+harness_defer(function () {
+	try {
+		DbConnector::get_instance()->get_db_link()
+			->prepare("DELETE FROM rql_request_logs WHERE rql_feature = 'booking' AND rql_ip_address LIKE '198.51.100.%'")->execute();
+	} catch (\Throwable $e) {
+		echo '  WARNING: could not clean booking request logs: ' . $e->getMessage() . "\n";
+	}
+});
 
 // ============================================================================
 section('Resolving the public booking page');
@@ -321,11 +345,34 @@ $client = new User($booking->get('bkn_usr_user_id_client'), TRUE);
 check($client->key, 'The booking points at an invitee user record');
 check($client->get('usr_email') !== '', 'The invitee record carries the email that was booked with');
 
-// Booking again with the same email must reuse that record rather than pile up
-// a new half-populated user on every appointment.
+// Typing an address proves nothing about owning it. A visitor who types the
+// email of an existing account must not have the booking, its intake answers
+// and its manage link filed under that account; they are asked to sign in.
 $repeat_email = $client->get('usr_email');
+$rows_before_claim = count(bk_rows($type));
+$res_claim = bk_submit($type->get('bty_slug'), $day . ' 11:00:00', array('invitee_email' => $repeat_email));
+check(!$res_claim->redirect, 'A visitor typing an existing account\'s email gets no confirmation or manage token',
+	(string)$res_claim->redirect);
+check(strpos(implode(' ', bk_errors($res_claim)), 'sign in') !== false,
+	'The visitor is asked to sign in to book with that email', json_encode(bk_errors($res_claim)));
+check(count(bk_rows($type)) === $rows_before_claim, 'No booking was filed under the existing account');
+
+$member = make_user('BkMember');
+$res_claim = bk_submit($type->get('bty_slug'), $day . ' 11:00:00', array('invitee_email' => $member->get('usr_email')));
+check(!$res_claim->redirect && bk_errors($res_claim), 'A visitor cannot book under a member\'s email',
+	json_encode(bk_errors($res_claim)));
+bk_signin($host);
+$res_claim = bk_submit($type->get('bty_slug'), $day . ' 11:00:00', array('invitee_email' => $member->get('usr_email')));
+check(!$res_claim->redirect && bk_errors($res_claim), 'Being signed in as someone else does not admit a member\'s email either',
+	json_encode(bk_errors($res_claim)));
+bk_signin(null);
+
+// Signed in as that account, booking again reuses the record rather than
+// piling up a new half-populated user on every appointment.
+bk_signin($client);
 $res2 = bk_submit($type->get('bty_slug'), $day . ' 11:00:00', array('invitee_email' => $repeat_email));
-check(!bk_errors($res2), 'A second booking by the same person is accepted', json_encode(bk_errors($res2)));
+bk_signin(null);
+check(!bk_errors($res2), 'A second booking by the same person, signed in, is accepted', json_encode(bk_errors($res2)));
 $booking2 = bk_from_redirect($res2);
 check($booking2 && (int)$booking2->get('bkn_usr_user_id_client') === (int)$client->key,
 	'The returning invitee is matched to their existing record, not duplicated');
@@ -782,6 +829,42 @@ check(count(bk_slots($type_notice, gmdate('Y-m-d', strtotime('+5 days')))) === 3
 	'A day beyond the minimum-notice period is open');
 $res = bk_submit($type_notice->get('bty_slug'), gmdate('Y-m-d', strtotime('+1 day')) . ' 09:00:00');
 check(bk_errors($res), 'A too-soon time is refused, not just hidden', json_encode(bk_errors($res)));
+
+
+// ============================================================================
+section('Bot defences on the public form');
+
+$host_s = bk_host('Spam', 'UTC');
+$sched_s = bk_schedule($host_s, 'UTC');
+list($day_s, $dow_s) = bk_future_day(16);
+bk_window($sched_s, $dow_s, '09:00:00', '12:00:00');
+$type_s = bk_type($host_s);
+$spam_email = 'bkflow_' . $RUN . '_spam@dev.getjoinery.com';
+
+$res = bk_submit($type_s->get('bty_slug'), $day_s . ' 09:00:00', array('invitee_email' => $spam_email, 'website_url' => 'http://spam.example'));
+check(!$res->redirect && bk_errors($res), 'A filled honeypot field refuses the booking', json_encode(bk_errors($res)));
+$answer = (string)Globalvars::get_instance()->get_setting('anti_spam_answer');
+if ($answer !== '') {
+	$res = bk_submit($type_s->get('bty_slug'), $day_s . ' 09:00:00', array('invitee_email' => $spam_email, 'antispam_question' => $answer . '_wrong'));
+	check(!$res->redirect && strpos(implode(' ', bk_errors($res)), 'anti-spam') !== false,
+		'A wrong anti-spam answer refuses the booking', json_encode(bk_errors($res)));
+} else {
+	harness_skip('A wrong anti-spam answer refuses the booking', 'no anti_spam_answer is configured');
+}
+check(count(bk_rows($type_s)) === 0 && !User::GetByEmail($spam_email),
+	'The refused bot made no booking and no account');
+
+// The attempt limit counts every attempt from one network, successes included.
+$flood_ip = '198.51.100.250';
+$flood_res = null;
+for ($i = 0; $i < 11; $i++) {
+	$flood_res = bk_submit($type_s->get('bty_slug'), 'not-a-slot', array('_remote_addr' => $flood_ip));
+}
+check(strpos(implode(' ', bk_errors($flood_res)), 'Too many') !== false,
+	'An eleventh attempt from one network inside fifteen minutes is refused', json_encode(bk_errors($flood_res)));
+$res = bk_submit($type_s->get('bty_slug'), 'not-a-slot');
+check(strpos(implode(' ', bk_errors($res)), 'Too many') === false,
+	'A different network is unaffected', json_encode(bk_errors($res)));
 
 
 // ============================================================================

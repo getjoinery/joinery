@@ -19,6 +19,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class RecoveryVerification extends SystemBase {
 	public static $prefix = 'rcv';
 	public static $tablename = 'rcv_recovery_verifications';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'rcv_recovery_verification_id';
 
 	const METHOD_CEREMONY = 'ceremony';
@@ -34,7 +35,7 @@ class RecoveryVerification extends SystemBase {
 
 	public static $field_specifications = array(
 		'rcv_recovery_verification_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'rcv_item_key'    => array('type' => 'varchar(100)', 'is_nullable' => false, 'required' => true),
+		'rcv_item_key'    => array('access_class' => 'keys', 'type' => 'varchar(100)', 'is_nullable' => false, 'required' => true),
 		'rcv_usr_user_id' => array('type' => 'int4', 'is_nullable' => false, 'required' => true),
 		'rcv_method'      => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true),
 		'rcv_passed'      => array('type' => 'boolean', 'is_nullable' => false, 'default' => false),

@@ -29,6 +29,7 @@ function upload_complete_logic(array $input): LogicResult {
 
 function upload_complete_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Finish a resumable upload for a registered purpose (not Drive) and create its file. Retry-safe via Idempotency-Key.',
 		'requires_session' => true,
 		'mutates'          => true,

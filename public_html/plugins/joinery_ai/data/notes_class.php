@@ -8,6 +8,9 @@ class RecipeNote extends SystemBase {
 
     public static $prefix = 'rcn';
     public static $tablename = 'rcn_notes';
+    public static $access_class = 'config';
+    public static $owner_column = 'rcn_owner_user_id';
+    public static $write_permission = 10;   // another user's note
     public static $pkey_column = 'rcn_note_id';
 
     // AI auto-discovery (read)
@@ -56,14 +59,6 @@ class RecipeNote extends SystemBase {
         $note->set('rcn_owner_user_id', $owner_user_id);
         $note->set('rcn_title', $title);
         return $note;
-    }
-
-    function authenticate_write($data) {
-        if ($this->get('rcn_owner_user_id') != $data['current_user_id']
-            && $data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Cannot edit a note owned by another user.');
-        }
     }
 
 }

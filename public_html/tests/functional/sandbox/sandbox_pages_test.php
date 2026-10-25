@@ -320,7 +320,8 @@ try {
 
 	section('An inactive plugin has no pages');
 	$sign_in($admin);
-	$pm->deactivate($name);
+	// The fixture's lifecycle, not the admin's act: deactivating is level 10.
+	SystemBase::server_initiated_write(function () use ($pm, $name) { $pm->deactivate($name); });
 	SandboxPlugins::reset();
 	$result = harness_call_logic($page_logic, 'admin_sandbox_page_logic', array('plugin' => $name, 'page' => 'main'), 'GET');
 	check((bool)$result->error, 'Its admin page is refused');

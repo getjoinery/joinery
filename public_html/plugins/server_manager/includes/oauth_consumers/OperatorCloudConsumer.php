@@ -36,7 +36,7 @@ class OperatorCloudConsumer implements OAuth2Consumer {
 		$user = $user_id > 0 ? new User($user_id, TRUE) : null;
 		// Only a superadmin adds an account to this node; the flow began on a
 		// superadmin page, and the grant is not stored for anyone else.
-		if (!$user || !$user->key || (int)$user->get('usr_permission') < 10) {
+		if (!$user || !$user->key || !Access::allows(10, (int)$user->get('usr_permission'))) {
 			return self::RETURN_URL . '&connect_error=permission';
 		}
 

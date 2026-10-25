@@ -1,14 +1,18 @@
 <?php
+/** @joinery-admin level=7 */
 /**
  * Server Manager - Node Detail (shell)
  * URL: /admin/server_manager/node_detail?mgn_managed_node_id=N&tab=overview
  *
- * Thin shell: loads the node, applies the permission gate, dispatches the POST
- * action (NodeDetailActions), renders the header + tab nav, and includes the
- * one tab partial. Each tab lives in includes/node_detail_tabs/{tab}.php — under
- * includes/, not views/, so a partial is never reachable as a standalone URL
- * that would bypass this file's node loading and check_permission(10).
+ * Thin shell: loads the node, dispatches the POST action (NodeDetailActions)
+ * at the action's level (SmActionLevels), renders the header + tab nav, and
+ * includes the one tab partial. The page opens at 7 (spec declared_permissions
+ * Q10: a 7 runs the look actions); below 8 it shows only the tabs that read.
+ * Each tab lives in includes/node_detail_tabs/{tab}.php — under includes/, not
+ * views/, so a partial is never reachable as a standalone URL that would bypass
+ * this file's node loading and the router's level.
  *
+ * @version 2.6 - opens at 7 (its header); each POST action needs its own level; below 8 only the reading tabs
  * @version 2.5 - a node whose agent moved away says so above every tab: managed elsewhere, nothing here reaches it
  * @version 2.4 - Copy tab (specs/site_copy.md WP8)
  * @version 2.3 - drop the local flash-message block; admin_header already renders them (they showed twice)
@@ -29,8 +33,8 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAsset
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/node_detail_actions_logic.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
+$may_change = Access::allows(8, (int)$session->get_permission());
 
 // Load node
 $mgn_managed_node_id = isset($_POST['edit_primary_key_value']) && $_POST['edit_primary_key_value']
@@ -59,6 +63,10 @@ $skip_joinery = $node->get('mgn_skip_joinery_checks');
 $valid_tabs = $skip_joinery
 	? ['overview', 'jobs', 'api_keys']
 	: ['overview', 'backups', 'database', 'updates', 'copy', 'jobs', 'api_keys'];
+// Below 8 a reader runs the looks and reads; the tabs that change a node are not theirs.
+if (!$may_change) {
+	$valid_tabs = array_values(array_intersect($valid_tabs, ['overview', 'backups', 'jobs']));
+}
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
 }
@@ -69,6 +77,8 @@ $base_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node->ke
 // ── POST action dispatch ──
 // Validates CSRF once, runs the handler with uniform error handling, and
 // returns a redirect URL — or null when there is no known action to handle.
+// An action needs its own level (SmActionLevels), whatever the page's.
+SmActionLevels::refuse_post('node_detail', $session, $base_url . '&tab=' . $tab);
 $redirect = NodeDetailActions::dispatch($node, $session, $base_url, $page_regex);
 if ($redirect !== null) {
 	header('Location: ' . $redirect);
@@ -82,7 +92,7 @@ require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeDnsPlan.php'));
 // A machine whose agent moved away has its DNS published from where it is managed now.
 $dns_box = null;
-if ($node->agent_moved_away() === null) {
+if ($node->agent_moved_away() === null && $may_change) {
 	$dns_return_url = $base_url . '&tab=overview';
 	$dns_result = DnsPublishBox::handle(array_merge($_GET, $_POST), function () use ($node) {
 		return NodeDnsPlan::forNode($node);

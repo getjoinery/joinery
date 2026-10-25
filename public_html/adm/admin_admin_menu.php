@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	// Active tab — controls which location is being viewed/managed.

@@ -205,7 +205,7 @@ function boards_card_save_logic_descriptor(): array {
 			'keep_members'  => array('type' => 'bool', 'required' => false, 'label' => 'Copy the members too'),
 			'detail'        => array('type' => 'bool', 'required' => false, 'label' => 'Return the whole card'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		// The AI can draft cards ("draft cards from this email thread"); every
 		// call waits in the owner's approval queue.
 		'ai_agent'         => 'confirm',

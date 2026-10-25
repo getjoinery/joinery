@@ -17,7 +17,8 @@
  *   watch         board_id   — tell me about every new card on this board
  *   unwatch       board_id
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - a board admin's delete runs under rule_checked_write()
  */
 
 function boards_board_save_logic(array $input): LogicResult {
@@ -57,7 +58,8 @@ function boards_board_save_logic(array $input): LogicResult {
 				BoardsManager::restoreBoard($board);
 				break;
 			case 'delete':
-				$board->soft_delete();
+				// A board admin (boardFor() above); the delete level is staff's.
+				SystemBase::rule_checked_write(function () use ($board) { $board->soft_delete(); });
 				return array('deleted' => true, 'board_id' => (int)$board->key);
 			case 'set_template':
 				BoardsManager::setTemplate($board, !empty($input['is_template']));
@@ -95,7 +97,7 @@ function boards_board_save_logic_descriptor(): array {
 			'template_id' => array('type' => 'int', 'required' => false, 'label' => 'Template board'),
 			'is_template' => array('type' => 'bool', 'required' => false, 'label' => 'Is a template'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 		'ai_agent'         => 'confirm',
 	);
 }

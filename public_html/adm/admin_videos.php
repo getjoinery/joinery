@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('data/videos_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -17,12 +17,12 @@
 	$source = LibraryFunctions::fetch_variable('source', NULL, 0, '');
 
 	$search_criteria = array();
-	if($vid_source){
+	if($source){
 		$search_criteria['source'] = $source;
 	}
 
-	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	//SHOW DELETED ONLY TO THOSE WHO MAY UNDELETE
+	if(!Access::permits(Video::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

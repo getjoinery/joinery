@@ -61,7 +61,7 @@ function unseal_batch_logic(array $input): LogicResult {
 function unseal_batch_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Unseal one bounded batch of the caller\'s own sealed messages on domains that no longer seal; returns unsealed and remaining counts',
 		'input' => [
 			'alias_id' => ['type' => 'int', 'required' => false, 'label' => 'Mailbox alias ID'],

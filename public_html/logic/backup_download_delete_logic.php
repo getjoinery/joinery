@@ -11,7 +11,7 @@
 
 function backup_download_delete_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only a superadmin can delete the backup built for download.');
 	}
 

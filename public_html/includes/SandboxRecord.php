@@ -9,17 +9,22 @@
  * carries from the manifest. From there the model is an ordinary one: its
  * table is built and migrated by update_database and plugin sync, it is a
  * record endpoint on /api/v1 (exposed read and write; per-record
- * authorization is SystemBase's default, which for a table with no owner
- * column is staff only), and the deletion system knows it.
+ * authorization is SystemBase's default for the content class: no owner
+ * column, so read at 5 and written at 6, spec declared_permissions 3.2), and
+ * the deletion system knows it.
  *
  * Every model gets {prefix}_id, {prefix}_create_time, {prefix}_update_time and
  * {prefix}_delete_time (soft delete) beside its declared fields, each stored
  * as {prefix}_{field}.
  *
+ * @version 1.1 - every sandboxed model is content (permissions.json)
  * @version 1.0
  */
 
 abstract class SandboxRecord extends SystemBase {
+
+	/** A plugin's records are content: what it stores is its own feature's data. */
+	public static $access_class = 'content';
 
 	/**
 	 * The field specifications a manifest model becomes.

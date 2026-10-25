@@ -13,7 +13,6 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	// Staff users who can be granted access to this mailbox. The reader is

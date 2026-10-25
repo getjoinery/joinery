@@ -1,9 +1,9 @@
 <?php
+/** @joinery-admin class=config */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10); // Superadmin only
 
 $specs_dir = PathHelper::getIncludePath('specs');
 $implemented_dir = $specs_dir . '/implemented';

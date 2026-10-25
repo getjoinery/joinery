@@ -94,6 +94,7 @@ function calendar_entry_logic(array $input): LogicResult {
 
 function calendar_entry_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Load one native calendar entry (owner-only) for editing',
 		'input' => [

@@ -33,6 +33,8 @@
  * later. The response says what was deferred and how long each lane took
  * (specs/mailbox_refresh_budget.md).
  *
+ * @version 1.3.0 - the pull and the fetch write as server_initiated_write(): the click only brings the
+ *               scheduled ingest forward, and what it stores is delivery no person authored
  * @version 1.2.2 - comment wording: the list says `parsing`, the reader starts the drain
  * @version 1.2.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.2.0 - the click has a time budget; deferred work is handed to the poller
@@ -91,7 +93,11 @@ function _check_mail_relay(): array {
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySpoolConsumer.php'));
 	$consumer = new RelaySpoolConsumer($relay);
-	$result = $consumer->pull(100);
+	// The relay reconcile task's own pull, run early: the deployment's whole
+	// spool, written as delivery (no person authors arriving mail).
+	$result = SystemBase::server_initiated_write(function () use ($consumer) {
+		return $consumer->pull(100);
+	});
 
 	if (($result['status'] ?? '') === 'error') {
 		// The reader still re-reads the list after this; a failed pull must not
@@ -156,13 +162,19 @@ function _check_mail_imap(MailboxViewer $viewer, ?float $deadline = null): array
 
 		$fetched++;
 		try {
-			$result = ImapFetch::run($account, 50, $deadline);
+			// The poller's fetch of a feed of one of the viewer's mailboxes (checked
+			// above), run early: what it stores is delivery, and the feed's own state.
+			$result = SystemBase::server_initiated_write(function () use ($account, $deadline) {
+				return ImapFetch::run($account, 50, $deadline);
+			});
 			$stored += intval($result['stored'] ?? 0);
 			if (!empty($result['budget_exhausted'])) {
 				// The claim above stamped the account as just polled; undo that
 				// so the poller finishes the cycle at its next tick.
 				$deferred++;
-				ImapFetch::leaveDue($account);
+				SystemBase::server_initiated_write(function () use ($account) {
+					ImapFetch::leaveDue($account);
+				});
 			}
 		} catch (ImapFetchBusyException $e) {
 			// The scheduled poller (or another fetch) already has this account —
@@ -171,7 +183,9 @@ function _check_mail_imap(MailboxViewer $viewer, ?float $deadline = null): array
 		} catch (\Throwable $e) {
 			$errors++;
 			// recordStatus is credential-free by construction.
-			$account->recordStatus('Fetch error: ' . substr($e->getMessage(), 0, 400));
+			SystemBase::server_initiated_write(function () use ($account, $e) {
+				$account->recordStatus('Fetch error: ' . substr($e->getMessage(), 0, 400));
+			});
 			error_log('check_mail: IMAP account ' . $account->key . ' failed: ' . $e->getMessage());
 		}
 	}
@@ -203,6 +217,7 @@ function _check_mail_imap_claim(int $account_id): bool {
 
 function check_mail_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Pull newly arrived mail into this deployment now (relay spool pull + IMAP feed fetch), ahead of the scheduled passes',
 	];

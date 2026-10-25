@@ -141,6 +141,7 @@ function messenger_poll_recent_updates(Conversation $conversation, int $user_id)
 
 function messenger_poll_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		// Not declared read-only: the poll carries the caller's typing state and

@@ -18,6 +18,7 @@ class SupportFaqEntryException extends SystemBaseException {}
 class SupportFaqEntry extends SystemBase {
 	public static $prefix = 'sfq';
 	public static $tablename = 'sfq_faq_entries';
+	public static $access_class = 'content';
 	public static $pkey_column = 'sfq_faq_entry_id';
 
 	const QUESTION_MAX = 500;
@@ -42,12 +43,6 @@ class SupportFaqEntry extends SystemBase {
 		'sfq_sth_support_thread_id' => array('action' => 'null'),
 		'sfq_author_user_id'        => array('action' => 'null', 'source_table' => 'usr_users'),
 	);
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('FAQ entries are written by the operator.');
-		}
-	}
 
 	/** The index path of this entry. */
 	public function indexPath(): string {

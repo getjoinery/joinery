@@ -108,7 +108,7 @@ class SupportTurnContext implements ToolContext {
 		return 'support thread #' . (int)$this->thread->key;
 	}
 
-	public function ownerScopedReads(): bool {
+	public function ownerScopedReads(?string $model_class = null): bool {
 		return true;
 	}
 

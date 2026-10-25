@@ -27,6 +27,8 @@
  * parse one message twice (twice would seal it twice, split its attachments
  * twice and run its rules twice).
  *
+ * @version 1.5 - the parse runs as server_initiated_write(): it is mail arriving late, which no
+ *               person asked for, on whatever page the vault owner is viewing
  * @version 1.4 - per-message lock (parseOne); parseMessages() for a thread open; the
  *               list no longer drains inline
  * @version 1.3 - skips a pending row whose key the owner's browser holds (a relay-sealed
@@ -159,8 +161,16 @@ class DeferredIngest {
 			// refusing attachment rows and log lines whose content came from
 			// their own plaintext, not from anything sealed. Nothing one
 			// message decrypts is in play when the next one starts.
+			//
+			// The parse is delivery, not the viewer's act: the message, its parts,
+			// its labels and its rules are what ingest would have written when the
+			// mail arrived, had the owner's key been at hand. It runs on whatever
+			// page the vault owner has open (a GET, often), and the owner may hold
+			// no grant on the mailbox the mail was addressed to.
 			return (bool)SealedEgressGuard::isolate(function () use ($router, $msg, $key) {
-				return $router->parsePendingMessage($msg, $key);
+				return SystemBase::server_initiated_write(function () use ($router, $msg, $key) {
+					return $router->parsePendingMessage($msg, $key);
+				});
 			});
 		} catch (\Throwable $e) {
 			error_log('DeferredIngest: failed to parse pending message ' . $id . ': ' . $e->getMessage());

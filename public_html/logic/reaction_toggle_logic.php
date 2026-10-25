@@ -43,6 +43,7 @@ function reaction_toggle_logic(array $input): LogicResult {
 
 function reaction_toggle_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Toggle the signed-in user\'s reaction on an entity.',
 		'mutates'     => true,
 		'input'       => [

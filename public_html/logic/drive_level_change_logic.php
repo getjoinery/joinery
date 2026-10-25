@@ -101,6 +101,7 @@ function drive_level_change_refusal(array $verdict): LogicResult {
 
 function drive_level_change_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Change a top-level Drive folder tree\'s protection level between standard and private (owner only). The folder changes immediately; existing files inside are converted afterwards by drive_level_batch. Going Private ends any public links and member grants in the subtree — the first call reports them as `blockers` and does nothing until `confirm_revoke_sharing` is sent. Going back to Standard requires an open unlock window. A change asks for a recent second-factor confirmation (answered as `requires_stepup`) when the owner has a second factor.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

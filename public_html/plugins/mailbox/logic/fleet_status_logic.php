@@ -47,6 +47,7 @@ function fleet_status_logic(array $input): LogicResult {
 
 function fleet_status_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'This deployment\'s hosted relay slot: status, connection coordinates, and domain claims.',
 		'requires_session' => true,
 		'mutates'          => false,

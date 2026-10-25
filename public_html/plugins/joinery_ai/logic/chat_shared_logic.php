@@ -18,7 +18,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversation_messages_class.php'));
 
     $session = SessionControl::get_instance();
-    if (!$session->is_logged_in() || $session->get_permission() < $min_permission) {
+    if (!$session->is_logged_in() || !Access::decide($min_permission, $session)) {
         return LogicResult::redirect('/login?return=' . $login_return);
     }
 

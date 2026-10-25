@@ -11,7 +11,6 @@ require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
 function admin_subscription_tier_edit_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
-    $session->check_permission(5);
 
     // Load or create tier
     if (isset($input['id']) || isset($input['edit_primary_key_value'])) {
@@ -30,9 +29,10 @@ function admin_subscription_tier_edit_logic(array $input): LogicResult {
         $tier = new SubscriptionTier(NULL);
     }
 
-    // Process POST actions. Tiers and their prices are money: 5 reads, 7 changes.
+    // Process POST actions. Tiers and their prices are money. Asked before the
+    // save, which makes the tier's group first at content's lower level.
     if(LibraryFunctions::isFormSubmission()){
-        $session->check_permission(7);
+        Access::demand(SubscriptionTier::access_level('write'), $session);
         try {
             // Process features
             $features = array();

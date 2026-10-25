@@ -8,7 +8,6 @@ function admin_mailing_list_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	if (isset($input['mlt_mailing_list_id'])) {
 		$mailing_list = new MailingList($input['mlt_mailing_list_id'], TRUE);
@@ -32,7 +31,7 @@ function admin_mailing_list_edit_logic(array $input): LogicResult {
 			}
 		}
 
-		if(!$mailing_list->get('mlt_link') || $_SESSION['permission'] == 10){
+		if(!$mailing_list->get('mlt_link') || Access::permits(10, $session)){
 			if($input['mlt_link']){
 				$mailing_list->set('mlt_link', $mailing_list->create_url($input['mlt_link']));
 			}

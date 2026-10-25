@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.31.0 - a passed model's rules: hidden columns are not emitted, locked ones are disabled, a row the reader may not change is read-only with a note
  * @version 2.30.0 - validateWhenChanged(): the browser checks a field only once its value changes
  * @version 2.29.0 - the upload row shows a file's `warning` (saved, but its sizes could not be made)
  * @version 2.28.0 - checkboxinput() takes `switch` (drawn as an on/off switch,
@@ -69,6 +70,9 @@ abstract class FormWriterV2Base {
     protected $error_summary_emitted = false;  // The summary container is emitted once, before the first submit button
     protected $validate_when_changed = array();  // Field names the browser checks only once their value changes (validateWhenChanged())
     protected $edit_primary_key_value = null;  // Store edit key for automatic hidden field
+    protected $hidden_columns = array();  // The passed model's columns the reader may not see (never emitted)
+    protected $locked_columns = array();  // ... may see but not change: column => the level it needs (drawn disabled)
+    protected $form_locked_level = null;  // The level changing the passed model's row needs, when the reader is below it
 
     // Static property for custom validators
     protected static $custom_validators = [];
@@ -119,6 +123,25 @@ abstract class FormWriterV2Base {
         // Second, merge in additional values array if provided (values override model)
         if (isset($this->options['values']) && is_array($this->options['values'])) {
             $final_values = array_merge($final_values, $this->options['values']);
+        }
+
+        // A model's own rules (docs/permissions.md): a column the reader may
+        // not see is never emitted, its value included; one they may see but
+        // not change is drawn disabled; a row they may not change locks the
+        // form with a note naming the level.
+        // A new row has no owner yet: its own save decides.
+        if (isset($this->options['model']) && $this->options['model'] instanceof SystemBase
+                && $this->options['model']->key !== null) {
+            $model = $this->options['model'];
+            $this->hidden_columns = $model->columns_hidden_from_session();
+            $this->locked_columns = $model->columns_locked_for_session();
+            foreach (array_keys($this->hidden_columns) as $column) {
+                unset($final_values[$column]);
+            }
+            if (Access::$sapi !== 'cli' && isset($_SERVER['REQUEST_METHOD'])
+                    && !$model->can_write(SessionControl::get_instance())) {
+                $this->form_locked_level = $model::access_level('write');
+            }
         }
 
         // Store merged values
@@ -894,6 +917,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function textinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'text', $label, $options);
         $this->outputTextInput($name, $label, $options);
     }
@@ -906,6 +930,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options (supports min, max, step, placeholder, required)
      */
     public function numberinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'number', $label, $options);
         $this->outputNumberInput($name, $label, $options);
     }
@@ -918,6 +943,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function passwordinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'password', $label, $options);
         $this->outputPasswordInput($name, $label, $options);
     }
@@ -966,6 +992,7 @@ abstract class FormWriterV2Base {
             $this->validateOptionFormat($options['options'], "dropinput('$name')");
         }
 
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'select', $label, $options);
         $this->outputDropInput($name, $label, $options);
     }
@@ -978,6 +1005,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function checkboxinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'checkbox', $label, $options);
         $this->outputCheckboxInput($name, $label, $options);
     }
@@ -995,6 +1023,7 @@ abstract class FormWriterV2Base {
             $this->validateOptionFormat($options['options'], "radioinput('$name')");
         }
 
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'radio', $label, $options);
         $this->outputRadioInput($name, $label, $options);
     }
@@ -1012,6 +1041,7 @@ abstract class FormWriterV2Base {
             $this->validateOptionFormat($options['options'], "checkboxList('$name')");
         }
 
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'checkboxlist', $label, $options);
         $this->outputCheckboxList($name, $label, $options);
     }
@@ -1024,6 +1054,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function dateinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'date', $label, $options);
         $this->outputDateInput($name, $label, $options);
     }
@@ -1036,6 +1067,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function timeinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'time', $label, $options);
         $this->outputTimeInput($name, $label, $options);
     }
@@ -1078,6 +1110,7 @@ abstract class FormWriterV2Base {
             }
         }
 
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($date_name, 'date', $label ? $label . ' (Date)' : '', $options);
         $this->registerField($time_name, 'time', $label ? $label . ' (Time)' : '', $options);
 
@@ -1092,6 +1125,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function fileinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'file', $label, $options);
         $this->outputFileInput($name, $label, $options);
     }
@@ -1114,6 +1148,7 @@ abstract class FormWriterV2Base {
             $options = $label;
             $label = '';
         }
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'hidden', '', $options);
         $this->outputHiddenInput($name, $options);
     }
@@ -1128,6 +1163,9 @@ abstract class FormWriterV2Base {
     public function submitbutton($name = 'btn_submit', $label = 'Submit', $options = []) {
         // If $name is empty string, use 'btn_submit'
         if (!$name) $name = 'btn_submit';
+        if ($this->form_locked_level !== null) {
+            $options['disabled'] = true;
+        }
 
         $this->outputSubmitButton($name, $label, $options);
     }
@@ -1249,6 +1287,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function textbox($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'textbox', $label, $options);
         $this->outputTextbox($name, $label, $options);
     }
@@ -1261,6 +1300,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function imageinput($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'image', $label, $options);
         $this->outputImageInput($name, $label, $options);
     }
@@ -1293,6 +1333,7 @@ abstract class FormWriterV2Base {
      *   - border_radius: Border radius for thumbnails (default: '4px')
      */
     public function imageselector($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'imageselector', $label, $options);
 
         // Extract options with defaults
@@ -1964,6 +2005,7 @@ abstract class FormWriterV2Base {
      *   - initial_display: Colors to show before "more" link (default: 100)
      */
     public function colorpicker($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'colorpicker', $label, $options);
 
         // Extract options with defaults
@@ -2465,6 +2507,7 @@ abstract class FormWriterV2Base {
      * @param array $options Field options
      */
     public function textarea($name, $label = '', $options = []) {
+        if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'textarea', $label, $options);
         $this->outputTextarea($name, $label, $options);
     }
@@ -2710,6 +2753,11 @@ abstract class FormWriterV2Base {
     protected function registerField($name, $input_type, $label, &$options) {
         $this->refuseHandDrawnSetting($name);
         $this->refuseUnknownOption($name, $input_type, is_array($options) ? $options : array());
+        if ($input_type !== 'hidden' && ($this->form_locked_level !== null || isset($this->locked_columns[$name]))) {
+            // A checkbox list's 'disabled' names the options it disables.
+            $options['disabled'] = $input_type === 'checkboxlist'
+                ? array_keys((array)($options['options'] ?? array())) : true;
+        }
 
         // Auto-fill value from values array if not explicitly provided
         if (!isset($options['value']) && isset($this->values[$name])) {
@@ -2829,6 +2877,12 @@ abstract class FormWriterV2Base {
         // Add edit_primary_key_value hidden field if provided
         if ($this->edit_primary_key_value !== null) {
             $html .= '<input type="hidden" name="edit_primary_key_value" value="' . htmlspecialchars($this->edit_primary_key_value) . '">';
+        }
+
+        // A row the reader may not change: the form is read-only, and says why.
+        if ($this->form_locked_level !== null) {
+            $html .= '<p class="jy-form-locked">Read only: changing this needs level '
+                . (int)$this->form_locked_level . ' (' . htmlspecialchars(Access::levelName($this->form_locked_level)) . ').</p>';
         }
 
         // Either echo immediately or store for deferred output

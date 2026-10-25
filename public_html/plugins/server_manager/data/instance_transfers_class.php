@@ -43,6 +43,7 @@ class InstanceTransferException extends SystemBaseException {}
 class InstanceTransfer extends SystemBase {
 	public static $prefix = 'itx';
 	public static $tablename = 'itx_instance_transfers';
+	public static $access_class = 'config';
 	public static $pkey_column = 'itx_instance_transfer_id';
 
 	public static $json_vars = array('itx_check_result', 'itx_email_times');

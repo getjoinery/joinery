@@ -117,8 +117,7 @@
             "title": "Support Desk",
             "url": "/plugins/support_desk/admin/admin_support_threads",
             "icon": "question-circle",
-            "order": 78,
-            "permission": 9
+            "order": 78
         }
     ]
 }

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('/data/change_tracking_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	// Get user ID from query string
 	if (!isset($_GET['user_id']) || !is_numeric($_GET['user_id'])) {
@@ -23,9 +23,10 @@
 		exit();
 	}
 
-	// Handle form submission. A user's tier is money: 5 reads, 7 changes.
+	// Handle form submission. A user's tier is money: changing it is money's
+	// write level, asked first because the membership change removes rows directly.
 	if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-		$session->check_permission(7);
+		Access::demand('money:write', $session);
 		if (isset($_POST['tier_id'])) {
 			try {
 				// Get current tier before making changes
@@ -33,44 +34,48 @@
 				$old_tier_id = $old_tier ? $old_tier->key : null;
 				$old_tier_level = $old_tier ? $old_tier->get('sbt_tier_level') : null;
 
-				if ($_POST['tier_id'] === '0') {
-					// Remove user from all tiers
-					$tier_groups = new MultiGroup(['category' => 'subscription_tier']);
-					$tier_groups->load();
+				// The tier's membership and its change record follow from the money
+				// write asked above; the change log itself is restricted's level.
+				SystemBase::rule_checked_write(function () use ($user_id, $old_tier, $old_tier_id, $old_tier_level, $session) {
+					if ($_POST['tier_id'] === '0') {
+						// Remove user from all tiers
+						$tier_groups = new MultiGroup(['category' => 'subscription_tier']);
+						$tier_groups->load();
 
-					foreach ($tier_groups as $group) {
-						$group->remove_member($user_id);
+						foreach ($tier_groups as $group) {
+							$group->remove_member($user_id);
+						}
+
+						// Record the change in tracking
+						if ($old_tier) {
+							$change = new ChangeTracking(NULL);
+							$change->set('cht_entity_type', 'subscription_tier');
+							$change->set('cht_entity_id', $old_tier_id);
+							$change->set('cht_usr_user_id', $user_id);
+							$change->set('cht_field_name', 'tier_level');
+							$change->set('cht_old_value', $old_tier_level);
+							$change->set('cht_new_value', null);
+							$change->set('cht_change_time', 'now()');
+							$change->set('cht_change_reason', 'manual');
+							$change->set('cht_reference_type', 'admin');
+							$change->set('cht_changed_by_usr_user_id', $session->get_user_id());
+							$change->save();
+						}
+
+						$_SESSION['admin_flash_message'] = 'User tier removed successfully';
+					} else {
+						// Add user to new tier
+						$tier = new SubscriptionTier($_POST['tier_id'], TRUE);
+						$tier->addUser(
+							$user_id,
+							'manual',
+							'admin',
+							null,
+							$session->get_user_id()
+						);
+						$_SESSION['admin_flash_message'] = 'User tier updated successfully';
 					}
-
-					// Record the change in tracking
-					if ($old_tier) {
-						$change = new ChangeTracking(NULL);
-						$change->set('cht_entity_type', 'subscription_tier');
-						$change->set('cht_entity_id', $old_tier_id);
-						$change->set('cht_usr_user_id', $user_id);
-						$change->set('cht_field_name', 'tier_level');
-						$change->set('cht_old_value', $old_tier_level);
-						$change->set('cht_new_value', null);
-						$change->set('cht_change_time', 'now()');
-						$change->set('cht_change_reason', 'manual');
-						$change->set('cht_reference_type', 'admin');
-						$change->set('cht_changed_by_usr_user_id', $session->get_user_id());
-						$change->save();
-					}
-
-					$_SESSION['admin_flash_message'] = 'User tier removed successfully';
-				} else {
-					// Add user to new tier
-					$tier = new SubscriptionTier($_POST['tier_id'], TRUE);
-					$tier->addUser(
-						$user_id,
-						'manual',
-						'admin',
-						null,
-						$session->get_user_id()
-					);
-					$_SESSION['admin_flash_message'] = 'User tier updated successfully';
-				}
+				});
 
 				header("Location: /admin/admin_user?usr_user_id=" . $user_id);
 				exit();

@@ -12,6 +12,7 @@ class MigrationNotSentException extends MigrationException {};
 
 class Migration extends SystemBase {	public static $prefix = 'mig';
 	public static $tablename = 'mig_migrations';
+	public static $access_class = 'config';
 	public static $pkey_column = 'mig_migration_id';
 	public static $url_namespace = 'migrations';
 
@@ -43,13 +44,6 @@ class Migration extends SystemBase {	public static $prefix = 'mig';
 	    'mig_success' => array('type'=>'bool'),
 	    'mig_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 8) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 	/**
 	 * Normalize SQL before hashing to handle formatting variations

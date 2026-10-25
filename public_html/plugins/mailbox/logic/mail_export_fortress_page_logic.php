@@ -46,7 +46,7 @@ function mail_export_fortress_page_logic_descriptor(): array {
 	return array(
 		'description' => 'The next rows of a Fortress mailbox export, as ciphertext for the owner\'s browser',
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input' => array(
 			'run_id' => array('type' => 'int', 'required' => true, 'label' => 'Export run ID'),
 			'folder' => array('type' => 'int', 'required' => false, 'label' => 'Folder index'),

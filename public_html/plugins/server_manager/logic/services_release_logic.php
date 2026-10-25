@@ -21,7 +21,10 @@ function services_release_logic(array $input): LogicResult {
 	$key_id = intval($session->get_api_key_id());
 	$service = trim((string)($input['service'] ?? ''));
 	try {
-		$data = JoineryServices::release($user_id, $key_id, $service);
+		// release() acts on this caller's and key's own tenant only.
+		$data = SystemBase::rule_checked_write(function () use ($user_id, $key_id, $service) {
+			return JoineryServices::release($user_id, $key_id, $service);
+		});
 	} catch (JoineryServicesException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (Smtp2GoException $e) {
@@ -32,6 +35,7 @@ function services_release_logic(array $input): LogicResult {
 
 function services_release_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Stop using one of the operator\'s services (mail or shelf, which is backup storage). Mail\'s subaccount is closed; backup storage is kept 90 days and then pruned.',
 		'requires_session' => true,
 		'mutates'          => true,

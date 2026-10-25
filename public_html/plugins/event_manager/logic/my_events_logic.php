@@ -84,6 +84,7 @@ function my_events_logic(array $input): LogicResult {
 
 function my_events_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Status-filtered, paginated event registration list for the signed-in owner',
 		'input' => [

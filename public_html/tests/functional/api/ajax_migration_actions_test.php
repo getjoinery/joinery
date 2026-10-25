@@ -18,6 +18,7 @@
  *
  * Run: php tests/functional/api/ajax_migration_actions_test.php [base_url] [origin_ip]
  *
+ * @version 1.1.0 - staff at the config level (8) the settings and plugins actions need
  * @version 1.0.0
  */
 
@@ -45,7 +46,7 @@ try {
 	echo 'Base URL: ' . harness_http_base_url() . "\nTest suffix: $suffix\n";
 
 	section('Setup: staff / member / superadmin keys');
-	$staff  = make_user($suffix . 'ST', 5);
+	$staff  = make_user($suffix . 'ST', 8);   // the settings and plugins checks are config: 8
 	$member = make_user($suffix . 'MB', 0);
 	$super  = make_user($suffix . 'SA', 10);
 	// Activate so the web-login path (activation_required_login) accepts them.

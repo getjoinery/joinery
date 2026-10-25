@@ -18,6 +18,9 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 harness_test_mode();
 
+// A level belongs to a signed-in user: get_permission() is 0 without one.
+$_SESSION['loggedin'] = true;
+$_SESSION['usr_user_id'] = 1;
 $_SESSION['permission'] = 10;
 
 $row = function (string $outcome, string $message, string $start, string $profile = 'site') {

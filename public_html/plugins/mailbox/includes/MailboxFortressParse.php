@@ -30,6 +30,7 @@
  * offset: PHP drops every upload past max_file_uploads (20 on this stack), and
  * a newsletter with more inline images than that is ordinary (B37).
  *
+ * @version 1.7 - a refused parse removes its own part Files as rule_checked_write() (standing() checked the owner)
  * @version 1.6 - the device parse's auth verdicts carry the stored DMARC policy (iem_dmarc_policy)
  * @version 1.5 - the device parse records the spam reason and meta tokens; a reply noted at pull time is honoured
  * @version 1.4 - next() takes max_bytes; with no item to hand out it still counts what waits (and too_large)
@@ -262,11 +263,14 @@ class MailboxFortressParse {
 			throw self::refuse($id, self::REFUSAL, $e->getMessage());
 		} finally {
 			if (!$stored) {
-				foreach ($made as $m) {
-					try { $m['file']->permanent_delete(); } catch (Throwable $e2) {
-						error_log('MailboxFortressParse: row ' . $id . ': could not remove a part it stored: ' . $e2->getMessage());
+				// Only the Files this post made; standing() checked the row is sealed to the caller.
+				SystemBase::rule_checked_write(function () use ($made, $id) {
+					foreach ($made as $m) {
+						try { $m['file']->permanent_delete(); } catch (Throwable $e2) {
+							error_log('MailboxFortressParse: row ' . $id . ': could not remove a part it stored: ' . $e2->getMessage());
+						}
 					}
-				}
+				});
 			}
 		}
 		if ($forward) {

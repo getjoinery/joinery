@@ -17,6 +17,7 @@
  * @version 1.1 - the response carries `warning` when a photo was saved but its sizes refused
  *                (specs/image_decode_memory.md)
  * @version 1.2 - base_sha256 / base_metadata_sha256 guard a new version (B10)
+ * @version 1.3 - a collaborator's new version of the owner's file is written under rule_checked_write() behind can_write()
  */
 
 function drive_upload_complete_logic(array $input): LogicResult {
@@ -288,8 +289,12 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					// counting against the owner's quota, and cannot be reached.
 					DriveHelper::owner_write_lock($owner_id);
 					$owner_locked = true;
+					// can_write() above admitted the uploader; the file is the
+					// folder owner's, and pruning old versions destroys rows.
 					try {
-						FileVersion::save_new_content($target_file, $blob, $user_id);
+						SystemBase::rule_checked_write(function () use ($target_file, $blob, $user_id) {
+							FileVersion::save_new_content($target_file, $blob, $user_id);
+						});
 					} catch (Exception $e) {
 						FileBlob::release($blob->key);
 						throw $e;
@@ -297,8 +302,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					$fresh_target = DriveHelper::load_file($target_file->key);
 					if ($fresh_target) {
 						$fresh_target->set('fil_plain_size_bytes', (int)$info['plain_size']);
-						$fresh_target->save();
-						DriveSealed::storeSealedThumbnail($fresh_target, $part, $fk);
+						SystemBase::rule_checked_write(function () use ($fresh_target, $part, $fk) {
+							$fresh_target->save();
+							DriveSealed::storeSealedThumbnail($fresh_target, $part, $fk);
+						});
 					}
 				} finally {
 					if (is_file($sealed_tmp)) { @unlink($sealed_tmp); }
@@ -327,7 +334,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				$guard['encrypted_metadata'] = ($enc_metadata !== null) ? (string)$enc_metadata : '';
 			}
 			try {
-				$wrote = FileVersion::save_new_content($target_file, $blob, $user_id, $guard);
+				// can_write() above admitted the uploader; the file is the
+				// folder owner's, and pruning old versions destroys rows.
+				$wrote = SystemBase::rule_checked_write(function () use ($target_file, $blob, $user_id, $guard) {
+					return FileVersion::save_new_content($target_file, $blob, $user_id, $guard);
+				});
 			} catch (FileHeadMovedException $moved) {
 				// The bytes were for a base that no longer holds. Nothing keeps
 				// them: the blob's reference goes back and the staged upload goes.
@@ -366,7 +377,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				$fresh_target = DriveHelper::load_file($target_file->key);
 				if ($fresh_target) {
 					$fresh_target->set('fil_content_modified_time', $modified_time);
-					$fresh_target->save();
+					SystemBase::rule_checked_write(function () use ($fresh_target) { $fresh_target->save(); });
 				}
 			}
 			$up->discard();
@@ -566,6 +577,7 @@ function _drive_store_encrypted_thumbnail($file, $b64) {
 
 function drive_upload_complete_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Finish a resumable Drive upload and create the file (or a new version). For a NEW encrypted vault file the body also carries opaque client-produced payloads — `encrypted_metadata` (the FK-encrypted name/mime/etc. blob), `wrapped_file_keys` (a map { user_id: file key sealed to that user\'s drive vault public key } covering the destination\'s reader set, owner entry required — resolve the set via drive_public_keys with folder_id), and optionally `encrypted_thumbnail` (base64 ciphertext for the thumb variant slot). A new VERSION of an encrypted file must be produced with the file\'s existing key and content id (DriveCrypto.encryptFileWith): the uploader must hold a FileKeyGrant, and any wrapped-key payload is refused. All payloads are validated in the logic and pass through the boundary untouched.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

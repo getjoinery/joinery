@@ -18,7 +18,7 @@ function passkey_lab_verify_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Not authorized.');
 	}
 	$user = new User($session->get_user_id(), TRUE);
@@ -51,7 +51,7 @@ function passkey_lab_verify_logic(array $input): LogicResult {
 function passkey_lab_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 'personal:read', 'requires_browser_session' => true),
 		'description' => 'Passkey lab (superadmin): verify a diagnostic assertion (no step-up marker is set)',
 		'input' => [
 			'variant' => ['type' => 'string', 'required' => false, 'max_length' => 40, 'label' => 'Options variant name'],

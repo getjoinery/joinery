@@ -64,6 +64,7 @@ function calendar_level_change_logic(array $input): LogicResult {
 
 function calendar_level_change_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'mutates'          => true,
 		'description'      => 'Make the signed-in member\'s calendar Standard or Private. The level flips at once and one bounded batch of entries converges; call calendar_level_batch until `remaining` is 0. Refused with `requires_stepup` when a recent second factor is needed.',

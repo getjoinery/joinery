@@ -12,6 +12,7 @@ class EmailRecipientGroupException extends SystemBaseException {}
 
 class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	public static $tablename = 'erg_email_recipient_groups';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'erg_email_recipient_group_id';
 
 	protected static $foreign_key_actions = array(
@@ -41,13 +42,6 @@ class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	    'erg_operation' => array('type'=>'varchar(6)'),
 	);
 
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
-	
 }
 
 class MultiEmailRecipientGroup extends SystemMultiBase {

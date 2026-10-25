@@ -34,7 +34,9 @@ function device_delete_logic(array $input): LogicResult{
 	$page_vars['device'] = $device;
 
 	if(isset($_POST['confirm'])){
-		$device->permanent_delete();
+		// assert_can_write() above: the owner removes their own device and its
+		// blocks for good, past an owner's level.
+		SystemBase::rule_checked_write(function () use ($device) { $device->permanent_delete(); });
 
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}
@@ -44,6 +46,7 @@ function device_delete_logic(array $input): LogicResult{
 
 function device_delete_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Permanently delete a DNS-filtering device (pass device_id and confirm=1)',
 		'input' => [

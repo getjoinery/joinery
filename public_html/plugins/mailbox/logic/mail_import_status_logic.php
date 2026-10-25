@@ -63,6 +63,7 @@ function mail_import_status_logic(array $input): LogicResult {
 
 function mail_import_status_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Progress of a mail archive import, or the caller\'s recent imports.',
 		'requires_session' => true,
 		'mutates'          => false,

@@ -18,7 +18,7 @@
  *   2. Anonymous access to a permission-gated route redirects to /login rather
  *      than rendering it.
  *   3. The permission gate is enforced for an authenticated-but-underprivileged
- *      user: a permission-0 member is refused /admin/* and a permission-5 staff
+ *      user: a permission-0 member is refused /admin/* and a permission-6 staff
  *      user is refused /tests/*, while the correctly-privileged user is allowed
  *      (positive controls, so the test cannot pass by refusing everything).
  *   4. A private file is 404 (not 403) to a stranger over HTTP — the ownership
@@ -65,11 +65,11 @@ try {
 	}
 
 	section('Permission gate for authenticated-but-underprivileged users');
-	// A permission-0 member and a permission-5 staff user, each logged into a
+	// A permission-0 member and a permission-6 staff user, each logged into a
 	// real web session; then probe a route above each one's level and one at or
 	// below it (the positive control).
 	$member = make_user('AzM' . $run_id, 0);
-	$staff  = make_user('AzS' . $run_id, 5);
+	$staff  = make_user('AzS' . $run_id, 6);   // admin_users is personal: 6 to open
 	$super  = make_user('AzX' . $run_id, 10);
 	authz_activate($member);
 	authz_activate($staff);
@@ -81,7 +81,7 @@ try {
 	check(harness_web_login($member_jar, $member->get('usr_email'), 'TestPassword_AzM' . $run_id) !== null,
 		'permission-0 member logged in');
 	check(harness_web_login($staff_jar, $staff->get('usr_email'), 'TestPassword_AzS' . $run_id) !== null,
-		'permission-5 staff logged in');
+		'permission-6 staff logged in');
 	check(harness_web_login($super_jar, $super->get('usr_email'), 'TestPassword_AzX' . $run_id) !== null,
 		'permission-10 superadmin logged in');
 
@@ -92,12 +92,12 @@ try {
 	check($r['status'] === 401, 'permission-0 member refused /admin/* with 401', 'status ' . $r['status']);
 
 	$r = harness_request('GET', '/tests/', array('jar' => $staff_jar, 'accept' => null, 'follow' => false));
-	check($r['status'] === 401, 'permission-5 staff refused /tests/* with 401', 'status ' . $r['status']);
+	check($r['status'] === 401, 'permission-6 staff refused /tests/* with 401', 'status ' . $r['status']);
 
 	// Positive controls: the privileged user is actually let in, so the refusals
 	// above are the gate working and not the pages being broken for everyone.
 	$r = harness_request('GET', '/admin/admin_users', array('jar' => $staff_jar, 'accept' => null, 'follow' => false));
-	check($r['status'] === 200, 'permission-5 staff allowed /admin/* (positive control)', 'status ' . $r['status']);
+	check($r['status'] === 200, 'permission-6 staff allowed /admin/* (positive control)', 'status ' . $r['status']);
 
 	$r = harness_request('GET', '/tests/', array('jar' => $super_jar, 'accept' => null, 'follow' => false));
 	check($r['status'] === 200, 'permission-10 superadmin allowed /tests/* (positive control)', 'status ' . $r['status']);

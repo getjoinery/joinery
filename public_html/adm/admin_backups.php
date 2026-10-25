@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * admin_backups — the Backups page.
  *

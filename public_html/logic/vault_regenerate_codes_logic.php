@@ -89,7 +89,7 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 function vault_regenerate_codes_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Replace every recovery code with a browser-made set (account halves of each code KEK, plus the root vault\'s wrappings of the same codes); requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) in the same request',
 		'input' => [
 			'code_set' => ['type' => 'object', 'required' => true, 'label' => 'Browser-made code set {id, entries:[{index, kek}]} (account halves only)'],

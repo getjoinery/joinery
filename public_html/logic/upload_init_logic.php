@@ -26,6 +26,7 @@ function upload_init_logic(array $input): LogicResult {
 
 function upload_init_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Begin a resumable upload for a registered purpose (not Drive): returns an upload token + chunk size. The bytes go up over PUT /api/v1/drive_upload/{token}; upload_complete finishes it.',
 		'requires_session' => true,
 		'mutates'          => true,

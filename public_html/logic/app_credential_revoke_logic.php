@@ -34,7 +34,7 @@ function app_credential_revoke_logic(array $input): LogicResult {
 function app_credential_revoke_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Revoke one of your app credentials (such as a mail app\'s app password); ends any unlock it borrowed',
 		'input' => array(
 			'credential_id' => array('type' => 'int', 'required' => true, 'label' => 'Credential'),

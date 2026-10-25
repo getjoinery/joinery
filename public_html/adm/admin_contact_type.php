@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
@@ -31,7 +32,7 @@
 		$options['altlinks'] += array('Edit Contact Type' => '/admin/admin_contact_type_edit?ctt_contact_type_id='.$contact_type->key);
 	}
 
-	if(!$contact_type->get('ctt_delete_time') && $_SESSION['permission'] >= 8) {
+	if(!$contact_type->get('ctt_delete_time') && $contact_type->can_delete($session)) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_contact_type', 'hidden' => array('action' => 'delete', 'ctt_contact_type_id' => $contact_type->key));
 	}
 

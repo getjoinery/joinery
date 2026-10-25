@@ -67,6 +67,7 @@ class BackupTargetException extends SystemBaseException {}
 class BackupTarget extends SystemBase {
 	public static $prefix = 'bkt';
 	public static $tablename = 'bkt_backup_targets';
+	public static $access_class = 'config';
 	public static $pkey_column = 'bkt_backup_target_id';
 
 	public static $json_vars = array('bkt_credentials', 'bkt_hidden_sweep');

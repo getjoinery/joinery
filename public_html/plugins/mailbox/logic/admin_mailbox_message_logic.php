@@ -24,7 +24,6 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	$id = intval($input['iem_inbound_email_message_id'] ?? 0);

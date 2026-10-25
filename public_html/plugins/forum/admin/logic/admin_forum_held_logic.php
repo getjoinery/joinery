@@ -9,7 +9,6 @@
 
 function admin_forum_held_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(ForumPost::$write_permission);
 	$user_id = (int)$session->get_user_id();
 
 	if (LibraryFunctions::isFormSubmission() && !empty($_POST['action']) && !empty($_POST['fpo_forum_post_id'])) {

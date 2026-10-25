@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.63 - purgeFromTrash() deletes as rule_checked_write(): trashMutationScopeSql() limits it to the viewer's mailboxes
  * @version 1.62 - fortressExportMessages(): a mailbox export pages through Fortress rows in the thread payload's shape
  * @version 1.61 - a label belongs to one mailbox: the no-feed rail lists the mailbox's own, setMembership()
  *   touches only messages of the label's mailbox, deleteLabel() and a listThreads() label refuse another
@@ -2914,7 +2915,10 @@ class MailboxService {
 			if (!$msg->key) {
 				continue;
 			}
-			$msg->permanent_delete();
+			// The query above (trashMutationScopeSql) admitted only the viewer's mailboxes.
+			SystemBase::rule_checked_write(function () use ($msg) {
+				$msg->permanent_delete();
+			});
 			$count++;
 		}
 		return $count;

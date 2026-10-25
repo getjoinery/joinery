@@ -24,7 +24,7 @@ function drive_link_revoke_logic(array $input): LogicResult {
 	if (!$link->key) {
 		return LogicResult::error('Share link not found.');
 	}
-	if ((int)$link->get('fsl_usr_user_id') !== $user_id && (int)$session->get_permission() < 5) {
+	if ((int)$link->get('fsl_usr_user_id') !== $user_id && !$link->can_write($session)) {
 		return LogicResult::error('You did not create this link.');
 	}
 
@@ -34,6 +34,7 @@ function drive_link_revoke_logic(array $input): LogicResult {
 
 function drive_link_revoke_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Revoke a Drive share link (creator only).',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

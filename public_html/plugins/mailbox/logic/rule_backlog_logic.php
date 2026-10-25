@@ -24,7 +24,7 @@ function rule_backlog_logic(array $input): LogicResult {
 function rule_backlog_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		// Closing a finished rule's walk is bookkeeping on the caller's own rule.
 		'mutates' => true,
 		'description' => 'The next page of applying a mail rule to the caller\'s existing end-to-end mail: {rule, rows, through_id}; rule is null when there is nothing to do',

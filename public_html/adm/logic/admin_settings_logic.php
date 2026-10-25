@@ -13,7 +13,6 @@ function admin_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$settings = Globalvars::get_instance();
 

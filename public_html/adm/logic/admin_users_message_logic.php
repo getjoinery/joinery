@@ -13,7 +13,6 @@
 function admin_users_message_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$evt_event_id = (int)LibraryFunctions::fetch_variable('evt_event_id', 0, FALSE, '');
 	$grp_group_id = (int)LibraryFunctions::fetch_variable('grp_group_id', 0, FALSE, '');
@@ -76,6 +75,8 @@ function admin_users_message_logic(array $input): LogicResult {
 	$recipient_groups[] = array('user', $sender->key);
 
 	if (LibraryFunctions::isFormSubmission()) {
+		// Sending is mail to other people about themselves: personal work.
+		Access::demand('personal:write', $session);
 		$subject = trim((string)($input['eml_subject'] ?? ''));
 		$body = nl2br((string)($input['eml_message'] ?? ''));
 		if ($subject === '' || trim(strip_tags($body)) === '') {

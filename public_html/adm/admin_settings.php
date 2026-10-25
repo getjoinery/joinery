@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -70,7 +71,7 @@
 		</div>
 	<?php endif;
 
-	if($_SESSION['permission'] == 10){
+	if(Access::permits(10, $session)){
 
 		echo '<b>NOTE: These settings will not override the settings if they are located in the Globalvars_site.php file in the /config directory</b><br>';
 		if((isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || $settings->get_setting('debug')){

@@ -58,7 +58,7 @@ class CertificateNotice {
 	const OVERDUE_GRACE = 86400;
 
 	public static function render(): string {
-		if ((int)($_SESSION['permission'] ?? 0) < 10) {
+		if (!Access::permits(10)) {
 			return '';
 		}
 		$facts = self::facts();

@@ -291,6 +291,8 @@ $utc_file = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
 	. "BEGIN:VEVENT\r\nUID:utc-series@example.test\r\nRECURRENCE-ID:20261117T010000Z\r\nSUMMARY:Evening class (moved)\r\n"
 	. "DTSTART;TZID=America/New_York:20261118T200000\r\nDTEND;TZID=America/New_York:20261118T210000\r\nEND:VEVENT\r\n"
 	. "END:VCALENDAR\r\n";
+// An import is the calendar owner's own act: sign in as them.
+exp_as($c);
 $s = IcsImporter::import(IcsImporter::parse($utc_file), CalendarSubject::user((int)$c->key), 'UTC');
 $rows = $db->query("SELECT cal_entry_id, cal_recurrence_end_date, cal_parent_entry_date FROM cal_entries WHERE cal_subject_type = 'user' AND cal_subject_id = "
 	. (int)$c->key . " AND cal_source_event_id = 'utc-series@example.test' ORDER BY cal_entry_id")->fetchAll(PDO::FETCH_ASSOC);

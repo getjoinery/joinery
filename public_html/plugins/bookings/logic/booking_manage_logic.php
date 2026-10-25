@@ -58,7 +58,9 @@ function booking_manage_logic(array $input): LogicResult {
 		$booking->set('bkn_canceled_by', 'invitee');
 		if ($reason !== '') { $booking->set('bkn_cancel_reason', $reason); }
 		$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
-		$booking->save();
+		// The booking is the host's row; the invitee's right is the action token
+		// (Booking::GetByToken above) and the notice window just checked.
+		SystemBase::rule_checked_write(function () use ($booking) { $booking->save(); });
 
 		booking_notify_cancellation($booking, $type, $host, $client, $settings, 'invitee');
 		return LogicResult::redirect('/booking/manage?token=' . $token . '&canceled=1');
@@ -99,7 +101,9 @@ function booking_manage_logic(array $input): LogicResult {
 				$booking->set('bkn_tzdata_version', '2026a');
 				$booking->set('bkn_status', Booking::BOOKING_STATUS_BOOKED);
 				$booking->set('bkn_update_time', gmdate('Y-m-d H:i:s'));
-				$booking->save();
+				// The invitee's right: the action token, the notice window and
+				// the slot re-checked open above.
+				SystemBase::rule_checked_write(function () use ($booking) { $booking->save(); });
 				return true;
 			});
 		} catch (Exception $e) {

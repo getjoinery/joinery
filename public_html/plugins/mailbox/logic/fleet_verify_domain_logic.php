@@ -49,6 +49,7 @@ function fleet_verify_domain_logic(array $input): LogicResult {
 
 function fleet_verify_domain_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Check the DNS TXT challenge for a pending domain claim. On success the fleet starts accepting mail for the domain.',
 		'requires_session' => true,
 		'mutates'          => true,

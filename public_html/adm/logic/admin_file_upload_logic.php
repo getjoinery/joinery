@@ -8,7 +8,6 @@ function admin_file_upload_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/UploadHandler.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	return LogicResult::render(array());

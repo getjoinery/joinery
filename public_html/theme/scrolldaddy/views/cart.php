@@ -109,7 +109,7 @@ Contact Area
 
 						<?php
 						//DEBUG LIST ALL COUPONS
-						if($session->get_permission() >= 8 && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
+						if(Access::permits(CouponCode::access_level('read'), $session) && ($_SESSION['test_mode'] || $settings->get_setting('debug'))){
 							echo '<div style="border: 3px solid blue; padding: 10px; margin: 10px;">Test mode:';
 							foreach($page_vars['all_coupons'] as $coupon){
 								$formwriter = $page->getFormWriter('form_test_coupon', ['action' => '/cart', 'method' => 'GET']);

@@ -20,6 +20,7 @@
  * Creates its own user and keys and removes them afterwards. Requires the
  * apk_scope column (run update_database after deploying the feature).
  *
+ * @version 1.3 - the key's user is at its model's write level (content, 6)
  * @version 1.2 - a refusal names the entry the key lacked
  * @version 1.1 - record entries over HTTP
  * @version 1.0
@@ -76,7 +77,7 @@ try {
 	if (!class_exists('Location')) {
 		harness_skip('Record entries over HTTP', 'the event_manager plugin is not active, so Location is not a record endpoint');
 	} else {
-		$admin = make_user($suffix . 'SR', 5);
+		$admin = make_user($suffix . 'SR', 6);   // Location is content: 6 to write
 		$rec = make_machine_key($admin->key, 'records-' . $suffix, 3);
 		$rec['api_key']->set('apk_scope', 'Location:read,Location:create');
 		$rec['api_key']->save();

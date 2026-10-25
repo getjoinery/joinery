@@ -90,6 +90,7 @@ function checkout_submit_survey_logic(array $input): LogicResult {
 
 function checkout_submit_survey_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Submit a post-purchase confirmation survey and mark the event registration survey-complete.',
 		'requires_session' => true,
 		'mutates'          => true,

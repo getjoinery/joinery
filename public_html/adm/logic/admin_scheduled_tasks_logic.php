@@ -16,7 +16,6 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_regex = '/\/admin\/admin_scheduled_tasks/';
 
@@ -50,11 +49,13 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 			$message = 'Task "' . $name . '" deactivated and removed. It can be re-activated from Available Tasks.';
 		}
 		elseif ($action === 'run_now' && isset($input['sct_scheduled_task_id'])) {
+			Access::demand(10, $session);   // the task runs now, whatever it does
 			$result = _handle_run_now($input['sct_scheduled_task_id']);
 			$message = $result['message'] ?? null;
 			$error = $result['error'] ?? null;
 		}
 		elseif ($action === 'dry_run' && isset($input['sct_scheduled_task_id'])) {
+			Access::demand(10, $session);
 			$result = _handle_dry_run($input['sct_scheduled_task_id']);
 			if (isset($result['html'])) {
 				// Dry run with HTML preview — don't redirect, render inline

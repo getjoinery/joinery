@@ -145,7 +145,7 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 function vault_unlock_passkey_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Complete unlocking the vault with a passkey',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response (the first PRF output only)'],

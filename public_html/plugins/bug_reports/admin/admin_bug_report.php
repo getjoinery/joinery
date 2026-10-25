@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=9 */
 /**
  * Admin: one received bug report — what the member wrote, the image, the
  * callback's verdict and reason, and every section of the bundle. Mark seen,
@@ -11,7 +12,6 @@
  * @version 1.0.0
  */
 $session = SessionControl::get_instance();
-$session->check_permission(9);
 $session->set_return();
 
 $id = (int)($_GET['rbr_received_bug_report_id'] ?? $_POST['rbr_received_bug_report_id'] ?? 0);

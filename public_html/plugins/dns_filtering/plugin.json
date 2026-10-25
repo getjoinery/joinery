@@ -128,7 +128,6 @@
             "url": "/profile/dns_filtering/profile",
             "icon": "shield",
             "visibility": "in",
-            "permission": 0,
             "order": 75,
             "nativeScreen": "dns_protection"
         },
@@ -138,7 +137,6 @@
             "url": "/profile/dns_filtering/devices",
             "icon": "devices",
             "visibility": "in",
-            "permission": 0,
             "order": 76,
             "nativeScreen": "dns_devices",
             "parent": "dns-filtering"

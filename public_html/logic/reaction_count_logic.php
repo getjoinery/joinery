@@ -38,6 +38,7 @@ function reaction_count_logic_descriptor(): array {
 		'description' => 'Total reaction count for an entity.',
 		'mutates'     => false,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability' => 'read',
 		],
 		'input'       => [

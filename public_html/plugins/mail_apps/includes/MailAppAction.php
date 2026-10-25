@@ -10,6 +10,7 @@
  * program's own words, so "mark everything read" is one short request, not a
  * list of a hundred thousand numbers.
  *
+ * @version 1.1.0 - the descriptor declares its level (0: a person's own mailbox)
  * @version 1.0.0
  */
 
@@ -87,6 +88,9 @@ class MailAppAction {
 			'requires_session' => true,
 			'requires_setting' => 'mail_apps_enabled',
 			'app_purpose'      => 'mail',
+			// A person's own mailbox: signed in is enough, and the mailbox's
+			// grant is the gate (docs/permissions.md, an action's level).
+			'auth'             => array('min_user_permission' => 0),
 			'description'      => $description,
 			'input'            => array(
 				'mailbox' => array('type' => 'string', 'required' => true, 'label' => 'Mailbox address', 'max_length' => 320),

@@ -31,7 +31,7 @@ function resolver_key_revoke_logic_descriptor(): array {
 		'auth'             => array(
 			'capability'               => 'write',
 			'requires_browser_session' => true,
-			'min_user_permission'      => 8,
+			'min_user_permission'      => 10,
 		),
 		'input'            => array(
 			'slot' => array('type' => 'string', 'required' => true, 'label' => 'Which DNS server: primary or secondary'),

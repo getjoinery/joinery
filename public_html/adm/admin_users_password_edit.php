@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Validate user ID is provided
 	if (empty($_REQUEST['usr_user_id'])) {
@@ -39,7 +39,6 @@
 	$page = new AdminPage();
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$page->admin_header(
 	array(

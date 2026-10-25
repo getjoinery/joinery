@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Admin Components List
  *
@@ -13,7 +14,6 @@ require_once(PathHelper::getIncludePath('data/components_class.php'));
 require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5); // Admin level
 $session->set_return();
 
 // Handle delete action

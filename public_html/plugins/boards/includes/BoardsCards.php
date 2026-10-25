@@ -12,7 +12,8 @@
  * they can know (the list belongs to the board, the person being added can open
  * it, the card ceiling).
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - deletes the caller's board role admitted run under rule_checked_write()
  */
 
 class BoardsCards {
@@ -459,7 +460,8 @@ class BoardsCards {
 	/** Delete a card (admins). It leaves the board; the row is kept until an admin purges it. */
 	public static function delete(BoardCard $card, Board $board, int $user_id): void {
 		Boards::transaction(function () use ($card, $board, $user_id) {
-			$card->soft_delete();
+			// A board admin (the caller's cardFor(..., 'admin')).
+			SystemBase::rule_checked_write(function () use ($card) { $card->soft_delete(); });
 			// The poll learns a card is gone from the activity on it.
 			Boards::log((int)$board->key, (int)$card->key, $user_id, 'card.archived', array('deleted' => true, 'quiet' => true));
 		});
@@ -498,7 +500,10 @@ class BoardsCards {
 			return;
 		}
 		Boards::transaction(function () use ($card, $board, $actor_id, $user_id, $id) {
-			(new BoardCardMember((int)$id, TRUE))->permanent_delete();
+			// An editor on the board (the caller's cardFor()).
+			SystemBase::rule_checked_write(function () use ($id) {
+				(new BoardCardMember((int)$id, TRUE))->permanent_delete();
+			});
 			Boards::log((int)$board->key, (int)$card->key, $actor_id, 'member.removed', array('user_id' => $user_id, 'name' => Boards::person($user_id)['name']));
 		});
 	}
@@ -531,7 +536,9 @@ class BoardsCards {
 			return;
 		}
 		Boards::transaction(function () use ($card, $board, $actor_id, $label, $label_id, $id) {
-			(new BoardCardLabel((int)$id, TRUE))->permanent_delete();
+			SystemBase::rule_checked_write(function () use ($id) {
+				(new BoardCardLabel((int)$id, TRUE))->permanent_delete();
+			});
 			Boards::log((int)$board->key, (int)$card->key, $actor_id, 'label.removed',
 				array('label_id' => $label_id, 'name' => (string)$label->get('blb_name'), 'color' => (string)$label->get('blb_color')));
 		});
@@ -683,14 +690,15 @@ class BoardsCards {
 
 	public static function deleteItem(BoardChecklistItem $item, BoardCard $card, Board $board, int $actor_id): void {
 		Boards::transaction(function () use ($item, $card, $board, $actor_id) {
-			$item->permanent_delete();
+			// An editor on the board (the caller's cardFor()).
+			SystemBase::rule_checked_write(function () use ($item) { $item->permanent_delete(); });
 			Boards::log((int)$board->key, (int)$card->key, $actor_id, 'card.updated', array('quiet' => true, 'what' => 'checklist item'));
 		});
 	}
 
 	public static function deleteChecklist(BoardChecklist $checklist, BoardCard $card, Board $board, int $actor_id): void {
 		Boards::transaction(function () use ($checklist, $card, $board, $actor_id) {
-			$checklist->permanent_delete();
+			SystemBase::rule_checked_write(function () use ($checklist) { $checklist->permanent_delete(); });
 			Boards::log((int)$board->key, (int)$card->key, $actor_id, 'card.updated', array('quiet' => true, 'what' => 'checklist'));
 		});
 	}
@@ -800,7 +808,8 @@ class BoardsCards {
 		}
 		Boards::transaction(function () use ($comment, $card, $board, $user_id) {
 			self::scrubExcerpt((int)$comment->key);
-			$comment->soft_delete();
+			// The author, or a board admin (checked above).
+			SystemBase::rule_checked_write(function () use ($comment) { $comment->soft_delete(); });
 			Boards::log((int)$board->key, (int)$card->key, $user_id, 'card.updated', array('quiet' => true, 'what' => 'comment'));
 		});
 	}
@@ -861,7 +870,9 @@ class BoardsCards {
 				$card->set('bcd_cover_fil_file_id', null);
 				$card->save();
 			}
-			$attachment->permanent_delete();
+			// An editor on the board (the caller's cardFor()); the attachment's
+			// File goes with it.
+			SystemBase::rule_checked_write(function () use ($attachment) { $attachment->permanent_delete(); });
 			Boards::log((int)$board->key, (int)$card->key, $user_id, 'card.updated', array('quiet' => true, 'what' => 'attachment'));
 		});
 	}

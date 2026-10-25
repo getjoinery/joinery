@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Inbound Email - Aliases List
  *
@@ -103,7 +104,7 @@ foreach ($aliases as $alias) {
 	// A superadmin reads every mailbox, so can download any it may read (the
 	// export page and its API decide what that is: a protected mailbox only
 	// by its owner).
-	if ($session->get_permission() >= 10) {
+	if (Access::permits(10, $session)) {
 		$actions .= ' <a class="btn btn-sm btn-outline-secondary" href="/profile/mailbox/export?mailbox=' . intval($alias->key) . '">Download</a>';
 	}
 	array_push($rowvalues, $actions);

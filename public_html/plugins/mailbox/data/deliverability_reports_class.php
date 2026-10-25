@@ -27,6 +27,7 @@ class DeliverabilityReportException extends SystemBaseException {}
 class DeliverabilityReport extends SystemBase {
 	public static $prefix = 'dvr';
 	public static $tablename = 'dvr_deliverability_reports';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'dvr_deliverability_report_id';
 
 	// Report kinds (dvr_kind)

@@ -40,6 +40,7 @@ function reaction_status_logic_descriptor(): array {
 		'description' => 'Whether the signed-in user has reacted to an entity, plus its reaction count.',
 		'mutates'     => false,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability' => 'read',
 		],
 		'input'       => [

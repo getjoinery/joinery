@@ -8,7 +8,9 @@
  * the realtime NOTIFY live here because messaging is core and several consumers
  * (the messenger UI, the iOS member app, the AI participant) share these rows.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - membership, rename, raise and sealing writes run under
+ *   rule_checked_write() behind the participant/admin checks that admit them
  * @changelog 1.4 - cnv_create_time is stamped when the row is made; it was left empty
  * @changelog 1.3 - two levels (standard / private) plus the Nothing-leaves-
  *   unsealed add-on (cnv_sealed_exits_only), one-way like the level.
@@ -30,6 +32,8 @@ class ConversationException extends SystemBaseException {}
 class Conversation extends SystemBase {
 	public static $prefix = 'cnv';
 	public static $tablename = 'cnv_conversations';
+	public static $access_class = 'personal';
+	public static $read_permission = 8;   // another person's conversations (Q13)
 	public static $pkey_column = 'cnv_conversation_id';
 
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
@@ -142,6 +146,15 @@ class Conversation extends SystemBase {
 
 		if (count($participant_user_ids) < 2) {
 			throw new ConversationException('A conversation requires at least 2 participants');
+		}
+		// A group's creator may not add someone either side has blocked, as a 1:1 may not.
+		$creator = (int)($options['admin_user_id'] ?? 0);
+		if ($creator > 0 && class_exists('UserBlock')) {
+			foreach ($participant_user_ids as $uid) {
+				if ($uid !== $creator && UserBlock::is_blocked($creator, $uid)) {
+					throw new ConversationException('Cannot message this user');
+				}
+			}
 		}
 
 		$conversation = new Conversation(NULL);
@@ -378,24 +391,31 @@ class Conversation extends SystemBase {
 		// overwritten — the row is simply never stored holding the words.
 		$message->set('msg_body', $sealed ? null : $clean_body);
 		$message->set('msg_sent_time', gmdate('Y-m-d H:i:s'));
-		$message->save();
+		// The messenger is the one writer a protected conversation accepts
+		// (Message::authenticate_write()), and the sender's place in the room
+		// was decided above.
+		SystemBase::rule_checked_write(function () use ($message) { $message->save(); });
 
-		if ($sealed) {
-			Message::sealBody($message->key, $dek, $clean_body);
-			$message->load();
-		}
-
-		foreach ($attachments as $attachment) {
+		// The body's sealing and the attachments hang off the message the
+		// sender's membership admitted above.
+		SystemBase::rule_checked_write(function () use ($message, $sealed, $dek, $clean_body, $attachments) {
 			if ($sealed) {
-				ConversationSealing::sealAttachment($attachment, $dek);
+				Message::sealBody($message->key, $dek, $clean_body);
+				$message->load();
 			}
-			MessageAttachment::attach($message, $attachment, $sealed);
-		}
+
+			foreach ($attachments as $attachment) {
+				if ($sealed) {
+					ConversationSealing::sealAttachment($attachment, $dek);
+				}
+				MessageAttachment::attach($message, $attachment, $sealed);
+			}
+		});
 
 		// The conversation's own update time is what an inbox delta reads, so it
 		// moves with every message including the system ones.
 		$this->set('cnv_update_time', gmdate('Y-m-d H:i:s'));
-		$this->save();
+		SystemBase::rule_checked_write(function () { $this->save(); });
 
 		// Resurface deleted conversations and create notifications
 		$participants = new MultiConversationParticipant(
@@ -428,7 +448,7 @@ class Conversation extends SystemBase {
 			// Clear delete_time to resurface conversation
 			if ($participant->get('cnp_delete_time')) {
 				$participant->set('cnp_delete_time', null);
-				$participant->save();
+				SystemBase::rule_checked_write(function () use ($participant) { $participant->save(); });
 			}
 
 			// Skip sender for notifications
@@ -785,7 +805,8 @@ class Conversation extends SystemBase {
 		$this->write_protection(function () {
 			$this->set('cnv_sealed_exits_only', true);
 		});
-		$this->save();
+		// Any participant may turn it on (checked above).
+		SystemBase::rule_checked_write(function () { $this->save(); });
 
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$actor = new User($actor_user_id, TRUE);
@@ -871,8 +892,10 @@ class Conversation extends SystemBase {
 			}
 			// The freshly minted key seals this change's own record of itself,
 			// so a member can protect a conversation without unlocking first —
-			// sealing needs public keys only.
-			$dek = $this->seal_history();
+			// sealing needs public keys only. Any participant may raise
+			// (checked above), and sealing writes every member's grant and
+			// message, not only the actor's.
+			$dek = SystemBase::rule_checked_write(function () { return $this->seal_history(); });
 		} else {
 			$dek = $this->change_key();
 		}
@@ -880,7 +903,7 @@ class Conversation extends SystemBase {
 		$this->write_protection(function () use ($level) {
 			$this->set('cnv_protection_level', $level);
 		});
-		$this->save();
+		SystemBase::rule_checked_write(function () { $this->save(); });
 
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$actor = new User($actor_user_id, TRUE);
@@ -1061,9 +1084,13 @@ class Conversation extends SystemBase {
 		// this first means a member who cannot be given the key is not added at
 		// all, rather than added to a conversation they cannot read.
 		$dek = $this->change_key();
+		// The new member's grant and membership row are theirs, not the
+		// actor's; assert_group_admin() above is the right to write them.
 		if ($dek !== null) {
 			$added_user = new User($user_id, TRUE);
-			if (ConversationKeyGrant::grant($this->key, $user_id, $dek) === null) {
+			if (SystemBase::rule_checked_write(function () use ($user_id, $dek) {
+					return ConversationKeyGrant::grant($this->key, $user_id, $dek);
+				}) === null) {
 				throw new ConversationException(
 					($added_user->key ? $added_user->display_name() : 'That member')
 					. ' has not set up protection yet, so they cannot be added to a protected conversation.');
@@ -1074,7 +1101,7 @@ class Conversation extends SystemBase {
 		$participant->set('cnp_cnv_conversation_id', $this->key);
 		$participant->set('cnp_usr_user_id', $user_id);
 		$participant->set('cnp_create_time', gmdate('Y-m-d H:i:s'));
-		$participant->save();
+		SystemBase::rule_checked_write(function () use ($participant) { $participant->save(); });
 		$this->forget_membership();
 
 		$actor = new User($actor_user_id, TRUE);
@@ -1112,17 +1139,22 @@ class Conversation extends SystemBase {
 		// no longer hold a key that opens it.
 		$dek = $this->change_key();
 
-		$row->permanent_delete();
+		// An admin removing someone, or a member leaving (checked above): the
+		// membership row and grant are destroyed outright, which no member's
+		// own level reaches.
+		SystemBase::rule_checked_write(function () use ($row) { $row->permanent_delete(); });
 		$this->forget_membership();
 
 		// Their key grant goes with their membership: from here the server will
 		// not open this conversation for them. What they have already read, they
 		// have already read — revocation is about what happens next.
-		ConversationKeyGrant::revoke($this->key, $user_id);
+		SystemBase::rule_checked_write(function () use ($user_id) {
+			ConversationKeyGrant::revoke($this->key, $user_id);
+		});
 
 		// A group that has lost every admin promotes its longest-standing member,
 		// so membership never becomes unmanageable.
-		$this->ensure_an_admin();
+		SystemBase::rule_checked_write(function () { $this->ensure_an_admin(); });
 
 		$this->add_system_message($is_self
 			? $subject->display_name() . ' left'
@@ -1148,7 +1180,7 @@ class Conversation extends SystemBase {
 		$dek = $this->change_key();
 
 		$this->set('cnv_subject', $subject !== '' ? $subject : null);
-		$this->save();
+		SystemBase::rule_checked_write(function () { $this->save(); });
 
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$actor = new User($actor_user_id, TRUE);
@@ -1168,10 +1200,10 @@ class Conversation extends SystemBase {
 			throw new ConversationException('That member is not in this group.');
 		}
 		$row->set('cnp_is_admin', (bool)$is_admin);
-		$row->save();
+		SystemBase::rule_checked_write(function () use ($row) { $row->save(); });
 		$this->forget_membership();
 
-		$this->ensure_an_admin();
+		SystemBase::rule_checked_write(function () { $this->ensure_an_admin(); });
 		return true;
 	}
 

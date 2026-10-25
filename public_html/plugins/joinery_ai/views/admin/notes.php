@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI - Notes List
  * URL: /admin/joinery_ai/notes
@@ -13,7 +14,6 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/notes_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $numperpage = 30;

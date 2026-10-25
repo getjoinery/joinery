@@ -28,7 +28,7 @@ function tests_run_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('tests/lib/discovery.php'));
 
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Superadmin permission required.');
 	}
 

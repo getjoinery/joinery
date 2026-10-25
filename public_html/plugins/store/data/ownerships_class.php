@@ -20,6 +20,8 @@ class OwnershipException extends SystemBaseException {}
 class Ownership extends SystemBase {
 	public static $prefix = 'own';
 	public static $tablename = 'own_ownerships';
+	public static $access_class = 'personal';
+	public static $owner_column = false;
 	public static $pkey_column = 'own_ownership_id';
 
 	/** The tag that covers every tag. */
@@ -41,7 +43,7 @@ class Ownership extends SystemBase {
 	    'own_tag' => array('type'=>'varchar(64)', 'required'=>true),
 	    'own_ord_order_id' => array('type'=>'int4'),
 	    'own_odi_order_item_id' => array('type'=>'int4'),
-	    'own_license_key' => array('type'=>'varchar(64)'),
+	    'own_license_key' => array('access_class' => 'keys', 'type'=>'varchar(64)'),
 	    'own_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'own_revoked_time' => array('type'=>'timestamp(6)'),
 	    'own_delete_time' => array('type'=>'timestamp(6)'),
@@ -124,12 +126,6 @@ class Ownership extends SystemBase {
 		return $ownership;
 	}
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 }
 
 class MultiOwnership extends SystemMultiBase {

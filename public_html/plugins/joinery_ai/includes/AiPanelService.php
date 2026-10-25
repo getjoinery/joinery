@@ -322,7 +322,7 @@ class AiPanelService {
             'last_run'       => (method_exists($job, 'runsOnDeviceFor') && $job->runsOnDeviceFor($context))
                 ? self::deviceLastRunLine((int)$recipe->key)
                 : self::lastRunLine((int)$recipe->key),
-            'dashboard_url'  => $permission >= 10
+            'dashboard_url'  => Access::allows(10, $permission)
                 ? '/admin/joinery_ai/edit?rcp_recipe_id=' . (int)$recipe->key : null,
         ];
     }

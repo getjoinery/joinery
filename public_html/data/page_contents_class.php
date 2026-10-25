@@ -24,6 +24,7 @@ class PageContentException extends SystemBaseException {}
 class PageContent extends SystemBase {
 	public static $prefix = 'pac';
 	public static $tablename = 'pac_page_contents';
+	public static $access_class = 'content';
 	public static $pkey_column = 'pac_page_content_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
@@ -199,18 +200,6 @@ class PageContent extends SystemBase {
 			return $this->get('pac_body');
 		}
 		return '';
-	}
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix . '_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in ' . static::$tablename
-				);
-			}
-		}
 	}
 
 	function save($debug = false) {

@@ -11,10 +11,9 @@ function admin_email_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
-	$email = new Email($input['eml_email_id'], TRUE);
+	$email = new Email($input['eml_email_id'] ?? null, TRUE);
 
 	// Handle actions
 	if($input['action'] == 'delete'){
@@ -49,7 +48,14 @@ function admin_email_logic(array $input): LogicResult {
 	}
 	else if($input['action'] == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($input['erg_email_recipient_group_id'], TRUE);
-		$email_recipient_group->permanent_delete();
+		// A recipient group is part of its email: the email's write rule decides.
+		if ((int)$email_recipient_group->get('erg_eml_email_id') !== (int)$email->key) {
+			return LogicResult::error('That recipient group is not on this email.');
+		}
+		$email->assert_can_write($session);
+		SystemBase::rule_checked_write(function () use ($email_recipient_group) {
+			$email_recipient_group->permanent_delete();
+		});
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=7 */
 /**
  * Server Manager - Job Detail
  * URL: /admin/server_manager/job_detail
@@ -58,9 +59,10 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdmin
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmSecretRedactor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 
+// Job pages open at 7 (Q11: output is redacted twice); acting on a job needs its own level.
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
+SmActionLevels::refuse_post('job_detail', $session, '/admin/server_manager/job_detail?job_id=' . (int)($_GET['job_id'] ?? 0));
 
 $job_id = isset($_GET['job_id']) ? intval($_GET['job_id']) : 0;
 if (!$job_id) {

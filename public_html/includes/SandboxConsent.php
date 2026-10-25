@@ -193,7 +193,7 @@ class SandboxConsent {
 		}
 		$user = new User((int)$row->get('sbi_usr_user_id'), TRUE);
 		if (!$user->key || $user->get('usr_delete_time') || $user->get('usr_is_disabled')
-				|| (int)$user->get('usr_permission') < self::APPROVER_PERMISSION) {
+				|| !Access::allows(self::APPROVER_PERMISSION, (int)$user->get('usr_permission'))) {
 			return null;
 		}
 		return $user;

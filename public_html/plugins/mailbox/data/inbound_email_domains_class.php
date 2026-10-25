@@ -73,6 +73,7 @@ class InboundEmailDomain extends SystemBase {
 	use NotifiesRelayMapOnChange;
 	public static $prefix = 'ied';
 	public static $tablename = 'ied_inbound_email_domains';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ied_inbound_email_domain_id';
 
 	// Catch-all mode values
@@ -162,13 +163,13 @@ class InboundEmailDomain extends SystemBase {
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key
 		'ied_dkim_selector'         => array('type'=>'varchar(63)', 'is_nullable'=>true),  // e.g. 'mailk1'
-		'ied_dkim_sealed_key'       => array('type'=>'text', 'is_nullable'=>true),   // DKIM private key, crypto_box_seal'd to the owner public key
+		'ied_dkim_sealed_key'       => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),   // DKIM private key, crypto_box_seal'd to the owner public key
 		'ied_dkim_public_dns'       => array('type'=>'text', 'is_nullable'=>true),   // cleartext DKIM DNS record value (Setup tab reads it while locked)
 		'ied_dkim_key_generation'   => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		// Staged rotation: the next key, sealed and awaiting DNS verification.
 		// The live key keeps signing until cutover swaps pending → live.
 		'ied_dkim_pending_selector'   => array('type'=>'varchar(63)', 'is_nullable'=>true),
-		'ied_dkim_pending_sealed_key' => array('type'=>'text', 'is_nullable'=>true),
+		'ied_dkim_pending_sealed_key' => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'ied_dkim_pending_public_dns' => array('type'=>'text', 'is_nullable'=>true),
 		'ied_forwarding_subdomain'  => array('type'=>'varchar(255)', 'is_nullable'=>true),  // e.g. 'fwd.example.com' (per-domain only)
 		'ied_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -261,13 +262,6 @@ class InboundEmailDomain extends SystemBase {
 		}
 
 		$this->set('ied_update_time', gmdate('Y-m-d H:i:s'));
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
 	}
 
 	/**

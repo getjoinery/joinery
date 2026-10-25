@@ -16,7 +16,6 @@
 
 function admin_sandbox_approve_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
 	$plugin = (string)($input['plugin'] ?? '');
@@ -36,6 +35,7 @@ function admin_sandbox_approve_logic(array $input): LogicResult {
 	$problems = SandboxPluginManager::validate($plugin)['errors'];
 
 	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'approve') {
+		Access::demand(10);   // activates the plugin's code
 		if ($problems) {
 			return LogicResult::error('This site cannot run it: ' . implode(' ', $problems));
 		}

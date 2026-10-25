@@ -79,7 +79,7 @@ function drive_versions_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'file_id' => array('type' => 'int', 'required' => true, 'label' => 'File id'),
 		),

@@ -64,6 +64,6 @@ function boards_label_save_logic_descriptor(): array {
 			'prev_id'  => array('type' => 'int', 'required' => false, 'label' => 'Label above'),
 			'next_id'  => array('type' => 'int', 'required' => false, 'label' => 'Label below'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 	);
 }

@@ -34,6 +34,7 @@ class MailImportEntryException extends SystemBaseException {}
 class MailImportEntry extends SystemBase {
 	public static $prefix = 'mie';
 	public static $tablename = 'mie_mail_import_entries';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mie_mail_import_entry_id';
 
 	const STATE_PENDING = 'pending';
@@ -106,13 +107,6 @@ class MailImportEntry extends SystemBase {
 	public static $index_specifications = array(
 		array('columns' => array('mie_mir_mail_import_run_id', 'mie_state')),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/** The entry's extra labels as an array (never null). */
 	function labels(): array {

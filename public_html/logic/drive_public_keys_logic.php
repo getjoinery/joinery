@@ -85,7 +85,7 @@ function drive_public_keys_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'folder_id' => array('type' => 'int', 'required' => false, 'label' => 'Folder id (reader-set mode)'),
 		),

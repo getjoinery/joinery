@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -8,10 +9,9 @@
 	require_once(PathHelper::getIncludePath('/data/group_members_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 	$session->set_return();
 
-	if($_POST['action'] == 'remove'){
+	if(($_POST['action'] ?? null) == 'remove'){
 		$public_menu = new PublicMenu($_POST['pmu_public_menu_id'], TRUE);
 		$public_menu->permanent_delete();
 		header("Location: /admin/admin_public_menu");
@@ -38,7 +38,7 @@
 	$headers = array("Menu", "Submenus", "Order", "Action");
 	$altlinks = array();
 	$altlinks += array('Add Menu Item'=> '/admin/admin_public_menu_edit');
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
+	$pager = new Pager(array('numrecords'=>0));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),
 		'altlinks' => $altlinks,

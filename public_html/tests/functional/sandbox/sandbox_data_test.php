@@ -20,6 +20,7 @@
  *
  * USAGE (CLI only): php tests/functional/sandbox/sandbox_data_test.php [base_url] [origin_ip]
  *
+ * @version 1.1 - the admin is at content's write and soft-delete levels (6, 7)
  * @version 1.0
  */
 
@@ -103,7 +104,7 @@ try {
 	check((int)$menu->fetchColumn() === 1, 'Its menu entry is added');
 
 	section('The record endpoints');
-	$admin = make_user('SbxData', 5);
+	$admin = make_user('SbxData', 7);   // a sandboxed model is content: 6 to write, 7 to delete
 	$scope = implode(',', array_map(function ($v) use ($class) { return $class . ':' . $v; }, ApiKey::RECORD_VERBS));
 	$key = make_machine_key($admin->key, 'sbx-' . $name, 4);
 	$key['api_key']->set('apk_scope', $scope);

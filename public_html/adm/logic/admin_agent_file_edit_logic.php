@@ -7,7 +7,6 @@ function admin_agent_file_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$agent_file_id = isset($input['agf_agent_file_id']) ? $input['agf_agent_file_id'] : NULL;
 

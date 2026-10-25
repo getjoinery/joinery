@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * admin_email_template_preview — raw HTML preview of an email template body, for
  * the iframe preview on the email-template admin page. Document load: echoes the
@@ -10,9 +11,8 @@ require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 header('Content-type: text/html');
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
-$template = new EmailTemplate($_GET['emt_email_template_id'], TRUE);
+$template = new EmailTemplate($_GET['emt_email_template_id'] ?? null, TRUE);
 
 echo $template->get('emt_body');
 ?>

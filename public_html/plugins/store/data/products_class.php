@@ -32,6 +32,7 @@ class BasicProductRequirementException extends SystemBaseException {}
 class Product extends SystemBase {
 	public static $prefix = 'pro';
 	public static $tablename = 'pro_products';
+	public static $access_class = 'money';
 	public static $pkey_column = 'pro_product_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,

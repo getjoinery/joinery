@@ -21,6 +21,7 @@ class AiConversationMessage extends SystemBase {
 
     public static $prefix = 'aim';
     public static $tablename = 'aim_conversation_messages';
+    public static $access_class = 'config';
     public static $pkey_column = 'aim_conversation_message_id';
 
     const ROLE_USER      = 'user';
@@ -73,7 +74,7 @@ class AiConversationMessage extends SystemBase {
         // aim_content_sealed marks a sealed row; aim_sealed_owner_user_id records
         // WHOSE vault the row seals to (the conversation owner) so decryption is
         // self-contained without re-reading the conversation.
-        'aim_sealed_key'          => array('type'=>'text', 'is_nullable'=>true),
+        'aim_sealed_key'          => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
         'aim_key_generation'      => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
         'aim_content_sealed'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         'aim_sealed_owner_user_id'=> array('type'=>'int8', 'is_nullable'=>true),
@@ -145,13 +146,6 @@ class AiConversationMessage extends SystemBase {
     // (ChatSeal::sealAttachmentUnderMessage()).
     public static $sealed_fields = array('aim_content', 'aim_tool_calls', 'aim_error');
 
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 5) {
-            throw new SystemAuthenticationError(
-                'Joinery AI chat messages require permission level 5 to write.');
-        }
-    }
-
     /** AD: chat:{aim_conversation_message_id}:{column} — the literal every row already sealed carries. */
     public static function sealAd(int $row_id, string $field): string {
         return 'chat:' . $row_id . ':' . $field;
@@ -175,6 +169,18 @@ class AiConversationMessage extends SystemBase {
         $conv = self::conversationRow($row);
         $owner = $conv !== null ? (int)$conv['aic_owner_user_id'] : 0;
         return $owner > 0 ? $owner : null;
+    }
+
+    /**
+     * A turn is its conversation's: whoever owns the chat (aic_owner_user_id)
+     * owns its messages, as they own the conversation row itself. The stored
+     * conversation is the one asked, so moving a row into your own chat is a
+     * change the model's level decides.
+     */
+    public function access_owner_is($user_id): bool {
+        if ((int)$user_id <= 0) return false;
+        $conv = self::conversationRow(array('aim_aic_conversation_id' => $this->access_stored('aim_aic_conversation_id')));
+        return $conv !== null && (int)$conv['aic_owner_user_id'] === (int)$user_id;
     }
 
     /** The owning conversation's level and owner, read fresh (a level change can land mid-request). */

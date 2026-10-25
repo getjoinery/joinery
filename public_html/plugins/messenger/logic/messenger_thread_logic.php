@@ -56,6 +56,7 @@ function messenger_thread_logic(array $input): LogicResult {
 
 function messenger_thread_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'One conversation: the newest page of messages plus its header, or an older page when before_message_id is given.',

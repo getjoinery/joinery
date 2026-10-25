@@ -29,6 +29,7 @@ class MailAppMessageException extends SystemBaseException {}
 class MailAppMessage extends SystemBase {
 	public static $prefix = 'mam';
 	public static $tablename = 'mam_mail_app_messages';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mam_mail_app_message_id';
 
 	protected static $foreign_key_actions = array(

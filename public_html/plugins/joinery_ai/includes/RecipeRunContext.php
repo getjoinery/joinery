@@ -230,7 +230,7 @@ class RecipeRunContext implements ToolContext {
      * The day a member-owned recipe surface lands, this flips to a permission
      * check on the recipe owner — the same fence the chat context applies.
      */
-    public function ownerScopedReads(): bool {
+    public function ownerScopedReads(?string $model_class = null): bool {
         return false;
     }
 

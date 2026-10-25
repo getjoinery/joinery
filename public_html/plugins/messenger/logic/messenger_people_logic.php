@@ -134,6 +134,7 @@ function messenger_people_logic(array $input): LogicResult {
 
 function messenger_people_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'Search members by name to start a conversation or add to a group. Names and pictures only.',

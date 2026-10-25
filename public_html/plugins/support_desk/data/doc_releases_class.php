@@ -14,6 +14,7 @@
 class SupportDocRelease extends SystemBase {
 	public static $prefix = 'sdr';
 	public static $tablename = 'sdr_doc_releases';
+	public static $access_class = 'content';
 	public static $pkey_column = 'sdr_doc_release_id';
 
 	/** Where a release's documents were read from. */
@@ -31,12 +32,6 @@ class SupportDocRelease extends SystemBase {
 		'sdr_faq'            => array('type' => 'text', 'is_nullable' => true),
 		'sdr_built_time'     => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('The support index is written by the support desk.');
-		}
-	}
 
 	/** The row for a release, or null. */
 	public static function forRelease(string $release): ?SupportDocRelease {

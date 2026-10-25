@@ -5,8 +5,8 @@ function admin_<?= $entity_snake ?>_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
+	// Who may open the page is the view's @joinery-admin header.
 	$session = SessionControl::get_instance();
-	$session->check_permission(<?= $admin_permission ?>);
 
 	if (isset($input['edit_primary_key_value'])) {
 		$<?= $entity_snake ?> = new <?= $entity ?>($input['edit_primary_key_value'], TRUE);
@@ -26,6 +26,8 @@ function admin_<?= $entity_snake ?>_edit_logic(array $input): LogicResult {
 
 		// TODO: business rules, plus any fields with no descriptor type (uploads, etc.)
 
+		// Who may change the row is its model's class (docs/permissions.md).
+		$<?= $entity_snake ?>->assert_can_write($session);
 		$<?= $entity_snake ?>->prepare();
 		$<?= $entity_snake ?>->save();
 
@@ -44,6 +46,8 @@ function admin_<?= $entity_snake ?>_edit_logic_descriptor(): array {
 		'description'      => 'Create or update a <?= $title ?> (admin).',
 		'requires_session' => true,
 		'mutates'          => true,
+		// Who may run it: the model's class (docs/permissions.md).
+		'auth'             => array('min_user_permission' => '<?= $access_class ?>:write'),
 		// Admin edit actions are not exposed to the AI agent by default.
 		// Uncomment to make this callable in chat (confirmed before it runs):
 		// 'ai_agent'         => 'confirm',

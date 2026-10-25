@@ -15,6 +15,8 @@ class ScheduledTaskException extends SystemBaseException {}
 class ScheduledTask extends SystemBase {
 	public static $prefix = 'sct';
 	public static $tablename = 'sct_scheduled_tasks';
+	public static $access_class = 'config';
+	public static $write_permission = 10;
 	public static $pkey_column = 'sct_scheduled_task_id';
 
 	public static $field_specifications = array(
@@ -262,12 +264,6 @@ class ScheduledTask extends SystemBase {
 		return array();
 	}
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 }
 
 class MultiScheduledTask extends SystemMultiBase {

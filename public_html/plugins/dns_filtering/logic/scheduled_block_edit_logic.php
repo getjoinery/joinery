@@ -36,7 +36,9 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 			return LogicResult::error("The always-on block cannot be deleted.");
 		}
 
-		$block->permanent_delete();
+		// assert_can_write() above: the device's owner removes their own block
+		// for good, past an owner's level.
+		SystemBase::rule_checked_write(function () use ($block) { $block->permanent_delete(); });
 
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}
@@ -115,15 +117,20 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 					$existing = new MultiSdScheduledBlockFilter(['block_id' => $block->key, 'filter_key' => $key]);
 					$existing->load();
 					foreach($existing as $row){
-						$row->permanent_delete();
+						// The block's owner (assert_can_write() above).
+						SystemBase::rule_checked_write(function () use ($row) { $row->permanent_delete(); });
 					}
 				}
 			}
 		}
 
 		// Update filter and service rules
-		$block->update_filters($input, $skip_keys);
-		$block->update_services($input, $skip_keys);
+		// The block's owner (assert_can_write() above); clearing a toggle removes
+		// its row outright.
+		SystemBase::rule_checked_write(function () use ($block, $input, $skip_keys) {
+			$block->update_filters($input, $skip_keys);
+			$block->update_services($input, $skip_keys);
+		});
 
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}
@@ -177,6 +184,7 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 
 function scheduled_block_edit_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Read a device block (device_id, optional block_id) or save it (action=edit) / delete it (action=delete)',
 		'input' => [

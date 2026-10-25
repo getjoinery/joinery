@@ -31,6 +31,7 @@ function mailboxes_logic(array $input): LogicResult {
 
 function mailboxes_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'List the granted mailboxes with unread counts, folder rails, and compose capability',
 	];

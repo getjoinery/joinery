@@ -474,7 +474,7 @@ class ChatRunner {
                            . "writes are confined to their own records. Use this user_id when a "
                            . "write tool needs an owner / created_by / updated_by column.\n";
                 } else {
-                    $text .= "Acting admin user_id: $uid (permission 5+, admin reach). "
+                    $text .= "Acting admin user_id: $uid (admin reach: other people's rows of each model its level may read). "
                            . "Use this user_id when a write tool needs an owner / created_by / "
                            . "updated_by column.\n";
                 }

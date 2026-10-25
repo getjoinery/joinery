@@ -20,13 +20,14 @@ class PageProbeGrantException extends SystemBaseException {}
 class PageProbeGrant extends SystemBase {
 	public static $prefix = 'ppg';
 	public static $tablename = 'ppg_page_probe_grants';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ppg_page_probe_grant_id';
 
 	public static $json_vars = array('ppg_report');
 
 	public static $field_specifications = array(
 		'ppg_page_probe_grant_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'ppg_token_hash'          => array('type'=>'varchar(64)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
+		'ppg_token_hash'          => array('access_class' => 'restricted', 'type'=>'varchar(64)', 'required'=>true, 'is_nullable'=>false, 'unique'=>true),
 		'ppg_usr_user_id'         => array('type'=>'int8'),
 		'ppg_viewer'              => array('type'=>'varchar(16)', 'required'=>true, 'is_nullable'=>false),
 		'ppg_page'                => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),

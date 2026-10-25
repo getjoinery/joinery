@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -6,7 +7,6 @@
 	require_once(PathHelper::getIncludePath('plugins/items/data/item_relation_types_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(7);
 
 	$page = new AdminPage();
 	$page->admin_header(

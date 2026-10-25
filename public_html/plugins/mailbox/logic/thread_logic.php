@@ -75,6 +75,7 @@ function thread_logic(array $input): LogicResult {
 
 function thread_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Fetch a mail thread: messages with bodies, signed attachment and inline-image URLs. '
 			. 'An end-to-end (Fortress) message has empty content fields, its sealed columns under `sealed` '

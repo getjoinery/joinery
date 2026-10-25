@@ -15,6 +15,7 @@ class PageException extends SystemBaseException {}
 
 class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $tablename = 'pag_pages';
+	public static $access_class = 'content';
 	public static $pkey_column = 'pag_page_id';
 
 	// REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Admin: a sandboxed plugin's page, drawn from its manifest.
  * See adm/logic/admin_sandbox_page_logic.php.

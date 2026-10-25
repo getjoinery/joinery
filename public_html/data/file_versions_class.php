@@ -66,6 +66,7 @@ class FileHeadMovedException extends Exception {
 class FileVersion extends SystemBase {
 	public static $prefix = 'fvr';
 	public static $tablename = 'fvr_file_versions';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fvr_file_version_id';
 
 	// When the file is permanently deleted, each version is permanent-deleted too

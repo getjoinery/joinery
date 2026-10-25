@@ -11,7 +11,7 @@
  * The web editor's page JS calls
  * POST /api/v1/action/dns_filtering/block_filter_set.
  *
- * @version 1.0
+ * @version 1.0.1 - clearing a toggle removes the owner's row under rule_checked_write()
  */
 
 function block_filter_set_logic(array $input): LogicResult{
@@ -49,7 +49,7 @@ function block_filter_set_logic(array $input): LogicResult{
 	}
 
 	$device = new SdDevice($block->get('sdb_sdd_device_id'), TRUE);
-	if ($device->get('sdd_usr_user_id') != $session->get_user_id() && $session->get_permission() < 5) {
+	if ($device->get('sdd_usr_user_id') != $session->get_user_id() && !$device->can_write($session)) {
 		return LogicResult::error('Not authorized.');
 	}
 
@@ -86,7 +86,8 @@ function block_filter_set_logic(array $input): LogicResult{
 		$row = ($existing->count() > 0) ? $existing->get(0) : null;
 
 		if ($action === '') {
-			if ($row) { $row->permanent_delete(); }
+			// The device's owner (checked above) clears their own toggle.
+			if ($row) { SystemBase::rule_checked_write(function () use ($row) { $row->permanent_delete(); }); }
 		}
 		else {
 			if (!$row) {
@@ -107,7 +108,8 @@ function block_filter_set_logic(array $input): LogicResult{
 		$row = ($existing->count() > 0) ? $existing->get(0) : null;
 
 		if ($action === '') {
-			if ($row) { $row->permanent_delete(); }
+			// The device's owner (checked above) clears their own toggle.
+			if ($row) { SystemBase::rule_checked_write(function () use ($row) { $row->permanent_delete(); }); }
 		}
 		else {
 			if (!$row) {
@@ -125,6 +127,7 @@ function block_filter_set_logic(array $input): LogicResult{
 
 function block_filter_set_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Set or clear one filter/service toggle on a block (block_id, type filter/service, key, action 0/1/empty-to-remove)',
 		'mutates'     => true,
 		'requires_session'        => true,

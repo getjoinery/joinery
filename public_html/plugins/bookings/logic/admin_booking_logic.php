@@ -13,7 +13,6 @@ function admin_booking_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/bookings/logic/booking_manage_logic.php'));   // booking_notify_cancellation
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	$id = LibraryFunctions::fetch_variable_local($input, 'bkn_booking_id', NULL, 'required', 'Booking id required.', 'safemode', 'int');

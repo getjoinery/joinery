@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 	$is_cli = php_sapi_name() === 'cli';
 
 	if ($is_cli) {
@@ -175,8 +176,8 @@
 	if ($is_cli) {
 		$session = null;
 	} else {
+		// Its header is the gate: the router checks it on /admin/server_manager/publish.
 		$session = SessionControl::get_instance();
-		$session->check_permission(8);
 	}
 
 	// Increase execution time for large zip file creation (5 minutes)

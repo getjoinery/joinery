@@ -1,11 +1,11 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	//$session->set_return();
 
 	$numperpage = 30;
@@ -44,7 +44,7 @@
 	//$search_criteria['email_like'] = $searchterm;
 
 	//ONLY SHOW DELETED TO SUPER ADMINS
-	if($_SESSION['permission'] < 10){
+	if(!Access::permits(Email::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 	
@@ -60,7 +60,7 @@
 	$headers = array('Email', 'Subject', 'Author', 'Status', 'Details');
 	$altlinks = array('New Email'=>'/admin/admin_email_edit');
 	if($numqueued){
-		$altlinks += array('Send Queued Emails'=> array('post' => '/admin/admin_emails_send', 'hidden' => array(),
+		$altlinks += array('Send Queued Emails'=> array('post' => '/admin/admin_emails_send', 'requires' => 'page:/admin/admin_emails_send', 'hidden' => array(),
 			'confirm' => 'Send every queued email now?'));
 	}
 	if($searchterm){

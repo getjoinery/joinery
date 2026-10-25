@@ -9,7 +9,8 @@
  * member, that a group is a user group, that a change would not leave the board
  * with nobody to run it.
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - deletes the caller's board role admitted run under rule_checked_write()
  */
 
 class BoardsManager {
@@ -64,7 +65,9 @@ class BoardsManager {
 			$member->set('bbm_bbd_board_id', (int)$board->key);
 			$member->set('bbm_usr_user_id', $owner_id);
 			$member->set('bbm_role', BoardMember::ROLE_ADMIN);
-			$member->save();
+			// The creator owns the board just made (bbd_usr_user_id_owner); this
+			// row is what makes them its admin, so no role admits it yet.
+			SystemBase::rule_checked_write(function () use ($member) { $member->save(); });
 			Boards::forgetRoles();
 
 			if ($starter) {
@@ -172,7 +175,10 @@ class BoardsManager {
 			$row->set('bbw_usr_user_id', $user_id);
 			$row->save();
 		} elseif (!$watch && $id) {
-			(new BoardWatcher((int)$id, TRUE))->permanent_delete();
+			// The watcher's own row, on a board the caller can open (boardFor()).
+			SystemBase::rule_checked_write(function () use ($id) {
+				(new BoardWatcher((int)$id, TRUE))->permanent_delete();
+			});
 		}
 	}
 
@@ -274,7 +280,9 @@ class BoardsManager {
 		if ($member->get('bbm_role') === BoardMember::ROLE_ADMIN) {
 			self::guardLastAdmin($board, (int)$member->key);
 		}
-		$member->permanent_delete();
+		// A board admin removing someone, or a person leaving (the caller's
+		// boardFor()); a membership row is removed outright.
+		SystemBase::rule_checked_write(function () use ($member) { $member->permanent_delete(); });
 		Boards::forgetRoles();
 		self::reconcileAccess($board);
 	}
@@ -299,7 +307,11 @@ class BoardsManager {
 		if ($q->fetchColumn()) {
 			return;
 		}
-		self::addUser($board, $user_id, BoardMember::ROLE_EDITOR);
+		// An Open to all members board takes anyone who can open it (the
+		// visibility check above); their membership row is a board admin's write.
+		SystemBase::rule_checked_write(function () use ($board, $user_id) {
+			self::addUser($board, $user_id, BoardMember::ROLE_EDITOR);
+		});
 	}
 
 	/** Leave a board (remove the person's own direct row), unless they are its last admin. */
@@ -425,7 +437,8 @@ class BoardsManager {
 	}
 
 	public static function deleteLabel(Board $board, BoardLabel $label): void {
-		$label->permanent_delete();
+		// A board admin (the caller's boardFor(..., 'admin')).
+		SystemBase::rule_checked_write(function () use ($label) { $label->permanent_delete(); });
 	}
 
 	public static function moveLabel(Board $board, BoardLabel $label, ?int $prev_id, ?int $next_id): void {

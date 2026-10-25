@@ -41,7 +41,8 @@ function drive_device_link_deny_logic(array $input): LogicResult {
 	}
 
 	$link->set('dlk_status', DeviceLink::STATUS_DENIED);
-	$link->save();
+	// actionable_by() above proved the code is this member's to answer.
+	SystemBase::rule_checked_write(function () use ($link) { $link->save(); });
 
 	return LogicResult::render(array('ok' => true, 'denied' => true));
 }
@@ -52,7 +53,7 @@ function drive_device_link_deny_logic_descriptor(): array {
 		'description'      => 'Refuse a pending device-link ceremony so the waiting client is told no immediately instead of timing out.',
 		'requires_session' => true,
 		'mutates'          => true,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input'            => array(
 			'code' => array('type' => 'string', 'required' => true, 'max_length' => 32, 'label' => 'Link code'),
 		),

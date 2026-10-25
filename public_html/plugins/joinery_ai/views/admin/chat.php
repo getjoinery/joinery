@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI - Chat (admin)
  * URL: /admin/joinery_ai/chat

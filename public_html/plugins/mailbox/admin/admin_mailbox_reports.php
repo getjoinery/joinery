@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Mailbox — Deliverability Reports (specs/deliverability_report_ingest.md § Surfaces)
  *
@@ -19,7 +20,6 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
 $domain_id = intval(LibraryFunctions::fetch_variable('domain_id', 0, 0, ''));
 $window_days = intval(LibraryFunctions::fetch_variable('window', 30, 0, ''));

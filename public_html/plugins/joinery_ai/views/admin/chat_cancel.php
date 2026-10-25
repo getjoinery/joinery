@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — cancel an in-flight chat turn (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_cancel  (POST)

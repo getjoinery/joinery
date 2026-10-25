@@ -33,7 +33,7 @@ function passkey_stepup_verify_logic(array $input): LogicResult {
 function passkey_stepup_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Complete passkey step-up confirmation, marking the session recently re-verified',
 		'input' => [
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],

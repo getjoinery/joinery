@@ -28,7 +28,7 @@ function passkey_stepup_options_logic(array $input): LogicResult {
 function passkey_stepup_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Begin passkey step-up confirmation (returns WebAuthn request options scoped to the current user)',
 	];
 }

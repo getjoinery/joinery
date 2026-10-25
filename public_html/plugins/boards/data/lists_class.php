@@ -10,6 +10,7 @@ class BoardList extends SystemBase {
 
 	public static $prefix = 'bls';
 	public static $tablename = 'bls_lists';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bls_list_id';
 
 	public static $field_specifications = array(

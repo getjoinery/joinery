@@ -36,6 +36,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class MailExportRun extends SystemBase {
 	public static $prefix = 'mxr';
 	public static $tablename = 'mxr_mail_export_runs';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mxr_mail_export_run_id';
 
 	public static $retention_policy = array(

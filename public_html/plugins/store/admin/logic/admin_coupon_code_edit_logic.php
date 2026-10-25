@@ -8,7 +8,6 @@ function admin_coupon_code_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_code_products_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$settings = Globalvars::get_instance();
 	$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
@@ -78,23 +77,27 @@ function admin_coupon_code_edit_logic(array $input): LogicResult {
 		$coupon_code->save();
 		$coupon_code->load();
 
-		//CLEAR ALL ENTRIES
-		$searches = array('coupon_id' => $coupon_code->key);
-		$coupon_code_products = new MultiCouponCodeProduct($searches);
-		$coupon_code_products->load();
-		foreach($coupon_code_products as $coupon_code_product){
-			$coupon_code_product->permanent_delete();
-		}
-
-		//LOAD THE NEW ENTRIES
-		if($input['ccd_applies_to'] == 3){
-			foreach (($input['products_list'] ?? []) as $product_id){
-				$coupon_code_product = new CouponCodeProduct(NULL);
-				$coupon_code_product->set('ccp_ccd_coupon_code_id', $coupon_code->key);
-				$coupon_code_product->set('ccp_pro_product_id', $product_id);
-				$coupon_code_product->save();
+		// The coupon's product links are part of the coupon: its save above was
+		// the decision, and replacing them is the same edit.
+		SystemBase::rule_checked_write(function () use ($coupon_code, $input) {
+			//CLEAR ALL ENTRIES
+			$searches = array('coupon_code_id' => $coupon_code->key);
+			$coupon_code_products = new MultiCouponCodeProduct($searches);
+			$coupon_code_products->load();
+			foreach($coupon_code_products as $coupon_code_product){
+				$coupon_code_product->permanent_delete();
 			}
-		}
+
+			//LOAD THE NEW ENTRIES
+			if($input['ccd_applies_to'] == 3){
+				foreach (($input['products_list'] ?? []) as $product_id){
+					$coupon_code_product = new CouponCodeProduct(NULL);
+					$coupon_code_product->set('ccp_ccd_coupon_code_id', $coupon_code->key);
+					$coupon_code_product->set('ccp_pro_product_id', $product_id);
+					$coupon_code_product->save();
+				}
+			}
+		});
 
 		return LogicResult::redirect('/plugins/store/admin/admin_coupon_code?ccd_coupon_code_id='.$coupon_code->key);
 	}

@@ -24,6 +24,7 @@ class PersonaBlockedSenderException extends SystemBaseException {}
 class PersonaBlockedSender extends SystemBase {
     public static $prefix = 'pbs';
     public static $tablename = 'pbs_persona_blocked_senders';
+    public static $access_class = 'personal';
     public static $pkey_column = 'pbs_persona_blocked_sender_id';
 
     public static $field_specifications = array(

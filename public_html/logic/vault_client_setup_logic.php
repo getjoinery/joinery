@@ -59,7 +59,7 @@ function vault_client_setup_logic(array $input): LogicResult {
 function vault_client_setup_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Persist a new client-custody vault (public key + browser-produced opaque wrapping blobs) for a scope',
 		'input' => [
 			'scope' => ['type' => 'string', 'required' => true, 'label' => 'Client-custody scope'],

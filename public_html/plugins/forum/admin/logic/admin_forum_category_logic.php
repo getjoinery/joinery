@@ -13,7 +13,6 @@ function admin_forum_category_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$post = LibraryFunctions::isFormSubmission() ? $input : array();
 	$get = $input;
-	$session->check_permission(ForumPost::$write_permission);
 
 	if (isset($post['edit_primary_key_value']) && (int)$post['edit_primary_key_value'] > 0) {
 		$category = new ForumCategory((int)$post['edit_primary_key_value'], TRUE);

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * admin_oauth_providers - Enter OAuth app credentials once per provider.
  *

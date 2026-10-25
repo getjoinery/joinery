@@ -14,7 +14,6 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     // Resolve which recipe we're editing (or that we're creating new)
     if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {

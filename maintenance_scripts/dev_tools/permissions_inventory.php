@@ -223,7 +223,9 @@ function model_index(string $ROOT): array {
 		$declared = $m['owner_column']
 			?? (preg_match('/static\s+\$ai_owner_field\s*=\s*\'(\w+)\'/', $src, $ao) ? $ao[1] : '');
 		$owner = '';
-		if ($declared !== '' && in_array($declared, $m['fields'], true)) {
+		if ($declared === false) {
+			$owner = 'none (declared)';
+		} elseif ($declared !== '' && in_array($declared, $m['fields'], true)) {
 			$owner = $declared;
 		} elseif ($prefix !== '' && in_array($prefix . '_usr_user_id', $m['fields'], true)) {
 			$owner = $prefix . '_usr_user_id';
@@ -256,7 +258,7 @@ function flag(string $src, string $name): bool {
 /** Today's write rule for a model: boilerplate, owner-only, a custom override, or the default. */
 function write_rule(string $src): string {
 	if (!preg_match('/function\s+authenticate_write\s*\(/', $src, $m, PREG_OFFSET_CAPTURE)) {
-		return 'default: owner or 5';
+		return 'default: owner, else the class level';
 	}
 	$code = strip_comments(brace_block($src, $m[0][1]));
 	preg_match_all('/permission\s*(<=|>=|==|!=|<|>)\s*(\d+)/', $code, $pm, PREG_SET_ORDER);

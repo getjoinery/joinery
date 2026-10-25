@@ -25,6 +25,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class FileKeyGrant extends SystemBase {
 	public static $prefix = 'fkg';
 	public static $tablename = 'fkg_file_key_grants';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fkg_file_key_grant_id';
 
 	// The grantee reference cascades on user delete. The file reference is
@@ -42,7 +43,7 @@ class FileKeyGrant extends SystemBase {
 		// The file key sealed to the grantee's drive-scope vault public key
 		// (VaultCrypto.sealToPublicKey → ephPub || IV || ciphertext, base64).
 		// Opaque here; only the grantee's browser can open it.
-		'fkg_wrapped_file_key'  => array('type' => 'text', 'is_nullable' => false, 'required' => true),
+		'fkg_wrapped_file_key'  => array('access_class' => 'keys', 'type' => 'text', 'is_nullable' => false, 'required' => true),
 		'fkg_create_time'       => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
@@ -108,7 +109,9 @@ class FileKeyGrant extends SystemBase {
 			$grant->set('fkg_usr_user_id', $user_id);
 		}
 		$grant->set('fkg_wrapped_file_key', (string)$wrapped_file_key);
-		$grant->save();
+		// The caller decided this user may hold the file's key (a share or
+		// the upload's own); the grant is the recipient's row.
+		SystemBase::rule_checked_write(function () use ($grant) { $grant->save(); });
 		return $grant;
 	}
 
@@ -121,52 +124,56 @@ class FileKeyGrant extends SystemBase {
 	 * nothing records that they ever held one.
 	 */
 	public static function sync_for_file($file_id, array $wrapped, $owner_id, &$removed = null) {
-		$removed = array();
-		$file_id = (int)$file_id;
-		$owner_id = (int)$owner_id;
+		// The caller decided this user may share the file; the grants are each
+		// recipient's own rows, written past the model check on that decision.
+		return SystemBase::rule_checked_write(function () use ($file_id, $wrapped, $owner_id, &$removed) {
+			$removed = array();
+			$file_id = (int)$file_id;
+			$owner_id = (int)$owner_id;
 
-		$existing = new MultiFileKeyGrant(array('file_id' => $file_id));
-		$existing->load();
-		$current = array();
-		foreach ($existing as $g) {
-			$current[(int)$g->get('fkg_usr_user_id')] = $g;
-		}
-
-		$desired = array();
-		foreach ($wrapped as $uid => $blob) {
-			$uid = (int)$uid;
-			if ($uid > 0 && $blob !== null && $blob !== '') {
-				$desired[$uid] = (string)$blob;
+			$existing = new MultiFileKeyGrant(array('file_id' => $file_id));
+			$existing->load();
+			$current = array();
+			foreach ($existing as $g) {
+				$current[(int)$g->get('fkg_usr_user_id')] = $g;
 			}
-		}
 
-		$newly = array();
-
-		// Remove grants no longer wanted (never the owner's own key).
-		foreach ($current as $uid => $grant) {
-			if ($uid === $owner_id) { continue; }
-			if (!isset($desired[$uid])) {
-				$grant->permanent_delete();
-				$removed[] = (int)$uid;
+			$desired = array();
+			foreach ($wrapped as $uid => $blob) {
+				$uid = (int)$uid;
+				if ($uid > 0 && $blob !== null && $blob !== '') {
+					$desired[$uid] = (string)$blob;
+				}
 			}
-		}
 
-		// Insert new; update changed blobs.
-		foreach ($desired as $uid => $blob) {
-			if (!isset($current[$uid])) {
-				$grant = new FileKeyGrant(NULL);
-				$grant->set('fkg_fil_file_id', $file_id);
-				$grant->set('fkg_usr_user_id', $uid);
-				$grant->set('fkg_wrapped_file_key', $blob);
-				$grant->save();
-				$newly[] = $uid;
-			} elseif ($current[$uid]->get('fkg_wrapped_file_key') !== $blob) {
-				$current[$uid]->set('fkg_wrapped_file_key', $blob);
-				$current[$uid]->save();
+			$newly = array();
+
+			// Remove grants no longer wanted (never the owner's own key).
+			foreach ($current as $uid => $grant) {
+				if ($uid === $owner_id) { continue; }
+				if (!isset($desired[$uid])) {
+					$grant->permanent_delete();
+					$removed[] = (int)$uid;
+				}
 			}
-		}
 
-		return $newly;
+			// Insert new; update changed blobs.
+			foreach ($desired as $uid => $blob) {
+				if (!isset($current[$uid])) {
+					$grant = new FileKeyGrant(NULL);
+					$grant->set('fkg_fil_file_id', $file_id);
+					$grant->set('fkg_usr_user_id', $uid);
+					$grant->set('fkg_wrapped_file_key', $blob);
+					$grant->save();
+					$newly[] = $uid;
+				} elseif ($current[$uid]->get('fkg_wrapped_file_key') !== $blob) {
+					$current[$uid]->set('fkg_wrapped_file_key', $blob);
+					$current[$uid]->save();
+				}
+			}
+
+			return $newly;
+		});
 	}
 }
 

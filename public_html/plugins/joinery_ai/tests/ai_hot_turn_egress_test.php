@@ -340,7 +340,7 @@ $stub_ctx = new class implements ToolContext {
 	public function enqueueProposedAction(array $tool_use): array {
 		throw new LogicException('autonomous surfaces never queue');
 	}
-	public function ownerScopedReads(): bool { return true; }
+	public function ownerScopedReads(?string $model_class = null): bool { return true; }
 	public function sealedReadsAllowed(): bool { return false; }
 	public function shouldContinue(): ?array { return null; }
 	public function shouldAbort(): bool { return false; }

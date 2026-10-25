@@ -121,6 +121,7 @@ function profile_dashboard_logic(array $input): LogicResult {
 
 function profile_dashboard_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Member dashboard summary: user card, counts, pending surveys, and recent lists',
 	];

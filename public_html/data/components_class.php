@@ -21,6 +21,7 @@ class ComponentException extends SystemBaseException {}
 class Component extends SystemBase {
 	public static $prefix = 'com';
 	public static $tablename = 'com_components';
+	public static $access_class = 'content';
 	public static $pkey_column = 'com_component_id';
 
 	/**

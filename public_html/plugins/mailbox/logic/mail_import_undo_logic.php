@@ -14,6 +14,7 @@
  * that went to the wrong mailbox or brought in the wrong decade should be one
  * action to put right, not a mailbox to weed by hand.
  *
+ * @version 1.1 - the reversal runs as rule_checked_write(): loadRun() checked the caller holds the mailbox
  * @version 1.0
  */
 
@@ -44,7 +45,10 @@ function mail_import_undo_logic(array $input): LogicResult {
 	}
 
 	$importer = new MailArchiveImporter($run);
-	$result = $importer->undo();
+	// loadRun() above admitted the caller: an operator, or a holder of the run's mailbox (canTarget).
+	$result = SystemBase::rule_checked_write(function () use ($importer) {
+		return $importer->undo();
+	});
 
 	$run->load();
 	return LogicResult::render(array(
@@ -63,6 +67,7 @@ function mail_import_undo_logic(array $input): LogicResult {
  */
 function mail_import_undo_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Reverse a finished mail archive import, permanently deleting the messages it created.',
 		'requires_session' => true,
 		'mutates'          => true,

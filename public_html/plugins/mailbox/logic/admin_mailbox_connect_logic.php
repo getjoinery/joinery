@@ -62,7 +62,6 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	// Full-mailbox credentials, like every other IMAP surface.
-	$session->check_permission(10);
 	$settings = Globalvars::get_instance();
 
 	$accounts_url = '/plugins/mailbox/admin/admin_mailbox_accounts';

@@ -22,7 +22,7 @@ function vault_row_custody_logic(array $input): LogicResult {
 function vault_row_custody_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => true,
 		'description' => 'Store DEKs re-sealed for rows leaving a client-custody scope (key column, generation and owner only)',
 		'input' => [

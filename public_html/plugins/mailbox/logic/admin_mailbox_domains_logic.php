@@ -129,7 +129,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	// True when any alias on the domain has more than one live grant — today's
@@ -710,7 +709,8 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 			} else if ($action === 'permanent_delete') {
-				$session->check_permission(10);
+				// It destroys the domain's DKIM private key.
+				Access::demand('keys:write', $session);
 				$domain->permanent_delete();
 
 				$session->save_message(new DisplayMessage(

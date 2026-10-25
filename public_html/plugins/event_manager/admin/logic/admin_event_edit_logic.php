@@ -13,7 +13,6 @@ function admin_event_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/locations_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Detect virtual instance editing (parent_event_id + instance_date)
 	$parent_event_id = isset($input['parent_event_id']) ? $input['parent_event_id'] : (isset($input['parent_event_id']) ? $input['parent_event_id'] : null);
@@ -196,7 +195,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 			$event->set($field, $value);
 		}
 
-		if(!$event->get('evt_link') || $_SESSION['permission'] == 10){
+		if(!$event->get('evt_link') || Access::permits(10)){
 			if($input['evt_link']){
 				$event->set('evt_link', $event->create_url($input['evt_link']));
 			}
@@ -225,7 +224,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	$title = $event->get('evt_name');
 	$content = $event->get('evt_description');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($input['cvn_content_version_id']){
+	if(!empty($input['cvn_content_version_id'])){
 		$content_version = new ContentVersion($input['cvn_content_version_id'], TRUE);
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');

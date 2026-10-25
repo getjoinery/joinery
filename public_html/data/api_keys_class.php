@@ -12,15 +12,8 @@ class ApiKeyException extends SystemBaseException {}
 
 class ApiKey extends SystemBase {	public static $prefix = 'apk';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'apk_api_keys';
+	public static $access_class = 'config';
 	public static $pkey_column = 'apk_api_key_id';
 
 	protected static $foreign_key_actions = array(
@@ -72,7 +65,7 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	    'apk_usr_user_id' => array('type'=>'int4'),
 	    'apk_name' => array('type'=>'varchar(32)'),
 	    'apk_public_key' => array('type'=>'varchar(32)'),
-	    'apk_secret_key' => array('type'=>'varchar(64)'),
+	    'apk_secret_key' => array('access_class' => 'keys', 'type'=>'varchar(64)'),
 	    'apk_type' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'machine'),
 	    // 1 read, 2 write only, 3 read + write, 4 read + write + delete (the
 	    // capability gate in ApiAuth::authorize()). Any other number is
@@ -544,17 +537,6 @@ public static function GenerateKey($key) {
 		foreach ($keys as $key) {
 			if ($key->is_session() || $key->is_app_credential()) {
 				$key->soft_delete();
-			}
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
 			}
 		}
 	}

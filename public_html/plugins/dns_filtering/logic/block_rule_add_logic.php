@@ -65,7 +65,7 @@ function block_rule_add_logic(array $input): LogicResult{
 	}
 
 	$device = new SdDevice($block->get('sdb_sdd_device_id'), TRUE);
-	if ($device->get('sdd_usr_user_id') != $session->get_user_id() && $session->get_permission() < 5) {
+	if ($device->get('sdd_usr_user_id') != $session->get_user_id() && !$device->can_write($session)) {
 		return LogicResult::error('Not authorized.');
 	}
 
@@ -100,6 +100,7 @@ function block_rule_add_logic(array $input): LogicResult{
 
 function block_rule_add_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Add a custom domain rule to a block (block_id or device_id, hostname, action 0=block/1=allow, optional hard_block)',
 		'mutates'     => true,
 		'requires_session'        => true,

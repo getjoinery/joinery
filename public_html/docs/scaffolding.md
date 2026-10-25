@@ -28,7 +28,7 @@ adm/admin_product_edit.php              # admin_edit  — admin edit view
 
 Singular names derive from `entity` (`product_edit.php`, the `Product` class); plural names derive from the required `plural` slug (`products_class.php`, `products.php`, the `prd_products` table, the `/products` and `/admin/admin_products` URLs). No pluralization is inferred — `plural` is the single source for every plural-derived name.
 
-No `serve.php` edits are needed: public views resolve by auto-discovery, admin pages by the `/admin/*` catch-all. A route that needs a `serve.php` entry (URL placeholder, feature flag, permission gate) is added by hand.
+No `serve.php` edits are needed: public views resolve by auto-discovery, admin pages by the `/admin/*` catch-all. Each admin view opens with `/** @joinery-admin class={access_class} */`, so the router lets in whoever may read the model ([Permissions](permissions.md#pages)), and the edit logic asks `assert_can_write()` before it saves. A route that needs a `serve.php` entry (URL placeholder, feature flag, permission gate) is added by hand.
 
 When `into:` targets a plugin, every path is rooted at `plugins/<plugin>/` and the entity is registered for the plugin's normal sync.
 
@@ -83,8 +83,8 @@ A JSON file — the same format as every other declarative manifest in the platf
     "excluded_fields": []
   },
 
+  "access_class": "money",
   "owner_field": "prd_usr_user_id",
-  "admin_permission": 5,
   "public_permission": 0,
 
   "delete": {
@@ -176,7 +176,7 @@ Fields with no descriptor type are emitted as a `// TODO:` stub right after the 
 
 ### Authorization
 
-When `owner_field` is **omitted**, or set to the standard `{prefix}_usr_user_id`, the generator emits no custom auth — SystemBase's default owner-or-staff scope applies. Only a **non-standard** owner column produces an `authenticate_read()/write()` pair: a working owner-check against that column, flagged with a `// TODO: confirm this row-scope rule is correct` comment for you to harden (the polymorphic-owner case uses this path). See [docs/api.md](api.md) for the row-scope model.
+`access_class` is required: the model's data class, one of the classes in `permissions.json` (content, money, personal, config, restricted, keys). The generated model declares it as `$access_class`, which gives its rows their read, write and delete levels ([Permissions](permissions.md)). When `owner_field` is **omitted**, or set to the standard `{prefix}_usr_user_id`, nothing else is written: the owner reads and writes their own rows, everyone else needs the class's level. A **non-standard** owner column is declared as `$owner_column`. The generator writes no `authenticate_read()` or `authenticate_write()`; add one only for a real rule of the model's own. See [docs/api.md](api.md) for the row-scope model.
 
 ### AI member read-scope (`ai.owner_field`)
 

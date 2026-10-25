@@ -156,6 +156,6 @@ function boards_members_save_logic_descriptor(): array {
 			'role'      => array('type' => 'string', 'required' => false, 'enum' => array('admin', 'editor', 'viewer'), 'label' => 'Role'),
 			'q'         => array('type' => 'string', 'required' => false, 'max_length' => 100, 'label' => 'Search'),
 		),
-		'auth'             => array('capability' => 'write'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'write'),
 	);
 }

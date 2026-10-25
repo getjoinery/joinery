@@ -19,7 +19,8 @@ function shelf_status_logic(array $input): LogicResult {
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
 	}
-	ShelfBroker::refreshFigure($row);
+	// tenantFor() proved this is the caller's own tenant; its figure is the broker's record.
+	SystemBase::rule_checked_write(function () use ($row) { ShelfBroker::refreshFigure($row); });
 	return LogicResult::render(JoineryServices::statusOf($row) + array(
 		'writable' => ShelfBroker::refusal($row) === '',
 		'refusal'  => ShelfBroker::refusal($row),
@@ -29,9 +30,10 @@ function shelf_status_logic(array $input): LogicResult {
 
 function shelf_status_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'This site\'s standing on the operator\'s backup storage: figure, allowance, paid-through date, state, notice, whether a run would be accepted now, and whether its copies can still be read.',
 		'requires_session' => true,
-		'mutates'          => false,
+		'mutates'          => true,   // it refreshes the tenant's usage figure
 		'input'            => array(),
 	);
 }

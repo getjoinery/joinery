@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_errors_logic.php'));
@@ -7,7 +8,6 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(9); // Admin permission level 9
 $session->set_return();
 
 $page_vars = process_logic(admin_errors_logic(array_merge($_GET, $_POST)));

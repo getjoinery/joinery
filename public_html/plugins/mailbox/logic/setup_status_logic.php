@@ -31,7 +31,7 @@ function setup_status_logic(array $input): LogicResult {
 		return LogicResult::error('Sign in required.');
 	}
 	// Mail setup is operator work — admins only (level 5+).
-	if (intval($session->get_permission()) < 5) {
+	if (!Access::decide(Access::staffLevel(), $session)) {
 		return LogicResult::error('Not authorized.');
 	}
 
@@ -75,7 +75,7 @@ function setup_status_logic_descriptor(): array {
 		// caller's session, which the API otherwise releases as soon as it has
 		// read identity — without this the cache would never survive the request
 		// and every reader load would re-run the DNS lookups.
-		'auth'             => array('session_write' => true),
+		'auth'             => array('min_user_permission' => 0, 'session_write' => true),
 		'input'            => array(
 			'alias_id' => array('type' => 'int', 'required' => true, 'label' => 'Mailbox'),
 			'fresh'    => array('type' => 'string', 'required' => false, 'label' => 'Bypass the cached verdict'),

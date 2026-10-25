@@ -19,7 +19,6 @@ const ADMIN_DOMAINS_LEDGER_LIMIT = 200;
 
 function admin_domains_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_url = '/admin/server_manager/domains';
 	$page_regex = '/\/admin\/server_manager\/domains/';
@@ -44,6 +43,7 @@ function admin_domains_logic(array $input): LogicResult {
 			$message = $row->get('rdm_domain') . ' is marked as pushed. The pipeline confirms it '
 				. 'automatically once the domain actually leaves the account.';
 		} elseif ($action === 'retry') {
+			Access::demand(10, $session);   // the provisioning task then buys the domain
 			// Back to the start of the fulfillment axis. The step timestamps
 			// are left alone: whatever already succeeded stays done.
 			$row->set('rdm_status', RegisteredDomain::STATUS_PENDING);

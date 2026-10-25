@@ -16,6 +16,7 @@
  * authoritatively, where the version is written (FileVersion::save_new_content).
  *
  * @version 1.1 - base_sha256 / base_metadata_sha256 guard a new version (B10)
+ * @version 1.2 - a collaborator's deduped upload into the owner's tree is written under rule_checked_write() behind can_write()
  */
 
 function drive_upload_init_logic(array $input): LogicResult {
@@ -221,7 +222,11 @@ function drive_upload_init_logic(array $input): LogicResult {
 						// otherwise the bytes are pinned for good, still counted
 						// against the owner and reachable by nobody.
 						try {
-							$wrote = FileVersion::save_new_content($target_file, $cand, $user_id, array('base_sha256' => $base));
+							// can_write() above admitted the uploader; the file is the
+							// folder owner's, and pruning old versions destroys rows.
+							$wrote = SystemBase::rule_checked_write(function () use ($target_file, $cand, $user_id, $base) {
+								return FileVersion::save_new_content($target_file, $cand, $user_id, array('base_sha256' => $base));
+							});
 						} catch (FileHeadMovedException $moved) {
 							FileBlob::release($cand->key);
 							return LogicResult::error($moved->getMessage(), $moved->refusal_data());
@@ -243,7 +248,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 						// version's, or every computer gets the edit stamped with
 						// the old time.
 						$target_file->set('fil_content_modified_time', $modified_time);
-						$target_file->save();
+						SystemBase::rule_checked_write(function () use ($target_file) { $target_file->save(); });
 						DriveUsage::recompute($owner_id);
 						FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
 						DriveHelper::forget_sync_meta($target_file->key);
@@ -282,8 +287,12 @@ function drive_upload_init_logic(array $input): LogicResult {
 						// file here and never reaches drive_upload_complete. Soak run
 						// 229 found it: folder trashed at 11:12:21.471366, this file
 						// created at .490591, live under it for good.
+						// can_write() on the folder admitted the uploader; the new
+						// file is the folder owner's (single-owner tree).
 						$file = DriveHelper::place_into($folder_id, function () use ($cand, $name, $mime, $owner_id, $restrictions) {
-							return File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+							return SystemBase::rule_checked_write(function () use ($cand, $name, $mime, $owner_id, $restrictions) {
+								return File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+							});
 						});
 					} catch (DriveDestinationTrashedException $e) {
 						return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
@@ -442,6 +451,7 @@ function _drive_parse_modified_time($raw) {
 
 function drive_upload_init_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Begin a Drive upload: returns an upload token + chunk size, or dedup-completes immediately.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',

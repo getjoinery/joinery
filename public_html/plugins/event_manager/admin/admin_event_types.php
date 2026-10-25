@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 require_once(PathHelper::getIncludePath('plugins/event_manager/admin/logic/admin_event_types_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -24,7 +25,7 @@ array(
 
 $headers = array('Event Type Name');
 $altlinks = array();
-if($session->get_permission() > 7){
+if(Access::allows(EventType::access_level('write'), (int)$session->get_permission())){
 	$altlinks['New Event Type'] = '/plugins/event_manager/admin/admin_event_type_edit';
 }
 $box_vars = array(

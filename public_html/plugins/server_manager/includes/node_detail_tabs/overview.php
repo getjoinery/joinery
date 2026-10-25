@@ -424,7 +424,7 @@
 			if (JobCommandBuilder::has_primitive($node, 'host_converge')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did.', function(){ document.getElementById('host_converge_form').submit(); }); return false;">Run Host Housekeeping</a></li>
 			<?php endif; ?>
-			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key') && $node->agent_moved_away() === null):
+			<?php if (Access::permits(10, $session) && !$node->get('mgn_agent_public_key') && $node->agent_moved_away() === null):
 				$overview_pending_joins = class_exists('AgentJoinRequest') ? count(AgentJoinRequest::pending()) : 0; ?>
 				<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=api_keys"><?php
 					echo $overview_pending_joins > 0

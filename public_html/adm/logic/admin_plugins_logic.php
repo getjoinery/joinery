@@ -31,7 +31,6 @@ function admin_plugins_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10); // System admin only
 	$session->set_return();
 
 	$message = '';
@@ -75,6 +74,8 @@ function admin_plugins_logic(array $input): LogicResult {
 	// upload. A bare ?show_upload=1 used to fall through to "Invalid plugin
 	// name" because any input at all was treated as an action.
 	if ($action !== '' || isset($input['unsigned'])) {
+		// Every action here installs, activates, repairs or removes code.
+		Access::demand(10, $session);
 
 		// Handle upload action separately as it doesn't require plugin_name
 		if ($action === 'upload') {

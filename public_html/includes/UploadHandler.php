@@ -13,6 +13,8 @@
 /**
  * Joinery changes to the upstream class:
  *
+ * @version 2.2 - get_full_url() asks LibraryFunctions::isSecure(), which believes X-Forwarded-Proto
+ *                only from a proxy we know
  * @version 2.1 - refuses an upload past the site's disk allowance on a shared host (DiskAllowance)
  * @version 2.0 - Decodes nothing. The EXIF-orientation pass, the GD image cache
  *                and the '' image version are gone: the stored original is the
@@ -186,9 +188,8 @@ class UploadHandler
     }
 
     protected function get_full_url() {
-        $https = !empty($_SERVER['HTTPS']) && strcasecmp($_SERVER['HTTPS'], 'on') === 0 ||
-            !empty($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
-            strcasecmp($_SERVER['HTTP_X_FORWARDED_PROTO'], 'https') === 0;
+        // A proxy's X-Forwarded-Proto counts only from a proxy we know (isSecure()).
+        $https = LibraryFunctions::isSecure();
         return
             ($https ? 'https://' : 'http://').
             (!empty($_SERVER['REMOTE_USER']) ? $_SERVER['REMOTE_USER'].'@' : '').

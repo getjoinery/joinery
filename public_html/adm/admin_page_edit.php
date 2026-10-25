@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -8,7 +9,6 @@
 	require_once(PathHelper::getIncludePath('/data/files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance(); 
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
@@ -30,12 +30,12 @@
 			$page->set($field, $_POST[$field]);
 		}
 
-		if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
+		if(!$page->get('pag_link') || Access::permits(10, $session)){
 			if($_POST['pag_link']){
 				$page->set('pag_link', $page->create_url($_POST['pag_link']));
 			}
 			else{
-				$page->set('pag_link', $page->create_url($event->get('pag_title')));
+				$page->set('pag_link', $page->create_url($page->get('pag_title')));
 			}
 		}
 		
@@ -123,7 +123,7 @@
 		'options' => $optionvals
 	]);
 
-	if(!$page->get('pag_link') || $_SESSION['permission'] == 10){
+	if(!$page->get('pag_link') || Access::permits(10, $session)){
 		$formwriter->textinput('pag_link', 'Link (no spaces)', [
 			'prepend' => $settings->get_setting('webDir').'/page/',
 			'validation' => ['required' => true]

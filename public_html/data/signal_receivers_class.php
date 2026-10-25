@@ -21,6 +21,7 @@ class SignalReceiverException extends SystemBaseException {}
 class SignalReceiver extends SystemBase {
 	public static $prefix = 'sgr';
 	public static $tablename = 'sgr_signal_receivers';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sgr_signal_receiver_id';
 
 	const KIND_WEBHOOK = 'webhook';

@@ -117,6 +117,7 @@ function direct_status_logic(array $input): LogicResult {
 
 function direct_status_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Whether a recipient address can be reached over Joinery Direct from the given From mailbox (per-domain capability only)',
 		'input' => array(

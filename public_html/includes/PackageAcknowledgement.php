@@ -70,7 +70,7 @@ class PackageAcknowledgement {
 		}
 		$uid = (int)$session->get_user_id();
 		$user = $uid > 0 ? new User($uid, TRUE) : null;
-		if (!$user || !$user->key || (int)$user->get('usr_permission') < 10) {
+		if (!$user || !$user->key || !Access::allows(10, (int)$user->get('usr_permission'))) {
 			throw new Exception('Only a superadmin can acknowledge an unsigned package.');
 		}
 		if (!$session->user_has_second_factor($user)) {
@@ -150,7 +150,7 @@ class PackageAcknowledgement {
 		}
 
 		$user = new User($user_id, TRUE);
-		if (!$user->key || (int)$user->get('usr_permission') < 10 || $user->get('usr_delete_time')
+		if (!$user->key || !Access::allows(10, (int)$user->get('usr_permission')) || $user->get('usr_delete_time')
 			|| $user->get('usr_is_disabled') || $user->get('usr_is_admin_disabled')) {
 			return 'the acknowledging user is not a live superadmin';
 		}

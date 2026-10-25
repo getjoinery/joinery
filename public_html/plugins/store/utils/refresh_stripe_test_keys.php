@@ -26,7 +26,7 @@ $session = SessionControl::get_instance();
 
 // Check permission level 10 if running from web
 if (php_sapi_name() !== 'cli') {
-    if ($session->get_permission() < 10) {
+    if (!Access::decide(10, $session)) {
         echo "ERROR: This script requires permission level 10 (superadmin).\n";
         exit(1);
     }

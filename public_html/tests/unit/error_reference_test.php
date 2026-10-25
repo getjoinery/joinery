@@ -207,6 +207,8 @@ check(ErrorStatus::of(new SystemDisplayableError('x')) === 400
 check(ErrorStatus::of(new SystemAuthenticationError('x')) === 403
 		&& ErrorStatus::of(new AuthorizationException('x')) === 403,
 	'a refused permission answers 403');
+check(ErrorStatus::of(new SystemBaseNoKeyError('x')) === 404 && !ErrorStatus::isExpected(new SystemBaseNoKeyError('x')),
+	'a record asked for with no key answers 404, and is still recorded');
 check(ErrorStatus::of(new RuntimeException('x')) === 500
 		&& ErrorStatus::of(new SystemDisplayablePermanentError('x')) === 500,
 	'a fault answers 500');

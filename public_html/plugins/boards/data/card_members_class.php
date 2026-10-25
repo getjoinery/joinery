@@ -13,6 +13,7 @@ class BoardCardMember extends SystemBase {
 
 	public static $prefix = 'bcm';
 	public static $tablename = 'bcm_card_members';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'bcm_card_member_id';
 
 	public static $field_specifications = array(

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 /**
  * Admin Help Editor - Markdown editor for the files behind the help viewer
  * and the public /documentation page. Origin deployment only; the logic

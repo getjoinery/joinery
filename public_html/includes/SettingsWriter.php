@@ -73,7 +73,7 @@ class SettingsWriter {
 	 */
 	public static function maySetSecrets(): bool {
 		if (PHP_SAPI === 'cli') return true;
-		return (int)SessionControl::get_instance()->get_permission() >= self::SECRET_WRITE_PERMISSION;
+		return Access::permits(self::SECRET_WRITE_PERMISSION);
 	}
 
 	/**

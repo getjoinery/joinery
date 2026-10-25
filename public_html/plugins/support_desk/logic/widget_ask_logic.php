@@ -29,6 +29,6 @@ function widget_ask_logic_descriptor(): array {
 			'message'   => array('type' => 'text', 'required' => true, 'max_length' => 8000, 'label' => 'Question'),
 			'thread_id' => array('type' => 'int', 'required' => false, 'label' => 'Conversation'),
 		),
-		'auth'             => array('allow_guest' => true, 'session_write' => true, 'requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'allow_guest' => true, 'session_write' => true, 'requires_browser_session' => true),
 	);
 }

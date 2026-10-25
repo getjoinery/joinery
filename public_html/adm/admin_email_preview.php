@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * admin_email_preview — raw HTML preview of an email, for the iframe preview on
  * the email admin pages. Document load (not a JSON action): echoes the email
@@ -14,9 +15,8 @@ require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 header('Content-type: text/html');
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 
-$email = new Email($_GET['eml_email_id'], TRUE);
+$email = new Email($_GET['eml_email_id'] ?? null, TRUE);
 
 if ($email->get('eml_status') == Email::EMAIL_SENT) {
 	echo $email->get('eml_message_html');

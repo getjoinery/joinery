@@ -42,6 +42,7 @@ class InboundMailboxSearchIndexException extends SystemBaseException {}
 class InboundMailboxSearchIndex extends SystemBase {
 	public static $prefix = 'imi';
 	public static $tablename = 'imi_inbound_mailbox_search_index';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'imi_inbound_mailbox_search_index_id';
 
 	public static $api_readable = false;
@@ -78,7 +79,7 @@ class InboundMailboxSearchIndex extends SystemBase {
 		// morphed into its Sent row keeps its id) — folded on the next cycle, then cleared.
 		'imi_refold_ids'       => array('type'=>'text', 'is_nullable'=>true),   // JSON int array
 		'imi_fil_file_id'      => array('type'=>'int8', 'is_nullable'=>true),
-		'imi_sealed_key'       => array('type'=>'text', 'is_nullable'=>true),
+		'imi_sealed_key'       => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		// The mark the persisted blob covers. Null before any recorded persist —
 		// a legacy blob was only ever written after a complete fold, when it and
 		// imi_fts_high_water agreed by construction.

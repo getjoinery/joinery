@@ -30,20 +30,8 @@ class VisitorStatsRollupException extends SystemBaseException {}
 class VisitorStatsRollup extends SystemBase {
 	public static $prefix = 'vsr';
 	public static $tablename = 'vsr_visitor_stats_rollup';
+	public static $access_class = 'content';
 	public static $pkey_column = 'vsr_visitor_stats_rollup_id';
-
-	// Internal aggregate, admin-only. Mirror VisitorEvent: the REST surface is
-	// readable/writable only at permission >= 5, never user-scoped content.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	public static $field_specifications = array(
 		'vsr_visitor_stats_rollup_id' => array('type' => 'int8', 'serial' => true, 'is_primary_key' => true, 'is_nullable' => false),
@@ -76,18 +64,8 @@ class VisitorDailyUniquesException extends SystemBaseException {}
 class VisitorDailyUniques extends SystemBase {
 	public static $prefix = 'vsu';
 	public static $tablename = 'vsu_visitor_daily_uniques';
+	public static $access_class = 'content';
 	public static $pkey_column = 'vsu_visitor_daily_uniques_id';
-
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	public static $field_specifications = array(
 		'vsu_visitor_daily_uniques_id' => array('type' => 'int8', 'serial' => true, 'is_primary_key' => true, 'is_nullable' => false),

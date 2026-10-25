@@ -57,6 +57,7 @@ class MailboxContactException extends SystemBaseException {}
 class MailboxContact extends SystemBase {
 	public static $prefix = 'imc';
 	public static $tablename = 'imc_mailbox_contacts';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'imc_mailbox_contact_id';
 
 	// How the row got here. Both are deliberate acts by the user — there is no
@@ -103,7 +104,7 @@ class MailboxContact extends SystemBase {
 		'imc_source'             => array('type'=>'varchar(10)', 'default'=>'manual'), // import|manual
 		// Sealed Vault columns (mirror InboundEmailMessage).
 		'imc_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'imc_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
+		'imc_sealed_key'         => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'imc_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'imc_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
 		// A mailbox level change stamps a row whose conversion failed, so the

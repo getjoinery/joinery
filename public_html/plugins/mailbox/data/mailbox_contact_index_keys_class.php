@@ -29,6 +29,7 @@ class MailboxContactIndexKeyException extends SystemBaseException {}
 class MailboxContactIndexKey extends SystemBase {
 	public static $prefix = 'mck';
 	public static $tablename = 'mck_mailbox_contact_index_keys';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'mck_mailbox_contact_index_key_id';
 
 	public static $api_readable = false;
@@ -44,7 +45,7 @@ class MailboxContactIndexKey extends SystemBase {
 		// The four Sealed Vault columns (docs/sealed_vault.md § Sealed-field model
 		// hook). mck_sealed_key is the sealed index key itself.
 		'mck_content_sealed'        => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		'mck_sealed_key'            => array('type'=>'text', 'is_nullable'=>true),
+		'mck_sealed_key'            => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 		'mck_sealed_owner_user_id'  => array('type'=>'int8', 'is_nullable'=>true),
 		'mck_key_generation'        => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 		'mck_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),

@@ -4,6 +4,7 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [maintenance_scripts/install_tools/host_housekeeping.sh]
  */
 /**
  * Which protocol generated URLs use, especially where there is no request.
@@ -21,6 +22,8 @@
  *
  * Run: php tests/run.php db --filter=absolute_url_protocol
  *
+ * @version 1.2 - forwarding headers (X-Forwarded-Proto and kin) are believed only from a proxy we know:
+ *                ignored from an untrusted peer, honoured from a trusted proxy or loopback
  * @version 1.1 - asks the pure resolver (LibraryFunctions::resolve_scheme) instead of flipping the live
  *                site's protocol_mode, which raced every other HTTP-touching suite in a parallel run
  * @version 1.0
@@ -74,6 +77,69 @@ $live = LibraryFunctions::get_absolute_url('/x');
 $want = LibraryFunctions::resolve_scheme((string)$settings->get_setting('protocol_mode'),
 	(string)$settings->get_setting('protocol_observed_scheme', true, true), null);
 check(strpos($live, $want . '://') === 0, 'get_absolute_url() headless agrees with the resolver for this site\'s settings', $live);
+
+section('Forwarding headers are believed only from a proxy we know');
+
+// isSecure() is what observe_protocol() records, so a header any client can
+// send must not flip it. Apache says whether the connection came from a proxy
+// it trusts (joinery-remoteip.conf: JOINERY_FORWARDER_KNOWN on every request,
+// JOINERY_FORWARDER_TRUSTED when mod_remoteip walked X-Forwarded-For from a
+// trusted proxy); here those variables are set by hand.
+$saved_server = $_SERVER;
+$as_request = function (array $vars) use ($saved_server) {
+	$_SERVER = $saved_server;
+	foreach (array('HTTPS', 'SERVER_PORT', 'REQUEST_SCHEME', 'REMOTE_ADDR', 'HTTP_X_FORWARDED_PROTO',
+			'HTTP_X_FORWARDED_SSL', 'HTTP_X_FORWARDED_PORT', 'HTTP_FORWARDED', 'JOINERY_FORWARDER_KNOWN',
+			'JOINERY_FORWARDER_TRUSTED', 'REDIRECT_JOINERY_FORWARDER_KNOWN', 'REDIRECT_JOINERY_FORWARDER_TRUSTED') as $k) {
+		unset($_SERVER[$k]);
+	}
+	$_SERVER = array_merge($_SERVER, array('SERVER_PORT' => '80', 'REQUEST_SCHEME' => 'http'), $vars);
+	return LibraryFunctions::isSecure();
+};
+$known = array('JOINERY_FORWARDER_KNOWN' => '1');
+$public4 = '198.51.100.23';
+$public6 = '2001:db8:5::23';
+
+check($as_request($known + array('REMOTE_ADDR' => $public4)) === false, 'a plain http request is http');
+check($as_request($known + array('REMOTE_ADDR' => $public4, 'HTTP_X_FORWARDED_PROTO' => 'https')) === false,
+	'X-Forwarded-Proto from an untrusted IPv4 peer is ignored');
+check($as_request($known + array('REMOTE_ADDR' => $public6, 'HTTP_X_FORWARDED_PROTO' => 'https')) === false,
+	'X-Forwarded-Proto from an untrusted IPv6 peer is ignored');
+check($as_request($known + array('REMOTE_ADDR' => $public4, 'HTTP_X_FORWARDED_SSL' => 'on')) === false
+	&& $as_request($known + array('REMOTE_ADDR' => $public4, 'HTTP_X_FORWARDED_PORT' => '443')) === false
+	&& $as_request($known + array('REMOTE_ADDR' => $public4, 'HTTP_FORWARDED' => 'for=1.2.3.4;proto=https')) === false,
+	'so are X-Forwarded-Ssl, X-Forwarded-Port and Forwarded proto=');
+check($as_request($known + array('REMOTE_ADDR' => $public4, 'HTTP_X_FORWARDED_PROTO' => 'https', 'HTTP_X_FORWARDED_FOR' => '127.0.0.1')) === false,
+	'a forged X-Forwarded-For naming loopback does not make the peer loopback');
+
+check($as_request($known + array('REMOTE_ADDR' => $public4, 'JOINERY_FORWARDER_TRUSTED' => '1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === true,
+	'from a proxy Apache trusts (mod_remoteip walked its chain) X-Forwarded-Proto is honoured');
+check($as_request(array('REMOTE_ADDR' => $public6, 'REDIRECT_JOINERY_FORWARDER_KNOWN' => '1', 'REDIRECT_JOINERY_FORWARDER_TRUSTED' => '1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === true,
+	'and after an internal redirect (REDIRECT_-prefixed), with an IPv6 client');
+check($as_request(array('REMOTE_ADDR' => $public6, 'REDIRECT_JOINERY_FORWARDER_KNOWN' => '1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === false,
+	'the REDIRECT_ marker alone still refuses an untrusted peer');
+check($as_request($known + array('REMOTE_ADDR' => '127.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === true
+	&& $as_request($known + array('REMOTE_ADDR' => '::1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === true
+	&& $as_request($known + array('REMOTE_ADDR' => '::ffff:127.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'https')) === true,
+	'a loopback peer (a gateway on this machine), IPv4, IPv6 and IPv4-mapped, is honoured');
+$edge = SessionControl::cloudflare_edge_ranges();
+if ($edge) {
+	$edge_ip = explode('/', $edge[0])[0];
+	check($as_request($known + array('REMOTE_ADDR' => $edge_ip, 'HTTP_X_FORWARDED_PROTO' => 'https')) === true,
+		'a Cloudflare edge still in REMOTE_ADDR (mod_remoteip not loaded) is honoured', $edge_ip);
+}
+check($as_request(array('REMOTE_ADDR' => $public4, 'HTTP_X_FORWARDED_PROTO' => 'https')) === true,
+	'an Apache configuration that predates the variables (no KNOWN marker) believes the header as before');
+check($as_request($known + array('REMOTE_ADDR' => $public4, 'HTTPS' => 'on')) === true
+	&& $as_request($known + array('REMOTE_ADDR' => $public4, 'SERVER_PORT' => '443')) === true,
+	'what the server itself knows (HTTPS, port 443) is believed from anyone');
+$_SERVER = $saved_server;
+
+// The other half: the configuration host housekeeping writes sets both variables.
+$hk = (string)@file_get_contents(PathHelper::getBasePath() . '/../maintenance_scripts/install_tools/host_housekeeping.sh');
+check(strpos($hk, 'SetEnvIfExpr "true" JOINERY_FORWARDER_KNOWN=1') !== false
+	&& strpos($hk, 'SetEnvIfExpr "%{CONN_REMOTE_ADDR} != %{REMOTE_ADDR}" JOINERY_FORWARDER_TRUSTED=1') !== false,
+	'joinery-remoteip.conf (host_housekeeping.sh) sets JOINERY_FORWARDER_KNOWN and JOINERY_FORWARDER_TRUSTED');
 
 section('Observation');
 

@@ -82,6 +82,7 @@ interface FileStreamingDecryptor {
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fil_file_id';
 
 	// AI auto-discovery (read)
@@ -315,7 +316,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // matches the vault generation the key is wrapped to on a sealed one, so
 	    // the rotation sweep can select exactly the old generation.
 	    'fil_content_sealed' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
-	    'fil_sealed_key' => array('type'=>'text', 'is_nullable'=>true),
+	    'fil_sealed_key' => array('access_class' => 'keys', 'type'=>'text', 'is_nullable'=>true),
 	    'fil_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
 	    'fil_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
 	    // Plaintext byte count for a sealed file, recorded at seal time. The blob
@@ -473,7 +474,9 @@ public static function get_by_name($name, $search_deleted = false) {
 			foreach ($restrictions as $col => $val) {
 				$file->set($col, $val);
 			}
-			$file->save();
+			// The caller's Drive access decided the upload and its owner (the
+			// folder's, when it is shared); the row is the owner's.
+			SystemBase::rule_checked_write(function () use ($file) { $file->save(); });
 			$file->load();
 		} catch (Throwable $e) {
 			FileBlob::release($blob->key);
@@ -1871,6 +1874,8 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	function permanent_delete($debug=false){
+		// Asked before the photo links go, which the parent's delete would ask too late.
+		$this->guard_raw_write('permanent_delete');
 		// Clean up all entity_photos rows referencing this file
 		$dbconnector = DbConnector::get_instance();
 		$dblink = $dbconnector->get_db_link();
@@ -2045,7 +2050,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			if (!$session->get_permission()) {
 				return false;
 			}
-			if ($session->get_permission() < $this->get('fil_min_permission')){
+			if (!Access::permits((int)$this->get('fil_min_permission'), $session)){
 				return false;
 			}
 	

@@ -21,6 +21,7 @@ class SandboxInstallException extends SystemBaseException {}
 class SandboxInstall extends SystemBase {
 	public static $prefix = 'sbi';
 	public static $tablename = 'sbi_sandbox_installs';
+	public static $access_class = 'config';
 	public static $pkey_column = 'sbi_sandbox_install_id';
 
 	/** The sealed-secret locator declared in settings.json. */

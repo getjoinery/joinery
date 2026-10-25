@@ -53,7 +53,6 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));

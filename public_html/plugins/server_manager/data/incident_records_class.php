@@ -44,6 +44,7 @@ class IncidentRecordException extends SystemBaseException {}
 class IncidentRecord extends SystemBase {
 	public static $prefix = 'inc';
 	public static $tablename = 'inc_incident_records';
+	public static $access_class = 'config';
 	public static $pkey_column = 'inc_incident_record_id';
 
 	public static $json_vars = array('inc_body', 'inc_detail');

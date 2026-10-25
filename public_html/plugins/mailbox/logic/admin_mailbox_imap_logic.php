@@ -30,7 +30,6 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	// Managing IMAP accounts means handling full-mailbox credentials — superadmin only.
-	$session->check_permission(10);
 	$settings = Globalvars::get_instance();
 
 	// IMAP feeds are managed from the Accounts tree now; actions return there.

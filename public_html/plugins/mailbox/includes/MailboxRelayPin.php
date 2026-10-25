@@ -19,6 +19,7 @@
  * check (not list a mailbox, not answer) or delete a pin, which the browser
  * then makes again on first use; the Fortress card says so.
  *
+ * @version 1.1 - setPin() writes the pin as rule_checked_write(): grantedAlias() checked the caller holds the mailbox
  * @version 1.0
  */
 
@@ -132,7 +133,8 @@ class MailboxRelayPin {
 	 * @throws MailboxRelayPinException
 	 */
 	public static function setPin(int $user_id, int $alias_id, string $relay_identity_public_key, string $mac): void {
-		$alias = self::grantedAlias($user_id, $alias_id);
+		// The same mailbox the pin is read for: the caller's own sealed mailbox.
+		$alias = self::ownAlias($user_id, $alias_id);
 		if ($alias === null) {
 			throw new MailboxRelayPinException('That mailbox is not one of yours.');
 		}
@@ -141,10 +143,13 @@ class MailboxRelayPin {
 		if ($key === false || strlen($key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES || $m === false || strlen($m) !== 32) {
 			throw new MailboxRelayPinException('That is not a relay pin.');
 		}
-		InboundEmailAlias::updateColumns(intval($alias->key), array('iea_relay_identity_pin' => json_encode(array(
-			'relay_identity_public_key' => $relay_identity_public_key,
-			'mac'                       => $mac,
-		))));
+		// ownAlias() above: the caller is this sealed mailbox's one owner.
+		SystemBase::rule_checked_write(function () use ($alias, $relay_identity_public_key, $mac) {
+			InboundEmailAlias::updateColumns(intval($alias->key), array('iea_relay_identity_pin' => json_encode(array(
+				'relay_identity_public_key' => $relay_identity_public_key,
+				'mac'                       => $mac,
+			))));
+		});
 	}
 
 	/** The stored pin, or null. */

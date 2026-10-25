@@ -150,6 +150,7 @@ function resolver_snapshot_logic_descriptor(): array {
 		'requires_session' => true,
 		'mutates'          => false,
 		'auth'             => array(
+			'min_user_permission' => 0,
 			'capability'           => 'read',
 			'requires_machine_key' => true,
 			'requires_scoped_key'  => true,

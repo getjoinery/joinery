@@ -24,7 +24,6 @@
       "title": "Server Account",
       "url": "/profile/server_manager/connect_cloud",
       "icon": "cloud",
-      "permission": 0,
       "order": 95
     }
   ],
@@ -33,7 +32,6 @@
       "slug": "server-manager",
       "title": "Server Manager",
       "icon": "server",
-      "permission": 10,
       "order": 14,
       "items": [
         {

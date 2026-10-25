@@ -34,6 +34,7 @@ function forward_confirm_logic_descriptor(): array {
 		'description' => 'Confirm that mail may be forwarded to the address a forwarding confirmation link was sent to.',
 		'mutates'     => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability'       => null,
 			'requires_session' => false,
 			'allow_guest'      => true,

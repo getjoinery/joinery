@@ -13,6 +13,7 @@ class BoardCardWatcher extends SystemBase {
 
 	public static $prefix = 'bcw';
 	public static $tablename = 'bcw_card_watchers';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'bcw_card_watcher_id';
 
 	public static $field_specifications = array(

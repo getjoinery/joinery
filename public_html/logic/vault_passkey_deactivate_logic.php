@@ -68,7 +68,7 @@ function vault_passkey_deactivate_logic(array $input): LogicResult {
 function vault_passkey_deactivate_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Remove a passkey\'s vault wrapping so it can no longer unlock the vault; requires a recent step-up',
 		'input' => [
 			'credential_id' => ['type' => 'int', 'required' => true, 'label' => 'Passkey ID'],

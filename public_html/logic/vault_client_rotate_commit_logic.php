@@ -26,7 +26,7 @@ function vault_client_rotate_commit_logic(array $input): LogicResult {
 function vault_client_rotate_commit_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => true,
 		'description' => 'Commit a pending client-custody key rotation: retire the old wrappings, make the pending key current, clear the scope from linked devices',
 		'input' => [

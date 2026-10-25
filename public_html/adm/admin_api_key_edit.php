@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=keys */
 /**
  * Admin: add or edit a machine API key. See adm/logic/admin_api_key_edit_logic.php.
  *

@@ -106,6 +106,7 @@ class CustomerCloudProvisionException extends SystemBaseException {}
 class CustomerCloudProvision extends SystemBase {
 	public static $prefix = 'cvp';
 	public static $tablename = 'cvp_customer_cloud_provisions';
+	public static $access_class = 'config';
 	public static $pkey_column = 'cvp_customer_cloud_provision_id';
 
 	public static $json_vars = array('cvp_mail_records');
@@ -175,7 +176,7 @@ class CustomerCloudProvision extends SystemBase {
 		// in cvp_root_pass_vault_sealed).
 		'cvp_root_pass_sealed'       => array('type'=>'text'),
 		// Public keys (one authorized_keys line each) the retire step puts on root. Empty: root login is turned off.
-		'cvp_root_ssh_keys'          => array('type'=>'text'),
+		'cvp_root_ssh_keys'          => array('access_class' => 'keys', 'type'=>'text'),
 		// The install password's lifecycle. held: the machine accepts it and
 		// this row holds it (from the moment it is sealed, through the install,
 		// until every agent the install put on the machine has been admitted).

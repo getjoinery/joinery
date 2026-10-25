@@ -85,7 +85,7 @@ function messenger_page_logic(array $input): LogicResult {
 		'member_can_send' => $site_ready && MessengerFederation::addressFor($user_id) !== null,
 		'admin_notice'    => '',
 	);
-	if ($session->get_permission() >= 10) {
+	if (Access::permits(10, $session)) {
 		if (!MessengerFederation::available()) {
 			$federation['admin_notice'] = 'not_set_up';
 		} elseif (!$site_ready) {

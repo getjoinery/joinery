@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
@@ -174,7 +175,7 @@ $formwriter->textinput('pro_max_cart_count', 'Max Number that can be added to ca
 
 $formwriter->textinput('pro_expires', 'Purchase expires after (days, 0 for never)');
 
-if(!$product->get('pro_link') || $_SESSION['permission'] == 10){
+if(!$product->get('pro_link') || Access::permits(10, $session)){
 	$formwriter->textinput('pro_link', 'Link (optional): '.$settings->get_setting('webDir').'/product/', [
 		'validation' => ['required' => false, 'maxlength' => 255]
 	]);
@@ -270,7 +271,7 @@ $page->end_box();
 // Product Photos card — only for saved products
 if ($product->key) {
 	$product_photos = $product->get_photos();
-	$photo_editable = !$product->get('pro_delete_time') && $_SESSION['permission'] > 4;
+	$photo_editable = !$product->get('pro_delete_time') && $product->can_write(SessionControl::get_instance());
 	PhotoHelper::render_photo_card('grid', 'product', $product->key, $product_photos, [
 		'set_primary_url' => '/plugins/store/admin/admin_product_edit?pro_product_id=' . $product->key,
 		'card_title' => 'Product Photos',

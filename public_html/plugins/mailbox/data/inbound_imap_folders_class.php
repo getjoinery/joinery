@@ -17,6 +17,7 @@
  *
  * See specs/two_way_imap_sync.md (§5, §6) and ImapSyncer.
  *
+ * @version 1.5 - access_owner_is(): a feed folder is its feed's mailbox's grant holders'
  * @version 1.4 - ensureLabel() binds the feed's mailbox's label and replaces a binding to a gone or
  *   foreign one; clearLabelBindingsForAccount() for an account pointed at another mailbox
  * @version 1.3
@@ -35,7 +36,24 @@ class InboundImapFolderException extends SystemBaseException {}
 class InboundImapFolder extends SystemBase {
 	public static $prefix = 'iif';
 	public static $tablename = 'iif_inbound_imap_folders';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'iif_inbound_imap_folder_id';
+
+	/**
+	 * The owner rule (spec declared_permissions 3.2): the holders of a grant on
+	 * the mailbox the folder's feed delivers to (a member creating a label on a
+	 * mailbox with a feed binds a folder for it).
+	 */
+	public function access_owner_is($user_id): bool {
+		$account_id = (int)$this->access_stored('iif_iia_inbound_imap_account_id');
+		if ((int)$user_id <= 0 || $account_id <= 0) {
+			return false;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT iia_iea_inbound_email_alias_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id = ?');
+		$q->execute(array($account_id));
+		return MailboxViewer::holdsMailbox((int)$user_id, (int)$q->fetchColumn());
+	}
 
 	// Special-use roles (mapped from SPECIAL-USE attributes / provider name maps).
 	const ROLE_INBOX   = 'inbox';
@@ -88,13 +106,6 @@ class InboundImapFolder extends SystemBase {
 		'iif_create_time'                 => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iif_update_time'                 => array('type'=>'timestamp(6)'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	function prepare() {
 		$this->set('iif_update_time', gmdate('Y-m-d H:i:s'));

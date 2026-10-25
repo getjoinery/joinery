@@ -377,7 +377,8 @@ PHP. No File column drives placement — whether a blob may be `cloud` at all is
 
 `fil_private` is a distinct restriction mode from the other four: it isn't a
 threshold or membership check, it's an **owner-or-admin** rule — only the
-file's owner (`fil_usr_user_id`) or an admin (permission ≥ 5) can view it.
+file's owner (`fil_usr_user_id`) or someone at File's read level (personal, 6;
+[Permissions](permissions.md)) can view it.
 `File::is_viewable()` and `SystemBase::authenticate_read()`/
 `authenticate_write()` (the record-access gate) share one `is_owner_or_admin()`
 helper, so the rule for opening a record and the rule for streaming its file

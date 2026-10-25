@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.57 - the channel's writes run as the server's own (server_initiated_write): no person is behind them
  * @version 1.56 - root_access: the node reports its owner's emergency root access answer (on|off), stored in
  *                 mgn_agent_root_access only when it is one and differs; absent for an agent before 1.94.0
  *                 (specs/implemented/beta_break_glass_root_access.md 5.1)
@@ -398,32 +399,37 @@ class AgentChannelEndpoint {
 
 		$body = self::read_body();
 
-		switch ($endpoint) {
-			case 'join':
-				self::handle_join($body);
-				break;
-			case 'join_status':
-				self::handle_join_status($body);
-				break;
-			case 'claim':
-				self::handle_claim($body);
-				break;
-			case 'result':
-				self::handle_result($body);
-				break;
-			case 'leave':
-				self::handle_leave($body);
-				break;
-			case 'quiet':
-				self::handle_quiet($body);
-				break;
-			case 'artifact':
-				self::handle_artifact($body);
-				break;
-			case 'job_status':
-				self::handle_job_status($body);
-				break;
-		}
+		// No person is behind the channel: a node's signature (or, for join,
+		// the request it files for an admin to approve) is the authority, so
+		// its writes are the server's own (spec declared_permissions 3.2).
+		SystemBase::server_initiated_write(function () use ($endpoint, $body) {
+			switch ($endpoint) {
+				case 'join':
+					self::handle_join($body);
+					break;
+				case 'join_status':
+					self::handle_join_status($body);
+					break;
+				case 'claim':
+					self::handle_claim($body);
+					break;
+				case 'result':
+					self::handle_result($body);
+					break;
+				case 'leave':
+					self::handle_leave($body);
+					break;
+				case 'quiet':
+					self::handle_quiet($body);
+					break;
+				case 'artifact':
+					self::handle_artifact($body);
+					break;
+				case 'job_status':
+					self::handle_job_status($body);
+					break;
+			}
+		});
 		exit;
 	}
 

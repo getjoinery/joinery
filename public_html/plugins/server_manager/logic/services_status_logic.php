@@ -30,6 +30,7 @@ function services_status_logic(array $input): LogicResult {
 
 function services_status_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'This site\'s standing with each of the operator\'s services it holds: figure, allowance, paid-through date, state, notice, and the link to its own account with the provider.',
 		'requires_session' => true,
 		'mutates'          => false,

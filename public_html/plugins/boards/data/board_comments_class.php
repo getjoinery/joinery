@@ -13,6 +13,7 @@ class BoardComment extends SystemBase {
 
 	public static $prefix = 'bco';
 	public static $tablename = 'bco_comments';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bco_comment_id';
 
 	const SOURCE_WEB = 'web';

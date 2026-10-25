@@ -27,7 +27,7 @@ function entry_delete_logic(array $input): LogicResult {
 function entry_delete_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Trash one encrypted password entry (soft delete)',
 		'input' => [
 			'id' => ['type' => 'int', 'required' => true, 'label' => 'Entry ID'],

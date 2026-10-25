@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 /**
  * Inbound Email - Setup & Verification (mailbox-first)
  *

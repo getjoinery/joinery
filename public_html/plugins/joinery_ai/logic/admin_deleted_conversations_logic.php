@@ -15,7 +15,6 @@ function admin_joinery_ai_deleted_conversations_logic(array $input): LogicResult
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/conversations_class.php'));
 
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
     $session->set_return();
 
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'

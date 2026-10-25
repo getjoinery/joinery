@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/store/admin/logic/admin_order_delete_logic.php'));

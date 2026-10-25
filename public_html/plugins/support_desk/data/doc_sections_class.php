@@ -22,6 +22,7 @@
 class SupportDocSection extends SystemBase {
 	public static $prefix = 'sds';
 	public static $tablename = 'sds_doc_sections';
+	public static $access_class = 'content';
 	public static $pkey_column = 'sds_doc_section_id';
 
 	/** The release tag of rows that belong to no release. */
@@ -57,11 +58,6 @@ class SupportDocSection extends SystemBase {
 		array('columns' => array("to_tsvector('english', sds_search_text)"), 'method' => 'gin'),
 	);
 
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('The support index is written by the support desk.');
-		}
-	}
 }
 
 class MultiSupportDocSection extends SystemMultiBase {

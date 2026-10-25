@@ -13,15 +13,8 @@ class WaitingListException extends SystemBaseException {}
 
 class WaitingList extends SystemBase {	public static $prefix = 'ewl';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'ewl_waiting_lists';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ewl_waiting_list_id';
 
 	protected static $foreign_key_actions = array(
@@ -73,6 +66,7 @@ public static function CheckIfExists($user_id, $event_id) {
 	}	
 	
 	function remove(){
+		$this->guard_raw_write('soft_delete');
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		
@@ -86,13 +80,6 @@ public static function CheckIfExists($user_id, $event_id) {
 
 	// Unique constraints now handled automatically by SystemBase
 	
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
-
 }
 
 class MultiWaitingList extends SystemMultiBase {

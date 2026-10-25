@@ -5,6 +5,7 @@ require_once(__DIR__ . '/ComponentBase.php');
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
  *
+ * @version 1.5.0 - validate() refuses a menu entry's 'permission': who sees an entry is who may open its page
  * @version 1.4.0 - getAvailablePlugins() skips a sandboxed plugin's folder (SandboxPlugins): it has no
  *   plugin.json and nothing in it is loaded natively. isActiveOfEitherKind() for the few questions about any plugin
  * @version 1.3.0 - validate() reports malformed or colliding "fileSources" declarations
@@ -208,8 +209,8 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: url must not contain .php extension";
             }
 
-            if (isset($item['permission']) && (!is_int($item['permission']) || $item['permission'] < 1 || $item['permission'] > 10)) {
-                $errors[] = "{$prefix}: permission must be an integer 1-10";
+            if (array_key_exists('permission', $item)) {
+                $errors[] = "{$prefix}: a menu entry has no 'permission': it shows to whoever may open its page";
             }
 
             if (isset($item['parent']) && isset($item['items'])) {
@@ -289,8 +290,8 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: url must not contain .php extension";
             }
 
-            if (isset($item['permission']) && (!is_int($item['permission']) || $item['permission'] < 0 || $item['permission'] > 10)) {
-                $errors[] = "{$prefix}: permission must be an integer 0-10";
+            if (array_key_exists('permission', $item)) {
+                $errors[] = "{$prefix}: a menu entry has no 'permission': it shows to whoever may open its page";
             }
 
             if (isset($item['visibility']) && !in_array($item['visibility'], ['in', 'out', 'both'], true)) {

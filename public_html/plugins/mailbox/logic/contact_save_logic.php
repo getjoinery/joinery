@@ -43,6 +43,7 @@ function contact_save_logic(array $input): LogicResult {
 
 function contact_save_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Change one of the caller\'s contacts: its name, its address, or both',
 		'input' => [

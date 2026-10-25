@@ -60,6 +60,7 @@ function message_timeline_logic(array $input): LogicResult {
 
 function message_timeline_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'The timeline of everything recorded about one mail message',
 		'input' => [

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - Managed Domains
  * URL: /admin/server_manager/domains

@@ -31,7 +31,6 @@
             "url": "/profile/boards",
             "icon": "tasks",
             "visibility": "in",
-            "permission": 0,
             "order": 57,
             "settingActivate": "boards_active"
         }
@@ -42,7 +41,6 @@
             "title": "Boards",
             "url": "/plugins/boards/admin/admin_boards",
             "icon": "tasks",
-            "permission": 10,
             "order": 17,
             "settingActivate": "boards_active"
         }

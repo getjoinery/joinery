@@ -9,7 +9,6 @@ function admin_user_add_logic(array $input): LogicResult {
 
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	if (LibraryFunctions::isFormSubmission()){
 

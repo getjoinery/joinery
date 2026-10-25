@@ -77,7 +77,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if (!$terms_already_accepted) {
 			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		}
-		$user->save();
+		// No one is signed in: the reset code proved above is the authority.
+		SystemBase::rule_checked_write(function () use ($user) { $user->save(); });
 
 		// A password reset re-issues the SESSION, never the vault
 		// (specs/mailbox_security_levels.md § Password reset): it is a credential
@@ -160,6 +161,7 @@ function password_reset_2_logic_form($formwriter, $user = null, $input = []) {
 
 function password_reset_2_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Set a new password using a one-time reset code.',
 		'requires_session' => false,
 		'mutates'          => true,

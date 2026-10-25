@@ -54,7 +54,7 @@ function moved_site_check_logic_descriptor(): array {
 		'description' => 'Show, and when stale ask again, whether the old machine of a switch-over\'s domain has left it and reaches the new server.',
 		'mutates'     => true,
 		'requires_session' => true,
-		'auth'        => ['min_user_permission' => 10],
+		'auth'        => ['min_user_permission' => 7],
 		'input'       => [
 			'node_id' => ['type' => 'int', 'required' => true, 'label' => 'Node ID'],
 			'force'   => ['type' => 'bool', 'required' => false, 'label' => 'Check now even if the last answer is recent'],

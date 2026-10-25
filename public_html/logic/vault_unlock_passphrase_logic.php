@@ -48,7 +48,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 function vault_unlock_passphrase_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Unlock the vault with the passphrase: the account half of its KEK, derived in the browser (the phrase itself is never sent)',
 		'input' => [
 			'passphrase_kek' => ['type' => 'password', 'required' => true, 'label' => 'Account half of the passphrase KEK (base64url, 32 bytes)'],

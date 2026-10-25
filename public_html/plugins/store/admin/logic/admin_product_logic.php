@@ -11,13 +11,12 @@ function admin_product_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/product_requirement_instances_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
 	$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
 
-	$product = new Product($input['pro_product_id'], TRUE);
+	$product = new Product($input['pro_product_id'] ?? null, TRUE);
 	$orders = new MultiOrderItem(array('product_id' => $product->key));
 
 	// Handle actions. Each is the Actions menu's POST button; opening the page is a GET.
@@ -36,8 +35,6 @@ function admin_product_logic(array $input): LogicResult {
 	}
 
 	if($action == 'permanent_delete'){
-		// The menu offers it only at 10; the handler holds the same line.
-		$session->check_permission(10);
 		if($orders->count_all()){
 			return LogicResult::error('You cannot delete a product with orders.');
 		}
@@ -49,15 +46,15 @@ function admin_product_logic(array $input): LogicResult {
 
 	// Build dropdown actions
 	$options['altlinks'] = array();
-	if($_SESSION['permission'] > 7){
+	if($product->can_write($session)){
 		$options['altlinks'] += array('Edit Product'=> '/plugins/store/admin/admin_product_edit?p='.$product->key);
 	}
 
 	if(!$orders->count_all()){
-		if($_SESSION['permission'] >= 5){
+		if($product->can_delete($session)){
 			$options['altlinks'] += array('Soft Delete'=> array('post' => '/plugins/store/admin/admin_product', 'hidden' => array('action' => 'delete', 'pro_product_id' => $product->key)));
 		}
-		if($_SESSION['permission'] == 10){
+		if($product->can_delete($session, true)){
 			$options['altlinks'] += array('Permanent Delete'=> array('post' => '/plugins/store/admin/admin_product', 'hidden' => array('action' => 'permanent_delete', 'pro_product_id' => $product->key)));
 		}
 	}

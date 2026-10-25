@@ -26,6 +26,7 @@
  * claimed host is used for exactly one thing, the callback, and that goes
  * through SafeHttpClient, which refuses private and internal addresses.
  *
+ * @version 1.4.0 - the report and its image save past the model check: the sender has no account here, and the rate buckets admitted it
  * @version 1.3.0 - a new automatic report of a muted fault is filed muted, with no email
  * @version 1.2.0 - FILE_SOURCE: the bug_report_image origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
@@ -120,7 +121,10 @@ class BugReportIntake {
 		$image_note = $image_problem;
 		if ($image_bytes !== null && $image_bytes !== '') {
 			try {
-				$file = self::storeImage($image_bytes);
+				// No one here is the sender (a sessionless site): the rate buckets
+				// (report_submit_logic, unverifiedFrom above) and the bundle's
+				// checks admitted it.
+				$file = SystemBase::rule_checked_write(function () use ($image_bytes) { return self::storeImage($image_bytes); });
 			} catch (BugReportRefusal $e) {
 				$image_note = $e->getMessage();
 			}
@@ -152,7 +156,9 @@ class BugReportIntake {
 		$report->set('rbr_automatic', $automatic);
 		$report->set('rbr_occurrences', $automatic ? $occurrences : 1);
 		$report->set('rbr_last_seen_time', gmdate('Y-m-d H:i:s'));
-		$report->save();
+		// An owner-less row a sessionless site sends: admitted by the rate
+		// buckets (report_submit_logic, unverifiedFrom above) and the bundle's checks.
+		SystemBase::rule_checked_write(function () use ($report) { $report->save(); });
 
 		if (!$muted) {
 			self::notify($report);

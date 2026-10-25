@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_groups_logic.php'));
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

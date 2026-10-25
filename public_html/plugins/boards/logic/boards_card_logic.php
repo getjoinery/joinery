@@ -45,7 +45,7 @@ function boards_card_logic_descriptor(): array {
 			'card_id'      => array('type' => 'int', 'required' => true, 'label' => 'Card'),
 			'move_targets' => array('type' => 'bool', 'required' => false, 'label' => 'Include move targets'),
 		),
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'ai_agent'         => 'auto',
 	);
 }

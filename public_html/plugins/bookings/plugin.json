@@ -16,7 +16,6 @@
             "url": "/profile/bookings/my_bookings",
             "icon": "calendar",
             "visibility": "in",
-            "permission": 0,
             "order": 78,
             "settingActivate": "bookings_active"
         }
@@ -27,7 +26,6 @@
             "title": "Bookings",
             "icon": "clock",
             "order": 6,
-            "permission": 8,
             "settingActivate": "bookings_active",
             "items": [
                 {

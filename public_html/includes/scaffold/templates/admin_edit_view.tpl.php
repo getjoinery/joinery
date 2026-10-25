@@ -1,5 +1,5 @@
 <?php extract($ctx); $O = ScaffoldGenerator::open(); $C = ScaffoldGenerator::close();
-?><?= $O ?>
+?><?= $O . "\n" ?>/** @joinery-admin class=<?= $access_class ?> */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('<?= $base ?>adm/logic/admin_<?= $entity_snake ?>_edit_logic.php'));

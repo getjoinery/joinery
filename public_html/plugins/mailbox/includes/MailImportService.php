@@ -48,8 +48,6 @@ class MailImportService {
 	 *  whoever pays for the space has to be able to see. */
 	const FILE_SOURCE = 'mail_import_archive';
 
-	/** Operators can import into any mailbox; members only into their own. */
-	const OPERATOR_PERMISSION = 5;
 
 	/** Runs shown in the member's history. Older ones stay in the table. */
 	const HISTORY_LIMIT = 25;
@@ -66,7 +64,7 @@ class MailImportService {
 	}
 
 	public function isOperator(): bool {
-		return $this->viewer->getPermission() >= self::OPERATOR_PERMISSION;
+		return Access::allows(Access::staffLevel(), (int)$this->viewer->getPermission());
 	}
 
 	/** May this caller import into, and see runs for, this mailbox? */

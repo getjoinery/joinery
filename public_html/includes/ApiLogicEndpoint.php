@@ -30,7 +30,8 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.5
+ * @version 1.8.6
+ * @changelog 1.8.6 - the idempotency claim and outcome are written as the server's own (server_initiated_write)
  * @changelog 1.8.5 - executeAction() takes the acting level: the action face simulated its session with an
  *                undefined variable (null), so a browser session ran at its stored level
  * @changelog 1.8.4 - The level floor and the simulated session use the acting level (actingPermission()):
@@ -456,7 +457,11 @@ class ApiLogicEndpoint {
 		// Idempotency, phase 2: the request is valid, so claim the key now
 		// (insert the in-flight row). Returns the row to finalize after the
 		// action runs, or null when no key is in play.
-		$idem_record = $idem_ctx ? self::idempotencyClaim($idem_ctx, $action_label, $user_id) : null;
+		// The idempotency rows are the API layer's own bookkeeping, not the
+		// caller's data (spec declared_permissions 3.2).
+		$idem_record = $idem_ctx ? SystemBase::server_initiated_write(function () use ($idem_ctx, $action_label, $user_id) {
+			return self::idempotencyClaim($idem_ctx, $action_label, $user_id);
+		}) : null;
 
 		// auth.session_write: this action mutates $_SESSION state (e.g. the
 		// cart) and runs on the browser credential, which released the session
@@ -533,7 +538,9 @@ class ApiLogicEndpoint {
 		// Store the outcome (success or 422 alike) so a retry with the same
 		// Idempotency-Key replays instead of re-executing.
 		if ($idem_record !== null) {
-			self::idempotencyFinalize($idem_record, $translated['status_code'], $response_json);
+			SystemBase::server_initiated_write(function () use ($idem_record, $translated, $response_json) {
+				self::idempotencyFinalize($idem_record, $translated['status_code'], $response_json);
+			});
 		}
 
 		header("Content-Type: application/json");

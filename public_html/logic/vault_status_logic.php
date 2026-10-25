@@ -93,7 +93,7 @@ function vault_status_logic(array $input): LogicResult {
 function vault_status_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Report the current user\'s vault setup/unlock status and enrolled unlockers (no secret material), with the root vault and every held content vault (opaque keyring views: public key, salt, wrappings), whether the codes are a browser-made set, and whether a passphrase is allowed',
 	];
 }

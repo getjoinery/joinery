@@ -253,8 +253,13 @@ function change_tier_logic(array $input): LogicResult {
                     $new_order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $updated_subscription->current_period_end));
                     $new_order_item->save();
 
-                    // Update user's tier
-                    $tier_result = TierBilling::handleProductPurchase($user, $product, $new_order_item, $order);
+                    // Update user's tier. The tier group membership and its change
+                    // log have no owner; the right is this request's own: the
+                    // subscription is the signed-in member's (loaded by their user id
+                    // above) and the payment processor accepted the change.
+                    $tier_result = SystemBase::rule_checked_write(function () use ($user, $product, $new_order_item, $order) {
+                        return TierBilling::handleProductPurchase($user, $product, $new_order_item, $order);
+                    });
 
                     // Send upgrade email
                     try {
@@ -421,7 +426,10 @@ function change_tier_logic(array $input): LogicResult {
                     $new_order_item->save();
 
                     // Update user's tier (use 'subscription_change' reason to allow downgrades)
-                    $tier_result = $new_tier->addUser($user_id, 'subscription_change', 'order', $order->key, null);
+                    // The member's own subscription, changed at the processor above.
+                    $tier_result = SystemBase::rule_checked_write(function () use ($new_tier, $user_id, $order) {
+                        return $new_tier->addUser($user_id, 'subscription_change', 'order', $order->key, null);
+                    });
 
                     // Send downgrade email
                     try {
@@ -465,13 +473,16 @@ function change_tier_logic(array $input): LogicResult {
                             $current_subscription->set('odi_subscription_status', 'canceled');
                             $current_subscription->save();
 
-                            SubscriptionTier::removeUserFromAllTiers($user_id);
+                            // The member's own subscription, cancelled at the processor above.
+                            SystemBase::rule_checked_write(function () use ($user_id, $current_tier_level, $current_subscription) {
+                                SubscriptionTier::removeUserFromAllTiers($user_id);
 
-                            ChangeTracking::logChange(
-                                'subscription_tier', null, $user_id, 'tier_removed',
-                                $current_tier_level, null, 'subscription_cancelled',
-                                'order_item', $current_subscription->key, $user_id
-                            );
+                                ChangeTracking::logChange(
+                                    'subscription_tier', null, $user_id, 'tier_removed',
+                                    $current_tier_level, null, 'subscription_cancelled',
+                                    'order_item', $current_subscription->key, $user_id
+                                );
+                            });
 
                             // Send cancellation email
                             try {
@@ -502,13 +513,16 @@ function change_tier_logic(array $input): LogicResult {
                             $current_subscription->set('odi_subscription_status', 'canceled');
                             $current_subscription->save();
 
-                            SubscriptionTier::removeUserFromAllTiers($user_id);
+                            // The member's own subscription, cancelled at the processor above.
+                            SystemBase::rule_checked_write(function () use ($user_id, $current_tier_level, $current_subscription) {
+                                SubscriptionTier::removeUserFromAllTiers($user_id);
 
-                            ChangeTracking::logChange(
-                                'subscription_tier', null, $user_id, 'tier_removed',
-                                $current_tier_level, null, 'subscription_cancelled',
-                                'order_item', $current_subscription->key, $user_id
-                            );
+                                ChangeTracking::logChange(
+                                    'subscription_tier', null, $user_id, 'tier_removed',
+                                    $current_tier_level, null, 'subscription_cancelled',
+                                    'order_item', $current_subscription->key, $user_id
+                                );
+                            });
 
                             // Send cancellation email
                             try {
@@ -760,6 +774,7 @@ function change_tier_logic(array $input): LogicResult {
 
 function change_tier_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Change the current user\'s subscription tier. action=upgrade or downgrade requires product_id; cancel and reactivate do not.',
 		'requires_session' => true,
 		'mutates'          => true,

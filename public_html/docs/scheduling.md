@@ -44,4 +44,4 @@ Two universal HTML5 + vanilla-JS component types in `views/components/`, rendere
 
 ## Data layer
 
-`sch_schedules`, `scw_schedule_windows`, `sco_schedule_overrides`, and `cal_entries` are core data-model classes. `Schedule` and `CalendarEntry` carry a polymorphic owner — `(subject_type, subject_id)` rather than a `usr_users` FK — so each defines a hand-written owner-or-staff `authenticate_read/write()` keyed on `subject_id`.
+`sch_schedules`, `scw_schedule_windows`, `sco_schedule_overrides`, and `cal_entries` are core data-model classes. `Schedule` and `CalendarEntry` carry a polymorphic owner — `(subject_type, subject_id)` rather than a `usr_users` FK — so each overrides `access_owner_is()` to read the subject: the owner is the user a user-typed subject names, and everyone else needs the model's class level ([Permissions](permissions.md)).

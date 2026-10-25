@@ -148,12 +148,13 @@ class InboundHandlerRegistry {
 	/**
 	 * Create the handler's alias on a domain, or re-enable it. Idempotent. Never moves
 	 * or deletes an alias: a domain a plugin stops using keeps its alias, so an address
-	 * already given out there keeps working.
+	 * already given out there keeps working. $reenable false leaves a switched-off
+	 * alias off (a member's use is not the operator's say to turn it back on).
 	 *
 	 * @param InboundEmailDomain|int $domain
 	 * @return array{alias:?InboundEmailAlias, reason:?string} reason is set when refused
 	 */
-	public static function ensureAlias(string $key, $domain): array {
+	public static function ensureAlias(string $key, $domain, bool $reenable = true): array {
 		if (!self::isDeclared($key)) {
 			return array('alias' => null, 'reason' => 'No active plugin declares the "' . $key . '" handler.');
 		}
@@ -179,6 +180,9 @@ class InboundHandlerRegistry {
 				return array('alias' => null, 'reason' => 'That alias is set to a sealing level; a plugin cannot read it.');
 			}
 			if (!$existing->get('iea_is_enabled')) {
+				if (!$reenable) {
+					return array('alias' => null, 'reason' => 'The address ' . $key . '@' . $domain->get('ied_domain') . ' is switched off.');
+				}
 				$existing->set('iea_is_enabled', true);
 				$existing->save();
 			}

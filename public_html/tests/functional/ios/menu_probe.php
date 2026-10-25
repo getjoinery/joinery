@@ -38,7 +38,6 @@ if ($cmd === 'add') {
 			'title'      => 'Phase3 Probe',
 			'url'        => '/profile/mailbox/mailbox',
 			'order'      => 999,
-			'permission' => 0,
 			'icon'       => 'envelope',
 		))),
 	);

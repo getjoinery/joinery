@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Server Manager - a machine written down by hand
  * URL: /admin/server_manager/machine_edit[?fhm_fleet_hand_machine_id=N][?ref=oca:3:12345&name=label][?ref=node:15&name=label]
@@ -16,7 +17,6 @@
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $id = (int)($_GET['fhm_fleet_hand_machine_id'] ?? 0);
 $machine = $id > 0 ? new FleetHandMachine($id, TRUE) : new FleetHandMachine(NULL);

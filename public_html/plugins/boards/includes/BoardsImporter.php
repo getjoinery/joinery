@@ -30,6 +30,7 @@
  *
  * NOT IMPORTED: add-on data, custom fields and automation rules.
  *
+ * @version 1.0.1 - the importer's first admin row is written under rule_checked_write()
  * @version 1.0.0
  */
 
@@ -248,7 +249,9 @@ class BoardsImporter {
 			$admin->set('bbm_bbd_board_id', $board_id);
 			$admin->set('bbm_usr_user_id', $importer_id);
 			$admin->set('bbm_role', BoardMember::ROLE_ADMIN);
-			$admin->save();
+			// The importer owns the board just made (bbd_usr_user_id_owner);
+			// this row is what makes them its admin, so no role admits it yet.
+			SystemBase::rule_checked_write(function () use ($admin) { $admin->save(); });
 			Boards::forgetRoles();
 
 			// The people who came across can do their own work on the board.

@@ -22,6 +22,8 @@ class AipRecipeItemLog extends SystemBase {
 
     public static $prefix = 'aip';
     public static $tablename = 'aip_recipe_item_log';
+    public static $access_class = 'restricted';
+    public static $write_permission = 10;   // written by the pipeline runner; a manual edit is 10
     public static $pkey_column = 'aip_recipe_item_log_id';
 
     protected static $foreign_key_actions = array(
@@ -42,13 +44,6 @@ class AipRecipeItemLog extends SystemBase {
         'aip_status'         => array('type'=>'varchar(10)'),   // done | error
         'aip_processed_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
     );
-
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Joinery AI item log rows are written by the pipeline runner; manual edits require permission level 10.');
-        }
-    }
 
 }
 

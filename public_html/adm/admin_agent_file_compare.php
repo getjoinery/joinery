@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 /**
  * Agent File Compare — side-by-side read-only view of an active row's
  * content next to its pending upgrade candidate's content. Two
@@ -11,7 +12,6 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/agent_files_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $active_id = isset($_GET['active_id']) ? (int)$_GET['active_id'] : 0;
 $page = new AdminPage();

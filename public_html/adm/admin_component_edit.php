@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 /**
  * Admin Component Edit
  *
@@ -17,7 +18,6 @@ require_once(PathHelper::getIncludePath('data/pages_class.php'));
 require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5); // Admin level
 $session->set_return();
 $settings = Globalvars::get_instance();
 
@@ -57,6 +57,8 @@ if (isset($_GET['cvn_content_version_id']) && $_GET['cvn_content_version_id'] &&
 		$content_version->get_local('cvn_create_time') .
 		'. Save to restore this version.';
 }
+
+$component_type = null;
 
 // Process form submission (skip if loading a version to prevent accidental overwrite)
 if ($_POST && !$loading_version) {

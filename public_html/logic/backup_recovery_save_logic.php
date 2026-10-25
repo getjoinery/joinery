@@ -26,7 +26,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function backup_recovery_save_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	if ((int)$session->get_permission() < 10) {
+	if (!Access::decide(10, $session)) {
 		return LogicResult::error('Only a superadmin can set the backup recovery key.');
 	}
 
@@ -44,6 +44,7 @@ function backup_recovery_save_logic(array $input): LogicResult {
 
 function backup_recovery_save_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Store the backup recovery public key (unproven) and return its possession challenge.',
 		'mutates'     => true,
 		'requires_session' => true,

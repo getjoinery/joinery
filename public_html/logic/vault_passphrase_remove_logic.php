@@ -74,7 +74,7 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 function vault_passphrase_remove_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Remove the vault passphrase (and the root vault\'s half of it); requires a recent step-up',
 	];
 }

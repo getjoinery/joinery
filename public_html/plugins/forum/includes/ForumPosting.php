@@ -13,7 +13,8 @@
  * moderators, takes no part in the counters, and sends no alerts until it is
  * approved. A held opening post holds its topic the same way.
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - topic and counter writes run under rule_checked_write() behind the checks here
  */
 
 class ForumPosting {
@@ -43,7 +44,9 @@ class ForumPosting {
 			$topic->set('ftp_title', $title);
 			$topic->set('ftp_slug', Forum::slugify($title));
 			$topic->set('ftp_is_approved', !$held);
-			$topic->save();
+			// The category's post rule admitted this member (mayPost above); a
+			// topic's own write level is a moderator's.
+			SystemBase::rule_checked_write(function () use ($topic) { $topic->save(); });
 
 			$post = self::insertPost($topic, $user_id, $body, true, null, $held);
 			ForumUploads::claimAll($attachment_ids, $user_id, $post);
@@ -127,6 +130,7 @@ class ForumPosting {
 			$post->set('fpo_edited_time', 'now()');
 			$post->assert_can_write($session);
 			$post->save();
+			// The edit's history rows (ChangeTracking records them as the server's).
 			if ($old_body !== $body) {
 				ChangeTracking::logChange(ForumPost::ENTITY_TYPE, (int)$post->key, (int)$post->get('fpo_usr_user_id'),
 					'fpo_body', $old_body, $body, 'edited', null, null, $user_id);
@@ -413,13 +417,20 @@ class ForumPosting {
 	/**
 	 * The topic row's own columns, written by the server on a member's behalf
 	 * (a reply moving its counters, an author removing their topic) — never
-	 * through a member-facing save of the topic.
+	 * through a member-facing save of the topic. Every caller has checked its
+	 * right first (the author, the lock, a moderator), so the write runs past
+	 * the topic's moderator-only level.
 	 */
 	private static function updateTopicColumns(int $topic_id, array $columns): void {
-		ForumTopic::updateColumns($topic_id, $columns);
+		SystemBase::rule_checked_write(function () use ($topic_id, $columns) {
+			ForumTopic::updateColumns($topic_id, $columns);
+		});
 	}
 
+	/** A post's columns, behind the same checks (author or a category moderator). */
 	private static function updatePostColumns(int $post_id, array $columns): void {
-		ForumPost::updateColumns($post_id, $columns);
+		SystemBase::rule_checked_write(function () use ($post_id, $columns) {
+			ForumPost::updateColumns($post_id, $columns);
+		});
 	}
 }

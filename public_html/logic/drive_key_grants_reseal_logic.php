@@ -80,7 +80,7 @@ function drive_key_grants_reseal_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => true,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input'            => array(
 			'mode'     => array('type' => 'string', 'required' => false, 'enum' => array('list', 'write'), 'label' => 'list or write'),
 			'after_id' => array('type' => 'int', 'required' => false, 'label' => 'Cursor: last grant id'),

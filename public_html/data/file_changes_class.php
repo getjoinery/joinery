@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class FileChange extends SystemBase {
 	public static $prefix = 'fch';
 	public static $tablename = 'fch_file_changes';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'fch_file_change_id';
 
 	// Owner is a real user reference; when the user is deleted their change rows
@@ -99,7 +100,9 @@ class FileChange extends SystemBase {
 			if ($audience_id !== null) {
 				$change->set('fch_audience_usr_user_id', (int)$audience_id);
 			}
-			$change->save();
+			// The feed records a mutation its caller already made; the row is the
+			// file owner's, whoever acted.
+			SystemBase::rule_checked_write(function () use ($change) { $change->save(); });
 			return $change;
 		} catch (Exception $e) {
 			error_log('FileChange::record failed (' . $kind . ' ' . $entity_type . ':' . $entity_id . '): ' . $e->getMessage());

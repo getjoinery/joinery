@@ -40,6 +40,7 @@ function fleet_enroll_logic(array $input): LogicResult {
 
 function fleet_enroll_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Enroll this deployment for a hosted relay slot on the shared fleet. Returns the slot coordinates (MX hostname, the shard\'s identity pin and address; on a tunnel shard its WireGuard endpoint, tunnel address and pull account).',
 		'requires_session' => true,
 		'mutates'          => true,

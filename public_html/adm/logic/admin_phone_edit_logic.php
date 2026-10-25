@@ -6,7 +6,6 @@ function admin_phone_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	// Load or create phone number first
 	if (isset($input['edit_primary_key_value'])) {

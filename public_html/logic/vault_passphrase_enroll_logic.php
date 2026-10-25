@@ -107,7 +107,7 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 function vault_passphrase_enroll_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'description' => 'Replace the vault passphrase, for an account whose passkeys cannot hold a key; requires a recent step-up and a fresh unlocker (unlocker: {credential} from vault_unlock_options, {passphrase_kek} or {code_kek}) in the same request. Only the account half of the new phrase\'s KEK is sent',
 		'input' => [
 			'passphrase_kek' => ['type' => 'password', 'required' => true, 'label' => 'Account half of the new passphrase KEK (base64url, 32 bytes)'],

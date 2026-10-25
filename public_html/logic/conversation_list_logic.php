@@ -63,6 +63,7 @@ function conversation_list_logic(array $input): LogicResult {
 
 function conversation_list_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Paginated conversation inbox for the signed-in owner',
 		'input' => [

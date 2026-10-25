@@ -44,7 +44,7 @@ function vault_deferred_work_logic_descriptor() {
 		// The unlock window is keyed to the browser session, so an API key can
 		// never carry one — state the boundary rather than let it fail
 		// incidentally. Same contract every vault endpoint declares.
-		'auth' => ['requires_browser_session' => true],
+		'auth' => ['min_user_permission' => 0, 'requires_browser_session' => true],
 		'description' => 'Run one slice of deferred work that requires the caller\'s vault to be unlocked',
 		'input' => [],
 	];

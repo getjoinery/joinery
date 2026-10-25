@@ -90,6 +90,11 @@ function backup_actions_logic(array $input): LogicResult {
 		return LogicResult::render(['success' => false, 'message' => 'Node not found']);
 	}
 
+	// Deleting a backup and restoring from one are destructive (Q8): 10.
+	if (in_array($action, array('delete_file', 'restore_objects'), true) && !Access::decide(10)) {
+		return LogicResult::render(['success' => false, 'message' => 'Deleting or restoring a backup needs level 10 (' . Access::levelName(10) . ').']);
+	}
+
 	if ($action === 'refresh_list') {
 		// A paired node reads its own backup directory as a primitive; an
 		// unpaired one still gets steps. createFromBuild stores either.
@@ -407,12 +412,13 @@ function backup_actions_logic(array $input): LogicResult {
 
 function backup_actions_logic_descriptor(): array {
 	return [
-		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / download_file / stage_chain / verify_backup / restore_objects / list_status) for a managed node.',
+		'description' => 'Backup browser actions (delete_file / upload_file / download_file / stage_chain / verify_backup / restore_objects) for a managed node; reading the listing is backup_list.',
 		'mutates'     => true,
 		'requires_session'        => true,
-		'auth'        => ['min_user_permission' => 10],
+		// 8 to act on a node's backups; delete_file and restore_objects need 10 (Q8, in the logic).
+		'auth'        => ['min_user_permission' => 8],
 		'input'       => [
-			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'verify_backup', 'restore_objects', 'list_status'], 'label' => 'Action'],
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['delete_file', 'upload_file', 'download_file', 'stage_chain', 'verify_backup', 'restore_objects'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
 			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
 			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],

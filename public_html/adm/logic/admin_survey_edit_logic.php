@@ -10,7 +10,6 @@ require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 function admin_survey_edit_logic(array $input): LogicResult {
     // Permission check
     $session = SessionControl::get_instance();
-    $session->check_permission(10);
 
     // Load or create survey
     if (isset($input['svy_survey_id']) || isset($input['edit_primary_key_value'])) {

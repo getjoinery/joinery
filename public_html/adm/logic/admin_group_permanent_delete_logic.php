@@ -15,7 +15,6 @@ function admin_group_permanent_delete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	$page_vars = array();
 

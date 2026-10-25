@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -35,7 +36,7 @@
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'undelete', 'url_url_id' => $url->key));
 	}
 
-	if($_SESSION['permission'] >= 8) {
+	if($url->can_delete($session, true)) {
 		$options['altlinks'] += array('Permanent Delete' => array('post' => '/admin/admin_url', 'hidden' => array('action' => 'permanent_delete', 'url_url_id' => $url->key)));
 	}
 

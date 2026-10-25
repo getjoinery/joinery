@@ -44,6 +44,7 @@ class DataRootEscrowException extends SystemBaseException {}
 class DataRootEscrow extends SystemBase {
 	public static $prefix = 'dre';
 	public static $tablename = 'dre_data_root_escrows';
+	public static $access_class = 'config';
 	public static $pkey_column = 'dre_data_root_escrow_id';
 
 	const SECRET_LOCATOR = 'dre_data_root_escrows.dre_secret';
@@ -74,7 +75,7 @@ class DataRootEscrow extends SystemBase {
 	public static $field_specifications = array(
 		'dre_data_root_escrow_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		// The machine's unlock identity: its Ed25519 public key, base64.
-		'dre_identity_key'    => array('type'=>'varchar(64)', 'is_nullable'=>false, 'unique'=>true),
+		'dre_identity_key'    => array('access_class' => 'keys', 'type'=>'varchar(64)', 'is_nullable'=>false, 'unique'=>true),
 		'dre_status'          => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending'),
 		// The node it is, where it is one of this plane's (proved by its node
 		// key at enrolment, or seen in its host report). Null for a machine

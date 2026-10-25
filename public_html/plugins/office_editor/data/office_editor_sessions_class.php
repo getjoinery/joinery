@@ -30,6 +30,7 @@ class OfficeEditorSessionException extends SystemBaseException {}
 class OfficeEditorSession extends SystemBase {
 	public static $prefix = 'oes';
 	public static $tablename = 'oes_office_editor_sessions';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'oes_office_editor_session_id';
 
 	protected static $foreign_key_actions = array(

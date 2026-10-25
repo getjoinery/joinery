@@ -35,7 +35,7 @@ function drive_shares_logic(array $input): LogicResult {
 		return LogicResult::error('Item not found.');
 	}
 	// Sharing is managed by the owner (or staff).
-	if (!DriveHelper::owns($entity_type, $entity, $user_id) && (int)$session->get_permission() < 5) {
+	if (!DriveHelper::owns($entity_type, $entity, $user_id) && !$entity->can_write($session)) {
 		return LogicResult::error('Only the owner can manage sharing.');
 	}
 
@@ -80,7 +80,7 @@ function drive_shares_logic_descriptor(): array {
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
-		'auth'             => array('capability' => 'read'),
+		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),

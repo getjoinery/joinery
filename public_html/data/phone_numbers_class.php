@@ -13,15 +13,8 @@ class DisplayablePhoneNumberException extends PhoneNumberException implements Di
 
 class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 
-	// REST API per-record read scope: only the owner (or staff, permission >= 5) may read this row via the API.
-	function authenticate_read($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-			}
-		}
-	}
 	public static $tablename = 'phn_phone_numbers';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'phn_phone_number_id';
 
 	protected static $foreign_key_actions = [
@@ -307,18 +300,6 @@ public static $phone_carriers = array(
 			}
 		};
 		$use_transaction ? DbConnector::transaction($set_default) : $set_default();
-	}
-
-
-	function authenticate_write($data) {
-		if ($this->get(static::$prefix.'_usr_user_id') != $data['current_user_id']) {
-			// If the user's ID doesn't match, we have to make
-			// sure they have admin access, otherwise denied.
-			if ($data['current_user_permission'] < 5) {
-				throw new SystemAuthenticationError(
-					'Current user does not have permission to edit this entry in '. static::$tablename);
-			}
-		}
 	}
 
 }

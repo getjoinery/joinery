@@ -19,7 +19,8 @@
  * leave, and every change writes a system message so the group can see its own
  * history.
  *
- * @version 1.1.0
+ * @version 1.1.1
+ * @changelog 1.1.1 - creating a group and setting its picture run under rule_checked_write()
  * @changelog 1.1.0 - create takes sealed_exits_only (Nothing leaves unsealed)
  */
 
@@ -132,11 +133,16 @@ function messenger_group_create(int $user_id, array $input): LogicResult {
 		// Created plain, then raised: protecting a conversation is a ceremony
 		// (mint a key, hand it to everyone, seal the history), and starting a
 		// group at Private is that same ceremony over an empty history.
-		$conversation = Conversation::create_conversation(
-			array_merge(array($user_id), $member_ids),
-			$name !== '' ? $name : null,
-			array('admin_user_id' => $user_id)
-		);
+		// requireMember() and the member checks above admit starting a group;
+		// the conversation and everyone else's membership rows are not the
+		// creator's own rows.
+		$conversation = SystemBase::rule_checked_write(function () use ($user_id, $member_ids, $name) {
+			return Conversation::create_conversation(
+				array_merge(array($user_id), $member_ids),
+				$name !== '' ? $name : null,
+				array('admin_user_id' => $user_id)
+			);
+		});
 
 		$creator = new User($user_id, TRUE);
 		$conversation->add_system_message($creator->display_name() . ' started the group');
@@ -183,15 +189,19 @@ function messenger_group_set_photo(Conversation $conversation, int $user_id, arr
 		return LogicResult::error('A group picture has to be an image.');
 	}
 
-	// One picture at a time: the old one stops being the group's.
-	messenger_group_clear_photos($conversation);
+	// One picture at a time: the old one stops being the group's. A group
+	// admin (checked above) sets it; the photo row has no owner.
+	$photo = SystemBase::rule_checked_write(function () use ($conversation, $file) {
+		messenger_group_clear_photos($conversation);
 
-	$photo = new EntityPhoto(NULL);
-	$photo->set('eph_entity_type', 'conversation');
-	$photo->set('eph_entity_id', (int)$conversation->key);
-	$photo->set('eph_fil_file_id', (int)$file->key);
-	$photo->set('eph_sort_order', 0);
-	$photo->save();
+		$photo = new EntityPhoto(NULL);
+		$photo->set('eph_entity_type', 'conversation');
+		$photo->set('eph_entity_id', (int)$conversation->key);
+		$photo->set('eph_fil_file_id', (int)$file->key);
+		$photo->set('eph_sort_order', 0);
+		$photo->save();
+		return $photo;
+	});
 
 	$actor = new User($user_id, TRUE);
 	$conversation->add_system_message($actor->display_name() . ' changed the group picture',
@@ -209,7 +219,9 @@ function messenger_group_remove_photo(Conversation $conversation, int $user_id):
 	if (!$conversation->is_admin($user_id)) {
 		return LogicResult::error('Only a group admin can do that.');
 	}
-	messenger_group_clear_photos($conversation);
+	SystemBase::rule_checked_write(function () use ($conversation) {
+		messenger_group_clear_photos($conversation);
+	});
 
 	return LogicResult::render(array(
 		'action'          => 'remove_photo',
@@ -232,6 +244,7 @@ function messenger_group_clear_photos(Conversation $conversation): void {
 
 function messenger_group_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'Create a group conversation, rename it, add or remove members, leave it, change who administers it, or set its picture.',

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — filtered thread list (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_list?search=term  (GET)

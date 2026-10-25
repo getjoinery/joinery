@@ -33,7 +33,7 @@ function search_entries_logic(array $input): LogicResult {
 function search_entries_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'mutates' => false,
 		'description' => 'Page the caller\'s end-to-end encrypted messages with their sealed search text, for their browser\'s own search index',
 		'input' => [

@@ -23,6 +23,7 @@ class PersonaStoryException extends SystemBaseException {}
 class PersonaStory extends SystemBase {
     public static $prefix = 'pss';
     public static $tablename = 'pss_persona_stories';
+    public static $access_class = 'content';
     public static $pkey_column = 'pss_persona_story_id';
 
     public static $field_specifications = array(

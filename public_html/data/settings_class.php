@@ -3,13 +3,9 @@ class SettingException extends SystemBaseException {}
 
 class Setting extends SystemBase {	public static $prefix = 'stg';
 
-	// REST API: settings may hold sensitive config/secrets — admin-only (permission >= 5) read via the API.
-	function authenticate_read($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in '. static::$tablename);
-		}
-	}
 	public static $tablename = 'stg_settings';
+	public static $access_class = 'config';
+	public static $owner_column = false;
 	public static $pkey_column = 'stg_setting_id';
 
 	protected static $foreign_key_actions = [
@@ -127,13 +123,6 @@ private function _check_for_duplicate_setting() {
 			}
 		}
 
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
 	}
 
 	/**

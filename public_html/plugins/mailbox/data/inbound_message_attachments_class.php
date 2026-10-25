@@ -30,6 +30,7 @@
  * file-backed the moment any path turns up the real bytes — an archive import
  * of the same message adopts them, whichever order the two happened in.
  *
+ * @version 1.6 - access_owner_is(): an attachment is its message's holders' (MailboxViewer::holdsMessage)
  * @version 1.5
  * @changelog 1.5 - ima_iem_inbound_email_message_id declared as a real
  *   foreign key: a manifest row can no longer outlive its message.
@@ -46,7 +47,13 @@ class InboundMessageAttachmentException extends SystemBaseException {}
 class InboundMessageAttachment extends SystemBase {
 	public static $prefix = 'ima';
 	public static $tablename = 'ima_inbound_message_attachments';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'ima_inbound_message_attachment_id';
+
+	/** The owner rule (spec declared_permissions 3.2): whoever holds the attachment's message. */
+	public function access_owner_is($user_id): bool {
+		return MailboxViewer::holdsMessage((int)$user_id, (int)$this->access_stored('ima_iem_inbound_email_message_id'));
+	}
 
 	protected static $foreign_key_actions = array(
 		'ima_iem_inbound_email_message_id' => array('action' => 'cascade'),
@@ -87,13 +94,6 @@ class InboundMessageAttachment extends SystemBase {
 		'ima_adopt_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/** Create and persist one manifest row. */
 	static function CreateEntry(array $row): InboundMessageAttachment {

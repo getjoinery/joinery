@@ -7,7 +7,6 @@ function admin_coupon_codes_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_codes_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(7);
 	$session->set_return();
 
 	$numperpage = 30;
@@ -16,7 +15,7 @@ function admin_coupon_codes_logic(array $input): LogicResult {
 	$sdirection = LibraryFunctions::fetch_variable_local($input, 'sdirection', 'DESC');
 
 	$search_criteria = array();
-	if($session->get_permission() < 10){
+	if(!Access::permits(CouponCode::access_level('soft_delete'), $session)){
 		$search_criteria['deleted'] = false;
 	}
 

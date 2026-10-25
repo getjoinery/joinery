@@ -84,7 +84,7 @@ function event_logic(array $input): LogicResult {
 
 	$page_vars['event'] = $event;
 	if(!$event->get('evt_visibility') || $event->get('evt_delete_time')){
-		if($session->get_permission() < 5){
+		if(!$event->can_read($session)){
 			require_once(LibraryFunctions::display_404_page());
 		}
 	}

@@ -9,6 +9,7 @@ class BoardChecklist extends SystemBase {
 
 	public static $prefix = 'bck';
 	public static $tablename = 'bck_checklists';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bck_checklist_id';
 
 	public static $field_specifications = array(

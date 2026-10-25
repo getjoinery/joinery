@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -6,7 +7,6 @@
 	require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	// CRITICAL: Check edit_primary_key_value (form submission) first, fallback to GET
 	if (isset($_POST['edit_primary_key_value'])) {
@@ -36,7 +36,7 @@
 	$title = $email_template->get('emt_name');
 	$content = $email_template->get('emt_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
-	if($_GET['cvn_content_version_id']){
+	if(!empty($_GET['cvn_content_version_id'])){
 		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
 		$content = $content_version->get('cvn_content');
 		$title = $content_version->get('cvn_title');
@@ -127,8 +127,6 @@
 </div>	';
 
 ?>
-<script src="/assets/js/form-visibility-helper.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/form-visibility-helper.js')); ?>"></script>
-
 <script>
 (function() {
     'use strict';

@@ -8,7 +8,6 @@ function admin_file_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();

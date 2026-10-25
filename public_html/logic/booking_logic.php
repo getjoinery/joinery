@@ -28,7 +28,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['booking_type'] = $booking_type;
 	$page_vars['client_user'] = $client_user;	
 	
-	if ($session->get_user_id() && $session->get_permission() > 4) {
+	if ($session->get_user_id() && Access::permits(Access::staffLevel(), $session)) {
 		//SHOW IT EVEN IF UNPUBLISHED OR DELETED
 	}
 	else {
@@ -43,6 +43,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 function booking_logic_descriptor() {
     return [
+        'auth' => ['min_user_permission' => 0],
         'requires_session' => true,
         'description' => 'Book an appointment',
         'input' => [

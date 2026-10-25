@@ -14,6 +14,7 @@ class BoardAttachment extends SystemBase {
 
 	public static $prefix = 'bat';
 	public static $tablename = 'bat_attachments';
+	public static $access_class = 'content';
 	public static $pkey_column = 'bat_attachment_id';
 
 	public static $field_specifications = array(

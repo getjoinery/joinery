@@ -15,6 +15,7 @@ class DisplayablePermanentProductRequirementException extends ProductRequirement
 
 class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
+	public static $access_class = 'content';
 	public static $pkey_column = 'prq_product_requirement_id';
 
 	protected static $foreign_key_actions = [
@@ -62,13 +63,6 @@ function get_link_to_append(){
 		else if($this->get('prq_fil_file_id')){
 			$file = new File($this->get('prq_fil_file_id'), TRUE);
 			return $file->get_url('original', 'full');
-		}
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
 		}
 	}
 

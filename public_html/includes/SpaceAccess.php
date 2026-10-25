@@ -37,6 +37,7 @@
  * row) is refused everything — the public rule included — so a watch or a
  * mention can never reach, or name, an account that is gone.
  *
+ * @version 1.2.0 - the moderator level is the post model's write level (access_level('write'))
  * @version 1.1.0 - a non-live account is refused even public spaces; a tier rule with no level is closed
  * @version 1.0.0
  */
@@ -128,8 +129,8 @@ class SpaceAccess {
 	public static function moderatorLevel($space): int {
 		$class = is_string($space) ? $space : get_class($space);
 		$post_model = property_exists($class, 'post_model') ? $class::$post_model : null;
-		if ($post_model && class_exists($post_model) && property_exists($post_model, 'write_permission')) {
-			return (int)$post_model::$write_permission;
+		if ($post_model && class_exists($post_model) && is_subclass_of($post_model, 'SystemBase')) {
+			return $post_model::access_level('write');
 		}
 		return self::DEFAULT_MODERATOR_LEVEL;
 	}

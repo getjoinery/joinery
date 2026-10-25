@@ -32,7 +32,7 @@ function vault_row_reseal_logic(array $input): LogicResult {
 function vault_row_reseal_logic_descriptor() {
 	return [
 		'requires_session' => true,
-		'auth' => array('requires_browser_session' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'mutates' => true,
 		'description' => 'Store DEKs re-sealed to a client-custody scope\'s new key during a rotation (key column and generation only)',
 		'input' => [

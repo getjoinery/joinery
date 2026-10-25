@@ -13,7 +13,9 @@
  * grant/revoke all work through the existing paths. Tier changes go through
  * TierBilling::handleProductPurchase / handleSubscriptionExpired only.
  *
- * @version 1.0.0
+ * @version 1.0.2 — a first claim is refused unless the receipt's account token
+ *   names the claiming member.
+ * @version 1.0.1 — a member's claim grants the tier inside rule_checked_write().
  */
 
 require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
@@ -106,6 +108,7 @@ class MobileBilling {
 			'period_end'               => $period_end,
 			'price'                    => $price,
 			'sandbox'                  => (strcasecmp((string)$environment, 'Sandbox') === 0),
+			'account_token'            => $transaction['appAccountToken'] ?? null,
 			'product_info'             => array(
 				'app_store_bundle_id'  => $bundle_id,
 				'app_store_product_id' => $product_id,
@@ -247,6 +250,7 @@ class MobileBilling {
 			'period_end'               => $expiry,
 			'price'                    => null,
 			'sandbox'                  => isset($purchase['testPurchase']),
+			'account_token'            => $purchase['externalAccountIdentifiers']['obfuscatedExternalAccountId'] ?? null,
 			'product_info'             => array(
 				'play_package_name'    => $package_name,
 				'play_subscription_id' => $line_product_id,
@@ -382,10 +386,31 @@ class MobileBilling {
 			if (!empty($details['cancel_at_period_end'])) {
 				$existing->set('odi_subscription_cancel_at_period_end', true);
 			}
-			self::applyProductMapping($existing, $mapping);
-			$order = $existing->get_order();
-			TierBilling::handleProductPurchase($user, self::orderItemProduct($existing), $existing, $order);
+			// The tier grant writes rows with no owner (the tier group
+			// membership, its change log). The right was checked: the store
+			// verified the purchase (the claim action) and the item is this
+			// member's (above).
+			SystemBase::rule_checked_write(function () use ($existing, $mapping, $user) {
+				self::applyProductMapping($existing, $mapping);
+				TierBilling::handleProductPurchase($user, self::orderItemProduct($existing), $existing, $existing->get_order());
+			});
 			return self::claimSummary($existing);
+		}
+
+		// First claim: the purchase must have been made for this member. The
+		// app attaches appAccountTokenForUser() to every purchase (the
+		// billing catalog hands it over), and the store signs it into the
+		// receipt. Without this, a member could post another member's genuine
+		// receipt and take the subscription, and the buyer's own claim would
+		// then be refused as another account's. A receipt with no token is
+		// refused too: it was not bought through the app's purchase sheet
+		// (e.g. an offer code redeemed in the store), so nothing says whose it is.
+		$token_user_id = self::userIdFromAppAccountToken($details['account_token'] ?? null);
+		if ($token_user_id === null) {
+			throw new MobileBillingException('This purchase is not linked to an account. Buy the plan from inside the app while signed in.');
+		}
+		if ($token_user_id !== (int)$user_id) {
+			throw new MobileBillingException('This purchase belongs to a different account.');
 		}
 
 		$conflict = TierBilling::sourceConflict($user_id, $source);
@@ -438,7 +463,10 @@ class MobileBilling {
 		$order_item->save();
 		$order_item->load();
 
-		TierBilling::handleProductPurchase($user, $product, $order_item, $order);
+		// The member's own purchase, verified by the store (the claim action).
+		SystemBase::rule_checked_write(function () use ($user, $product, $order_item, $order) {
+			TierBilling::handleProductPurchase($user, $product, $order_item, $order);
+		});
 
 		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 		SignalBus::dispatch('subscription.started', array(

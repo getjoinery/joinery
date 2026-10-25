@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Persona Browser — Senders
  * URL: /plugins/persona_browser/admin/admin_persona_senders
@@ -25,7 +26,6 @@ require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_bl
 require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_allowed_senders_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(5);
 $session->set_return();
 
 $self = '/plugins/persona_browser/admin/admin_persona_senders';

@@ -53,7 +53,7 @@ function vault_client_resume_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'mutates' => true,
-		'auth' => array('requires_browser_session' => true, 'session_write' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_browser_session' => true, 'session_write' => true),
 		'description' => 'Keep, return or drop this session\'s half of the key that lets a browser-held (client-custody) '
 			. 'vault reopen after a reload of the same tab. The half alone opens nothing and lives only in the session.',
 		'input' => [

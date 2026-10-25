@@ -60,7 +60,6 @@ const SMPS_ACCOUNT_ACTIONS = array('add_account_key', 'connect_account', 'reconn
 
 function admin_provisioning_setup_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	$page_url = '/admin/server_manager/provisioning_setup';
 	$page_regex = '/\/admin\/server_manager\/provisioning_setup/';

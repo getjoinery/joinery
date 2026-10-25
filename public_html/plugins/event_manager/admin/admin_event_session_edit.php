@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -9,7 +10,6 @@
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_sessions_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 
 	if (isset($_REQUEST['evs_event_session_id']) || isset($_POST['edit_primary_key_value'])) {
 		$session_id = isset($_POST['edit_primary_key_value']) ? $_POST['edit_primary_key_value'] : $_REQUEST['evs_event_session_id'];
@@ -26,19 +26,8 @@
 	}
 
 	if($_REQUEST['action'] == 'delete'){
-		$event_session->assert_can_write($session);
-		$dbhelper = DbConnector::get_instance();
-		$dblink = $dbhelper->get_db_link();
-		$sql = 'DELETE FROM evs_event_sessions WHERE evs_event_session_id=:evs_event_session_id';
-
-		try{
-			$q = $dblink->prepare($sql);
-			$q->bindParam(':evs_event_session_id', $event_session->key, PDO::PARAM_INT);
-			$q->execute();
-		}
-		catch(PDOException $e){
-			$dbhelper->handle_query_error($e);
-		}
+		// The model's permanent delete: its level, its deletion rules, and a POST.
+		$event_session->permanent_delete();
 		LibraryFunctions::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 		return;
 	}

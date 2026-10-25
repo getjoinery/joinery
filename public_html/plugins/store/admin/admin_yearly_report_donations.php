@@ -1,10 +1,10 @@
 <?php
+/** @joinery-admin class=personal */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/store/admin/logic/admin_yearly_report_donations_logic.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $page_vars = process_logic(admin_yearly_report_donations_logic(array_merge($_GET, $_POST)));

@@ -46,7 +46,8 @@ try {
 	check(mrs_can_read($message, $bob->key), 'a participant who did not send it reads it');
 	check(mrs_can_read($message, $carol->key), 'so does the third participant');
 	check(!mrs_can_read($message, $dave->key), 'a non-participant is refused');
-	check(mrs_can_read($message, $dave->key, 5), 'staff read it');
+	check(mrs_can_read($message, $dave->key, 8) && !mrs_can_read($message, $dave->key, 7),
+		'staff read it at Message\'s read level (8, Q13), not below');
 
 	section('AI owner scope');
 	check(Message::$ai_owner_field === 'msg_usr_user_id_sender', 'the AI owner field is the sender column alone');

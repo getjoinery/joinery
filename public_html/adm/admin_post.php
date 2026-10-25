@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 
@@ -9,7 +10,6 @@
 	require_once(PathHelper::getIncludePath('/includes/PhotoHelper.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$session->set_return();
 	$settings = Globalvars::get_instance();
 
@@ -56,7 +56,7 @@
 		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'undelete', 'pst_post_id' => $post->key));
 	}
 
-	if($_SESSION['permission'] >= 8) {
+	if($post->can_delete(SessionControl::get_instance(), true) && PublicPageBase::may_open('/admin/admin_post_permanent_delete')) {
 		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_post_permanent_delete?pst_post_id='.$post->key);
 	}
 
@@ -170,7 +170,7 @@
 	<!-- Post Photos Card -->
 	<?php
 	$post_photos = $post->get_photos();
-	$photo_editable = !$post->get('pst_delete_time') && $_SESSION['permission'] > 4;
+	$photo_editable = !$post->get('pst_delete_time') && $post->can_write(SessionControl::get_instance());
 	PhotoHelper::render_photo_card('grid', 'post', $post->key, $post_photos, [
 		'set_primary_url' => '/admin/admin_post?pst_post_id=' . $post->key,
 		'card_title' => 'Post Photos',

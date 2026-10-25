@@ -10,6 +10,7 @@ class ScheduleWindowException extends SystemBaseException {}
 class ScheduleWindow extends SystemBase {
 	public static $prefix = 'scw';
 	public static $tablename = 'scw_schedule_windows';
+	public static $access_class = 'config';
 	public static $pkey_column = 'scw_schedule_window_id';
 
 	public static $field_specifications = array(
@@ -29,6 +30,21 @@ class ScheduleWindow extends SystemBase {
 	);
 
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
+
+	/**
+	 * A row of a schedule is its schedule owner's: the person whose
+	 * availability it is may add, change and remove it. The stored schedule id
+	 * decides, so pointing a row at someone else's schedule makes it theirs,
+	 * not yours.
+	 */
+	public function access_owner_is($user_id): bool {
+		$schedule_id = (int)$this->access_stored('scw_sch_schedule_id');
+		if ((int)$user_id <= 0 || $schedule_id <= 0) {
+			return false;
+		}
+		$schedule = new Schedule($schedule_id, TRUE);
+		return $schedule->key && $schedule->access_owner_is($user_id);
+	}
 
 	// Business-rule extension point. TODO: add cross-field validation, computed
 	// export_as_array() keys, or relationship loading here. Override prepare()

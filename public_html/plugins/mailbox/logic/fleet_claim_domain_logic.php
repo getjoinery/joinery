@@ -39,6 +39,7 @@ function fleet_claim_domain_logic(array $input): LogicResult {
 
 function fleet_claim_domain_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Claim a mail domain for this fleet slot. Returns the DNS TXT challenge to publish; complete it with fleet_verify_domain.',
 		'requires_session' => true,
 		'mutates'          => true,

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=restricted */
 /**
  * Admin: a sandboxed plugin's call log. See adm/logic/admin_sandbox_log_logic.php.
  *

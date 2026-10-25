@@ -44,6 +44,13 @@ Everything else stays locked down: an anonymous caller is denied by default and
 reaches only the actions that opt in with `allow_guest`. See
 [API § Authentication](../../../docs/api.md) for the anonymous-principal contract.
 
+A guest's checkout makes a new account from the billing email. Paying as an
+account that already exists needs that account's sign-in: the checkout page
+asks for it before it offers payment, and `cart_charge` refuses a guest's
+charge to an existing account. A free order completes when the billing form
+posts to `/cart_charge`; a GET there persists something only when it is a
+payment gateway's verified return.
+
 ## Activation
 
 `activate.php` is idempotent and self-guarded. It backfills `stc_stripe_customers` from the pre-extraction user columns and product fulfillment columns where those still exist, claims the plugin's scheduled-task rows, and drops the superseded columns. On upgrade, `update_database` runs a one-time auto-activation: the store activates when the install shows store evidence (product/order rows, or a Stripe/PayPal key configured); a store-less install stays inactive.
@@ -75,6 +82,17 @@ Because the price lives in the form data, **coupon repricing is free of side
 effects**: `ShoppingCart::update_items_for_coupon()` re-calls `get_price()`
 with the persisted form data and derives the same number, with no lookup and
 no second call to anything external.
+
+### The version's Stripe price
+
+A version's Stripe price id (`prv_stripe_price_id`, or `prv_stripe_price_id_test`
+in test mode) is the plan's price: a tier change, the billing page and the
+Stripe webhook read it back to know what a subscription bills at.
+`StripeHelper::get_or_create_price($version)` finds or creates it at the
+version's own amount (`prv_version_price`), interval and trial, and stores it.
+Called with any other amount (a coupon-discounted or buyer-priced line), it
+finds or creates a Stripe price at that amount for that one charge and never
+writes the version.
 
 ### Requirement-contributed companion lines
 

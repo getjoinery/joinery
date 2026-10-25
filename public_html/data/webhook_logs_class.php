@@ -8,6 +8,7 @@ class WebhookLogException extends SystemBaseException {}
 class WebhookLog extends SystemBase {
 	public static $prefix = 'wbh';
 	public static $tablename = 'wbh_webhook_logs';
+	public static $access_class = 'restricted';
 	public static $pkey_column = 'wbh_webhook_log_id';
 
 	public static $field_specifications = array(

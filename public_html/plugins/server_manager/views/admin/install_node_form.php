@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 /**
  * Server Manager - Install New Node
  * URL: /admin/server_manager/install_node_form
@@ -46,7 +47,6 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 $session->set_return();
 
 $error = null;

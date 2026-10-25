@@ -12,6 +12,7 @@ class PublicMenuException extends SystemBaseException {}
 
 class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	public static $tablename = 'pmu_public_menus';
+	public static $access_class = 'config';
 	public static $pkey_column = 'pmu_public_menu_id';
 
 		/**
@@ -37,13 +38,6 @@ class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	    'pmu_parent_menu_id' => array('type'=>'int4'),
 	    'pmu_order' => array('type'=>'int2'),
 	);	
-
-function authenticate_write($data) {
-		if ($data['current_user_permission'] < 10) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in '. static::$tablename);
-		}
-	}
 
 }
 

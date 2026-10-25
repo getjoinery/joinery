@@ -53,6 +53,7 @@ function draft_get_logic(array $input): LogicResult {
 
 function draft_get_logic_descriptor() {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'description' => 'Return the decrypted compose state + attachments for a saved draft',
 		'input' => [

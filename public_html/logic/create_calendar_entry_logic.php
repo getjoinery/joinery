@@ -52,6 +52,7 @@ function create_calendar_entry_logic(array $input): LogicResult {
 
 function create_calendar_entry_logic_descriptor(): array {
     return [
+        'auth' => ['min_user_permission' => 0],
         'description'      => 'Add an entry to the current user\'s personal calendar. '
                             . 'It is created tentative — the owner confirms or deletes it in the calendar UI.',
         'requires_session' => true,

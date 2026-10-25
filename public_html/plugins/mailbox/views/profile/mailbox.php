@@ -94,7 +94,7 @@ if (!$has_mailboxes) {
 	// verdict for the open mailbox, and the endpoint answering it refuses anyone
 	// below permission 5. An operator reads mail here like everyone else, so
 	// the link that turns the check on is passed for them and for nobody else.
-	$is_operator = SessionControl::get_instance()->get_permission() >= 5;
+	$is_operator = Access::permits(Access::staffLevel());
 	mailbox_render_mailbox_reader($page, array(
 		'csrf_token'          => $csrf_token,
 		'initial_mailboxes'   => $initial_mailboxes,

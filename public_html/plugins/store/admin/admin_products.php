@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=money */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -22,7 +23,7 @@
 	);
 
 		$headers = array('Product', 'Event', 'Active', 'Orders', 'Revenue');
-		if($_SESSION['permission'] >= 8){
+		if(Access::allows(Product::access_level('write'), (int)SessionControl::get_instance()->get_permission())){
 			$altlinks = array('New Product'=>'/plugins/store/admin/admin_product_edit');
 		}
 		else{
@@ -75,7 +76,7 @@
 				$active = 'Disabled';
 			}
 
-			if($_SESSION['permission'] >7){
+			if($product->can_write(SessionControl::get_instance())){
 				$editlink = '<a href="/plugins/store/admin/admin_product?pro_product_id=' . $product->get('pro_product_id') . '">'.$product->get('pro_name').'</a>';
 			}
 			else{

@@ -36,6 +36,7 @@ function fleet_release_logic(array $input): LogicResult {
 
 function fleet_release_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'description'      => 'Release this deployment\'s hosted relay slot (exit ramp — point your MX elsewhere first).',
 		'requires_session' => true,
 		'mutates'          => true,

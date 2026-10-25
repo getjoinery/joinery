@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=8 */
 /**
  * Inbound Email - Filters (Gmail-parity inbound rules).
  *

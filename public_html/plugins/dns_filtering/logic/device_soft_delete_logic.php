@@ -46,6 +46,7 @@ function device_soft_delete_logic(array $input): LogicResult{
 
 function device_soft_delete_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => true,
 		'description' => 'Deactivate a DNS-filtering device (pass device_id)',
 		'input' => [

@@ -2722,6 +2722,10 @@ dialog.jy-ui.cal-form-dialog[open] { display: block; overflow-y: auto; }
 .jy-copyfield input[readonly] { flex: 1; min-width: 10rem; cursor: text; background: #fff; }
 .jy-copyfield button { white-space: nowrap; }
 
+/* A control or form the reader may not use (docs/permissions.md § Surfaces) says why. */
+.jy-form-locked { margin: 0 0 0.75rem; padding: 0.5rem 0.75rem; border-left: 3px solid var(--jy-color-warning); background: var(--jy-color-warning-bg); font-size: 0.875rem; }
+.jy-needs-level { color: var(--jy-color-text-muted); font-size: 0.8rem; white-space: nowrap; }
+
 /* ============================================
    Box variants (begin_box 'variant' option)
    Unscoped: boxes are chrome, not kit components,

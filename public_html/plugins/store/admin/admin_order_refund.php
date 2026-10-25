@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 	
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	
 	$settings = Globalvars::get_instance();
 	$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
@@ -28,14 +28,17 @@
 	)
 	);
 
-	if ($_POST['confirm']){
+	if (!empty($_POST['confirm'])){
+		// A refund is money leaving: the order items' level, asked before Stripe
+		// is (the row's owner is the buyer, who does not refund themselves).
+		Access::demand(OrderItem::access_level('write'), $session);
+		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE);
 
 		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
 		$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
 
 		$charge = $stripe_helper->get_charge($_POST['charge_id']);
 		
-		$order_item = new OrderItem($_REQUEST['order_item_id'], TRUE); 
 		$refund_amount_before = $order_item->get('odi_refund_amount');
 		$refund_amount_this_time = $_POST['refund_amount'];
 		$order_item->set('odi_refund_amount', $_POST['refund_amount'] + $refund_amount_before);
@@ -57,8 +60,8 @@
 	}
 else{
 	
-	if(!$_REQUEST['oi']){
-		throw new SystemDisplayablePermanentError("Order item is not present.");
+	if(empty($_REQUEST['oi'])){
+		throw new SystemDisplayableError("Order item is not present.");
 		exit();			
 	}
 	

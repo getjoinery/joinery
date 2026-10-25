@@ -10,6 +10,8 @@ class PluginVersionNotSentException extends PluginVersionException {}
 
 class PluginVersion extends SystemBase {    public static $prefix = 'plv';
     public static $tablename = 'plv_plugin_versions';
+    public static $access_class = 'config';
+    public static $write_permission = 10;
     public static $pkey_column = 'plv_plugin_version_id';
 
         /**
@@ -38,12 +40,6 @@ class PluginVersion extends SystemBase {    public static $prefix = 'plv';
         'plv_metadata' => array('type'=>'text'),
     );
 
-    function authenticate_write($data) {
-        if ($data['current_user_permission'] < 10) {
-            throw new SystemAuthenticationError(
-                'Current user does not have permission to edit this entry in '. static::$tablename);
-        }
-    }
 }
 
 class MultiPluginVersion extends SystemMultiBase {

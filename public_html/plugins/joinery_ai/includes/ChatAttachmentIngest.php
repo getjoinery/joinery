@@ -210,7 +210,9 @@ class ChatAttachmentIngest {
                 error_log('[joinery_ai chat] attachment type drift for "' . $label . '": validated '
                     . var_export($p['category'] ?? null, true) . ' but stored fil_type='
                     . var_export($file->get('fil_type'), true) . ' (file ' . $file->key . ') — dropping');
-                $file->permanent_delete();
+                // The sender's own upload, dropped by the ingest that just made
+                // it in their own chat; a member's level does not destroy rows.
+                SystemBase::rule_checked_write(function () use ($file) { $file->permanent_delete(); });
                 $failures[] = $label;
                 continue;
             }
@@ -254,7 +256,9 @@ class ChatAttachmentIngest {
                     // attachment rather than store its content unsealed on a
                     // protected chat. The send still proceeds without this file.
                     error_log('[joinery_ai chat] attachment seal failed for "' . $label . '": ' . $e->getMessage());
-                    try { $link->permanent_delete(); } catch (Throwable $ignore) {}
+                    try {
+                        SystemBase::rule_checked_write(function () use ($link) { $link->permanent_delete(); });
+                    } catch (Throwable $ignore) {}
                     $failures[] = $label;
                     continue;
                 }

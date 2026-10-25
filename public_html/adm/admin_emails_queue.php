@@ -1,11 +1,11 @@
 <?php
+/** @joinery-admin class=personal */
 	
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	require_once(PathHelper::getIncludePath('data/emails_class.php'));
 	
 	$session = SessionControl::get_instance();
 	//$session->set_return();
-	$session->check_permission(8);
 	// Queueing is a button (POST): a link is a GET any other site can make the browser follow.
 	if (!LibraryFunctions::isFormSubmission()) {
 		throw new SystemDisplayableError('Queue an email with the Add to Send Queue button on its page.');

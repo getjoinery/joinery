@@ -8,7 +8,6 @@ function admin_store_product_mappings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(8);
 	$session->set_return();
 
 	$numperpage = 30;

@@ -12,7 +12,8 @@
  * Returns the stored message in the same shape the poll uses, so the browser
  * appends it with the code path it already has rather than a second renderer.
  *
- * @version 1.0.0
+ * @version 1.0.1
+ * @changelog 1.0.1 - opening a 1:1 and recording a federated send run under rule_checked_write()
  */
 
 
@@ -44,7 +45,12 @@ function messenger_send_logic(array $input): LogicResult {
 			if (!User::check_if_exists($to)) {
 				return LogicResult::error('That member does not exist.');
 			}
-			$conversation = Conversation::get_or_create_conversation($user_id, $to);
+			// A member opening a 1:1 (requireMember() and the recipient check
+			// above): the conversation and the other person's membership row
+			// are not the sender's own rows. Blocks are refused inside.
+			$conversation = SystemBase::rule_checked_write(function () use ($user_id, $to) {
+				return Conversation::get_or_create_conversation($user_id, $to);
+			});
 		} else {
 			return LogicResult::error('Say who this is for.');
 		}
@@ -72,8 +78,13 @@ function messenger_send_logic(array $input): LogicResult {
 	// than a spinner; anything that does not go through is queued and retried.
 	if ($conversation->is_federated()) {
 		$message->set('msg_delivery_state', Message::DELIVERY_QUEUED);
-		$message->save();
-		MessengerFederation::sendMessage($conversation, $message);
+		// The sender's message, just admitted by add_message(); its delivery
+		// state is recorded here and by the send, and a protected
+		// conversation's messages take writes only past the model's own rule.
+		SystemBase::rule_checked_write(function () use ($conversation, $message) {
+			$message->save();
+			MessengerFederation::sendMessage($conversation, $message);
+		});
 		$message->load();
 	}
 
@@ -87,6 +98,7 @@ function messenger_send_logic(array $input): LogicResult {
 
 function messenger_send_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 0),
 		'requires_session' => true,
 		'requires_setting' => 'messenger_active',
 		'description' => 'Send a message in a conversation (conversation_id, or to for a new/existing 1:1), optionally quoting a message and carrying uploaded attachments.',

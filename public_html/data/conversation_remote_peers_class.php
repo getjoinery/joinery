@@ -24,6 +24,7 @@ class ConversationRemotePeerException extends SystemBaseException {}
 class ConversationRemotePeer extends SystemBase {
 	public static $prefix = 'crp';
 	public static $tablename = 'crp_conversation_remote_peers';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'crp_conversation_remote_peer_id';
 
 	// Not REST-exposed: a peer is only meaningful inside its conversation, and

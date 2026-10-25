@@ -337,6 +337,7 @@ function scan_url_logic(array $input): LogicResult{
 
 function scan_url_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Fetch a page and test its external domains against a device\'s filter (device_id, url). Heavy: responses can take several seconds.',
 		'mutates'     => false,
 		'requires_session'        => true,

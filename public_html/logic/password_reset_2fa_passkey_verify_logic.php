@@ -79,6 +79,7 @@ function password_reset_2fa_passkey_verify_logic(array $input): LogicResult {
 
 function password_reset_2fa_passkey_verify_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Complete the passkey second factor for a vault-holder password reset',
 		'input' => [

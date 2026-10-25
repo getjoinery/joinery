@@ -54,6 +54,11 @@ function harness_call_logic($logic_path, $logic_fn, array $data = array(), $meth
 	if ($method === 'GET' || $method === 'HEAD') {
 		GuardedPdo::$sapi = 'fpm-fcgi';
 	}
+	// And every save is checked as on the web, refusing: the CLI is exempt from
+	// the model check, so without this a suite never sees a member's or a
+	// visitor's write refused (docs/permissions.md § Every write is checked).
+	$saved_access_sapi = Access::$sapi;
+	Access::$sapi = 'fpm-fcgi';
 
 	try {
 		require_once(PathHelper::getIncludePath($logic_path));
@@ -63,6 +68,7 @@ function harness_call_logic($logic_path, $logic_fn, array $data = array(), $meth
 		return $logic_fn($data);
 	} finally {
 		GuardedPdo::$sapi = $saved_sapi;
+		Access::$sapi = $saved_access_sapi;
 		$_POST = $saved['post'];
 		$_GET = $saved['get'];
 		$_REQUEST = $saved['req'];

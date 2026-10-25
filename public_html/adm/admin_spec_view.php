@@ -1,10 +1,10 @@
 <?php
+/** @joinery-admin class=config */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10); // Superadmin only
 
 $file = isset($_GET['file']) ? $_GET['file'] : '';
 $specs_dir = PathHelper::getIncludePath('specs');

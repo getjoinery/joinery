@@ -35,6 +35,7 @@ class ShelfRunException extends SystemBaseException {}
 class ShelfRun extends SystemBase {
 	public static $prefix = 'svr';
 	public static $tablename = 'svr_shelf_runs';
+	public static $access_class = 'config';
 	public static $pkey_column = 'svr_shelf_run_id';
 
 	const STATE_OPEN     = 'open';
@@ -67,14 +68,14 @@ class ShelfRun extends SystemBase {
 			'allowed_values'=>array('backup', 'upload')),
 		// A node's run: the sha256 of the token its broker calls carry, and when
 		// that token stops being accepted. Never the token itself.
-		'svr_token_hash'            => array('type'=>'varchar(64)'),
+		'svr_token_hash'            => array('access_class' => 'restricted', 'type'=>'varchar(64)'),
 		'svr_token_expires_time'    => array('type'=>'timestamp(6)'),
 		// The space the run was taken in, and so the target that holds it.
 		'svr_sps_storage_space_id'  => array('type'=>'int8'),
 		'svr_profile'               => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'site'),
 		'svr_chain'                 => array('type'=>'varchar(64)'),
 		// The boundary: every key signed for this run starts with it.
-		'svr_base_key'              => array('type'=>'varchar(512)', 'is_nullable'=>false),
+		'svr_base_key'              => array('access_class' => 'keys', 'type'=>'varchar(512)', 'is_nullable'=>false),
 		// What the site declared, and what the allowance check counted.
 		'svr_declared_bytes'        => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
 		'svr_declared_names'        => array('type'=>'text'),

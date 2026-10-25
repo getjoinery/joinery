@@ -55,7 +55,7 @@ function fortress_parse_store_logic(array $input): LogicResult {
 function fortress_parse_store_logic_descriptor() {
 	return array(
 		'requires_session' => true,
-		'auth' => array('requires_person_credential' => true),
+		'auth' => array('min_user_permission' => 0, 'requires_person_credential' => true),
 		'description' => 'Store an end-to-end message the caller\'s browser parsed from its relay-sealed form: the fields and attachments as ciphertext under the row\'s own key',
 		'input' => [
 			'id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],

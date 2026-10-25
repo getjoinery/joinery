@@ -14,6 +14,7 @@ class BoardMember extends SystemBase {
 
 	public static $prefix = 'bbm';
 	public static $tablename = 'bbm_board_members';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'bbm_board_member_id';
 
 	const ROLE_ADMIN = 'admin';

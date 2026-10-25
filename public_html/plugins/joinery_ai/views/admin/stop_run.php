@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin level=10 */
 /**
  * Joinery AI - Stop Run
  * URL: /admin/joinery_ai/stop_run
@@ -14,7 +15,6 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
 $session = SessionControl::get_instance();
-$session->check_permission(10);
 
 $run_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcr_recipe_run_id', 0);
 $recipe_id = (int)LibraryFunctions::fetch_variable_local($_REQUEST, 'rcp_recipe_id', 0);

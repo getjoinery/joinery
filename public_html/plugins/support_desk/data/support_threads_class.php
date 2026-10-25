@@ -31,6 +31,7 @@ class SupportThreadException extends SystemBaseException {}
 class SupportThread extends SystemBase {
 	public static $prefix = 'sth';
 	public static $tablename = 'sth_support_threads';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'sth_support_thread_id';
 
 	const STATE_OPEN     = 'open';
@@ -93,7 +94,7 @@ class SupportThread extends SystemBase {
 		// widget's browser session) was given when the thread was made and
 		// presents with every later call. Knowing a host and a thread number
 		// is not enough to read or continue a thread.
-		'sth_token_hash'          => array('type' => 'varchar(64)', 'is_nullable' => false),
+		'sth_token_hash'          => array('access_class' => 'restricted', 'type' => 'varchar(64)', 'is_nullable' => false),
 		'sth_input_tokens'        => array('type' => 'int8', 'is_nullable' => false, 'default' => 0),
 		'sth_output_tokens'       => array('type' => 'int8', 'is_nullable' => false, 'default' => 0),
 		// Node reads spent on the UTC day in sth_node_reads_day.
@@ -135,18 +136,6 @@ class SupportThread extends SystemBase {
 		'purge_method'   => 'purgeClosed',
 		'window_setting' => 'support_desk_thread_retention_days',
 	);
-
-	function authenticate_read($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('Support threads are for the operator.');
-		}
-	}
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9) {
-			throw new SystemAuthenticationError('Support threads are for the operator.');
-		}
-	}
 
 	public function stateLabel(): string {
 		return self::STATES[(string)$this->get('sth_state')] ?? (string)$this->get('sth_state');

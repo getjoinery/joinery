@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=content */
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	if (isset($_REQUEST['pst_item_id'])) {
 		$item = new Item($_REQUEST['itm_item_id'], TRUE);
@@ -23,7 +23,7 @@
 			$item->set($field, $_POST[$field]);
 		}
 
-		if(!$item->get('itm_link') || $_SESSION['permission'] == 10){
+		if(!$item->get('itm_link') || Access::permits(10)){
 			if($_POST['itm_link']){
 				$item->set('itm_link', $item->create_url($_POST['itm_link']));
 			}
@@ -124,7 +124,7 @@
 
 	//echo $formwriter->textinput('Tags (optional, separate with comma)', 'tags', NULL, 100, $tags, '', 255, '');
 
-	if(!$item->get('itm_link') || $_SESSION['permission'] == 10){
+	if(!$item->get('itm_link') || Access::permits(10)){
 		$formwriter->textinput('itm_link', 'Link (only letters, numbers, and dashes) '.$settings->get_setting('webDir').'/blog/', [
 			'value' => $item->get('itm_link'),
 			'maxlength' => 255

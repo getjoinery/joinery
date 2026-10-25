@@ -61,6 +61,7 @@ function ai_actions_list_logic_descriptor(): array {
 		'mutates'     => false,
 		'requires_session' => true,
 		'auth'        => [
+			'min_user_permission' => 0,
 			'capability'       => 'read',
 		],
 		'input'       => [

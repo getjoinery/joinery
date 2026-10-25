@@ -33,6 +33,7 @@ class InboundSenderRecordException extends SystemBaseException {}
 class InboundSenderRecord extends SystemBase {
 	public static $prefix = 'isr';
 	public static $tablename = 'isr_inbound_sender_records';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'isr_inbound_sender_record_id';
 
 	protected static $foreign_key_actions = array(
@@ -57,12 +58,6 @@ class InboundSenderRecord extends SystemBase {
 		'isr_create_time'                => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 }
 
 class MultiInboundSenderRecord extends SystemMultiBase {

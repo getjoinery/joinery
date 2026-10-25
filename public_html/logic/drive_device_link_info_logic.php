@@ -64,7 +64,7 @@ function drive_device_link_info_logic_descriptor(): array {
 		'description'      => 'Details of a pending device-link ceremony, looked up by its code, so the approval page can show the user what is asking for access.',
 		'requires_session' => true,
 		'mutates'          => false,
-		'auth'             => array('requires_browser_session' => true),
+		'auth'             => array('min_user_permission' => 0, 'requires_browser_session' => true),
 		'input'            => array(
 			'code' => array('type' => 'string', 'required' => true, 'max_length' => 32, 'label' => 'Link code'),
 		),

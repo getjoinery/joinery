@@ -6,7 +6,6 @@ function admin_mailbox_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 	$settings = Globalvars::get_instance();
 
 	// Handle delete action
@@ -42,7 +41,6 @@ function admin_mailbox_logic(array $input): LogicResult {
 	}
 
 	if ($input && isset($input['action']) && $input['action'] === 'permanent_delete') {
-		$session->check_permission(10);
 		$alias = new InboundEmailAlias($input['iea_inbound_email_alias_id'], TRUE);
 
 		// Permanently deleting the alias cascades to permanent-delete its IMAP

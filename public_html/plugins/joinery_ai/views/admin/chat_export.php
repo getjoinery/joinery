@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=personal */
 /**
  * Joinery AI — export a chat thread (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_export?conversation_id=N  (GET)

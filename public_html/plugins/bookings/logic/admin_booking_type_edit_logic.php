@@ -15,7 +15,6 @@ function admin_booking_type_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/surveys_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(5);
 
 	$pk = $input['edit_primary_key_value'] ?? ($input['bty_booking_type_id'] ?? null);
 	$type = $pk ? new BookingType($pk, TRUE) : new BookingType(NULL);
@@ -95,6 +94,7 @@ function booking_type_edit_vars($session, $type): array {
 /** Descriptor for the straightforward fields (host + location are hand-added). */
 function admin_booking_type_edit_logic_descriptor(): array {
 	return array(
+		'auth' => array('min_user_permission' => 'content:write'),
 		'description' => 'Create or update a booking type (admin).',
 		'requires_session' => true,
 		'mutates' => true,

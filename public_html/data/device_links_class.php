@@ -33,6 +33,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class DeviceLink extends SystemBase {
 	public static $prefix = 'dlk';
 	public static $tablename = 'dlk_device_links';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'dlk_device_link_id';
 
 	protected static $foreign_key_actions = array(
@@ -77,8 +78,8 @@ class DeviceLink extends SystemBase {
 
 	public static $field_specifications = array(
 		'dlk_device_link_id'     => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'dlk_code_hash'          => array('type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
-		'dlk_poll_token_hash'    => array('type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'dlk_code_hash'          => array('access_class' => 'restricted', 'type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
+		'dlk_poll_token_hash'    => array('access_class' => 'restricted', 'type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'dlk_device_pubkey'      => array('type' => 'text', 'is_nullable' => true),
 		'dlk_device_name'        => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true),
 		'dlk_platform'           => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true),
@@ -89,11 +90,11 @@ class DeviceLink extends SystemBase {
 		'dlk_sde_sync_device_id' => array('type' => 'int8', 'is_nullable' => true),
 		// The drive vault secret key sealed to dlk_device_pubkey in the approving
 		// browser. Opaque here — the server never held the key that opens it.
-		'dlk_sealed_vault_key'   => array('type' => 'text', 'is_nullable' => true),
+		'dlk_sealed_vault_key'   => array('access_class' => 'keys', 'type' => 'text', 'is_nullable' => true),
 		// Every other client-custody scope the user chose to hand over, as JSON
 		// {scope: blob}, each sealed to dlk_device_pubkey the same way. Drive
 		// keeps its own column above because the shipped sync client reads it.
-		'dlk_sealed_vault_keys'  => array('type' => 'text', 'is_nullable' => true),
+		'dlk_sealed_vault_keys'  => array('access_class' => 'keys', 'type' => 'text', 'is_nullable' => true),
 		// The minted session secret, SecretBox-encrypted at rest and scrubbed the
 		// moment the device collects it. It exists here only to bridge the gap
 		// between the browser that approved and the device that is polling.

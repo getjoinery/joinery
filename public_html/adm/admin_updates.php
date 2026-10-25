@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 /**
  * Updates — what release this site runs, where it came from, what it has
  * installed, and, on a site no management node looks after, updating it.

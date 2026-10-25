@@ -29,6 +29,7 @@ class InboundForwardDestinationException extends SystemBaseException {}
 class InboundForwardDestination extends SystemBase {
 	public static $prefix = 'ifd';
 	public static $tablename = 'ifd_inbound_forward_destinations';
+	public static $access_class = 'config';
 	public static $pkey_column = 'ifd_inbound_forward_destination_id';
 
 	const STATUS_PENDING   = 'pending';
@@ -49,7 +50,7 @@ class InboundForwardDestination extends SystemBase {
 		'ifd_iea_inbound_email_alias_id'     => array('type'=>'int8'),
 		'ifd_destination'        => array('type'=>'varchar(320)', 'is_nullable'=>false),
 		'ifd_status'             => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'pending'),
-		'ifd_token_hash'         => array('type'=>'varchar(64)', 'index'=>true),
+		'ifd_token_hash'         => array('access_class' => 'restricted', 'type'=>'varchar(64)', 'index'=>true),
 		'ifd_request_sent_time'  => array('type'=>'timestamp(6)'),
 		'ifd_request_count'      => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'ifd_confirmed_time'     => array('type'=>'timestamp(6)'),
@@ -61,13 +62,6 @@ class InboundForwardDestination extends SystemBase {
 	function prepare() {
 		$this->set('ifd_destination', strtolower(trim((string)$this->get('ifd_destination'))));
 		$this->set('ifd_update_time', gmdate('Y-m-d H:i:s'));
-	}
-
-	function authenticate_write($data) {
-		if ($data['current_user_permission'] < 5) {
-			throw new SystemAuthenticationError(
-				'Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
 	}
 
 	function is_confirmed(): bool {

@@ -75,6 +75,7 @@ function purge_querylog_logic(array $input): LogicResult{
 
 function purge_querylog_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description' => 'Truncate a device\'s DNS query log (device_id)',
 		'mutates'     => true,
 		'requires_session'        => true,

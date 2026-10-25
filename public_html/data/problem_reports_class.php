@@ -47,6 +47,7 @@ class ProblemReportException extends SystemBaseException {}
 class ProblemReport extends SystemBase {
 	public static $prefix = 'prr';
 	public static $tablename = 'prr_problem_reports';
+	public static $access_class = 'personal';
 	public static $pkey_column = 'prr_problem_report_id';
 
 	const STATUS_QUEUED = 'queued';
@@ -147,20 +148,6 @@ class ProblemReport extends SystemBase {
 
 	/** Most rows the retention sweep removes in one run. */
 	const PURGE_MAX_PER_RUN = 500;
-
-	function authenticate_read($data) {
-		if (($data['current_user_permission'] ?? 0) < 9
-				&& (int)($data['current_user_id'] ?? 0) !== (int)$this->get('prr_usr_user_id')) {
-			throw new SystemAuthenticationError('Current user does not have permission to view this entry in ' . static::$tablename);
-		}
-	}
-
-	function authenticate_write($data) {
-		if (($data['current_user_permission'] ?? 0) < 9
-				&& (int)($data['current_user_id'] ?? 0) !== (int)$this->get('prr_usr_user_id')) {
-			throw new SystemAuthenticationError('Current user does not have permission to edit this entry in ' . static::$tablename);
-		}
-	}
 
 	/** The bundle, decoded. */
 	public function bundle(): array {

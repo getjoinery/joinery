@@ -50,6 +50,7 @@ function login_2fa_passkey_options_logic(array $input): LogicResult {
 
 function login_2fa_passkey_options_logic_descriptor() {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'requires_session' => false,
 		'description' => 'Begin passkey second-factor confirmation during password sign-in',
 	];

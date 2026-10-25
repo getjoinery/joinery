@@ -14,11 +14,12 @@
  *   bug 3 — PK emits `int8` + `'serial'=>true` and round-trips via the canonical sequence
  *   bug 4 — PK is named `{prefix}_{singular}_id` (not `{prefix}_id`)
  *   item 2 — `serial`/`bigserial` declared on a field is rejected
- *   item 4 — non-standard owner_field emits a flagged owner-check; standard/absent emits none
+ *   item 4 — the model declares access_class; a non-standard owner_field is its $owner_column
  *   item 5b — every column type the platform's own data classes use is accepted
  *
  * Run:  php tests/scaffold/scaffold_hardening_test.php
  *
+ * @version 1.2 - access_class: required, declared on the model; a non-standard owner is $owner_column
  * @version 1.1
  */
 /** @joinery-test
@@ -43,7 +44,8 @@ function probe_manifest(array $overrides = []): array {
         'prefix'      => 'zqx',
         'plural'      => 'scaffold_hardening_probes',
         'surfaces'    => ['data'],
-        'owner_field' => 'zqx_account_id',           // non-standard → flagged auth
+        'access_class' => 'personal',
+        'owner_field' => 'zqx_account_id',           // non-standard → $owner_column
         'delete'      => ['strategy' => 'soft'],
         'fields'      => [
             ['name' => 'account_id', 'type' => 'int8',          'required' => true],
@@ -88,21 +90,19 @@ ok('bug 2: delete column is timestamp(6)',
 ok('bug 2: delete column is not timestamp with time zone',
     stripos($data, 'timestamp with time zone') === false);
 
-// item 4 — non-standard owner_field emits a flagged, working owner-check
-ok('item 4: non-standard owner emits authenticate_read()',
-    strpos($data, 'function authenticate_read') !== false);
-ok('item 4: non-standard owner emits authenticate_write()',
-    strpos($data, 'function authenticate_write') !== false);
-ok('item 4: owner-check is flagged with a TODO',
-    strpos($data, 'TODO: confirm this row-scope rule is correct') !== false);
-ok('item 4: owner-check references the declared owner column',
-    strpos($data, "\$this->get('zqx_account_id')") !== false);
+// item 4 — the model declares its class, and a non-standard owner_field its owner column
+ok('item 4: the model declares the manifest\'s access_class',
+    strpos($data, "public static \$access_class = 'personal';") !== false);
+ok('item 4: non-standard owner declares $owner_column',
+    strpos($data, "public static \$owner_column = 'zqx_account_id';") !== false);
+ok('item 4: and writes no authenticate_read() or authenticate_write() of its own',
+    strpos($data, 'function authenticate_') === false);
 
-// item 4 — standard owner_field emits NO custom auth
+// item 4 — standard owner_field declares no owner column
 $std = (new ScaffoldGenerator(probe_manifest(['owner_field' => 'zqx_usr_user_id'])))
     ->files()['data/scaffold_hardening_probes_class.php'] ?? '';
-ok('item 4: standard owner_field emits no authenticate_read()',
-    strpos($std, 'function authenticate_read') === false);
+ok('item 4: standard owner_field declares no $owner_column',
+    strpos($std, '$owner_column') === false && strpos($std, 'function authenticate_read') === false);
 
 // item 4 — omitted owner_field emits NO custom auth
 $none_manifest = probe_manifest();
@@ -114,6 +114,16 @@ ok('item 4: omitted owner_field emits no authenticate_read()',
 
 // ── Validation rules ─────────────────────────────────────────────────────────
 section('Validation rules');
+
+// access_class is required and must be a class in permissions.json
+$m = probe_manifest();
+unset($m['access_class']);
+$errs = (new ScaffoldGenerator($m))->validate();
+ok('access_class: a manifest without one is refused',
+    (bool)array_filter($errs, function ($e) { return strpos($e, 'access_class') === 0; }), implode('; ', $errs));
+$errs = (new ScaffoldGenerator(probe_manifest(['access_class' => 'secret'])))->validate();
+ok('access_class: a class permissions.json does not name is refused',
+    (bool)array_filter($errs, function ($e) { return strpos($e, 'access_class') === 0; }), implode('; ', $errs));
 
 // item 2 — serial / bigserial cannot be declared on a field
 foreach (['bigserial', 'serial', 'smallserial', 'serial8'] as $serial_type) {

@@ -1,4 +1,5 @@
 <?php
+/** @joinery-admin class=config */
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
@@ -7,7 +8,6 @@
 	require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
 	$session = SessionControl::get_instance();
-	$session->check_permission(10);
 
 	if (isset($_POST['edit_primary_key_value'])) {
 		$admin_menu = new AdminMenu($_POST['edit_primary_key_value'], TRUE);
@@ -43,7 +43,7 @@
 			$admin_menu->set('amu_parent_menu_id', NULL);
 		}
 
-		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_min_permission', 'amu_icon', 'amu_disable', 'amu_slug', 'amu_setting_activate');
+		$editable_fields = array('amu_menudisplay', 'amu_defaultpage', 'amu_order', 'amu_icon', 'amu_disable', 'amu_slug', 'amu_setting_activate');
 
 		foreach($editable_fields as $field) {
 			$admin_menu->set($field, $_POST[$field]);
@@ -144,7 +144,6 @@
 	}
 
 	$formwriter->textinput('amu_order', 'Order');
-	$formwriter->textinput('amu_min_permission', 'Minimum permission');
 
 	// Visibility — only meaningful on user_dropdown rows
 	if ($is_user_dropdown) {

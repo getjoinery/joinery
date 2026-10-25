@@ -93,6 +93,7 @@ function subscription_summary_logic(array $input): LogicResult {
 
 function subscription_summary_logic_descriptor(): array {
 	return [
+		'auth' => ['min_user_permission' => 0],
 		'description'      => 'Active and cancelled subscriptions, current tier, and payment source for the signed-in owner',
 		'requires_session' => true,
 		'mutates'          => false,
