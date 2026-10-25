@@ -15,6 +15,7 @@
  * jobs are finished by hand, as site_copy_runner does; the proof through the
  * proxy is a stand-in that answers as the copy or as the frozen site.
  *
+ * @version 1.4 - its sources sit at JobCommandBuilder::COPY_SOURCE_MIN_VERSION, the copy floor (B115)
  * @version 1.3 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.2 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
  *               up only through a storage space, the suite had been skipping;
@@ -142,7 +143,7 @@ $census = function (int $rows) {
 $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scwsite/public_html', 'mgn_site_url' => 'https://scp.example.org',
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.53.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'copy_export,copy_vouch,site_census,site_quiet,backup_run,check_status',
-	'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
+	'mgn_joinery_version' => JobCommandBuilder::COPY_SOURCE_MIN_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
 	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_host_report' => json_encode(array('sites' => array('scwsite')))));
 // Its backups, on a target of the test's own.
@@ -174,7 +175,7 @@ JobCommandBuilder::set_shelf_listing_for_tests(array());
 
 $mk_copy = function (ManagedNode $cnode) use ($src, $chain_id, $look) {
 	$c = new SiteCopy(NULL);
-	foreach (array('scp_source_node_id' => (int)$src->key, 'scp_copy_node_id' => (int)$cnode->key, 'scp_release' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
+	foreach (array('scp_source_node_id' => (int)$src->key, 'scp_copy_node_id' => (int)$cnode->key, 'scp_release' => JobCommandBuilder::COPY_SOURCE_MIN_VERSION,
 		'scp_status' => SiteCopy::STATUS_DORMANT, 'scp_chain_id' => $chain_id, 'scp_look_path' => $look,
 		'scp_last_copied_time' => gmdate('Y-m-d H:i:s')) as $k => $v) {
 		$c->set($k, $v);

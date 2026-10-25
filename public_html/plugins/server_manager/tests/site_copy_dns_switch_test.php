@@ -30,6 +30,7 @@
  *  - a manual switch's way back: the records the owner points back, named
  *    before going back and, after, while DNS still names the copy.
  *
+ * @version 1.7 - its sources sit at JobCommandBuilder::COPY_SOURCE_MIN_VERSION, the copy floor (B115)
  * @version 1.6 - a container site's DNS move takes the AAAA naming its host's IPv6 (C7's B47)
  * @version 1.5 - holds the copy lock for the run, so the live tick never refuses one of its actions
  * @version 1.4 - reverse DNS at settle names the copy's IPv6 too, each address checked against its own record (C5's B33)
@@ -213,7 +214,7 @@ $pair = function (string $n) use ($mk_node, $domain, $S4, $S6, $T4, $T6, $words,
 	$src = $mk_node('src' . $n, array('mgn_web_root' => '/var/www/html/scd' . $n . '/public_html', 'mgn_site_url' => 'https://' . $domain,
 		'mgn_host' => $S4, 'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => JobCommandBuilder::FORWARD_MIN_AGENT_VERSION,
 		'mgn_agent_primitives' => $words, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
-		'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
+		'mgn_joinery_version' => JobCommandBuilder::COPY_SOURCE_MIN_VERSION,
 		'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
 		'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
 		'mgn_last_host_report' => json_encode(array('sites' => array('scd' . $n)))));
@@ -240,7 +241,7 @@ $pair = function (string $n) use ($mk_node, $domain, $S4, $S6, $T4, $T6, $words,
 	harness_register_row('ajr_agent_join_requests', 'ajr_agent_join_request_id', $ajr->key);
 	$c = new SiteCopy(NULL);
 	foreach (array('scp_source_node_id' => (int)$src->key, 'scp_copy_node_id' => (int)$cnode->key,
-			'scp_release' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'scp_status' => SiteCopy::STATUS_DORMANT, 'scp_chain_id' => $chain_id,
+			'scp_release' => JobCommandBuilder::COPY_SOURCE_MIN_VERSION, 'scp_status' => SiteCopy::STATUS_DORMANT, 'scp_chain_id' => $chain_id,
 			'scp_look_path' => $look, 'scp_last_copied_time' => gmdate('Y-m-d H:i:s')) as $k => $v) {
 		$c->set($k, $v);
 	}
