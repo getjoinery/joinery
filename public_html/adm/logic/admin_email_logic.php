@@ -17,7 +17,7 @@ function admin_email_logic(array $input): LogicResult {
 	$email->assert_found();
 
 	// Handle actions
-	if($input['action'] == 'delete'){
+	if(($input['action'] ?? null) == 'delete'){
 		$email->assert_can_write($session);
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);
@@ -25,13 +25,13 @@ function admin_email_logic(array $input): LogicResult {
 
 		return LogicResult::redirect('/admin/admin_emails');
 	}
-	else if($input['action'] == 'undelete'){
+	else if(($input['action'] ?? null) == 'undelete'){
 		$email->assert_can_write($session);
 		$email->undelete();
 
 		return LogicResult::redirect('/admin/admin_emails');
 	}
-	else if($input['action'] == 'unqueue'){
+	else if(($input['action'] ?? null) == 'unqueue'){
 		$email->set('eml_status', Email::EMAIL_CREATED);
 		$email->assert_can_write($session);
 		$email->save();
@@ -41,13 +41,13 @@ function admin_email_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_emails');
 	}
 
-	if($input['action'] == 'add_recipient'){
+	if(($input['action'] ?? null) == 'add_recipient'){
 		//ADD A PROVIDER-RESOLVED RECIPIENT GROUP TO THE EMAIL
 		$email->add_recipient_group($input['provider'], $input['reference_id']);
 		$returnurl = $session->get_return();
 		return LogicResult::redirect($returnurl);
 	}
-	else if($input['action'] == 'remove'){
+	else if(($input['action'] ?? null) == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($input['erg_email_recipient_group_id'], TRUE);
 		// A recipient group is part of its email: the email's write rule decides.
 		if ((int)$email_recipient_group->get('erg_eml_email_id') !== (int)$email->key) {

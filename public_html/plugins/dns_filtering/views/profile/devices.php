@@ -48,7 +48,7 @@ if(!$tier){
 }
 else{			
 
-	if(!$_GET['showdeleted'] && $num_deleted_devices){
+	if(empty($_GET['showdeleted']) && $num_deleted_devices){
 	?>
                         <div class="job-content">
                             <div class="job-post_date">
@@ -58,7 +58,7 @@ else{
                         </div>
 		<?php	
 	}
-	else if($_GET['showdeleted'] && $num_deleted_devices){
+	else if(!empty($_GET['showdeleted']) && $num_deleted_devices){
 		foreach($deleted_devices as $deleted_device){
 
 				echo '

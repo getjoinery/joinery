@@ -13,19 +13,19 @@ function admin_mailing_list_logic(array $input): LogicResult {
 	$mailing_list = new MailingList($input['mlt_mailing_list_id'] ?? null, TRUE);
 	$mailing_list->assert_found();
 
-	if($input['action'] == 'delete'){
+	if(($input['action'] ?? null) == 'delete'){
 		$mailing_list->assert_can_write($session);
 		$mailing_list->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
 	}
-	else if($input['action'] == 'undelete'){
+	else if(($input['action'] ?? null) == 'undelete'){
 		$mailing_list->assert_can_write($session);
 		$mailing_list->undelete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
 	}
-	else if($input['action'] == 'removeregistrant'){
+	else if(($input['action'] ?? null) == 'removeregistrant'){
 		$registrant = new MailingListRegistrant($input['mlr_mailing_list_registrant_id'], TRUE);
 		$registrant->assert_found();
 		$mailing_list->remove_registrant($registrant->get('mlr_usr_user_id'));

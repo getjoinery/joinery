@@ -63,7 +63,7 @@ function admin_user_logic(array $input): LogicResult {
 	$user->assert_found();
 
 	// Process actions
-	$action = $input['action'] ?? $input['action'] ?? null;
+	$action = $input['action'] ?? null;
 
 	// Delete and undelete are buttons (POST): a link is a GET any site can make
 	// the browser follow.
@@ -81,20 +81,20 @@ function admin_user_logic(array $input): LogicResult {
 	// Handle POST actions
 	if(LibraryFunctions::isFormSubmission()){
 
-		if($input['action'] == 'add_to_group'){
+		if($action == 'add_to_group'){
 			//ADD THE USER TO A GROUP
 			$group = new Group($input['grp_group_id'], TRUE);
 			$group->assert_found();
 			$groupmember = $group->add_member($user->key);
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($input['action'] == 'remove_from_group'){
+		else if($action == 'remove_from_group'){
 			$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
 			$groupmember->assert_found();
 			$groupmember->remove();
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($input['action'] == 'activate'){
+		else if($action == 'activate'){
 			// Activating vouches for an address nobody confirmed.
 			Access::demand('restricted:write', $session);
 			$user->assert_can_write($session);
@@ -106,7 +106,7 @@ function admin_user_logic(array $input): LogicResult {
 			}
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
-		else if($input['action'] == 'resend_activation'){
+		else if($action == 'resend_activation'){
 			// A POST: it sends mail, and a link would send it whenever anything
 			// fetched the URL.
 			Access::demand('personal:write', $session);

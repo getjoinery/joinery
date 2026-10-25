@@ -920,6 +920,23 @@ class SessionControl{
 	 * Non-consuming on purpose: FormWriter's own validateCSRF() clears the
 	 * token on a successful check, and this must not take that away from it.
 	 */
+	/**
+	 * Whether $presented is a live form token this session issued, under any
+	 * form id: for a handler several forms post to (the sign-in). Non-consuming.
+	 */
+	public static function form_token_issued($presented): bool {
+		if (!is_string($presented) || $presented === '') {
+			return false;
+		}
+		$stored = isset($_SESSION['csrf_tokens']) && is_array($_SESSION['csrf_tokens']) ? $_SESSION['csrf_tokens'] : array();
+		foreach ($stored as $entry) {
+			if (is_array($entry) && isset($entry['token']) && hash_equals((string)$entry['token'], $presented)) {
+				return !isset($entry['expires']) || $entry['expires'] >= time();
+			}
+		}
+		return false;
+	}
+
 	private static function shadow_verify_form_csrf() {
 		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 			return;
@@ -1265,7 +1282,7 @@ class SessionControl{
 		} elseif ($user->get('usr_delete_time') || !$user->actions_allowed()
 				|| (int)($_SESSION['session_generation'] ?? 0) !== (int)$user->get('usr_session_generation')) {
 			$this->logout();
-		} elseif ((int)($_SESSION['permission'] ?? 0) > (int)$user->get('usr_permission')) {
+		} elseif (!Access::allows((int)($_SESSION['permission'] ?? 0), (int)$user->get('usr_permission'))) {
 			// A level lowered since sign-in holds from this request on: a demoted
 			// admin loses the old level at once, not when the session ends. A
 			// raise holds from the next sign-in, never inside a session.

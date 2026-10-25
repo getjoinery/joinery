@@ -96,6 +96,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return $too_many_attempts();
 		}
 
+		// A sign-in needs no cookie, so SameSite cannot stop another site's form
+		// from signing a visitor into an account it controls: the form's token
+		// must be one this session issued.
+		if (!SessionControl::form_token_issued($input['_csrf_token'] ?? '')) {
+			return LogicResult::error('This sign-in form expired. Reload the page and sign in again.');
+		}
+
 		if ((empty($input['email']) && empty($input['lbx_email'])) ||
 			(empty($input['password']) && empty($input['lbx_password']))) {
 			if ($ajax) {

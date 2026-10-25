@@ -24,14 +24,14 @@
 
 	$recipient_groups = $email->get_recipient_groups();
 
-	if($_REQUEST['action'] == 'add_recipient'){
+	if(($_REQUEST['action'] ?? null) == 'add_recipient'){
 		//ADD A PROVIDER-RESOLVED RECIPIENT GROUP TO THE EMAIL
 		$email->add_recipient_group($_POST['provider'], $_POST['reference_id'], $op);
 		$returnurl = $session->get_return();
 		header("Location: /admin/admin_email_recipients_modify?eml_email_id=".$email->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'remove'){
+	else if(($_REQUEST['action'] ?? null) == 'remove'){
 		$email_recipient_group = new EmailRecipientGroup($_POST['erg_email_recipient_group_id'], TRUE);
 		// A recipient group is part of its email: the email's write rule decides.
 		if ((int)$email_recipient_group->get('erg_eml_email_id') !== (int)$email->key) {
@@ -70,7 +70,6 @@
 		);
 		$page->tableheader($headers, $box_vars);
 
-		$total = 0;
 		$total_unsubscribed = 0;
 		$total_duplicates = 0;
 		$recipient_list = array();
@@ -101,7 +100,6 @@
 				}
 				$num_total++;
 			}
-			$total += $nummembers;
 			if($recipient_group->get('erg_operation') == 'add'){
 				array_push($rowvalues, 'Add: '. $label);
 				array_push($rowvalues, 'Users subscribed: '.$group_total . ', unsubscribed: '.$group_unsubscribed);

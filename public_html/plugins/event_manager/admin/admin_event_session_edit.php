@@ -27,13 +27,13 @@
 		exit();
 	}
 
-	if($_REQUEST['action'] == 'delete'){
+	if(($_REQUEST['action'] ?? null) == 'delete'){
 		// The model's permanent delete: its level, its deletion rules, and a POST.
 		$event_session->permanent_delete();
 		LibraryFunctions::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 		return;
 	}
-	else if($_REQUEST['action'] == 'addfile'){
+	else if(($_REQUEST['action'] ?? null) == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
 		$event_session->assert_found();
 		$event_session->assert_can_write($session);
@@ -47,7 +47,7 @@
 		header("Location: /plugins/event_manager/admin/admin_event_session_edit?evs_event_session_id=".$event_session->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'removefile'){
+	else if(($_REQUEST['action'] ?? null) == 'removefile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
 		$event_session->assert_found();
 		$event_session->assert_can_write($session);
@@ -58,7 +58,7 @@
 		header("Location: /plugins/event_manager/admin/admin_event_session_edit?evs_event_session_id=".$event_session->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'newsession-days'){
+	else if(($_REQUEST['action'] ?? null) == 'newsession-days'){
 
 		//PULL LATEST Session
 		$searches = array();

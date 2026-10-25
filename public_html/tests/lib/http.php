@@ -431,9 +431,12 @@ function harness_csrf_header($token) {
  * did not take — callers should assert on that rather than push on.
  */
 function harness_web_login($jar, $email, $password) {
+	// The sign-in form's token, as a browser has it from the page it posts.
+	$form = harness_request('GET', '/login', array('jar' => $jar, 'accept' => null));
+	$token = preg_match('/name="_csrf_token"[^>]*value="([^"]+)"/', (string)$form['body'], $m) ? html_entity_decode($m[1]) : '';
 	$login = harness_request('POST', '/login', array(
 		'jar'    => $jar,
-		'body'   => array('email' => $email, 'password' => $password),
+		'body'   => array('email' => $email, 'password' => $password, '_csrf_token' => $token),
 		'encode' => 'form',
 	));
 	// A successful login redirects; a failed one re-renders the form with a 200.

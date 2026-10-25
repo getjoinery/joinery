@@ -12,21 +12,21 @@ function admin_url_logic(array $input): LogicResult {
 	$url = new Url($input['url_url_id'] ?? null, TRUE);
 	$url->assert_found();
 
-	if($input['action'] == 'soft_delete'){
+	if(($input['action'] ?? null) == 'soft_delete'){
 		$url->assert_can_write($session);
 		$url->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
-	if($input['action'] == 'undelete'){
+	if(($input['action'] ?? null) == 'undelete'){
 		$url->assert_can_write($session);
 		$url->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
-	if($input['action'] == 'permanent_delete'){
+	if(($input['action'] ?? null) == 'permanent_delete'){
 		$url->assert_can_write($session);
 		$url->permanent_delete();
 

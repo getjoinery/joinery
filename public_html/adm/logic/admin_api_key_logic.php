@@ -19,28 +19,28 @@ function admin_api_key_logic(array $input): LogicResult {
 		return LogicResult::error('This key is the sandboxed plugin ' . $sandbox_plugin . "'s credential: it is made and removed with the plugin, on the Plugins page.");
 	}
 
-	if($input['action'] == 'soft_delete'){
+	if(($input['action'] ?? null) == 'soft_delete'){
 		$api_key->assert_can_write($session);
 		$api_key->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($input['action'] == 'undelete'){
+	if(($input['action'] ?? null) == 'undelete'){
 		$api_key->assert_can_write($session);
 		$api_key->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($input['action'] == 'permanent_delete'){
+	if(($input['action'] ?? null) == 'permanent_delete'){
 		$api_key->assert_can_write($session);
 		$api_key->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
-	if($input['action'] == 'regenerate_secret'){
+	if(($input['action'] ?? null) == 'regenerate_secret'){
 		$api_key->assert_can_write($session);
 
 		// Generate new secret

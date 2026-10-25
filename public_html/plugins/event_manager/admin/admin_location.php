@@ -14,14 +14,14 @@
 	$location = new Location($_REQUEST['loc_location_id'] ?? null, TRUE);
 	$location->assert_found();
 
-	if($_REQUEST['action'] == 'delete'){
+	if(($_REQUEST['action'] ?? null) == 'delete'){
 		$location->assert_can_write($session);
 		$location->soft_delete();
 
 		header("Location: /plugins/event_manager/admin/admin_locations");
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if(($_REQUEST['action'] ?? null) == 'undelete'){
 		$location->assert_can_write($session);
 		$location->undelete();
 
