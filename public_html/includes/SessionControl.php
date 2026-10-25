@@ -110,6 +110,9 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.21 - check_permission() sets its 401 with http_response_code() and throws with code 401, which
+ *                ErrorStatus answers: a raw HTTP/ status line made the error handler's own http_response_code()
+ *                warn on every refused page under PHP 8.5
  * @version 1.20 - the Secure flag on the session cookie and on every set_secure_cookie() cookie asks LibraryFunctions::isSecure(),
  *                which believes forwarding headers only from a proxy we know
  * @version 1.19 - check_permission() takes a level or class:verb and asks Access; the staff tests ask
@@ -1797,9 +1800,9 @@ class SessionControl{
 			$this->enforce_navigation_gates();
 
 			if(!isset($_SESSION['permission']) || !Access::allows($level, (int)$_SESSION['permission'])){
-				header("HTTP/1.1 401 Unauthorized");
+				http_response_code(401);
 				throw new SystemAuthenticationError(
-					'Sorry, you do not have the needed permissions to view this page.');
+					'Sorry, you do not have the needed permissions to view this page.', 401);
 			}
 		}
 	}

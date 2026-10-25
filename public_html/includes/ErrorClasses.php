@@ -29,6 +29,11 @@ final class ErrorStatus {
         if ($exception instanceof AuthenticationException) {
             return 401;
         }
+        // A page refused to a visitor whose level is too low says 401, the
+        // code its thrower gives it (SessionControl::check_permission()).
+        if ($exception instanceof \SystemAuthenticationError && $exception->getCode() === 401) {
+            return 401;
+        }
         if ($exception instanceof AuthorizationException || $exception instanceof \SystemAuthenticationError) {
             return 403;
         }
@@ -47,12 +52,19 @@ final class ErrorStatus {
     }
 
     /**
-     * Whether the thrower marked it as expected (the NoLog family): it is not
-     * recorded as an error and offers nothing to report.
+     * Whether it is expected, so it is not recorded as an error and offers
+     * nothing to report: what its thrower marked (the NoLog family), and a
+     * request refused for who is asking (sign in, level, row rule). A refusal
+     * a signed-in person meets is recorded as access_refused by Access, and
+     * a refused model write logs its own [WRITE_REFUSED] line naming the code
+     * that wrote, so neither needs an error row as well.
      */
     public static function isExpected(\Throwable $exception): bool {
         return $exception instanceof \DisplayableErrorMessageNoLog
-            || $exception instanceof \DisplayablePermanentErrorMessageNoLog;
+            || $exception instanceof \DisplayablePermanentErrorMessageNoLog
+            || $exception instanceof \SystemAuthenticationError
+            || $exception instanceof AuthenticationException
+            || $exception instanceof AuthorizationException;
     }
 }
 

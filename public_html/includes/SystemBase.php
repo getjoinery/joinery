@@ -26,7 +26,8 @@ class SystemBaseNoKeyError extends SystemBaseException {}
 class SystemRowNotFoundError extends SystemBaseNoKeyError {}
 
 // A refusal: its message names what was refused and the level it needs, written
-// for the person refused, so it is shown to them (ErrorStatus still answers 403).
+// for the person refused, so it is shown to them (ErrorStatus answers 403, or 401
+// when it is thrown with that code).
 class SystemAuthenticationError extends SystemBaseException implements DisplayableErrorMessage {}
 
 class SystemDisplayableError extends SystemBaseException implements DisplayableErrorMessage {}
