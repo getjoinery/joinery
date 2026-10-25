@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.28 - disable_root_login results (agent 1.95.0): what sshd reads before and after, the reload, Match blocks
  * @version 1.27 - net_health and web_workers results (agent 1.93.0): a verdict line, then the counts
  * @version 1.26 - starting a deploy-all rollout on a page view is the server's own write (server_initiated_write)
  * @version 1.25 - a site_log_count result renders as a marker table under a line saying whether the read covered the window
@@ -850,6 +851,25 @@ if ($result) {
 			} else {
 				echo '<div class="text-muted mt-1">Not yet seen to come back. This management node asks the machine for a host report every two minutes until one carries a new boot id.</div>';
 			}
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'disable_root_login' && !empty($result_data['read'])) {
+		// Root login off for good (agent 1.95.0, beta_break_glass_root_access 5.3).
+		$drl_done = $result_data['permitrootlogin_after'] === 'no' && $result_data['refused'] === '';
+		echo '<div class="card mb-3"><div class="card-header"><strong>Turn off root login</strong></div><div class="card-body">';
+		if ($result_data['refused'] !== '' && empty($result_data['changed'])) {
+			echo '<div>Not changed: ' . htmlspecialchars((string)$result_data['reason']) . '</div>';
+		} else {
+			echo '<div class="' . ($drl_done ? 'text-success' : 'text-danger') . '">'
+				. ($drl_done ? 'Root may no longer log in over SSH.' : 'Written, but not in force: ' . htmlspecialchars((string)$result_data['reason'])) . '</div>';
+			echo '<div class="small text-muted mt-1">sshd read permitrootlogin ' . htmlspecialchars($result_data['permitrootlogin_before'])
+				. ' before, ' . htmlspecialchars($result_data['permitrootlogin_after']) . ' after; '
+				. ($result_data['written'] === 'main' ? 'set first in sshd_config' : 'its own drop-in, sorted first') . '; sshd '
+				. htmlspecialchars(array('reloaded' => 'reloaded', 'not_running' => 'was not running and reads it when it starts', 'failed' => 'did not reload', 'none' => 'not reloaded')[$result_data['reload']]) . '.</div>';
+		}
+		if (!empty($result_data['match_blocks'])) {
+			echo '<div class="small text-warning mt-1">The machine\'s sshd configuration has a Match block, which can let root in for some address or user whatever the global value. Check it on the machine.</div>';
 		}
 		echo '</div></div>';
 		$result_data = null;

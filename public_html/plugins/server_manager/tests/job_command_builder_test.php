@@ -394,6 +394,27 @@ check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
 check(preg_match("#--management-node=('https://[^']+') --upgrade-server=\\1#", $metal_cmd) === 1,
 	'bare metal too installs and upgrades from this plane', $metal_cmd);
 
+// The beta's emergency root access (beta_break_glass_root_access 4.1): the
+// caller says the box may be kept, and the site line offers the checkbox.
+check(strpos($boot_cmd, '--beta-root-access') === false && strpos($metal_cmd, '--beta-root-access') === false,
+	'an install not marked beta_root_access offers no root access checkbox');
+$beta_boot = jcb_ssh_steps(JobCommandBuilder::build_install_node($boot_target, array(
+	'mode' => 'fresh', 'sitename' => 'bootsite', 'domain' => 'boot.example.com', 'docker_mode' => 'docker',
+	'beta_root_access' => true)))[0]['cmd'];
+check(preg_match("#install\\.sh -y -q site --docker [^\n]*--beta-root-access#", $beta_boot) === 1
+	&& preg_match("#install\\.sh -y -q docker [^\n]*--beta-root-access#", $beta_boot) === 0,
+	'a docker install marked beta_root_access passes --beta-root-access to install.sh site only', $beta_boot);
+$beta_metal = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
+	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com', 'docker_mode' => 'bare-metal',
+	'beta_root_access' => true)))[0]['cmd'];
+check(preg_match("#install\\.sh -y -q site --bare-metal [^\n]*--beta-root-access#", $beta_metal) === 1,
+	'and so does a bare-metal one', $beta_metal);
+$beta_copy = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, array(
+	'mode' => 'copy', 'sitename' => 'metalsite', 'domain' => 'metal.example.com', 'docker_mode' => 'bare-metal',
+	'copy_of' => 417, 'copy_of_key' => base64_encode(str_repeat("\x0c", 32)), 'release' => '0.8.496',
+	'beta_root_access' => true)))[0]['cmd'];
+check(strpos($beta_copy, '--beta-root-access') === false, 'a copy never offers it: its settings are its source\'s', $beta_copy);
+
 // B38: a plane that serves no releases (built from one, never published from)
 // sends its servers to where it takes its own; one that publishes keeps them.
 $p = 'https://mgr-a.example.net';

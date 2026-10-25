@@ -7,6 +7,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.13 - Emergency root access card beside log access, where the install offered it: on until the owner turns it off,
+ *                 and then off for good (specs/implemented/beta_break_glass_root_access.md 4.2)
  * @version 1.12 - The Help panel card says when support_url is set but is not an https address
  * @version 1.11 - The Help panel card names the upgrade source as the desk a blank support_url asks
  * @version 1.10 - The Help panel card says it is off while support_url is blank
@@ -47,6 +49,9 @@ $agent_installed = $page_vars['agent_installed'];
 $agent_switched  = $page_vars['agent_switched'];
 $log_access      = $page_vars['log_access'];
 $log_access_switched = $page_vars['log_access_switched'];
+$root_access_offered = $page_vars['root_access_offered'];
+$root_access     = $page_vars['root_access'];
+$root_access_switched = $page_vars['root_access_switched'];
 $installer_hint  = $page_vars['installer_hint'];
 $error           = $page_vars['error'];
 $requested       = $page_vars['requested'];
@@ -278,6 +283,30 @@ echo '<form method="POST" action="' . $self . '" class="d-inline">'
    . ($log_access ? 'Turn off log access' : 'Turn on log access') . '</button>'
    . '</form>';
 echo '</div></div>';
+
+// ---- Emergency root access (beta) ------------------------------------------
+// Only where the install said the management node keeps this machine's root
+// password for the beta. One-way: there is no button that turns it back on.
+if ($root_access_offered) {
+	if ($root_access_switched === 'off') {
+		echo '<div class="alert alert-info" role="alert">Emergency root access is off. The management node\'s operator removes the password from your server; this cannot be undone.</div>';
+	}
+	echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
+	echo '<h5 class="card-title mb-2">Emergency root access (beta) <span class="badge ' . ($root_access ? 'bg-success' : 'bg-secondary') . '">' . ($root_access ? 'On' : 'Off') . '</span></h5>';
+	if ($root_access) {
+		echo '<p class="mb-2">If an update breaks your server badly enough that the agent cannot reach it, the management node\'s operator '
+		   . 'can log in as root to fix it. The password is locked so only that operator can read it, and every time it is read is recorded. '
+		   . 'It is removed for everyone when the beta ends.</p>';
+		echo '<p class="text-muted small mb-3">Turning this off has the password removed, and cannot be undone: it cannot be turned back on.</p>';
+		echo '<form method="POST" action="' . $self . '" class="d-inline" onsubmit="return confirm(\'Turn off emergency root access? This cannot be undone.\');">'
+		   . '<input type="hidden" name="action" value="root_access_off">'
+		   . '<button type="submit" class="btn btn-sm btn-outline-secondary">Turn off emergency root access</button>'
+		   . '</form>';
+	} else {
+		echo '<p class="mb-0">You turned this off. It cannot be turned back on.</p>';
+	}
+	echo '</div></div>';
+}
 
 // ---- The Help panel: what it may send, and live reads ----------------------
 // The support desk this site asks (support_chatbot.md, Consent). The

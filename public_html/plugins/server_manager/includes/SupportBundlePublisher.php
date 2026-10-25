@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.35 - carries disable_root_login.sh, the machine word of agent 1.95.0 that turns root SSH login off
+ *                 (specs/implemented/beta_break_glass_root_access.md 5.3)
  * @version 1.34 - carries arm_ssl_retry.sh: setup_ssl.sh run from the bundle armed no certificate retry,
  *                so a container host's site whose name did not reach it yet never got a certificate (B109)
  * @version 1.33 - carries net_health.sh and web_workers.sh, the two machine words of agent 1.93.0
@@ -218,6 +220,10 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/listening_sockets.sh',
 		'maintenance_scripts/sysadmin_tools/container_inventory.sh',
 		'maintenance_scripts/sysadmin_tools/reboot_machine.sh',
+		// disable_root_login (agent 1.95.0): a Docker host's sshd is the
+		// machine's, and a host agent turns root login off from the bundle.
+		// Sources nothing.
+		'maintenance_scripts/sysadmin_tools/disable_root_login.sh',
 		// net_health and web_workers (agent 1.93.0): whether a Docker host
 		// drops packets or connections, and its web tier's workers (none of
 		// its own: the word says so). Both source nothing.

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.21 - JOINERY_BETA_ROOT_ACCESS=1 (install.sh site --beta-root-access) writes beta_root_access_offered = 1:
+#                 the setup wizard offers the emergency root access checkbox (spec beta_break_glass_root_access 4.1)
 # VERSION: 3.20 - An admin address the account refuses (a domain with no mail and no website) no longer leaves the
 #                 seeded default password: the password goes on alone under the seeded address, the refusal is said,
 #                 and the credentials file names the address to sign in with, a supplied password's too (B105)
@@ -135,6 +137,9 @@
 #                            and JOINERY_BACKUP_REGION alongside
 #   JOINERY_OUTBOUND_NOTICE_GB  the monthly outbound notice's figure in GB
 #                            (outbound_monthly_notice_gb; 0 turns it off)
+#   JOINERY_BETA_ROOT_ACCESS 1: the management node keeps this machine's root
+#                            password for the beta, so the setup wizard offers
+#                            the owner its checkbox (beta_root_access_offered)
 
 set -e
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
@@ -668,6 +673,21 @@ if [[ "${JOINERY_OUTBOUND_NOTICE_GB:-}" =~ ^[0-9]{1,6}$ ]]; then
          WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'outbound_monthly_notice_gb');" \
         2>/dev/null || true
     log "Monthly outbound notice: past ${JOINERY_OUTBOUND_NOTICE_GB} GB"
+fi
+
+# The management node keeps this machine's root password for the beta
+# (install.sh site --beta-root-access): the setup wizard offers the owner the
+# emergency root access checkbox. A managed setting the site's own pages read.
+if [ "${JOINERY_BETA_ROOT_ACCESS:-}" = "1" ]; then
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = '1' WHERE stg_name = 'beta_root_access_offered';" \
+        2>/dev/null || true
+    psql -U postgres -d "$SITENAME" -q -c \
+        "INSERT INTO stg_settings (stg_name, stg_value)
+         SELECT 'beta_root_access_offered', '1'
+         WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'beta_root_access_offered');" \
+        2>/dev/null || true
+    log "Emergency root access is offered to the owner in the setup wizard"
 fi
 
 # =============================================================================

@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.108 - disable_root_login results (agent 1.95.0): held to the script's shape; a completed run whose sshd
+ *                 reads no retires the machine's kept or retire_failed install password, with an event naming who
+ *                 asked (specs/implemented/beta_break_glass_root_access.md 5.3)
  * @version 1.107 - host_report's php_workers (host_report 1.39): PHP-FPM's worker ceiling and where it came from,
  *                 the host reserve beside what the rest of the machine holds, and PostgreSQL's settings
  *                 pending a restart, held to its shape (specs/php_fpm_sizing_bare_metal.md WP5)
@@ -3926,6 +3929,64 @@ HTML;
 	private static function process_reboot_machine($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_reboot_machine(self::script_json($job))));
 		$job->save();
+	}
+
+	/** The refusal and failure codes disable_root_login.sh gives. */
+	const DISABLE_ROOT_LOGIN_CODES = ['container', 'no_sshd', 'sshd_refused', 'reload_failed', 'not_effective'];
+
+	/**
+	 * A disable_root_login job's result (agent 1.95.0), each field held to the
+	 * shape the script gives it. Pure; the processor test drives it.
+	 */
+	public static function sanitise_disable_root_login($d) {
+		if (!is_array($d) || !array_key_exists('changed', $d)) {
+			return ['read' => false];
+		}
+		$value = function ($v) { $v = preg_replace('/[^a-z-]/', '', strtolower((string)$v)); return substr($v, 0, 24) ?: 'unknown'; };
+		return [
+			'read'                   => true,
+			'changed'                => ($d['changed'] ?? null) === true,
+			'written'                => in_array($d['written'] ?? '', ['dropin', 'main'], true) ? $d['written'] : '',
+			'permitrootlogin_before' => $value($d['permitrootlogin_before'] ?? ''),
+			'permitrootlogin_after'  => $value($d['permitrootlogin_after'] ?? ''),
+			'reload'                 => in_array($d['reload'] ?? '', ['reloaded', 'not_running', 'failed', 'none'], true) ? $d['reload'] : 'none',
+			'match_blocks'           => ($d['match_blocks'] ?? null) === true,
+			'refused'                => in_array($d['refused'] ?? '', self::DISABLE_ROOT_LOGIN_CODES, true) ? $d['refused'] : '',
+			'reason'                 => substr(preg_replace('#[^A-Za-z0-9 ,.:;()/_\'-]#', '', (string)($d['reason'] ?? '')), 0, 300),
+		];
+	}
+
+	/**
+	 * A disable_root_login job's result. Once the machine's sshd reads
+	 * permitrootlogin no, the install password this plane holds for it opens
+	 * nothing over SSH any more: a kept or retire_failed provision belongs in
+	 * retired. One direct UPDATE, as BreakGlassRootAccess's fallback is,
+	 * because nobody's vault is open while a result is folded: the vault
+	 * column and its four sealing columns cleared, the SecretBox copy and the
+	 * "NOT retired" error cleared. The record of how it was closed is the
+	 * event, whose user is the job's creator.
+	 */
+	private static function process_disable_root_login($job) {
+		$result = self::sanitise_disable_root_login(self::script_json($job));
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+		if ((string)$job->get('mjb_status') !== 'completed' || empty($result['read'])
+				|| $result['permitrootlogin_after'] !== 'no' || $result['refused'] !== '') {
+			return;
+		}
+		$node = new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE);
+		$provision = $node->key ? CustomerCloudProvision::for_machine_address((string)$node->get('mgn_host')) : null;
+		if (!$provision || !in_array((string)$provision->get('cvp_install_password'), ['kept', 'retire_failed'], true)) {
+			return;
+		}
+		DbConnector::get_instance()->get_db_link()->prepare("UPDATE cvp_customer_cloud_provisions SET
+			cvp_root_pass_vault_sealed = NULL, cvp_content_sealed = false, cvp_sealed_key = NULL, cvp_sealed_owner_user_id = NULL,
+			cvp_key_generation = 0, cvp_root_pass_sealed = NULL, cvp_error = NULL, cvp_install_password = 'retired',
+			cvp_root_access_offered = false, cvp_update_time = now()
+			WHERE cvp_customer_cloud_provision_id = ?")->execute([(int)$provision->key]);
+		BreakGlassRootAccess::log_root_login_off((int)$job->get('mjb_created_by'), $provision);
+		error_log('JobResultProcessor: root login turned off by the agent on ' . $node->get('mgn_name') . ' (job #' . $job->key
+			. '); provision #' . $provision->key . ' install password retired');
 	}
 
 	/** Sites and records each a site_state_report lists at most (the word's stateReportMaxSites and stateReportMaxEntries). */

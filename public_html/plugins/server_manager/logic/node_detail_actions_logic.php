@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.78 - disable_root_login (agent 1.95.0): root SSH login off for good, through the machine's own agent
+ * @version 1.77 - Retry Install on a box whose password is kept for the beta says so, and names the holder's Retire (reviewer2 B2)
  * @version 1.76 - the node API secret is stored sealed (ManagedNode::set_api_secret_key())
  * @version 1.75 - set_reverse_dns names the address the form chose: both, the IPv4 alone or the IPv6 alone (B70)
  * @version 1.74 - edge_vs_origin (EdgeOriginProbe, run here, no agent), net_health and web_workers (agent 1.93.0)
@@ -201,6 +203,7 @@ class NodeDetailActions {
 		'container_inventory'      => 'overview',
 		'spam_learning_status'     => 'overview',
 		'reboot_machine'           => 'overview',
+		'disable_root_login'       => 'overview',
 		'reset_failed_unit'        => 'overview',
 		'restart_unit'             => 'overview',
 		'move_to_plane'            => 'api_keys',
@@ -513,7 +516,8 @@ class NodeDetailActions {
 			case 'refresh_site_containers':
 			case 'net_health':
 			case 'web_workers':
-			case 'reboot_machine': {
+			case 'reboot_machine':
+			case 'disable_root_login': {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);
 				$job = ManagementJob::createFromBuild($node->key, $action, $built, null, $uid);
@@ -890,6 +894,13 @@ class NodeDetailActions {
 				// finished one retires it (the server refuses it, and this
 				// plane erases it). Without it the retry could only wait out
 				// the SSH budget, so say so instead.
+				$retry_provision = CustomerCloudProvision::latest_for_node((int)$node->key);
+				if ($retry_provision && (string)$retry_provision->get('cvp_install_password') === 'kept') {
+					self::fail($session, $page_regex,
+						'This install cannot be retried while its root password is kept for the beta: it is sealed to its holder\'s vault, '
+						. 'and the install logs in with it from this management node. The holder clicks Retire on the dashboard first.');
+					return $base_url;
+				}
 				if (!InstallJobExecutor::holds_install_password($node)) {
 					self::fail($session, $page_regex,
 						'This install cannot be retried: this plane no longer holds the server\'s install password, '

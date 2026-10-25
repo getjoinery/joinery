@@ -8,10 +8,15 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.145 - build_disable_root_login (agent 1.95.0): root SSH login off for good on a machine through its own
+ *                 agent; refused on a container node (named its host's node) and while this management node still
+ *                 logs in with the install password (specs/implemented/beta_break_glass_root_access.md 5.3)
  * @version 1.144 - the node's API secret is read sealed (ManagedNode::api_secret_key()): the probe, the status fetch
  *                 and has_api_creds(), where a secret that no longer opens counts as none
+ * @version 1.143 - build_install_node: beta_root_access passes --beta-root-access to a fresh install's install.sh site, so
+ *                 the site offers its owner the emergency root access checkbox (beta_break_glass_root_access 4.1)
  * @version 1.142 - build_install_node passes --keep-root-login to install.sh docker and server, which turn root SSH
- *                 login off by default (specs/beta_break_glass_root_access.md section 2)
+ *                 login off by default (specs/implemented/beta_break_glass_root_access.md section 2)
  * @version 1.141 - net_health and web_workers (agent 1.93.0, specs/slow_request_diagnosis_words.md WP2/WP3):
  *                 two reads that take nothing. net_health is asked of a container site's host, never of
  *                 the container (its network is not where an edge connects). site_log offers the access
@@ -3459,6 +3464,58 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Why this plane will not ask the machine to turn root login off, or null
+	 * (specs/implemented/beta_break_glass_root_access.md 5.3). A container site is not the
+	 * machine: its agent reports the word too, but a job there would change
+	 * the container's files, not the host's sshd, so it is sent to the host's
+	 * node. And while the machine's provision is held or retiring, an install,
+	 * a Retry Install or the password's cleanup still logs in as root with the
+	 * password.
+	 */
+	public static function disable_root_login_refusal($node): ?string {
+		if (trim((string)$node->get('mgn_container_name')) !== '' || (int)$node->get('mgn_mgh_managed_host_id')) {
+			$host = (int)$node->get('mgn_mgh_managed_host_id') ? new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE) : null;
+			$host_node = ($host && $host->key) ? $host->host_node() : null;
+			return 'This site runs in a container; turn root login off on its server'
+				. ($host_node ? ', from ' . $host_node->get('mgn_name') . '\'s node.' : ', from the server\'s own node.');
+		}
+		$provision = CustomerCloudProvision::for_machine_address((string)$node->get('mgn_host'));
+		$state = $provision ? (string)$provision->get('cvp_install_password') : '';
+		if ($state === 'held') {
+			return 'This management node still logs in to the machine as root with its install password (an install, a Retry Install, '
+				. 'or the cleanup once its agents are admitted). Wait for the password to be retired; for a failed install, delete the instance.';
+		}
+		if ($state === 'retiring') {
+			return 'The install password\'s cleanup is running and logs in as root; wait for it to finish.';
+		}
+		return null;
+	}
+
+	/**
+	 * Turn root SSH login off on the machine for good (agent 1.95.0).
+	 * PRIMITIVE ONLY, and it takes nothing: the script writes one value, no, in
+	 * a drop-in that sorts first, and is done only when sshd -T reads it.
+	 * JobResultProcessor::process_disable_root_login retires a kept or
+	 * retire_failed install password once it is.
+	 */
+	public static function build_disable_root_login($node) {
+		if (!self::has_primitive($node, 'disable_root_login')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot turn root login off from here. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['disable_root_login']));
+		}
+		$why = self::disable_root_login_refusal($node);
+		if ($why !== null) {
+			throw new Exception($why);
+		}
+		return self::build_disable_root_login_primitive($node);
+	}
+
+	public static function build_disable_root_login_primitive($node) {
+		return ['primitive' => 'disable_root_login', 'params' => []];
+	}
+
+	/**
 	 * Has the node's owner left log access on, as the node last reported? The
 	 * node enforces this itself; asking here only saves queuing a job whose
 	 * answer is already known. An agent that has never reported (no log words)
@@ -5788,7 +5845,8 @@ class JobCommandBuilder {
 	 * $params: mode (fresh|bare|copy), sitename, domain, docker_mode
 	 * (docker|bare-metal), admin_email, admin_password_stdin; for copy, the
 	 * source and its release (below); for an encrypted data root,
-	 * encrypted_data_root and recovery_public_key (base64).
+	 * encrypted_data_root and recovery_public_key (base64); beta_root_access
+	 * when the provision may keep the root password for the beta.
 	 */
 	public static function build_install_node($node, $params) {
 		$mode     = (string)($params['mode'] ?? 'fresh');
@@ -5866,6 +5924,12 @@ class JobCommandBuilder {
 			}
 			$encrypted_flags = ' --encrypted-data-root --recovery-public-key=' . escapeshellarg($recovery_key);
 		}
+
+		// The caller (ProvisionCustomerCloud) may keep this machine's root
+		// password for the beta, and says so: the site offers its owner the
+		// checkbox (specs/implemented/beta_break_glass_root_access.md 4.1). A fresh
+		// install only; a copy's settings are its source's.
+		$beta_flags = (!empty($params['beta_root_access']) && $mode === 'fresh') ? ' --beta-root-access' : '';
 
 		// Per-job path, and NOT under /tmp: the extracted release stays on the
 		// machine (the deferred-SSL timer may run its setup_ssl.sh until the
@@ -5983,7 +6047,7 @@ class JobCommandBuilder {
 			// is refused for the life of the container. Invisible on the
 			// production plane, where the two are the same machine.
 			$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
-				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}";
+				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$beta_flags}";
 			}
 		} else {
 			// Bare metal: prerequisites, then the site. install.sh server turns
@@ -6010,7 +6074,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server --keep-root-login' . self::outbound_install_flags() . $encrypted_flags . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

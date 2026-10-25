@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.11 - the retire section pins emergency root access off, so a box with a fit holder is retired as before
  * @version 1.10 - reverse DNS is handed the addresses the name gives, not a yes (NodeReverseDns 1.6)
  * @version 1.9 - the account list is HeldCloudAccounts::targets(); scopes from OperatorCloudAccount::SCOPES (cloud_accounts_list)
  * @version 1.8 - teardown names every node this run's provisions made as a fixture, so a provisioner that
@@ -293,6 +294,9 @@ class CustomerCloudProvisioningTest {
 
 	private function test_install_password_retirement() {
 		section('Retiring the install password: every agent on the machine admitted, then the machine\'s word');
+		// Today's retire, whatever this box's beta setting: a kept password is
+		// break_glass_root_access_test's.
+		harness_set_setting_mem(BreakGlassRootAccess::SETTING, '0');
 
 		$suffix = substr(bin2hex(random_bytes(4)), 0, 8);
 		$fake = new KeylessProbeDriver();

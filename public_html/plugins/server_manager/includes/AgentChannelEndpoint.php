@@ -41,6 +41,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.56 - root_access: the node reports its owner's emergency root access answer (on|off), stored in
+ *                 mgn_agent_root_access only when it is one and differs; absent for an agent before 1.94.0
+ *                 (specs/implemented/beta_break_glass_root_access.md 5.1)
  * @version 1.55 - an approved join keeps the machine's reported addresses on its node (mgn_addresses);
  *                 a declared body that is missing is RequestBodyIncomplete (400) unless it was over post_max_size
  *                 (RequestBody), so a stalled agent connection is not reported as an oversized request
@@ -1240,6 +1243,11 @@ class AgentChannelEndpoint {
 			// Plugin::is_active()'s rule. A closed set; absent for an agent
 			// before 1.37.0, or one whose database did not answer.
 			'server_manager' => ['type' => 'string', 'max' => 8, 'pattern' => '/^(active|inactive)?$/'],
+			// The site owner's answer to keeping emergency root access for the
+			// beta (beta_root_access), read by the agent from the node's own
+			// settings. A closed set; absent for an agent before 1.94.0, or one
+			// whose database did not answer.
+			'root_access'    => ['type' => 'string', 'max' => 3, 'pattern' => '/^(on|off)?$/'],
 			// Where the agent's own self-update stands: its verdict on the
 			// version on offer, and that version. A closed set of verdicts;
 			// absent for an agent before 1.65.0 and before its first check.
@@ -1349,6 +1357,13 @@ class AgentChannelEndpoint {
 		if (array_key_exists('server_manager', $in) && in_array((string)$in['server_manager'], ['active', 'inactive'], true)
 			&& (string)$in['server_manager'] !== (string)$node->get('mgn_agent_server_manager')) {
 			$node->set('mgn_agent_server_manager', (string)$in['server_manager']);
+		}
+		// The owner's emergency root access answer, the same way: absent or
+		// empty leaves the last answer standing, so a database outage never
+		// reads as the owner turning it off.
+		if (array_key_exists('root_access', $in) && in_array((string)$in['root_access'], ['on', 'off'], true)
+			&& (string)$in['root_access'] !== (string)$node->get('mgn_agent_root_access')) {
+			$node->set('mgn_agent_root_access', (string)$in['root_access']);
 		}
 
 		// Where its own self-update stands. A refused update is otherwise seen

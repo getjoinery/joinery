@@ -6,6 +6,8 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.13 - action beta_permissions_save: the Beta permissions step's answer (emergency root access, one-way, and
+ *                 log access), written with Setting::put as the Management Node page writes it
  * @version 2.12 - every action, and the DNS box's, runs only on a POST: opening a step changes nothing
  * @version 2.11 - a saved backup target is made the scheduled one by save_target itself; the newest-enabled guess is gone
  * @version 2.10 - the Calendar step's protection level (action calendar_level)
@@ -208,6 +210,26 @@ function setup_logic(array $input): LogicResult {
 		if ($error === '') {
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect('/setup?step=' . urlencode(_setup_next_key($steps, 'welcome')));
+		}
+	}
+
+	// Beta permissions: managed settings, which the generic settings save
+	// refuses, so the step has its own action (BetaPermissions holds the
+	// rules: emergency root access is shown only where the install offered
+	// it, and never turns back on once off).
+	if ($action === 'beta_permissions_save' && $permission >= 10) {
+		require_once(PathHelper::getIncludePath('includes/BetaPermissions.php'));
+		if (BetaPermissions::root_access_offered()) {
+			$refusal = BetaPermissions::set_root_access(!empty($input['keep_root_access']));
+			if ($refusal !== null) {
+				$error = $refusal;
+			}
+		}
+		if ($error === '') {
+			BetaPermissions::set_log_access(!empty($input['allow_log_access']));
+			SetupSteps::recordDecision('beta_permissions', NULL);
+			SetupSteps::invalidateSessionCache();
+			return LogicResult::redirect('/setup?step=' . urlencode(_setup_next_key($steps, 'beta_permissions')));
 		}
 	}
 

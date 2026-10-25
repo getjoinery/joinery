@@ -1,14 +1,22 @@
 # Beta break-glass root access
 
-**Status:** Draft 2026-10-24, redesigned the same day. The first design (an
+**Status:** Implemented 2026-10-25: all four work packages built and reviewed.
+WP1 (self-hosted root SSH off by default) committed 7ffbfa58c; WP2 to WP4
+(the kept password, the site's Beta permissions and the agent's root_access
+report, and disable_root_login) reviewed by reviewer2, every finding taken
+(B1, B2, B-a). Verified by tests only: break_glass_root_access 82/82,
+beta_permissions 32/32, disable_root_login_gate 20/20, root_ssh_login_gate
+22/22, the agent's own suite (1.95.0). Not yet seen on a real machine: a kept
+install, Reveal and Retire, the owner turning it off, and disable_root_login on
+a box; those are in the live verification queue, after the release and the
+agent 1.95.0 rollout.
+
+History: drafted 2026-10-24 and redesigned the same day. The first design (an
 agent operation, five new states and a new install job, so that removal ran
 unattended) drew 61 findings over four reviews; the owner chose this simpler
-design instead: removal waits for the holder's click, and the existing,
-proven cleanup does the work. Section 2 (self-hosted) is unchanged from the
-reviewed text. Sections 3 to 6 were reviewed by reviewer1 (N1–N8, C1–C2) and reviewer2 (H1–H8,
-H2b), all taken. The owner then chose no special handling for a lost holder
-vault (3.4), and asked for the agent operation in 5.3, reviewed by reviewer2
-(K1–K9), all taken. WP1 built 2026-10-24 (gate 22/22); its live check is in the live verification queue. WP2–WP4 not started.
+design: removal waits for the holder's click, and the existing cleanup does the
+work. Sections 3 to 6 were reviewed by reviewer1 (N1–N8, C1–C2) and reviewer2
+(H1–H8, H2b), 5.3 by reviewer2 (K1–K9), all taken.
 
 ## 1. What this does
 
@@ -164,7 +172,11 @@ In `handle_install_password`, two changes:
    `retire_failed` while the SecretBox copy it expects is gone). A kept row
    whose node is gone stays `kept`; the dashboard summary says so (3.6), and the
    holder's Retire takes it to `held`, where today's node-gone branch applies
-   unchanged.
+   unchanged. Accepted residual (reviewer2): when the machine itself was
+   destroyed, that branch leaves the row at `retire_failed`, on the board for
+   good, saying it is kept so a machine that no longer exists stays reachable.
+   That is today's behaviour for any node removed mid-retire; the kept state
+   makes it reachable from an ordinary lifecycle.
 2. **In the `held` branch, once the agents are ready:** keep instead of retiring
    when all of these hold, else retire as today:
    - `server_manager_beta_root_access` is on;
@@ -221,10 +233,13 @@ not API-exposed; it must not become so without handling that exception.
 
 Two model hooks, both existing:
 
-- **`sealedOwnerUserIdFor()`** returns `cvp_sealed_owner_user_id`, and throws
+- **`sealOwnerForWrite()`** returns `cvp_sealed_owner_user_id`, and throws
   when it is empty. The default write path falls back to `cvp_usr_user_id`,
   which on a provision is the buyer: the password must never seal to the
-  customer.
+  customer. (Built on the write hook rather than `sealedOwnerUserIdFor()`,
+  which the read path and the rotation's row walk also call: a throw there
+  would end a rotation's pass over every row instead of reading one as
+  locked.)
 - **`shouldSeal()`** stays true. The default save stores a sealed field in the
   clear when its owner has no vault; the keep decision checks the vault first,
   and the read-back check in 3.2 catches the rest.
@@ -279,15 +294,21 @@ holder. Both are POSTs handled in the dashboard's POST block beside
   and has used it recently (`$session->has_recent_second_factor()`). `node_detail_actions_logic::step_up_required()` lets an
   account without a second factor through, so this checks the factor itself.
 
-**Reveal** shows the password once. Reveal and Retire each write a row to the
+**Reveal** shows the password once, on a page of its own: opening sealed
+content arms the platform's write rule (`SealedEgressGuard`) for the rest of
+the request, and the dashboard writes job results as it renders, so Reveal
+answers and stops, and Retire redirects. Reveal and Retire each write a row to the
 platform's general event log (`evl_event_logs`), as `VaultAudit` does, with the
 events `break_glass_reveal` and `break_glass_retire` and a note naming the
 provision and node: who, when, which box, never the password. There is no
 provision detail page and no general event-log page, so they are listed on the
 kept box's dashboard row (which exists for every kept row, including one whose
-node is gone), and also on the node detail page's Security box while the node
-exists, whatever the row's state (beside **Emergency root access: kept** while
-it is kept), so a retired row's history (5.3) stays visible there.
+node is gone), and also in an **Emergency root access** box on the node detail
+page while the node exists, whatever the row's state (saying **kept** while it
+is kept), so a retired row's history (5.3) stays visible there. A box of its
+own, not a line in the Security box, which a container site's node does not
+show. The note is short (`provision #12, node #34`): the write rule refuses a
+long plaintext value once the password is open.
 
 **Retire**, in one request with the vault open:
 
@@ -376,7 +397,7 @@ Plain-language copy (final wording at build):
 > ☑ **Emergency root access.** If an update breaks your server badly enough that our
 > normal tools can't reach it, we can log in as root to fix it. The password is
 > locked so only our operator can read it, and every time it is read is
-> recorded. Unchecking this has it removed within a day and **cannot be undone**:
+> recorded. Unchecking this has it removed and **cannot be undone**:
 > we cannot turn it back on for you. It is removed for everyone when the beta
 > ends.
 >
@@ -565,7 +586,8 @@ run.
   prompt, messages, help text, docs, `BASE_IMAGE_VERSION`. The install executor
   (its server and docker lines) and `AgentLiveProofRun` pass the flag;
   `SiteCopyRunner::owner_command` does not (section 2). **Built 2026-10-24.**
-- **WP2 — Keep, reveal, retire.** The `kept` state and its first-line return,
+- **WP2 — Keep, reveal, retire.** **Built 2026-10-24** (`BreakGlassRootAccess`,
+  `plugins/server_manager/tests/break_glass_root_access_test.php`). The `kept` state and its first-line return,
   the keep decision and read-back check, the sealed field and its hooks,
   `cvp_root_access_offered`, the vault consumer, the holder setting, Reveal,
   Retire, Retire all requested, Retire all kept, the summary line, the transfer
@@ -581,7 +603,9 @@ run.
   column, and the SecretBox copy; the dashboard and node page render a kept row
   with no vault open; Retire's SecretBox copy opens with the executor's own
   reader.
-- **WP3 — Site and agent.** `--beta-root-access` through `install.sh` and
+- **WP3 — Site and agent.** **Built 2026-10-24** (`BetaPermissions`, the
+  `beta_permissions` step, agent 1.94.0 `RootAccessReport`,
+  `tests/integration/beta_permissions_test.php`). `--beta-root-access` through `install.sh` and
   `_site_init.sh`; the wizard step and `beta_permissions_save`; the Management
   Node row; the agent's `root_access` report (agent version bump, signed
   release; no new agent operations); the endpoint entry, column and
@@ -591,7 +615,11 @@ run.
   `server_manager_beta_root_access_holder` (default empty) in server_manager's
   `plugin.json`.
 
-- **WP4 — Turn off root login.** Section 5.3: the agent word, its script and
+- **WP4 — Turn off root login.** **Built 2026-10-24** (agent 1.95.0,
+  `tests/integration/disable_root_login_gate.sh`). In main-file mode the line
+  is put first in `sshd_config` rather than set in place or appended: an
+  appended line can fall inside a `Match` block. The script also refuses in a
+  container itself, beside the builder's rule. Section 5.3: the agent word, its script and
   gate test (the script's one-way file, `sshd -t` refusal path, reload not
   restart, effective-value check), the pinned lists, the support bundle entry,
   the builder, button and result processor. Tests: the builder refuses a held

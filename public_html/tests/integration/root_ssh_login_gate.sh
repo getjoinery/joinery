@@ -8,7 +8,7 @@
 # covers: [maintenance_scripts/install_tools/install.sh]
 #
 # What install.sh server and install.sh docker do to root SSH login
-# (configure_ssh_access, derive_ssh_access; specs/beta_break_glass_root_access.md
+# (configure_ssh_access, derive_ssh_access; specs/implemented/beta_break_glass_root_access.md
 # section 2), against a fixture /etc/ssh and a stand-in sshd, with no terminal:
 #
 #   - by default root SSH login is off, root's keys included, and the run says

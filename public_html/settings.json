@@ -2654,6 +2654,18 @@
       "helptext": "Set once an administrator has acknowledged the one-time notice that a connected management node can read this site's logs (agent_log_access), or has used the switch. A node connected after the release that introduced the switch never sees the notice, because the switch is on the page it used to connect."
     },
     {
+      "name": "beta_root_access",
+      "default": "1",
+      "managed": true,
+      "helptext": "While Joinery is in beta, whether the management node that installed this site may keep the machine's root password, locked so only its named operator can read it, as a way back in if an update breaks the server badly enough that its agent cannot reach it. Every read is recorded. On by default; set from the setup wizard's Beta permissions step or the Management Node admin page. Turning it off is permanent: once off, nothing on this site turns it back on, and the management node's operator retires the password. Shown only when the install offered it (beta_root_access_offered). specs/implemented/beta_break_glass_root_access.md."
+    },
+    {
+      "name": "beta_root_access_offered",
+      "default": "",
+      "managed": true,
+      "helptext": "1 when the management node that installed this site keeps its root password for the beta and asked the site to offer its owner the choice (install.sh site --beta-root-access). Written by the installer only. Without it the setup wizard and the Management Node page show no emergency root access checkbox."
+    },
+    {
       "name": "agent_join_request",
       "default": "",
       "managed": true,

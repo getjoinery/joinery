@@ -13,6 +13,9 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.23 - plane:break_glass_attention and plane:break_glass_no_holder, and the vault re-seal of kept root passwords
+ *                (CustomerCloudProvision), so a key rotation of the holder's vault re-wraps them
+ *                (specs/implemented/beta_break_glass_root_access.md 3.3, 3.7)
  * @version 1.22 - plane:security_fix_pending (a critical fix waiting over an hour, any fix over a day, no check in
  *                three hours) and plane:old_code_serving (php-fpm or a site service on replaced code)
  *                (fleet_security_patching WP6)
@@ -55,9 +58,14 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceDataRootLocked', 'IncidentSourceMailGateway', 'IncidentSourceSiteCodeUnverified',
 	'IncidentSourceCloudAccountKey', 'IncidentSourceDataRootStopped', 'IncidentSourceKernelWarning',
 	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers',
-	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing') as $incident_source) {
+	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing',
+	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
+// A kept root password is sealed to its holder's vault (beta_break_glass_root_access
+// 3.3): a key rotation of that vault re-wraps it. plugin.json declares
+// reseals, so a rotation refuses wherever this does not load.
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(CustomerCloudProvision::class)));
 // Incident analysis spends model tokens through joinery_ai; they count toward
 // its monthly ceiling.
 if (class_exists('CostGuard') && method_exists('CostGuard', 'registerUsageCounter')) {

@@ -35,7 +35,11 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.16
+ * @version 1.17
+ * @changelog 1.17 - New core step: 'beta_permissions' (site scope, order 3) — what
+ *   the owner lets a management node keep while Joinery is in beta: emergency
+ *   root access when the install offered it, and log access
+ *   (specs/implemented/beta_break_glass_root_access.md 4.2). Green once answered.
  * @changelog 1.16 - shouldInterrupt() also stops for usr_setup_reviewed_time —
  *   set when the owner leaves from the final checklist — while pillCounts()
  *   keeps the header pill up until every step is green.
@@ -471,6 +475,24 @@ class SetupSteps {
 					$ok = $ok && trim((string)Globalvars::get_instance()->get_setting('site_name')) !== '';
 				}
 				return $ok ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+			},
+		));
+
+		// While Joinery is in beta: what the owner lets a management node keep.
+		// The step is itself the question, so it declares no decision (that
+		// would add a "Not now"); answering it is what makes it green, and an
+		// owner who never opens it keeps both on.
+		self::register('beta_permissions', array(
+			'title' => 'Beta permissions',
+			'scope' => 'site',
+			'order' => 3,
+			'copy'  => 'While Joinery is in beta, we keep ways to help if something goes wrong. Choose which ones this site allows.',
+			'render_file' => 'includes/setup_steps/beta_permissions.php',
+			'home_url' => '/admin/admin_management_node',
+			'dismiss_line' => 'Beta permissions are not answered.',
+			'status' => function (?User $viewer): string {
+				return SetupSteps::hasDecision('beta_permissions', NULL)
+					? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 			},
 		));
 

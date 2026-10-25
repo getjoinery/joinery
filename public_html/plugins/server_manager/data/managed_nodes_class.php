@@ -4,6 +4,8 @@
  *
  * @version 1.68 - mgn_api_secret_key is stored sealed (API_SECRET_LOCATOR): api_secret_key() opens it,
  *                 set_api_secret_key() seals it
+ * @version 1.67 - mgn_agent_root_access: the owner's emergency root access answer as the node last reported it at
+ *                 poll (on|off), shown to the holder of a kept root password (specs/implemented/beta_break_glass_root_access.md 5.1)
  * @version 1.66 - mgn_addresses: the machine's own addresses, IPv4 and IPv6, as its agent last reported them (its
  *                 join, or an escrow state post), for the edge-versus-origin probe to time each one
  *                 (specs/slow_request_diagnosis_words.md WP4)
@@ -464,6 +466,14 @@ class ManagedNode extends SystemBase {
 		// node (is_management_node()); the check_status report carries the
 		// same fact and is the fallback for an agent that polls without it.
 		'mgn_agent_server_manager' => array('type'=>'varchar(8)'),
+
+		// The site owner's answer to keeping emergency root access for the
+		// beta (the beta_root_access setting), as the agent reported it on its
+		// last poll: 'on', 'off', or empty for an agent that has not said.
+		// Reported, never set from here. Nothing acts on 'off' by itself: the
+		// holder of the kept password sees it and clicks Retire
+		// (specs/implemented/beta_break_glass_root_access.md 5.1).
+		'mgn_agent_root_access'   => array('type'=>'varchar(8)'),
 
 		// Where the agent's own self-update stands, as it reported on its last
 		// poll: the verdict on the version on offer (current, update_pending,

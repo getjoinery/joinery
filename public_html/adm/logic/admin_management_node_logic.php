@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.9 - root_access_off: the owner turns emergency root access off, one-way (specs/implemented/beta_break_glass_root_access.md 4.2)
  * @version 1.8 - support_facts_on/off and support_reads_on/off: the Help panel's consent (support_chatbot.md)
  * @version 1.7 - the switch takes effect at the host converger's next tick, which counts it as a change (B24)
  * @version 1.6 - disable_agent needs the typed words "disable agent" (the page dialog asks; this refuses without)
@@ -74,6 +75,13 @@ function admin_management_node_logic(array $input): LogicResult {
 		Setting::put('agent_log_access', '');
 		Setting::put('agent_log_access_notice_seen', '1');
 		return LogicResult::redirect('/admin/admin_management_node?logs=off');
+	}
+
+	// Emergency root access, while Joinery is in beta: shown only where the
+	// install offered it, and one-way. There is no action that turns it on.
+	if (isset($input['action']) && $input['action'] === 'root_access_off') {
+		BetaPermissions::set_root_access(false);
+		return LogicResult::redirect('/admin/admin_management_node?root=off');
 	}
 
 	// What the Help panel may send to the support desk, and whether a
@@ -160,6 +168,9 @@ function admin_management_node_logic(array $input): LogicResult {
 		'agent_enabled'   => admin_management_node_agent_enabled($settings),
 		'log_access'      => admin_management_node_log_access($settings),
 		'log_access_switched' => isset($input['logs']) ? (string)$input['logs'] : '',
+		'root_access_offered' => BetaPermissions::root_access_offered(),
+		'root_access'     => BetaPermissions::root_access_on(),
+		'root_access_switched' => isset($input['root']) ? (string)$input['root'] : '',
 		'agent_installed' => file_exists(ADMIN_MANAGEMENT_NODE_AGENT_BINARY),
 		'installer_hint'  => admin_management_node_installer_hint(),
 		'error'           => isset($input['error']) ? (string)$input['error'] : '',

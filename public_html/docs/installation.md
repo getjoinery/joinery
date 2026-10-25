@@ -653,7 +653,7 @@ Set them at install time:
 | `--outbound-conn-burst=N` | the burst above it | 100 |
 | `--outbound-open-conns=N` | connections open at once | 256 |
 
-On `install.sh docker` and `install.sh server` they are the machine's. On `install.sh site` they are that container site's own, and a rebuild without the flag keeps the figure; `default` takes one back to the machine's. A bare-metal site refuses them. `install.sh site` also takes `--outbound-notice-gb=N`, the first figure of the site's monthly transfer notice (`outbound_monthly_notice_gb`), a setting the site's admin can change.
+On `install.sh docker` and `install.sh server` they are the machine's. On `install.sh site` they are that container site's own, and a rebuild without the flag keeps the figure; `default` takes one back to the machine's. A bare-metal site refuses them. `install.sh site` also takes `--outbound-notice-gb=N`, the first figure of the site's monthly transfer notice (`outbound_monthly_notice_gb`), a setting the site's admin can change. `install.sh site --beta-root-access` writes `beta_root_access_offered = 1`: the site's setup wizard and Management Node page offer its owner the emergency root access checkbox. A management node passes it on a fresh install whose root password it may keep for the beta (Server Manager docs, the install password).
 
 Change them later without a reinstall:
 
