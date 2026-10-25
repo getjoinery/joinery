@@ -282,6 +282,20 @@ fn mount_table_first_in(table: &str, path: &Path) -> Option<PathBuf> {
     mount_table_points(table).into_iter().filter(|m| m.starts_with(path)).min_by_key(|m| m.components().count())
 }
 
+/// The mount points among `points` strictly inside `real` (the path as the
+/// mount table names it), spelled under `given` (the path as the caller
+/// does), each once, in order.
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn points_inside(points: impl IntoIterator<Item = PathBuf>, real: &Path, given: &Path) -> Vec<PathBuf> {
+    let mut inside: Vec<PathBuf> = points
+        .into_iter()
+        .filter_map(|m| m.strip_prefix(real).ok().filter(|u| !u.as_os_str().is_empty()).map(|u| given.join(u)))
+        .collect();
+    inside.sort();
+    inside.dedup();
+    inside
+}
+
 /// The path as the kernel's mount table names it: every symlink on the way
 /// to it followed, as the table never shows one. The path as given where it
 /// cannot be read.
@@ -975,6 +989,45 @@ impl Vfs for OsVfs {
         device_change_in(path)
     }
 
+    /// The kernel's mount table, read once.
+    #[cfg(target_os = "linux")]
+    fn disks_mounted_inside(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        let table = fs::read_to_string("/proc/self/mountinfo").ok()?;
+        Some(points_inside(mount_table_points(&table), &real_path(path), path))
+    }
+
+    /// The system's list of mounted file systems (`getmntinfo`), read once.
+    /// A folder in the Data volume is named in it by its path there as well
+    /// as by the path the user sees, so both are asked.
+    #[cfg(target_os = "macos")]
+    fn disks_mounted_inside(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        use std::os::unix::ffi::OsStrExt;
+        let mut list: *mut libc::statfs = std::ptr::null_mut();
+        // SAFETY: getmntinfo points `list` at its own buffer of `n` entries,
+        // which stays valid until the next call on this thread; it is read
+        // before anything else runs here.
+        let n = unsafe { libc::getmntinfo(&mut list, libc::MNT_NOWAIT) };
+        if n <= 0 || list.is_null() {
+            return None;
+        }
+        // SAFETY: `n` entries at `list`, as getmntinfo said.
+        let entries = unsafe { std::slice::from_raw_parts(list, n as usize) };
+        let points: Vec<PathBuf> = entries
+            .iter()
+            .map(|e| {
+                // SAFETY: the kernel NUL-terminates the name inside the array.
+                let name = unsafe { std::ffi::CStr::from_ptr(e.f_mntonname.as_ptr()) };
+                PathBuf::from(std::ffi::OsStr::from_bytes(name.to_bytes()))
+            })
+            .collect();
+        let real = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let mut inside = points_inside(points.iter().cloned(), &real, path);
+        inside.extend(points_inside(points, &Path::new("/System/Volumes/Data").join(real.strip_prefix("/").unwrap_or(&real)), path));
+        inside.sort();
+        inside.dedup();
+        Some(inside)
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         folder_on_disk(to)?;
         let to = as_written(to, &self.personality);
@@ -1622,6 +1675,22 @@ mod tests {
         assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/My Disk")), Some(PathBuf::from("/home/u/Joinery/My Disk")));
         assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/My")), None, "a name it starts with is not a folder above it");
         assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/Big")), None);
+    }
+
+    /// The disks mounted inside a folder are the mount points strictly
+    /// under it, named as the caller names the folder, each once: not the
+    /// folder's own mount, nor one a name it starts with, nor one above it.
+    #[test]
+    fn the_disks_inside_a_folder_are_the_mount_points_under_it() {
+        let table = "22 1 0:21 / / rw,relatime shared:1 - btrfs /dev/sda2 rw\n\
+                     87 22 7:3 / /real/Joinery rw shared:39 - ext4 /dev/loop3 rw\n\
+                     88 87 7:4 / /real/Joinery/My\\040Disk rw shared:40 - ext4 /dev/loop4 rw\n\
+                     89 87 7:4 / /real/Joinery/My\\040Disk rw shared:40 - ext4 /dev/loop4 rw\n\
+                     90 88 7:5 / /real/Joinery/My\\040Disk/Inner rw shared:41 - ext4 /dev/loop5 rw\n\
+                     91 22 7:6 / /real/JoineryOld/X rw shared:42 - ext4 /dev/loop6 rw\n";
+        let inside = points_inside(mount_table_points(table), Path::new("/real/Joinery"), Path::new("/home/u/Joinery"));
+        assert_eq!(inside, vec![PathBuf::from("/home/u/Joinery/My Disk"), PathBuf::from("/home/u/Joinery/My Disk/Inner")]);
+        assert!(points_inside(mount_table_points(table), Path::new("/real/Joinery/My Disk/Inner"), Path::new("/x")).is_empty());
     }
 
     /// The mount table names no symlink, so a folder reached through one is

@@ -48,6 +48,21 @@ enum Node {
     File { bytes: Vec<u8>, mtime_ns: u64 },
 }
 
+/// One file or folder on a disk unmounted inside the root, with what makes
+/// it the same file when the disk is mounted again.
+#[derive(Debug)]
+struct OnAnUnmountedDisk {
+    /// Its path under the folder the disk was mounted at.
+    under: String,
+    node: Node,
+    file_id: Option<u64>,
+    birth: Option<u64>,
+    file_birth: Option<u64>,
+    file_change: Option<u64>,
+    soul: Option<u64>,
+    sealed: bool,
+}
+
 /// Which operation a scheduled failure applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsOp {
@@ -227,6 +242,14 @@ struct MemFsState {
     mounts: BTreeSet<String>,
     /// Mount points stay where they are, as on Linux (`mount_points_stay`).
     mounts_stay: bool,
+    /// What is on a disk unmounted inside the root, by the folder it was
+    /// mounted at (`MemFs::user_unmounts_disk`): off this disk, and not
+    /// deleted, until it is mounted there again.
+    unmounted: BTreeMap<String, Vec<OnAnUnmountedDisk>>,
+    /// Every disk's top folder reads the same identity, with no birth, as
+    /// on Linux disks of one filesystem without birth times
+    /// (`MemFs::disk_tops_alike`).
+    disk_tops_alike: bool,
     failures: Vec<ScheduledFailure>,
     /// Spool files in flight, by their temporary name.
     spools: BTreeMap<String, Vec<u8>>,
@@ -489,6 +512,8 @@ impl MemFs {
                 root_available: true,
                 mounts: BTreeSet::new(),
                 mounts_stay: false,
+                unmounted: BTreeMap::new(),
+                disk_tops_alike: false,
                 failures: Vec::new(),
                 spools: BTreeMap::new(),
                 next_spool: 0,
@@ -835,6 +860,13 @@ impl MemFs {
         self.state.lock().unwrap().mounts_stay = true;
     }
 
+    /// Every disk mounted inside the root reads, at its top folder, the same
+    /// identity with no birth: inode 2 on every ext4 disk of a kernel or
+    /// filesystem that keeps no birth time.
+    pub fn disk_tops_alike(&self) {
+        self.state.lock().unwrap().disk_tops_alike = true;
+    }
+
     /// What a person does where the folder a disk is mounted at stays put
     /// (`mount_points_stay`): unmount the disk, rename or move the folder, and
     /// mount the disk again there. The files on the disk are the same files.
@@ -848,17 +880,73 @@ impl MemFs {
 
     /// What a person does to a disk mounted inside the root: unmount it. The
     /// folder it was mounted at stays, empty, and what is on the disk leaves
-    /// with it.
+    /// this disk with it, not deleted: no hand took it, and
+    /// [`MemFs::user_mounts_disk_again`] brings the same files back.
     pub fn user_unmounts_disk(&self, path: &str) {
         let key = self.key_for(&PathBuf::from("/sync").join(path)).unwrap_or_else(|_| self.store_path(path));
-        let on_it: Vec<String> = {
-            let mut st = self.state.lock().unwrap();
-            st.mounts.remove(&key);
-            st.nodes.keys().filter(|k| k.starts_with(&format!("{key}/")) && !k[key.len() + 1..].contains('/')).cloned().collect()
-        };
-        for child in on_it {
-            self.user_remove(&child);
+        let mut st = self.state.lock().unwrap();
+        st.mounts.remove(&key);
+        let on_it: Vec<String> = st.nodes.keys().filter(|k| k.starts_with(&format!("{key}/"))).cloned().collect();
+        let mut held = Vec::new();
+        for k in on_it {
+            st.touched.insert(k.clone());
+            let Some(node) = st.nodes.remove(&k) else { continue };
+            held.push(OnAnUnmountedDisk {
+                under: k[key.len() + 1..].to_string(),
+                node,
+                file_id: st.file_ids.remove(&k),
+                birth: st.births.remove(&k),
+                file_birth: st.file_births.remove(&k),
+                file_change: st.file_changes.remove(&k),
+                soul: st.souls.remove(&k),
+                sealed: st.sealed_dirs.remove(&k),
+            });
         }
+        st.unmounted.insert(key, held);
+    }
+
+    /// The disk [`MemFs::user_unmounts_disk`] took away, mounted again at
+    /// the folder it was mounted at: the same files, as they were. Nothing
+    /// may have been put in that folder while the disk was away, since the
+    /// disk would hide it.
+    pub fn user_mounts_disk_again(&self, path: &str) {
+        self.user_mounts_disk_at(path, path);
+    }
+
+    /// The disk [`MemFs::user_unmounts_disk`] took away from the folder
+    /// `was`, mounted at the folder `at`: the same files, as they were.
+    pub fn user_mounts_disk_at(&self, was: &str, at: &str) {
+        let from = self.store_path(was);
+        let key = self.key_for(&PathBuf::from("/sync").join(at)).unwrap_or_else(|_| self.store_path(at));
+        let mut st = self.state.lock().unwrap();
+        assert!(matches!(st.nodes.get(&key), Some(Node::Dir)), "no folder at {key} to mount the disk at");
+        let hidden: Vec<String> = st.nodes.keys().filter(|k| k.starts_with(&format!("{key}/"))).cloned().collect();
+        assert!(hidden.is_empty(), "put in {key} while its disk was unmounted, and hidden by it now: {hidden:?}");
+        let held = st.unmounted.remove(&from).unwrap_or_else(|| panic!("no disk was unmounted at {from}"));
+        for item in held {
+            let k = format!("{key}/{}", item.under);
+            st.touched.insert(k.clone());
+            st.nodes.insert(k.clone(), item.node);
+            if let Some(v) = item.file_id {
+                st.file_ids.insert(k.clone(), v);
+            }
+            if let Some(v) = item.birth {
+                st.births.insert(k.clone(), v);
+            }
+            if let Some(v) = item.file_birth {
+                st.file_births.insert(k.clone(), v);
+            }
+            if let Some(v) = item.file_change {
+                st.file_changes.insert(k.clone(), v);
+            }
+            if let Some(v) = item.soul {
+                st.souls.insert(k.clone(), v);
+            }
+            if item.sealed {
+                st.sealed_dirs.insert(k);
+            }
+        }
+        st.mounts.insert(key);
     }
 
     /// The disk a path is on: the innermost mount it is strictly under, or
@@ -1182,6 +1270,15 @@ impl MemFs {
             .collect();
         st.user_moved.extend(carried);
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
+        // A disk mounted at or under what moved goes with it, as the
+        // engine's rename carries one. Not the folder a disk is mounted at
+        // where mount points stay: nothing renames that.
+        assert!(!(st.mounts_stay && st.mounts.contains(&f)), "a disk is mounted at {f}, and it stays where it is");
+        let disks: Vec<String> = st.mounts.iter().filter(|m| **m == f || m.starts_with(&format!("{f}/"))).cloned().collect();
+        for m in disks {
+            st.mounts.remove(&m);
+            st.mounts.insert(format!("{t}{}", &m[f.len()..]));
+        }
         let leaf = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
         if matches!(st.nodes.get(&t), Some(Node::File { .. })) && !replaced && leaf(&f) != leaf(&t) {
             let sealed = Self::under_a_sealed_dir(&st, &t);
@@ -2166,6 +2263,9 @@ impl Vfs for MemFs {
         self.check_failure(FsOp::Fingerprint, &key, path)?;
         let st = self.state.lock().unwrap();
         Ok(match st.nodes.get(&key) {
+            Some(Node::Dir) if st.disk_tops_alike && st.mounts.contains(&key) => {
+                Some(jd_vfs::FileIdentity { file_id: 2, birth_ns: 0 })
+            }
             Some(Node::Dir) => Some(Self::directory_fingerprint_of(&st, &key).identity()),
             _ => None,
         })
@@ -2348,6 +2448,18 @@ impl Vfs for MemFs {
             .filter(|m| **m == key || m.starts_with(&format!("{key}/")))
             .min_by_key(|m| m.len())
             .map(|m| PathBuf::from("/sync").join(m))
+    }
+
+    fn disks_mounted_inside(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        let key = self.key_for(path).ok()?;
+        let st = self.state.lock().unwrap();
+        Some(
+            st.mounts
+                .iter()
+                .filter(|m| key.is_empty() || m.starts_with(&format!("{key}/")))
+                .map(|m| PathBuf::from("/sync").join(m))
+                .collect(),
+        )
     }
 
     fn trash(&self, path: &Path) -> VfsResult<()> {

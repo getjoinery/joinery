@@ -26806,3 +26806,504 @@ fn a_peers_rename_of_a_folder_a_disk_is_mounted_at_settles_and_says_so() {
     assert_nothing_lost(&world, &committed);
     assert_eq!(world.server.folders().iter().filter(|f| !f.trashed).count(), 1, "{:?}", world.server.folders());
 }
+
+/// What a device says while a disk mounted inside its sync folder is not
+/// there (`disk_not_there`).
+fn disk_not_there_said(d: &jd_sim::Device) -> Vec<String> {
+    d.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "disk_not_there").map(|i| i.detail).collect()
+}
+
+/// Every file the server holds, by id, where, what and whether trashed.
+fn server_files(world: &World) -> Vec<(i64, Option<i64>, String, String, bool)> {
+    world.server.files().into_iter().map(|f| (f.id, f.folder, f.name, f.sha256, f.trashed)).collect()
+}
+
+/// B5: a second disk mounted inside the sync folder is unmounted while the
+/// device syncs, leaving the empty folder it was mounted at. Nothing on it is
+/// deleted, on the server or on the peer; the device says the disk is not
+/// there and goes quiet. Mounted again, it is the same files, the saying
+/// ends, and nothing went up again. RED with every file on the disk deleted
+/// everywhere, nothing asked, and sent up again as new files once the disk
+/// is back.
+#[test]
+fn a_disk_unmounted_inside_the_folder_is_not_read_as_deleted() {
+    let world = World::new(9_951, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_mkdir("Disk/Photos");
+    for i in 1..=4 {
+        let bytes = format!("photo {i}");
+        lin.fs.user_write(&format!("Disk/Photos/p{i}.txt"), bytes.as_bytes());
+        committed.note(&format!("Disk/Photos/p{i}.txt"), bytes.as_bytes());
+    }
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    committed.note("Disk/notes.txt", b"on the disk");
+    lin.fs.user_write("report.txt", b"beside the disk");
+    committed.note("report.txt", b"beside the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+    assert!(mac.fs.exists("Disk/Photos/p4.txt"), "{:?}", mac.fs.all_paths());
+    let files_before = server_files(&world);
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    world.pass(mac);
+    for _ in 0..3 {
+        let again = world.pass(lin);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert_eq!(server_files(&world), files_before, "the server's files changed while the disk was away");
+    assert!(mac.fs.exists("Disk/Photos/p4.txt") && mac.fs.exists("Disk/notes.txt"), "{:?}", mac.fs.all_paths());
+    let said = disk_not_there_said(lin);
+    assert_eq!(said.len(), 1, "{:?}", lin.store.open_issues().unwrap());
+    assert!(said[0].contains("/sync/Disk is not there now"), "{said:?}");
+
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "still said with the disk back: {:?}", disk_not_there_said(lin));
+    assert_eq!(server_files(&world), files_before, "the disk's files went up again");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: what a peer does on the disk while it is not there here -- a new file
+/// on it, an edit, a rename -- waits for it. Nothing is put in the empty
+/// folder the disk was mounted at, where the disk would cover it once
+/// mounted; mounted again, every change arrives on the disk. RED with the
+/// peer's changes landed in the folder under the disk.
+#[test]
+fn a_peers_changes_on_a_disk_not_there_wait_for_it() {
+    let world = World::new(9_952, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_mkdir("Disk/Photos");
+    lin.fs.user_write("Disk/Photos/p1.txt", b"photo 1");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    mac.fs.user_write("Disk/Photos/p2.txt", b"photo 2, from the peer");
+    mac.fs.user_write("Disk/notes.txt", b"on the disk, edited by the peer");
+    mac.fs.user_rename("Disk/Photos/p1.txt", "Disk/Photos/first.txt");
+    committed.note("Disk/Photos/first.txt", b"photo 1");
+    committed.note("Disk/Photos/p2.txt", b"photo 2, from the peer");
+    committed.note("Disk/notes.txt", b"on the disk, edited by the peer");
+    world.pass(mac);
+    for _ in 0..3 {
+        world.pass(lin);
+    }
+    for _ in 0..3 {
+        let again = world.pass(lin);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert_eq!(disk_not_there_said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: a file a peer moves onto the disk while it is not there here stays
+/// where it is here, not put in the empty folder the disk was mounted at.
+/// Mounted again, the move is one onto another disk, held and said as any
+/// such move is, and the server keeps it. RED with the file moved into the
+/// folder under the disk, and read as deleted once the disk covers it.
+#[test]
+fn a_peers_move_onto_a_disk_not_there_waits_for_it() {
+    let world = World::new(9_955, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    lin.fs.user_write("report.txt", b"beside the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    mac.fs.user_rename("report.txt", "Disk/report.txt");
+    world.pass(mac);
+    for _ in 0..4 {
+        world.pass(lin);
+    }
+    assert!(lin.fs.exists("report.txt"), "the move onto the disk did not wait for it: {:?}", lin.fs.all_paths());
+
+    lin.fs.user_mounts_disk_again("Disk");
+    for _ in 0..4 {
+        world.pass(lin);
+    }
+    assert!(lin.fs.exists("report.txt") && lin.fs.exists("Disk/notes.txt"), "{:?}", lin.fs.all_paths());
+    let held: Vec<String> = lin
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.detail)
+        .filter(|t| t.contains("/sync/Disk is a separate disk inside the sync folder"))
+        .collect();
+    assert_eq!(held.len(), 1, "{:?}", lin.store.open_issues().unwrap());
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    let tree: Vec<String> = world.server.tree().into_keys().collect();
+    assert_eq!(tree, vec!["Disk".to_string(), "Disk/notes.txt".into(), "Disk/report.txt".into()]);
+}
+
+/// B5: a file put in the empty folder a disk was mounted at, while the disk
+/// is not there, is not sent: the disk covers it once mounted, and sent, it
+/// read as deleted then, on the server and on every device. It waits with
+/// the disk, said; moved out of the folder by hand, it is sent from where it
+/// stands. RED with the file sent into the folder on the server.
+#[test]
+fn a_file_put_where_a_disk_is_not_there_waits_with_it() {
+    let world = World::new(9_956, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    committed.note("Disk/notes.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    lin.fs.user_write("Disk/new.txt", b"saved while the disk was away");
+    for _ in 0..3 {
+        world.pass(lin);
+        world.pass(mac);
+    }
+    let tree: Vec<String> = world.server.tree().into_keys().collect();
+    assert_eq!(tree, vec!["Disk".to_string(), "Disk/notes.txt".into()], "sent from under where the disk goes");
+    assert_eq!(disk_not_there_said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+
+    lin.fs.user_rename("Disk/new.txt", "new.txt");
+    committed.note("new.txt", b"saved while the disk was away");
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: a copy of a file on the disk, made elsewhere in the sync folder while
+/// the disk is not there, is a new file, not that file moved off the disk:
+/// what is on a disk not there is not read at all. Mounted again, both stand,
+/// each the file it is. RED with the copy taken for the disk's file moved out.
+#[test]
+fn a_copy_made_while_a_disk_is_not_there_is_not_taken_for_its_file() {
+    let world = World::new(9_957, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    committed.note("Disk/notes.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+    let on_the_disk = world.server.files().into_iter().find(|f| f.name == "notes.txt").map(|f| f.id);
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    lin.fs.user_write("notes copy.txt", b"on the disk");
+    committed.note("notes copy.txt", b"on the disk");
+    for _ in 0..3 {
+        world.pass(lin);
+        world.pass(mac);
+    }
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    let now = world.server.files().into_iter().find(|f| f.name == "notes.txt" && !f.trashed).map(|f| f.id);
+    assert_eq!(now, on_the_disk, "the disk's file is not the record it was: {:?}", world.server.files());
+}
+
+/// B5 with B3: a peer renames the folder a second disk is mounted at here,
+/// on a system that will not rename it while the disk is mounted (Linux), and
+/// the person does what the issue says, syncing all the while: unmounts the
+/// disk, moves the folder, and mounts the disk again there. Nothing on the
+/// disk is read as deleted while it is unmounted, and the folder is the
+/// server's again. RED with the disk's files deleted everywhere the pass the
+/// disk was unmounted.
+#[test]
+fn a_folder_moved_by_hand_while_its_disk_is_unmounted_keeps_its_files() {
+    let world = World::new(9_958, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    mac.fs.user_mkdir("Disk");
+    mac.fs.user_write("Disk/a.txt", b"on the other disk");
+    assert!(world.settle().is_some(), "never settled before the rename");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.mount_points_stay();
+    world.pass(lin);
+    mac.fs.user_rename("Disk", "Disk2");
+    committed.note("Disk2/a.txt", b"on the other disk");
+    world.pass(mac);
+    for _ in 0..3 {
+        world.pass(lin);
+    }
+    assert!(lin.fs.exists("Disk/a.txt"), "{:?}", lin.fs.all_paths());
+
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    world.pass(mac);
+    assert!(mac.fs.exists("Disk2/a.txt"), "deleted while the disk was unmounted: {:?}", mac.fs.all_paths());
+    lin.fs.user_rename("Disk", "Disk2");
+    world.pass(lin);
+    lin.fs.user_mounts_disk_at("Disk", "Disk2");
+    assert!(world.settle().is_some(), "never settled after the folder was moved by hand");
+    assert!(lin.store.open_issues().unwrap().iter().all(|i| !i.detail.contains("/sync/Disk")), "{:?}", lin.store.open_issues().unwrap());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(world.server.folders().iter().filter(|f| !f.trashed).count(), 1, "{:?}", world.server.folders());
+}
+
+/// B5: two disks of one kind in the sync folder, whose top folders read the
+/// same identity with no birth (ext4 without birth times). One is unmounted,
+/// the other stays: the one away is not taken for the other moved, and what
+/// was on it stays everywhere. RED with the away disk read as moved with its
+/// folder, and every file on it deleted.
+#[test]
+fn a_disk_unmounted_beside_another_of_its_kind_is_not_there() {
+    let world = World::new(9_959, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.disk_tops_alike();
+    lin.fs.mount_points_stay();
+    for d in ["DiskA", "DiskB"] {
+        lin.fs.user_mkdir(d);
+        lin.fs.mount_another_disk(d);
+        lin.fs.user_write(&format!("{d}/notes.txt"), d.as_bytes());
+        committed.note(&format!("{d}/notes.txt"), d.as_bytes());
+    }
+    assert!(world.settle().is_some(), "never settled before the unmount");
+    let files_before = server_files(&world);
+
+    lin.fs.user_unmounts_disk("DiskA");
+    world.pass(lin);
+    world.pass(mac);
+    assert_eq!(server_files(&world), files_before, "the server's files changed while the disk was away");
+    assert!(mac.fs.exists("DiskA/notes.txt"), "{:?}", mac.fs.all_paths());
+    assert_eq!(disk_not_there_said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+
+    lin.fs.user_mounts_disk_again("DiskA");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: what an earlier pass queued to write under the disk, still queued
+/// when the disk goes -- a peer's edit whose download keeps failing, a
+/// peer's delete whose trash keeps failing -- waits for the disk. Run, the
+/// download landed in the folder the disk then covers, and the trash found
+/// nothing and forgot a file that is on the disk, which went up again once
+/// it was back. RED with either.
+#[test]
+fn what_was_queued_for_a_disk_waits_while_it_is_not_there() {
+    let world = World::new(9_960, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    lin.fs.user_write("Disk/old.txt", b"to be deleted by the peer");
+    assert!(world.settle().is_some(), "never settled before the peer's changes");
+
+    mac.fs.user_write("Disk/notes.txt", b"on the disk, edited by the peer");
+    mac.fs.user_remove("Disk/old.txt");
+    committed.note("Disk/notes.txt", b"on the disk, edited by the peer");
+    world.pass(mac);
+    lin.fs.fail_next(FsOp::Commit, Some("Disk/notes.txt"), FailureKind::Io, 1);
+    lin.fs.fail_next(FsOp::Trash, Some("Disk/old.txt"), FailureKind::PermissionDenied, 1);
+    world.pass(lin);
+    assert!(lin.fs.exists("Disk/old.txt") && lin.fs.peek("Disk/notes.txt").as_deref() == Some(&b"on the disk"[..]), "{:?}", lin.fs.all_paths());
+
+    assert_eq!(lin.store.queued_ops().unwrap().len(), 2, "{:?}", lin.store.queued_ops().unwrap());
+
+    lin.fs.user_unmounts_disk("Disk");
+    for _ in 0..4 {
+        world.clock.advance_secs(60);
+        world.pass(lin);
+    }
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(!lin.fs.exists("Disk/old.txt"), "{:?}", lin.fs.all_paths());
+    let tree: Vec<String> = world.server.tree().into_keys().collect();
+    assert_eq!(tree, vec!["Disk".to_string(), "Disk/notes.txt".into()], "the peer's delete came back");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: a vault inside a vault, neither of which this device holds a key
+/// for, stands here as placeholder directories, and a second disk is mounted
+/// at the outer one. Unmounted, the inner placeholder's directory is on that
+/// disk, not gone: its tie to the vault is kept, and once the disk is back the
+/// file held in it is still held, never sent in the clear. RED with the tie
+/// lapsed the pass the disk went.
+#[test]
+fn a_placeholder_on_a_disk_not_there_keeps_its_tie() {
+    let vault = SimVault::new(9_962);
+    let mut world = World::new(9_962, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "V");
+    let w = world.server.seed_encrypted_folder(Some(v), "W");
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("V");
+    guest.fs.mount_another_disk("V");
+    guest.fs.user_mkdir("V/W");
+    guest.fs.user_write("V/W/x.txt", b"held under the placeholder");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+    let tied = |d: &jd_sim::Device| d.store.get_entry(jd_core::EntityId::folder(w)).unwrap().is_some_and(|e| e.stand_in.is_some());
+    assert!(tied(guest), "the premise: W stands here as a placeholder");
+
+    guest.fs.user_unmounts_disk("V");
+    world.pass(guest);
+    world.pass(guest);
+    assert!(tied(guest), "the placeholder's tie lapsed while its disk was away");
+
+    guest.fs.user_mounts_disk_again("V");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(tied(guest), "the placeholder's tie lapsed once the disk was back");
+    assert!(!world.server.tree().keys().any(|k| k.ends_with("x.txt")), "went up in the clear: {:?}", world.server.tree());
+}
+
+/// B5: a peer swaps the names of the folder a second disk is mounted at here
+/// and another folder, and the park that sets the mount folder aside for the
+/// swap is still queued when the disk is unmounted. It waits with the disk:
+/// run, it set the empty folder the disk was mounted at aside under a working
+/// name, where the disk could not be mounted again. Once the disk is back the
+/// swap goes through, disk and all. RED with the folder parked away.
+#[test]
+fn a_park_queued_for_a_disk_not_there_waits_for_it() {
+    let world = World::new(9_963, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    lin.fs.user_mkdir("Other");
+    lin.fs.user_write("Other/plain.txt", b"beside the disk");
+    assert!(world.settle().is_some(), "never settled before the swap");
+
+    mac.fs.user_rename("Disk", "Tmp");
+    mac.fs.user_rename("Other", "Disk");
+    mac.fs.user_rename("Tmp", "Other");
+    committed.note("Other/notes.txt", b"on the disk");
+    committed.note("Disk/plain.txt", b"beside the disk");
+    world.pass(mac);
+    lin.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
+    world.pass(lin);
+    let queued: Vec<String> = lin.store.queued_ops().unwrap().into_iter().map(|o| o.kind).collect();
+    assert!(queued.iter().any(|k| k == "park_local"), "the premise: the park is queued: {queued:?}");
+
+    lin.fs.user_unmounts_disk("Disk");
+    for _ in 0..3 {
+        world.clock.advance_secs(60);
+        world.pass(lin);
+    }
+    assert!(lin.fs.exists("Disk"), "the folder the disk is mounted at was set aside: {:?}", lin.fs.all_paths());
+    lin.fs.user_mounts_disk_again("Disk");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: as above, with the disk mounted at the folder the swap parks first:
+/// the park of the folder a disk is mounted at, still queued when the disk is
+/// unmounted, waits for it. Run, it set the empty folder aside under a
+/// working name, where the disk could not be mounted again. RED with the
+/// mount folder parked away.
+#[test]
+fn a_park_of_the_folder_a_disk_is_not_there_at_waits_for_it() {
+    let world = World::new(9_964, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    lin.fs.user_mkdir("Disk");
+    lin.fs.user_write("Disk/plain.txt", b"beside the disk");
+    lin.fs.user_mkdir("Other");
+    lin.fs.mount_another_disk("Other");
+    lin.fs.user_write("Other/notes.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the swap");
+
+    mac.fs.user_rename("Disk", "Tmp");
+    mac.fs.user_rename("Other", "Disk");
+    mac.fs.user_rename("Tmp", "Other");
+    committed.note("Disk/notes.txt", b"on the disk");
+    committed.note("Other/plain.txt", b"beside the disk");
+    world.pass(mac);
+    lin.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
+    world.pass(lin);
+    let parked: Vec<String> = lin.store.queued_ops().unwrap().into_iter().filter(|o| o.kind == "park_local").map(|o| o.params).collect();
+    assert_eq!(parked.len(), 1, "the premise: a park is queued: {parked:?}");
+
+    lin.fs.user_unmounts_disk("Other");
+    for _ in 0..3 {
+        world.clock.advance_secs(60);
+        world.pass(lin);
+    }
+    assert!(lin.fs.exists("Other"), "the folder the disk is mounted at was set aside: {:?}", lin.fs.all_paths());
+    lin.fs.user_mounts_disk_again("Other");
+    assert!(world.settle().is_some(), "never settled after the disk was mounted again");
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: a disk gone for good leaves the sync folder by its folder deleted on
+/// the web. The device that held it lets the folder go, empty, and the
+/// saying with it; nothing comes back to the server. RED with the folder held
+/// for ever.
+#[test]
+fn a_disk_gone_for_good_leaves_with_its_folder_deleted_on_the_web() {
+    let world = World::new(9_953, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    lin.fs.user_mkdir("Disk");
+    lin.fs.mount_another_disk("Disk");
+    lin.fs.user_write("Disk/notes.txt", b"on the disk");
+    lin.fs.user_write("report.txt", b"beside the disk");
+    assert!(world.settle().is_some(), "never settled before the unmount");
+    lin.fs.user_unmounts_disk("Disk");
+    world.pass(lin);
+    assert_eq!(disk_not_there_said(lin).len(), 1, "{:?}", lin.store.open_issues().unwrap());
+
+    mac.fs.user_remove("Disk");
+    assert!(world.settle().is_some(), "never settled after the folder was deleted");
+    assert!(!lin.fs.exists("Disk"), "{:?}", lin.fs.all_paths());
+    assert!(disk_not_there_said(lin).is_empty(), "{:?}", disk_not_there_said(lin));
+    let tree: Vec<String> = world.server.tree().into_keys().collect();
+    assert_eq!(tree, vec!["report.txt".to_string()], "the folder came back to the server");
+    assert_converged(&world);
+}
+
+/// B5: on a Mac the folder a disk is mounted at renames, disk and all. The
+/// disk has not gone: it is followed to the folder's new name, nothing is
+/// held or said, and the rename reaches the server. RED with the disk read
+/// as not there at its old name and the rename never read.
+#[test]
+fn a_folder_renamed_with_its_disk_mounted_is_followed_not_held() {
+    let world = World::new(9_954, &["mac", "lin"]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let mut committed = Committed::default();
+    mac.fs.user_mkdir("Disk");
+    mac.fs.mount_another_disk("Disk");
+    mac.fs.user_write("Disk/notes.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the rename");
+    world.pass(mac);
+
+    mac.fs.user_rename("Disk", "Archive");
+    committed.note("Archive/notes.txt", b"on the disk");
+    for _ in 0..3 {
+        world.pass(mac);
+        assert!(disk_not_there_said(mac).is_empty(), "{:?}", disk_not_there_said(mac));
+    }
+    assert!(world.settle().is_some(), "never settled after the rename");
+    assert!(lin.fs.exists("Archive/notes.txt"), "{:?}", lin.fs.all_paths());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
