@@ -38,6 +38,7 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
+ * @version 1.7 - a refused or vault-blocked setting is named by its label
  * @version 1.6 - a user setting saves only an existing user's id, or nothing
  * @version 1.5 - a credential (a `secret` setting) changes only at SECRET_WRITE_PERMISSION; a web save
  *   below it is refused, naming the field
@@ -370,7 +371,7 @@ class SettingsWriter {
 		if (!empty($result['vault_blocked'])) {
 			$session->save_message(new DisplayMessage(
 				'Unlock your vault to change these protected settings, then save again: '
-					. htmlspecialchars(implode(', ', $result['vault_blocked'])) . '. '
+					. htmlspecialchars(implode(', ', array_map(fn($n) => self::labelOf($n), $result['vault_blocked']))) . '. '
 					. 'Other settings were saved.',
 				'Unlock required',
 				$page_regex,
@@ -395,7 +396,7 @@ class SettingsWriter {
 		if (!empty($result['errors'])) {
 			$lines = array();
 			foreach ($result['errors'] as $name => $messages) {
-				$lines[] = $name . ': ' . implode(' ', (array)$messages);
+				$lines[] = self::labelOf($name) . ': ' . implode(' ', (array)$messages);
 			}
 			$session->save_message(new DisplayMessage(
 				htmlspecialchars(implode(' | ', $lines)),
@@ -408,6 +409,12 @@ class SettingsWriter {
 	}
 
 	// ── internals ────────────────────────────────────────────────────────────
+
+	/** What an admin sees a setting called: its declared label, else its name. */
+	private static function labelOf(string $name): string {
+		$declaration = SettingsDeclarations::get($name);
+		return (string)($declaration['label'] ?? $name);
+	}
 
 	/**
 	 * A setting is vault-gated when its declaration says so, or when the owning

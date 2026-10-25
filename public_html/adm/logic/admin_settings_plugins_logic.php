@@ -7,7 +7,8 @@
  * The write scope is that one plugin's declared settings — nothing else in the
  * POST is written, so a crafted post cannot reach a core or sibling-plugin row.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - A refused save is named once, by SettingsWriter::reportTo()
  * @changelog 2.1 - One plugin per view: ?plugin= selects a subtab and a save returns to the plugin it wrote
  * @changelog 2.0 - Saves through SettingsWriter, so scope, validation, credential handling and the vault gate are the same rules every other settings page enforces
  */
@@ -61,13 +62,11 @@ function admin_settings_plugins_logic(array $input): LogicResult {
 	));
 	SettingsWriter::reportTo($write, '~/admin/admin_settings_plugins~');
 
+	// reportTo() has already named each refused field; this says only that
+	// the save as a whole did not happen.
 	if (!empty($write['errors'])) {
-		$lines = array();
-		foreach ($write['errors'] as $name => $messages) {
-			$lines[] = $name . ': ' . implode(' ', (array)$messages);
-		}
 		return LogicResult::error(
-			'Nothing was saved: ' . implode(' | ', $lines),
+			'Nothing was saved — fix the fields named above and save again.',
 			array('plugin_sources' => $plugin_sources, 'selected_plugin' => $target)
 		);
 	}
