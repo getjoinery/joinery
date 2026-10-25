@@ -4601,6 +4601,100 @@ fn a_move_of_a_folder_a_disk_is_mounted_at_is_held_and_said_not_retried() {
     assert_eq!(device.store.refusals().unwrap().len(), 1, "held, so the next pass does not ask again");
 }
 
+/// B4: the server deleted the folder a second disk is mounted at here. No
+/// system takes a mount point to the trash, and before it went there a file
+/// never sent was carried off the disk, which no rename does: on a Linux run
+/// the disk's own trash folder was rescued, refused, and said as a move
+/// between disks nobody asked for. The trash is held and said once, naming
+/// the disk; nothing on it moves. RED with the rescue asked first.
+#[test]
+fn a_trash_of_a_folder_a_disk_is_mounted_at_is_held_and_said_not_retried() {
+    let (_clock, server, device) = world();
+    let disk = server.seed_folder(None, "Disk");
+    device.fs.user_mkdir("Disk");
+    device.fs.user_write("Disk/new.txt", b"on the other disk, never sent");
+    device.fs.mount_another_disk("Disk");
+    let mut folder = fresh(EntityId::folder(disk), None, "Disk", LocalStatus::Synced);
+    folder.synced_placement = Some(folder.remote.clone());
+    device.store.put_entry(&folder).unwrap();
+    let id = EntityId::folder(disk);
+
+    let report = do_one(&device, id, Action::TrashLocal);
+    assert_eq!((report.retrying, report.withdrawn), (0, 1), "{report:?}");
+    assert!(device.store.queued_ops().unwrap().is_empty(), "nothing is left to retry");
+    let said: Vec<String> =
+        device.store.open_issues().unwrap().into_iter().filter(|i| i.entity == Some(id)).map(|i| i.detail).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("/sync/Disk stays here: a separate disk is mounted at /sync/Disk, and sync never puts a disk in the trash"),
+        "{said:?}"
+    );
+    assert_eq!(device.fs.peek("Disk/new.txt").as_deref(), Some(&b"on the other disk, never sent"[..]));
+    assert_eq!(device.fs.all_paths().len(), 2, "{:?}", device.fs.all_paths());
+    assert!(device.fs.trashed().is_empty(), "{:?}", device.fs.trashed());
+    assert_eq!(device.store.refusals().unwrap().len(), 1, "held, so the next pass does not ask again");
+}
+
+/// A folder above one a disk is mounted at goes to the trash with the disk
+/// still mounted inside it, and everything on the disk with it (traced on a
+/// Mac and on Linux). Held and said, naming where the disk is mounted.
+#[test]
+fn a_trash_of_a_folder_holding_a_mounted_disk_is_held_and_said() {
+    let (_clock, server, device) = world();
+    let media = server.seed_folder(None, "Media");
+    device.fs.user_mkdir("Media");
+    device.fs.user_mkdir("Media/Disk");
+    device.fs.user_write("Media/Disk/new.txt", b"on the other disk, never sent");
+    device.fs.mount_another_disk("Media/Disk");
+    let mut folder = fresh(EntityId::folder(media), None, "Media", LocalStatus::Synced);
+    folder.synced_placement = Some(folder.remote.clone());
+    device.store.put_entry(&folder).unwrap();
+    let id = EntityId::folder(media);
+
+    let report = do_one(&device, id, Action::TrashLocal);
+    assert_eq!((report.retrying, report.withdrawn), (0, 1), "{report:?}");
+    let said: Vec<String> =
+        device.store.open_issues().unwrap().into_iter().filter(|i| i.entity == Some(id)).map(|i| i.detail).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("/sync/Media stays here: a separate disk is mounted at /sync/Media/Disk"), "{said:?}");
+    assert_eq!(device.fs.peek("Media/Disk/new.txt").as_deref(), Some(&b"on the other disk, never sent"[..]));
+    assert!(device.fs.trashed().is_empty(), "{:?}", device.fs.trashed());
+    assert_eq!(device.store.refusals().unwrap().len(), 1);
+}
+
+/// The other way a folder leaves this computer for the trash: its name on
+/// the server can no longer be held here, and its copy is given up. With a
+/// disk mounted at it, it is held and said as a trash of it is; nothing on
+/// the disk is carried off it first. RED with the rescue asked first.
+#[test]
+fn a_folder_a_disk_is_mounted_at_is_not_given_up_to_the_trash() {
+    let (_clock, server, device) = world();
+    let disk = server.seed_folder(None, "Disk");
+    device.fs.user_mkdir("Disk");
+    device.fs.user_write("Disk/new.txt", b"on the other disk, never sent");
+    device.fs.mount_another_disk("Disk");
+    let mine = device.fs.file_id_of("Disk").expect("a directory id");
+    let id = EntityId::folder(disk);
+    let mut folder = fresh(id, None, "Disk", LocalStatus::Synced);
+    folder.synced_placement = Some(folder.remote.clone());
+    folder.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(mine, 0));
+    device.store.put_entry(&folder).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "disk".into() } },
+    );
+    assert_eq!((report.retrying, report.withdrawn), (0, 1), "{report:?}");
+    let said: Vec<String> =
+        device.store.open_issues().unwrap().into_iter().filter(|i| i.entity == Some(id)).map(|i| i.detail).collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("/sync/Disk stays here: a separate disk is mounted at /sync/Disk"), "{said:?}");
+    assert_eq!(device.fs.peek("Disk/new.txt").as_deref(), Some(&b"on the other disk, never sent"[..]));
+    assert!(device.fs.trashed().is_empty(), "{:?}", device.fs.trashed());
+    assert_eq!(device.store.get_entry(id).unwrap().unwrap().status, LocalStatus::Synced);
+}
+
 /// Where the folder a disk is mounted at stays put, a folder above it still
 /// moves, and the disk with it; the mount point itself is refused by the
 /// rename as the real volume refuses it.

@@ -269,11 +269,32 @@ fn volume_boundary(root: &Path, from: &Path, to: &Path) -> PathBuf {
     top
 }
 
-/// Does this `/proc/self/mountinfo` text name `path` as a mount point? The
-/// fifth field of each line, with the kernel's octal escapes (`\040` for a
-/// space) read back.
+/// Does this `/proc/self/mountinfo` text name `path` as a mount point?
 #[cfg(any(target_os = "linux", test))]
 fn mount_table_names(table: &str, path: &Path) -> bool {
+    mount_table_points(table).iter().any(|m| m == path)
+}
+
+/// The mount point this `/proc/self/mountinfo` text names at `path` or
+/// under it, the one nearest the top.
+#[cfg(any(target_os = "linux", test))]
+fn mount_table_first_in(table: &str, path: &Path) -> Option<PathBuf> {
+    mount_table_points(table).into_iter().filter(|m| m.starts_with(path)).min_by_key(|m| m.components().count())
+}
+
+/// The path as the kernel's mount table names it: every symlink on the way
+/// to it followed, as the table never shows one. The path as given where it
+/// cannot be read.
+#[cfg(target_os = "linux")]
+fn real_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Every mount point a `/proc/self/mountinfo` text names: the fifth field of
+/// each line, with the kernel's octal escapes (`\040` for a space) read
+/// back.
+#[cfg(any(target_os = "linux", test))]
+fn mount_table_points(table: &str) -> Vec<PathBuf> {
     let unescape = |field: &str| -> String {
         let bytes = field.as_bytes();
         let mut out = Vec::with_capacity(bytes.len());
@@ -293,7 +314,36 @@ fn mount_table_names(table: &str, path: &Path) -> bool {
         }
         String::from_utf8_lossy(&out).into_owned()
     };
-    table.lines().filter_map(|l| l.split(' ').nth(4)).any(|m| Path::new(&unescape(m)) == path)
+    table.lines().filter_map(|l| l.split(' ').nth(4)).map(|m| PathBuf::from(unescape(m))).collect()
+}
+
+/// The first folder at or under `path`, nearest the top, on another device
+/// from the folder it is in: where a second disk is mounted. Not entered: a
+/// disk mounted inside that one is the same answer.
+#[cfg(unix)]
+fn device_change_in(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = |p: &Path| fs::symlink_metadata(p).ok().map(|m| m.dev());
+    let here = dev(path)?;
+    if dev(path.parent()?)? != here {
+        return Some(path.to_path_buf());
+    }
+    let mut todo = std::collections::VecDeque::from([path.to_path_buf()]);
+    while let Some(dir) = todo.pop_front() {
+        let Ok(children) = fs::read_dir(&dir) else { continue };
+        for child in children.flatten() {
+            if !child.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let at = child.path();
+            match dev(&at) {
+                Some(d) if d != here => return Some(at),
+                Some(_) => todo.push_back(at),
+                None => {}
+            }
+        }
+    }
+    None
 }
 
 /// Windows names no volume a folder is on without a call of its own; the
@@ -897,13 +947,32 @@ impl Vfs for OsVfs {
             return false;
         }
         if let Ok(table) = fs::read_to_string("/proc/self/mountinfo") {
-            return mount_table_names(&table, path);
+            return mount_table_names(&table, &real_path(path));
         }
         let dev = |p: &Path| fs::symlink_metadata(p).ok().map(|m| m.dev());
         match (dev(path), path.parent().and_then(dev)) {
             (Some(here), Some(above)) => here != above,
             _ => false,
         }
+    }
+
+    /// Linux: the kernel's mount table, as for a fixed mount point. Elsewhere
+    /// on unix, and without the table: a folder on another device from the
+    /// one it is in, found walking down.
+    #[cfg(unix)]
+    fn disk_mounted_in(&self, path: &Path) -> Option<PathBuf> {
+        if !fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
+            return None;
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(table) = fs::read_to_string("/proc/self/mountinfo") {
+            let real = real_path(path);
+            return mount_table_first_in(&table, &real).map(|m| match m.strip_prefix(&real) {
+                Ok(under) if !under.as_os_str().is_empty() => path.join(under),
+                _ => path.to_path_buf(),
+            });
+        }
+        device_change_in(path)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
@@ -1549,6 +1618,36 @@ mod tests {
         assert!(mount_table_names(table, Path::new("/home/u/Joinery/Bound")), "a bind mount is a mount point");
         assert!(!mount_table_names(table, Path::new("/home/u/Joinery/Big")), "a subvolume is not");
         assert!(!mount_table_names(table, Path::new("/home/u/Joinery/My\\040Disk")));
+        assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery")), Some(PathBuf::from("/home/u/Joinery/My Disk")));
+        assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/My Disk")), Some(PathBuf::from("/home/u/Joinery/My Disk")));
+        assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/My")), None, "a name it starts with is not a folder above it");
+        assert_eq!(mount_table_first_in(table, Path::new("/home/u/Joinery/Big")), None);
+    }
+
+    /// The mount table names no symlink, so a folder reached through one is
+    /// asked about by where it really is.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_mount_table_is_asked_by_the_real_path() {
+        let dir = TempDir::new("realpath");
+        fs::create_dir_all(dir.path().join("real/A")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+        assert_eq!(real_path(&dir.path().join("link/A")), fs::canonicalize(dir.path().join("real/A")).unwrap());
+        assert_eq!(real_path(&dir.path().join("link/gone")), dir.path().join("link/gone"), "unreadable: as given");
+    }
+
+    /// One disk all the way down: nothing to find, at the folder or under it.
+    #[cfg(unix)]
+    #[test]
+    fn one_disk_has_no_device_change_in_it() {
+        let dir = TempDir::new("devchange");
+        let v = vfs(&dir);
+        let root = dir.path().join("root");
+        fs::create_dir_all(root.join("A/B/C")).unwrap();
+        fs::write(root.join("A/B/f.txt"), b"x").unwrap();
+        assert_eq!(device_change_in(&root.join("A")), None);
+        assert_eq!(v.disk_mounted_in(&root.join("A")), None);
+        assert_eq!(v.disk_mounted_in(&root.join("A/B/f.txt")), None, "a file is no folder");
     }
 
     struct TempDir(PathBuf);

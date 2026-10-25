@@ -825,6 +825,18 @@ fn classify(e: &ExecError) -> OpOutcome {
             to.display(),
             from.display()
         )),
+        // A folder going to the trash with a second disk mounted at it or
+        // inside it: no system takes a mount point to the trash, and a folder
+        // above one would take the disk there, still mounted, with everything
+        // on it. Held and said the same way; once the disk is unmounted, the
+        // hold lifts (`pass::lift_or_keep_refusals`) and the trash goes ahead.
+        ExecError::Vfs(jd_vfs::VfsError::DiskInside { folder, mount }) => OpOutcome::Withdrawn(format!(
+            "{} stays here: a separate disk is mounted at {}, and sync never puts a disk in the trash. \
+             Unmount that disk and sync puts {} in the trash within the hour, or delete it yourself",
+            folder.display(),
+            mount.display(),
+            folder.display()
+        )),
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
@@ -847,12 +859,17 @@ fn stands_here(p: &ProtoError) -> bool {
 
 /// A withdrawal asked again unchanged is answered the same, so it is held
 /// (`pass::lift_or_keep_refusals`): a refusal that stands here, a move
-/// between two disks, which no rename carries out, or a move of the folder a
-/// disk is mounted at, which this system will not make.
+/// between two disks, which no rename carries out, a move of the folder a
+/// disk is mounted at, which this system will not make, or a trash of a
+/// folder with a disk mounted at it or inside it.
 fn held_here(e: &ExecError) -> bool {
     match e {
         ExecError::Proto(p) => stands_here(p),
-        ExecError::Vfs(jd_vfs::VfsError::OtherVolume { .. } | jd_vfs::VfsError::MountPoint { .. }) => true,
+        ExecError::Vfs(
+            jd_vfs::VfsError::OtherVolume { .. }
+            | jd_vfs::VfsError::MountPoint { .. }
+            | jd_vfs::VfsError::DiskInside { .. },
+        ) => true,
         _ => false,
     }
 }
@@ -6831,6 +6848,7 @@ fn unmaterialize_and_park(
             )?;
             return Ok(OpOutcome::Done);
         }
+        no_disk_inside(env, &path)?;
         // Whose COPY is inside this directory, which is not the same question as
         // whose record the server files under this folder.
         //
@@ -7361,6 +7379,19 @@ fn rescue_unsynced(
     };
     for child in children {
         let path = folder.join(&child.name);
+        // What a system or an application keeps for itself
+        // (`jd_vfs::is_system_file`, `is_system_folder`) is not work: it goes
+        // to the trash with the folder, and what is inside a system folder
+        // with it. Rescued, a file from a disk's own trash folder came back out
+        // of it under an ordinary name and went up to the server.
+        let system = match child.kind {
+            jd_vfs::EntryKind::Directory => jd_vfs::is_system_folder(&child.name),
+            jd_vfs::EntryKind::File => jd_vfs::is_system_file(&child.name),
+            _ => false,
+        };
+        if system {
+            continue;
+        }
         match child.kind {
             jd_vfs::EntryKind::Directory => {
                 // Re-asked at every directory on the way down, and it can only
@@ -7804,6 +7835,19 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<Op
 /// reads this belt's bar from these issues.
 pub(crate) const SEALED_RECORD_KEPT: &str = "sealed_record_kept";
 
+/// A folder with a second disk mounted at it or inside it does not go to the
+/// trash ([`jd_vfs::VfsError::DiskInside`]). Asked before anything is carried
+/// out of the folder for its trash: what never reached the server is on that
+/// disk, and a rescue off it is a move no rename makes (traced on a Linux run:
+/// the disk's own trash folder rescued, refused, and said as a move between
+/// disks nobody asked for).
+fn no_disk_inside(env: &ExecEnv, path: &std::path::Path) -> Result<(), ExecError> {
+    match env.vfs.disk_mounted_in(path) {
+        Some(mount) => Err(jd_vfs::VfsError::DiskInside { folder: path.to_path_buf(), mount }.into()),
+        None => Ok(()),
+    }
+}
+
 fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
         return Ok(OpOutcome::Overtaken(
@@ -7888,6 +7932,7 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             env.store.delete_subtree(op.entity)?;
             return Ok(OpOutcome::Done);
         }
+        no_disk_inside(env, &path)?;
         // Not while something inside this directory belongs elsewhere on the
         // server. The trash below takes what is under the directory now; the
         // rescue before it saves only what never reached the server; and a
