@@ -25,6 +25,8 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.6 - the pass counts the plaintext values it seals ('sealed N plaintext' in the summary),
+ *                so an upgrade's output shows them
  * @version 1.5 - a secret of an active sandboxed plugin is ranked as an active plugin's (PluginHelper::isActiveOfEitherKind)
  * @version 1.4 - the unreadable signal declares its audience (superadmins); the payload names no recipients
  * @version 1.3 - the locator path asks for a table only when it exists (to_regclass), so a plugin
@@ -48,7 +50,7 @@ class SecretReconciler {
 	 *                     unattended update_database run.
 	 * @return array{healed:int, needs_attention:int, dead_operator:int,
 	 *               dead_needs_ack:int, dead_low:int, discarded:int,
-	 *               key_mismatch:bool, summary:string}
+	 *               resealed:int, key_mismatch:bool, summary:string}
 	 */
 	public static function reconcile(array $opts = array()): array {
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
@@ -77,7 +79,7 @@ class SecretReconciler {
 		$out = array(
 			'healed' => 0, 'needs_attention' => 0,
 			'dead_operator' => 0, 'dead_needs_ack' => 0, 'dead_low' => 0,
-			'discarded' => 0, 'key_mismatch' => false, 'summary' => '',
+			'discarded' => 0, 'resealed' => 0, 'key_mismatch' => false, 'summary' => '',
 		);
 		$newly_dead = array();   // categories that transitioned into dead this run
 
@@ -129,7 +131,7 @@ class SecretReconciler {
 
 			// Opportunistically reseal any legacy plaintext (B3), cold only — the
 			// write is a >64-char blob the egress guard refuses in a hot process.
-			if ($cold) { self::reseal_plaintext($row); }
+			if ($cold) { $out['resealed'] += self::reseal_plaintext($row); }
 
 			// Write back the cached verdict the pill and the stats blob read.
 			self::server_write(function () use ($row, $new_state, $inspect) {
@@ -163,6 +165,7 @@ class SecretReconciler {
 			. ($out['dead_operator'] + $out['dead_needs_ack'])
 			. ($out['dead_low'] ? " (+{$out['dead_low']} low)" : '')
 			. ($out['discarded'] ? ", discarded {$out['discarded']} stale" : '')
+			. ($out['resealed'] ? ", sealed {$out['resealed']} plaintext" : '')
 			. ($cold ? '' : ' (ran hot — heals/mints deferred to a cold pass)');
 		return $out;
 	}
@@ -407,28 +410,30 @@ class SecretReconciler {
 	 * bare-blob row column. A WRAPPED column (declared enumerator) is left to its
 	 * consumer, which reseals on its next save; the reconciler cannot re-wrap a
 	 * {"enc":…} envelope generically. Idempotent: once a value is sealed it is no
-	 * longer plaintext, so a later pass skips it.
+	 * longer plaintext, so a later pass skips it. Returns how many values it sealed.
 	 */
-	private static function reseal_plaintext($row): void {
+	private static function reseal_plaintext($row): int {
 		// Never rewrite a deleted plugin's data — and its locator is no longer
 		// declared, so seal() would throw and abort the whole reconcile.
-		if ($row->is_orphan()) return;
+		if ($row->is_orphan()) return 0;
 		$locator = (string)$row->get('ssr_locator');
-		if (strpos($locator, 'session:') === 0) return;
-		if ((string)$row->get('ssr_enumerator') !== '') return;   // wrapped — consumer's job
+		if (strpos($locator, 'session:') === 0) return 0;
+		if ((string)$row->get('ssr_enumerator') !== '') return 0;   // wrapped — consumer's job
 
 		$box = null;
-		try { $box = new SecretBox(); } catch (\Throwable $e) { return; }
+		try { $box = new SecretBox(); } catch (\Throwable $e) { return 0; }
 
-		self::server_write(function () use ($locator, $box) {
+		$sealed = 0;
+		self::server_write(function () use ($locator, $box, &$sealed) {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			if (strpos($locator, '.') === false) {
 				$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = ?");
 				$q->execute(array($locator));
 				$v = $q->fetchColumn();
 				if ($v !== false && $v !== '' && !SecretBox::looksEncrypted((string)$v)) {
-					$dblink->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = ?")
-						->execute(array($box->seal($locator, (string)$v), $locator));
+					$q = $dblink->prepare("UPDATE stg_settings SET stg_value = ? WHERE stg_name = ?");
+					$q->execute(array($box->seal($locator, (string)$v), $locator));
+					$sealed += $q->rowCount();
 				}
 				return;
 			}
@@ -442,10 +447,12 @@ class SecretReconciler {
 				// Bind the old value alongside ctid: a ctid that moved (concurrent
 				// UPDATE) or was vacuum-reused for a different row then never matches,
 				// so this destructive-ish rewrite can only touch the row we read.
-				$dblink->prepare("UPDATE \"{$table}\" SET \"{$column}\" = ? WHERE ctid = ? AND \"{$column}\" = ?")
-					->execute(array($box->seal($locator, (string)$r['v']), $r['ctid'], (string)$r['v']));
+				$q = $dblink->prepare("UPDATE \"{$table}\" SET \"{$column}\" = ? WHERE ctid = ? AND \"{$column}\" = ?");
+				$q->execute(array($box->seal($locator, (string)$r['v']), $r['ctid'], (string)$r['v']));
+				$sealed += $q->rowCount();
 			}
 		});
+		return $sealed;
 	}
 
 	/** Discard the DEAD ephemeral value(s), leaving any live ones alone. */

@@ -10,7 +10,8 @@ request. For each error it:
 
 1. **records it** through two loggers: `DatabaseErrorLogger` saves an
    `err_general_errors` row (`GeneralError::logError()`), and `FileErrorLogger` writes
-   one JSON line to `logs/error.log`;
+   one JSON line to `logs/error.log`. An exception marked `NoLog` is an expected
+   refusal: it is not recorded, and its page offers nothing to report;
 2. **renders the response** for the kind of request, with one handler each
    (`includes/ErrorClasses.php`):
 
@@ -23,6 +24,21 @@ request. For each error it:
 | Command line | `CliErrorHandler` | Message, file, line and trace on stderr |
 
 Recording comes first, so the response can refer to the row it was saved as.
+
+**The status** comes from one rule for every handler (`ErrorStatus::of()`). A request
+the server refused answers 4xx; only a fault answers 500:
+
+| Exception | Status |
+|---|---|
+| `LogicRefusal`: a `LogicResult::error` with nothing else to show, thrown by `process_logic()` | 422, the status `/api/v1` gives the same result |
+| `ValidationException` | 400 |
+| `AuthenticationException` | 401 |
+| `AuthorizationException`, `SystemAuthenticationError` | 403 |
+| Any other `DisplayableErrorMessage` or `DisplayableErrorMessageNoLog` (an error the user can fix) | 400 |
+| Everything else, `DisplayablePermanent*` included | 500 |
+
+`LogicRefusal` is `NoLog`: a stale link or a refused request shows its message and
+records nothing.
 
 What a person is told: a `Displayable*` exception's own message, a displayable
 `BaseException`'s user message, the raw message when the `show_errors` setting is on,

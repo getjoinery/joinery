@@ -130,6 +130,23 @@ $has_oauth = false;
 foreach ($dead as $d) { if ($d['locator'] === 'oauth_google_client_secret') $has_oauth = true; }
 check($has_oauth, 'dead_items lists the flagged operator secret');
 
+// --- Reconcile: a value stored before it was sealed --------------------------
+section('Reconcile — plaintext is sealed and counted');
+// What an upgrade does to a value written before its column was declared sealed.
+// The count is what lets an upgrade's output show that it happened.
+$plant_setting('oauth_microsoft_client_secret', 'plain-client-secret');
+$rp = SecretReconciler::reconcile();
+$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = 'oauth_microsoft_client_secret'");
+$q->execute();
+$now = (string)$q->fetchColumn();
+check(SecretBox::looksEncrypted($now) && $box->open($now)['value'] === 'plain-client-secret',
+	'the plaintext value is sealed and opens to the same value');
+check($rp['resealed'] >= 1 && strpos($rp['summary'], 'plaintext') !== false,
+	'the pass counts it, and its summary says so', $rp['summary']);
+$rq = SecretReconciler::reconcile();
+check($rq['resealed'] === 0 && strpos($rq['summary'], 'plaintext') === false,
+	'a second pass seals nothing and says nothing', $rq['summary']);
+
 // --- Reconcile: a broken enumerator is one category's problem ----------------
 section('Reconcile — a throwing enumerator does not abort the run');
 // The shape that took down a production reconcile: a declared category whose

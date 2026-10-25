@@ -55,6 +55,7 @@ require_once(__DIR__ . '/lib/harness.php');    // parser + Globalvars, no side e
 require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_rel()
 require_once(__DIR__ . '/lib/coverage.php');   // coverage map + --changed selection
 require_once(__DIR__ . '/lib/gate.php');       // the lock, run records, result reuse
+require_once(__DIR__ . '/lib/php_warnings.php'); // warnings the site logs during the run
 
 // Every suite this run starts, and the lane worker, inherit the mark the git
 // guard hooks look for (tests/lib/repo_guard.php).
@@ -566,6 +567,10 @@ $rg_root = $tier_arg === 'deploy' ? null : repo_guard_root();
 $rg_setup = $rg_root !== null ? repo_guard_install_hooks($rg_root) : null;
 $rg_before = $rg_root !== null ? repo_guard_snapshot($rg_root) : null;
 
+// Where the site's error log ends: a warning a request raised during the run
+// fails it (tests/lib/php_warnings.php). A deploy run is upgrade.php's.
+$pw_mark = $tier_arg === 'deploy' ? null : php_warnings_mark();
+
 // Every result lands here: into the aggregate and onto the run record, one
 // line as it completes, which is what a waiting runner reads for progress.
 $results = array();
@@ -989,6 +994,17 @@ if ($rg_before !== null) {
 		));
 		if (!$want_json) print_human_line($r, $ROOT);
 	}
+}
+
+// What PHP wrote to the site's error log while the suites ran.
+$pw = php_warnings_since($pw_mark);
+if ($pw) {
+	$r = $land(array(
+		'name' => 'php_warnings', 'path' => 'tests/lib/php_warnings.php', 'tier' => $tier_arg, 'env' => 'dev-only',
+		'status' => 'fail', 'stats' => array('total' => count($pw), 'passed' => 0, 'failed' => count($pw), 'skipped' => 0),
+		'duration_ms' => 0, 'note' => 'the site logged PHP warnings during this run (logs/error.log)', 'fail_lines' => $pw,
+	));
+	if (!$want_json) print_human_line($r, $ROOT);
 }
 
 // ---------------------------------------------------------------------------

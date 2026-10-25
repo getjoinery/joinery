@@ -32,6 +32,11 @@ class SystemDisplayableErrorNoLog extends SystemBaseException implements Display
 
 class SystemDisplayablePermanentErrorNoLog extends SystemBaseException implements DisplayablePermanentErrorMessageNoLog {}
 
+// A request the logic refused: a LogicResult::error with nothing else to show
+// (process_logic()). Nothing broke, so it is not recorded as an error, and the
+// page answers 422, as /api/v1 answers the same result (ErrorStatus::of()).
+class LogicRefusal extends SystemBaseException implements DisplayableErrorMessageNoLog {}
+
 abstract class SystemBase {
 	
 	public $key;

@@ -110,6 +110,9 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.18 - logout() marks both session checks done before its own identity calls: the account-standing
+ *                check ran inside a logout the app-key check had begun, ended the session there, and the
+ *                outer call's session_destroy() then found none; it destroys only an active session
  * @version 1.17 - the trusted-device key is read sealed (User::second_factor_hmac_key()); set_api_user() takes the level the API request was authorized at, so a browser-credential
  *   action runs at the session's level, not the stored one
  * @version 1.16 - crawlerDetect() names JoineryEdgeProbe, the management node timing a site through its edge and
@@ -845,6 +848,12 @@ class SessionControl{
 	 * window's keys are still wiped and the session still ends.
 	 */
 	function logout(bool $account_gone = false) {
+		// The identity calls below must not run the session checks again: a
+		// check is what calls logout(), and the other one would end the session
+		// a second time inside this call, which then finds it already gone.
+		$this->_app_context_checked = true;
+		$this->_account_checked = true;
+
 		if($this->get_user_id() && !$account_gone) {
 			Login::record_logout($this->get_user_id());
 		}
@@ -904,7 +913,9 @@ class SessionControl{
 		// Kill the remember me cookie
 		$this->delete_cookie('tt');
 
-		session_destroy();
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			session_destroy();
+		}
 		session_write_close();
 	}
 

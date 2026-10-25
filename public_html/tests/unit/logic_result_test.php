@@ -134,8 +134,9 @@ section('process_logic: which errors stop the page');
 lr_reset_messages();
 $out = lr_process(LogicResult::error('No such record.'));
 check($out['threw'] === true, 'An error with nothing to show raises');
-check(isset($out['class']) && $out['class'] === 'SystemDisplayableError',
-	'It raises the displayable error type, not a bare exception',
+check(isset($out['class']) && $out['class'] === 'LogicRefusal'
+		&& in_array('DisplayableErrorMessageNoLog', class_implements('LogicRefusal'), true),
+	'It raises a refusal (displayable, not recorded as an error), not a bare exception',
 	isset($out['class']) ? $out['class'] : '');
 check(isset($out['message']) && $out['message'] === 'No such record.',
 	'The logic function\'s message reaches the error page');
