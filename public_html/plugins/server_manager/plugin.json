@@ -623,8 +623,8 @@
       "name": "server_manager_beta_root_access_holder",
       "default": "",
       "group": "provisioning",
-      "label": "Emergency root access holder (user id)",
-      "type": "number",
+      "label": "Emergency root access holder",
+      "type": "user",
       "helptext": "The operator whose vault new kept root passwords are sealed to. They need a vault and a second factor; until both hold, new installs are retired instead of kept, and an incident says so. Changing it affects new installs only: a kept password stays with the holder it was kept under."
     }
   ],

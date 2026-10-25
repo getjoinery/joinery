@@ -1272,8 +1272,8 @@ the agents are admitted and every one of these holds: the setting
 supplied, which passes `--beta-root-access` to `install.sh site` so the site's
 setup wizard offers its owner the checkbox); no root keys were supplied; the
 site's node has not reported its owner's `root_access` as `off`; and the holder
-is fit. The holder, `server_manager_beta_root_access_holder` (a user id, no
-default), is fit with a vault and a second factor. Otherwise the password is
+is fit. The holder, `server_manager_beta_root_access_holder` (chosen with a
+user picker; no default), is fit with a vault and a second factor. Otherwise the password is
 retired as above.
 
 Keeping moves the password from SecretBox into the holder's vault, with nobody

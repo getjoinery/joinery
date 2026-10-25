@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/declared_settings_test.php
  *
+ * @version 1.2 - the user setting type: drawn as the user search picker, and refuses an id that is no user
  * @version 1.1
  */
 
@@ -422,6 +423,26 @@ check(is_array($changed_only) && in_array('allowed_upload_extensions', $changed_
 	'a setting with a rule is checked in the browser only once its value changes', $cm[1] ?? 'no changedOnly');
 check(is_array($changed_only) && !in_array('probe_required', $changed_only, true),
 	'a field that is not a setting is checked as always');
+
+
+// A user setting is drawn as the user search picker showing the chosen user by
+// name, and a save refuses an id that is no user.
+$uform = new FormWriterV2HTML5('user_type_probe');
+$holder_id = (int)DbConnector::get_instance()->get_db_link()->query('SELECT MIN(usr_user_id) FROM usr_users WHERE usr_delete_time IS NULL')->fetchColumn();
+ob_start();
+$uform->begin_form();
+SettingsFieldRenderer::renderGroup($uform, 'provisioning', array('source' => 'server_manager',
+	'only' => array('server_manager_beta_root_access_holder'),
+	'values' => array('server_manager_beta_root_access_holder' => (string)$holder_id)));
+$uform->end_form();
+$uhtml = ob_get_clean();
+check(strpos($uhtml, '/api/v1/action/user_search') !== false
+	&& preg_match('/<option[^>]*value="' . $holder_id . '"[^>]*selected/', $uhtml) === 1,
+	'a user setting is the user search picker, with the stored user chosen', substr(strip_tags($uhtml), 0, 200));
+check(SettingsWriter::validate(array('server_manager_beta_root_access_holder' => '999999999')) !== array()
+	&& SettingsWriter::validate(array('server_manager_beta_root_access_holder' => (string)$holder_id)) === array()
+	&& SettingsWriter::validate(array('server_manager_beta_root_access_holder' => '')) === array(),
+	'a user setting saves an existing user\'s id or nothing, and refuses an id that is no user');
 
 
 harness_finish();

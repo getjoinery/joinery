@@ -28,6 +28,7 @@
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
+ * @version 1.4 - type user: a user id, chosen with the user search picker
  * @version 1.3 - a sandboxed plugin's manifest settings are declarations too (SandboxSettings)
  * @version 1.2 - clearPagesFor(): a setting's declared clearsPages leave the static cache when any writer changes it
  * @changelog 1.1 - show_when takes a list of values
@@ -301,7 +302,7 @@ class SettingsDeclarations {
 	 */
 	public static function schemaErrors(): array {
 		$errors = array();
-		$valid_types = array('text', 'number', 'checkbox', 'select', 'password', 'textarea', 'color');
+		$valid_types = array('text', 'number', 'checkbox', 'select', 'password', 'textarea', 'color', 'user');
 
 		foreach (self::all() as $name => $d) {
 			$where = "{$d['_source']}:{$name}";

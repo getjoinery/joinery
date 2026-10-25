@@ -7,6 +7,7 @@
  * instead of kept. Raised on this management node's own node; cleared when the
  * holder is fit or the setting is off.
  *
+ * @version 1.1 - the fix names the holder field as a user picker
  * @version 1.0
  */
 class IncidentSourceBreakGlassNoHolder implements IncidentSource {
@@ -33,7 +34,7 @@ class IncidentSourceBreakGlassNoHolder implements IncidentSource {
 				'What it means' => 'Emergency root access is on for the beta, but a kept password must be sealed to a holder who can '
 					. 'read and retire it. Until one is named and fit, every new install\'s password is retired as soon as its '
 					. 'agents are admitted, leaving no way back in if the agent breaks.',
-				'What to do'    => 'Name the holder in Server Manager settings (Emergency root access holder, a user id). They need a '
+				'What to do'    => 'Choose the holder in Server Manager settings (Emergency root access holder, under Customer provisioning). They need a '
 					. 'vault and a second factor. Or turn emergency root access off.',
 			),
 		);

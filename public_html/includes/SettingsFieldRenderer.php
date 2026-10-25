@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.9 - type user: the user search picker (user_search), showing the chosen user by name
  * @version 1.8 - a credential is drawn locked, with no Reset, below SettingsWriter::SECRET_WRITE_PERMISSION
  * @version 1.7 - a setting's rule is checked in the browser only once its value changes
  * @version 1.6
@@ -394,6 +395,23 @@ class SettingsFieldRenderer {
 				$field['value'] = $value;
 				if (!isset($field['sort'])) $field['sort'] = 'frequency';
 				$form->colorpicker($name, $label, $field);
+				return;
+
+			case 'user':
+				// A user id, chosen by searching: the one option drawn is the
+				// user stored now, so the field shows a name, not a number.
+				$choices = array();
+				if ((int)$value > 0) {
+					$chosen = new User((int)$value, TRUE);
+					$choices[(int)$value] = $chosen->key
+						? $chosen->display_name() . ' (' . $chosen->get('usr_email') . ')'
+						: 'User #' . (int)$value . ' (not found)';
+				}
+				$field['options'] = $choices;
+				$field['value'] = (int)$value > 0 ? (int)$value : '';
+				$field['empty_option'] = $declaration['empty_option'] ?? 'Nobody';
+				$field['ajaxendpoint'] = '/api/v1/action/user_search';
+				$form->dropinput($name, $label, $field);
 				return;
 
 			default:
