@@ -12,6 +12,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.19 - the Keep root SSH login help says a fresh install keeps an emergency root password during the beta
  * @version 1.18 - a server in one of our accounts is born with its data root encrypted where data_root_encryption_offered
  *                 is on, and the form says so (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.17 - the Cloud Account list is every account held, ours first with the default chosen; a server in one
@@ -301,8 +302,19 @@ $formwriter->textinput('domain', 'Domain', [
 	'pattern'     => '^(?!https?://).+',
 ]);
 
+$keep_root_help = 'Off by default: the new server is reached through its agent and root cannot log in over SSH.';
+if (BreakGlassRootAccess::beta_on()) {
+	$holder = BreakGlassRootAccess::holder_id();
+	$unfit = BreakGlassRootAccess::holder_unfit_reason($holder);
+	$keep_root_help = $unfit === null
+		? 'Off by default: the new server is reached through its agent. During the beta, a fresh install with no keys here'
+			. ' still lets root log in with one emergency password, sealed to ' . BreakGlassRootAccess::holder_name($holder)
+			. ', until the site\'s owner turns it off or the holder retires it.'
+		: $keep_root_help . ' During the beta a fresh install would keep an emergency root password, but '
+			. $unfit . ', so it is retired when the install finishes.';
+}
 $formwriter->checkboxinput('keep_root_login', 'Keep root SSH login (not recommended)', [
-	'helptext' => 'Off by default: the new server is reached through its agent and root cannot log in over SSH.',
+	'helptext' => $keep_root_help,
 ]);
 $formwriter->textbox('root_ssh_keys', 'Public keys for root', [
 	'rows'     => 3,

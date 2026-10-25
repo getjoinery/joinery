@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.10 - type user: the chosen user is labelled as user_search labels it
  * @version 1.9 - type user: the user search picker (user_search), showing the chosen user by name
  * @version 1.8 - a credential is drawn locked, with no Reset, below SettingsWriter::SECRET_WRITE_PERMISSION
  * @version 1.7 - a setting's rule is checked in the browser only once its value changes
@@ -404,7 +405,7 @@ class SettingsFieldRenderer {
 				if ((int)$value > 0) {
 					$chosen = new User((int)$value, TRUE);
 					$choices[(int)$value] = $chosen->key
-						? $chosen->display_name() . ' (' . $chosen->login_label() . ')'
+						? $chosen->display_name() . ' - ' . $chosen->login_label()
 						: 'User #' . (int)$value . ' (not found)';
 				}
 				$field['options'] = $choices;
