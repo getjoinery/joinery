@@ -31,7 +31,10 @@
  *   suite alone is how a flaky one is told from a real one), the debug
  *   environment matches, and none of the files that reach names differ
  *   between the record's tree and this one — one `git diff-tree` per record
- *   answers that for every suite at once. The decision reuses the --changed
+ *   answers that for every suite at once. A PHP file whose difference is only
+ *   comments and layout does not count against what loads it, and one whose
+ *   difference is inside function bodies counts only against a suite whose
+ *   recorded function set ran one of them. The decision reuses the --changed
  *   selection (coverage_select) so the two can never disagree about what a
  *   change reaches.
  *
@@ -40,6 +43,8 @@
  * while the real gate is held; JOINERY_GATE_CUTOFF (same gating) lowers the
  * queue cutoff so such a test can exercise the wait.
  *
+ * @version 1.2 - a difference inside function bodies blocks reuse only for a suite that ran one of them
+ * @version 1.1 - a comment-only difference in a PHP file does not block reuse through what loads it
  * @version 1.0 - lock, holder, run records, reuse (specs/gate_lock_and_shared_results.md)
  */
 
@@ -236,13 +241,65 @@ function gate_tree_id($site_root) {
 /**
  * Site-relative paths that differ between two trees, or null when git cannot
  * say (a tree that no longer exists). Null means "not reusable".
+ * $code_unchanged receives [path => true] for the PHP files among them whose
+ * difference is only comments and layout (coverage_code_unchanged()), and
+ * $fn_changes [path => [key => true] | null] for the other changed PHP files:
+ * the function bodies that changed, or null for the whole file
+ * (coverage_function_change()).
  */
-function gate_changed_between($site_root, $tree_a, $tree_b) {
+function gate_changed_between($site_root, $tree_a, $tree_b, &$code_unchanged = null, &$fn_changes = null) {
+	$code_unchanged = array();
+	$fn_changes = array();
 	if ($tree_a === $tree_b) return array();
-	$git = 'git -C ' . escapeshellarg($site_root);
-	exec($git . ' diff-tree -r --name-only ' . escapeshellarg($tree_a) . ' ' . escapeshellarg($tree_b) . ' 2>/dev/null', $lines, $rc);
-	if ($rc !== 0) return null;
-	return array_values(array_filter(array_map('trim', $lines), 'strlen'));
+	$proc = proc_open(array('git', '-C', $site_root, 'diff-tree', '-r', '-z', $tree_a, $tree_b),
+		array(1 => array('pipe', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+	if (!is_resource($proc)) return null;
+	$raw = stream_get_contents($pipes[1]);
+	fclose($pipes[1]);
+	if (proc_close($proc) !== 0) return null;
+	// -z raw: ":<mode> <mode> <old id> <new id> <status>\0<path>\0" per file.
+	$parts = explode("\0", (string)$raw);
+	$paths = array();
+	$blobs = array(); // path => [old id, new id]
+	for ($i = 0; $i + 1 < count($parts); $i += 2) {
+		$f = preg_split('/\s+/', ltrim($parts[$i], ":\n"));
+		$path = $parts[$i + 1];
+		if ($path === '') continue;
+		$paths[] = $path;
+		if (count($f) >= 4 && strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'php') $blobs[$path] = array($f[2], $f[3]);
+	}
+	gate_blob_changes($site_root, $blobs, $code_unchanged, $fn_changes);
+	return $paths;
+}
+
+/**
+ * What each changed PHP file's difference is, for [path => [old blob id, new
+ * blob id]]: comment-only ($code_unchanged), or the function bodies it
+ * changed ($fn_changes, null for the whole file). Each blob is read and split
+ * once per process, and only its hashes are kept — a reuse plan diffs many
+ * records whose changes share most of their blobs.
+ */
+function gate_blob_changes($site_root, array $blobs, &$code_unchanged, &$fn_changes) {
+	static $seen = array(); // blob id => [code hash, regions] (nulls: absent, not PHP, or unparsable)
+	$code_unchanged = array();
+	$fn_changes = array();
+	$need = array();
+	foreach ($blobs as $ids) {
+		foreach ($ids as $id) {
+			if (!preg_match('/^0+$/', $id) && !array_key_exists($id, $seen)) $need[$id] = true;
+		}
+	}
+	if ($need) {
+		foreach (coverage_git_objects($site_root, array_keys($need)) as $id => $src) {
+			$seen[$id] = $src === null ? array(null, null) : array(coverage_php_code_hash($src), coverage_php_regions($src));
+		}
+	}
+	foreach ($blobs as $path => $ids) {
+		$a = $seen[$ids[0]] ?? array(null, null);
+		$b = $seen[$ids[1]] ?? array(null, null);
+		if ($a[0] !== null && $a[0] === $b[0]) { $code_unchanged[$path] = true; continue; }
+		$fn_changes[$path] = coverage_regions_change($a[1], $b[1]);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -348,14 +405,15 @@ function gate_reach_complete(array $r, array $meta) {
  * as discovered now; $rel is its path under public_html. Returns '' when
  * reusable, else the reason it is not.
  */
-function gate_reuse_refusal(array $result, array $meta, $rel, array $changed, $debug_env_matches) {
+function gate_reuse_refusal(array $result, array $meta, $rel, array $changed, $debug_env_matches, array $code_unchanged = array(), array $fn_changes = array()) {
 	if (empty($result['reach_complete'])) return 'reach not complete';
 	if (($result['status'] ?? '') === 'fail') return 'a fail is never borrowed; it is re-proven here';
 	if (($result['status'] ?? '') !== 'pass') return 'not a pass';
 	if (!$debug_env_matches) return 'different debug environment';
 	$key = 'public_html/' . ltrim($rel, '/');
 	$entry = array('files' => array_values($result['files'] ?? array()), 'covers' => array_values($result['covers'] ?? array()));
-	$sel = coverage_select(array(array('path' => $key, 'meta' => $meta)), array($key => $entry), $changed);
+	if (isset($result['functions']) && is_array($result['functions'])) $entry['functions'] = $result['functions'];
+	$sel = coverage_select(array(array('path' => $key, 'meta' => $meta)), array($key => $entry), $changed, $code_unchanged, $fn_changes);
 	if ($sel['run_all'] !== '') return $sel['run_all'];
 	if (isset($sel['selected'][$key])) return $sel['selected'][$key];
 	return '';
@@ -379,11 +437,19 @@ function gate_reuse_plan(array $to_run, array $records, $my_tree, $site_root, $r
 		if (!$pending) break;
 		$wanted = array_intersect_key($run['results'], $pending);
 		if (!$wanted) continue;
-		$changed = gate_changed_between($site_root, $run['tree'], $my_tree);
+		$changed = gate_changed_between($site_root, $run['tree'], $my_tree, $code_unchanged, $fn_changes);
+		$local = array_filter($fn_changes, 'is_array');
 		if ($changed === null) continue;
 		$debug_matches = (bool)($run['debug_env'] ?? false) === (bool)$debug_on;
 		foreach ($wanted as $rel => $r) {
-			$refusal = gate_reuse_refusal($r, $pending[$rel], $rel, $changed, $debug_matches);
+			// The function set is read only when a loaded file changed inside
+			// function bodies: only then can it spare the suite.
+			if (!empty($r['functions_set']) && $local && array_intersect_key($local, array_flip($r['files'] ?? array()))) {
+				$set = coverage_fnset_get($root, $r['functions_set']);
+				if ($set !== null) $r['functions'] = $set;
+			}
+			$refusal = gate_reuse_refusal($r, $pending[$rel], $rel, $changed, $debug_matches, $code_unchanged, $fn_changes);
+			unset($r['functions']);
 			if ($refusal !== '') { if (!isset($why[$rel])) $why[$rel] = $refusal; continue; }
 			unset($why[$rel]);
 			$r['reused_from'] = array(

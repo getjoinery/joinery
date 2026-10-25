@@ -398,12 +398,16 @@ if ($changed_mode) {
 			. ($changed_ref !== '' ? " (and '$changed_ref' must be a resolvable ref)" : '') . ".\n");
 		exit(2);
 	}
-	$map = coverage_map_load($ROOT);
+	// An edit that only touches comments and layout runs the same code; one
+	// inside function bodies reaches only the suites that ran them.
+	$code_unchanged = coverage_changed_code_unchanged(dirname($ROOT), $changed, $changed_ref);
+	$fn_changes = coverage_changed_function_changes(dirname($ROOT), $changed, $code_unchanged, $changed_ref);
+	$map = coverage_map_with_functions(coverage_map_load($ROOT), $fn_changes, $ROOT);
 	$as_sel = function ($d) use ($ROOT) {
 		return array('path' => 'public_html/' . harness_rel($d['path'], $ROOT), 'meta' => $d['meta']);
 	};
-	$sel = coverage_select(array_map($as_sel, $to_run), $map, $changed);
-	$sel_estate = coverage_select(array_map($as_sel, $declared), $map, $changed);
+	$sel = coverage_select(array_map($as_sel, $to_run), $map, $changed, $code_unchanged, $fn_changes);
+	$sel_estate = coverage_select(array_map($as_sel, $declared), $map, $changed, $code_unchanged, $fn_changes);
 	if ($sel['run_all'] === '') {
 		$kept = array();
 		foreach ($to_run as $d) {
@@ -417,6 +421,7 @@ if ($changed_mode) {
 	}
 	$selection = array(
 		'mode' => 'changed', 'ref' => $changed_ref, 'changed' => $changed,
+		'comment_only' => array_keys($code_unchanged),
 		'run_all' => $sel['run_all'], 'selected' => count($to_run),
 		'uncovered' => $sel_estate['uncovered'],
 	);
@@ -424,6 +429,11 @@ if ($changed_mode) {
 		echo 'Changed: ' . count($changed) . ' file' . (count($changed) === 1 ? '' : 's')
 			. ' -> ' . count($to_run) . " {$tier_arg}-batch suite" . (count($to_run) === 1 ? '' : 's') . " selected"
 			. ' (map: ' . count($map) . " entries)\n";
+		if ($code_unchanged) {
+			echo '  ' . count($code_unchanged) . ' of them change only comments and layout: '
+				. implode(', ', array_slice(array_map('basename', array_keys($code_unchanged)), 0, 5))
+				. (count($code_unchanged) > 5 ? ', ...' : '') . "\n";
+		}
 		if ($sel['run_all'] !== '') echo '  running EVERYTHING: ' . $sel['run_all'] . "\n";
 		$shown = 0;
 		foreach ($to_run as $d) {
@@ -783,6 +793,17 @@ function opcache_flags($root) {
 }
 
 /**
+ * The function trace, prepended so it starts before the suite's first line
+ * (tests/lib/function_trace.php). Only where xhprof is loaded; elsewhere a
+ * suite reports files only and selects as files. The deploy tier is never
+ * reused, so it is never traced.
+ */
+function function_trace_flags($root) {
+	if (($GLOBALS['tier_arg'] ?? '') === 'deploy' || !extension_loaded('xhprof')) return '';
+	return '-d auto_prepend_file=' . escapeshellarg($root . '/tests/lib/function_trace.php') . ' ';
+}
+
+/**
  * Run `parallel: true` suites PARALLEL_WIDTH at a time, handing each result to
  * $done as it lands. Only safe-tier suites may declare it, and the harness
  * makes their database session read-only, so a pooled suite that writes fails
@@ -826,7 +847,7 @@ function run_one_start($d, $root, $timeout_s) {
 	// actually execute; suites that don't touch APCu are unaffected.
 	$inner = $is_sh
 		? 'bash ' . escapeshellarg($path)
-		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . opcache_flags($root) . escapeshellarg($path) . ' --json';
+		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . opcache_flags($root) . function_trace_flags($root) . escapeshellarg($path) . ' --json';
 	// -k 5s sends SIGKILL 5s after SIGTERM if the test ignores the term.
 	//
 	// The child starts with ONLY stdio open. This process inherits descriptors
@@ -901,7 +922,10 @@ function run_one_finish_raw(array $h, $exit = null) {
 			'stats' => $contract['stats'], 'sections' => $contract['sections'] ?? array(),
 			'duration_ms' => $contract['duration_ms'] ?? $ms, 'exit' => $exit,
 			'files' => $contract['files'] ?? array(), 'covers' => $d['meta']['covers'] ?? array(),
-		);
+		) + (!empty($contract['functions']) && is_array($contract['functions'])
+			// Stored once per distinct set; the result carries its id.
+			&& ($set = coverage_fnset_put($root, $contract['functions'])) !== ''
+			? array('functions_set' => $set) : array());
 	}
 
 	// A declared .php test MUST emit a result contract. If it doesn't, it either
@@ -974,6 +998,8 @@ function print_human_line($r, $root, $tag = '') {
 // result stays out: the map already holds exactly that reach from the run
 // that produced it.
 coverage_map_update(array_values(array_filter($results, function ($r) { return empty($r['reused_from']); })), $ROOT);
+// Function sets live as long as a record could still name them.
+coverage_fnsets_prune($ROOT, GATE_RECORD_TTL_S);
 
 // The real repository, compared with how this run found it. A change a suite
 // made fails the run as an entry of its own, saying what to put back; a

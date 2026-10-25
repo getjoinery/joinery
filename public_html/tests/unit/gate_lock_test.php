@@ -90,6 +90,19 @@ $why = gate_reuse_refusal($res, $meta, $rel, array('public_html/tests/lib/gate.p
 check($why !== '' && strpos($why, 'harness') !== false, 'the harness changing refuses everything', $why);
 $why = gate_reuse_refusal($res, $meta, $rel, array('public_html/tests/unit/fixtures/thing.bin'), true);
 check($why !== '', 'a fixture in the suite\'s area changing refuses', $why);
+check(gate_reuse_refusal($res, $meta, $rel, array('public_html/includes/A.php'), true, array('public_html/includes/A.php' => true)) === '',
+	'a comment-only change to a loaded file: reusable');
+$why = gate_reuse_refusal($res, $meta, $rel, array('public_html/tests/unit/x_test.php'), true, array('public_html/tests/unit/x_test.php' => true));
+check($why !== '', "a comment-only change to the suite's own file still refuses: its header is a comment", $why);
+$fres = $res + array('functions' => array('a::kept' => true));
+check(gate_reuse_refusal($fres, $meta, $rel, array('public_html/includes/A.php'), true, array(), array('public_html/includes/A.php' => array('a::other' => true))) === '',
+	'a body change to a function the suite never ran: reusable');
+$why = gate_reuse_refusal($fres, $meta, $rel, array('public_html/includes/A.php'), true, array(), array('public_html/includes/A.php' => array('a::kept' => true)));
+check(strpos($why, 'runs a::kept') === 0, 'a body change to a function it ran refuses, naming it', $why);
+$why = gate_reuse_refusal($fres, $meta, $rel, array('public_html/includes/A.php'), true, array(), array('public_html/includes/A.php' => null));
+check(strpos($why, 'loads') === 0, 'a whole-file change refuses', $why);
+$why = gate_reuse_refusal($res, $meta, $rel, array('public_html/includes/A.php'), true, array(), array('public_html/includes/A.php' => array('a::other' => true)));
+check(strpos($why, 'loads') === 0, 'a result with no function set is file level', $why);
 check(gate_reuse_refusal($res, $meta, $rel, array(), false) !== '', 'a different debug environment refuses');
 check(gate_reuse_refusal(array('status' => 'pass', 'reach_complete' => false, 'files' => array()), $meta, $rel, array(), true) !== '', 'an incomplete reach refuses');
 check(gate_reuse_refusal(array_merge($res, array('status' => 'fail')), $meta, $rel, array(), true) !== '',
@@ -117,9 +130,32 @@ exec($envi . $git . ' add -A 2>&1');
 exec('echo "<?php // probe" | ' . $git . ' hash-object -w --stdin', $bl); $blob = trim(implode('', $bl));
 exec($envi . $git . ' update-index --add --cacheinfo 100644,' . $blob . ',' . escapeshellarg($probe_rel) . ' 2>&1', $ui, $rc_ui);
 exec($envi . $git . ' write-tree', $wt); $tree2 = trim(implode('', $wt));
+// Two more: the probe with only its comment changed, and with its code changed.
+$probe_tree = function ($content) use ($git, $envi, $probe_rel) {
+	exec('printf %s ' . escapeshellarg($content) . ' | ' . $git . ' hash-object -w --stdin', $b);
+	exec($envi . $git . ' update-index --add --cacheinfo 100644,' . trim(implode('', $b)) . ',' . escapeshellarg($probe_rel) . ' 2>&1');
+	exec($envi . $git . ' write-tree', $t);
+	return trim(implode('', $t));
+};
+$tree3 = $probe_tree("<?php\n/* a different comment */\n");
+$tree4 = $probe_tree("<?php echo 1;\n");
+$tree5 = $probe_tree("<?php class P { function a() { return 1; } function b() { return 1; } }\n");
+$tree6 = $probe_tree("<?php class P { function a() { return 2; } function b() { return 1; } }\n");
+$tree7 = $probe_tree("<?php class P { const X = 1; function a() { return 2; } function b() { return 1; } }\n");
 @unlink($tmp_index);
-$diff = gate_changed_between($SITE_ROOT, $tree2, $tree);
+$diff = gate_changed_between($SITE_ROOT, $tree2, $tree, $cu);
 check($rc_ui === 0 && $diff === array($probe_rel), 'a tree with one extra file differs by exactly that path', json_encode($diff));
+check($cu === array(), 'an added file is never a comment-only change');
+$diff = gate_changed_between($SITE_ROOT, $tree2, $tree3, $cu);
+check($diff === array($probe_rel) && isset($cu[$probe_rel]), 'a PHP file whose comment changed differs, and is named comment-only', json_encode($cu));
+$diff = gate_changed_between($SITE_ROOT, $tree2, $tree4, $cu);
+check($diff === array($probe_rel) && $cu === array(), 'a PHP file whose code changed is not', json_encode($cu));
+$diff = gate_changed_between($SITE_ROOT, $tree5, $tree6, $cu, $fc);
+check($diff === array($probe_rel) && ($fc[$probe_rel] ?? null) === array('p::a' => true), 'a method body change between trees names the method', json_encode($fc));
+$diff = gate_changed_between($SITE_ROOT, $tree6, $tree7, $cu, $fc);
+check(array_key_exists($probe_rel, $fc) && $fc[$probe_rel] === null, 'a new constant between trees is a whole-file change', json_encode($fc));
+$diff = gate_changed_between($SITE_ROOT, $tree2, $tree5, $cu, $fc);
+check(array_key_exists($probe_rel, $fc) && $fc[$probe_rel] === null, 'and so is a file that turned into something else', json_encode($fc));
 
 // ---------------------------------------------------------------------------
 section('A run leaves a record');
