@@ -17,6 +17,7 @@
  * before the node is taken unfreezes the site; discarding removes the copy
  * from its host.
  *
+ * @version 1.4 - its sources sit at JobCommandBuilder::COPY_SOURCE_MIN_VERSION, the copy floor (B115)
  * @version 1.3 - a host whose agent has gone silent takes no copy (B100); a dead container whose host is gone is
  *               switched over and kept, its stop owed until that host runs it, cancelled once the container is gone,
  *               and a way back starts the old container when its host took the stop up meanwhile (B103)
@@ -42,7 +43,7 @@ $copy_fpr = AgentJoinRequest::fingerprint(base64_decode($copy_key));
 $look = '/.joinery-look/' . str_repeat('6b', 16);
 $H_SRC = '192.0.2.71';
 $H_COPY = '198.51.100.72';
-$release = '0.8.496';
+$release = JobCommandBuilder::COPY_SOURCE_MIN_VERSION;
 
 // The owner's recovery key, and a chain whose data key is sealed to it.
 $recovery = sodium_crypto_box_keypair();

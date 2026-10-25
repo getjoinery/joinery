@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.147 - a copy's install passes --keep-root-login only to a release that knows it (keep_root_login_flag,
+ *                 KEEP_ROOT_LOGIN_MIN_VERSION 0.8.535), and both copy floors are COPY_INSTALL_MIN_VERSION 0.8.497, the
+ *                 first install.sh that takes every other option a copy's install passes (B115)
+ * @version 1.146 - disable_root_login_refusal: a Docker host's own node (whose placement record names it) is the machine,
+ *                 not a container; container_node_host() says which (live check 2026-10-25)
  * @version 1.145 - build_disable_root_login (agent 1.95.0): root SSH login off for good on a machine through its own
  *                 agent; refused on a container node (named its host's node) and while this management node still
  *                 logs in with the install password (specs/implemented/beta_break_glass_root_access.md 5.3)
@@ -614,17 +619,39 @@ class JobCommandBuilder {
 	 * from off the machine (_site_state.sh 1.4), 0.8.453 and later. And each
 	 * copy run backs the source up first, through this management node's
 	 * backup broker (BROKER_MIN_CORE_VERSION), so the copy is of the site as it
-	 * is at its release: 0.8.472.
+	 * is at its release: 0.8.472. And that release's install.sh takes every
+	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION.
 	 */
-	const COPY_SOURCE_MIN_VERSION = '0.8.472';
+	const COPY_SOURCE_MIN_VERSION = self::COPY_INSTALL_MIN_VERSION;
 
 	/**
 	 * The oldest release a site can be copied from its backups (site_copy.md
 	 * WP10). The owner types the recovery key on the copy's own /copy-key
 	 * page, and that page is part of the release the copy installs: the
-	 * source's. 0.8.456 is the first release that carries it.
+	 * source's (0.8.456 and later). And that release's install.sh takes every
+	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION.
 	 */
-	const COPY_FROM_BACKUPS_MIN_VERSION = '0.8.456';
+	const COPY_FROM_BACKUPS_MIN_VERSION = self::COPY_INSTALL_MIN_VERSION;
+
+	/**
+	 * The oldest release whose install.sh takes every option a copy's install
+	 * passes, on either target; a copy runs its source's own release's
+	 * install.sh. Onto a new server (build_install_node, mode copy):
+	 * --outbound-set-by=plane from 0.8.465, and an encrypted data root's
+	 * --encrypted-data-root --recovery-public-key from 0.8.484. Onto a host
+	 * (the host agent's site_install word): --release-tree-only from 0.8.497.
+	 * An older one stops at the first it does not know, after the server or
+	 * container is made (B115). --keep-root-login is passed only to a release
+	 * that knows it (keep_root_login_flag).
+	 */
+	const COPY_INSTALL_MIN_VERSION = '0.8.497';
+
+	/**
+	 * The first release whose install.sh server and docker turn root SSH login
+	 * off by default, and take --keep-root-login to leave it on. An older one
+	 * never turns it off, and stops at the option it does not know.
+	 */
+	const KEEP_ROOT_LOGIN_MIN_VERSION = '0.8.535';
 
 	/**
 	 * The oldest release whose dormant copy answers its key look path,
@@ -2467,6 +2494,17 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * --keep-root-login, with a leading space, for the install.sh of RELEASE
+	 * ('' is the stream's newest): this plane logs in with the root password
+	 * again (the keep or retire job, probes, Retry Install). A release before
+	 * KEEP_ROOT_LOGIN_MIN_VERSION never turns root login off and does not know
+	 * the option, so it gets nothing (B115).
+	 */
+	public static function keep_root_login_flag(string $release): string {
+		return ($release === '' || version_compare($release, self::KEEP_ROOT_LOGIN_MIN_VERSION, '>=')) ? ' --keep-root-login' : '';
+	}
+
+	/**
 	 * Turn a machine's outbound limits on or off, or set their figures
 	 * (node_outbound_and_transfer WP5): the machine's own, or one container
 	 * site's. Addressed to the agent of the machine that holds the limits: a
@@ -3473,11 +3511,10 @@ class JobCommandBuilder {
 	 * password.
 	 */
 	public static function disable_root_login_refusal($node): ?string {
-		if (trim((string)$node->get('mgn_container_name')) !== '' || (int)$node->get('mgn_mgh_managed_host_id')) {
-			$host = (int)$node->get('mgn_mgh_managed_host_id') ? new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE) : null;
-			$host_node = ($host && $host->key) ? $host->host_node() : null;
+		$container = self::container_node_host($node);
+		if ($container !== null) {
 			return 'This site runs in a container; turn root login off on its server'
-				. ($host_node ? ', from ' . $host_node->get('mgn_name') . '\'s node.' : ', from the server\'s own node.');
+				. ($container['host_node'] ? ', from ' . $container['host_node']->get('mgn_name') . '\'s node.' : ', from the server\'s own node.');
 		}
 		$provision = CustomerCloudProvision::for_machine_address((string)$node->get('mgn_host'));
 		$state = $provision ? (string)$provision->get('cvp_install_password') : '';
@@ -3487,6 +3524,26 @@ class JobCommandBuilder {
 		}
 		if ($state === 'retiring') {
 			return 'The install password\'s cleanup is running and logs in as root; wait for it to finish.';
+		}
+		return null;
+	}
+
+	/**
+	 * Is this node a site in a container, rather than a machine? Returns
+	 * ['host_node' => its host's node or null] when it is, null when it is the
+	 * machine. A container has its container name; a Docker host's own node
+	 * carries its placement record (mgn_mgh_managed_host_id) too, and is the
+	 * machine when that record names it as the host.
+	 */
+	public static function container_node_host($node): ?array {
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
+		$host = $host_id ? new ManagedHost($host_id, TRUE) : null;
+		$host_node = ($host && $host->key) ? $host->host_node() : null;
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			return array('host_node' => $host_node);
+		}
+		if ($host_id && $host_node && (int)$host_node->key !== (int)$node->key) {
+			return array('host_node' => $host_node);
 		}
 		return null;
 	}
@@ -6028,7 +6085,7 @@ class JobCommandBuilder {
 			// by default, and this plane logs in with the root password
 			// again (the keep or retire job, probes, Retry Install).
 			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name)
-				. ' --keep-root-login' . self::outbound_install_flags() . $encrypted_flags;
+				. self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags;
 			if ($mode !== 'bare') {
 				// No --no-ssl: install.sh writes the universal proxy vhost,
 				// tries for a certificate, and arms the host's retry timer when
@@ -6055,7 +6112,8 @@ class JobCommandBuilder {
 			// password login on a box whose root holds no SSH key
 			// (derive_ssh_access), because this plane logs in with that
 			// password again and retires it itself once the machine's agents
-			// are admitted. retry_install is refused only after that (B37).
+			// are admitted. retry_install is refused only after that (B37). A
+			// copy at an older release gets no such option (keep_root_login_flag).
 			//
 			// _site_init.sh uses the site's DB password as PGPASSWORD for the
 			// postgres role when it runs createdb, so the site's password MUST
@@ -6071,7 +6129,7 @@ class JobCommandBuilder {
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server --keep-root-login' . self::outbound_install_flags() . $encrypted_flags . ';'
+			         . ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
 			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}";

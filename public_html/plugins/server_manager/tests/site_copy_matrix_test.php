@@ -25,6 +25,7 @@
  * of a site whose agent key is not on record, and alive or dead is the
  * source's, whatever the target (on a host too).
  *
+ * @version 1.2 - its sources sit at JobCommandBuilder::COPY_SOURCE_MIN_VERSION, the copy floor (B115)
  * @version 1.1 - a site whose agent was never heard from is not copied as a running one (B101)
  * @version 1.0
  */
@@ -75,7 +76,7 @@ $provision = function (ManagedNode $n, string $provider, string $region) use ($o
 $base = array('mgn_site_url' => 'https://scm.example.org', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
 	'mgn_agent_version' => JobCommandBuilder::FORWARD_MIN_AGENT_VERSION,
 	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,site_quiet,copy_vouch,check_status',
-	'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
+	'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_joinery_version' => JobCommandBuilder::COPY_SOURCE_MIN_VERSION,
 	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')), 'mgn_backup_recovery_fpr' => str_repeat('cd', 32),
 	'mgn_agent_server_manager' => 'inactive', 'mgn_last_host_report' => json_encode(array('sites' => array())));
 
