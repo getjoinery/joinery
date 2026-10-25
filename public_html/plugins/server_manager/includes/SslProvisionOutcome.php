@@ -30,6 +30,8 @@
  * it does: that is a wait, not a fault. A timer that could not be armed, or an
  * edge on Full (Strict), is a fault nothing on the node will clear.
  *
+ * @version 1.3 - a refused HTTP-01 is a failed challenge before it is a wait, with the credentials path when one was
+ *                printed; an edge on Full (Strict) says when a DNS-01 attempt failed too (reviewer2 on B111)
  * @version 1.2 - reads the words the scripts print today (B111): "drop credentials at" in any case, and
  *                "no DNS-01 provider was detected" beside the older "no LE challenge path available", so a
  *                no-certificate run is no longer unreadable; a run that armed the retry timer is a wait
@@ -148,20 +150,41 @@ class SslProvisionOutcome {
 				          . 'host, for a site in a container) once the domain reaches it.',
 			];
 		}
+		$dns_failed = self::says($text, 'dns_attempt') && strpos($text, 'failed') !== false;
+		$cred = self::matched('/drop credentials at (\S+)/i', $text);
 		if (self::says($text, 'edge_strict')) {
 			return [
 				'state'  => self::EDGE_STRICT,
 				'detail' => 'No certificate was issued: the edge in front of the domain is on Full (Strict) and '
 				          . 'refuses the placeholder certificate the node answers with until it has a real one. Set '
 				          . 'the edge to Full; the node\'s retry timer then issues the certificate, and Full (Strict) '
-				          . 'works after that.',
+				          . 'works after that.'
+				          . ($dns_failed ? ' A DNS-01 challenge through the provider was tried as well and did not validate.' : ''),
+			];
+		}
+
+		// A challenge was attempted and refused: the name reached the node (or
+		// the zone answered), so it is not waiting for the name.
+		if ($dns_failed) {
+			return [
+				'state'  => self::CHALLENGE_FAILED,
+				'detail' => 'A DNS-01 challenge was attempted and did not validate. The credentials on the '
+				          . 'node may be wrong or lack permission on the zone.',
+			];
+		}
+		if (self::says($text, 'http_failed')) {
+			return [
+				'state'  => self::CHALLENGE_FAILED,
+				'detail' => 'An HTTP-01 challenge was attempted and did not validate, and no DNS-01 fallback '
+				          . 'was available.'
+				          . ($cred !== '' ? ' To use DNS-01 instead, put the provider credentials at ' . $cred
+				          . ' and provision again.' : ''),
 			];
 		}
 
 		// The script has already worked out the provider and the exact path it
 		// wants credentials at, whenever it found one.
 		if (self::says($text, 'not_issued')) {
-			$cred = self::matched('/drop credentials at (\S+)/i', $text);
 			if (self::says($text, 'retry_armed')) {
 				return [
 					'state'  => self::WAITING_FOR_NAME,
@@ -186,22 +209,6 @@ class SslProvisionOutcome {
 					          . 'Point the domain here, or use a supported DNS provider.',
 				];
 			}
-		}
-
-		if (self::says($text, 'dns_attempt') && strpos($text, 'failed') !== false) {
-			return [
-				'state'  => self::CHALLENGE_FAILED,
-				'detail' => 'A DNS-01 challenge was attempted and did not validate. The credentials on the '
-				          . 'node may be wrong or lack permission on the zone.',
-			];
-		}
-
-		if (self::says($text, 'http_failed')) {
-			return [
-				'state'  => self::CHALLENGE_FAILED,
-				'detail' => 'An HTTP-01 challenge was attempted and did not validate, and no DNS-01 fallback '
-				          . 'was available.',
-			];
 		}
 
 		if (self::says($text, 'configtest')) {

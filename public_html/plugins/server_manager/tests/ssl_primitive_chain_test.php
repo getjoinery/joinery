@@ -194,7 +194,29 @@ check($c['state'] === SslProvisionOutcome::NO_DNS_CREDENTIALS && strpos($c['deta
 $c = SslProvisionOutcome::classify($strict);
 check($c['state'] === SslProvisionOutcome::EDGE_STRICT && SslProvisionOutcome::needs_operator($c['state']),
 	'an edge on Full (Strict): a person is needed even with the timer armed, since only the edge\'s owner can change it', $c['state']);
-foreach ([$unarmed, $armed, $no_provider_armed, $creds_today, $strict] as $sample) {
+// The name reached the node and HTTP-01 was refused: a failed challenge, not a
+// wait for the name, with or without a provider (reviewer2 on B111).
+$http_refused_armed = "{$Y}[WARN]{$N} HTTP-01 failed; trying DNS-01\n"
+         . "{$B}[INFO]{$N} No origin cert issued for h.example.com (HTTP-01 did not validate, and no DNS-01 provider was detected).\n"
+         . "{$B}[INFO]{$N} A retry timer asks every five minutes whether h.example.com reaches this box, and issues its "
+         . "certificate when it does.\n";
+$http_refused_creds = "{$Y}[WARN]{$N} HTTP-01 failed; trying DNS-01\n"
+         . "{$B}[INFO]{$N} No origin cert issued for h.example.com.\n"
+         . "{$B}[INFO]{$N}   h.example.com reaches this box but HTTP-01 did not validate (above); the retry timer asks again, "
+         . "or drop credentials at /etc/letsencrypt/linode.ini and re-run sysadmin_tools/setup_ssl.sh h.example.com for DNS-01.\n";
+$strict_dns_failed = str_replace("{$B}[INFO]{$N} No origin cert issued for s.example.com.\n"
+         . "{$B}[INFO]{$N}   Set the edge to Full (not Full (Strict)) until the first certificate lands; the retry timer "
+         . "issues it on its own once s.example.com reaches here.\n",
+         "{$G}[STEP]{$N} Domain s.example.com resolves to cloudflare; using DNS-01\n{$Y}[WARN]{$N} DNS-01 via cloudflare failed\n", $strict);
+check(SslProvisionOutcome::classify($http_refused_armed)['state'] === SslProvisionOutcome::CHALLENGE_FAILED,
+	'HTTP-01 refused with no provider and the timer armed: a failed challenge, not a wait for the name');
+$c = SslProvisionOutcome::classify($http_refused_creds);
+check($c['state'] === SslProvisionOutcome::CHALLENGE_FAILED && strpos($c['detail'], '/etc/letsencrypt/linode.ini') !== false,
+	'HTTP-01 refused with a provider and no credentials: a failed challenge that names where credentials would go', $c['detail']);
+$c = SslProvisionOutcome::classify($strict_dns_failed);
+check($c['state'] === SslProvisionOutcome::EDGE_STRICT && strpos($c['detail'], 'DNS-01 challenge through the provider was tried') !== false,
+	'an edge on Full (Strict) whose DNS-01 fallback failed too: the edge first, and the failed DNS-01 said', $c['detail']);
+foreach ([$unarmed, $armed, $no_provider_armed, $creds_today, $strict, $http_refused_armed, $http_refused_creds] as $sample) {
 	check(!SslProvisionOutcome::is_issued(SslProvisionOutcome::classify($sample)['state']),
 		'and none of them is read as a certificate on the node');
 }

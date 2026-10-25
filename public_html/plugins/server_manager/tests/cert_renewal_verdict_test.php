@@ -192,4 +192,35 @@ check($issuer(['issuer' => ['O' => 'ACME', 'CN' => 'ACME']]) === 'ACME',
 	'a repeated value is not printed twice');
 check($issuer([]) === '', 'no issuer fields yields an empty string, and the line is dropped');
 
+section('An origin still on its placeholder is its own problem, timed from when it was first seen (B112)');
+// The placeholder names the site (apex and www), so it covers the name; only
+// its issuer gives it away. A real one, minted the way _placeholder_cert.sh
+// mints it, read back the way the check reads a served certificate.
+$ph_key  = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+$ph_csr  = openssl_csr_new(['commonName' => 'placeholder.example'], $ph_key);
+$ph_cert = openssl_x509_parse(openssl_csr_sign($ph_csr, null, $ph_key, 3650));
+$ss = new ReflectionMethod('RunNodeUptimeChecks', 'is_self_signed');
+$ss->setAccessible(true);
+check($ss->invoke($task, $ph_cert) === true, 'a self-signed certificate (issuer is subject) reads as the placeholder');
+check($ss->invoke($task, ['subject' => ['CN' => 'a.example'], 'issuer' => ['O' => "Let's Encrypt", 'CN' => 'YE2']]) === false,
+	'one a certificate authority signed does not');
+check($ss->invoke($task, []) === false, 'and a certificate with no subject claims nothing');
+check(RunNodeUptimeChecks::placeholder_since(null, 1000) === 1000, 'first seen now when nothing was stored');
+check(RunNodeUptimeChecks::placeholder_since(['reason' => 'placeholder', 'since' => 400], 1000) === 400,
+	'first seen when the stored problem says, while it is still the placeholder');
+check(RunNodeUptimeChecks::placeholder_since(['reason' => 'overdue'], 1000) === 1000, 'another problem before it starts the clock now');
+$pp = new ReflectionMethod('RunNodeUptimeChecks', 'placeholder_problem');
+$pp->setAccessible(true);
+$p = $pp->invoke($task, 'site.example', strtotime('2026-10-24 21:08:00 UTC'), false);
+check($p['reason'] === 'placeholder' && $p['since'] === strtotime('2026-10-24 21:08:00 UTC')
+	&& strpos($p['title'], 'placeholder certificate for site.example') !== false, 'the problem names the host and when it was first seen', $p['title']);
+check(strpos($p['detail']['Fix'], '/var/www/html/*/maintenance_scripts/sysadmin_tools/setup_ssl.sh site.example') !== false,
+	'a site on its own server is fixed with its own setup_ssl.sh');
+check(strpos($pp->invoke($task, 'site.example', 1, true)['detail']['Fix'],
+	"On the site's host: sudo bash /opt/joinery-agent/tree/maintenance_scripts/sysadmin_tools/setup_ssl.sh site.example") !== false,
+	'a site in a container, with the setup_ssl.sh its host has (the agent\'s bundle)');
+$ph_at    = strpos($fn, 'is_self_signed');
+check($ph_at !== false && $store_at !== false && $ph_at < $store_at,
+	'the placeholder is recorded before, and instead of, storing its ten-year expiry');
+
 harness_finish();
