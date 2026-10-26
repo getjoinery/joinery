@@ -195,6 +195,11 @@ try {
             }
             break;
 
+        // invoice.paid also arrives for an invoice marked paid by hand in
+        // Stripe's dashboard, which sends no payment_succeeded. A charged
+        // invoice sends both; the second finds the line already active and
+        // changes nothing.
+        case 'invoice.paid':
         case 'invoice.payment_succeeded':
             $invoice = $event->data->object;
             $subscription_id = $invoice->subscription;

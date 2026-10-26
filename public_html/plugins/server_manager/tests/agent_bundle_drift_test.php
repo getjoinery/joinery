@@ -20,9 +20,13 @@
  * This is that invariant as a check that costs nothing and runs every day.
  *
  * A box with no agent source is not a publishing management node; there is no
- * drift to detect and the source checks report as skipped.
+ * drift to detect and the source checks report as skipped. An agent commit
+ * made since the last publish is pending, not drift (the next publish
+ * rebuilds the bundle), and reports as skipped too.
  *
  * Run: php plugins/server_manager/tests/agent_bundle_drift_test.php
+ *
+ * @version 1.1 - an agent commit since the last publish is pending, not drift (B143)
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -78,13 +82,33 @@ if (!$has_source) {
 	check($source_version !== null, 'agent source version is readable at HEAD',
 		"could not read 'var version' from main.go at the HEAD of {$src}");
 
-	check(
-		$source_version !== null && $source_version === $bundled_version,
-		'bundled agent version matches the agent source commit',
-		"the agent source's HEAD is v" . var_export($source_version, true)
-		. " but agent_dist is v" . var_export($bundled_version, true)
-		. " - the last publish from this box shipped a stale agent; rebuild the bundle"
-	);
+	// A publish rebuilds the bundle whenever the source is newer, so an agent
+	// commit made since the last publish is pending, not drift: the bundle is
+	// held to HEAD only when a release was published after HEAD was committed.
+	$head = ReleaseCommit::git($src, array('log', '-1', '--format=%ct', 'HEAD'));
+	$head_time = ($head['exit'] === 0) ? (int)trim(implode('', $head['out'])) : 0;
+	$last_publish = 0;
+	try {
+		$newest = DbConnector::get_instance()->get_db_link()
+			->query('SELECT max(upg_create_time) FROM upg_upgrades')->fetchColumn();
+		$last_publish = $newest ? (int)strtotime($newest . ' UTC') : 0;
+	} catch (Exception $e) {
+		// No release table here: hold the bundle to HEAD.
+	}
+
+	if ($source_version !== $bundled_version && $head_time && $last_publish && $head_time > $last_publish) {
+		harness_skip('bundled agent version matches the agent source commit',
+			"the agent source's HEAD (v{$source_version}) was committed after the last publish, which shipped v"
+			. var_export($bundled_version, true) . '; the next publish rebuilds the bundle');
+	} else {
+		check(
+			$source_version !== null && $source_version === $bundled_version,
+			'bundled agent version matches the agent source commit',
+			"the agent source's HEAD is v" . var_export($source_version, true)
+			. " but agent_dist is v" . var_export($bundled_version, true)
+			. ' - a release published after that commit shipped the older agent; rebuild the bundle'
+		);
+	}
 }
 
 harness_finish();
