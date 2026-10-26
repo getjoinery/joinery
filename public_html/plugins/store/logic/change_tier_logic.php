@@ -189,14 +189,10 @@ function change_tier_logic(array $input): LogicResult {
                         throw new Exception('The selected plan does not have any active pricing versions. Please contact support.');
                     }
 
-                    // Get appropriate price ID based on test mode
-                    $price_id_field = $stripe_helper->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
-                    $new_price_id = $product_version->get($price_id_field);
-
-                    if (!$new_price_id) {
-                        $mode = $stripe_helper->test_mode ? 'test' : 'live';
-                        throw new Exception("The selected plan is not configured for {$mode} mode payments. Please contact support.");
-                    }
+                    // The version's own price, looked up rather than read from the
+                    // stored id: an id stored before 10-26 may be a coupon's
+                    // discounted price, and the lookup replaces it.
+                    $new_price_id = $stripe_helper->get_or_create_price($product_version)->id;
 
                     // Validate subscription ID exists
                     $subscription_id = $current_subscription->get('odi_stripe_subscription_id');
@@ -326,14 +322,10 @@ function change_tier_logic(array $input): LogicResult {
                         throw new Exception('The selected plan does not have any active pricing versions. Please contact support.');
                     }
 
-                    // Get appropriate price ID based on test mode
-                    $price_id_field = $stripe_helper->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
-                    $new_price_id = $product_version->get($price_id_field);
-
-                    if (!$new_price_id) {
-                        $mode = $stripe_helper->test_mode ? 'test' : 'live';
-                        throw new Exception("The selected plan is not configured for {$mode} mode payments. Please contact support.");
-                    }
+                    // The version's own price, looked up rather than read from the
+                    // stored id: an id stored before 10-26 may be a coupon's
+                    // discounted price, and the lookup replaces it.
+                    $new_price_id = $stripe_helper->get_or_create_price($product_version)->id;
 
                     // Validate subscription ID exists
                     $subscription_id = $current_subscription->get('odi_stripe_subscription_id');

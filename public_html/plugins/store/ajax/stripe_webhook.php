@@ -151,6 +151,16 @@ try {
 
                 $order_item->save();
 
+                // A first payment never made within Stripe's 23 hours ends the
+                // subscription as incomplete_expired. Whichever of this and
+                // .deleted arrives first sends the one cancellation; the other
+                // finds the line already ended (its cancelled time is set). A
+                // failed first invoice may have marked the line past_due in
+                // between, so the line's earlier status is not what decides.
+                if ($status === 'incomplete_expired' && !$order_item->get('odi_subscription_cancelled_time')) {
+                    _stripe_webhook_subscription_ended($order_item, $subscription_id);
+                }
+
                 // Trigger tier validation
                 if ($user_id) {
                     SubscriptionTier::GetUserTier($user_id);
@@ -171,24 +181,13 @@ try {
 
             if ($order_items->count() > 0) {
                 $order_item = $order_items->get(0);
-                $order_item->set('odi_subscription_status', 'canceled');
-                $order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
-                $order_item->save();
-
-                require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-                SignalBus::dispatch('subscription.cancelled', array(
-                    'order_item_id'            => $order_item->key,
-                    'user_id'                  => $order_item->get('odi_usr_user_id'),
-                    'provider'                 => 'stripe',
-                    'provider_subscription_id' => $subscription_id,
-                ));
-
-                // Handle tier expiration
-                $user_id = $order_item->get('odi_usr_user_id');
-                if ($user_id) {
-                    TierBilling::handleSubscriptionExpired($user_id);
+                if ((string)$order_item->get('odi_subscription_status') === 'incomplete_expired'
+                    && $order_item->get('odi_subscription_cancelled_time')) {
+                    // Ended already by its .updated (above).
+                    error_log("Stripe webhook: subscription $subscription_id deleted, already ended as incomplete_expired");
+                    break;
                 }
-
+                _stripe_webhook_subscription_ended($order_item, $subscription_id);
                 error_log("Stripe webhook: subscription $subscription_id deleted");
             } else {
                 error_log("Stripe webhook: no order item found for subscription $subscription_id");
@@ -293,7 +292,7 @@ try {
                 $order = Order::GetByStripePaymentIntent($charge->payment_intent);
             }
             if ($order) {
-                $order->set('ord_refund_amount', $charge->amount_refunded / 100);
+                $order->refresh_refund_amount($charge->amount_refunded / 100);
                 if (!$order->get('ord_refund_time')) {
                     $order->set('ord_refund_time', 'now()');
                 }
@@ -322,6 +321,34 @@ WebhookLog::logEvent(
 );
 
 http_response_code(200);
+
+/**
+ * A Stripe subscription has ended: record it on its line, tell whatever
+ * listens for a cancelled subscription (a hosted site's wind-down), and let
+ * the buyer's tier lapse.
+ */
+function _stripe_webhook_subscription_ended($order_item, $subscription_id) {
+    if ((string)$order_item->get('odi_subscription_status') !== 'incomplete_expired') {
+        $order_item->set('odi_subscription_status', 'canceled');
+    }
+    if (!$order_item->get('odi_subscription_cancelled_time')) {
+        $order_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
+    }
+    $order_item->save();
+
+    require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+    SignalBus::dispatch('subscription.cancelled', array(
+        'order_item_id'            => $order_item->key,
+        'user_id'                  => $order_item->get('odi_usr_user_id'),
+        'provider'                 => 'stripe',
+        'provider_subscription_id' => $subscription_id,
+    ));
+
+    $user_id = $order_item->get('odi_usr_user_id');
+    if ($user_id) {
+        TierBilling::handleSubscriptionExpired($user_id);
+    }
+}
 
 /**
  * Send payment failure email to user with dedup check

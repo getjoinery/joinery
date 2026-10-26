@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.4 - refund_payment(): a line is refunded from the payment that paid it (a subscription's own
+ *                latest invoice, or the order's charge), capped per line, and can cancel a subscription with it
  * @version 1.3 - a cancel notice goes to each address on subscription_notification_emails whether or not it is a
  *                user's: one that was not stopped the cancel page with a 500 after the provider had cancelled
  * @version 1.2 - cancel_subscription_by_system(): the same provider cancel for a scheduled task acting on the
@@ -328,6 +330,84 @@ function get_order() {
 	function cancel_subscription_by_system($cancel_type) {
 		$this->cancel_with_provider($cancel_type);
 		return true;
+	}
+
+	/**
+	 * How much of $charge can still be refunded against this line: what is
+	 * left on the charge, and no more than the line's price. A one-time line
+	 * shares the order's charge with the other one-time lines, so its own
+	 * earlier refunds count against it; a subscription line's charge is one
+	 * invoice of its own.
+	 */
+	public function refundable_amount($charge): float {
+		$left_on_charge = ((int)$charge->amount - (int)$charge->amount_refunded) / 100;
+		$line_left = (float)$this->get('odi_price');
+		if (!$this->get('odi_is_subscription')) {
+			$line_left -= (float)$this->get('odi_refund_amount');
+		}
+		return round(max(0, min($left_on_charge, $line_left)), 2);
+	}
+
+	/**
+	 * Refund part or all of what this line was paid, from the Stripe charge
+	 * that paid it (StripeHelper::refundable_charge_for_item()), and record it
+	 * on the line and the order. With $and_cancel, a subscription line is then
+	 * cancelled now, through the same cancel as everywhere else, so whatever
+	 * listens for a cancelled subscription (a hosted site's wind-down) hears it.
+	 *
+	 * @return array ['refunded' => float, 'what' => string, 'cancelled' => bool,
+	 *         'cancel_error' => ?string, why a cancel asked for did not happen]
+	 * @throws SystemDisplayableError when nothing can be refunded, the amount is
+	 *         out of range, or Stripe refuses; nothing is recorded then.
+	 */
+	public function refund_payment($amount, string $note = '', bool $and_cancel = false): array {
+		$stripe_helper = $this->stripe_helper();
+		try {
+			$found = $stripe_helper->refundable_charge_for_item($this);
+		} catch (StripeHelperException $e) {
+			throw new SystemDisplayableError('The payment cannot be read: ' . $e->getMessage());
+		}
+		if (empty($found['charge'])) {
+			throw new SystemDisplayableError($found['reason']);
+		}
+		$amount = round((float)$amount, 2);
+		$max = $this->refundable_amount($found['charge']);
+		if ($amount <= 0 || $amount > $max) {
+			throw new SystemDisplayableError('The refund must be more than 0 and at most ' . number_format($max, 2) . '.');
+		}
+
+		try {
+			$stripe_helper->refund_charge($found['charge']->id, $amount);
+		} catch (StripeHelperException $e) {
+			throw new SystemDisplayableError('The refund was not made: ' . $e->getMessage());
+		}
+
+		$this->set('odi_refund_amount', round((float)$this->get('odi_refund_amount') + $amount, 2));
+		$this->set('odi_refund_note', $note);
+		$this->set('odi_refund_time', 'now()');
+		$this->save();
+
+		$order = $this->get_order();
+		// Stripe's own figure for the order's charge, this refund included, so
+		// an earlier dashboard refund stays counted.
+		$order->refresh_refund_amount(!empty($found['is_order_charge'])
+			? ((int)$found['charge']->amount_refunded / 100) + $amount : null);
+		$order->set('ord_refund_time', 'now()');
+		$order->save();
+
+		// The refund stands whatever the cancel does; a refused cancel is
+		// reported beside it rather than in place of it.
+		$cancelled = false;
+		$cancel_error = null;
+		if ($and_cancel && $this->get('odi_is_subscription') && !$this->get('odi_subscription_cancelled_time')) {
+			try {
+				$this->cancel_subscription_order_item(true, 'immediate');
+				$cancelled = true;
+			} catch (SystemBaseException $e) {
+				$cancel_error = $e->getMessage();
+			}
+		}
+		return array('refunded' => $amount, 'what' => $found['what'], 'cancelled' => $cancelled, 'cancel_error' => $cancel_error);
 	}
 
 	/**

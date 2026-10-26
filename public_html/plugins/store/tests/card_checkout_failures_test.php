@@ -66,6 +66,8 @@ class CcfStripe extends StripeHelper {
 	public $client;
 	public $log = array();
 	public $refuse_card = null;
+	public $card_outage = false;
+	public $price_error = null;
 	public $refuse_charge = null;
 	/** Subscriptions Stripe "makes", in order: status, amount paid, intent status, decline. */
 	public $subscription_plan = array();
@@ -82,6 +84,7 @@ class CcfStripe extends StripeHelper {
 			$n = count($helper->log);
 			return \Stripe\Subscription::constructFrom(array(
 				'id' => 'sub_ccf_' . $n, 'object' => 'subscription', 'status' => $plan[0],
+				'current_period_end' => 1893456000,
 				'latest_invoice' => array(
 					'id' => 'in_ccf_' . $n, 'object' => 'invoice', 'amount_paid' => $plan[1],
 					'payment_intent' => array(
@@ -93,9 +96,13 @@ class CcfStripe extends StripeHelper {
 		};
 	}
 	public function get_or_create_stripe_customer($user) { return 'cus_ccf'; }
-	public function get_or_create_price($product_version, $price = NULL) { return array('id' => 'price_ccf_' . $product_version->key); }
+	public function get_or_create_price($product_version, $price = NULL) {
+		if ($this->price_error) { throw new SystemDisplayablePermanentError($this->price_error); }
+		return array('id' => 'price_ccf_' . $product_version->key);
+	}
 	public function create_card_from_token($token, $customer, $set_as_default = true) {
 		$this->log[] = 'card';
+		if ($this->card_outage) { throw new StripeHelperException('Could not connect to Stripe'); }
 		if ($this->refuse_card) { throw new SystemDisplayableError('Your card was not accepted. ' . $this->refuse_card); }
 		return array('id' => 'card_ccf');
 	}
@@ -231,6 +238,15 @@ check($order && (int)$order->get('ord_status') === Order::STATUS_ERROR, 'the ord
 	$order ? 'status ' . $order->get('ord_status') : 'no order');
 check($order && strpos((string)$order->get('ord_error'), 'declined') !== false, 'and why', $order ? (string)$order->get('ord_error') : '');
 check(!in_array('charge', $stripe->log, true), 'nothing is charged');
+check(strpos($messages, 'Nothing was charged.') !== false, 'and the buyer is told so', $messages);
+
+ccf_cart(array($one_time_id), 'ou');
+$stripe = new CcfStripe();
+$stripe->card_outage = true;
+list($redirect, $order, $messages) = ccf_charge($stripe);
+check($redirect === '/checkout' && strpos($messages, "couldn't reach our card processor") !== false
+	&& strpos($messages, 'not accepted') === false,
+	'Stripe out of reach is not reported as a refused card (R3)', $messages);
 
 // ===========================================================================
 section('B126: a subscription whose first payment is declined');
@@ -263,6 +279,8 @@ $stripe->refuse_charge = 'Your card was declined.';
 list($redirect, $order, $messages) = ccf_charge($stripe);
 check($stripe->log === array('card', 'subscription', 'charge'), 'the subscription is made before the charge', implode(',', $stripe->log));
 check($redirect === '/checkout', 'the buyer is sent back to checkout', var_export($redirect, true));
+check(strpos($messages, '12.99 USD was taken and has been refunded') !== false && strpos($messages, 'Nothing was charged') === false,
+	'and told the first payment taken was refunded (R4)', $messages);
 $cancels = ccf_calls($stripe->client->subscriptions, 'cancel');
 $refunds = ccf_calls($stripe->client->refunds, 'create');
 check(count($cancels) === 1 && $cancels[0][0] === 'sub_ccf_2', 'the subscription is cancelled', json_encode($cancels));
@@ -295,6 +313,8 @@ check($sub_item && $sub_item->get('odi_stripe_subscription_id') === 'sub_ccf_2',
 check($sub_item && $sub_item->get('odi_stripe_foreign_invoice_id') === 'in_ccf_2', 'and its first invoice');
 check($sub_item && $sub_item->get('odi_subscription_status') === 'active' && (int)$sub_item->get('odi_status') === OrderItem::STATUS_PAID,
 	'and is live and paid');
+check($sub_item && strpos((string)$sub_item->get('odi_subscription_period_end'), '2030-01-01') === 0,
+	'with its period end recorded at checkout (R2)', $sub_item ? (string)$sub_item->get('odi_subscription_period_end') : '');
 check(count(ccf_calls($stripe->client->subscriptions, 'cancel')) === 0, 'nothing is cancelled');
 
 ccf_cart(array($monthly_id), 'so');
@@ -303,6 +323,14 @@ list($redirect, $order, $messages) = ccf_charge($stripe);
 check($redirect !== '/checkout', 'a subscription alone completes', $messages);
 check(!in_array('charge', $stripe->log, true), 'with no one-time charge');
 check($order && (int)$order->get('ord_status') === Order::STATUS_PAID, 'and its order is paid');
+
+ccf_cart(array($monthly_id), 'pe');
+$stripe = new CcfStripe();
+$stripe->price_error = 'This product does not have a stripe product id.';
+list($redirect, $order, $messages) = ccf_charge($stripe);
+check($redirect === '/checkout' && $order && (int)$order->get('ord_status') === Order::STATUS_ERROR
+	&& strpos((string)$order->get('ord_error'), 'stripe product id') !== false,
+	'a price that cannot be found refuses the checkout and records why (R9)', $order ? (string)$order->get('ord_error') : $messages);
 
 ShoppingCart::current()->clear_cart();
 harness_finish();

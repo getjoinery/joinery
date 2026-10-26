@@ -451,6 +451,34 @@ $ends = $wt ? strtotime((string)$wt->get('htr_trial_ends_time') . ' UTC') : 0;
 check($ends > time() + 13 * 86400 && $ends < time() + 15 * 86400,
 	'ending after the configured length when the store has no date to offer');
 
+// A cancel that arrived while the site was still being built found no row
+// then (B132); the store kept it on the order line, and the new row reads it.
+$early_buyer = make_user('HtEarly' . $suffix);
+$early_order = new Order(NULL);
+$early_order->set('ord_usr_user_id', $early_buyer->key);
+$early_order->save();
+$early_order->load();
+harness_register_row('ord_orders', 'ord_order_id', $early_order->key);
+$early_item = new OrderItem(NULL);
+$early_item->set('odi_ord_order_id', $early_order->key);
+$early_item->set('odi_pro_product_id', 999999002);
+$early_item->set('odi_usr_user_id', $early_buyer->key);
+$early_item->set('odi_price', '12.99');
+$early_item->set('odi_is_subscription', true);
+$early_item->set('odi_subscription_status', 'canceled');
+$early_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
+$early_item->save();
+$early_item->load();
+harness_register_row('odi_order_items', 'odi_order_item_id', $early_item->key);
+$early = ht_provision('httest-early-' . $suffix, 'operator', array('cvp_external_order_item_id' => $early_item->key));
+$open->invoke($watch, $early, 0);
+$et = HostedTrial::for_provision($early->key);
+check($et !== null && (string)$et->get('htr_state') === HostedTrial::STATE_GRACE,
+	'a site whose subscription was cancelled before it was ready opens in its wind-down',
+	$et ? (string)$et->get('htr_state') : 'no row');
+check($nt !== null && (string)$nt->get('htr_state') === HostedTrial::STATE_SUBSCRIBED,
+	'a site with no store line behind it is untouched');
+
 // ---------------------------------------------------------------------------
 section('A trial that simply ends becomes a subscription');
 

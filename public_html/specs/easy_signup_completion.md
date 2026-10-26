@@ -4,7 +4,7 @@
 refactors it waited on (declared_permissions, optional_username) are committed and released
 (0.8.537). WP1 corrected 10-26 after a re-read: the card checkout works; WP1 is its edges.
 WP1a built 10-26 (suite `card_checkout_failures` 33/33, Stripe doubled; its live check is in the
-live verification queue). Next: WP1b.
+live verification queue). WP1b built 10-26 (`order_refund` 18/18). Next: WP1c.
 
 **Companions:** `managed_hosting_and_services.md` (the umbrella and its contracts C1/C2),
 `managed_hosting_phase1_purchase.md`, `services_phase2_platform.md`,
@@ -142,22 +142,35 @@ Tests: a store suite with the Stripe client stubbed: a card refused when saved, 
 created `incomplete`, a subscription refused after another was made, a one-time charge refused
 after a subscription was made (refund + cancel), the hosting receipt's outcome.
 
-#### WP1b — refunds and the hosting signals
+#### WP1b — refunds and the hosting signals (built 10-26)
 
-- **B125 — refunds.** `admin_order_refund.php:78-84` refunds against `ord_stripe_charge_id` first,
-  which on a hosting order is the domain charge; a subscription's first invoice is not on the
-  order, and an order with neither id cannot be refunded (`:89`). Refund a subscription line
-  against its first invoice (`odi_stripe_foreign_invoice_id`), and offer "refund and cancel",
-  which cancels through the store's cancel path so the hosting wind-down fires.
+- **B125 — refunds.** The refund page (`admin_order_refund.php`) refunded every line from the
+  order's one-time charge, posted an empty charge id for a Stripe Checkout order, and showed no
+  refund link on a subscription-only order. Fix: `OrderItem::refund_payment()` refunds a line
+  from the payment that paid it (`StripeHelper::refundable_charge_for_item()`: a subscription
+  line from its subscription's latest invoice, any other line from the order's charge), found
+  again on the server rather than read from the form, capped per line
+  (`OrderItem::refundable_amount()`), and with "Also cancel the subscription now" cancels through
+  `cancel_subscription_order_item()`; Stripe's `customer.subscription.deleted` webhook then sends
+  `subscription.cancelled`, which starts the hosting wind-down, as any other cancel does. PayPal and
+  wrong-mode orders say where to refund instead.
+- **B151 — the order's refund total was a whole number.** `ord_refund_amount` was `int4`, so a
+  12.99 refund stored as 13. It is `numeric(10,2)`, and `Order::refresh_refund_amount()` sums the
+  lines' refunds (the order charge's part is the larger of its lines' refunds and Stripe's figure,
+  so a dashboard refund still counts). A refund of a subscription invoice made in Stripe's
+  dashboard is not mirrored on the order: `charge.refunded` finds no order for it.
 - **B126b — an expiring incomplete subscription is silent.** `customer.subscription.updated`
-  (`stripe_webhook.php:93-164`) syncs the status and dispatches nothing. Send
-  `subscription.cancelled` when it moves to `incomplete_expired`. (After WP1a a checkout no
-  longer keeps an incomplete subscription; one made another way still can.)
-- **B132 — a failure or cancel before the server is built is lost.**
-  `HostedTrialSignals.php:48-53` returns when no plan row exists. The signal holds the provision
-  until the row exists.
-- **B144 — a version still holding a coupon's price id.** A one-time sweep compares each
-  version's stored Stripe price with `prv_version_price` and clears a mismatch.
+  now sends `subscription.cancelled` when a line moves from `incomplete` to `incomplete_expired`;
+  `.deleted` skips a line that ended that way, so one cancellation goes whichever arrives first
+  (`_stripe_webhook_subscription_ended()`). Which of the two Stripe sends was not settled.
+- **B132 — a failure or cancel before the server is built is lost.** A plan row opened by
+  `HostedTrialWatch::open_row()` reads its order line (`HostedTrialSignals::catch_up()`): cancelled,
+  or `past_due`/`unpaid`/`incomplete`, starts the wind-down then.
+- **B144 — a version still holding a coupon's price id.** Fixed at its readers instead of by a
+  sweep: a billing-cycle change and both tier changes ask `get_or_create_price()` for the
+  version's own price, which repairs a stale stored id, instead of reading the column.
+
+Tests: `order_refund` 18/18; `hosted_tier` gains the early-cancel check (113/113).
 
 #### WP1c — 3-D Secure on the card form
 

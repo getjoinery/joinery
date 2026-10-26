@@ -65,7 +65,7 @@ class Order extends SystemBase {	public static $prefix = 'ord';
 	    'ord_serialized_cart' => array('type'=>'text'),
 	    'ord_status' => array('type'=>'int4'),
 	    'ord_error' => array('type'=>'varchar(255)'),
-	    'ord_refund_amount' => array('type'=>'int4'),
+	    'ord_refund_amount' => array('type'=>'numeric(10,2)'),
 	    'ord_refund_time' => array('type'=>'timestamp(6)'),
 	    'ord_refund_note' => array('type'=>'varchar(255)'),
 	    'ord_stripe_charge_id' => array('type'=>'varchar(64)'),
@@ -170,6 +170,34 @@ function is_stripe_order(){
 		$order->load_from_data($data, array_keys(Order::$field_specifications));
 		return $order;
 	}	
+
+	/**
+	 * Set the order's refund total from its lines and, when known, from what
+	 * Stripe reports refunded on the order's own charge.
+	 *
+	 * An order is paid by up to two kinds of Stripe payment: the charge for its
+	 * one-time lines (ord_stripe_charge_id or ord_stripe_payment_intent_id) and
+	 * each subscription line's own invoices. A refund of the order's charge can
+	 * also be made in Stripe's dashboard, where no line records it, so that
+	 * part is the larger of the one-time lines' recorded refunds and Stripe's
+	 * figure. Subscription lines' refunds are added on top.
+	 *
+	 * @param float|null $order_charge_refunded Stripe's amount_refunded on the
+	 *        order's own charge, in currency units; null when not at hand.
+	 */
+	public function refresh_refund_amount(?float $order_charge_refunded = null) {
+		$one_time = 0.0;
+		$subscriptions = 0.0;
+		foreach (new MultiOrderItem(array('odi_ord_order_id' => $this->key)) as $line) {
+			if ($line->get('odi_is_subscription')) {
+				$subscriptions += (float)$line->get('odi_refund_amount');
+			} else {
+				$one_time += (float)$line->get('odi_refund_amount');
+			}
+		}
+		$charge_part = ($order_charge_refunded === null) ? $one_time : max($one_time, $order_charge_refunded);
+		$this->set('ord_refund_amount', round($charge_part + $subscriptions, 2));
+	}
 
 	function permanent_delete($debug = false){
 		//REMOVE ALL ORDER ITEMS FIRST

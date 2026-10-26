@@ -35,114 +35,90 @@
 		$order_item = new OrderItem($_REQUEST['order_item_id'] ?? null, TRUE);
 		$order_item->assert_found();
 
-		//HOW TO REFUND PART OF A CHARGE https://stripe.com/docs/refunds#issuing
-		try {
-			$refund = $stripe_helper->refund_charge($_POST['charge_id'], $_POST['refund_amount']);
-			$charge = $stripe_helper->get_charge($_POST['charge_id']);
-		} catch (StripeHelperException $e) {
-			// No keys here, or Stripe refused: nothing was refunded, so nothing is recorded.
-			throw new SystemDisplayableError('The refund was not made: ' . $e->getMessage());
-		}
-		
-		$refund_amount_before = $order_item->get('odi_refund_amount');
-		$refund_amount_this_time = $_POST['refund_amount'];
-		$order_item->set('odi_refund_amount', $_POST['refund_amount'] + $refund_amount_before);
-		$order_item->set('odi_refund_note', $_POST['odi_refund_note']);
-		$order_item->set('odi_refund_time', 'now()');
-
+		// The payment is found again here from the line, never taken from the
+		// form, and the amount is checked against what that line may refund.
+		$result = $order_item->refund_payment($_POST['refund_amount'] ?? 0, (string)($_POST['odi_refund_note'] ?? ''),
+			!empty($_POST['cancel_subscription']));
 		$order = $order_item->get_order();
-		$order->set('ord_refund_time', 'now()');
-		$order->set('ord_refund_amount', $charge->amount_refunded/100);	
-
-		$order_item->save();
-		$order->save();
 
 		$pageoptions['title'] = 'Refund confirm';
 		$page->begin_box($pageoptions);
-		
-		echo $currency_symbol.$refund_amount_this_time. ' was refunded on order <a href="/plugins/store/admin/admin_order?ord_order_id='.$order->key.'">'.$order->key.'</a>';
+
+		echo $currency_symbol . number_format($result['refunded'], 2) . ' was refunded from ' . htmlspecialchars($result['what'])
+			. ' on order <a href="/plugins/store/admin/admin_order?ord_order_id=' . $order->key . '">' . $order->key . '</a>.';
+		if ($result['cancelled']) {
+			echo ' The subscription is cancelled.';
+		}
+		else if ($result['cancel_error'] !== null) {
+			echo ' <strong>The subscription was not cancelled:</strong> ' . htmlspecialchars($result['cancel_error']);
+		}
 
 	}
 else{
 	
 	if(empty($_REQUEST['oi'])){
 		throw new SystemDisplayableError("Order item is not present.");
-		exit();			
 	}
 	
 	$order_item = new OrderItem($_REQUEST['oi'], TRUE);
 	$order_item->assert_found();
 	$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
-	$order = $order_item->get_order();
 
 	try {
-		if ($order->get('ord_stripe_charge_id')){
-			$charge_id = $order->get('ord_stripe_charge_id');
-			$charge = $stripe_helper->get_charge($charge_id);
-		}
-		else if ($order->get('ord_stripe_payment_intent_id')) {
-			$charge = $stripe_helper->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
-		}
+		$found = $stripe_helper->refundable_charge_for_item($order_item);
 	} catch (StripeHelperException $e) {
-		throw new SystemDisplayableError('The charge cannot be read: ' . $e->getMessage());
-	}
-	if (!$order->get('ord_stripe_charge_id') && !$order->get('ord_stripe_payment_intent_id')){
-		echo "No payment intent or charge id.";
-		exit();					
+		throw new SystemDisplayableError('The payment cannot be read: ' . $e->getMessage());
 	}
 
-	$amount_refunded = 0;
-	if($charge->amount_refunded){
-		$amount_refunded = $charge->amount_refunded/100;
-		$amount_left = ($charge->amount - $charge->amount_refunded)/100;
-	}
-	else{
-		$amount_refunded = 0;
-		$amount_left = $charge->amount/100;
-	}
-	
-	if($amount_left > $order_item->get('odi_price')){
-		$amount_left = $order_item->get('odi_price');
-	}
-	
 	$session = SessionControl::get_instance();
 	$session->set_return("/plugins/store/admin/admin_order_refund");
 
 	$pageoptions['title'] = 'Refund charge';
 	$page->begin_box($pageoptions);
 
-	$formwriter = $page->getFormWriter('form1', [
-		'action' => '/plugins/store/admin/admin_order_refund',
-		'method' => 'POST'
-	]);
-
-	$formwriter->begin_form();
-
 	echo '<fieldset><h4>Confirm Refund ('.htmlspecialchars($product->get('pro_name')).')</h4>';
-		echo '<div class="fields full">';
-		echo 'Total charge: ', $currency_symbol.$charge->amount/100 .'. '.$currency_symbol.$amount_refunded. ' refunded so far.';
+	echo '<div class="fields full">';
 
-	if($amount_left != 0){
-		$formwriter->textinput('refund_amount', 'Amount to refund ('.$currency_symbol.$amount_left. ' maximum)', [
-			'value' => $amount_left,
-			'validation' => ['required' => true, 'max' => $amount_left]
-		]);
-		$formwriter->textinput('odi_refund_note', 'Refund description or reason', [
-			'value' => $order_item->get('odi_refund_note')
-		]);
-		$formwriter->hiddeninput('confirm', '', ['value' => 1]);
-		$formwriter->hiddeninput('charge_id', '', ['value' => $charge_id]);
-		$formwriter->hiddeninput('order_item_id', '', ['value' => $order_item->key]);
-
-		$formwriter->submitbutton('submit_button', 'Submit');
+	if (empty($found['charge'])) {
+		echo '<p>' . htmlspecialchars($found['reason']) . '</p>';
 	}
-	else{
-		echo '<p>You cannot refund any more.</p>';
+	else {
+		$charge = $found['charge'];
+		$amount_left = $order_item->refundable_amount($charge);
+		echo '<p>Refunding from ' . htmlspecialchars($found['what']) . ': ' . $currency_symbol . number_format($charge->amount / 100, 2)
+			. ', ' . $currency_symbol . number_format($charge->amount_refunded / 100, 2) . ' refunded so far.</p>';
+
+		if ($amount_left > 0) {
+			$formwriter = $page->getFormWriter('form1', [
+				'action' => '/plugins/store/admin/admin_order_refund',
+				'method' => 'POST'
+			]);
+			$formwriter->begin_form();
+			$formwriter->textinput('refund_amount', 'Amount to refund ('.$currency_symbol.number_format($amount_left, 2). ' maximum)', [
+				'value' => number_format($amount_left, 2, '.', ''),
+				'validation' => ['required' => true, 'max' => $amount_left]
+			]);
+			$formwriter->textinput('odi_refund_note', 'Refund description or reason', [
+				'value' => $order_item->get('odi_refund_note')
+			]);
+			if ($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')) {
+				$formwriter->checkboxinput('cancel_subscription', 'Also cancel the subscription now (billing and service stop today)', [
+					'value' => 1,
+					'checked' => false,
+				]);
+			}
+			$formwriter->hiddeninput('confirm', '', ['value' => 1]);
+			$formwriter->hiddeninput('order_item_id', '', ['value' => $order_item->key]);
+			$formwriter->submitbutton('submit_button', 'Submit');
+			$formwriter->end_form();
+		}
+		else {
+			echo '<p>You cannot refund any more.</p>';
+		}
 	}
 
-		echo '</div>';
+	echo '</div>';
 	echo '</fieldset>';
-	$formwriter->end_form();
 
 }
 	$page->end_box();

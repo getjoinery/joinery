@@ -33,6 +33,7 @@
  * host into a grace period minutes after it left
  * (specs/managed_to_self_hosted_transfer.md §5 step 3).
  *
+ * @version 1.2 - catch_up(): a row opened after a cancel or a failed payment starts its wind-down then
  * @version 1.1 - a transferred row is left alone by every signal
  * @version 1.0
  */
@@ -60,6 +61,38 @@ class HostedTrialSignals {
 			case 'subscription.payment_failed':  self::start_grace($trial, 'a payment failed'); break;
 			case 'subscription.cancelled':       self::start_grace($trial, 'the subscription was cancelled'); break;
 			case 'subscription.payment_recovered': self::clear_grace($trial); break;
+		}
+	}
+
+	/**
+	 * Apply what the store already knows to a plan row that has just opened.
+	 *
+	 * The row opens only once the site is built, and a signal that arrived
+	 * before then found no row and was dropped (handle_signal() above). The
+	 * store keeps the outcome on the order line whether or not anyone was
+	 * listening, so the new row reads it there: a cancelled subscription, or
+	 * one whose payment is failing, starts the wind-down it would have started.
+	 */
+	public static function catch_up($trial): void {
+		$order_item_id = (int)$trial->get('htr_external_order_item_id');
+		if (!$order_item_id || !class_exists('OrderItem')) {
+			// The store lives on another site in some deployments.
+			return;
+		}
+		try {
+			$item = new OrderItem($order_item_id, TRUE);
+		} catch (Throwable $e) {
+			return;
+		}
+		if (!$item->key) {
+			return;
+		}
+		if ($item->get('odi_subscription_cancelled_time')) {
+			self::start_grace($trial, 'the subscription was cancelled before the site was ready');
+		}
+		else if (in_array((string)$item->get('odi_subscription_status'),
+				array('past_due', 'unpaid', 'incomplete', 'incomplete_expired'), true)) {
+			self::start_grace($trial, 'a payment failed before the site was ready');
 		}
 	}
 

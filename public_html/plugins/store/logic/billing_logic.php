@@ -205,17 +205,10 @@ function billing_logic(array $input): LogicResult {
                         throw new Exception('Invalid billing option selected.');
                     }
 
-                    // Get the Stripe price ID for the new version
-                    $new_price_id = StripeHelper::isTestMode()
-                        ? $new_version->get('prv_stripe_price_id_test')
-                        : $new_version->get('prv_stripe_price_id');
-
-                    if (!$new_price_id) {
-                        $stripe_helper->get_or_create_price($new_version);
-                        $new_price_id = StripeHelper::isTestMode()
-                            ? $new_version->get('prv_stripe_price_id_test')
-                            : $new_version->get('prv_stripe_price_id');
-                    }
+                    // The version's own price, looked up rather than read from the
+                    // stored id: an id stored before 10-26 may be a coupon's
+                    // discounted price, and the lookup replaces it.
+                    $new_price_id = $stripe_helper->get_or_create_price($new_version)->id;
 
                     // Get the subscription item ID from Stripe
                     $stripe_sub = $stripe_helper->get_subscription($current_subscription->get('odi_stripe_subscription_id'));
