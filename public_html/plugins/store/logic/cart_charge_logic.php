@@ -29,6 +29,30 @@ function _cart_charge_paid_not_completed(string $log_detail, ?string $buyer_mess
 }
 
 /**
+ * A card checkout waiting on the buyer's bank (3-D Secure): what it has made
+ * so far, kept in this session while the checkout page runs the bank's
+ * confirmation (StripeHelper::output_stripe_regular_form()). Null clears it.
+ * Read back only within StripeHelper::CARD_PENDING_MAX_AGE: past that, what
+ * it made has lapsed at Stripe (an authorization is released, an incomplete
+ * subscription expires) and nothing was charged.
+ */
+function _cart_charge_card_pending(?array $pending = null, bool $read = false) {
+	if ($read) {
+		$kept = $_SESSION[StripeHelper::CARD_PENDING_KEY] ?? null;
+		if (!is_array($kept) || (int)($kept['time'] ?? 0) <= time() - StripeHelper::CARD_PENDING_MAX_AGE) {
+			return null;
+		}
+		return $kept;
+	}
+	if ($pending === null) {
+		unset($_SESSION[StripeHelper::CARD_PENDING_KEY]);
+	} else {
+		$_SESSION[StripeHelper::CARD_PENDING_KEY] = $pending;
+	}
+	return null;
+}
+
+/**
  * Email the site's operator about an order that needs a person. Never throws:
  * it runs on paths that are already handling a failure.
  */
@@ -393,6 +417,21 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	$existing_order = null;
+	// A card checkout the buyer's bank asked to confirm comes back here once
+	// the checkout page has run that step; it carries on with the order and
+	// the Stripe objects it already made.
+	$card_resume = null;
+	if($return === null && !empty($_POST['card_payment_confirm'])){
+		$card_resume = _cart_charge_card_pending(null, true);
+		if(!$card_resume){
+			return _checkout_error('That payment confirmation is no longer open. Nothing was charged; please try again.');
+		}
+		$existing_order = new Order((int)$card_resume['order_id'], TRUE);
+		if(!$existing_order->key || $existing_order->is_fulfilled()){
+			_cart_charge_card_pending(null);
+			return LogicResult::redirect('/cart_confirm');
+		}
+	}
 	if($return !== null){
 		// Under the lock: a return that got here first has completed it.
 		if($return['service'] === 'stripe_checkout'){
@@ -518,8 +557,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	
+	//A card checkout carrying on after the bank's confirmation passed every
+	//check below on its first pass, for this same cart (its hash is checked
+	//against the one it paid for); money may have moved since, so a refusal
+	//here would turn the buyer away without taking it back.
+	$resuming_card = ($card_resume !== null);
+
 	//CHECK THE COUPON CODES BEFORE WE CHARGE
-	foreach($cart->coupon_codes as $coupon_code_name){
+	foreach(($resuming_card ? array() : $cart->coupon_codes) as $coupon_code_name){
 		$coupon_code_test = CouponCode::GetByColumn('ccd_code', trim($coupon_code_name));
 		if(!$coupon_code_test->is_valid()){
 			return $refuse("One of your coupon codes is no longer valid. Please remove it and try again.");
@@ -572,7 +617,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//billed through the App Store or Google Play can't start a web-billed one
 	//— they must cancel in the store first. Surfaces before any card charge.
 	require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
-	foreach($cart->items as $key => $cart_item) {
+	foreach(($resuming_card ? array() : $cart->items) as $key => $cart_item) {
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 		if($product_version->is_subscription()){
 			$conflict = TierBilling::sourceConflict($resolved_users[$key]->key, 'stripe');
@@ -595,11 +640,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//page asked before it offered that payment; a line that went bad in
 	//between is fulfill()'s to report.
 	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
-	$money_moved = ($return !== null);
+	$money_moved = ($return !== null || $resuming_card);
 	if(!$money_moved){
 		$unavailable = FulfillmentRegistry::cartRefusal($cart);
 		if($unavailable !== null){
 			return _checkout_error($unavailable);
+		}
+		if(($card_refusal = $cart->card_checkout_refusal()) !== null){
+			return _checkout_error($card_refusal);
 		}
 	}
 
@@ -611,7 +659,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//recorder would credit, so a gift to an owner is refused too.
 	//
 	//A refusal is a refusal, never a discount: no branch below reprices.
-	foreach($cart->items as $key => $cart_item) {
+	foreach(($resuming_card ? array() : $cart->items) as $key => $cart_item) {
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
 		if($ownership_tag === '' || $product_version->is_subscription()){
@@ -655,9 +703,20 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//told. $declined is false when no card was tried (Stripe out of reach):
 	//that is not reported as a failed payment.
 	$stripe_subscriptions = array();
-	$payment_refused = function (string $message, bool $declined = true) use ($order, $billing_user, &$stripe_subscriptions, &$stripe_helper, $currency_code) {
+	$card_intent = null;
+	$payment_refused = function (string $message, bool $declined = true) use ($order, $billing_user, &$stripe_subscriptions, &$card_intent, &$stripe_helper, $currency_code) {
+		_cart_charge_card_pending(null);
 		$undo_failures = array();
 		$refunded_cents = 0;
+		if($card_intent){
+			try {
+				$refunded_cents += $stripe_helper->undo_card_payment($card_intent);
+			}
+			catch (Exception $undo_e) {
+				$undo_failures[] = $card_intent->id . ': ' . $undo_e->getMessage();
+			}
+			$card_intent = null;
+		}
 		foreach($stripe_subscriptions as $made_subscription){
 			try {
 				$refunded_cents += $stripe_helper->undo_regular_subscription($made_subscription);
@@ -673,8 +732,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$order->save();
 		if($undo_failures){
 			error_log('cart_charge: order ' . $order->key . ' subscriptions not undone: ' . implode('; ', $undo_failures));
-			_cart_charge_alert_operator('Order #' . $order->key . ': subscription not cancelled or refunded',
-				"A card checkout failed after Stripe started a subscription, and taking it back failed.\n\n"
+			_cart_charge_alert_operator('Order #' . $order->key . ': card payment not cancelled or refunded',
+				"A card checkout failed after Stripe took or held a payment, and taking it back failed.\n\n"
 				. 'Billing user: ' . $billing_user->get('usr_email') . "\n"
 				. 'Why the checkout failed: ' . $message . "\n"
 				. 'Not undone: ' . implode("\n", $undo_failures) . "\n\n"
@@ -692,7 +751,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		if($refunded_cents > 0){
 			// The currency code, not the symbol: the symbol is HTML ('&euro;').
-			$message .= ' A first payment of ' . number_format($refunded_cents / 100, 2) . ' ' . strtoupper((string)$currency_code)
+			$message .= ' A payment of ' . number_format($refunded_cents / 100, 2) . ' ' . strtoupper((string)$currency_code)
 				. ' was taken and has been refunded; it can take a few days to show on your statement.';
 		}
 		else if(!$undo_failures){
@@ -702,6 +761,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	};
 
 	$payment_service = '';
+	$payment_method_id = null;
 	if($charge_total > 0){
 		if($return !== null){
 			// Verified with the gateway before anything was written
@@ -717,26 +777,30 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
 
-			//CHECK CREDIT CARD INFO AND STORE IF PRESENT FOR REGULAR STRIPE CHECKOUT
-			//IF IT IS A NONZERO CART, REQUIRE CREDIT CARD INFO
-			if(!isset($_REQUEST['stripeToken'])){
-				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->set('ord_error', 'The credit card was not submitted because the browser is not using https.');
-				$order->save();
-				
-				$log_error = "The credit card information was not submitted because your browser has javascript turned off or is not using https.  Go back to the previous page and make sure that you are accessing this page from https (look for the lock icon) and turn off any script blockers.  For help, contact us at ".$settings->get_setting('defaultemail')." .";
-
-				return _checkout_error("Your credit card information could not be submitted. Please make sure you are using a secure connection (https) and that JavaScript is enabled.");
-			}	
-
-			try {
-				$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
-			}
-			catch (SystemDisplayableError $e) {
-				return $payment_refused($e->getMessage());
-			}
-			catch (StripeHelperException $e) {
-				return $payment_refused("We couldn't reach our card processor. Please try again in a few minutes.", false);
+			//THE CARD. The form posts a PaymentMethod (stripePaymentMethod);
+			//a token (stripeToken) still arrives from a page loaded before the
+			//form changed, and is made into one. A checkout carrying on after
+			//the bank's confirmation already saved its card.
+			if(!$card_resume){
+				$payment_method_id = trim((string)($_POST['stripePaymentMethod'] ?? ''));
+				try {
+					if($payment_method_id === '' && !empty($_REQUEST['stripeToken'])){
+						$payment_method_id = $stripe_helper->payment_method_from_token((string)$_REQUEST['stripeToken']);
+					}
+					if($payment_method_id === ''){
+						$order->set('ord_status', Order::STATUS_ERROR);
+						$order->set('ord_error', 'No card was submitted (the browser ran no JavaScript, or the page was not https).');
+						$order->save();
+						return _checkout_error("Your credit card information could not be submitted. Please make sure you are using a secure connection (https) and that JavaScript is enabled.");
+					}
+					$payment_method_id = $stripe_helper->attach_card($payment_method_id, $stripe_customer_id);
+				}
+				catch (SystemDisplayableError $e) {
+					return $payment_refused($e->getMessage());
+				}
+				catch (StripeHelperException $e) {
+					return $payment_refused("We couldn't reach our card processor. Please try again in a few minutes.", false);
+				}
 			}
 			$order->set('ord_payment_method', 'stripe');
 			$order->save();
@@ -757,97 +821,142 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	//REFRESH THE ORDER 
 	$order->load();
 
-	//THE SUBSCRIPTIONS, BEFORE THE ONE-TIME CHARGE. Stripe charges a
-	//subscription's first invoice as it makes it, and answers a declined one
-	//with an 'incomplete' subscription rather than an error. Made first, and
-	//kept only when live, so a card refused for a subscription is refused
-	//before any one-time line is charged; whatever fails after this takes
-	//them back ($payment_refused).
+	//THE CARD PAYMENT (stripe_regular), one sequence that can stop for the
+	//buyer's bank and carry on:
+	//  1. the one-time lines are AUTHORIZED, not charged; with a subscription
+	//     to follow, the bank's confirmation also covers charging the card
+	//     again without the buyer;
+	//  2. the subscription is made (off-session after step 1), and kept only
+	//     when live: Stripe answers a declined first invoice with an
+	//     'incomplete' subscription, not an error;
+	//  3. the authorization is CAPTURED, last, so nothing is taken for the
+	//     one-time lines unless the subscription went through.
+	//Where the bank asks the buyer to confirm (3-D Secure), what was made is
+	//kept in the session (_cart_charge_card_pending()) and the buyer goes back
+	//to /checkout, where Stripe.js runs the step and posts back to carry on.
+	//A buyer who never comes back is charged nothing: an authorization never
+	//captured lapses and an incomplete subscription expires. Every refusal
+	//takes back what was made ($payment_refused).
 	if($payment_service == 'stripe_regular'){
-		foreach($cart->items as $key => $cart_item) {
-			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-			if(!$product_version->is_subscription()){
-				continue;
+		$card_state = array('intent' => null, 'subscriptions' => array(), 'awaiting' => null);
+		try {
+			if($card_resume){
+				$card_state = $card_resume['state'];
+				if($card_state['intent']){
+					$card_intent = $stripe_helper->get_card_payment($card_state['intent']);
+				}
+				foreach($card_state['subscriptions'] as $key => $subscription_id){
+					$stripe_subscriptions[$key] = $stripe_helper->get_regular_subscription($subscription_id);
+				}
+				_cart_charge_card_pending(null);
+				if($card_resume['cart_hash'] !== $cart->get_hash()){
+					return $payment_refused('Your cart changed while your bank was confirming the payment. Please check out again.', false);
+				}
 			}
-			try {
-				// A discounted line is billed at a Stripe price of its own;
-				// the version's stored price stays its own amount.
-				$stripe_price = $stripe_helper->get_or_create_price($product_version, $price - $discount);
-				$made_subscription = $stripe_helper->create_regular_subscription($stripe_price, $product_version, $order, $billing_user, $stripe_customer_id);
-			}
-			catch (SystemBaseException $e) {
-				// A refused create, or a price that could not be found or made.
-				return $payment_refused($e->getMessage());
-			}
-			$stripe_subscriptions[$key] = $made_subscription;
-			if(!in_array($made_subscription->status, array('active', 'trialing'), true)){
-				return $payment_refused(StripeHelper::regular_subscription_refusal($made_subscription));
-			}
-		}
-		// A cart of subscriptions alone has no card charge below: their
-		// first invoices are the payment.
-		if($stripe_subscriptions && !$cart->get_non_recurring_total()){
-			$order->set('ord_status', Order::STATUS_PAID);
-			$order->save();
-		}
-	}
-		
 
-	
-	//NOW CHARGE THE CREDIT CARD FOR THE REMAINING AMOUNT
-	if($cart->get_non_recurring_total()){
-		if($payment_service == 'stripe_regular'){
+			// What the bank was asked to confirm last time, if it still asks.
+			$stop_for_bank = function ($object_id, $client_secret) use (&$card_state, $order, $cart, $card_resume, $payment_refused) {
+				if($card_resume && $card_state['awaiting'] === $object_id){
+					return $payment_refused('Your bank did not confirm the payment. Please try again or use another card.');
+				}
+				$card_state['awaiting'] = $object_id;
+				_cart_charge_card_pending(array(
+					'order_id'      => $order->key,
+					'cart_hash'     => $cart->get_hash(),
+					'state'         => $card_state,
+					'client_secret' => $client_secret,
+					'time'          => time(),
+				));
+				return LogicResult::redirect('/checkout');
+			};
 
-			//THE CARD CHARGE COVERS THE ONE-TIME LINES ONLY. A subscription line
-			//is billed by its own Stripe subscription (below), so it must not
-			//appear in this charge's description: the buyer's statement would
-			//name a hosting fee the charge did not include.
-			$stripe_item_list = array();
+			// 1. The one-time lines, authorized. Their names, not a
+			// subscription's, go on the statement.
+			$one_time_total = $cart->get_non_recurring_total();
+			if($one_time_total > 0){
+				if(!$card_intent){
+					$stripe_item_list = array();
+					foreach($cart->items as $key => $cart_item) {
+						list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+						if(!$product_version->is_subscription()){
+							$stripe_item_list[] = substr($product->get('pro_name').' '.$product_version->get('prv_version_name'), 0, 40) .' ('.$quantity.') - '. ($price - $discount);
+						}
+					}
+					$card_intent = $stripe_helper->authorize_card_payment($one_time_total, $stripe_customer_id, $payment_method_id,
+						implode(', ', $stripe_item_list), $order, $billing_user, (bool)$cart->get_num_recurring());
+					$card_state['intent'] = $card_intent->id;
+				}
+				if($card_intent->status === 'requires_action'){
+					return $stop_for_bank($card_intent->id, $card_intent->client_secret);
+				}
+				if(!in_array($card_intent->status, array('requires_capture', 'succeeded'), true)){
+					return $payment_refused(StripeHelper::card_payment_refusal($card_intent));
+				}
+			}
+
+			// 2. The subscription.
 			foreach($cart->items as $key => $cart_item) {
 				list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-				if($product_version->is_subscription()){
+				if(!$product_version->is_subscription()){
 					continue;
 				}
-				$product_name = $product->get('pro_name').' '. $product_version->get('prv_version_name');
-
-				//ASSEMBLE THE STRIPE CHARGE DESCRIPTION
-				$stripe_current_item = substr($product_name, 0, 40) .' ('.$quantity.') - $'. ($price - $discount). ' ';
-				array_push($stripe_item_list, $stripe_current_item);
+				if(!isset($stripe_subscriptions[$key])){
+					// A discounted line is billed at a Stripe price of its own;
+					// the version's stored price stays its own amount.
+					$stripe_price = $stripe_helper->get_or_create_price($product_version, $price - $discount);
+					$stripe_subscriptions[$key] = $stripe_helper->create_regular_subscription($stripe_price, $product_version, $order,
+						$billing_user, $stripe_customer_id, $one_time_total > 0);
+					$card_state['subscriptions'][$key] = $stripe_subscriptions[$key]->id;
+				}
+				$made_subscription = $stripe_subscriptions[$key];
+				$first_intent = StripeHelper::regular_subscription_intent($made_subscription);
+				if(!in_array($made_subscription->status, array('active', 'trialing'), true)
+					&& $first_intent && $first_intent->status === 'succeeded'){
+					// Paid at the bank a moment ago; Stripe moves it to active
+					// as the invoice settles. Read it again once.
+					$stripe_subscriptions[$key] = $made_subscription = $stripe_helper->get_regular_subscription($made_subscription->id);
+				}
+				if(in_array($made_subscription->status, array('active', 'trialing'), true)
+					|| ($first_intent && $first_intent->status === 'succeeded')){
+					continue;
+				}
+				if($first_intent && $first_intent->status === 'requires_action'){
+					return $stop_for_bank($made_subscription->id, $first_intent->client_secret);
+				}
+				return $payment_refused(StripeHelper::regular_subscription_refusal($made_subscription));
 			}
 
-			try{
-				$charge_result = $stripe_helper->executePaymentWithErrorHandling(
-					function() use ($stripe_helper, $source_result, $cart, $stripe_customer_id, $stripe_item_list, $billing_user, $order) {
-						return $stripe_helper->process_charge($source_result, $cart->get_non_recurring_total(), $stripe_customer_id, $stripe_item_list, $billing_user, $order);
-					},
-					'Credit card charge processing'
-				);
+			// 3. The one-time lines, captured.
+			if($card_intent && $card_intent->status === 'requires_capture'){
+				$card_intent = $stripe_helper->capture_card_payment($card_intent->id);
 			}
-			catch (SystemDisplayableError $e) {
-				return $payment_refused($e->getMessage());
-			}
-			catch (StripeHelperException $e) {
-				error_log("Stripe configuration error during payment: " . $e->getMessage());
-				$support_email = $settings->get_setting('defaultemail');
-				return $payment_refused("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".", false);
-			}
-
-			//STORE THE CHARGE ID AND MARK PAID
-			//Phase 2 of cart_charge_atomicity: mark PAID immediately upon successful
-			//charge to eliminate the UNPAID-with-charge-id contradiction. PayPal,
-			//Stripe checkout, and free paths already mark PAID earlier in payment-
-			//path branching; this completes the invariant for stripe_regular.
-			$order->set('ord_stripe_charge_id', $charge_result->id);
-			$order->set('ord_status', Order::STATUS_PAID);
-			$order->save();
 		}
+		catch (SystemBaseException $e) {
+			// A declined authorization or capture, a refused subscription, a
+			// price that could not be found or made.
+			return $payment_refused($e->getMessage());
+		}
+		catch (StripeHelperException $e) {
+			error_log("Stripe configuration error during payment: " . $e->getMessage());
+			$support_email = $settings->get_setting('defaultemail');
+			return $payment_refused("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".", false);
+		}
+
+		//PAID. Phase 2 of cart_charge_atomicity: marked PAID the moment the
+		//money is taken, before any line is written.
+		if($card_intent){
+			$order->set('ord_stripe_payment_intent_id', $card_intent->id);
+			if(!empty($card_intent->latest_charge)){
+				$order->set('ord_stripe_charge_id', $card_intent->latest_charge);
+			}
+		}
+		$order->set('ord_status', Order::STATUS_PAID);
+		$order->save();
 	}
-	
-	
-	
-	
-	
-	
+
+
+
+
 	// =========================================================================
 	// PHASE 3 of cart_charge_atomicity: post-charge work as a two-pass restructure.
 	//   Pass 1: data persistence (must succeed for the line to be "real")
@@ -1048,7 +1157,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$subscription_result = null;
 			if($product_version->is_subscription()){
 				if($payment_service == 'stripe_regular'){
-					//MADE AND CHECKED LIVE BEFORE THE CHARGE
+					//MADE, AND CONFIRMED LIVE, IN THE CARD PAYMENT ABOVE
 					$subscription_result = $stripe_subscriptions[$key];
 					$stripe_helper->record_regular_subscription($order_item, $subscription_result);
 				}
@@ -1377,7 +1486,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
   } catch (Exception $e) {
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
 	// Subscriptions started for a checkout that never got paid are taken back.
-	if(!empty($stripe_subscriptions) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID && empty($charge_result)){
+	if((!empty($stripe_subscriptions) || !empty($card_intent)) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID){
 		return $payment_refused("Something went wrong processing your order. Please try again.", false);
 	}
 	if($return !== null){

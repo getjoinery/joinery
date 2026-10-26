@@ -53,6 +53,41 @@ existing account other than the one signed in. A free order completes when the
 billing form posts to `/cart_charge`; a GET there persists something only when
 it is a payment gateway's verified return.
 
+### The card form (`stripe_regular`)
+
+The card is entered on the checkout page itself. Stripe.js turns it into a
+PaymentMethod in the browser and the form posts only its id to `/cart_charge`
+(`StripeHelper::output_stripe_regular_form()`); a posted token is made into a
+PaymentMethod (`StripeHelper::payment_method_from_token()`). The charge then
+runs one sequence in `cart_charge_logic`:
+
+1. the card is saved on the buyer's Stripe customer as the card their
+   invoices are charged to (`attach_card()`);
+2. the one-time lines are **authorized**, not charged
+   (`authorize_card_payment()`, a manually captured PaymentIntent); with a
+   subscription in the cart, the authorization also covers charging the card
+   again without the buyer, so the subscription is not confirmed a second time;
+3. the subscription is made (off-session after step 2) and kept only when
+   live: Stripe answers a declined first invoice with an `incomplete`
+   subscription, not an error;
+4. the authorization is **captured**, last (`capture_card_payment()`), so the
+   one-time lines are paid only when the subscription went through.
+
+Where the buyer's bank asks them to confirm a payment (3-D Secure), what was
+made is kept in the session (`StripeHelper::CARD_PENDING_KEY`, for an hour)
+and the buyer is sent back to `/checkout`, where the card form runs the bank's
+confirmation as the page loads and posts `card_payment_confirm` back to
+`/cart_charge`. The checkout carries on with the same order, reading the
+outcome from Stripe, provided the cart is the one it paid for. A buyer who
+never comes back is charged nothing: an authorization never captured lapses,
+and an incomplete subscription expires.
+
+Any refusal takes back what the sequence made (an authorization released, a
+subscription cancelled and its first payment refunded), records the reason on
+the order, and tells the buyer what happened to their money. A take-back that
+fails is emailed to the operator. The card form takes one subscription per
+checkout (`ShoppingCart::card_checkout_refusal()`).
+
 ### Gateway returns
 
 A hosted payment (a Stripe Checkout session, a PayPal order or subscription)

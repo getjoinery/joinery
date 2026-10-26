@@ -196,6 +196,10 @@ function checkout_logic(array $input): LogicResult{
 	// sentence, and no session, plan or order is made.
 	require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 	$page_vars['payment_refusal'] = ($cart->get_total() > 0) ? FulfillmentRegistry::cartRefusal($cart) : null;
+	// The card form takes one subscription per checkout (cart_charge_logic).
+	if ($page_vars['payment_refusal'] === null && $cart->get_total() > 0) {
+		$page_vars['payment_refusal'] = $cart->card_checkout_refusal();
+	}
 
 	// Paying as an account that already exists needs that account's sign-in:
 	// the order, its charge and what it grants are written to that account. A

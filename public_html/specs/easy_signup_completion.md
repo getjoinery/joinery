@@ -4,7 +4,7 @@
 refactors it waited on (declared_permissions, optional_username) are committed and released
 (0.8.537). WP1 corrected 10-26 after a re-read: the card checkout works; WP1 is its edges.
 WP1a built 10-26 (suite `card_checkout_failures` 33/33, Stripe doubled; its live check is in the
-live verification queue). WP1b built 10-26 (`order_refund` 18/18). Next: WP1c.
+live verification queue). WP1b built 10-26 (`order_refund` 18/18). WP1c built 10-26 (`card_checkout_failures` 45/45). Next: WP1d.
 
 **Companions:** `managed_hosting_and_services.md` (the umbrella and its contracts C1/C2),
 `managed_hosting_phase1_purchase.md`, `services_phase2_platform.md`,
@@ -172,22 +172,41 @@ after a subscription was made (refund + cancel), the hosting receipt's outcome.
 
 Tests: `order_refund` 18/18; `hosted_tier` gains the early-cancel check (113/113).
 
-#### WP1c — 3-D Secure on the card form
+#### WP1c — 3-D Secure on the card form (built 10-26)
 
-**B133.** The form turns the card into a token (`stripe.createToken`, `StripeHelper.php:343-445`),
-saves it as a source (`create_card_from_token()`, `:1073`) and charges with the Charges API
-(`process_charge()`, `:1484`). That path cannot run the bank's extra check, so a card whose bank
-requires it is declined: most European cards, few US ones. 3-D Secure testing was listed as
-future work in `checkout_test_v1.md` and never done. Needed because the store plugin is sold
-(Q2), not for a US-first Managed launch.
+**B133.** The form turned the card into a token (`stripe.createToken`), saved it as a source and
+charged with the Charges API, which cannot run the bank's extra check: a card whose bank requires
+it was declined (most European cards, few US ones). Needed because the store plugin is sold (Q2).
 
-Fix: the form makes a PaymentMethod with Stripe's Payment Element; the server confirms one
-PaymentIntent for a cart of one-time lines, or the first subscription's first invoice with
-the one-time lines on it (`add_invoice_items`, `payment_behavior=default_incomplete`); when the
-bank asks for 3-D Secure, Stripe.js runs it on our page and returns to `/cart_charge`, verified
-like a Checkout session's return. `products_test.php` moves from `tok_visa` (`:450,566`) to test
-PaymentMethods, including `pm_card_authenticationRequired`. The stripe-php in vendor (10.21.0)
-has every call. ScrollDaddy's subscriptions are part of its live check.
+Built (`plugins/store/docs/overview.md` § The card form):
+
+- The form makes a PaymentMethod (`stripe.createPaymentMethod`) and posts its id; a posted token
+  (an old page, `products_test`'s `tok_visa`) is made into one (`payment_method_from_token()`).
+- `cart_charge_logic` runs one sequence: save the card (`attach_card()`), **authorize** the one-time
+  lines (`authorize_card_payment()`, manual capture, `setup_future_usage=off_session` when a
+  subscription follows), make the subscription (off-session after an authorization, so the bank
+  asks once), **capture** last. Nothing is taken for the one-time lines unless the subscription
+  went through; this replaces WP1a's "subscription first" order.
+- When the bank asks (`requires_action`), what was made is kept in the session
+  (`StripeHelper::CARD_PENDING_KEY`, an hour) and the buyer returns to `/checkout`, where the form
+  runs `stripe.confirmCardPayment` on load and posts `card_payment_confirm`; the checkout carries on
+  with the same order, from Stripe's answer, if the cart's hash is unchanged. A confirmation that
+  comes back still unanswered is refused, not asked again. A resumed checkout skips the pre-charge
+  refusals it passed on its first pass. A buyer who never returns is charged nothing (an
+  uncaptured authorization lapses; an incomplete subscription expires).
+- Every refusal goes through `$payment_refused`: authorization released or payment refunded
+  (`undo_card_payment()`), subscription cancelled and refunded, reason on the order, the buyer told
+  what happened to the money.
+- **One subscription per card checkout** (`ShoppingCart::card_checkout_refusal()`, also shown on the
+  checkout page): a second subscription would be a second payment the bank may stop on, and a buyer
+  leaving between them would have paid for one with no order. No dev order has ever had two
+  (0 of 246 subscription orders, 10-26).
+- Removed: `create_card_from_token()`, `process_charge()`, `create_charge()` (no other callers).
+
+Tests: `card_checkout_failures` rewritten with Stripe doubled at its API so StripeHelper runs as
+written: 45/45 (works, 3-D Secure confirmed / declined / unanswered / cart changed, refusals,
+two subscriptions). The form's script passes `node --check`. Not yet run against Stripe: see the
+live verification queue (cards `4000 0027 6000 3184`, `4000 0000 0000 3220`, ScrollDaddy).
 
 #### WP1d — the hosted page's and PayPal's return
 

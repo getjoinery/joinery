@@ -251,6 +251,19 @@ class ShoppingCart {
 	}
 
 	/**
+	 * Why the card form (stripe_regular) cannot take this cart, or null. It
+	 * takes one subscription per checkout: each is a payment the buyer's bank
+	 * may stop to confirm (3-D Secure), and a buyer who left between two would
+	 * have paid for one with no order.
+	 */
+	public function card_checkout_refusal() {
+		if (Globalvars::get_instance()->get_setting('checkout_type') === 'stripe_regular' && $this->get_num_recurring() > 1) {
+			return 'Please check out one subscription at a time: remove the others from your cart and add them after this order.';
+		}
+		return null;
+	}
+
+	/**
 	 * Check if PayPal is available for the current cart contents.
 	 * PayPal cannot handle: mixed subscription + non-subscription items, or multiple subscriptions.
 	 * This is checked at payment time, not at add-to-cart time, so Stripe users aren't restricted.
