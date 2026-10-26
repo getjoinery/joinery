@@ -98,8 +98,10 @@ chk "absent marker reads FREE" "$("$T/reader.sh" "$MARKER")" "FREE"
 echo "== a marker naming a live agent defers the restart =="
 # A real process whose /proc/PID/comm is exactly "joinery-agent" — the check the
 # reader makes. comm is the executable's basename, so a copy under that name is
-# indistinguishable from the real thing to this test's purpose.
-cp "$(command -v sleep)" "$T/joinery-agent"
+# indistinguishable from the real thing to this test's purpose. Ubuntu 26.04's
+# sleep is the Rust coreutils program, which picks its tool from the name it is
+# run under and refuses "joinery-agent"; GNU's gnusleep, shipped beside it, does not.
+cp "$(command -v gnusleep || command -v sleep)" "$T/joinery-agent"
 "$T/joinery-agent" 60 &
 FAKE_PID=$!
 sleep 0.2

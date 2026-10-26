@@ -97,7 +97,10 @@ for u in apache2 php-fpm postgresql; do
 done
 chk "served certificates is a list or unknown" "$( t=$(jv "$T/real.json" served_certificates type); [ "$t" = list ] || [ "$(jv "$T/real.json" served_certificates)" = unknown ]; echo $? )" "0"
 chk "containers is a list, none or unknown" "$( t=$(jv "$T/real.json" containers type); v=$(jv "$T/real.json" containers); [ "$t" = list ] || [ "$v" = none ] || [ "$v" = unknown ]; echo $? )" "0"
-chk "outbound_limits names its four parts" "$(jv "$T/real.json" outbound_limits keys)" "state,reason,since,web_user_dropped"
+# The figures come along while the limits are on, and while off from a status that keeps them.
+chk "outbound_limits names its four parts, and the figures while on or off" "$( k=$(jv "$T/real.json" outbound_limits keys); s=$(jv "$T/real.json" outbound_limits.state)
+    [ "$k" = "state,reason,since,web_user_dropped" ] && [ "$s" != on ] && echo ok
+    [ "$k" = "state,reason,since,web_user_dropped,figures,web_ceiling_mbit,sites" ] && { [ "$s" = on ] || [ "$s" = off ]; } && echo ok )" "ok"
 chk "outbound_limits is a known state" "$( case "$(jv "$T/real.json" outbound_limits.state)" in on|off|refused|absent|none|unknown) echo ok ;; esac )" "ok"
 chk "mail_gateway is none or names its parts" "$( v=$(jv "$T/real.json" mail_gateway); k=$(jv "$T/real.json" mail_gateway keys); [ "$v" = none ] || [ "$k" = "version,state,restarts,up_seconds,connections,sites" ]; echo $? )" "0"
 chk "generated_at is now" "$( g=$(jv "$T/real.json" generated_at); n=$(date -u +%s); [ "$g" -le "$n" ] && [ "$g" -ge $((n-60)) ]; echo $? )" "0"
