@@ -1,8 +1,10 @@
 # Easy signup — finishing the buy, the install and the provider choice
 
-**Status:** Draft, 2026-10-25. Written from a four-part inventory of the code and dev
-the same day. Lands after the running refactors (declared_permissions, optional_username)
-are committed and deployed: most of the store work below touches files those carry.
+**Status:** Draft, 2026-10-25; WP1 rewritten 10-26 after Q2 was decided. The running
+refactors it waited on (declared_permissions, optional_username) are committed and released
+(0.8.537). WP1 corrected 10-26 after a re-read: the card checkout works; WP1 is its edges.
+WP1a built 10-26 (suite `card_checkout_failures` 33/33, Stripe doubled; its live check is in the
+live verification queue). Next: WP1b.
 
 **Companions:** `managed_hosting_and_services.md` (the umbrella and its contracts C1/C2),
 `managed_hosting_phase1_purchase.md`, `services_phase2_platform.md`,
@@ -92,89 +94,103 @@ when the owner runs the pack's apply scripts on the node (WP7).
 
 In build order. WP1–WP3 are independent of each other; WP4 needs WP2; WP7 needs WP1–WP4.
 
-### WP1 — money handling for a subscription plus a one-time line
+### WP1 — money handling (the store, in every checkout mode)
 
-All in `plugins/store/logic/cart_charge_logic.php`, `StripeHelper.php`,
-`plugins/store/admin/admin_order_refund.php`, `plugins/store/ajax/stripe_webhook.php`.
-permissionsrefactor finished its edits to the first two on 10-25; re-read them before editing. Those
-two files were being edited while this was written, so places in them are named by the
-comment or function that marks them; line numbers are as of 2026-10-25 16:50 UTC.
+Re-read 10-26 against HEAD (`ab457eae4`). **The card checkout works**: one-time lines,
+subscriptions and a mix go through `stripe_regular` to an order, its lines, receipts and
+fulfillment; `products_test` drives it against Stripe test mode, dev order 23935 bought a
+Managed site with it, and ScrollDaddy's live subscriptions use it
+(`theme/scrolldaddy/views/checkout.php:220`). A failure after the card is charged is recorded on
+the order and emailed to the operator (`cart_charge_logic.php:1229-1270`). What follows are the
+paths around it, in build order.
 
-- **B126 — a subscription is marked paid whatever Stripe says.** Under the
-  `//HANDLE SUBSCRIPTIONS` comment (`cart_charge_logic.php` ~755) the line is set PAID right
-  after `process_stripe_regular_subscription_from_order_item()`, and that function sets it
-  PAID again (`//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT`, `StripeHelper.php` ~1462),
-  neither reading the subscription's status. A
-  card that fails its first invoice comes back `incomplete`, not as an error, and the hosting
-  line is activated. Fix: only `active` or `trialing` is paid; anything else is an error line
-  with a buyer-facing sentence, and fulfillment does not run.
-- **B126b — an expiring incomplete subscription is silent.** `customer.subscription.updated`
-  (`stripe_webhook.php:76-147`) syncs the status and dispatches nothing; only `.deleted`
-  (`:148-162`) and the two invoice events (`:181-246`) send signals. Check which event Stripe
-  sends when an incomplete subscription expires, and send `subscription.cancelled` for it.
-- **B127 — a subscription-only order stays UNPAID.** The order starts UNPAID (~267); under
-  `stripe_regular` it is marked PAID only after the one-time charge
-  (`//STORE THE CHARGE ID AND MARK PAID`, ~543), inside `if($cart->get_non_recurring_total())`. Dev orders 13359, 23935 and 24018 are like this.
-  Fix: mark the order paid once every line is paid (the charge, and each subscription's
-  first invoice), and repair the existing rows by migration.
-- **B128 — the domain is charged before the subscription exists.** The one-time charge runs
-  first (`//NOW CHARGE THE CREDIT CARD`, ~491); the subscription is created later, in the
-  post-charge pass (`//HANDLE SUBSCRIPTIONS`, ~755). If creating it fails, the buyer has paid
-  for a domain and sees the success page; and `process_stripe_regular_subscription_from_order_item()`
-  `exit`s when Stripe returns no subscription id (`StripeHelper.php` ~1460: blank page, cart kept).
-  Fix: create the subscription first (Stripe charges its first invoice at once), then the
-  one-time charge; on a one-time failure cancel the subscription; replace the `exit` with
-  an exception the caller turns into an error line.
-- **B125 — refunds.** `admin_order_refund.php:72-75` refunds against `ord_stripe_charge_id`,
-  which on a hosting order is the domain charge; a subscription's own invoice is not on the
-  order, so a subscription-only order cannot be refunded (`:79-81`). A refund never cancels
-  the subscription or stops the server. Fix: refund a subscription line against its invoice's
-  charge (`odi_stripe_foreign_invoice_id`), and offer "refund and cancel", which cancels
-  through the store's cancel path so the hosting wind-down signal fires.
+Already fixed in HEAD: **B127** (a subscription-only order is marked paid by its live
+subscription, `cart_charge_logic.php:956-963`); **B143** (PayPal's return compares `plan_id`,
+`:226-231`); half of **B145** (a refused return lands on `/cart_confirm`, which offers no second
+payment, `_cart_charge_paid_not_completed()` `:21-30`).
+
+#### WP1a — the card form's failure paths (built 10-26)
+
+- **B150 — a refused card says "Something went wrong".** The card is saved to the customer
+  before anything is charged (`create_card_from_token()`, `cart_charge_logic.php:658`), and Stripe
+  checks it then. That call sits outside every inner `try`, so its `SystemDisplayableError`
+  reaches the outer `catch` (`:1297-1305`): the bank's reason is dropped and the order row
+  (made at `:620-635`) stays UNPAID. Fix: catch it where it is called, as the charge's own
+  failure is (`:697-724`): order in error, `payment.failed`, the bank's reason on `/checkout`.
+- **B128 — a subscription is created after the one-time charge.** The one-time lines are
+  charged at `:680-735`; each subscription is created later, inside pass 1 (`:944-964`). If
+  creating it fails, the post-charge safety net records it and emails the operator, and the
+  buyer sees the success page for a subscription that does not exist. (The `exit`s in
+  `StripeHelper.php:1458,1467` are not reached in practice: a refused create throws first.)
+- **B126 — a subscription whose first payment failed is fulfilled.** Stripe answers a declined
+  first invoice with a subscription in status `incomplete`, not an error. The line is set PAID
+  whatever the status (`cart_charge_logic.php:954`, `StripeHelper.php:1473`) and its fulfillment
+  runs; only the order's own status reads the subscription's (`:956-963`). Narrow, because the
+  card was checked when it was saved, but a card that fails on the amount (insufficient funds,
+  a bank that wants 3-D Secure) reaches it.
+
+  Fix for B128 and B126 together: create the cart's subscriptions **before** the one-time charge,
+  keep them only when `active` or `trialing`, and undo what was made when anything after fails
+  (cancel the subscription, refund a first invoice already paid). A declined subscription then
+  reaches the buyer as a decline on `/checkout`, before any one-time line is charged.
 - **B129 — the hosting receipt reads as an event registration.** The receipt's outcome is
-  `event` whenever the fulfillment result carries a `ref_id` (`cart_charge_logic.php` ~826-836, "Outcome category"),
-  and `CustomerCloudFulfillment::fulfill()` returns the provision id there (`:137`). Fix: the
-  provider result may name its own outcome (`'outcome' => 'subscription'`), checked before the
-  `ref_id` rule; the store still never learns what the line is for.
-- **B134 — a coupon on a subscription discounts every renewal.** The subscription is made at
-  `$price - $discount` (`$final_price`, just under `//HANDLE SUBSCRIPTIONS`). Decide per coupon whether it is first-payment-only
-  (Stripe coupon with `duration=once`) or for life; default first payment only.
+  `event` whenever the fulfillment result has a `ref_id` (`:1023-1036`), and
+  `CustomerCloudFulfillment::fulfill()` returns the provision id there. Fix: a provider's result
+  may name its outcome (`'outcome' => 'subscription'`), checked first.
+
+Tests: a store suite with the Stripe client stubbed: a card refused when saved, a subscription
+created `incomplete`, a subscription refused after another was made, a one-time charge refused
+after a subscription was made (refund + cancel), the hosting receipt's outcome.
+
+#### WP1b — refunds and the hosting signals
+
+- **B125 — refunds.** `admin_order_refund.php:78-84` refunds against `ord_stripe_charge_id` first,
+  which on a hosting order is the domain charge; a subscription's first invoice is not on the
+  order, and an order with neither id cannot be refunded (`:89`). Refund a subscription line
+  against its first invoice (`odi_stripe_foreign_invoice_id`), and offer "refund and cancel",
+  which cancels through the store's cancel path so the hosting wind-down fires.
+- **B126b — an expiring incomplete subscription is silent.** `customer.subscription.updated`
+  (`stripe_webhook.php:93-164`) syncs the status and dispatches nothing. Send
+  `subscription.cancelled` when it moves to `incomplete_expired`. (After WP1a a checkout no
+  longer keeps an incomplete subscription; one made another way still can.)
 - **B132 — a failure or cancel before the server is built is lost.**
-  `HostedTrialSignals.php:48-53` returns when no plan row exists, and the row is opened only
-  after provisioning finishes. Fix: the signal opens the row's grace when the provision
-  exists without a plan row, or the provision itself is held until the row exists.
-- **B133 — no 3-D Secure.** `stripe_regular` uses tokens and charges (`create_card_from_token`,
-  `cart_charge_logic.php` ~469), which cannot run 3-D Secure, so cards that require it are
-  declined. See Q2.
+  `HostedTrialSignals.php:48-53` returns when no plan row exists. The signal holds the provision
+  until the row exists.
+- **B144 — a version still holding a coupon's price id.** A one-time sweep compares each
+  version's stored Stripe price with `prv_version_price` and clears a mismatch.
 
-- **B143 — a PayPal subscription on any plan pays for the cart.** On PayPal's return the
-  subscription is checked for status only (`cart_charge_logic.php` ~412-415: `ACTIVE` or
-  `APPROVED`), never for its `plan_id`, so an active subscription to a cheaper plan of ours
-  marks the order paid. Fix: compare `plan_id` with the plan the checkout offered for this
-  cart. (Raised by permissionsrefactor, 10-25.)
-- **B144 — a version already holding a coupon's price id keeps it until next looked up.**
-  `get_or_create_price` stores only the version's own amount from 10-25 on, and replaces a
-  stored id at its next canonical lookup (`StripeHelper.php` ~1381-1384), but a version that
-  is never looked up again keeps the discounted id, and `change_billing_cycle`
-  (`billing_logic.php`) bills from the stored id. Fix: a one-time sweep that checks each
-  version's stored Stripe price against `prv_version_price` and clears a mismatch. (Raised by
-  permissionsrefactor, 10-25.)
+#### WP1c — 3-D Secure on the card form
 
-- **B145-B147 — gaps left in the gateway return** (reported by permissionsrefactor 10-25
-  after its return-path fix; trace each before building):
-  - **B145:** on a return, an invalid coupon or an ownership refusal still sends a buyer who
-    has already paid back to checkout with an error. Once money has moved, a refusal must
-    become an order line in error plus a refund or an operator alert, never a bounce.
-  - **B146:** an order the webhook makes for a buyer who never comes back stays PAID with no
-    lines. The webhook must build the lines itself, from the recorded payment, when no
-    return arrives.
-  - **B147:** a return that lands in another browser session (a phone's in-app browser, a
-    second tab after sign-out) tells the buyer to contact support. The recorded payment
-    should find its order without the original session.
+**B133.** The form turns the card into a token (`stripe.createToken`, `StripeHelper.php:343-445`),
+saves it as a source (`create_card_from_token()`, `:1073`) and charges with the Charges API
+(`process_charge()`, `:1484`). That path cannot run the bank's extra check, so a card whose bank
+requires it is declined: most European cards, few US ones. 3-D Secure testing was listed as
+future work in `checkout_test_v1.md` and never done. Needed because the store plugin is sold
+(Q2), not for a US-first Managed launch.
 
-Tests: a store suite that drives each failure with the Stripe client stubbed: incomplete
-subscription, subscription create failure after a charge, subscription-only order, refund of
-each line kind, expiry webhook.
+Fix: the form makes a PaymentMethod with Stripe's Payment Element; the server confirms one
+PaymentIntent for a cart of one-time lines, or the first subscription's first invoice with
+the one-time lines on it (`add_invoice_items`, `payment_behavior=default_incomplete`); when the
+bank asks for 3-D Secure, Stripe.js runs it on our page and returns to `/cart_charge`, verified
+like a Checkout session's return. `products_test.php` moves from `tok_visa` (`:450,566`) to test
+PaymentMethods, including `pm_card_authenticationRequired`. The stripe-php in vendor (10.21.0)
+has every call. ScrollDaddy's subscriptions are part of its live check.
+
+#### WP1d — the hosted page's and PayPal's return
+
+Applies to `stripe_checkout` and PayPal only; dev and ScrollDaddy use `stripe_regular`. What a
+gateway payment was made for is kept only in the buyer's PHP session
+(`ShoppingCart::record_payment()`, `ShoppingCart.php:40,698-719`; `recorded_payment()`, `:746`):
+
+- **B146:** for a buyer who never comes back, Stripe's webhook makes an order marked PAID with
+  no lines and stops (`stripe_webhook.php:58-90`).
+- **B147:** a return in another browser session finds no record and is told to contact the site
+  (`cart_charge_logic.php:146-148`).
+- **B145 (rest):** a return refused after payment (`$refuse`, `:401-406`) leaves only a log line.
+
+Fix: the record moves to a table keyed by the gateway reference; the completion stops reading
+the session so the webhook can run it; a refusal after payment makes the order with its lines in
+error and alerts the operator.
 
 ### WP2 — hosted mail runs once, for real
 
@@ -276,15 +292,14 @@ Managed customer departure (`managed_customer_departure.md`), and the live run o
   customer, and the story "your keys, if you want them" holds for both doors. No: one shape
   to support, and it is what the code does today. Recommend no for launch; WP5 gives
   self-hosters the choice.
-- **Q2. 3-D Secure.** Move hosting purchases to Stripe's hosted page (`stripe_checkout`,
-  which handles 3-D Secure today; the buyer leaves our page to pay), or move `stripe_regular`
-  to Payment Intents (more work; the buyer stays on our page). Recommend the hosted page.
-  Its return path was broken until 10-25 (reviewer2's trace, fixed by permissionsrefactor,
-  uncommitted at writing): the return now builds the order from the payment the browser
-  recorded, under a lock the webhook shares (`ShoppingCart::record_payment()`,
-  `Order::with_payment_lock()`). The hosted page is usable once a test-mode Managed order
-  completes through it; B145-B147 are the return's remaining gaps.
+- **Q2. 3-D Secure. Decided 10-26:** the store's own card form gets it (WP1c), because the
+  store plugin is sold. Stripe's hosted page stays a supported mode; WP1d fixes its return.
 - **Q3. Pricing for our mail and backups** (`DEFERRED_services_pricing.md`). WP9 waits on it.
+- **Q4. Coupons on a subscription.** A coupon has no duration (`coupon_codes_class.php:44-56`), so
+  on a subscription it discounts every renewal (`$final_price`, `cart_charge_logic.php:948`). Add
+  a "first payment only / every payment" choice to the coupon (a Stripe coupon with
+  `duration=once` or `forever`), or keep every coupon for life. The choice suits store customers
+  running a promotion; for life is today's behaviour and one less field.
 
 ## 7. Owner operations
 

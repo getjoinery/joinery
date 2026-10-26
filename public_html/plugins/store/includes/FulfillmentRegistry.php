@@ -59,7 +59,10 @@ interface FulfillmentProvider {
     /**
      * Run fulfillment on a successful, paid purchase. Returns
      * ['ref_id' => ?int, 'label' => ?string, 'labels' => ?array] for the
-     * order line summary; the provider owns any of its own notifications/signals.
+     * order line summary, plus optionally 'outcome' (bundle, event,
+     * subscription, digital, plain) naming how the receipt describes the line;
+     * without it, labels mean bundle and a ref_id means event. The provider
+     * owns any of its own notifications/signals.
      */
     public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array;
     /** Admin HTML label/link describing a reference. */

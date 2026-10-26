@@ -431,6 +431,7 @@ $draft->load();
 check(!$draft->get('cvp_data_root_encrypted'),
 	'with data root encryption not offered, the hosted site is not marked for an encrypted data root');
 check(($f1['label'] ?? '') === 'Server for msp-register-test.com', 'the order line says which server');
+check(($f1['outcome'] ?? '') === 'subscription', 'the receipt reads the line as a subscription, not an event registration');
 $draft->load();
 check($draft->get('cvp_status') === 'ready', 'the row is ready for the pipeline');
 check((int)$draft->get('cvp_external_order_item_id') === (int)$item->key, 'with the paid order item stamped');
