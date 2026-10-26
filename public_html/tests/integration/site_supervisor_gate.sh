@@ -57,7 +57,9 @@ RUN="$T/root"
 mkdir -p "$RUN/etc/postgresql/18/main" "$RUN/etc/init.d" "$RUN/var/run/postgresql" "$RUN/run/php" \
          "$RUN/var/run/apache2" "$RUN/run/joinery" "$T/bin" "$T/fake" "$T/leftovers"
 touch "$RUN/etc/init.d/php8.5-fpm" "$RUN/etc/init.d/php8.3-fpm"
-SLEEP="$(command -v sleep)"
+# Ubuntu 26.04's sleep is the Rust coreutils program, which picks its tool from the
+# name it is run under and refuses "postgres"; GNU's gnusleep, shipped beside it, does not.
+SLEEP="$(command -v gnusleep || command -v sleep)"
 for c in postgres php-fpm8.5 apache2 cron; do cp "$SLEEP" "$T/fake/$c"; done
 
 # service NAME start|stop|status, apache2ctl start|stop: a stand-in process

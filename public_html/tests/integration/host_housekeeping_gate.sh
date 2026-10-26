@@ -495,8 +495,10 @@ chk "install.sh writes no module list of its own" "$(grep -v '^#' "$SITE_ROOT/ma
 chk "nor a sysctl file of its own" "$(grep -v '^[[:space:]]*#' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh" | grep -c 'sysctl\.d/')" "0"
 if command -v modprobe >/dev/null 2>&1; then
     # modprobe itself, dry-run against the written list: the module is refused, not inserted.
+    # Only sctp's own module counts: where its helpers (udp_tunnel, ip6_udp_tunnel) are not
+    # loaded yet, the dry run lists inserting them before it reaches the refused install line.
     chk "modprobe reads it: sctp would run /bin/false, not be inserted" \
-        "$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^install /bin/false')|$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^insmod')" "1|0"
+        "$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^install /bin/false')|$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^insmod .*/sctp\.ko')" "1|0"
 fi
 
 echo "=== PostgreSQL answers only locally ==="
