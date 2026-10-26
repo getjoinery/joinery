@@ -303,6 +303,7 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
 - `cssFramework`: Declares which CSS the theme's chrome loads — `"bootstrap"` for Bootstrap themes, `"html5"` for zero-dependency themes. This is independent of FormWriter.
 - `formWriterBase`: Always `"FormWriterV2HTML5"`. FormWriter renders semantic HTML5 regardless of the theme's `cssFramework`.
 - `publicPageBase`: Always use `"PublicPageBase"` (NOT PublicPageFalcon)
+- `publicPaths` (optional): the theme's own public pages for the sitemap and the SEO inventory, e.g. `["/pricing"]`. A theme view of a core page (its own index or blog) needs no entry; a view not declared is not listed. See [SEO Metadata](seo_metadata.md#what-is-enumerated).
 
 ### Step 5: Create FormWriter.php
 
