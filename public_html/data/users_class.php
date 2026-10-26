@@ -1110,7 +1110,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			$ts = $candidate_step * 30;
 			if (hash_equals($totp->at($ts), $code)) {
 				$this->set('usr_totp_last_used_step', $candidate_step);
-				$this->save();
+				// Before anyone is signed in: the code just proved is the authority.
+				SystemBase::server_initiated_write(function () { $this->save(); });
 				return true;
 			}
 		}
@@ -1169,7 +1170,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			if (password_verify($code, $hash)) {
 				array_splice($hashes, $idx, 1);
 				$this->set('usr_totp_backup_codes', json_encode($hashes));
-				$this->save();
+				// Before anyone is signed in: the backup code just proved is the authority.
+				SystemBase::server_initiated_write(function () { $this->save(); });
 				return true;
 			}
 		}

@@ -7,6 +7,8 @@
  * unmutes its whole fault. Everything shown came from another
  * machine and is escaped.
  *
+ * @version 1.2.1 - a missing report answers 404 through assert_found(), not a raw status line
+ *                  the error page then tried to set again (a warning on PHP 8.5)
  * @version 1.2.0 - muted reports: Unmute
  * @version 1.1.0 - automatic reports: sender, count, last seen; group link by fingerprint
  * @version 1.0.0
@@ -16,10 +18,7 @@ $session->set_return();
 
 $id = (int)($_GET['rbr_received_bug_report_id'] ?? $_POST['rbr_received_bug_report_id'] ?? 0);
 $report = new ReceivedBugReport($id, TRUE);
-if (!$report->key) {
-	header('HTTP/1.0 404 Not Found');
-	throw new SystemDisplayableError('That bug report no longer exists.');
-}
+$report->assert_found();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 	switch ($_POST['action'] ?? '') {

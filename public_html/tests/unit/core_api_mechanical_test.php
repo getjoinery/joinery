@@ -283,7 +283,7 @@ $permitted = array(
 	// No person behind the request: a credential, signature or token is the
 	// authority, so the model write-path check (declared_permissions 3.2) does
 	// not apply either. Each is a POST.
-	'data/users_class.php'                                    => 'a password hash upgraded by check_password(), before anyone is signed in: the password just proved is the authority',
+	'data/users_class.php'                                    => 'a password hash upgraded by check_password(), and a two-factor code or backup code spent by verify_totp()/verify_backup_code(), before anyone is signed in: the credential just proved is the authority',
 	'includes/ApiAuthEndpoint.php'                            => 'auth/login and device_link: the issued key and the ceremony\'s state, before anyone is signed in; the proved credential is the authority',
 	'includes/ApiLogicEndpoint.php'                           => 'the idempotency claim and outcome: the API layer\'s own bookkeeping',
 	'data/drive_usage_class.php'                              => 'a user\'s Drive total recomputed from the files it counts, whoever\'s request moved them',

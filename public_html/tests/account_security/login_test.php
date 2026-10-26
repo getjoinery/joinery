@@ -517,6 +517,18 @@ check(isset($_SESSION['totp_pending_expires']) && $_SESSION['totp_pending_expire
 	'the pending state expires within ten minutes',
 	'expires in: ' . (($_SESSION['totp_pending_expires'] ?? 0) - time()) . 's');
 
+// The code page finishes it. Spending the code is a write made before anyone is
+// signed in, so the model's own check must let it through or no factor works.
+require_once(Globalvars::get_instance()->get_setting('composerAutoLoad') . 'autoload.php');
+$res = harness_call_logic('logic/verify_totp_logic.php', 'verify_totp_logic',
+	array('totp_code' => \OTPHP\TOTP::createFromSecret('JBSWY3DPEHPK3PXP')->at(time())), 'POST');
+check(!empty($_SESSION['loggedin']) && (int)($_SESSION['usr_user_id'] ?? 0) === (int)$totp_user->key,
+	'a valid code on the code page signs the account in',
+	'redirect: ' . var_export($res->redirect, true) . ', error: ' . var_export($res->error ?? null, true));
+$totp_user->load();
+check((int)$totp_user->get('usr_totp_last_used_step') > 0,
+	'and the code is spent, so it cannot be used again');
+
 // A wrong password must not create a pending state — otherwise the divert
 // itself would confirm the account exists and holds a factor.
 $_SESSION = array();
