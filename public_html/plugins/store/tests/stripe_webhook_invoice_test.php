@@ -11,7 +11,8 @@
  * subscription events; these two had no test).
  *
  *   - invoice.payment_failed marks the line past_due;
- *   - invoice.payment_succeeded marks it active again and takes the period end.
+ *   - invoice.payment_succeeded marks it active again and takes the period end;
+ *   - invoice.paid, all an invoice marked paid by hand in Stripe sends, does too.
  *
  * Each is a save with no one signed in, under the declared-permissions save
  * check. The endpoint answers 200 even when its handler throws (it logs the
@@ -23,6 +24,7 @@
  *
  * Run: php plugins/store/tests/stripe_webhook_invoice_test.php [base_url] [origin_ip]
  *
+ * @version 1.1 - invoice.paid
  * @version 1.0
  */
 
@@ -118,5 +120,23 @@ check($line->get('odi_subscription_status') === 'active', 'the line is active ag
 check(strtotime((string)$line->get('odi_subscription_period_end') . ' UTC') === $period_end,
 	'and carries the invoice\'s period end', (string)$line->get('odi_subscription_period_end'));
 check($ok === true, 'and the endpoint logged the event as handled', $err);
+
+section('invoice.paid (marked paid by hand in Stripe)');
+
+$line->set('odi_subscription_status', 'past_due');
+$line->save();
+$period_end = time() + 60 * 86400;
+$evt = 'evt_swi_' . $run_id . '_oob';
+$r = swi_post($evt, 'invoice.paid', array('id' => 'in_swi_' . $run_id . '_o', 'object' => 'invoice',
+	'subscription' => $sub_id, 'paid_out_of_band' => true,
+	'lines' => array('object' => 'list', 'data' => array(array('object' => 'line_item',
+		'period' => array('start' => time(), 'end' => $period_end))))), $secret);
+check($r['status'] === 200, 'accepted (200)', 'status ' . $r['status']);
+$line->load();
+list($ok, $err) = swi_logged($evt);
+check($line->get('odi_subscription_status') === 'active', 'the past_due line is active again',
+	'status ' . $line->get('odi_subscription_status') . '; logged: ' . $err);
+check(strtotime((string)$line->get('odi_subscription_period_end') . ' UTC') === $period_end,
+	'and carries the new period end', (string)$line->get('odi_subscription_period_end'));
 
 harness_finish();

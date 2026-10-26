@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.38 - the admin login summary, its credentials file and the email first-task line name https
+#               once a CA-signed certificate is in place (B145)
 #VERSION 3.37 - the admin login summary names the username admin; an address is optional (spec optional_username)
 #VERSION 3.36 - a name that reached this box and failed HTTP-01 is no longer reported as not reaching it, with or
 #               without a DNS-01 provider (reviewer2 on B111).
@@ -1125,7 +1127,7 @@ print_services_outcome() {
 # worse than one extra line for an admin who has already done it.
 print_email_setup_notice() {
     echo -e "${YELLOW}First task: set up email${NC}"
-    echo -e "  ${BLUE}http://${DOMAIN_NAME}/admin/admin_settings_email${NC}"
+    echo -e "  ${BLUE}$(site_scheme "$DOMAIN_NAME")://${DOMAIN_NAME}/admin/admin_settings_email${NC}"
     echo ""
     echo "  This site cannot send mail until you name a provider, and password reset"
     echo "  is how you get back in if the admin password is ever lost. Most hosts"
@@ -1355,6 +1357,24 @@ ca_cert_in_place() {
     issuer="$(openssl x509 -in "$pem" -noout -issuer 2>/dev/null | sed 's/^issuer=//')"
     subject="$(openssl x509 -in "$pem" -noout -subject 2>/dev/null | sed 's/^subject=//')"
     [ -n "$issuer" ] && [ "$issuer" != "$subject" ]
+}
+
+# The scheme the site serves $1 on: https once a CA-signed certificate is in
+# place, http until then (the certificate the retry timer issues later turns on
+# the http-to-https redirect, so an http link keeps working).
+site_scheme() {
+    if ca_cert_in_place "$1"; then echo https; else echo http; fi
+}
+
+# _site_init.sh writes config/admin_credentials.txt before the certificate step,
+# so its addresses say http. Once the certificate is in place they name https,
+# the address the operator will find the site at.
+# $1 = path to the credentials file
+# $2 = optional prefix that runs a command in the site (docker sites need docker exec)
+credentials_name_site_scheme() {
+    local cred_path="$1" runner="${2:-}"
+    [ "$(site_scheme "$DOMAIN_NAME")" = https ] || return 0
+    $runner sed -i "s#http://${DOMAIN_NAME//./\\.}/#https://${DOMAIN_NAME}/#g" "$cred_path" 2>/dev/null || true
 }
 
 # setup_ssl.sh's last step: with no CA-signed certificate in place for $1, the
@@ -6085,7 +6105,7 @@ EOF
 
     # A proxied site is reached by its domain; one with no domain, at its port.
     local SITE_URL="http://$DOMAIN_NAME:$PORT/"
-    [ -n "$WEB_PUBLISH" ] && SITE_URL="http://$DOMAIN_NAME/"
+    [ -n "$WEB_PUBLISH" ] && SITE_URL="$(site_scheme "$DOMAIN_NAME")://$DOMAIN_NAME/"
 
     # Summary (always shown, even in quiet mode)
     if [ "$QUIET_MODE" -eq 1 ]; then
@@ -6117,6 +6137,7 @@ EOF
         # this script's own function, which no shell outside it knows.
         local ENGINE_CMD
         ENGINE_CMD="$(site_engine_kind)"
+        credentials_name_site_scheme "/var/www/html/$SITENAME/config/admin_credentials.txt" "$ENGINE_CMD exec $SITENAME"
         print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt" \
             "$ENGINE_CMD exec $SITENAME cat" \
             "$ENGINE_CMD exec $SITENAME cat /var/www/html/$SITENAME/config/admin_credentials.txt"
@@ -6443,11 +6464,12 @@ do_site_baremetal() {
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
             echo ""
         fi
-        echo -e "Access your site: ${GREEN}http://$DOMAIN_NAME/${NC}"
+        echo -e "Access your site: ${GREEN}$(site_scheme "$DOMAIN_NAME")://$DOMAIN_NAME/${NC}"
         if [ "$WITH_TEST_SITE" = true ]; then
             echo -e "Test site:        ${GREEN}http://test.$DOMAIN_NAME/${NC}"
         fi
         echo ""
+        credentials_name_site_scheme "/var/www/html/$SITENAME/config/admin_credentials.txt"
         print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt"
         print_ssl_deferred_notice
         echo "Useful commands:"
