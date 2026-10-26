@@ -103,3 +103,6 @@ RELEASE_STATEMENT
 
 # Migration 177 writes the legacy message export beside public_html; it is data, not source
 legacy_message_export_*.json
+
+# Python bytecode (test rigs)
+__pycache__/

@@ -445,13 +445,16 @@ the journal, which a non-root session cannot read, and the plane has no word for
 |---|---|---|
 | Whether the data root's mount point is locked underneath it, or holds files written while it was not mounted | Read `/run/joinery/data-root.mountpoint-seen` on dev (the tick records `locked`, `mode-only`, `holds-files`, `failed` or `unreachable` there) | `host_report`'s `data_root_script` carries `mountpoint`: that file's word, or none yet this boot, so the node page can say when a host's data root is not locked underneath |
 
-**2026-10-22, the 0.8.520 live check of fleet_security_patching WP10.** The new
-`outbound_mail` check failed on galactictribune and joinerydemo ("Mailgun is not set up").
-Whether a fallback service would still send their mail could not be read from here.
+**2026-10-22, the 0.8.517 rollout halted at scrolldaddy (job 6747, lost).** The plane said
+only that the agent came back idle. The answer was that docker-prod, scrolldaddy's host, got
+a power-button press from Linode at 15:58:32 UTC, two minutes into the apply; the upgrade had
+staged 0.8.517 and stopped before the swap, so the site stayed on 0.8.516, clean. Both facts
+were read over read-only SSH.
 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
-| Which mail service a site names, and its fallback (`email_service`, `email_fallback_service`): the names only, never a key | Read-only SSH to docker-prod, `docker exec` and the site's own PHP (galactictribune: Mailgun with no key, fallback SMTP with no host). joinerydemo has no SSH, so it stays unknown | Covered by the fix instead: the check itself names the service and the fallback (PluginProvisioning 1.5). A general `site_settings` observe word would take a closed list of non-secret setting names |
+| The agent's own log in a site container around a lost job (`/var/log/joinery-agent.log`: the last line before it died, the restart) | Read-only SSH, `docker exec` and grep | `site_log` gains the agent's log file where the agent runs under the container keepalive; `unit_journal`'s `joinery-agent` already covers a systemd host |
+| Whether and why the machine restarted under a job: when it booted, and how the previous boot ended (power button from the provider, `systemctl reboot`, or no clean end at all, which is a crash) | Read-only SSH: `last -x` and the previous boot's journal on docker-prod | `host_report` carries `last_boot`: boot time and the previous boot's end as one word from a closed list (`power_key`, `reboot`, `poweroff`, `none`). The plane then names it in a lost job's message when the node, or a container's host, booted after the job started: "docker-prod restarted at 15:59 (power button)" instead of "the agent or its machine restarted" |
 
 **2026-10-22, the site copy final test's C5 (a move by DNS onto a Hetzner server this
 management node made; root login off there).** The test asks that, while the old server
@@ -463,6 +466,14 @@ the copy's `log_logins`. The address it recorded could not be read, by design:
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
 | Whether a request sent through the old server reached the copy carrying the visitor's own address, not the old server's | Proven on brought servers over SSH (C4, C4b); on a plane-made copy, only that the request arrived | `copy_probes` takes a one-time path token and the address the plane sent it from, and answers whether the copy's access log holds a request for that token from that address: yes or no, no address leaving the machine |
+
+**2026-10-22, the 0.8.520 live check of fleet_security_patching WP10.** The new
+`outbound_mail` check failed on galactictribune and joinerydemo ("Mailgun is not set up").
+Whether a fallback service would still send their mail could not be read from here.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Which mail service a site names, and its fallback (`email_service`, `email_fallback_service`): the names only, never a key | Read-only SSH to docker-prod, `docker exec` and the site's own PHP (galactictribune: Mailgun with no key, fallback SMTP with no host). joinerydemo has no SSH, so it stays unknown | Covered by the fix instead: the check itself names the service and the fallback (PluginProvisioning 1.5). A general `site_settings` observe word would take a closed list of non-secret setting names |
 
 **2026-10-22, migration 220 after 0.8.521 (getjoinery, getjoinery-orgs, getjoinery-developers).**
 220 gave the shared grm_group_members ids their own; the table's missing primary key could
@@ -484,6 +495,24 @@ compiled list, which has no cloud-init unit. With root login off, nothing could 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
 | Why a cloud-init unit failed on a plane-made server, and to clear it once understood | Nothing: the incident stays open unexplained (copy-final's B46) | `unit_journal` and `reset_failed_unit` gain `cloud-init-local`, `cloud-init-network`, `cloud-init-main`, `cloud-init` and `cloud-final` (the three copies of the list: agent, `unit_journal.sh`, the plane) |
+
+**2026-10-23, jeremytunnell.com hanging behind Cloudflare.** All five rows below BUILT 2026-10-23 (agent 1.93.0, `slow_request_diagnosis_words.md`). The owner's unstar, calendar
+decline and email open hung for up to 90 seconds; each write landed, the reply never came
+back. From dev, 40 requests at once down each path: through Cloudflare 5 stalled (31 to
+90 s, 520 and 408), getjoinery through Cloudflare 0, the same site pinned to its own
+address 0. Apache logged `AH01075 ... (reading input brigade)` timeouts: the request
+reached Apache and its body never followed. `host_report` showed a healthy machine.
+Whether the kernel was dropping connections (a full accept queue, a full connection
+tracking table) could not be read: an SSH attempt with the wrong key got dev's address
+banned by the sshd jail.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Whether the kernel is dropping connections: listen-queue overflows, SYN drops, backlog drops, retransmits and timeouts, connection-tracking count against its maximum | Nothing; the question is still open | `net_health` (observe, machine, no parameters): the TCP counters from `/proc/net/netstat` and `/proc/net/snmp` (`ListenOverflows`, `ListenDrops`, `TCPBacklogDrop`, `TCPTimeouts`, `RetransSegs`, `TCPAbortOnTimeout`) read twice ten seconds apart so the answer is a rate, plus `nf_conntrack_count` and `_max`, plus connection counts by state on the web ports. Counts only, no remote address. `kernel_events_24h` in `host_report` gains `conntrack_full` and `syn_flood` (the kernel's "table full, dropping packet" and "Possible SYN flooding") |
+| Whether the web tier was saturated: Apache workers busy or idle, PHP-FPM active, idle, listen queue, max children reached | Inferred from a fast direct request at the same moment | `web_workers` (observe, machine, no parameters): Apache's `server-status?auto` scoreboard over loopback and each PHP-FPM pool's status page (active, idle, listen queue, max listen queue, max children reached, slow requests). Counts only; no request line, no client |
+| Which requests were slow on the server, as opposed to slow in transit | Nothing: `rql_response_ms` was null on every one of the 171 API rows read, because only some callers of `RequestLogger` pass it | Not a word. The API front door records `rql_response_ms` on every request, so `log_table_tail requests` answers it. `RequestTooLarge` stops being the label for a body that never arrived (Content-Length 2 read as "exceeds post_max_size 32M"): a short read is its own error type |
+| The same request timed through the site's public name and pinned to its own address, side by side, at the same moment | A shell loop of `curl` from dev, 40 pairs at a time, read by eye | A plane-side probe, not a node word: `edge_vs_origin {node}` sends N matched pairs (public name, and `--resolve` to the node's recorded addresses, IPv4 and IPv6) and reports each path's p50, p95, and stall count over 5 s. A Check Status button can then say "slow through the edge, fast direct" in one line |
+| The node's IPv6 address, to test the second origin path an edge may use | Nothing; it is not on the node row | `host_report` carries the machine's global addresses (IPv4 and IPv6), so the plane can probe both |
 
 ## Settled 2026-09-23
 

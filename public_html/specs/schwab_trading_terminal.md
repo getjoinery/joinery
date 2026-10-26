@@ -15,7 +15,17 @@ credential store, so deleting or editing the app's data cannot loosen
 today; R20 became D15 (an exit button never flips
 a position). Build started 2026-10-10 in `~/trader` (D16): engine,
 simulator and scenario suite first (Phase 2 and the keyless half of
-Phase 1). Every other choice carries a
+Phase 1); reviewer2 signed the tree off for Phase 1 wiring. The `jt`
+command line followed on 2026-10-15 (`jt-cli`: sign-in, accounts, quotes,
+price history, stream); Phase 1's live half waits only on the
+developer-portal app. The read-only window (Phase 3) was built the same
+night: `jt-view` (reviewed by reviewer2, V1–V8 fixed), the page, a
+browser preview over a demo market, and the Tauri shell (built and run
+on macOS; the dev box lacks WebKitGTK). Phase 4 followed: the button
+grid, button editor with hotkey recording, global hotkeys in the shell,
+the confirm path, the rules editor, and sim controls that move the market
+to rehearse a trip — every action type and a forced trip rehearsed in
+sim from the real UI. Every other choice carries a
 builder default in
 [§ Defaults](#defaults-owner-may-override). Builder guardrails in
 [§ Build contract](#part-iv--build-contract-executor-notes).
@@ -71,10 +81,20 @@ watched by its own rules all the time, whichever one is on screen.
   jt-engine/     domain types, the Broker trait, account model, rule engine,
                  lockout, order gateway, audit log
   jt-sim/        mock Broker impl, scripted feeds, scenario tests
-  jt-platform/   every per-OS piece: credential store, app-data paths,
-                 opening the browser — no C dependencies, so the dev box
-                 cross-checks it for Windows and macOS (§Platforms)
-  jt-app/        Tauri v2 shell: UI (webview), hotkeys, config UI, packaging
+  jt-platform/   every per-OS piece: credential store, opening the
+                 browser, no-echo terminal input — no C
+                 dependencies, so the dev box cross-checks it for Windows
+                 and macOS (§Platforms)
+  jt-cli/        the `jt` command line (Phase 1 proof): sign-in, accounts,
+                 quotes, price history, stream; reads only
+  jt-view/       what the window shows, as plain data (switcher, panel, rule
+                 strip, watchlist + positions band, chart bars, status bar),
+                 tested against the simulator; `jt-preview` serves the same
+                 page to a browser over the demo market
+  jt-app/ui/     the window's page: vanilla TS + vite, lightweight-charts
+  jt-app/src-tauri/  Tauri v2 shell: hosts the page, passes its calls to
+                 jt-view, hotkeys, packaging. Outside the Cargo workspace:
+                 it needs the OS web view to build
 ```
 
 **Shell: Tauri v2** (D3). The Rust backend owns everything that matters —
@@ -110,13 +130,15 @@ code earns by these rules:
   "this hotkey works only while the window is focused" instead of failing
   silently. On every OS, a global hotkey another program already holds
   (thinkorswim's own, say) fails at registration, and the editor says so.
-- The repo gate cross-checks `jt-platform` and `jt-app` for
+- The repo gate cross-checks `jt-platform` for
   `x86_64-pc-windows-gnu` and `aarch64-apple-darwin` on every run (same
   pattern as Joinery's `sync_cross_build_gate.sh`), so a change that breaks
   an OS nobody is running fails at once, not at release time. `jt-engine`
   (bundled SQLite) and `jt-broker` (a TLS library) need a C cross-compiler
   the dev box lacks; they hold no per-OS code, so their Linux build covers
-  them.
+  them. The Tauri shell holds no per-OS code of its own either; the gate
+  checks it wherever the OS web view's development files exist (always on
+  Windows and macOS; WebKitGTK on Linux), and type-checks the page.
 
 **Token custody:** Schwab app key/secret and OAuth tokens in the OS
 credential store via the `keyring` crate (Windows Credential Manager / macOS
@@ -125,7 +147,11 @@ kernel keyutils backend). Nothing secret in config files, SQLite, or logs.
 Windows Credential Manager caps one secret at 2,560 bytes, so the app key,
 app secret, access token and refresh token are **four separate entries**;
 the token response's `id_token` is not stored at all. Each account's
-rules (§I.6) live in the same store, in entries of their own.
+rules (§I.6) live in the same store, in entries of their own. The
+`keyring` crate stores text there as UTF-16, so an entry holds 1,280
+characters; the cap is checked that way on every OS (so the simulator
+refuses what Windows would), and rules too long for it — only dozens of
+per-symbol size limits get there — are refused in plain words.
 
 ## The Broker trait (`jt-engine`)
 
@@ -201,7 +227,13 @@ working reference for every flow below**):
   paste-the-URL flow below. Headless login (a CLI on a machine whose browser is elsewhere):
   print the authorize URL, the owner signs in on any browser, the redirect
   page fails to load, and the owner pastes that page's URL back — the
-  `code` is in its query string (schwabdev's manual flow).
+  `code` is in its query string (schwabdev's manual flow). Every sign-in
+  sends a random `state`, and a redirect without that exact `state` is
+  refused, missing or different: otherwise any page open in the browser
+  could hand the waiting listener a code for someone else's Schwab login.
+  Phase 1 confirms Schwab echoes `state`; if it does not, sign-in fails
+  loudly and this is redesigned, never quietly relaxed. A redirect
+  carrying `error` (Deny pressed at Schwab) ends the wait at once.
 - **Account type:** `securitiesAccount.type` is `MARGIN` or `CASH`. Short
   entries exist only on margin (§II.4). Cash accounts trade on settled
   money (§I.2 settled-cash gate): confirm in Phase 1 which
@@ -403,9 +435,13 @@ on disagreement** (log the divergence).
   socket that still looks connected). While the stream is down or stale,
   hard-rule equity is Schwab's `liquidationValue` from a REST snapshot
   every 10 s instead of 60, and the status bar says "rules running on
-  10-second balances".
-- **Waking from sleep:** a gap in the monotonic clock, or the OS resume
-  event, triggers a full reconcile (snapshots, orders, executions) before
+  10-second balances". The stream adapter itself drops and reconnects a
+  socket silent for 30 s (heartbeats can be that far apart); the rules
+  have long since moved to REST by then.
+- **Waking from sleep:** a gap of more than 5 s between the window's
+  quarter-second pumps — in the monotonic clock, or between it and the
+  wall clock (operating systems differ in whether the monotonic clock
+  counts sleep) — triggers a full reconcile (snapshots, orders, executions) before
   any button is enabled again.
 - **A fill seen in the order list** (filled quantity up) triggers a balance
   read at once, not at the next 60-second reconcile.
@@ -507,12 +543,12 @@ gates.
 | Rule | Refuses | v1 |
 |---|---|---|
 | Max position size (shares or notional, per symbol; default applies to all) | any order whose fill would exceed it (resting orders count toward exposure) | ✅ |
-| Max single-order size (fat-finger, notional) | any order above the cap | ✅ |
+| Max single-order size (fat-finger, notional) | any order that opens or adds to a position above the cap. Exits are never capped: they sell at most what is held (D15), and getting out must never take more than one press | ✅ |
 | Max daily trades (D11) | any position-opening order once today's trades **plus working entry orders** reach the limit — a resting entry limit order holds its slot, so two presses at 9/10 cannot both fill. Closes, flatten, cancels and bracket exits are always allowed | ✅ |
 | Entries-only-with-stop | any position-opening button not configured as a bracket (toggleable; default on) | ✅ |
 | Auth runway (not configurable) | every order button, when the refresh token expires before the end of the current regular session (or, outside the session, the next one), or the last token refresh failed or is older than one access-token lifetime. The status bar names the fix: sign in again | ✅ |
 | Short entries need margin (not configurable) | any short-opening order on a `CASH` account | ✅ |
-| Buy with settled cash only (cash accounts; toggleable, default on) | any buy on a `CASH` account costing more than its settled cash minus the cost of its working buy orders. Buying with today's sale proceeds and selling before they settle is a good-faith violation at Schwab; enough of them restrict the account for 90 days. Dollar and %-of-buying-power quantities size against settled cash on these accounts | ✅ |
+| Buy with settled cash only (cash accounts; toggleable, default on) | any buy on a `CASH` account costing more than its settled cash minus the cost of its working buy orders. Buying with today's sale proceeds and selling before they settle is a good-faith violation at Schwab; enough of them restrict the account for 90 days. Dollar and %-of-buying-power quantities size against settled cash on these accounts (and when no rules are known yet, which refuses the press anyway); with the rule off, % of buying power sizes against `cashAvailableForTrading` | ✅ |
 | No entries while day P&L below soft threshold | entry orders only — exits always allowed | later |
 
 ## I.3 Enforcement sequence (hard-rule trip)
@@ -547,8 +583,10 @@ review 2026-10-10, CR1–CR2):
    confirmed by one immediate REST snapshot (~300 ms) before anything
    happens; if Schwab's own `liquidationValue` does not confirm it, the
    divergence is logged and nothing trips. One bad print or a one-sided
-   quote at 09:30 must not flatten the account. A trip computed from a
-   REST snapshot needs no second read.
+   quote at 09:30 must not flatten the account. After a disagreement,
+   streamed marks may not trip that account again for 5 s (one bad tape
+   would otherwise ask Schwab every tick); REST snapshots keep evaluating
+   meanwhile. A trip computed from a REST snapshot needs no second read.
 1. **Enter `Enforcing`** (buttons/hotkeys on this account refused from
    here on).
 2. **Cancel** every working order on the account — bracket children,
@@ -572,7 +610,12 @@ review 2026-10-10, CR1–CR2):
    - e. Watch the order through the poller. Filled → back to (b) (a
      partial fill leaves a remainder). Still working after 10 s while
      the symbol is trading → cancel it, back to (a). Rejected → surface
-     loudly, retry from (a) every 60 s until flat.
+     loudly, retry from (a) every 60 s until flat. **Not filling:** after
+     three orders sent on a symbol with nothing sold for 30 s (no halt
+     flagged, the market there but not taking them), the symbol shows in
+     the `Stalled` list — "SPY: sell orders are not filling (3 sent,
+     nothing sold for 30s); still trying" — with a loud notice; unlike the
+     other stalls, the engine keeps cancelling and re-sending.
    - **Halted symbol:** while level-one quotes show the symbol halted
      (field verified in Phase 1), the 10 s rule is suspended — the single
      order waits for the reopen, and the overlay says "XYZ halted, sell
@@ -681,7 +724,17 @@ Schwab rather than trusting local files**:
 - **Today's rules are not in the app's data folder** (§I.6), so deleting
   or editing that folder cannot loosen today. Deleting the database during
   a first-step lockout loses its row; the rule re-trips with a fresh
-  timeout — a second break, never an early unlock.
+  timeout — a second break, never an early unlock. Editing the row is no
+  better: a lock lasts at least its trip time plus the timeout in today's
+  rules (which are in the credential store), so a row whose end was moved
+  earlier or marked ended is put back on start, the lock stands, and a
+  loud notice says the record was changed outside the app. A sell-off's
+  row marked ended is put back whatever the time (the engine never ends
+  one early), and flattening resumes. That floor sits below the engine's
+  own end — the lock starts once the account is flat — so an end moved
+  earlier by no more than the sell-off took passes, and a restored lock
+  ends at the floor. The row's trip time, rule and step are where the
+  line is drawn: whoever edits those can as easily trade in thinkorswim.
 - Outside the model, stated plainly in the README: Schwab's own apps keep
   working. The tool makes the disciplined path the fast path.
 
@@ -810,7 +863,7 @@ carries the first candidates).
 ## II.4 Programmable buttons + hotkeys
 
 A button = named action + parameters + optional hotkey + optional per-button
-confirm. **No scripting language, deliberately** — buttons are data
+confirm (every action honors it, Flatten all and Cancel all included). **No scripting language, deliberately** — buttons are data
 interpreted by the Rust order builder; a closed vocabulary is what keeps
 every press one gate-checked order intent (no loops, no conditions, no path
 around the engine). Full action vocabulary (all v1, one order builder):
@@ -862,7 +915,9 @@ shows the account it acted on ("Flatten all — Roth") — it always acts on
 the account selected in the switcher. All hotkeys dead
 while the selected account is `Enforcing`/`Locked` and while any confirm
 dialog is open. Conflicts
-refused at record time.
+refused at record time. A held key's repeats are ignored, and the engine
+refuses the same button pressed again within 1 s ("Pressed twice within
+a second"), so a bouncing key or a double click sends one order.
 
 **Buttons are shared across accounts**: one grid, and a press acts on the
 account selected in the switcher, gated by that account's rules. A
@@ -893,7 +948,9 @@ from the live stream; several ship in-repo) when it doesn't. Fill model:
 market fills at opposing quote (ask for buys) up to displayed size, limit
 fills when the quote crosses, brackets honored locally. Mode is loud —
 colored window border + persistent badge; sim and live never share an
-account model or database file. Schwab has no paper-trading API; this is
+account model or database file. Sim controls in the button bar move the
+chart symbol by ±1 % or ±3 % at once, so a rule trip can be rehearsed
+on demand. Schwab has no paper-trading API; this is
 the rehearsal surface for buttons, hotkeys, and rule trips.
 
 ## II.6 Rules editor
@@ -1024,7 +1081,24 @@ the trade limit still counts the fill; the credential store failing
 mid-day — rules keep enforcing; an OCO placed in thinkorswim — kept by
 Cancel all and cut by the guard; a crash between cancelling a stop and
 putting it back, on a partial or full close and with cancels still
-pending — the stop comes back for what is held, nothing is sold. **Harsh mode** (`tests/harsh.rs`) re-runs
+pending — the stop comes back for what is held, nothing is sold.
+
+Added by the 2026-10-17 coverage audit: flatten orders that never fill —
+`Stalled` with a loud notice in words, still re-sending, settled once
+they fill; a 429 or no network after the trip with the flatten order out
+— nothing sent while down, no duplicate after; a thinkorswim sell on the
+symbol being flattened, mid-enforcement — cancelled before any flatten
+order goes out; a hand-deleted or hand-edited lockout row — the lock
+stands (a running sell-off resumes), never an early unlock or a first
+step switched off; a silent open socket — 10-second balances after 15 s; a
+one-sided or crossed quote through the limit — no trip; a deposit above
+the profit target — no lock; a short entry — every entry gate; % of
+buying power on a cash account — settled cash only while that rule is
+on; rules too long for one credential-store entry — refused whole.
+Every scenario that trips a rule ends by stepping on until the trip has
+settled and asserting it (the harness fails a scenario that does not),
+and no closing order the app sends — enforcement, Flatten all, a press —
+may fill past flat. **Harsh mode** (`tests/harsh.rs`) re-runs
 the main scenarios with the market moving between every REST call,
 cancels that take a second and can lose to a fill, executions two
 minutes late, and partial fills.
@@ -1066,7 +1140,9 @@ carries `Location`; thinkorswim open while the app streams; overnight
 sampling of `initialBalances` to pin the day roll; how a transfer's
 transaction `time` relates to when its cash moves (if a row can be
 stamped before the balances show the cash, day P&L counts it twice —
-code review CR11).
+code review CR11); `gate.sh` on the Windows machine, so the real
+credential-store test runs against Credential Manager; the alarm heard on
+a rule trip right after a cold launch, before any click.
 
 **Repo gate:** `gate.sh` at the repo root — runs every suite and the
 cross-checks of §Platforms, under `nice -n 19`.
@@ -1077,8 +1153,11 @@ cross-checks of §Platforms, under `nice -n 19`.
 
 - **Phase 1 — broker plumbing.** OAuth ceremony + keyring custody +
   auto-refresh; account/positions/balances; quotes, price history,
-  streamer subscribe; CLI proof (`jt accounts`, `jt account <nickname>`,
-  `jt quote SPY`, `jt stream SPY`). *Done when:* CLI shows live account + streaming quotes from the
+  streamer subscribe; CLI proof (`jt login`, `jt accounts`,
+  `jt account <nickname>`, `jt quote SPY`, `jt history SPY`,
+  `jt stream SPY`; the nickname is the one set at Schwab, read from
+  `userPreference`, and the last four digits also select an account).
+  The CLI reads only: it places, changes and cancels nothing. *Done when:* CLI shows live account + streaming quotes from the
   real key; contract tests green on captured fixtures. (Fixture-first: all
   serializer work proceeds keyless while approval is pending.)
 - **Phase 2 — engine + sim.** Account model, full v1 rule set, enforcement
@@ -1087,6 +1166,15 @@ cross-checks of §Platforms, under `nice -n 19`.
   every §Verification scenario passes; the gate script is green.
 - **Phase 3 — terminal shell (read-only).** Tauri app: account panel +
   rule strip, watchlist with integrated positions, chart with live edge.
+  **Live, the whole process is read-only until Phase 5:** the engine runs
+  over a broker wrapper that refuses every place, replace and cancel
+  before anything reaches Schwab, so a rule that trips stalls loudly
+  instead of trading. Nothing is linked by itself: granted accounts show
+  in the switcher as "Not linked", and the owner links each one (a new
+  one arms at the next day roll). The window polls one `call` command;
+  the terminal runs on a thread of its own (the database connection
+  cannot be shared between threads), and if that thread dies the window
+  covers itself with the reason instead of looking alive.
   *Done when:* a full market session runs against the live account with
   correct P&L, healing chart, no stalls — a daily-usable read-only
   terminal.
