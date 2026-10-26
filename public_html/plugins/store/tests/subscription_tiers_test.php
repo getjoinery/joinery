@@ -64,9 +64,11 @@ $settings = Globalvars::get_instance();
 // ---------------------------------------------------------------------------
 
 /**
- * Persist a setting to the (test) database and drop the Globalvars cache so the
- * next get_setting() re-reads it. change_tier_logic reads settings through the
- * singleton, so an in-memory-only override would not survive its internal reads.
+ * Persist a setting to the (test) database and set it on the Globalvars
+ * singleton, which change_tier_logic reads it through. The singleton is kept,
+ * not rebuilt: a rebuilt one re-reads the sealed Stripe secret key from the
+ * copied test database, where it does not open, and Stripe stops working for
+ * the rest of the run.
  */
 function st_apply_settings(array $values) {
 	foreach ($values as $name => $value) {
@@ -75,10 +77,8 @@ function st_apply_settings(array $values) {
 			$setting->set('stg_value', $value);
 			$setting->save();
 		}
+		harness_set_setting_mem($name, $value);
 	}
-	$ref = new ReflectionClass('Globalvars');
-	$map = $ref->getProperty('instance_map');
-	$map->setValue(null, array());
 }
 
 /** Snapshot the named settings and defer their restoration (crash-safe, LIFO). */
@@ -120,6 +120,15 @@ function st_current_level($user_id) {
  * Returns the subscription detail array, or null with the reason in $error.
  */
 function st_create_subscription($user_id, $product_id, &$error = null) {
+	// Made as the checkout makes it: a purchase writes the buyer's Stripe
+	// customer, order and line under the charge's rule-checked write
+	// (cart_charge_logic), which a member's own session cannot do alone.
+	return SystemBase::rule_checked_write(function () use ($user_id, $product_id, &$error) {
+		return st_make_subscription($user_id, $product_id, $error);
+	});
+}
+
+function st_make_subscription($user_id, $product_id, &$error = null) {
 	$product = new Product($product_id, TRUE);
 	$versions = $product->get_product_versions();
 	$version = $versions->count() > 0 ? $versions->get(0) : null;
@@ -206,6 +215,12 @@ function st_create_subscription($user_id, $product_id, &$error = null) {
  * make the next one pass (or fail) for the wrong reason.
  */
 function st_reset_user($user_id) {
+	// Clearing the member's Stripe customer is the store's bookkeeping, as at
+	// checkout (st_create_subscription()).
+	SystemBase::rule_checked_write(function () use ($user_id) { st_clear_user($user_id); });
+}
+
+function st_clear_user($user_id) {
 	try {
 		$user = new User($user_id, TRUE);
 		$helper = new StripeHelper();
