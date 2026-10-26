@@ -17,6 +17,7 @@
  * scheduled task's scan (advanceAll) never picks them up while the test
  * drives advance() directly.
  *
+ * @version 1.2 - publishedHere(): a version already released here is not offered again
  * @version 1.1 - followUp() gives the started publish's own status
  * @version 1.0
  */
@@ -122,5 +123,24 @@ foreach ($cases as $c) {
 	check(($t['outcome'] ?? '') === 'refused' && strpos((string)($t['reason'] ?? ''), $c[2]) !== false && !isset($t['publish_job_id']),
 		'and the apply job says why: ' . $c[2], json_encode($t));
 }
+
+section('A version already published here is not offered again');
+
+// The publisher refuses a second release of a version (publish_upgrade.php);
+// publishedHere() asks the same thing first, so a site that republishes is
+// offered Apply and publish rather than a Republish that can only fail.
+$patch = random_int(900, 999);
+$release = new Upgrade(NULL);
+$release->set('upg_major_version', 0);
+$release->set('upg_minor_version', 0);
+$release->set('upg_patch_version', $patch);
+$release->set('upg_name', 'harness-aap-' . $patch);
+$release->save();
+$release->load();
+harness_register_row('upg_upgrades', 'upg_upgrade_id', $release->key);
+
+check(ApplyAndPublish::publishedHere('0.0.' . $patch), 'a version with a release here reads as published');
+check(!ApplyAndPublish::publishedHere('0.0.' . ($patch + 1000)), 'one with no release here does not');
+check(!ApplyAndPublish::publishedHere('not-a-version'), 'nor does a version that is not a number');
 
 harness_finish();

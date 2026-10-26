@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.12 - this site's own node offers no Publish of a version it has already published (the publisher
+ *                refuses it), only Apply and publish while its upgrade source offers a newer one
  * @version 1.11 - Deploy to all managed nodes is described by StagedRolloutRunner::deploy_all_description (its two stages)
  * @version 1.10 - Apply and publish beside Publish, while the node is behind: the apply, then the publish of the
  *                 version it reaches (ApplyAndPublish); Auto-notes then drafts through that version
@@ -143,8 +145,21 @@
 			$pub_major = (int)$pm[1]; $pub_minor = (int)$pm[2]; $pub_patch = (int)$pm[3];
 		}
 		$publish_blocked = $node->is_self() ? AgentDistPublisher::uncommittedAdvice()['lines'] : array();
+		// Apply and publish is offered while the node is behind the version
+		// shown above: it applies that, then publishes what the node reaches.
+		$apply_target = ($up_to_date === false && preg_match('/^\d+\.\d+\.\d+$/', $compare_version)) ? $compare_version : '';
+		// This site's own release list is here to read: a version it already
+		// published is refused by the publisher, so it is not offered. Another
+		// node's list is on that node, whose publish job says so itself.
+		$already_published = $node->is_self() && !DeploymentHelper::mayMintReleaseVersion()
+			&& ApplyAndPublish::publishedHere($running);
 		$page->begin_box(['title' => 'Publish Release on This Node']);
-		if ($publish_blocked) {
+		if ($already_published && $apply_target === '') {
+			echo '<p class="text-muted mb-0">' . htmlspecialchars($running) . ' is already published here, and a site that '
+				. 'republishes what it received has no other number to publish. Publishing is offered again when its '
+				. 'upgrade source offers a newer release.</p>';
+			$page->end_box();
+		} elseif ($publish_blocked) {
 			echo '<div class="jy-callout jy-callout-warning">A release is built from committed work, so there is nothing to publish until these are committed and pushed:<ul class="mb-0"><li>'
 				. implode('</li><li>', array_map('htmlspecialchars', $publish_blocked)) . '</li></ul>Reload this page afterwards.</div>';
 			$page->end_box();
@@ -159,9 +174,6 @@
 		$pub_form->numberinput('version_major', 'Major', ['required' => true, 'value' => $pub_major, 'min' => 0]);
 		$pub_form->numberinput('version_minor', 'Minor', ['required' => true, 'value' => $pub_minor, 'min' => 0]);
 		$pub_form->numberinput('version_patch', 'Patch', ['required' => true, 'value' => $pub_patch, 'min' => 0]);
-		// Apply and publish is offered while the node is behind the version
-		// shown above: it applies that, then publishes what the node reaches.
-		$apply_target = ($up_to_date === false && preg_match('/^\d+\.\d+\.\d+$/', $compare_version)) ? $compare_version : '';
 		if ($apply_target !== '') {
 			$pub_form->hiddeninput('apply_target', '', ['value' => $apply_target]);
 		}
@@ -179,7 +191,9 @@
 				'helptext' => StagedRolloutRunner::deploy_all_description(StagedRolloutRunner::deploy_all_plan()),
 			]);
 		}
-		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
+		if (!$already_published) {
+			$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
+		}
 		if ($apply_target !== '') {
 			echo ' ';
 			$pub_form->submitbutton('btn_apply_and_publish', 'Apply and publish', ['class' => 'btn btn-outline-primary']);
