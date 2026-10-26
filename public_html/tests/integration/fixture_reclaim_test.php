@@ -20,8 +20,10 @@
  *  - a dead run's user (lock file there, nobody holding it) goes at once,
  *    whatever its age;
  *  - a live run's user (lock held) is NEVER touched, however old;
- *  - a user whose token has no lock file goes only past the one-hour floor,
+ *  - a user whose token has no lock file goes only past the two-hour floor,
  *    and so does a HarnessTest-named family row, which carries no token;
+ *  - a named row in a table with no birth column goes only while no other
+ *    run is alive;
  *  - a tier that promises no side effects (safe) never sweeps.
  *
  * The other runs are faked: a lock file this suite holds stands in for a live
@@ -34,7 +36,9 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 $db = DbConnector::get_instance()->get_db_link();
-$two_hours_ago = gmdate('Y-m-d H:i:s', time() - 7200);
+// Past the floor by a margin: a row born exactly at the floor is not older
+// than it, and the sweep often runs within the same second.
+$past_floor = gmdate('Y-m-d H:i:s', time() - HARNESS_STALE_FIXTURE_SECONDS - 600);
 $live_dir = harness_shared_dir('live');   // the folder every run's lock is in, not this run's scratch
 
 /** A token no real run holds. */
@@ -67,6 +71,7 @@ $user_exists = function ($id) use ($db) {
 $lock_files = array();
 $held = array();
 $event = null;
+$stranded_email = null;
 try {
 	// ------------------------------------------------------------------
 	section('A dead run\'s fixtures go at once');
@@ -89,7 +94,7 @@ try {
 	check($fh && flock($fh, LOCK_EX | LOCK_NB), 'this suite holds a lock standing in for another live run');
 	$held[] = $fh;
 	check(harness_run_token_state($live) === 'live', 'a held lock reads as a live run');
-	$u = $make_stranded_user($live, $two_hours_ago);
+	$u = $make_stranded_user($live, $past_floor);
 	harness_cleanup_stale_fixtures();
 	check($user_exists($u->key), 'a live run\'s user is left alone, old as it is');
 	flock($fh, LOCK_UN);
@@ -98,11 +103,11 @@ try {
 	check(!$user_exists($u->key), 'then the next sweep takes it', 'user ' . $u->key . ' survived');
 
 	// ------------------------------------------------------------------
-	section('With no lock file, the one-hour floor decides');
+	section('With no lock file, the two-hour floor decides');
 
 	$unknown = $other_token();
 	check(harness_run_token_state($unknown) === 'unknown', 'a token with no lock file reads as unknown');
-	$old = $make_stranded_user($unknown, $two_hours_ago);
+	$old = $make_stranded_user($unknown, $past_floor);
 	$young = $make_stranded_user($unknown, gmdate('Y-m-d H:i:s'));
 	harness_cleanup_stale_fixtures();
 	check(!$user_exists($old->key),
@@ -117,7 +122,7 @@ try {
 		$event->load();
 		// Backdate the birth column the sweep ages by.
 		$q = $db->prepare('UPDATE evt_events SET evt_create_time = ? WHERE evt_event_id = ?');
-		$q->execute(array($two_hours_ago, $event->key));
+		$q->execute(array($past_floor, $event->key));
 		harness_cleanup_stale_fixtures();
 		$q = $db->prepare('SELECT count(*) FROM evt_events WHERE evt_event_id = ?');
 		$q->execute(array($event->key));
@@ -128,9 +133,40 @@ try {
 	}
 
 	// ------------------------------------------------------------------
+	section('A table with no birth column goes only while no other run is alive');
+
+	// An email has no creation time to age by, so its row cannot be judged
+	// stale by the floor; a live run might still be using it.
+	$stranded_email = new Email(NULL);
+	$stranded_email->set('eml_subject', 'HarnessTest ReclaimTimeless');
+	$stranded_email->set('eml_message_plain', 'body');
+	$stranded_email->set('eml_status', Email::EMAIL_CREATED);
+	$stranded_email->save();
+	$stranded_email->load();
+	$email_exists = function () use ($db, $stranded_email) {
+		$q = $db->prepare('SELECT count(*) FROM eml_emails WHERE eml_email_id = ?');
+		$q->execute(array($stranded_email->key));
+		return (int)$q->fetchColumn() === 1;
+	};
+	$other = $other_token();
+	$lock_files[] = $live_dir . '/' . $other;
+	$fh = fopen($live_dir . '/' . $other, 'c');
+	check($fh && flock($fh, LOCK_EX | LOCK_NB), 'this suite holds a lock standing in for another live run');
+	$held[] = $fh;
+	harness_cleanup_stale_fixtures();
+	check($email_exists(), 'while another run is alive, the email is left alone');
+	flock($fh, LOCK_UN);
+	if (harness_other_run_live()) {
+		harness_skip('with no other run alive, the email is reclaimed', 'a real run is alive on this box right now');
+	} else {
+		harness_cleanup_stale_fixtures();
+		check(!$email_exists(), 'with no other run alive, the email is reclaimed', 'email ' . $stranded_email->key . ' survived');
+	}
+
+	// ------------------------------------------------------------------
 	section('A no-side-effects tier never sweeps');
 
-	$u = $make_stranded_user($other_token(), $two_hours_ago);
+	$u = $make_stranded_user($other_token(), $past_floor);
 	$h = &$GLOBALS['__harness'];
 	$real_tier = $h['meta']['tier'];
 	$h['meta']['tier'] = 'safe';
@@ -144,7 +180,7 @@ try {
 	// Backstop only: if a check above failed, don't strand the props.
 	foreach ($held as $fh) { if ($fh) { fclose($fh); } }
 	foreach ($lock_files as $file) { @unlink($file); }
-	foreach (array_merge($stranded_users, array($event)) as $leftover) {
+	foreach (array_merge($stranded_users, array($event, $stranded_email)) as $leftover) {
 		if ($leftover && $leftover->key) {
 			try { $leftover->permanent_delete(); } catch (\Throwable $e) { /* already gone */ }
 		}

@@ -556,15 +556,23 @@ deletion engine and the validator — a new one is a decision: give it a model
 
 It also names surviving rows in the fixture families that label themselves.
 Name any standalone fixture `HarnessTest <something>` in the table's name column
-(`evt_events`, `svy_surveys`, `grp_groups`, `pro_products`, `bty_booking_types`,
-`mgn_managed_nodes`, `qst_questions` are covered) and a leak reports the table
-and the offending row instead of waiting to be noticed as a phantom entry in an
-admin screen. Where the value cannot hold a space, the label is a prefix instead:
-mailbox domains start `harnesstest-` (`ied_domain`), mailbox aliases and IMAP
-account usernames start `harnesstest_` (`iea_alias`, `iia_username`). The
-boot-time reclaim takes these families before the users, because a fixture user
-who is the sole member of a protected mailbox cannot be deleted while that
-mailbox stands — the alias goes first and cascades its grants and feeds. A
+and a leak reports the table and the offending row instead of waiting to be
+noticed as a phantom entry in an admin screen. Where the value cannot hold a
+space, the label is a prefix instead: mailbox domains start `harnesstest-`
+(`ied_domain`), mailbox aliases and IMAP account usernames start `harnesstest_`
+(`iea_alias`, `iia_username`). The families are one list,
+`harness_named_fixture_families()` in `tests/lib/harness.php`, which both the
+gate and the boot-time reclaim read. A table goes on it the first time a suite
+names a fixture there: the gate scans the suites for `'HarnessTest` values and
+fails on a name column the list does not cover, since a killed run's rows in
+such a table would never be reclaimed. The list is in reclaim order, a row
+before whatever it points at (a node before its host and backup target, backup
+history before its target), and the mailbox families come before the users,
+because a fixture user who is the sole member of a protected mailbox cannot be
+deleted while that mailbox stands — the alias goes first and cascades its
+grants and feeds. A table with no creation column (`pro_products`,
+`eml_emails`) cannot be aged, so the reclaim takes its rows only while no other
+run is alive. A
 fixture reachable from a registered parent needs no name.
 
 A `HarnessTest` node is also invisible to the scheduled passes that run on the

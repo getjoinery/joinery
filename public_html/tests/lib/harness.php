@@ -917,6 +917,61 @@ function make_machine_key($user_id, $name, $permission = 4) {
 }
 
 /**
+ * The fixture families that label themselves by name, one row each:
+ * [class, table, name column, birth column or null, LIKE pattern]. The
+ * pattern is 'HarnessTest ' for display names, 'harnesstest_' /
+ * 'harnesstest-' where the value is an address part or a hostname and cannot
+ * hold a space. The order is the reclaim's: a row goes before whatever it
+ * points at, so a node goes before its host and its backup target, history
+ * before its target, an event before its location.
+ *
+ * harness_cleanup_stale_fixtures() reclaims these and referential_integrity
+ * names any that survive. That gate also fails a suite that names a fixture
+ * 'HarnessTest ...' in a table missing here, which is how a family stays
+ * covered: a table left off this list keeps every row a killed run strands.
+ */
+function harness_named_fixture_families() {
+	return array(
+		array('InboundEmailDomain', 'ied_inbound_email_domains', 'ied_domain', 'ied_create_time', 'harnesstest-%'),
+		array('InboundEmailAlias', 'iea_inbound_email_aliases', 'iea_alias', 'iea_create_time', 'harnesstest\\_%'),
+		array('InboundImapAccount', 'iia_inbound_imap_accounts', 'iia_username', 'iia_create_time', 'harnesstest\\_%'),
+		array('InboundEmailMessage', 'iem_inbound_email_messages', 'iem_subject', 'iem_create_time', 'HarnessTest %'),
+		array('Event', 'evt_events', 'evt_name', 'evt_create_time', 'HarnessTest %'),
+		array('Location', 'loc_locations', 'loc_name', 'loc_create_time', 'HarnessTest %'),
+		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time', 'HarnessTest %'),
+		array('Question', 'qst_questions', 'qst_question', 'qst_create_time', 'HarnessTest %'),
+		array('Group', 'grp_groups', 'grp_name', 'grp_create_time', 'HarnessTest %'),
+		array('Product', 'pro_products', 'pro_name', null, 'HarnessTest %'),
+		array('BookingType', 'bty_booking_types', 'bty_name', 'bty_create_time', 'HarnessTest %'),
+		array('Email', 'eml_emails', 'eml_subject', null, 'HarnessTest %'),
+		array('MailingList', 'mlt_mailing_lists', 'mlt_name', 'mlt_create_time', 'HarnessTest %'),
+		array('SignalReceiver', 'sgr_signal_receivers', 'sgr_name', 'sgr_create_time', 'HarnessTest %'),
+		array('Post', 'pst_posts', 'pst_title', 'pst_create_time', 'HarnessTest %'),
+		array('ApiKey', 'apk_api_keys', 'apk_name', 'apk_create_time', 'HarnessTest %'),
+		array('Recipe', 'rcp_recipes', 'rcp_name', 'rcp_create_time', 'HarnessTest %'),
+		array('DataRootEscrow', 'dre_data_root_escrows', 'dre_hostname', 'dre_create_time', 'HarnessTest %'),
+		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time', 'HarnessTest %'),
+		array('ManagedHost', 'mgh_managed_hosts', 'mgh_name', 'mgh_create_time', 'HarnessTest %'),
+		array('FleetHandMachine', 'fhm_fleet_hand_machines', 'fhm_name', 'fhm_create_time', 'HarnessTest %'),
+		array('CustomerCloudAccount', 'cca_customer_cloud_accounts', 'cca_account_name', 'cca_create_time', 'HarnessTest %'),
+		array('OperatorCloudAccount', 'oca_operator_cloud_accounts', 'oca_account_name', 'oca_create_time', 'HarnessTest %'),
+		array('BackupHistory', 'bkh_backup_history', 'bkh_target_name', 'bkh_create_time', 'HarnessTest %'),
+		array('BackupTarget', 'bkt_backup_targets', 'bkt_name', 'bkt_create_time', 'HarnessTest %'),
+	);
+}
+
+/** Whether any run other than this one is alive now (holds its run lock). */
+function harness_other_run_live() {
+	foreach ((array)glob(PathHelper::getSiteRoot() . '/cache/tests/live/*') as $file) {
+		if (is_file($file) && harness_run_token_state(basename($file)) === 'live'
+			&& basename($file) !== $GLOBALS['__harness']['run_token']) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * Reclaim fixture rows a KILLED run left behind.
  *
  * Teardown runs on a clean finish, on a crash, and (via the SIGTERM handler
@@ -935,8 +990,9 @@ function make_machine_key($user_id, $name, $permission = 4) {
  * one whose run is live is never touched, and one whose token has no lock
  * file is reclaimed only past the two-hour floor (no suite process outlives
  * its timeout cap: HARNESS_TIMEOUT_MAX, or HARNESS_TIMEOUT_MAX_LIVE for a live
- * suite). The other families carry no token
- * in their names and go by the floor alone. Deletion goes through each
+ * suite). The named families (harness_named_fixture_families()) carry no
+ * token and go by the floor, or, in a table with no birth column, only while
+ * no other run is alive. Deletion goes through each
  * model's permanent_delete(), so declared cascades run and nothing is
  * orphaned. Gated like the mail sweep: never without debug (production), and
  * never from a tier that promises no side effects — which keeps
@@ -954,37 +1010,34 @@ function harness_cleanup_stale_fixtures() {
 	$floor = gmdate('Y-m-d H:i:s', time() - HARNESS_STALE_FIXTURE_SECONDS);
 	$db = DbConnector::get_instance()->get_db_link();
 
-	// The self-labelling families referential_integrity watches, same floor,
-	// BEFORE the users: a stale fixture user who is the sole member of a
-	// protected mailbox cannot be deleted while that mailbox stands (the grant
-	// refuses, correctly), and the mailbox is fixture debris too. Deleting the
-	// alias first cascades its grants and feeds; the user then goes cleanly.
-	// A class that does not resolve here (inactive plugin) is skipped: its
-	// rows cannot be deleted with their cascades honoured, and the gate still
-	// names them. Each family names the LIKE pattern its fixtures carry —
-	// 'HarnessTest ' for display names, 'harnesstest_' / 'harnesstest-' where
-	// the value is an address part or a hostname and cannot hold a space.
-	$families = array(
-		array('InboundEmailDomain', 'ied_inbound_email_domains', 'ied_domain', 'ied_create_time', 'harnesstest-%'),
-		array('InboundEmailAlias', 'iea_inbound_email_aliases', 'iea_alias', 'iea_create_time', 'harnesstest\\_%'),
-		array('InboundImapAccount', 'iia_inbound_imap_accounts', 'iia_username', 'iia_create_time', 'harnesstest\\_%'),
-		array('Event', 'evt_events', 'evt_name', 'evt_create_time', 'HarnessTest %'),
-		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time', 'HarnessTest %'),
-		array('Group', 'grp_groups', 'grp_name', 'grp_create_time', 'HarnessTest %'),
-		array('Product', 'pro_products', 'pro_name', 'pro_create_time', 'HarnessTest %'),
-		array('BookingType', 'bty_booking_types', 'bty_name', 'bty_create_time', 'HarnessTest %'),
-		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time', 'HarnessTest %'),
-		array('Recipe', 'rcp_recipes', 'rcp_name', 'rcp_create_time', 'HarnessTest %'),
-		array('Question', 'qst_questions', 'qst_question', 'qst_create_time', 'HarnessTest %'),
-	);
-	foreach ($families as $f) {
+	// The self-labelling families (harness_named_fixture_families()), BEFORE
+	// the users: a stale fixture user who is the sole member of a protected
+	// mailbox cannot be deleted while that mailbox stands (the grant refuses,
+	// correctly), and the mailbox is fixture debris too. Deleting the alias
+	// first cascades its grants and feeds; the user then goes cleanly. A
+	// class that does not resolve here (inactive plugin) is skipped: its rows
+	// cannot be deleted with their cascades honoured, and the gate still
+	// names them. A table with no birth column cannot be aged, so its rows go
+	// only while no other run is alive to own them.
+	$other_run_live = null;
+	foreach (harness_named_fixture_families() as $f) {
 		list($cls, $table, $name_col, $created_col, $pattern) = $f;
 		if (!class_exists($cls)) continue;
 		if (!property_exists($cls, 'tablename') || $cls::$tablename !== $table) continue;
+		if ($created_col === null) {
+			if ($other_run_live === null) $other_run_live = harness_other_run_live();
+			if ($other_run_live) continue;
+		}
 		try {
 			$pkey_col = $cls::$pkey_column;
-			$q = $db->prepare("SELECT {$pkey_col}, {$name_col} FROM {$table} WHERE {$name_col} LIKE ? AND {$created_col} < ?");
-			$q->execute(array($pattern, $floor));
+			$sql = "SELECT {$pkey_col}, {$name_col} FROM {$table} WHERE {$name_col} LIKE ?";
+			$params = array($pattern);
+			if ($created_col !== null) {
+				$sql .= " AND {$created_col} < ?";
+				$params[] = $floor;
+			}
+			$q = $db->prepare($sql);
+			$q->execute($params);
 			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 				try {
 					$id = (int)$row[$pkey_col];
@@ -997,7 +1050,7 @@ function harness_cleanup_stale_fixtures() {
 				}
 			}
 		} catch (\Throwable $e) {
-			// Absent table or column on this install: nothing to reclaim.
+			harness_boot_note("  WARNING: stale fixture lookup in {$table} failed: " . $e->getMessage() . "\n");
 		}
 	}
 
