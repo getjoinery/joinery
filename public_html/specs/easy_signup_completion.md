@@ -160,6 +160,18 @@ comment or function that marks them; line numbers are as of 2026-10-25 16:50 UTC
   version's stored Stripe price against `prv_version_price` and clears a mismatch. (Raised by
   permissionsrefactor, 10-25.)
 
+- **B145-B147 — gaps left in the gateway return** (reported by permissionsrefactor 10-25
+  after its return-path fix; trace each before building):
+  - **B145:** on a return, an invalid coupon or an ownership refusal still sends a buyer who
+    has already paid back to checkout with an error. Once money has moved, a refusal must
+    become an order line in error plus a refund or an operator alert, never a bounce.
+  - **B146:** an order the webhook makes for a buyer who never comes back stays PAID with no
+    lines. The webhook must build the lines itself, from the recorded payment, when no
+    return arrives.
+  - **B147:** a return that lands in another browser session (a phone's in-app browser, a
+    second tab after sign-out) tells the buyer to contact support. The recorded payment
+    should find its order without the original session.
+
 Tests: a store suite that drives each failure with the Stripe client stubbed: incomplete
 subscription, subscription create failure after a charge, subscription-only order, refund of
 each line kind, expiry webhook.
@@ -170,6 +182,28 @@ each line kind, expiry webhook.
 - Run one Managed test order on dev to `mail_state = done`, and send a message from the site.
 - Then the self-hosted Connect path: a second dev box connects to dev's plane, enrols mail,
   sends, and switches back to its own provider (`services_phase2_platform.md` §11 steps 1 and 3).
+
+**getjoinery's own mail moves from Mailgun to SMTP2GO** (owner, 10-25: the Mailgun free
+allowance is too small for what getjoinery sends). This is getjoinery's own mail (receipts,
+password resets, the Managed welcome), separate from customers' mail: that goes through
+per-customer subaccounts made with Server Manager's master key (`Smtp2GoClient::fromSettings()`)
+and never through the site's email settings. Nothing in the Managed flow needs this move;
+it rides on the same account and is the first real send through `Smtp2GoProvider`, whose
+suites all run against a stubbed API.
+
+1. Check what getjoinery uses Mailgun for, read-only through its agent. `Smtp2GoProvider`
+   only sends (its header: not a `RawMessageRelay`); if getjoinery also receives through
+   Mailgun, receiving stays there or moves to Postfix on the box, and that is decided first.
+2. The SMTP2GO account is the one WP2 opens (§7). Ask on the call whether getjoinery's own
+   sends and every customer subaccount draw on one monthly allowance.
+3. Dev first: `Smtp2GoProvider` on a test sending domain (`mg.joinerytest.com`), a password
+   reset and a receipt delivered and passing DKIM.
+4. getjoinery: a second key with only the Emails and Sender Domains groups
+   (`Smtp2GoProvider::ENDPOINTS_USED`), separate from the master key, so either is revoked
+   without the other. Add getjoinery.com as a sending domain, publish its three CNAMEs,
+   wait for verified, switch the email settings, send a test.
+5. After a clean day, remove Mailgun. Its DNS records stay until then, so going back is
+   one setting.
 
 ### WP3 — hosted backups have a recovery key
 
@@ -245,11 +279,18 @@ Managed customer departure (`managed_customer_departure.md`), and the live run o
 - **Q2. 3-D Secure.** Move hosting purchases to Stripe's hosted page (`stripe_checkout`,
   which handles 3-D Secure today; the buyer leaves our page to pay), or move `stripe_regular`
   to Payment Intents (more work; the buyer stays on our page). Recommend the hosted page.
+  Its return path was broken until 10-25 (reviewer2's trace, fixed by permissionsrefactor,
+  uncommitted at writing): the return now builds the order from the payment the browser
+  recorded, under a lock the webhook shares (`ShoppingCart::record_payment()`,
+  `Order::with_payment_lock()`). The hosted page is usable once a test-mode Managed order
+  completes through it; B145-B147 are the return's remaining gaps.
 - **Q3. Pricing for our mail and backups** (`DEFERRED_services_pricing.md`). WP9 waits on it.
 
 ## 7. Owner operations
 
 Dev: an SMTP2GO master key and webhook secret (WP2); a welcome-from address and name.
-getjoinery: SMTP2GO account, master key, webhook secret, MSP and affiliate enrolment; a Linode
+getjoinery: SMTP2GO account on a plan with subaccounts, master key, webhook secret, MSP and
+affiliate enrolment; a second SMTP2GO key for getjoinery's own mail and the getjoinery.com
+sending-domain records (WP2); closing Mailgun after the switch; a Linode
 token with `linodes:read_write`; a backup bucket and credential; Namecheap API eligibility with
 the plane's IP allowlisted; the storage referral link (umbrella, "Owner operations").
