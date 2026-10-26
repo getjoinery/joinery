@@ -192,7 +192,7 @@ class TestDatabaseHelper {
     }
 
     /**
-     * Get schema (tables and columns) for a database
+     * Get schema (tables, and each column with its type) for a database
      */
     private static function getDatabaseSchema($dbname, $db_user, $db_pass) {
         try {
@@ -212,10 +212,16 @@ class TestDatabaseHelper {
 
             $schema = [];
             foreach ($tables as $table) {
-                // Get columns for each table
-                $sql = "SELECT column_name FROM information_schema.columns
-                        WHERE table_schema = 'public' AND table_name = ?
-                        ORDER BY ordinal_position";
+                // Each column with its type ('ord_refund_amount numeric(10,2)'):
+                // a column whose type changed is drift too, and a copy that
+                // matched on names alone was never refreshed for it.
+                $sql = "SELECT a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+                        FROM pg_attribute a
+                        JOIN pg_class c ON c.oid = a.attrelid
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = 'public' AND c.relname = ?
+                          AND a.attnum > 0 AND NOT a.attisdropped
+                        ORDER BY a.attnum";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([$table]);
                 $schema[$table] = $stmt->fetchAll(PDO::FETCH_COLUMN);

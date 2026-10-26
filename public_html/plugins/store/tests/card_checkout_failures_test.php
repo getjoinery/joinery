@@ -124,7 +124,9 @@ class CcfStripe extends StripeHelper {
 			'id' => 'pi_ccf', 'object' => 'payment_intent', 'status' => $status, 'client_secret' => 'pi_ccf_secret',
 			'amount_received' => $status === 'succeeded' ? $amount : 0,
 			'latest_charge' => $status === 'succeeded' ? 'ch_ccf' : null,
-			'last_payment_error' => $status === 'requires_payment_method' ? array('message' => 'Your bank declined the confirmation.') : null,
+			'last_payment_error' => $status === 'requires_payment_method' ? array('type' => 'invalid_request_error',
+				'code' => 'payment_intent_authentication_failure',
+				'message' => 'The provided PaymentMethod has failed authentication. You can provide payment_method_data or a new PaymentMethod to attempt to fulfill this PaymentIntent again.') : null,
 		));
 	}
 
@@ -135,7 +137,7 @@ class CcfStripe extends StripeHelper {
 				'id' => 'in_ccf', 'object' => 'invoice', 'amount_paid' => $plan[1],
 				'payment_intent' => array(
 					'id' => 'pi_sub', 'object' => 'payment_intent', 'status' => $plan[2], 'client_secret' => 'pi_sub_secret',
-					'last_payment_error' => $plan[3] ? array('message' => $plan[3]) : null,
+					'last_payment_error' => $plan[3] ? array('type' => 'card_error', 'message' => $plan[3]) : null,
 				),
 			),
 		));
@@ -361,8 +363,9 @@ $stripe->intent_status = 'requires_action';
 ccf_charge($stripe, $w);
 $stripe->intent_status_later = 'requires_payment_method';
 list($redirect, $order, $messages) = ccf_confirm($stripe, $w);
-check($redirect === '/checkout' && strpos($messages, 'Your bank declined the confirmation.') !== false,
-	'a bank that says no is a refusal with its reason', $messages);
+check($redirect === '/checkout' && strpos($messages, 'Your bank did not confirm the payment.') !== false
+	&& strpos($messages, 'payment_method_data') === false,
+	'a bank that says no is a refusal in the buyer\'s words, not Stripe\'s developer text (B154)', $messages);
 check($stripe->client->paymentIntents->calls('cancel') === 1 && ccf_status($order) === Order::STATUS_ERROR,
 	'the authorization is released and the order records it');
 check(strpos($messages, 'Nothing was charged.') !== false, 'and the buyer is told nothing was charged');
