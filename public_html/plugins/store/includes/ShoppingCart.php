@@ -30,18 +30,6 @@ class ShoppingCart {
 	const SESSION_KEY = 'shopping_cart';
 
 	/**
-	 * Session slot for the payments a gateway was asked to take (record_payment()).
-	 * A record is kept for as long as its payment can still come back: a Stripe
-	 * Checkout session lives at most a day, and a PayPal approval far less. The
-	 * count is only a bound on the session's size; every view of the checkout
-	 * page records a payment per gateway, so it is well above what a buyer's
-	 * open tabs can make in a day.
-	 */
-	const PAYMENTS_KEY = 'cart_payments';
-	const PAYMENTS_MAX_AGE = 86400;
-	const PAYMENTS_KEPT = 200;
-
-	/**
 	 * The DisplayMessage identifier of a gateway payment that was taken but
 	 * not made into an order (cart_charge); /cart_confirm shows it in place of
 	 * a receipt.
@@ -248,6 +236,27 @@ class ShoppingCart {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Why no payment can be started for this cart now, or null: the checks
+	 * the checkout page makes before it offers one, made again where a payment
+	 * is started (the hosted page's POST, the PayPal button's record action).
+	 */
+	public function payment_start_refusal() {
+		if ($this->get_total() <= 0) {
+			return 'There is nothing to pay for in your cart.';
+		}
+		$email = (string)($this->billing_user['billing_email'] ?? '');
+		if ($email === '') {
+			return 'Please enter your billing details first.';
+		}
+		$billing_account = User::GetByEmail($email);
+		if ($billing_account && (int)$billing_account->key !== (int)SessionControl::get_instance()->get_user_id()) {
+			return 'An account already uses ' . $email . '. Log in to check out with it.';
+		}
+		require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
+		return FulfillmentRegistry::cartRefusal($this) ?? $this->card_checkout_refusal();
 	}
 
 	/**
@@ -697,16 +706,15 @@ class ShoppingCart {
 	/**
 	 * Freeze what a gateway payment is being created for, keyed by the
 	 * gateway's reference (a Stripe Checkout session id, or the token a PayPal
-	 * order or subscription carries as its custom_id).
+	 * order or subscription carries as its custom_id), as a GatewayPaymentRecord.
 	 *
-	 * The gateway's return comes back later, and the cart may have changed in
-	 * between (another tab, another billing email): the return completes the
-	 * order from this record, never from the live cart. It holds the cart's
-	 * plain session data (items, prices, coupons, billing details) and who was
-	 * signed in when the payment was made. It lives in this session alongside
-	 * the cart, so only this browser's return can complete it. One is kept per
-	 * payment the checkout page offered, for as long as that payment can still
-	 * come back (PAYMENTS_MAX_AGE).
+	 * The gateway's return or webhook comes back later, and the cart may have
+	 * changed in between (another tab, another billing email): the completion
+	 * makes the order from this record, never from the live cart. It holds the
+	 * cart's plain data (items, prices, coupons, billing details) and who was
+	 * signed in when the payment was started. It is written by the checkout's
+	 * own POST (the hosted page's start, the PayPal button's record action),
+	 * never by a page view.
 	 */
 	public function record_payment(string $ref, string $gateway, array $extra = array()) {
 		$record = $this->to_session_data();
@@ -718,17 +726,15 @@ class ShoppingCart {
 		$record['total'] = $this->get_total();
 		$record = array_merge($record, $extra);
 
-		$all = (isset($_SESSION[self::PAYMENTS_KEY]) && is_array($_SESSION[self::PAYMENTS_KEY]))
-			? $_SESSION[self::PAYMENTS_KEY] : array();
-		unset($all[$ref]);
-		$oldest_kept = time() - self::PAYMENTS_MAX_AGE;
-		foreach ($all as $kept_ref => $kept) {
-			if (!is_array($kept) || (int)($kept['recorded_time'] ?? 0) < $oldest_kept) {
-				unset($all[$kept_ref]);
-			}
-		}
-		$all[$ref] = $record;
-		$_SESSION[self::PAYMENTS_KEY] = array_slice($all, -self::PAYMENTS_KEPT, null, true);
+		GatewayPaymentRecord::prune();
+		$row = GatewayPaymentRecord::GetByRef($ref) ?: new GatewayPaymentRecord(NULL);
+		$row->set('gpr_ref', $ref);
+		$row->set('gpr_gateway', $gateway);
+		$row->set('gpr_record', json_encode($record));
+		$row->set('gpr_session_hash', GatewayPaymentRecord::current_session_hash() ?: null);
+		$row->set('gpr_state', GatewayPaymentRecord::STATE_OPEN);
+		$row->save();
+		return $row;
 	}
 
 	/**
@@ -755,17 +761,39 @@ class ShoppingCart {
 		return self::lines_of($session_data['items']) === self::lines_of((array)($record['items'] ?? array()));
 	}
 
-	/** The record_payment() record for this gateway reference, or null. */
+	/**
+	 * The record_payment() record for this gateway reference, while it can
+	 * still be completed, or null. The array carries the row as 'row'.
+	 */
 	public static function recorded_payment(string $ref) {
-		if ($ref === '' || empty($_SESSION[self::PAYMENTS_KEY][$ref]) || !is_array($_SESSION[self::PAYMENTS_KEY][$ref])) {
+		$row = GatewayPaymentRecord::GetByRef($ref);
+		if (!$row || !$row->is_open()) {
 			return null;
 		}
-		return $_SESSION[self::PAYMENTS_KEY][$ref];
+		$record = $row->data();
+		$record['row'] = $row;
+		return $record;
 	}
 
-	/** A completed payment's record is spent. */
-	public static function forget_payment(string $ref) {
-		unset($_SESSION[self::PAYMENTS_KEY][$ref]);
+	/**
+	 * A payment's record is spent: completed into $order_id, or refused after
+	 * payment. $keep is added to the record for a later visit: a completed
+	 * one's 'receipts' (for a browser that comes back after the webhook
+	 * completed it), a refused one's 'refused_message'.
+	 */
+	public static function forget_payment(string $ref, $order_id = null, bool $refused = false, array $keep = array()) {
+		$row = GatewayPaymentRecord::GetByRef($ref);
+		if (!$row) {
+			return;
+		}
+		if ($keep) {
+			$row->set('gpr_record', json_encode(array_merge($row->data(), $keep)));
+		}
+		$row->set('gpr_state', $refused ? GatewayPaymentRecord::STATE_REFUSED : GatewayPaymentRecord::STATE_COMPLETED);
+		if ($order_id) {
+			$row->set('gpr_ord_order_id', (int)$order_id);
+		}
+		$row->save();
 	}
 
 	public function clear_cart() {

@@ -295,9 +295,9 @@
                                 <h5 class="jy-checkout-payhead">Pay with PayPal</h5>
                                 <?php
                                 if ($cart->get_num_recurring() == 1 && $cart->get_num_non_recurring() == 0) {
-                                    echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($page_vars['plan_id'], $page_vars['paypal_ref'] ?? '');
+                                    echo $page_vars['paypal_helper']->output_paypal_subscription_checkout_code($cart->get_hash());
                                 } else {
-                                    echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list']);
+                                    echo $page_vars['paypal_helper']->output_paypal_checkout_code($page_vars['paypal_item_list'], $cart->get_hash());
                                 }
                                 ?>
                             </div>

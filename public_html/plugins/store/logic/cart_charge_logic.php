@@ -16,10 +16,15 @@ function _checkout_error($message) {
  * completed as recorded. The buyer has paid, so they land on /cart_confirm,
  * which offers no payment, told to contact the site; /checkout would offer the
  * same cart again and take a second payment. Nothing is written; the reason is
- * logged for the operator.
+ * logged and emailed to the operator ($alert false for one already reported,
+ * shown again on a reload).
  */
-function _cart_charge_paid_not_completed(string $log_detail, ?string $buyer_message = null) {
+function _cart_charge_paid_not_completed(string $log_detail, ?string $buyer_message = null, bool $alert = true) {
 	error_log('cart_charge: ' . $log_detail);
+	if ($alert) {
+		_cart_charge_alert_operator('A payment was received but not made into an order',
+			$log_detail . "\n\nFind the payment at the gateway by the reference above, then complete the order by hand or refund it.");
+	}
 	$support_email = Globalvars::get_instance()->get_setting('defaultemail');
 	$contact = 'Please contact us' . ($support_email ? ' at ' . $support_email : '') . ' so we can complete your order.';
 	$message = ($buyer_message ?? 'Your payment was received, but we could not complete your order.') . ' ' . $contact;
@@ -71,6 +76,128 @@ function _cart_charge_alert_operator(string $subject, string $body) {
 	catch (Exception $ops_e) {
 		error_log('Operator notification failed (' . $subject . '): ' . $ops_e->getMessage());
 	}
+}
+
+/**
+ * The buyer's own browser, back for a payment already made into its order
+ * (by the webhook, or an earlier return): it shows that order's receipt and
+ * empties the cart of what was paid for. Another browser session is only
+ * sent to the confirmation page.
+ */
+function _cart_charge_show_completed(string $ref): LogicResult {
+	$row = GatewayPaymentRecord::GetByRef($ref);
+	if (!$row) {
+		return LogicResult::redirect('/cart_confirm');
+	}
+	$data = $row->data();
+	$receipts = (array)($data['receipts'] ?? array());
+	if (!$row->started_in_this_session()) {
+		_cart_charge_show_receipt_only($receipts);
+		return LogicResult::redirect('/cart_confirm');
+	}
+	_cart_charge_settle_live_cart($data, $receipts);
+
+	// A guest whose order the webhook completed before they came back: the
+	// account the checkout made for them is signed in here, as their return
+	// would have done. Only the account this payment's completion made
+	// (made_user_id), and only in the browser session that started it.
+	$session = SessionControl::get_instance();
+	if (empty($data['payer_user_id']) && !$session->get_user_id() && !empty($data['made_user_id'])) {
+		$buyer = new User((int)$data['made_user_id'], TRUE);
+		if ($buyer->key) {
+			$session->store_session_variables($buyer);
+		}
+	}
+	return LogicResult::redirect('/cart_confirm');
+}
+
+/**
+ * A browser session that did not start a payment, at its completed return
+ * (a phone's in-app browser): the confirmation page shows the receipt; its
+ * cart is left as it is.
+ */
+function _cart_charge_show_receipt_only(array $receipts) {
+	$live_cart = ShoppingCart::current();
+	$live_cart->last_receipt = $receipts;
+	$live_cart->persist();
+}
+
+/**
+ * A gateway payment already refused after payment, shown again (a reload):
+ * the buyer is told what they were told then, and nobody is emailed twice.
+ * Null when $ref's record was not refused.
+ */
+function _cart_charge_show_refused(string $ref) {
+	$row = GatewayPaymentRecord::GetByRef($ref);
+	if (!$row || $row->get('gpr_state') !== GatewayPaymentRecord::STATE_REFUSED) {
+		return null;
+	}
+	$data = $row->data();
+	return _cart_charge_paid_not_completed('gateway payment ' . $ref . ' shown again; refused earlier into order #'
+		. $row->get('gpr_ord_order_id'), $data['refused_message'] ?? null, false);
+}
+
+/**
+ * The live cart after its payment completed: it carries the receipt, and is
+ * emptied only if it still holds what was paid for (lines added since are not
+ * paid for).
+ */
+function _cart_charge_settle_live_cart(array $record, array $receipts) {
+	$live_cart = ShoppingCart::current();
+	$live_cart->last_receipt = $receipts;
+	if ($live_cart->holds_lines_of($record)) {
+		$live_cart->clear_cart();
+	} else {
+		$live_cart->persist();
+	}
+}
+
+/**
+ * A gateway payment that was taken but cannot be completed as recorded (the
+ * billing email now belongs to another account, a coupon gone invalid, an
+ * ownership clash): its order is kept, in error with the reason and the cart
+ * it was for, its record marked refused, and the operator told
+ * (_cart_charge_paid_not_completed()); the refund is theirs to decide.
+ */
+function _cart_charge_refused_after_payment(array $return, string $message, ?string $buyer_message) {
+	$order = null;
+	if ($return['service'] === 'stripe_checkout') {
+		$order = Order::GetByStripeSession($return['ref']);
+	} else {
+		foreach (new MultiOrder(array('ord_paypal_order_id' => $return['lock_ref'])) as $used_order) {
+			$order = $used_order;
+		}
+	}
+	$order = $order ?: new Order(NULL);
+	// Refused already (the return and the webhook both reached it): the
+	// order and the operator have it once.
+	$already_refused = strpos((string)$order->get('ord_error'), 'Paid but not completed') === 0;
+	foreach ($return['order_fields'] as $order_column => $order_value) {
+		if ($order_value !== null) {
+			$order->set($order_column, $order_value);
+		}
+	}
+	$record = $return['record'];
+	if (!$order->key) {
+		$order->set('ord_timestamp', 'now()');
+	}
+	if (!empty($record['payer_user_id'])) {
+		$order->set('ord_usr_user_id', (int)$record['payer_user_id']);
+	}
+	if (StripeHelper::isTestMode()) {
+		$order->set('ord_test_mode', true);
+	}
+	$order->set('ord_total_cost', $return['cart']->get_total());
+	$order->set('ord_serialized_cart', serialize($return['cart']->get_items_generic()));
+	$order->set('ord_status', Order::STATUS_ERROR);
+	$order->set('ord_error', substr('Paid but not completed: ' . $message, 0, 250));
+	$order->prepare();
+	$order->save();
+	ShoppingCart::forget_payment($return['ref'], $order->key, true, array('refused_message' => $buyer_message));
+
+	return _cart_charge_paid_not_completed('Order #' . $order->key . ': ' . $return['service'] . ' payment ' . $return['lock_ref']
+		. ' (billing ' . ($record['billing_user']['billing_email'] ?? '?') . ') was taken but not completed: ' . $message,
+		$buyer_message, !$already_refused);
 }
 
 /**
@@ -181,40 +308,21 @@ function _cart_charge_verify_return($settings) {
 		}
 		$session_id = (string)$stripe_session->id;
 
-		// A return followed again (a reload, the back button) shows the receipt.
+		// A return followed again (a reload, the back button) shows the receipt,
+		// or what it was told when the payment was refused or matched nothing.
 		$existing = Order::GetByStripeSession($session_id);
 		if ($existing && $existing->is_fulfilled()) {
-			return LogicResult::redirect('/cart_confirm');
+			return _cart_charge_show_completed($session_id);
+		}
+		if (($shown = _cart_charge_show_refused($session_id)) !== null) {
+			return $shown;
+		}
+		if ($existing && strpos((string)$existing->get('ord_error'), 'Paid at Stripe Checkout') === 0) {
+			return _cart_charge_paid_not_completed('Stripe Checkout session ' . $session_id . ' shown again; reported as order #' . $existing->key,
+				'Your payment was received, but we could not match it to your checkout.', false);
 		}
 
-		$record = ShoppingCart::recorded_payment($session_id);
-		if (!$record || ($record['gateway'] ?? '') !== 'stripe_checkout') {
-			return $unmatched('Stripe Checkout session', substr($session_id, 0, 20) . ' (matches no checkout in this session)');
-		}
-		// The session was made for whoever was signed in then; Stripe says so too.
-		$reference_user = (string)($stripe_session->client_reference_id ?? '');
-		if ($reference_user !== (string)($record['payer_user_id'] ?? '')) {
-			return $unmatched('Stripe Checkout session', substr($session_id, 0, 20) . ' (client_reference_id differs from the record)');
-		}
-
-		$record_cart = $hydrate_whole($record);
-		if (!$record_cart) {
-			return $unmatched('Stripe Checkout session', substr($session_id, 0, 20) . ' (a recorded line no longer loads)');
-		}
-
-		return array(
-			'service'      => 'stripe_checkout',
-			'ref'          => $session_id,
-			'lock_ref'     => $session_id,
-			'record'       => $record,
-			'cart'         => $record_cart,
-			'order_fields' => array(
-				'ord_stripe_session_id'        => $session_id,
-				'ord_stripe_payment_intent_id' => $stripe_session->payment_intent ?? null,
-				'ord_payment_method'           => 'stripe_checkout',
-			),
-			'stripe_subscription_id' => $stripe_session->subscription ?? null,
-		);
+		return _cart_charge_stripe_checkout_return($stripe_session, $unmatched);
 	}
 
 	// --- PayPal: ?id= (an order) or ?subscription=1&paypal_subscription_id= --
@@ -250,39 +358,27 @@ function _cart_charge_verify_return($settings) {
 		// completed, as a Stripe Checkout session's is.
 		foreach (new MultiOrder(array('ord_paypal_order_id' => $paypal_id)) as $used_order) {
 			if ($used_order->is_fulfilled()) {
-				return LogicResult::redirect('/cart_confirm');
+				return _cart_charge_show_completed($custom_id);
 			}
 		}
 
+		if (($shown = _cart_charge_show_refused($custom_id)) !== null) {
+			return $shown;
+		}
 		$what = 'PayPal ' . ($is_subscription ? 'subscription' : 'order');
 		$record = ShoppingCart::recorded_payment($custom_id);
 		if (!$record || ($record['gateway'] ?? '') !== 'paypal') {
-			return $unmatched($what, $paypal_id . ' (matches no checkout in this session)');
+			return $unmatched($what, $paypal_id . ' (matches no open checkout record)');
 		}
 		$record_cart = $hydrate_whole($record);
 		if (!$record_cart) {
 			return $unmatched($what, $paypal_id . ' (a recorded line no longer loads)');
 		}
 
-		// What PayPal took must be what the record asks: it is whatever the
-		// page's script asked PayPal for. A subscription pays for its one
-		// line only (the checkout offers it for a cart of one subscription,
-		// quantity one); in a cart with other lines it would leave them unpaid.
-		if ($is_subscription) {
-			$only_line = (count($record_cart->items) === 1) ? reset($record_cart->items) : null;
-			if (!$only_line || (int)$only_line[0] !== 1 || !$only_line[5]->is_subscription()
-				|| empty($record['plan_id']) || (string)($payment['plan_id'] ?? '') !== (string)$record['plan_id']) {
-				return $unmatched($what, $paypal_id . ' (not the recorded cart\'s one subscription and plan)');
-			}
-		}
-		else if (!_cart_charge_paypal_amount_matches($paypal, $payment, $record_cart)) {
-			return $unmatched($what, $paypal_id . ' (the amount paid is not the recorded cart\'s)');
-		}
-
 		$funding_source = isset($_GET['funding']) ? $_GET['funding'] : 'paypal';
 		$payment_method = in_array($funding_source, array('paypal', 'venmo', 'card', 'paylater'), true) ? $funding_source : 'paypal';
 
-		return array(
+		$paypal_return = array(
 			'service'      => 'paypal',
 			'ref'          => $custom_id,
 			'lock_ref'     => $paypal_id,
@@ -295,9 +391,125 @@ function _cart_charge_verify_return($settings) {
 			),
 			'paypal_subscription_id' => $is_subscription ? $paypal_id : null,
 		);
+
+		// What PayPal took must be what the record asks: it is whatever the
+		// page's script asked PayPal for. A subscription pays for its one
+		// line only (the checkout offers it for a cart of one subscription,
+		// quantity one); in a cart with other lines it would leave them unpaid.
+		// A payment that does not match is kept as an order in error.
+		$mismatch = null;
+		if ($is_subscription) {
+			$only_line = (count($record_cart->items) === 1) ? reset($record_cart->items) : null;
+			if (!$only_line || (int)$only_line[0] !== 1 || !$only_line[5]->is_subscription()
+				|| empty($record['plan_id']) || (string)($payment['plan_id'] ?? '') !== (string)$record['plan_id']) {
+				$mismatch = 'not the recorded cart\'s one subscription and plan';
+			}
+		}
+		else if (!_cart_charge_paypal_amount_matches($paypal, $payment, $record_cart)) {
+			$mismatch = 'the amount paid is not the recorded cart\'s';
+		}
+		if ($mismatch !== null) {
+			return Order::with_payment_lock($paypal_id, function () use ($paypal_return, $mismatch) {
+				return _cart_charge_refused_after_payment($paypal_return, $mismatch, null);
+			});
+		}
+		return $paypal_return;
 	}
 
 	return _checkout_error("We couldn't process your payment. Please try again or contact support.");
+}
+
+/**
+ * What a paid Stripe Checkout session completes, from its record
+ * (GatewayPaymentRecord), for the buyer's return and for the webhook alike: the
+ * array _cart_charge_run() takes, or what $unmatched answers when the session
+ * matches no open record, was made for someone else, or names a line that no
+ * longer loads. $stripe_session is verified already (the return asked Stripe;
+ * the webhook's signature was checked).
+ */
+function _cart_charge_stripe_checkout_return($stripe_session, callable $unmatched) {
+	$session_id = (string)$stripe_session->id;
+	$record = ShoppingCart::recorded_payment($session_id);
+	if (!$record || ($record['gateway'] ?? '') !== 'stripe_checkout') {
+		return $unmatched('Stripe Checkout session', $session_id . ' (matches no open checkout record)');
+	}
+	// The session was made for whoever was signed in then; Stripe says so too.
+	$reference_user = (string)($stripe_session->client_reference_id ?? '');
+	if ($reference_user !== (string)($record['payer_user_id'] ?? '')) {
+		return $unmatched('Stripe Checkout session', $session_id . ' (client_reference_id differs from the record)');
+	}
+	$record_cart = ShoppingCart::hydrate($record);
+	$recorded = is_array($record['items'] ?? null) ? count($record['items']) : 0;
+	if ($recorded === 0 || count($record_cart->items) !== $recorded) {
+		return $unmatched('Stripe Checkout session', $session_id . ' (a recorded line no longer loads)');
+	}
+	return array(
+		'service'      => 'stripe_checkout',
+		'ref'          => $session_id,
+		'lock_ref'     => $session_id,
+		'record'       => $record,
+		'cart'         => $record_cart,
+		'order_fields' => array(
+			'ord_stripe_session_id'        => $session_id,
+			'ord_stripe_payment_intent_id' => $stripe_session->payment_intent ?? null,
+			'ord_payment_method'           => 'stripe_checkout',
+		),
+		'stripe_subscription_id' => $stripe_session->subscription ?? null,
+	);
+}
+
+/**
+ * Complete a paid Stripe Checkout session from Stripe's webhook, for a buyer
+ * who has not come back (or before they do). Runs under the session's payment
+ * lock, which the return shares. A session it cannot complete is left to the
+ * caller, which reports its payment.
+ *
+ * @return string|null null when completion was run, else why it could not be
+ */
+function cart_charge_complete_from_webhook($stripe_session): ?string {
+	$row = GatewayPaymentRecord::GetByRef((string)$stripe_session->id);
+	if ($row && $row->get('gpr_state') === GatewayPaymentRecord::STATE_REFUSED) {
+		return 'refused after payment already';
+	}
+	$why = null;
+	$return = _cart_charge_stripe_checkout_return($stripe_session, function ($what, $detail) use (&$why) {
+		$why = $detail;
+		return null;
+	});
+	if ($why !== null || !is_array($return)) {
+		return $why ?? 'no checkout record';
+	}
+	$return['background'] = true;
+	_cart_charge_run(array(), $return);
+	return null;
+}
+
+/**
+ * Start a hosted Stripe Checkout payment, from its button's POST: the cart is
+ * checked as the checkout page checked it, the session made at Stripe and
+ * recorded (ShoppingCart::record_payment()), and the buyer sent to Stripe's
+ * page. A cart changed since the page was shown is shown again instead.
+ */
+function _cart_charge_start_hosted_checkout(): LogicResult {
+	$cart = ShoppingCart::current();
+	if ((string)($_POST['cart_cs'] ?? '') !== $cart->get_hash()) {
+		return _checkout_error('Your cart changed since this page was shown. Please review it and pay again.');
+	}
+	if (($refusal = $cart->payment_start_refusal()) !== null) {
+		return _checkout_error($refusal);
+	}
+	$stripe_helper = _cart_charge_gateway('StripeHelper');
+	$session = SessionControl::get_instance();
+	try {
+		$create_list = $stripe_helper->build_checkout_item_array($cart,
+			$session->get_user_id() ? new User($session->get_user_id(), TRUE) : NULL);
+		$stripe_session = $stripe_helper->create_stripe_checkout_session($create_list);
+	} catch (Exception $e) {
+		error_log('cart_charge: starting a Stripe Checkout session failed: ' . $e->getMessage());
+		return _checkout_error("We couldn't start the payment. Please try again.");
+	}
+	$cart->record_payment((string)$stripe_session->id, 'stripe_checkout');
+	return LogicResult::redirect((string)$stripe_session->url);
 }
 
 /**
@@ -390,8 +602,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	// The checkout page asks a signed-in buyer with no email to add one; this holds
-	// the same rule for a charge that reaches here another way.
-	if($session->get_user_id() && !(new User($session->get_user_id(), TRUE))->get('usr_email')){
+	// the same rule for a charge that reaches here another way. A gateway's
+	// return is for the payer of record, whoever this browser is signed in as.
+	if($return === null && !_cart_charge_is_gateway_return()
+		&& $session->get_user_id() && !(new User($session->get_user_id(), TRUE))->get('usr_email')){
 		return User::add_email_first(User::CHECKOUT_NEEDS_EMAIL);
 	}
 	
@@ -416,6 +630,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		});
 	}
 
+	if($return === null && !empty($_POST['start_hosted_checkout']) && $settings->get_setting('checkout_type') == 'stripe_checkout'){
+		return _cart_charge_start_hosted_checkout();
+	}
+
+	// Who the completion is for. The buyer's own POST, or a gateway's return
+	// in the browser session that started the payment, acts in that session:
+	// a new account is signed in, the live cart emptied. A return that lands in
+	// another browser session, or the gateway's webhook, completes the order
+	// for the payer of record and touches no session.
+	$in_buyers_session = ($return === null)
+		|| (empty($return['background']) && !empty($return['record']['row']) && $return['record']['row']->started_in_this_session());
+
 	$existing_order = null;
 	// A card checkout the buyer's bank asked to confirm comes back here once
 	// the checkout page has run that step; it carries on with the order and
@@ -437,13 +663,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if($return['service'] === 'stripe_checkout'){
 			$existing_order = Order::GetByStripeSession($return['ref']);
 			if($existing_order && $existing_order->is_fulfilled()){
-				return LogicResult::redirect('/cart_confirm');
+				return _cart_charge_show_completed($return['ref']);
 			}
 		}
 		else{
 			foreach(new MultiOrder(array('ord_paypal_order_id' => $return['lock_ref'])) as $used_order){
 				if($used_order->is_fulfilled()){
-					return LogicResult::redirect('/cart_confirm');
+					return _cart_charge_show_completed($return['ref']);
 				}
 				$existing_order = $used_order;
 			}
@@ -462,7 +688,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if($return === null){
 			return _checkout_error($message);
 		}
-		return _cart_charge_paid_not_completed('gateway return ' . $return['lock_ref'] . ' not completed: ' . $message, $buyer_message);
+		return _cart_charge_refused_after_payment($return, $message, $buyer_message);
 	};
 
 	// A free order completes from the checkout's billing form, posted here
@@ -541,14 +767,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		if($return === null && !empty($_POST['password'])){
 			$user_data['password'] = $_POST['password'];
 		}
-		$billing_user = User::CreateCompleteNew($user_data, true, true, false);
+		$billing_user = User::CreateCompleteNew($user_data, true, $in_buyers_session, false);
+		$made_billing_user = true;
 		if(!$billing_user){
 			return $refuse("We couldn't create your account. Please check your information and try again.");
 		}
 		// Implicit consent was shown under the Continue button on the cart billing form.
 		$billing_user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$billing_user->save();
-		$_SESSION['terms_accepted'] = true;
+		if($in_buyers_session){
+			$_SESSION['terms_accepted'] = true;
+		}
 	}
 	
 	if($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout'){
@@ -1419,8 +1648,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		// Record PURCHASE conversion event — canonical attribution signal for
 		// revenue-by-channel. UTM is carried automatically from the session.
 		require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
-		$session->save_visitor_event(VisitorEvent::TYPE_PURCHASE, FALSE, 'order', $order->key);
-		unset($_SESSION['checkout_started']);
+		if($in_buyers_session){
+			$session->save_visitor_event(VisitorEvent::TYPE_PURCHASE, FALSE, 'order', $order->key);
+			unset($_SESSION['checkout_started']);
+		}
 
 		// Optional post-purchase surveys for confirmation page display are
 		// collected during fulfillment (the provider returns them per line).
@@ -1464,16 +1695,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// Always run — order is PAID (Phase 2), errors recorded on ord_error for
 	// operator follow-up, customer sees the success page.
 	if($return !== null){
-		// The payment's record is spent. The live cart is emptied only if it
-		// still holds what was paid for: lines added since are not paid for.
-		ShoppingCart::forget_payment($return['ref']);
-		$live_cart = ShoppingCart::current();
-		$live_cart->last_receipt = $receipts;
-		if($live_cart->holds_lines_of($return['record'])){
-			$live_cart->clear_cart();
+		// The payment's record is spent, and keeps the receipt for a return
+		// that arrives after the webhook completed it.
+		ShoppingCart::forget_payment($return['ref'], $order->key, false, array_filter(array(
+			'receipts' => $receipts,
+			'made_user_id' => !empty($made_billing_user) && $billing_user ? (int)$billing_user->key : null,
+		), function ($kept) { return $kept !== null; }));
+		if($in_buyers_session){
+			_cart_charge_settle_live_cart($return['record'], $receipts);
 		}
-		else{
-			$live_cart->persist();
+		else if(empty($return['background'])){
+			_cart_charge_show_receipt_only($receipts);
 		}
 	}
 	else{
