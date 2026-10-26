@@ -1,6 +1,11 @@
 # Declared permissions
 
-**Status:** Draft. Research 2026-10-07 and 2026-10-08. Design reworked
+**Status:** Implemented 2026-10-26. WP0 and WP2-WP6 built and flipped
+2026-10-25, released in 0.8.537 and checked on permtest at every level and on
+getjoinery signed out; the remaining live checks are in the live verification
+queue. WP1's flip and B1 moved to their own spec, `page_views_never_write`.
+
+Research 2026-10-07 and 2026-10-08. Design reworked
 2026-10-08, and again 2026-10-20 after the owner's level scheme and a code
 review: named data classes, a read level on models, raise-only column
 classes, page headers, one decision function, a generated inventory
