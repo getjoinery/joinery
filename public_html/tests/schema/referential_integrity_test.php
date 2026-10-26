@@ -31,7 +31,7 @@
  * here and reclaimed there the moment that run is dead. A red on users in
  * check 4 is therefore a leak from a run that has ended — a teardown bug
  * worth a human look now. The 'HarnessTest ...' families carry no token and
- * are judged by the one-hour floor there.
+ * are judged by the two-hour floor there (harness_named_fixture_families()).
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -199,35 +199,54 @@ if (isset($existing_tables['pkc_passkey_credentials'])) {
 	check($stray_pkc === 0, 'no leftover vault-test-% passkey credentials', "$stray_pkc row(s)");
 }
 
-// The fixture families that name themselves 'HarnessTest ...'. Naming the table
-// and the surviving row turns a leak into a one-line fix instead of an
-// investigation — the alternative is noticing phantom rows in an admin screen
-// weeks later. Tables absent on this install are simply skipped.
-$named_fixtures = array(
-	'evt_events'        => 'evt_name',
-	'svy_surveys'       => 'svy_name',
-	'grp_groups'        => 'grp_name',
-	'pro_products'      => 'pro_name',
-	'bty_booking_types' => 'bty_name',
-	'mgn_managed_nodes' => 'mgn_name',
-	'qst_questions'     => 'qst_question',
-);
-foreach ($named_fixtures as $table => $column) {
+// The fixture families that name themselves (harness_named_fixture_families(),
+// the list the boot-time reclaim works from). Naming the table and the
+// surviving row turns a leak into a one-line fix instead of an investigation —
+// the alternative is noticing phantom rows in an admin screen weeks later.
+// Tables absent on this install are simply skipped.
+$families = harness_named_fixture_families();
+foreach ($families as $f) {
+	list(, $table, $column, , $pattern) = $f;
 	if (!isset($existing_tables[$table])) {
-		harness_skip("no leftover HarnessTest rows in $table", 'table not present on this install');
+		harness_skip("no leftover fixture rows in $table", 'table not present on this install');
 		continue;
 	}
-	$q = $dblink->prepare("SELECT count(*) FROM {$table} WHERE {$column} LIKE 'HarnessTest %'");
-	$q->execute();
+	$q = $dblink->prepare("SELECT count(*) FROM {$table} WHERE {$column} LIKE ?");
+	$q->execute(array($pattern));
 	$stray = (int)$q->fetchColumn();
 	$detail = '';
 	if ($stray > 0) {
-		$q = $dblink->prepare("SELECT {$column} FROM {$table} WHERE {$column} LIKE 'HarnessTest %' ORDER BY 1 LIMIT 5");
-		$q->execute();
+		$q = $dblink->prepare("SELECT {$column} FROM {$table} WHERE {$column} LIKE ? ORDER BY 1 LIMIT 5");
+		$q->execute(array($pattern));
 		$detail = "$stray row(s): " . implode(', ', $q->fetchAll(PDO::FETCH_COLUMN));
 	}
-	check($stray === 0, "no leftover HarnessTest rows in $table", $detail);
+	check($stray === 0, "no leftover fixture rows in $table", $detail);
 }
+
+// Every column a suite stamps 'HarnessTest ...' into is on that list. One left
+// off is never reclaimed, so each killed run strands its rows for good (it is
+// how 17 backup targets piled up on dev). Users are judged by their address
+// token instead, above.
+$listed = array();
+foreach ($families as $f) { $listed[$f[2]] = true; }
+$unlisted = array();
+$test_files = new RegexIterator(new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PathHelper::getIncludePath('tests'),
+	FilesystemIterator::SKIP_DOTS)), '/\.php$/');
+$sources = array_merge(iterator_to_array($test_files, false), glob(PathHelper::getIncludePath('plugins') . '/*/tests/{,*/,*/*/}*.php', GLOB_BRACE) ?: array());
+foreach ($sources as $file) {
+	$src = file_get_contents((string)$file);
+	if (strpos($src, 'HarnessTest') === false) continue;
+	preg_match_all("~(?:set\\(\\s*'([a-z]{3}_[a-z_]+)'\\s*,|'([a-z]{3}_[a-z_]+)'\\s*=>)\\s*'HarnessTest~", $src, $m, PREG_SET_ORDER);
+	foreach ($m as $hit) {
+		$column = $hit[1] !== '' ? $hit[1] : $hit[2];
+		if (strpos($column, 'usr_') === 0 || isset($listed[$column])) continue;
+		$unlisted[$column][] = str_replace(PathHelper::getIncludePath(''), '', (string)$file);
+	}
+}
+$detail = array();
+foreach ($unlisted as $column => $files) { $detail[] = $column . ' (' . implode(', ', array_unique($files)) . ')'; }
+check(!$unlisted, 'every column a suite names a HarnessTest fixture in is reclaimed (harness_named_fixture_families())',
+	implode('; ', $detail));
 
 harness_finish();
 ?>
