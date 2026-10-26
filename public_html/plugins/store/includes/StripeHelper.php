@@ -340,9 +340,27 @@ class StripeHelper {
 
 
 	
+	/** The session key a card checkout waiting on the buyer's bank is kept under (cart_charge_logic). */
+	const CARD_PENDING_KEY = 'card_payment_pending';
+	/** How long a card checkout waits for the bank's confirmation to come back. */
+	const CARD_PENDING_MAX_AGE = 3600;
+
+	/**
+	 * The card form (stripe_regular). Stripe.js turns the card into a
+	 * PaymentMethod in the browser and the form posts only its id to
+	 * /cart_charge; no card data reaches this server.
+	 *
+	 * When a checkout is waiting on the buyer's bank (3-D Secure,
+	 * CARD_PENDING_KEY), the page runs that confirmation as it loads and posts
+	 * back to /cart_charge to carry on, whatever the bank answered: the server
+	 * reads the outcome from Stripe, not from the page.
+	 */
 	public function output_stripe_regular_form($formwriter, $button_class=''){
-				
-				$output = '
+		$pending = $_SESSION[self::CARD_PENDING_KEY] ?? null;
+		$client_secret = (is_array($pending) && !empty($pending['client_secret'])
+			&& (int)($pending['time'] ?? 0) > time() - self::CARD_PENDING_MAX_AGE) ? (string)$pending['client_secret'] : '';
+
+		$output = '
 				<script>
 					document.addEventListener(\'DOMContentLoaded\', function() {
 						var el = document.getElementById(\'nojavascript\'); if (el) el.style.display = \'none\';
@@ -359,91 +377,76 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. '<button type="submit" class="btn btn-primary '.$button_class.'">Pay with Stripe</button></form>';
+				<br />'. '<button type="submit" id="payment-submit" class="btn btn-primary '.$button_class.'">Pay with Stripe</button></form>
+				<form action="/cart_charge" method="post" id="card-confirm-form">
+				  <input type="hidden" name="card_payment_confirm" value="1">
+				</form>';
 
+		$output .= '<script> var stripe = Stripe(' . json_encode($this->get_stripe_public_key()) . ');
+							var pendingSecret = ' . json_encode($client_secret) . ';';
 
-	
-
-				$output .= '<script language="javascript"> var stripe = Stripe(\''.$this->get_stripe_public_key().'\');';
-				
-				$output .= "				
+		$output .= "
 							var elements = stripe.elements();
-
-							// Custom styling can be passed to options when creating an Element.
-							// (Note that this demo uses a wider set of styles than the guide below.)
 							var style = {
-								
 							  base: {
-								color: '#32325d', 
+								color: '#32325d',
 								fontFamily: '\"Helvetica Neue\", Helvetica, sans-serif',
 								fontSmoothing: 'antialiased',
 								fontSize: '24px',
 								 '::placeholder': {
 								  color: '#aab7c4'
-								} 
+								}
 							  },
 							  invalid: {
 								color: '#fa755a',
 								iconColor: '#fa755a'
 							  }
-							  
 							};
 
-							// Create an instance of the card Element.
 							var card = elements.create('card', {style: style});
-
-
-							// Add an instance of the card Element into the `card-element` <div>.
 							card.mount('#card-element');
 
-
-
-							// Handle real-time validation errors from the card Element.
+							var displayError = document.getElementById('card-errors');
+							var submitButton = document.getElementById('payment-submit');
 							card.on('change', function(event) {
-							  var displayError = document.getElementById('card-errors');
-							  if (event.error) {
-								displayError.textContent = event.error.message;
-							  } else {
-								displayError.textContent = '';
-							  }
+							  displayError.textContent = event.error ? event.error.message : '';
 							});
 
-							// Handle form submission.
+							// The card becomes a PaymentMethod here; only its id is posted.
 							var form = document.getElementById('payment-form');
 							form.addEventListener('submit', function(event) {
 							  event.preventDefault();
-
-							  stripe.createToken(card).then(function(result) {
+							  submitButton.disabled = true;
+							  stripe.createPaymentMethod({type: 'card', card: card}).then(function(result) {
 								if (result.error) {
-								  // Inform the user if there was an error.
-								  var errorElement = document.getElementById('card-errors');
-								  errorElement.textContent = result.error.message;
-								} else {
-								  // Send the token to your server.
-								  stripeTokenHandler(result.token);
+								  displayError.textContent = result.error.message;
+								  submitButton.disabled = false;
+								  return;
 								}
+								var hiddenInput = document.createElement('input');
+								hiddenInput.setAttribute('type', 'hidden');
+								hiddenInput.setAttribute('name', 'stripePaymentMethod');
+								hiddenInput.setAttribute('value', result.paymentMethod.id);
+								form.appendChild(hiddenInput);
+								form.submit();
 							  });
 							});
 
-							// Submit the form with the token ID.
-							function stripeTokenHandler(token) {
-							  // Insert the token ID into the form so it gets submitted to the server
-							  var form = document.getElementById('payment-form');
-							  var hiddenInput = document.createElement('input');
-							  hiddenInput.setAttribute('type', 'hidden');
-							  hiddenInput.setAttribute('name', 'stripeToken');
-							  hiddenInput.setAttribute('value', token.id);
-							  form.appendChild(hiddenInput);
+							// A checkout waiting on the buyer's bank: Stripe shows the bank's
+							// confirmation, then the checkout carries on at /cart_charge.
+							if (pendingSecret) {
+							  submitButton.disabled = true;
+							  displayError.textContent = 'Confirming the payment with your bank...';
+							  stripe.confirmCardPayment(pendingSecret).then(function() {
+								document.getElementById('card-confirm-form').submit();
+							  });
+							}";
 
-							  // Submit the form
-							  form.submit();
-							}";		
-				
-				$output .= '</script>';	
-				
-				return $output;
+		$output .= '</script>';
+
+		return $output;
 	}
-	
+
 	public function output_stripe_checkout_form($cart_hash){
 				require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
 				$formwriter = new FormWriterV2HTML5('form3', ['action' => '/profile/payment_finalize', 'method' => 'post']);
@@ -1126,61 +1129,47 @@ class StripeHelper {
 	}
 
 
-	public function create_card_from_token($stripe_token, $stripe_customer_id, $set_as_default=true){
+	/**
+	 * Turn a card token (Stripe.js createToken, or a test token such as
+	 * tok_visa) into a PaymentMethod. The card form posts a PaymentMethod; a
+	 * token still arrives from a page loaded before the form changed and from
+	 * the live store test.
+	 *
+	 * @throws SystemDisplayableError when the bank refuses the card.
+	 * @throws StripeHelperException when Stripe cannot be asked.
+	 */
+	public function payment_method_from_token($stripe_token) {
 		try {
-			//STORE PAYMENT METHOD 
-			/*
-			$source_result = $stripe->sources->create([ 
-				 'type' => 'card', 
-				 'token' => $_REQUEST['stripeToken'],  
-			]);
-			*/
-			$source_result = $this->client()->customers->createSource($stripe_customer_id, [ 
-				 'source' => $stripe_token,  
-			]);
-	
+			$method = $this->client()->paymentMethods->create(['type' => 'card', 'card' => ['token' => $stripe_token]]);
+		}
+		catch (\Stripe\Exception\CardException $e) {
+			throw new SystemDisplayableError("Your card was not accepted. " . $e->getMessage());
+		}
+		catch (Exception $e) {
+			error_log("Making a payment method from a token failed: " . $e->getMessage());
+			throw new StripeHelperException($e->getMessage(), 0, $e);
+		}
+		return $method->id;
+	}
 
+	/**
+	 * Save the checkout's card on the buyer's Stripe customer and make it the
+	 * card their invoices are charged to, so a subscription made next pays
+	 * with it.
+	 *
+	 * @return string the saved PaymentMethod's id, which the checkout pays with:
+	 *         Stripe's test shortcuts (pm_card_visa) save as a new id
+	 * @throws SystemDisplayableError when the bank refuses the card.
+	 * @throws StripeHelperException when Stripe cannot be asked (no card was tried).
+	 */
+	public function attach_card($payment_method_id, $stripe_customer_id): string {
+		try {
+			$method = $this->client()->paymentMethods->attach($payment_method_id, ['customer' => $stripe_customer_id]);
+			$saved_id = (is_object($method) && !empty($method->id)) ? (string)$method->id : (string)$payment_method_id;
+			$this->client()->customers->update($stripe_customer_id, [
+				'invoice_settings' => ['default_payment_method' => $saved_id],
+			]);
 		}
-		/*
-		catch(\Stripe\Error\Card $e) {
-			// Since it's a decline, \Stripe\Exception\Card will be caught
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_error', substr($error, 0, 250));
-			$order->save();	
-			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
-		} 
-		catch(\Stripe\Error\CardException $e) {
-			// Since it's a decline, \Stripe\Exception\Card will be caught
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_error', substr($error, 0, 250));
-			$order->save();	
-			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
-		}
-		catch (\Stripe\Exception\RateLimitException $e) {
-		  // Too many requests made to the API too quickly
-			$error = "Sorry, we weren't able to authorize your card due to too many requests. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\InvalidRequestException $e) {
-			$error = "Sorry, we weren't able to authorize your card due to an invalid request. That's our fault. You have not been charged.";	
-		} 
-		catch (\Stripe\Exception\AuthenticationException $e) {
-		  // Authentication with Stripe's API failed
-		  // (maybe you changed API keys recently)
-		  $error = "Sorry, our connection to our credit card processor is not currently working. That's our fault. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\ApiConnectionException $e) {
-		  // Network communication with Stripe failed
-		  $error = "Sorry, we were unable to reach the credit card processor. That's our fault. You have not been charged.";
-		} 
-		catch (\Stripe\Exception\ApiErrorException $e) {
-			
-			print_r($e);
-			exit;
-		  // Display a very generic error to the user, and maybe send
-		  // yourself an email
-		  $error = "Sorry, we weren't able to connect to the Stripe api.";
-		} 
-		*/
 		catch (\Stripe\Exception\CardException $e) {
 			// The bank refused the card: the buyer is told why.
 			$error = "Your card was not accepted. " . $e->getMessage();
@@ -1188,38 +1177,94 @@ class StripeHelper {
 			throw new SystemDisplayableError($error);
 		}
 		catch (Exception $e) {
-			// Stripe out of reach, a bad key, a token used twice: no card was
+			// Stripe out of reach, a bad key, a method used twice: no card was
 			// tried, so it is not reported as a decline.
 			error_log("Saving the card failed before the bank was asked: " . $e->getMessage());
 			throw new StripeHelperException($e->getMessage(), 0, $e);
-			/*		
-			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-
-			$error = "Sorry, we weren't able to charge your card. <strong>" . $e->getMessage()."</strong> Please use your back button to go back to the checkout form and try again or contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.";
-			$order->set('ord_error', substr($stored_error, 0, 250));
-			$order->save();	
-			PublicPage::OutputGenericPublicPage("Card Error", "Card Error", $error);
-			
-			$error = "Sorry, we weren't able to charge your card. " . $e->getMessage();
-			exit;
-			*/
 		}
-		
-		//SET NEW CARD AS DEFAULT 
-		if($set_as_default){
-			try {
-				$customer = $this->client()->customers->retrieve($stripe_customer_id);
-				$customer->default_source=$source_result['id'];
-				$customer->save();  
-			}
-			catch (Exception $e) {		  
-				error_log("Unable to set stripe default card.");
-			}
-		}			
-		return $source_result;
-		
+		return $saved_id;
 	}
-	
+
+	/**
+	 * Authorize a card checkout's one-time lines, to be captured once the
+	 * rest of the checkout has gone through (capture_card_payment()). An
+	 * authorization that is never captured lapses on its own: a buyer who
+	 * leaves while their bank is asking to confirm is never charged.
+	 *
+	 * With $for_later, the bank's confirmation also covers charging this card
+	 * again without the buyer present, so the subscription made next does not
+	 * ask a second time.
+	 *
+	 * Returns the PaymentIntent: 'requires_capture' (authorized),
+	 * 'requires_action' (the bank wants the buyer to confirm, client_secret
+	 * for Stripe.js), or another status the caller treats as refused.
+	 *
+	 * @throws SystemDisplayableError when the card is declined.
+	 * @throws StripeHelperException on a configuration problem.
+	 */
+	public function authorize_card_payment($amount, $stripe_customer_id, $payment_method_id, $description, $order, $billing_user, bool $for_later) {
+		$params = [
+			'amount' => (int)round($amount * 100),
+			'currency' => Globalvars::get_instance()->get_setting('site_currency'),
+			'customer' => $stripe_customer_id,
+			'payment_method' => $payment_method_id,
+			'payment_method_types' => ['card'],
+			'capture_method' => 'manual',
+			'confirm' => true,
+			'description' => substr((string)$description, 0, 1000),
+			'metadata' => [
+				'ord_order_id' => $order->key,
+				'customer_name' => $billing_user->display_name(),
+				'customer_email' => $billing_user->get('usr_email'),
+			],
+		];
+		if ($for_later) {
+			$params['setup_future_usage'] = 'off_session';
+		}
+		return $this->executePaymentWithErrorHandling(function () use ($params) {
+			return $this->client()->paymentIntents->create($params);
+		}, 'Card authorization');
+	}
+
+	/** Take the money a card checkout authorized. */
+	public function capture_card_payment($intent_id) {
+		return $this->executePaymentWithErrorHandling(function () use ($intent_id) {
+			return $this->client()->paymentIntents->capture($intent_id);
+		}, 'Card capture');
+	}
+
+	public function get_card_payment($intent_id) {
+		return $this->client()->paymentIntents->retrieve($intent_id);
+	}
+
+	/**
+	 * Take back a card checkout's one-time payment: release an authorization
+	 * not yet captured, refund one that was.
+	 *
+	 * @return int what was refunded, in cents (0 when nothing had been taken)
+	 * @throws \Stripe\Exception\ExceptionInterface when Stripe refuses.
+	 */
+	public function undo_card_payment($intent): int {
+		$status = (string)$intent->status;
+		if ($status === 'succeeded') {
+			$this->client()->refunds->create(['payment_intent' => $intent->id]);
+			return (int)$intent->amount_received;
+		}
+		if ($status !== 'canceled') {
+			$this->client()->paymentIntents->cancel($intent->id);
+		}
+		return 0;
+	}
+
+	/** What to tell the buyer when a card payment was not authorized. */
+	public static function card_payment_refusal($intent): string {
+		if (($intent->status ?? '') === 'requires_action') {
+			return 'Your bank did not confirm the payment. Please try again or use another card.';
+		}
+		return !empty($intent->last_payment_error->message)
+			? $intent->last_payment_error->message : 'Your card was not accepted.';
+	}
+
 	public function get_payment_methods($stripe_user_id){
 		$result = $this->client()->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
 		return $result;
@@ -1319,14 +1364,6 @@ class StripeHelper {
 
 	
 
-	public function create_charge($params){
-		//CHARGE THE PURCHASE
-		$charge = $this->client()->charges->create($params); 
-		return $charge;
-	}
-
-
-	
 	/**
 	 * The Stripe price to charge a product version at.
 	 *
@@ -1469,7 +1506,7 @@ class StripeHelper {
 	 *
 	 * @throws SystemDisplayableError when Stripe refuses to create it.
 	 */
-	public function create_regular_subscription($price, $product_version, $order, $billing_user, $stripe_customer_id){
+	public function create_regular_subscription($price, $product_version, $order, $billing_user, $stripe_customer_id, bool $off_session = false){
 		$subscription_params = [
 			'customer' => $stripe_customer_id,
 			'items' => [['price' => $price['id']]],
@@ -1483,6 +1520,12 @@ class StripeHelper {
 		$trial_period_days = intval($product_version->get('prv_trial_period_days'));
 		if ($trial_period_days > 0) {
 			$subscription_params['trial_period_days'] = $trial_period_days;
+		}
+		// After the checkout's one-time authorization confirmed the card for
+		// later use, the first invoice is charged as a merchant charge, so the
+		// bank does not ask the buyer a second time.
+		if ($off_session) {
+			$subscription_params['off_session'] = true;
 		}
 
 		try {
@@ -1498,12 +1541,21 @@ class StripeHelper {
 		return $subscription;
 	}
 
+	public function get_regular_subscription($subscription_id) {
+		return $this->client()->subscriptions->retrieve($subscription_id, ['expand' => ['latest_invoice.payment_intent']]);
+	}
+
+	/** The first invoice's PaymentIntent of a subscription made by create_regular_subscription(), or null. */
+	public static function regular_subscription_intent($subscription) {
+		$intent = $subscription->latest_invoice->payment_intent ?? null;
+		return is_object($intent) ? $intent : null;
+	}
+
 	/** What to tell the buyer when a new subscription is not live. */
 	public static function regular_subscription_refusal($subscription): string {
 		$intent = $subscription->latest_invoice->payment_intent ?? null;
 		if (is_object($intent) && ($intent->status ?? '') === 'requires_action') {
-			return 'Your bank asked to confirm this payment, which this checkout cannot do yet. '
-				. 'Please try another card.';
+			return 'Your bank did not confirm the payment. Please try again or use another card.';
 		}
 		return (is_object($intent) && !empty($intent->last_payment_error->message))
 			? $intent->last_payment_error->message : 'Your card was not accepted for the first payment.';
@@ -1550,45 +1602,6 @@ class StripeHelper {
 	}
 
 
-	public function process_charge($source, $amount, $stripe_customer_id, $item_list, $billing_user, $order=NULL){
-		
-		if($amount <= 0){
-			throw new SystemDisplayablePermanentError("The amount value ".$amount."submitted for process_charge is not greater than zero.");
-			exit();	
-		}
-		$settings = Globalvars::get_instance();
-		$currency_code = $settings->get_setting('site_currency');
-		$currency_symbol = CurrencyHelper::symbol($settings->get_setting('site_currency'));
-		$billing_name = $billing_user->display_name();
-		
-		$amount = $amount*100;
-			
-		//CHARGE THE PURCHASE
-		
-		$metadata = array();
-		if($order){
-			$metadata['ord_order_id'] = $order->get('ord_order_id'); 
-		}
-		$metadata['customer_name'] = $billing_name;
-		$metadata['customer_email'] = $billing_user->get('usr_email');
-			 
-		$charge_params = array(
-		  'source' => $source['id'],
-		  'amount' => $amount,
-		  'currency' => $currency_code,
-		  'customer' => $stripe_customer_id,
-		  'description' => implode(",", $item_list), 
-		  //'billing_details' => ['email' => $billing_user->get('usr_email'), 'name' => $billing_name, ],
-		  'metadata' => $metadata 
-		);
-
-		$charge = $this->create_charge($charge_params);
-
-		return $charge;
-			
-	}
-	
-	
 	/* BEGIN STRIPE CHECKOUT FUNCTIONS */
 	
 
