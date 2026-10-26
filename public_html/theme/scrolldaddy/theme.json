@@ -2,7 +2,7 @@
     "name": "scrolldaddy",
     "display_name": "ScrollDaddy Theme",
     "description": "ScrollDaddy self-hosted DNS filtering service theme",
-    "version": "1.0.17",
+    "version": "1.0.18",
     "status": "stable",
     "audience": [
         "scrolldaddy.app"
@@ -10,6 +10,7 @@
     "author": "System Developer",
     "receives_upgrades": true,
     "included_in_publish": true,
+    "publicPaths": ["/pricing"],
     "cssFramework": "html5",
     "publicPageBase": "PublicPageBase",
     "asset_fallback_theme": "default",

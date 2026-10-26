@@ -366,54 +366,19 @@ class SeoPageMetadata extends SystemBase {
 		return $records;
 	}
 
+	/**
+	 * Core's public, indexable pages. A view file is not a public page: most
+	 * of core's are sign-in steps, callbacks, endpoints or member pages, which
+	 * are wrong, private or broken as a bare URL, so only these are listed.
+	 * A theme's view of one of them (its own index or blog) is the same page.
+	 */
+	const CORE_PUBLIC_PATHS = array('/', '/blog', '/lists', '/site-directory', '/documentation', '/license');
+
 	private static function enumerate_static_paths() {
 		$records = array();
 		$seen = array();
-		$settings = Globalvars::get_instance();
-		$active_theme = $settings->get_setting('theme_template', false, true);
-
-		$candidate_dirs = array(PathHelper::getIncludePath('views'));
-		if ($active_theme) {
-			$theme_views = PathHelper::getIncludePath('theme/' . $active_theme . '/views');
-			if (is_dir($theme_views)) {
-				$candidate_dirs[] = $theme_views;
-			}
-		}
-
-		$skip_files = array('post.php', 'event.php', 'product.php', 'page.php',
-			'location.php', 'video.php', 'list.php', '404.php', 'sitemap.php',
-			'robots.php', 'login.php', 'logout.php', 'register.php',
-			'change-password-required.php');
-
-		foreach ($candidate_dirs as $dir) {
-			if (!is_dir($dir)) continue;
-			foreach (scandir($dir) as $entry) {
-				if ($entry === '.' || $entry === '..') continue;
-				if (substr($entry, -4) !== '.php') continue;
-				if (in_array($entry, $skip_files, true)) continue;
-				$base = substr($entry, 0, -4);
-				if ($base === 'index') {
-					$path = '/';
-				} else {
-					$path = '/' . $base;
-				}
-				$canonical = self::canonicalize_path($path);
-				if (isset($seen[$canonical])) continue;
-				$seen[$canonical] = true;
-				$records[] = array(
-					'path'        => $canonical,
-					'entity_type' => null,
-					'entity_id'   => null,
-					'modify_time' => null,
-				);
-			}
-		}
-
-		// A plugin's public pages are the ones it declares (plugin.json
-		// "publicPaths"), for active plugins only. A plugin's view files are not
-		// a list of public pages: most are member, admin, endpoint or
-		// placeholder views that are wrong, private or broken as a bare URL.
-		foreach (self::plugin_public_paths() as $path) {
+		$declared = array_merge(self::CORE_PUBLIC_PATHS, self::theme_public_paths(), self::plugin_public_paths());
+		foreach ($declared as $path) {
 			$canonical = self::canonicalize_path($path);
 			if (isset($seen[$canonical])) continue;
 			$seen[$canonical] = true;
@@ -424,8 +389,34 @@ class SeoPageMetadata extends SystemBase {
 				'modify_time' => null,
 			);
 		}
-
 		return $records;
+	}
+
+	/** Whether a declared public path is a same-site path. */
+	private static function is_declarable_path($path): bool {
+		return is_string($path) && preg_match('#^/[A-Za-z0-9/_\-.]*$#', $path) && strpos($path, '//') === false;
+	}
+
+	/**
+	 * The public pages of its own the active theme declares in theme.json
+	 * ("publicPaths": ["/pricing"]), as a plugin does in plugin.json.
+	 *
+	 * @return string[]
+	 */
+	public static function theme_public_paths(): array {
+		$paths = array();
+		$theme = (string)Globalvars::get_instance()->get_setting('theme_template', false, true);
+		if ($theme === '' || !class_exists('ThemeHelper')) {
+			return $paths;
+		}
+		foreach ((array)ThemeHelper::config('publicPaths', array(), $theme) as $path) {
+			if (!self::is_declarable_path($path)) {
+				error_log("SeoPageMetadata: theme '{$theme}' declares publicPaths entry that is not a same-site path; ignored.");
+				continue;
+			}
+			$paths[] = $path;
+		}
+		return $paths;
 	}
 
 	/**
@@ -450,7 +441,7 @@ class SeoPageMetadata extends SystemBase {
 		}
 		foreach ($plugins as $name => $plugin) {
 			foreach ((array)$plugin->get('publicPaths', array()) as $path) {
-				if (!is_string($path) || !preg_match('#^/[A-Za-z0-9/_\-.]*$#', $path) || strpos($path, '//') !== false) {
+				if (!self::is_declarable_path($path)) {
 					error_log("SeoPageMetadata: plugin '{$name}' declares publicPaths entry that is not a same-site path; ignored.");
 					continue;
 				}

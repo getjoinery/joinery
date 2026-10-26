@@ -100,9 +100,10 @@ Both categories show up in the **Find orphans** view on the admin SEO list page 
 
 ## What is enumerated
 
-`SeoPageMetadata::enumerate_public_paths()` lists three kinds of path:
+`SeoPageMetadata::enumerate_public_paths()` lists four kinds of path:
 
-- **Core static pages** — the top-level `views/*.php` of core and the active theme (minus entity, auth and utility views).
+- **Core public pages** — `SeoPageMetadata::CORE_PUBLIC_PATHS`: `/`, `/blog`, `/lists`, `/site-directory`, `/documentation`, `/license`. A view file is not a public page (most of core's are sign-in steps, callbacks, endpoints or member pages), so no other core view is listed.
+- **Theme public pages** — the paths the active theme declares in `theme.json` (`"publicPaths": ["/pricing"]`). A theme's view of a core page is that core page.
 - **Plugin public pages** — the paths each active plugin declares in `plugin.json`. A plugin's view files are not a list of public pages (most are member, admin, endpoint or placeholder views), so nothing is listed that is not declared:
 
   ```json
