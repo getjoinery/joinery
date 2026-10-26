@@ -1126,7 +1126,7 @@ class StripeHelper {
 		} 
 		*/
 		catch (Exception $e) {
-			$error = "Sorry, we weren't able to store your card. " . $e->getMessage();
+			$error = "Your card was not accepted. " . $e->getMessage();
 			error_log($error);
 			throw new SystemDisplayableError($error);
 			/*		
@@ -1396,91 +1396,88 @@ class StripeHelper {
 
 
 
-	public function process_stripe_regular_subscription_from_order_item($price, $order_item, $billing_user, $stripe_customer_id){
-		$billing_name = $billing_user->display_name();
-		$order = $order_item->get_order();
-		
-		$price_items = array(
-			'price' => $price['id'],
-		);
-				
-		//START THE SUBSCRIPTION
-		
-		$price_items_wrap = array($price_items);
-
-		// Check for trial period on the product version
-		require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
-		$trial_period_days = 0;
-		$product_version_id = $order_item->get('odi_prv_product_version_id');
-		if ($product_version_id) {
-			$product_version = new ProductVersion($product_version_id, TRUE);
-			if ($product_version->key) {
-				$trial_period_days = intval($product_version->get('prv_trial_period_days'));
-			}
+	/**
+	 * Start a card checkout's subscription, before anything is written to its
+	 * order line. Stripe charges the first invoice as it creates the
+	 * subscription, and a declined first invoice is not an error: the
+	 * subscription comes back 'incomplete'. The caller keeps it only when it is
+	 * 'active' or 'trialing' (regular_subscription_refusal() says why not), and
+	 * undoes it (undo_regular_subscription()) if the checkout fails after it.
+	 *
+	 * @throws SystemDisplayableError when Stripe refuses to create it.
+	 */
+	public function create_regular_subscription($price, $product_version, $order, $billing_user, $stripe_customer_id){
+		$subscription_params = [
+			'customer' => $stripe_customer_id,
+			'items' => [['price' => $price['id']]],
+			'metadata' => [
+				'ord_order_id' => $order->key,
+				'customer_name' => $billing_user->display_name(),
+				'customer_email' => $billing_user->get('usr_email'),
+			],
+			'expand' => ['latest_invoice.payment_intent'],
+		];
+		$trial_period_days = intval($product_version->get('prv_trial_period_days'));
+		if ($trial_period_days > 0) {
+			$subscription_params['trial_period_days'] = $trial_period_days;
 		}
 
-		try{
-
-			$subscription_params = [
-			  'customer' => $stripe_customer_id,
-			  'items' => $price_items_wrap,
-			  'metadata' => [
-				 "ord_order_id" => $order->key,
-				 "odi_order_item_id" => $order_item->key,
-				 "customer_name" => $billing_name,
-				 "customer_email" => $billing_user->get('usr_email')],
-			];
-
-			if ($trial_period_days > 0) {
-				$subscription_params['trial_period_days'] = $trial_period_days;
-			}
-
-			$params = array($subscription_params);
-			
-			
-			$subscription_result = $this->create_subscription($params);
-			
-
-
+		try {
+			$subscription = $this->create_subscription($subscription_params);
 		}
-		catch (Exception $e) {		  
-			$stored_error = "Subscription failed.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
-			
-			$error = "Sorry, we weren't able to create your subscription. <strong>" . $e->getMessage()."</strong> ";
-			
-			$order->set('ord_error', substr($stored_error, 0, 250));
-			$order->save();	
-			
-			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-			$order_item->set('odi_status_change_time', 'now()');
-			$order_item->save();
-			throw new SystemDisplayablePermanentError($error);
-			exit;;  //SKIP THE REST OF THE ITEM
-		}				
-		
-
-		//IF THE SUBSCRIPTION FAILED MARK IT AS ERROR
-		if(!$subscription_result['id']){
-			$order_item->set('odi_status', OrderItem::STATUS_ERROR);
-			$order_item->set('odi_status_change_time', 'now()');
-			$order_item->save();
-			exit;  //SKIP THE REST OF THE ITEM
+		catch (\Stripe\Exception\ExceptionInterface $e) {
+			error_log('Stripe subscription create failed for order ' . $order->key . ': ' . $e->getMessage());
+			throw new SystemDisplayableError("We couldn't start your subscription. " . $e->getMessage());
 		}
-		
-		//SAVE THE SUBSCRIPTION INFO FROM REGULAR CHECKOUT
-		$order_item->set('odi_stripe_subscription_id', $subscription_result['id']);
+		if (empty($subscription->id)) {
+			throw new SystemDisplayableError("We couldn't start your subscription. Please try again.");
+		}
+		return $subscription;
+	}
+
+	/** What to tell the buyer when a new subscription is not live. */
+	public static function regular_subscription_refusal($subscription): string {
+		$intent = $subscription->latest_invoice->payment_intent ?? null;
+		if (is_object($intent) && ($intent->status ?? '') === 'requires_action') {
+			return 'Your bank asked to confirm this payment, which this checkout cannot do yet. '
+				. 'Nothing was charged. Please try another card.';
+		}
+		$reason = (is_object($intent) && !empty($intent->last_payment_error->message))
+			? $intent->last_payment_error->message : 'Your card was not accepted for the first payment.';
+		return $reason . ' Nothing was charged.';
+	}
+
+	/**
+	 * Take back a subscription a checkout made and then could not complete:
+	 * cancel it now, and refund its first invoice if Stripe already took it.
+	 *
+	 * @throws \Stripe\Exception\ExceptionInterface when Stripe refuses; the
+	 *         caller alerts the operator, since money may still be held.
+	 */
+	public function undo_regular_subscription($subscription){
+		$this->client()->subscriptions->cancel($subscription->id);
+		$invoice = $subscription->latest_invoice ?? null;
+		$intent = is_object($invoice) ? ($invoice->payment_intent ?? null) : null;
+		$intent_id = is_object($intent) ? ($intent->id ?? null) : $intent;
+		if ($intent_id && (int)($invoice->amount_paid ?? 0) > 0) {
+			$this->client()->refunds->create(['payment_intent' => $intent_id]);
+		}
+	}
+
+	/** Write a live subscription made by create_regular_subscription() onto its order line. */
+	public function record_regular_subscription($order_item, $subscription){
+		$invoice = $subscription->latest_invoice ?? null;
+		$order_item->set('odi_stripe_subscription_id', $subscription->id);
 		$order_item->set('odi_payment_source', 'stripe');
-		$order_item->set('odi_stripe_foreign_invoice_id', $subscription_result['latest_invoice']);
+		$order_item->set('odi_stripe_foreign_invoice_id', is_object($invoice) ? $invoice->id : $invoice);
 		$order_item->set('odi_is_subscription', true);
+		$order_item->set('odi_subscription_status', $subscription->status);
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
 		$order_item->set('odi_status_change_time', 'now()');
-		$order_item->save();		
-		
-		return $subscription_result;
-		
-	}	
-	
-	
+		$order_item->save();
+	}
+
+
 	public function process_charge($source, $amount, $stripe_customer_id, $item_list, $billing_user, $order=NULL){
 		
 		if($amount <= 0){

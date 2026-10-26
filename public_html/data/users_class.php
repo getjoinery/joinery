@@ -557,7 +557,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 					'send_emails' => $send_emails
 				);
 
-				if($data['password']){
+				if(!empty($data['password'])){
 					$tdata['password'] = $data['password'];
 				}
 

@@ -46,6 +46,8 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.6 - fulfill() names its receipt outcome, 'subscription', so the hosting receipt
+ *                no longer reads as an event registration
  * @version 1.5 - an activated draft on the operator's account is born with its data root encrypted where
  *                data_root_encryption_offered is on (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.4 - configure first, pay once, payment activates (specs/managed_hosting_phase1_purchase.md):
@@ -132,10 +134,14 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$provision = null;
 		}
 		if ($provision === null) {
-			return array('ref_id' => null, 'label' => 'Server provisioning needs attention', 'labels' => null);
+			return array('ref_id' => null, 'label' => 'Server provisioning needs attention', 'labels' => null,
+				'outcome' => 'subscription');
 		}
+		// The receipt reads the line as the subscription it is; without the
+		// outcome a ref_id makes it an event registration.
 		return array('ref_id' => (int)$provision->key,
-			'label' => 'Server for ' . $provision->get('cvp_domain'), 'labels' => null);
+			'label' => 'Server for ' . $provision->get('cvp_domain'), 'labels' => null,
+			'outcome' => 'subscription');
 	}
 
 	/**

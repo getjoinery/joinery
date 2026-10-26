@@ -29,6 +29,27 @@ function _cart_charge_paid_not_completed(string $log_detail, ?string $buyer_mess
 }
 
 /**
+ * Email the site's operator about an order that needs a person. Never throws:
+ * it runs on paths that are already handling a failure.
+ */
+function _cart_charge_alert_operator(string $subject, string $body) {
+	try {
+		$settings = Globalvars::get_instance();
+		$ops_email = $settings->get_setting('defaultemail');
+		if ($ops_email) {
+			EmailSender::sendTemplate($settings->get_setting('individual_email_inner_template'), $ops_email, array(
+				'subject' => $subject,
+				'body' => $body,
+				'recipient' => array('display_name' => 'Operator'),
+			));
+		}
+	}
+	catch (Exception $ops_e) {
+		error_log('Operator notification failed (' . $subject . '): ' . $ops_e->getMessage());
+	}
+}
+
+/**
  * Resolve which template name to use for this product's per-product receipt email.
  * Falls back to $default_name when the product has no override or the override
  * points to a missing/soft-deleted template (best-effort, never load-bearing).
@@ -627,6 +648,46 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$order->save();
 	$order->load();
 
+	//A card payment refused before the checkout completed: the order records
+	//why, any subscription already made for it is taken back, and the buyer
+	//is sent back to /checkout with the reason. A take-back that fails leaves
+	//money with us, so the operator is told.
+	$stripe_subscriptions = array();
+	$payment_refused = function (string $message) use ($order, $billing_user, &$stripe_subscriptions, &$stripe_helper) {
+		$undo_failures = array();
+		foreach($stripe_subscriptions as $made_subscription){
+			try {
+				$stripe_helper->undo_regular_subscription($made_subscription);
+			}
+			catch (Exception $undo_e) {
+				$undo_failures[] = $made_subscription->id . ': ' . $undo_e->getMessage();
+			}
+		}
+		$stripe_subscriptions = array();
+
+		$order->set('ord_status', Order::STATUS_ERROR);
+		$order->set('ord_error', substr($message . ($undo_failures ? ' | NOT UNDONE: ' . implode('; ', $undo_failures) : ''), 0, 250));
+		$order->save();
+		if($undo_failures){
+			error_log('cart_charge: order ' . $order->key . ' subscriptions not undone: ' . implode('; ', $undo_failures));
+			_cart_charge_alert_operator('Order #' . $order->key . ': subscription not cancelled or refunded',
+				"A card checkout failed after Stripe started a subscription, and taking it back failed.\n\n"
+				. 'Billing user: ' . $billing_user->get('usr_email') . "\n"
+				. 'Why the checkout failed: ' . $message . "\n"
+				. 'Not undone: ' . implode("\n", $undo_failures) . "\n\n"
+				. 'Cancel and refund these in Stripe.');
+		}
+
+		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+		SignalBus::dispatch('payment.failed', array(
+			'order_id'      => $order->key,
+			'user_id'       => $billing_user->key,
+			'error_message' => substr($message, 0, 160),
+		));
+
+		return _checkout_error($message);
+	};
+
 	$payment_service = '';
 	if($charge_total > 0){
 		if($return !== null){
@@ -655,7 +716,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return _checkout_error("Your credit card information could not be submitted. Please make sure you are using a secure connection (https) and that JavaScript is enabled.");
 			}	
 
-			$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+			try {
+				$source_result = $stripe_helper->create_card_from_token($_REQUEST['stripeToken'], $stripe_customer_id, true);
+			}
+			catch (SystemDisplayableError $e) {
+				return $payment_refused($e->getMessage());
+			}
 			$order->set('ord_payment_method', 'stripe');
 			$order->save();
 			$payment_service = 'stripe_regular';
@@ -674,6 +740,40 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	//REFRESH THE ORDER 
 	$order->load();
+
+	//THE SUBSCRIPTIONS, BEFORE THE ONE-TIME CHARGE. Stripe charges a
+	//subscription's first invoice as it makes it, and answers a declined one
+	//with an 'incomplete' subscription rather than an error. Made first, and
+	//kept only when live, so a card refused for a subscription is refused
+	//before any one-time line is charged; whatever fails after this takes
+	//them back ($payment_refused).
+	if($payment_service == 'stripe_regular'){
+		foreach($cart->items as $key => $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			if(!$product_version->is_subscription()){
+				continue;
+			}
+			try {
+				// A discounted line is billed at a Stripe price of its own;
+				// the version's stored price stays its own amount.
+				$stripe_price = $stripe_helper->get_or_create_price($product_version, $price - $discount);
+				$made_subscription = $stripe_helper->create_regular_subscription($stripe_price, $product_version, $order, $billing_user, $stripe_customer_id);
+			}
+			catch (SystemDisplayableError $e) {
+				return $payment_refused($e->getMessage());
+			}
+			$stripe_subscriptions[$key] = $made_subscription;
+			if(!in_array($made_subscription->status, array('active', 'trialing'), true)){
+				return $payment_refused(StripeHelper::regular_subscription_refusal($made_subscription));
+			}
+		}
+		// A cart of subscriptions alone has no card charge below: their
+		// first invoices are the payment.
+		if($stripe_subscriptions && !$cart->get_non_recurring_total()){
+			$order->set('ord_status', Order::STATUS_PAID);
+			$order->save();
+		}
+	}
 		
 
 	
@@ -707,26 +807,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				);
 			}
 			catch (SystemDisplayableError $e) {
-				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->set('ord_error', substr($e->getMessage(), 0, 250));
-				$order->save();
-
-				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-				SignalBus::dispatch('payment.failed', array(
-					'order_id'      => $order->key,
-					'user_id'       => $billing_user->key,
-					'error_message' => substr($e->getMessage(), 0, 160),
-				));
-
-				return _checkout_error($e->getMessage());
+				return $payment_refused($e->getMessage());
 			}
 			catch (StripeHelperException $e) {
 				error_log("Stripe configuration error during payment: " . $e->getMessage());
-				$order->set('ord_status', Order::STATUS_ERROR);
-				$order->set('ord_error', 'Stripe configuration error');
-				$order->save();
 				$support_email = $settings->get_setting('defaultemail');
-				return _checkout_error("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".");
+				return $payment_refused("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".");
 			}
 
 			//STORE THE CHARGE ID AND MARK PAID
@@ -945,22 +1031,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$subscription_result = null;
 			if($product_version->is_subscription()){
 				if($payment_service == 'stripe_regular'){
-					$final_price = $price - $discount;
-					// A discounted line is billed at a Stripe price of its own;
-					// the version's stored price stays its own amount.
-					$stripe_price = $stripe_helper->get_or_create_price($product_version, $final_price);
-					$subscription_result = $stripe_helper->process_stripe_regular_subscription_from_order_item($stripe_price, $order_item, $billing_user, $stripe_customer_id);
-					$order_item->set('odi_subscription_status', $subscription_result['status']);
-					$order_item->set('odi_status', OrderItem::STATUS_PAID);
-					$order_item->save();
-					// A cart of subscriptions alone has no card charge above to
-					// mark its order paid: the subscription's first invoice is
-					// the payment, so a live subscription marks it.
-					if((int)$order->get('ord_status') === Order::STATUS_UNPAID
-						&& in_array($subscription_result['status'], array('active', 'trialing'), true)){
-						$order->set('ord_status', Order::STATUS_PAID);
-						$order->save();
-					}
+					//MADE AND CHECKED LIVE BEFORE THE CHARGE
+					$subscription_result = $stripe_subscriptions[$key];
+					$stripe_helper->record_regular_subscription($order_item, $subscription_result);
 				}
 				else if($payment_service == 'stripe_checkout'){
 					$order_item->set('odi_status', OrderItem::STATUS_PAID);
@@ -1023,7 +1096,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			//Outcome category (mirrors template body conditionals). The fulfilled
 			//cases are driven by the provider's result shape, not by any product
 			//column the store would have to interpret.
-			if ($fulfillment_result && !empty($fulfillment_result['labels'])) {
+			$named_outcomes = array('bundle', 'event', 'subscription', 'digital', 'plain');
+			if ($fulfillment_result && in_array($fulfillment_result['outcome'] ?? null, $named_outcomes, true)) {
+				$outcome = $fulfillment_result['outcome'];
+			} else if ($fulfillment_result && !empty($fulfillment_result['labels'])) {
 				$outcome = 'bundle';
 			} else if ($fulfillment_result && !empty($fulfillment_result['ref_id'])) {
 				$outcome = 'event';
@@ -1251,25 +1327,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		// Operator notification — paged the instant it happens.
-		try {
-			$ops_email = $settings->get_setting('defaultemail');
-			if ($ops_email) {
-				$body = "Post-charge work failed for order #{$order->key}.\n\n".
-					"Billing user: ".$billing_user->get('usr_email')."\n".
-					"Error: ".$post_charge_e->getMessage()."\n".
-					"Location: ".$post_charge_e->getFile().":".$post_charge_e->getLine()."\n\n".
-					"Order is PAID; manual fix-up via /admin/admin_orders.";
-				$email_inner_template = $settings->get_setting('individual_email_inner_template');
-				EmailSender::sendTemplate($email_inner_template, $ops_email, array(
-					'subject' => 'Order #'.$order->key.' post-charge failure',
-					'body' => $body,
-					'recipient' => array('display_name' => 'Operator')
-				));
-			}
-		}
-		catch (Exception $ops_e) {
-			error_log("Operator notification failed for order {$order->key}: " . $ops_e->getMessage());
-		}
+		_cart_charge_alert_operator('Order #'.$order->key.' post-charge failure',
+			"Post-charge work failed for order #{$order->key}.\n\n".
+			"Billing user: ".$billing_user->get('usr_email')."\n".
+			"Error: ".$post_charge_e->getMessage()."\n".
+			"Location: ".$post_charge_e->getFile().":".$post_charge_e->getLine()."\n\n".
+			"Order is PAID; manual fix-up via /admin/admin_orders.");
 	}
 
 	// Always run — order is PAID (Phase 2), errors recorded on ord_error for
@@ -1296,6 +1359,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
   } catch (Exception $e) {
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+	// Subscriptions started for a checkout that never got paid are taken back.
+	if(!empty($stripe_subscriptions) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID){
+		return $payment_refused("Something went wrong processing your order, and nothing was charged. Please try again.");
+	}
 	if($return !== null){
 		return _cart_charge_paid_not_completed('gateway return ' . $return['lock_ref'] . ' threw before it completed');
 	}
