@@ -19,6 +19,8 @@
  * publish job, or 'refused' with the reason. The AdvanceStagedRollouts task
  * advances it every run.
  *
+ * @version 1.2 - publishedHere(): whether this site already holds a version, the publisher's own refusal
+ *                asked before a form offers to republish it
  * @version 1.1 - followUp() says where the publish it started stands (publish_status)
  * @version 1.0
  */
@@ -43,6 +45,12 @@ class ApplyAndPublish {
 	 * @param array $params release_notes, major, minor, patch
 	 */
 	public static function queuePublish(ManagedNode $node, array $params, bool $deploy_all, $uid): ManagementJob {
+		if ($node->is_self() && !DeploymentHelper::mayMintReleaseVersion()
+				&& self::publishedHere(LibraryFunctions::get_joinery_version())) {
+			throw new Exception(LibraryFunctions::get_joinery_version() . ' is already published here, and a site '
+				. 'that republishes what it received has no other number to publish. Use Apply and publish to bring '
+				. 'in the newer release.');
+		}
 		$built = JobCommandBuilder::build_publish_upgrade($node, $params);
 		self::assertCommitted($node);
 		// Recorded on the job, never sent to the node: the plane starts the
@@ -51,6 +59,25 @@ class ApplyAndPublish {
 			$params['deploy_all'] = true;
 		}
 		return ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
+	}
+
+	/**
+	 * Whether this site already holds a published release of $version. The
+	 * publisher refuses a second one (publish_upgrade.php, the same query), so
+	 * a site running a version it has already republished has nothing to
+	 * publish until it applies a newer one: the forms offer Apply and publish,
+	 * never a Republish that can only fail.
+	 */
+	public static function publishedHere(string $version): bool {
+		if (!preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $version, $m)) {
+			return false;
+		}
+		$existing = new MultiUpgrade(
+			array('major_version' => (int)$m[1], 'minor_version' => (int)$m[2], 'patch_version' => (int)$m[3]),
+			array(),
+			1
+		);
+		return count($existing) > 0;
 	}
 
 	/**

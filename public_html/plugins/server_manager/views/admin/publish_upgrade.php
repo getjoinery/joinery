@@ -12,6 +12,9 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.17 - a site that republishes is offered Apply and publish while its upgrade source offers a newer
+ *                release, and no Republish of a version it has already published (the publisher refuses it):
+ *                the button that made getjoinery's 0.8.538 publish fail as 'Version 0.8.537 already exists'
  * @version 1.16 - Deploy to all managed nodes is described by StagedRolloutRunner::deploy_all_description (its two stages)
  * @version 1.15 - the changed agent words with no recorded run on a real machine are listed, and a publish of them
  *                needs the Publish these without a live run box (AgentLiveProofs; fleet_security_patching WP7, Q5)
@@ -167,6 +170,19 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 		try {
 			if (!$self) {
 				throw new Exception(publish_self_pairing_advice());
+			}
+			// Apply what the upgrade source offers, then publish it: the node
+			// page's request, made for this site's own node.
+			if (isset($_POST['btn_apply_and_publish'])) {
+				$job = ApplyAndPublish::request($self, $release_notes, trim((string)($_POST['apply_target'] ?? '')),
+					!empty($_POST['deploy_all']), $session->get_user_id());
+				header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
+				exit;
+			}
+			$running = LibraryFunctions::get_joinery_version();
+			if (!DeploymentHelper::mayMintReleaseVersion() && ApplyAndPublish::publishedHere($running)) {
+				throw new Exception($running . ' is already published here, and a site that republishes what it '
+					. 'received has no other number to publish. Use Apply and publish to bring in the newer release.');
 			}
 			if (($blocked = AgentDistPublisher::uncommittedAdvice()['lines'])) {
 				throw new Exception('Commit and push first. ' . implode(' ', $blocked));
@@ -359,6 +375,21 @@ if (!$may_mint && $current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $curr
 	$next_patch = (int)$m[3];
 }
 
+// A site that republishes has two things it can publish: what it runs, once,
+// and what its upgrade source offers, by applying it first (Apply and publish,
+// as on its node page). Republishing what is already published here only fails.
+$already_published = !$may_mint && ApplyAndPublish::publishedHere($current);
+$apply_target = '';
+$offer_error = '';
+if (!$may_mint && !$cannot_publish) {
+	$offered = ReleaseProvenance::offered((string)Globalvars::get_instance()->get_setting('upgrade_source'));
+	$offer_error = $offered['error'];
+	if (preg_match('/^\d+\.\d+\.\d+$/', $offered['version']) && $offered['version'] !== $current) {
+		$apply_target = $offered['version'];
+	}
+}
+$nothing_to_publish = $already_published && $apply_target === '';
+
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
@@ -499,13 +530,24 @@ $page->begin_box($pageoptions);
 <div class="jy-callout jy-callout-warning"><?php echo $cannot_publish; ?></div>
 <?php elseif ($may_mint): ?>
 <p class="text-muted">Build upgrade archives from the current management node source code, as a job of this node's own agent (<?php echo htmlspecialchars($self_node->get('mgn_name')); ?>). The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
+<?php elseif ($apply_target !== ''): ?>
+<div class="jy-callout jy-callout-info">This site runs <?php echo htmlspecialchars($current); ?>, exactly what
+its upgrade source delivered, and the source now offers <?php echo htmlspecialchars($apply_target); ?>.
+<strong>Apply and publish</strong> brings <?php echo htmlspecialchars($apply_target); ?> in, then publishes it
+from here once the apply passes its checks (job completed, nothing rolled back).<?php
+	echo $already_published ? ' ' . htmlspecialchars($current) . ' itself is already published here.' : ''; ?></div>
+<?php elseif ($nothing_to_publish): ?>
+<div class="jy-callout jy-callout-info">This site runs <?php echo htmlspecialchars($current); ?>, exactly what
+its upgrade source delivered, and <?php echo htmlspecialchars($current); ?> is already published here.
+There is nothing to publish until the source offers a newer release<?php
+	echo $offer_error !== '' ? ' (asking it just now: ' . htmlspecialchars($offer_error) . ')' : ''; ?>.</div>
 <?php else: ?>
 <div class="jy-callout jy-callout-info">This deployment is running exactly the version upstream
 delivered (<?php echo htmlspecialchars($current); ?>), so it republishes that version rather than
-minting a new number. Upgrade it first to serve newer code.</div>
+minting a new number.</div>
 <?php endif; ?>
 <?php
-if (!$cannot_publish) {
+if (!$cannot_publish && !$nothing_to_publish) {
 $formwriter = $page->getFormWriter('publish_form');
 $formwriter->begin_form();
 $formwriter->hiddeninput('action', '', ['value' => 'publish_upgrade']);
@@ -533,7 +575,10 @@ $formwriter->textarea('release_notes', 'Release notes', [
 	'rows'        => 4,
 	'placeholder' => 'Describe what changed in this release...',
 ]);
-echo ReleaseNotesDrafter::buttonHtml('#publish_form textarea[name="release_notes"]');
+echo ReleaseNotesDrafter::buttonHtml('#publish_form textarea[name="release_notes"]', $apply_target);
+if ($apply_target !== '') {
+	$formwriter->hiddeninput('apply_target', '', ['value' => $apply_target]);
+}
 $formwriter->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
 	'checked'  => false,
 	'helptext' => StagedRolloutRunner::deploy_all_description(StagedRolloutRunner::deploy_all_plan()),
@@ -555,7 +600,13 @@ if ($unproven) {
 		'helptext' => 'The publish is refused unless this is ticked while the list above is not empty.',
 	]);
 }
-$formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
+if (!$already_published) {
+	$formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
+}
+if ($apply_target !== '') {
+	echo ' ';
+	$formwriter->submitbutton('btn_apply_and_publish', 'Apply and publish', ['class' => 'btn btn-primary']);
+}
 $formwriter->end_form();
 }
 ?>
