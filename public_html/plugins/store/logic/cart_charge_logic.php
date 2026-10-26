@@ -650,14 +650,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	//A card payment refused before the checkout completed: the order records
 	//why, any subscription already made for it is taken back, and the buyer
-	//is sent back to /checkout with the reason. A take-back that fails leaves
-	//money with us, so the operator is told.
+	//is sent back to /checkout with the reason and what happened to any money
+	//taken. A take-back that fails leaves money with us, so the operator is
+	//told. $declined is false when no card was tried (Stripe out of reach):
+	//that is not reported as a failed payment.
 	$stripe_subscriptions = array();
-	$payment_refused = function (string $message) use ($order, $billing_user, &$stripe_subscriptions, &$stripe_helper) {
+	$payment_refused = function (string $message, bool $declined = true) use ($order, $billing_user, &$stripe_subscriptions, &$stripe_helper, $currency_code) {
 		$undo_failures = array();
+		$refunded_cents = 0;
 		foreach($stripe_subscriptions as $made_subscription){
 			try {
-				$stripe_helper->undo_regular_subscription($made_subscription);
+				$refunded_cents += $stripe_helper->undo_regular_subscription($made_subscription);
 			}
 			catch (Exception $undo_e) {
 				$undo_failures[] = $made_subscription->id . ': ' . $undo_e->getMessage();
@@ -678,13 +681,23 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				. 'Cancel and refund these in Stripe.');
 		}
 
-		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-		SignalBus::dispatch('payment.failed', array(
-			'order_id'      => $order->key,
-			'user_id'       => $billing_user->key,
-			'error_message' => substr($message, 0, 160),
-		));
+		if($declined){
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			SignalBus::dispatch('payment.failed', array(
+				'order_id'      => $order->key,
+				'user_id'       => $billing_user->key,
+				'error_message' => substr($message, 0, 160),
+			));
+		}
 
+		if($refunded_cents > 0){
+			// The currency code, not the symbol: the symbol is HTML ('&euro;').
+			$message .= ' A first payment of ' . number_format($refunded_cents / 100, 2) . ' ' . strtoupper((string)$currency_code)
+				. ' was taken and has been refunded; it can take a few days to show on your statement.';
+		}
+		else if(!$undo_failures){
+			$message .= ' Nothing was charged.';
+		}
 		return _checkout_error($message);
 	};
 
@@ -721,6 +734,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 			catch (SystemDisplayableError $e) {
 				return $payment_refused($e->getMessage());
+			}
+			catch (StripeHelperException $e) {
+				return $payment_refused("We couldn't reach our card processor. Please try again in a few minutes.", false);
 			}
 			$order->set('ord_payment_method', 'stripe');
 			$order->save();
@@ -759,7 +775,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				$stripe_price = $stripe_helper->get_or_create_price($product_version, $price - $discount);
 				$made_subscription = $stripe_helper->create_regular_subscription($stripe_price, $product_version, $order, $billing_user, $stripe_customer_id);
 			}
-			catch (SystemDisplayableError $e) {
+			catch (SystemBaseException $e) {
+				// A refused create, or a price that could not be found or made.
 				return $payment_refused($e->getMessage());
 			}
 			$stripe_subscriptions[$key] = $made_subscription;
@@ -812,7 +829,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			catch (StripeHelperException $e) {
 				error_log("Stripe configuration error during payment: " . $e->getMessage());
 				$support_email = $settings->get_setting('defaultemail');
-				return $payment_refused("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".");
+				return $payment_refused("Your payment could not be processed. Please try again or contact support" . ($support_email ? " at $support_email" : "") . ".", false);
 			}
 
 			//STORE THE CHARGE ID AND MARK PAID
@@ -1360,8 +1377,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
   } catch (Exception $e) {
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
 	// Subscriptions started for a checkout that never got paid are taken back.
-	if(!empty($stripe_subscriptions) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID){
-		return $payment_refused("Something went wrong processing your order, and nothing was charged. Please try again.");
+	if(!empty($stripe_subscriptions) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID && empty($charge_result)){
+		return $payment_refused("Something went wrong processing your order. Please try again.", false);
 	}
 	if($return !== null){
 		return _cart_charge_paid_not_completed('gateway return ' . $return['lock_ref'] . ' threw before it completed');

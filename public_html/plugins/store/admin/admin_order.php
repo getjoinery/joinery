@@ -176,7 +176,7 @@
 								<?php endif; ?>
 
 								<div class="fs-11 mt-2">
-									<?php if($order->can_write($session) && ($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id')) && ($order->get('ord_refund_amount') < $order->get('ord_total_cost'))): ?>
+									<?php if($order->can_write($session) && ($order->get('ord_stripe_payment_intent_id') || $order->get('ord_stripe_charge_id') || $order_item->get('odi_stripe_subscription_id'))): ?>
 									<a href="/plugins/store/admin/admin_order_refund?oi=<?php echo $order_item->key; ?>" class="me-3">[refund]</a>
 									<?php endif; ?>
 									<a href="/plugins/store/admin/admin_order_item_edit?odi_order_item_id=<?php echo $order_item->key; ?>">[edit]</a>

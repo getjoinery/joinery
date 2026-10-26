@@ -845,14 +845,70 @@ class StripeHelper {
 		if($charge->amount_refunded){
 			//print_r($charge->refunds);
 			//$order->set('ord_refund_time', 'now()');
-			$order->set('ord_refund_amount', $charge->amount_refunded/100);
-			//$order->set('ord_refund_note', $_POST['ord_refund_note']);
+			$order->refresh_refund_amount($charge->amount_refunded/100);
 
 			// The refund total Stripe just reported, folded in on the order page's view.
 			SystemBase::server_initiated_write(function () use ($order) { $order->save(); });
 	
 		}	
 		return $charge;		
+	}
+
+	/**
+	 * The Stripe charge a refund of this order line comes out of.
+	 *
+	 * A subscription line is paid by its own invoices, so its refund comes out
+	 * of the subscription's latest paid invoice. Any other line was paid by the
+	 * order's own charge (ord_stripe_charge_id, or the charge of
+	 * ord_stripe_payment_intent_id).
+	 *
+	 * @return array ['charge' => \Stripe\Charge, 'is_order_charge' => bool,
+	 *         'what' => what is being refunded, for the page] or
+	 *         ['charge' => null, 'reason' => why there is nothing to refund here]
+	 * @throws StripeHelperException when Stripe cannot be asked.
+	 */
+	public function refundable_charge_for_item($order_item) {
+		$order = $order_item->get_order();
+		if ((bool)$order->get('ord_test_mode') !== (bool)$this->test_mode) {
+			return array('charge' => null, 'reason' => 'This order was paid in Stripe '
+				. ($order->get('ord_test_mode') ? 'test' : 'live') . ' mode; refund it with the site in that mode.');
+		}
+		if ($order_item->get_payment_source() === 'paypal' || $order->get('ord_paypal_order_id')) {
+			return array('charge' => null, 'reason' => 'This was paid through PayPal: refund it in PayPal.');
+		}
+
+		try {
+			if ($order_item->get('odi_stripe_subscription_id')) {
+				$subscription = $this->client()->subscriptions->retrieve(
+					$order_item->get('odi_stripe_subscription_id'), ['expand' => ['latest_invoice']]);
+				$invoice = $subscription->latest_invoice ?? null;
+				$charge_id = is_object($invoice) ? ($invoice->charge ?? null) : null;
+				if (!$charge_id) {
+					return array('charge' => null, 'reason' => 'The subscription\'s latest invoice has no payment to refund (a trial, or not paid yet).');
+				}
+				return array(
+					'charge' => $this->get_charge($charge_id),
+					'is_order_charge' => false,
+					'what' => 'the subscription\'s latest payment (invoice ' . ($invoice->number ?: $invoice->id)
+						. ', ' . gmdate('Y-m-d', (int)$invoice->created) . ')',
+				);
+			}
+
+			$charge = null;
+			if ($order->get('ord_stripe_charge_id')) {
+				$charge = $this->get_charge($order->get('ord_stripe_charge_id'));
+			}
+			else if ($order->get('ord_stripe_payment_intent_id')) {
+				$charge = $this->get_charge_from_payment_intent($order->get('ord_stripe_payment_intent_id'));
+			}
+		}
+		catch (\Stripe\Exception\ExceptionInterface $e) {
+			throw new StripeHelperException($e->getMessage(), 0, $e);
+		}
+		if (!$charge) {
+			return array('charge' => null, 'reason' => 'This order has no Stripe card payment to refund.');
+		}
+		return array('charge' => $charge, 'is_order_charge' => true, 'what' => 'the order\'s card payment');
 	}
 
 	public function get_subscription($stripe_subscription_id){
@@ -869,7 +925,7 @@ class StripeHelper {
 		try{
 			$re = $this->client()->refunds->create([
 			'charge' => $stripe_charge_id,
-			'amount' => $refund_amount*100
+			'amount' => (int)round($refund_amount * 100)
 			]);
 		}
 		catch(\Stripe\Exception\ExceptionInterface $e) {
@@ -1125,10 +1181,17 @@ class StripeHelper {
 		  $error = "Sorry, we weren't able to connect to the Stripe api.";
 		} 
 		*/
-		catch (Exception $e) {
+		catch (\Stripe\Exception\CardException $e) {
+			// The bank refused the card: the buyer is told why.
 			$error = "Your card was not accepted. " . $e->getMessage();
 			error_log($error);
 			throw new SystemDisplayableError($error);
+		}
+		catch (Exception $e) {
+			// Stripe out of reach, a bad key, a token used twice: no card was
+			// tried, so it is not reported as a decline.
+			error_log("Saving the card failed before the bank was asked: " . $e->getMessage());
+			throw new StripeHelperException($e->getMessage(), 0, $e);
 			/*		
 			$stored_error = "Card not charged.   Error type: ". $e->getError()->type . "  Code: " . $e->getError()->code. "  Decline code: ". $e->getError()->decline_code . "  Message: ".$e->getMessage(). "  Debug info: ".$e->getError()->doc_url .", ". $e->getError()->param;
 
@@ -1440,28 +1503,31 @@ class StripeHelper {
 		$intent = $subscription->latest_invoice->payment_intent ?? null;
 		if (is_object($intent) && ($intent->status ?? '') === 'requires_action') {
 			return 'Your bank asked to confirm this payment, which this checkout cannot do yet. '
-				. 'Nothing was charged. Please try another card.';
+				. 'Please try another card.';
 		}
-		$reason = (is_object($intent) && !empty($intent->last_payment_error->message))
+		return (is_object($intent) && !empty($intent->last_payment_error->message))
 			? $intent->last_payment_error->message : 'Your card was not accepted for the first payment.';
-		return $reason . ' Nothing was charged.';
 	}
 
 	/**
 	 * Take back a subscription a checkout made and then could not complete:
 	 * cancel it now, and refund its first invoice if Stripe already took it.
 	 *
+	 * @return int what was refunded, in cents (0 when nothing had been paid)
 	 * @throws \Stripe\Exception\ExceptionInterface when Stripe refuses; the
 	 *         caller alerts the operator, since money may still be held.
 	 */
-	public function undo_regular_subscription($subscription){
+	public function undo_regular_subscription($subscription): int {
 		$this->client()->subscriptions->cancel($subscription->id);
 		$invoice = $subscription->latest_invoice ?? null;
 		$intent = is_object($invoice) ? ($invoice->payment_intent ?? null) : null;
 		$intent_id = is_object($intent) ? ($intent->id ?? null) : $intent;
-		if ($intent_id && (int)($invoice->amount_paid ?? 0) > 0) {
+		$paid = (int)($invoice->amount_paid ?? 0);
+		if ($intent_id && $paid > 0) {
 			$this->client()->refunds->create(['payment_intent' => $intent_id]);
+			return $paid;
 		}
+		return 0;
 	}
 
 	/** Write a live subscription made by create_regular_subscription() onto its order line. */
@@ -1472,6 +1538,12 @@ class StripeHelper {
 		$order_item->set('odi_stripe_foreign_invoice_id', is_object($invoice) ? $invoice->id : $invoice);
 		$order_item->set('odi_is_subscription', true);
 		$order_item->set('odi_subscription_status', $subscription->status);
+		// Recorded here, not left to the first invoice's webhook: that event
+		// is sent as the subscription is made and can arrive before this line
+		// exists, and then nothing sets the date until the next renewal.
+		if (!empty($subscription->current_period_end)) {
+			$order_item->set('odi_subscription_period_end', gmdate('Y-m-d H:i:s', (int)$subscription->current_period_end));
+		}
 		$order_item->set('odi_status', OrderItem::STATUS_PAID);
 		$order_item->set('odi_status_change_time', 'now()');
 		$order_item->save();

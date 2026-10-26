@@ -39,6 +39,7 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.7 - a new row catches up on a cancel or failed payment that came before it
  * @version 1.6 - the shutdown uses the driver of the account's own provider
  * @version 1.5 - a site is shut down with its own account's credential; the transfer pool watched is the default
  *                account's, where hosted orders go (cloud_accounts_list)
@@ -177,6 +178,8 @@ class HostedTrialWatch {
 		$trial->set('htr_counts_reset_time', gmdate('Y-m-d H:i:s'));
 		$trial->prepare();
 		$trial->save();
+		// A cancel or failed payment from before this row existed.
+		HostedTrialSignals::catch_up($trial);
 		error_log('HostedTrialWatch: hosting started for ' . $provision->get('cvp_domain')
 			. ($trial_days > 0
 				? '; the trial ends ' . $trial->get('htr_trial_ends_time') . ' UTC.'
