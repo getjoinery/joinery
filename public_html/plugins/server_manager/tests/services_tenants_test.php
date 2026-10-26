@@ -101,8 +101,8 @@ $drain = function () use (&$history) {
 $paths = function (array $calls) { return array_map(function ($c) { return $c['path']; }, $calls); };
 $domain_entry = function (string $full, bool $verified) {
 	return array('domains' => array(array('domain' => array(
-		'fulldomain' => $full, 'dkim_selector' => 's2g', 'dkim_value' => 'dkim.smtp2go.net',
-		'rpath_selector' => 'em', 'rpath_value' => 'return.smtp2go.net',
+		'fulldomain' => $full, 'dkim_selector' => 's2g', 'dkim_expected' => 'dkim.smtp2go.net',
+		'rpath_selector' => 'em', 'rpath_expected' => 'return.smtp2go.net',
 		'dkim_verified' => $verified, 'rpath_verified' => $verified,
 	))));
 };

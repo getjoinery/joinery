@@ -10,7 +10,7 @@
  * second-guesses them.
  *
  * WHAT THIS IS ALLOWED TO DO IS DELIBERATELY SMALL. SMTP2GO does not sign its
- * webhooks — the only checks available are a basic-auth secret in the URL and
+ * webhooks — the only checks available are a basic-auth secret and
  * the provider's own sending addresses — so a spoofed or dropped delivery can
  * move a number on a banner and can never move a cap. The cap is the
  * provider's own month-to-date count against the subaccount limit, and nothing
@@ -25,11 +25,14 @@
  *
  * THE URL IS /ajax/smtp2go_webhook (this file overrides the core ajax route),
  * and the webhook itself is created BY HAND in the SMTP2GO console against the
- * master account, with this deployment's webhook secret as the basic-auth
- * password. Nothing here registers it: the provider's webhook is account-wide
+ * master account: JSON output, the 'Email processed' event, and Basic
+ * authorization with this deployment's webhook secret as the password.
+ * Nothing here registers it: the provider's webhook is account-wide
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.4 - one send counts once: only 'processed' moves the figure, so a webhook
+ *   that also sends 'delivered' does not count each message twice (B158)
  * @version 1.3 - writes after the secret checks are the server's own (declared_permissions 3.2)
  * @version 1.2 - a delivery for a services tenant's SMTP user moves that tenant's figure (E4)
  * @version 1.1
@@ -77,7 +80,7 @@ if ($expected === '') {
 	exit();
 }
 
-// The secret arrives as the basic-auth password on the URL the provider was
+// The secret arrives as the basic-auth password the provider was
 // given. hash_equals so a wrong secret takes the same time as a right one.
 $supplied = (string)($_SERVER['PHP_AUTH_PW'] ?? '');
 if ($supplied === '' && !empty($_SERVER['HTTP_AUTHORIZATION'])
@@ -117,7 +120,7 @@ foreach ($events as $event) {
 		// Not a Managed site's credential: a self-hosted services tenant's,
 		// perhaps. Same rule — deliveries move its banner figure, nothing more;
 		// the reconcile overwrites it with the provider's own count each pass.
-		if (($kind === 'processed' || $kind === 'delivered')
+		if ($kind === 'processed'
 				&& JoineryServices::countWebhookSend(
 					trim((string)($event['auth'] ?? $event['username'] ?? '')),
 					trim((string)($event['subaccount_id'] ?? '')))) {
@@ -135,16 +138,14 @@ foreach ($events as $event) {
 		$trial->set('htr_counts_reset_time', gmdate('Y-m-d H:i:s'));
 	}
 
-	switch ($kind) {
-		case 'processed':
-		case 'delivered':
-			$trial->set('htr_sent_count', (int)$trial->get('htr_sent_count') + 1);
-			break;
-		default:
-			// Bounces, complaints and rejections included: the provider acts on
-			// those itself, and a count of them here would decide nothing.
-			continue 2;
+	// 'processed' is the provider accepting a message, which is what its own
+	// monthly count (the cap) counts. Every other event, 'delivered' among them,
+	// is a later stage of a message already counted: bounces, complaints and
+	// rejections the provider acts on itself.
+	if ($kind !== 'processed') {
+		continue;
 	}
+	$trial->set('htr_sent_count', (int)$trial->get('htr_sent_count') + 1);
 	$trial->save();
 	$counted++;
 }

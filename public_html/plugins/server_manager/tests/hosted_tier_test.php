@@ -525,8 +525,9 @@ section('Reading the provider\'s DNS records in the shape it actually answers');
 
 // The domain endpoints (add / view / verify) all answer in one shape: the
 // domain object nested under domains[].domain, with the trackers beside it.
-// EVERY RECORD IS A CNAME — dkim_value is the target of a CNAME at the
-// provider's selector, not a DKIM key to publish as TXT — and the return-path
+// EVERY RECORD IS A CNAME — dkim_expected is the target of a CNAME at the
+// provider's selector, not a DKIM key to publish as TXT (dkim_value is what DNS
+// answers today, empty until published) — and the return-path
 // host is built from rpath_selector, which is a LABEL and not a hostname.
 // Read wrongly, this leg registers a sending domain, publishes records that
 // resolve to nothing, never verifies, and leaves the customer's mail unsigned
@@ -541,14 +542,17 @@ $answer = array('domains' => array(array(
 		'fulldomain'     => 'mail.example.com',
 		'dkim_selector'  => 's1234567',
 		'dkim_verified'  => true,
-		'dkim_value'     => 'dkim.smtp2go.net',
+		'dkim_expected'  => 'dkim.smtp2go.net',
+		'dkim_value'     => '',
 		'rpath_selector' => 'em1234',
 		'rpath_verified' => true,
-		'rpath_value'    => 'return.smtp2go.net',
+		'rpath_expected' => 'return.smtp2go.net',
+		'rpath_value'    => '',
 	),
 	'trackers' => array(array(
-		'fulldomain'  => 'link.mail.example.com',
-		'cname_value' => 'track.smtp2go.net',
+		'fulldomain'     => 'link.mail.example.com',
+		'cname_expected' => 'track.smtp2go.net',
+		'cname_value'    => '',
 		'enabled'     => true,
 	)),
 )));

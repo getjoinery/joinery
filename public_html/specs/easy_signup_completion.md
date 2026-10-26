@@ -267,7 +267,28 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
 
 ### WP2 — hosted mail runs once, for real
 
-- Owner: an SMTP2GO account with a master key and webhook secret, on dev first (§7).
+- Owner: an SMTP2GO account with a master key and webhook secret, on dev first (§7). Account:
+  Professional (100k/month, subaccounts included), owner 10-26. The webhook form has its own
+  Authorization: Basic fields; set JSON output and the *Email processed* event only.
+- **dev has no webhook** (owner 10-26: dev must not receive live customers' mail events). The
+  webhook is account-wide, so it is set up on getjoinery only, when it sells Managed; dev's test
+  banner shows 0 sent. dev's master key reaches the whole account: before getjoinery has paying
+  customers, revoke it or move dev to its own SMTP2GO account.
+- **B158 (fixed 10-26):** the webhook counted both `processed` and `delivered`, so a webhook with
+  both events ticked counted every message twice. Only `processed` counts (`smtp2go_webhook.php`
+  1.4), which matches the provider's own monthly count.
+- **dev's key (10-26):** Subaccounts, Sender Domains, SMTP Users, Statistics; no Emails. Read-only
+  calls from dev all answered 200: `stats/email_summary` (0 of 100,000; carries `email_count`, which
+  `monthToDateSends` reads), `subaccounts/search` (none), `domain/view`, `users/smtp/view`. The
+  account already holds getjoinery.com and dev.getjoinery.com as sender domains, both unverified.
+- **B159 (fixed 10-26):** `Smtp2GoProvider::recordsOf` read `dkim_value` / `rpath_value` /
+  `cname_value`, which are what DNS answers today and are empty until published. The targets are
+  `*_expected`. Every new domain read as zero records, so the hosted mail leg would have stopped
+  and a site switching to SMTP2GO would have been shown nothing to publish. Smtp2GoProvider 1.5
+  reads `*_expected`; the four suites' fakes carry the live shape (provider_dkim 1.3 fails on the
+  old reader). Checked against the live `domain/view` answer.
+- **B157 (open, step 4):** getjoinery.com's SPF names only `mailgun.org`; add
+  `include:spf.smtp2go.com` with the switch. DMARC passes on DKIM alone, so this is not blocking.
 - Run one Managed test order on dev to `mail_state = done`, and send a message from the site.
 - Then the self-hosted Connect path: a second dev box connects to dev's plane, enrols mail,
   sends, and switches back to its own provider (`services_phase2_platform.md` §11 steps 1 and 3).

@@ -137,8 +137,10 @@ own box.
 **Delivery events arrive at `/ajax/smtp2go_webhook`**, and that webhook is
 created **by hand**, once, in the SMTP2GO console against the master account —
 it is account-wide rather than per-subaccount, so it is operator setup rather
-than a step of every customer's provisioning. Set the deployment's webhook
-secret as the basic-auth password on the URL. The endpoint requires both that
+than a step of every customer's provisioning. It sends JSON, for the *Email
+processed* event only (a message counts once, when the provider accepts it, as
+its own monthly count does), with Basic authorization whose password is the
+deployment's webhook secret; the username is not checked. The endpoint requires both that
 secret and a source address the provider publishes; it refuses anything else,
 and it refuses everything if no secret is configured, because an open counter
 looks like evidence and is not. What those events can do is bounded on purpose:

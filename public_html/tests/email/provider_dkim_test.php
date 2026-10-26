@@ -21,6 +21,9 @@
  *
  * Run: php tests/run.php safe --filter=provider_dkim
  *
+ * @version 1.3
+ * @changelog 1.3 - SMTP2GO: the fakes carry the live shape, targets in *_expected and
+ *   *_value empty until published (B159)
  * @version 1.2
  * @changelog 1.2 - SMTP2GO: the 400 "or it doesn't exist" answer for a domain the
  *   account does not hold reads as not_registered (isUnknownDomainAnswer)
@@ -81,9 +84,12 @@ try {
 
 	// One shape answers /domain/add, /domain/view and /domain/verify: the
 	// domain object nested under domains[].domain, trackers beside it. EVERY
-	// RECORD IS A CNAME. dkim_value is the TARGET of a CNAME at the provider's
+	// RECORD IS A CNAME. dkim_expected is the TARGET of a CNAME at the provider's
 	// selector — not a DKIM key to publish as TXT — and the return-path host is
-	// built from rpath_selector, a bare label rather than a hostname. Read
+	// built from rpath_selector, a bare label rather than a hostname. The
+	// *_value fields are what DNS answers today: empty for a domain whose
+	// records are not published yet, which is every new one (observed live
+	// 2026-10-26), so they are blank here and must not be what is read. Read
 	// wrongly, a sending domain is registered, records that resolve to nothing
 	// are published, the domain never verifies, and mail goes out unsigned
 	// while every dashboard reads green.
@@ -92,14 +98,17 @@ try {
 			'fulldomain'     => 'mail.example.com',
 			'dkim_selector'  => 's1234567',
 			'dkim_verified'  => true,
-			'dkim_value'     => 'dkim.smtp2go.net',
+			'dkim_expected'  => 'dkim.smtp2go.net',
+			'dkim_value'     => '',
 			'rpath_selector' => 'em1234',
 			'rpath_verified' => true,
-			'rpath_value'    => 'return.smtp2go.net',
+			'rpath_expected' => 'return.smtp2go.net',
+			'rpath_value'    => '',
 		),
 		'trackers' => array(array(
-			'fulldomain'  => 'link.mail.example.com',
-			'cname_value' => 'track.smtp2go.net',
+			'fulldomain'     => 'link.mail.example.com',
+			'cname_expected' => 'track.smtp2go.net',
+			'cname_value'    => '',
 			'enabled'     => true,
 		)),
 	)));
@@ -146,7 +155,7 @@ try {
 
 	$many = array('domains' => array(
 		array('domain' => array('fulldomain' => 'other.example.com',
-			'dkim_selector' => 'sX', 'dkim_value' => 'dkim.smtp2go.net')),
+			'dkim_selector' => 'sX', 'dkim_expected' => 'dkim.smtp2go.net')),
 		$answer['domains'][0],
 	));
 	check((Smtp2GoProvider::entryFor($many, 'mail.example.com')['domain']['fulldomain'] ?? '')
@@ -172,8 +181,8 @@ try {
 
 	// A half-formed record is worse than a missing one: it looks published.
 	$half = array('domains' => array(array('domain' => array(
-		'fulldomain' => 'mail.example.com', 'dkim_selector' => 's1', 'dkim_value' => '',
-		'rpath_selector' => '', 'rpath_value' => 'return.smtp2go.net'))));
+		'fulldomain' => 'mail.example.com', 'dkim_selector' => 's1', 'dkim_expected' => '',
+		'rpath_selector' => '', 'rpath_expected' => 'return.smtp2go.net'))));
 	check(Smtp2GoProvider::recordsOf(Smtp2GoProvider::entryFor($half, 'mail.example.com')) === array(),
 		'a record missing either half is dropped rather than half-published');
 
