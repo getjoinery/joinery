@@ -252,6 +252,56 @@ $store_flags_on = (bool)$settings->get_setting('products_active')
 check($store_flags_on, 'store and subscriptions enabled',
 	$store_flags_on ? '' : 'products_active / subscriptions_active must be on for change_tier_logic to act');
 
+// The copied test database carries no content, so the tiers this suite works
+// on are its own: three, each with a monthly product made through the admin
+// logic (which gives it a Stripe product). Taken down at the end.
+if ($has_stripe_keys && $store_flags_on) {
+	require_once(__DIR__ . '/../../../tests/lib/logic.php');
+	$st_run = substr(md5(uniqid('st', true)), 0, 8);
+	$st_admin = make_user('TierAdmin' . $st_run, 10);
+	st_act_as($st_admin->key);
+	$_SESSION['permission'] = 10;
+	foreach (array(1 => 'Basic', 2 => 'Plus', 3 => 'Pro') as $step => $label) {
+		$fixture_tier = new SubscriptionTier(NULL);
+		$fixture_tier->set('sbt_tier_level', 900 + $step * 10);
+		$fixture_tier->set('sbt_name', 'st_' . $st_run . '_' . strtolower($label));
+		$fixture_tier->set('sbt_display_name', 'ST ' . $label . ' ' . $st_run);
+		$fixture_tier->set('sbt_is_active', true);
+		$fixture_tier->save();
+		$fixture_tier->load();
+		$tier_id = (int)$fixture_tier->key;
+		$group_id = (int)$fixture_tier->get('sbt_grp_group_id');
+		harness_defer(function () use ($tier_id, $group_id) {
+			try {
+				$t = new SubscriptionTier($tier_id, TRUE);
+				if ($t->key) $t->permanent_delete();
+				$g = new Group($group_id, TRUE);
+				if ($g->key) $g->permanent_delete();
+			} catch (\Throwable $e) { echo "  WARNING: fixture tier $tier_id not deleted: " . $e->getMessage() . "\n"; }
+		});
+
+		$made = harness_call_logic_ok('plugins/store/admin/logic/admin_product_edit_logic.php', 'admin_product_edit_logic', array(
+			'action' => 'add', 'json_confirm' => '1', 'pro_name' => 'ST ' . $label . ' ' . $st_run,
+			'pro_description' => 'subscription_tiers fixture', 'pro_short_description' => 'fixture',
+			'pro_is_active' => '1', 'pro_max_purchase_count' => '0', 'pro_max_cart_count' => '0', 'pro_expires' => '0',
+			'pro_link' => 'st-' . strtolower($label) . '-' . $st_run,
+			'pro_sbt_subscription_tier_id' => $tier_id,
+		));
+		if ($made->redirect && preg_match('/pro_product_id=(\d+)/', $made->redirect, $m)) {
+			$product_id = (int)$m[1];
+			harness_defer(function () use ($product_id) {
+				try { $p = new Product($product_id, TRUE); if ($p->key) $p->permanent_delete(); }
+				catch (\Throwable $e) { echo "  WARNING: fixture product $product_id not deleted: " . $e->getMessage() . "\n"; }
+			});
+			harness_call_logic_ok('plugins/store/admin/logic/admin_product_edit_logic.php', 'admin_product_edit_logic', array(
+				'action' => 'new_version', 'p' => $product_id, 'version_name' => 'Monthly',
+				'version_price' => (string)(5 * $step) . '.00', 'prv_price_type' => 'month', 'prv_trial_period_days' => '0',
+			), 'POST');
+		}
+	}	// The sections below act as members, not as the admin who made these.
+	unset($_SESSION['permission']);
+}
+
 $multi_tiers = new MultiSubscriptionTier(
 	array('sbt_is_active' => true, 'sbt_delete_time' => 'IS NULL'),
 	array('sbt_tier_level' => 'ASC')

@@ -205,8 +205,18 @@ Built (`plugins/store/docs/overview.md` § The card form):
 
 Tests: `card_checkout_failures` rewritten with Stripe doubled at its API so StripeHelper runs as
 written: 45/45 (works, 3-D Secure confirmed / declined / unanswered / cart changed, refusals,
-two subscriptions). The form's script passes `node --check`. Not yet run against Stripe: see the
-live verification queue (cards `4000 0027 6000 3184`, `4000 0000 0000 3220`, ScrollDaddy).
+two subscriptions). **Verified on dev against Stripe test mode, 10-26:** `card_checkout_stripe_live`
+32/32 and `products_test` 50/50; in the browser, a mixed cart with `4000 0025 0000 3155` showed one
+bank confirmation on our page and completed (subscription charged off-session without a second),
+`4000 0027 6000 3184` + Fail charged nothing and made no subscription, a subscription alone with
+`4000 0000 0000 3220` completed after its confirmation, `4242` completed with no confirmation, a
+checkout left at the confirmation charged nothing, and refund-and-cancel refunded the invoice and
+cancelled at Stripe. Still owed: a ScrollDaddy subscription after release.
+
+- **B154 (found in the browser run, fixed):** a failed bank confirmation showed Stripe's developer
+  text ("The provided PaymentMethod has failed authentication. You can provide
+  payment_method_data..."). `StripeHelper::buyer_reason()` shows Stripe's message only for a card
+  error, and plain words for a failed confirmation or anything else.
 
 #### WP1d — the hosted page's and PayPal's return
 

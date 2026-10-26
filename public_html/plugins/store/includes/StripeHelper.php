@@ -1261,8 +1261,26 @@ class StripeHelper {
 		if (($intent->status ?? '') === 'requires_action') {
 			return 'Your bank did not confirm the payment. Please try again or use another card.';
 		}
-		return !empty($intent->last_payment_error->message)
-			? $intent->last_payment_error->message : 'Your card was not accepted.';
+		return self::buyer_reason($intent->last_payment_error ?? null, 'Your card was not accepted.');
+	}
+
+	/**
+	 * A payment error in words for the buyer. Stripe's message is shown only
+	 * for a card error (the bank's decline, worded for the cardholder); its
+	 * other errors are worded for the developer ('The provided PaymentMethod
+	 * has failed authentication. You can provide payment_method_data...').
+	 */
+	public static function buyer_reason($error, string $fallback): string {
+		if (!is_object($error)) {
+			return $fallback;
+		}
+		if (($error->code ?? '') === 'payment_intent_authentication_failure') {
+			return 'Your bank did not confirm the payment. Please try again or use another card.';
+		}
+		if (($error->type ?? '') === 'card_error' && !empty($error->message)) {
+			return (string)$error->message;
+		}
+		return $fallback;
 	}
 
 	public function get_payment_methods($stripe_user_id){
@@ -1557,8 +1575,8 @@ class StripeHelper {
 		if (is_object($intent) && ($intent->status ?? '') === 'requires_action') {
 			return 'Your bank did not confirm the payment. Please try again or use another card.';
 		}
-		return (is_object($intent) && !empty($intent->last_payment_error->message))
-			? $intent->last_payment_error->message : 'Your card was not accepted for the first payment.';
+		return self::buyer_reason(is_object($intent) ? ($intent->last_payment_error ?? null) : null,
+			'Your card was not accepted for the first payment.');
 	}
 
 	/**
