@@ -58,12 +58,16 @@ try {
         case 'checkout.session.completed':
             $sessionobject = $event->data->object;
 
-            // One order per session. The buyer's return (cart_charge) may have
-            // made and completed it already; then this only records what Stripe
-            // reports. Otherwise this makes it, PAID, and the return completes it.
+            // One order per session, under the lock the buyer's return
+            // shares. When the return has completed it, this only records
+            // what Stripe reports. Otherwise the order is completed here from
+            // the checkout's record of what was paid for, so a buyer who
+            // never comes back still gets their order, receipts and
+            // fulfilment (cart_charge_complete_from_webhook()).
+            require_once(PathHelper::getIncludePath('plugins/store/logic/cart_charge_logic.php'));
             Order::with_payment_lock((string)$sessionobject->id, function () use ($sessionobject) {
                 $order = Order::GetByStripeSession($sessionobject->id);
-                if ($order) {
+                if ($order && $order->is_fulfilled()) {
                     if (!$order->get('ord_stripe_payment_intent_id') && $sessionobject->payment_intent) {
                         $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
                     }
@@ -73,20 +77,33 @@ try {
                     $order->save();
                     return;
                 }
-
-                $order = new Order(NULL);
-                $order->set('ord_total_cost', $sessionobject->amount_total / 100);
-                if ($sessionobject->client_reference_id) {
-                    $order->set('ord_usr_user_id', $sessionobject->client_reference_id);
+                $why = cart_charge_complete_from_webhook($sessionobject);
+                if ($why === null) {
+                    return;
                 }
-                $order->set('ord_stripe_session_id', $sessionobject->id);
-                $order->set('ord_raw_response', $sessionobject);
-                $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
-                $order->set('ord_stripe_subscription_id_temp', $sessionobject->subscription);
-                $order->set('ord_status', Order::STATUS_PAID);
 
-                $order->prepare();
-                $order->save();
+                // A paid session it could not complete (no open checkout
+                // record, made for someone else, a line that no longer loads):
+                // its payment is kept as an order with no lines, and the
+                // operator told why. One refused after payment has its order.
+                if (!$order) {
+                    $order = new Order(NULL);
+                    $order->set('ord_total_cost', $sessionobject->amount_total / 100);
+                    if ($sessionobject->client_reference_id) {
+                        $order->set('ord_usr_user_id', $sessionobject->client_reference_id);
+                    }
+                    $order->set('ord_stripe_session_id', $sessionobject->id);
+                    $order->set('ord_raw_response', $sessionobject);
+                    $order->set('ord_stripe_payment_intent_id', $sessionobject->payment_intent);
+                    $order->set('ord_stripe_subscription_id_temp', $sessionobject->subscription);
+                    $order->set('ord_status', Order::STATUS_PAID);
+                    $order->set('ord_error', substr('Paid at Stripe Checkout, not completed: ' . $why, 0, 250));
+                    $order->prepare();
+                    $order->save();
+                    _cart_charge_alert_operator('Order #' . $order->key . ': a Stripe Checkout payment not completed',
+                        'Stripe Checkout session ' . $sessionobject->id . ' was paid (' . ($sessionobject->amount_total / 100)
+                        . ') but could not be made into its order: ' . $why . '. The order has no lines. Complete it by hand or refund it.');
+                }
             });
             break;
 

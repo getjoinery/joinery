@@ -413,6 +413,7 @@ $rule_permitted = array(
 	'plugins/store/admin/logic/admin_coupon_code_edit_logic.php' => 'a coupon\'s product links are replaced as part of the coupon\'s own save',
 	'plugins/store/includes/MobileBilling.php' => 'a member claiming an App Store or Google Play purchase the store verified is granted its tier',
 	'plugins/store/logic/cart_charge_logic.php' => 'the buyer\'s checkout POST: a guest has no identity, a gift\'s rows are the recipient\'s, and what a purchase grants is the payment\'s, so the checkout\'s rules (the session\'s cart; coupons, ownership, availability checked) and the charge are the authority',
+	'plugins/store/logic/checkout_record_paypal_logic.php' => 'the buyer\'s PayPal button recording its own session\'s cart for the payment it is starting, after the checkout\'s checks (ShoppingCart::payment_start_refusal()); a guest has no identity to own the record',
 	'plugins/store/logic/change_tier_logic.php' => 'a member changing or cancelling their own subscription grants or removes its tier group membership and change log once the processor accepted the change',
 	'plugins/support_desk/includes/SupportIntake.php' => 'a sessionless asker\'s writes behind the origin callback or thread token',
 	'plugins/support_desk/logic/desk_cancel_logic.php' => 'the cancel flag behind the thread token',

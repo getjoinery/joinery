@@ -91,44 +91,64 @@ checkout (`ShoppingCart::card_checkout_refusal()`).
 ### Gateway returns
 
 A hosted payment (a Stripe Checkout session, a PayPal order or subscription)
-is paid on the gateway's page, and the buyer comes back to `/cart_charge`
-later. When the checkout page creates such a payment it records what the
-payment is for, `ShoppingCart::record_payment()`: the cart's items, prices,
-coupons and billing details, and who was signed in, kept in the browser's
-session under the gateway's reference (the Stripe session id, or the
-`custom_id` the PayPal order or subscription carries). The return:
+is paid on the gateway's page and completed later. What it was for is a
+`GatewayPaymentRecord` (`gpr_gateway_payment_records`): the cart's items,
+prices, coupons and billing details and who was signed in, keyed by the
+gateway's reference (the Stripe session id, or the `custom_id` the PayPal order
+or subscription carries), written by `ShoppingCart::record_payment()`. A
+checkout page view writes none and makes nothing at a gateway; a record is
+written by the buyer's own POST:
+
+- **Stripe Checkout:** the Pay button posts `start_hosted_checkout` to
+  `/cart_charge`, which checks the cart as the page did
+  (`ShoppingCart::payment_start_refusal()`; a cart changed since the page was
+  shown is shown again), makes the session, records it, and sends the buyer to
+  Stripe's page.
+- **PayPal:** the button's `createOrder` / `createSubscription` first calls
+  `store/checkout_record_paypal`, which makes the same checks, records the cart
+  and answers the `custom_id` (and, for a subscription, the plan).
+
+The return (`/cart_charge?session_id=`, or PayPal's `?id=` / `?subscription=`):
 
 1. verifies the payment with the gateway before writing anything (paid, and
    its Stripe `client_reference_id` the recorded signed-in user);
-2. finds the record by that reference, and checks the payment against it: a
-   PayPal order's amount is the recorded cart's, and a PayPal subscription's
-   plan is the recorded one, for a recorded cart of exactly one subscription
-   line of quantity one;
+2. finds the open record by that reference, from whatever browser session it
+   lands in, and checks the payment against it: a PayPal order's amount is the
+   recorded cart's, and a PayPal subscription's plan is the recorded one, for a
+   recorded cart of exactly one subscription line of quantity one;
 3. completes the order from the record, never from the live cart, under a lock
-   on the payment reference (`Order::with_payment_lock()`).
+   on the payment reference (`Order::with_payment_lock()`), and marks the
+   record completed with its order and receipt.
 
-A record is kept for a day (`ShoppingCart::PAYMENTS_MAX_AGE`), longer than a
-Stripe Checkout session or a PayPal approval lives; every view of the checkout
-page records one payment per gateway it offers.
+A record can be completed for two days (`GatewayPaymentRecord::MAX_AGE`) and
+is kept a week. Only the browser session that started the payment
+(`gpr_session_hash`) is acted on: a new account is signed in there and its cart
+emptied of what was paid for; a return that lands in another browser session
+completes the order and shows its receipt, signing nothing in and leaving that
+session's cart as it is.
 
-A payment that was taken but is not completed writes nothing and lands on
-`/cart_confirm`, which shows that the payment was received and asks the buyer
-to contact the site; it offers no payment, so the cart is not paid for twice.
-That is a payment this browser's checkout did not create, one that does not
-match its record, a record with a line whose product or version no longer
-loads, and a recorded checkout that can no longer be completed (billing as an
+Stripe's `checkout.session.completed` webhook completes the order itself when
+the buyer has not come back (`cart_charge_complete_from_webhook()`), with its
+receipts, fulfilment and emails; the buyer's later return finds the order
+complete, shows its receipt, empties the cart, and signs in the account the
+completion made for a guest (the record's `made_user_id`). A paid session it
+cannot complete (no open record, made for someone else, a line that no longer
+loads) is kept as a paid order with no lines and emailed to the operator with
+the reason.
+
+A payment that was taken but cannot be completed as recorded (billing as an
 account the buyer was not signed in to when they paid, a coupon gone invalid,
-an ownership conflict). The reason is logged.
+an ownership conflict) keeps its order in error with the reason and the cart,
+marks its record refused, and emails the operator; the refund is theirs to
+decide; a PayPal payment whose amount or plan is not the record's is kept the
+same way. A payment that matches no record is emailed to the operator. The
+buyer lands on `/cart_confirm`, which shows that the payment was received and
+offers no second payment; a reload shows the same and emails nobody again.
 
-A Stripe Checkout session's order may already exist: the webhook's
-`checkout.session.completed` makes it (PAID, with no lines) when it arrives
-first, and the return completes that order; when the return comes first, the
-webhook finds its order and only records the payment intent. A PayPal
-payment's order that an earlier return saved but did not complete is completed
-the same way. A return followed again for a payment whose order has its lines
-(`Order::is_fulfilled()`) goes to the receipt. The live cart is emptied only
-when it still holds the lines that were paid for (each line's product,
-version, quantity and form data, `ShoppingCart::holds_lines_of()`).
+The PayPal buttons send the cart hash the page was shown with, and the record
+action refuses a cart changed since, before PayPal is asked for anything. A
+PayPal payment is captured in the buyer's browser, and only the return
+completes it: no PayPal webhook completes a one-time order.
 
 ## Activation
 

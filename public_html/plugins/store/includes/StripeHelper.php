@@ -447,42 +447,24 @@ class StripeHelper {
 		return $output;
 	}
 
+	/**
+	 * The hosted Stripe Checkout button: a POST to /cart_charge, which makes
+	 * the session for the cart as it is then, records it, and sends the buyer
+	 * to Stripe's page (cart_charge_logic). Nothing is made at Stripe until it
+	 * is pressed. $cart_hash is the cart the page showed: a cart changed since
+	 * is shown again rather than paid for.
+	 */
 	public function output_stripe_checkout_form($cart_hash){
-				require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
-				$formwriter = new FormWriterV2HTML5('form3', ['action' => '/profile/payment_finalize', 'method' => 'post']);
-				$output = '
-				<script src="https://js.stripe.com/v3/"></script>
-				<script language="javascript">
-				var stripe = Stripe(\''. $this->get_stripe_public_key() .'\');
-
-				function ToCheckout() {
-					stripe.redirectToCheckout({
-					  sessionId: \''. $this->stripe_checkout_session->id .'\'
-					}).then(function (result) {
-					  // If `redirectToCheckout` fails due to a browser or network
-					  // error, display the localized error message to your customer
-					  // using `result.error.message`.
-					});
-				}
-				</script>';
-					
-
-				
-				$output .= $formwriter->begin_form();
-
-				$output .=  '<div id="errorMsg" style="display:none;"></div>';
-
-				$output .=  $formwriter->hiddeninput('cc_type', '');
-				$output .=  $formwriter->hiddeninput('cart_cs', $cart_hash);
-				
-				$output .=  '<input type="button" value="Pay with Stripe" class="inline-flex justify-center mr-3 mt-3 py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 " onclick="ToCheckout();" style="width:200px;">';
-				
-
-				$output .=  $formwriter->end_form();	
-
-				return $output;
+		$formwriter = new FormWriterV2HTML5('form_hosted_checkout', ['action' => '/cart_charge', 'method' => 'post']);
+		ob_start();
+		$formwriter->begin_form();
+		$formwriter->hiddeninput('start_hosted_checkout', '', ['value' => 1]);
+		$formwriter->hiddeninput('cart_cs', '', ['value' => $cart_hash]);
+		$formwriter->submitbutton('pay_hosted', 'Pay with Stripe');
+		$formwriter->end_form();
+		return ob_get_clean();
 	}
-	
+
 	public function build_checkout_item_array($cart, $existing_billing_user){
 
 		$settings = Globalvars::get_instance();

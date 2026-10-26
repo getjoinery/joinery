@@ -94,7 +94,12 @@ class PaypalHelper{
 		];
 	}
 	
-	public function output_paypal_checkout_code($data){
+	/**
+	 * The PayPal buttons for a one-time cart. $cart_hash is the cart the page
+	 * showed: the record action refuses a cart changed since, before PayPal is
+	 * asked for anything.
+	 */
+	public function output_paypal_checkout_code($data, $cart_hash = ''){
 		if(!$data){
 			return false;
 		}
@@ -115,10 +120,12 @@ class PaypalHelper{
 			var selectedFundingSource = "paypal";
 			let paypalData = '. json_encode($data) .';
 			paypal.Buttons({
+			  // The cart is recorded for this payment first (store/checkout_record_paypal);
+			  // the order carries the reference of that record, which the return completes from.
 			  createOrder: function(data, actions) {
-				return actions.order.create(paypalData).then(function(orderID) {
-				  console.log(orderID);
-				  return orderID;
+				return joineryApi.post("store/checkout_record_paypal", { cart_cs: '.json_encode((string)$cart_hash).' }).then(function(recorded) {
+				  paypalData.purchase_units[0].custom_id = recorded.custom_id;
+				  return actions.order.create(paypalData);
 				});
 			  },
 			  onClick: function(data) {
@@ -131,7 +138,9 @@ class PaypalHelper{
 				});
 			  },
 			  onError: function(err) {
-				alert("An error occurred during the payment. Please try again.");
+				// The record action refuses in a sentence of its own (the cart
+				// changed, log in first); PayPal errors say nothing a buyer can use.
+				alert((err && err.status && err.message) ? err.message : "An error occurred during the payment. Please try again.");
 			  }
 			}).render("#paypal-button-container");
 		  </script>	';
@@ -140,10 +149,12 @@ class PaypalHelper{
 	}
 	
 	/**
-	 * $custom_id is the checkout's record of what this subscription is for
-	 * (ShoppingCart::record_payment()); PayPal returns it on the subscription.
+	 * The subscription's plan and the reference of the checkout's record of
+	 * what it is for come from store/checkout_record_paypal as the button is
+	 * pressed (ShoppingCart::record_payment()); PayPal returns the reference on
+	 * the subscription.
 	 */
-	public function output_paypal_subscription_checkout_code($plan_id, $custom_id = ''){ 
+	public function output_paypal_subscription_checkout_code($cart_hash = ''){ 
 	
 		$output = '
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
@@ -155,14 +166,16 @@ class PaypalHelper{
    <script>
     paypal.Buttons({
       createSubscription: function(data, actions) {
-        return actions.subscription.create('.json_encode(array_filter(array('plan_id' => (string)$plan_id, 'custom_id' => (string)$custom_id))).');
+        return joineryApi.post("store/checkout_record_paypal", { cart_cs: '.json_encode((string)$cart_hash).' }).then(function(recorded) {
+          return actions.subscription.create({ plan_id: recorded.plan_id, custom_id: recorded.custom_id });
+        });
       },
       onApprove: function(data, actions) {
 		// Go to the return URL page with subscription ID
 		window.location.href = "'.$this->return_url.'?subscription=1&paypal_subscription_id=" + encodeURIComponent(data.subscriptionID);
       },
 	  onError: function(err) {
-		alert("An error occurred during the payment. Please try again.");
+		alert((err && err.status && err.message) ? err.message : "An error occurred during the payment. Please try again.");
 	  }
     }).render("#paypal-button-container"); 
   </script>';
@@ -171,6 +184,30 @@ class PaypalHelper{
 		
 	}
 	
+	/**
+	 * The PayPal plan a cart's subscription line is billed on, found or made
+	 * at PayPal (product, then plan named for the product and amount), or null
+	 * for a cart with no subscription.
+	 */
+	public function plan_for_cart($cart) {
+		$plan_id = null;
+		foreach ($cart->items as $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			if (!$product_version->is_subscription()) {
+				continue;
+			}
+			if (!$paypal_product = $this->searchProduct($product->get('pro_name'))) {
+				$paypal_product = $this->createProduct($product);
+			}
+			$amount = $price - $discount;
+			if (!$paypal_plan = $this->searchPlans($product->get('pro_name') . '-' . $amount)) {
+				$paypal_plan = $this->createPlan($paypal_product['id'], $product_version, $amount);
+			}
+			$plan_id = $paypal_plan['id'];
+		}
+		return $plan_id;
+	}
+
 	//UNUSED IN CURRENT IMPLEMENTATION
 	public function createPayment($data){
 		

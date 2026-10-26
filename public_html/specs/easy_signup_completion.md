@@ -4,7 +4,8 @@
 refactors it waited on (declared_permissions, optional_username) are committed and released
 (0.8.537). WP1 corrected 10-26 after a re-read: the card checkout works; WP1 is its edges.
 WP1a built 10-26 (suite `card_checkout_failures` 33/33, Stripe doubled; its live check is in the
-live verification queue). WP1b built 10-26 (`order_refund` 18/18). WP1c built 10-26 (`card_checkout_failures` 45/45). Next: WP1d.
+live verification queue). WP1b built 10-26 (`order_refund` 18/18). WP1c built 10-26 (`card_checkout_failures` 45/45), verified on dev against Stripe test mode. WP1d built
+10-26 (`hosted_checkout` 24/24). WP1 is built; its remaining live checks are in the live verification queue.
 
 **Companions:** `managed_hosting_and_services.md` (the umbrella and its contracts C1/C2),
 `managed_hosting_phase1_purchase.md`, `services_phase2_platform.md`,
@@ -218,21 +219,51 @@ cancelled at Stripe. Still owed: a ScrollDaddy subscription after release.
   payment_method_data..."). `StripeHelper::buyer_reason()` shows Stripe's message only for a card
   error, and plain words for a failed confirmation or anything else.
 
-#### WP1d — the hosted page's and PayPal's return
+#### WP1d — the hosted page's and PayPal's return (built 10-26)
 
-Applies to `stripe_checkout` and PayPal only; dev and ScrollDaddy use `stripe_regular`. What a
-gateway payment was made for is kept only in the buyer's PHP session
-(`ShoppingCart::record_payment()`, `ShoppingCart.php:40,698-719`; `recorded_payment()`, `:746`):
+Applies to `stripe_checkout` and PayPal; dev and ScrollDaddy use `stripe_regular`. What a gateway
+payment was made for was kept only in the buyer's PHP session (`$_SESSION['cart_payments']`), and
+written on every checkout page view, where a Stripe Checkout session was also made:
 
-- **B146:** for a buyer who never comes back, Stripe's webhook makes an order marked PAID with
-  no lines and stops (`stripe_webhook.php:58-90`).
-- **B147:** a return in another browser session finds no record and is told to contact the site
-  (`cart_charge_logic.php:146-148`).
-- **B145 (rest):** a return refused after payment (`$refuse`, `:401-406`) leaves only a log line.
+- **B146:** for a buyer who never came back, Stripe's webhook made an order marked PAID with no
+  lines and stopped.
+- **B147:** a return in another browser session found no record and was told to contact the site.
+- **B145 (rest):** a return refused after payment left only a log line.
 
-Fix: the record moves to a table keyed by the gateway reference; the completion stops reading
-the session so the webhook can run it; a refusal after payment makes the order with its lines in
-error and alerts the operator.
+Built (`plugins/store/docs/overview.md` § Gateway returns):
+
+- `GatewayPaymentRecord` (`gpr_gateway_payment_records`) holds the record, keyed by the gateway's
+  reference; `ShoppingCart::record_payment()` / `recorded_payment()` / `forget_payment()` use it.
+- Nothing is written or made at a gateway by a page view. The hosted page's button posts
+  `start_hosted_checkout` to `/cart_charge`, which checks the cart
+  (`ShoppingCart::payment_start_refusal()`), makes the session, records it and redirects to
+  Stripe; the PayPal buttons call `store/checkout_record_paypal` before creating the order or
+  subscription.
+- The return finds the record by reference from any browser session (B147); only the session that
+  started the payment is signed in and has its cart emptied (`gpr_session_hash`).
+- The webhook completes the order from the record (`cart_charge_complete_from_webhook()`, B146);
+  the buyer's later return shows the receipt kept on the record and empties the cart.
+- A refusal after payment keeps the order in error with the reason, marks the record refused, and
+  emails the operator (`_cart_charge_refused_after_payment()`, B145); a payment matching no record
+  is emailed too.
+
+reviewer2 (10-26): 1 NEEDED, 3 VALID, 6 NIT; R1-R3, R5-R7, R9, R10 taken (a guest whose
+webhook beats the return is signed in; a reload after a refusal emails nobody again; PayPal
+buttons send the page's cart hash and a wrong amount is an order in error; record life two days;
+the webhook's alert says why; another session's return shows the receipt).
+
+- **B155 (open, R4): a PayPal buyer who never comes back.** PayPal captures in the browser before
+  the redirect, and no PayPal webhook completes a one-time order (`paypal_subscription_webhook.php`
+  handles `BILLING.SUBSCRIPTION.*` only), so such a payment is never made into an order, and its
+  open record is pruned at a week without a word. Fix: complete from `PAYMENT.CAPTURE.COMPLETED`
+  by the capture's `custom_id`, as Stripe's webhook does; needs PayPal sandbox keys on dev to
+  build against. B146 is fixed for Stripe Checkout only.
+- **B156 (open, R8):** `stripe_webhook_test`'s first payload is now the no-record case, so each run
+  on dev emails the operator. Give it a record (which also covers the webhook completion over
+  HTTP).
+
+Tests: `hosted_checkout` 29/29 (Stripe and PayPal stood in). Not run against Stripe or PayPal: dev's
+checkout is the card form, and dev has no PayPal keys (live verification queue).
 
 ### WP2 — hosted mail runs once, for real
 
