@@ -27,6 +27,8 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.5 - records are read from dkim_expected / rpath_expected / cname_expected, what the provider
+ *   asks for; the _value fields are what DNS shows now and are empty until published (B159)
  * @version 1.4 - with no API key, getSendingDomainState answers '' and says why without asking the
  *                API or logging a failure for every domain a Setup run checks
  * @version 1.3 - a domain the account does not hold is 'not_registered', not '':
@@ -582,6 +584,11 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
      *                                                             what SPF is checked against
      *   {tracker fulldomain}                → track.smtp2go.net   only when tracking is on
      *
+     * The target is the *_expected field: what the provider wants the CNAME to
+     * point at. The *_value field beside it is what DNS answers today, empty
+     * until the record is published (observed live 2026-10-26), so it never
+     * names what to publish.
+     *
      * A record missing either half is dropped rather than half-published: a
      * malformed record is worse than an absent one, because it looks done.
      */
@@ -594,14 +601,14 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         $records = array();
 
         $selector = trim((string)($domain['dkim_selector'] ?? ''));
-        $dkim = trim((string)($domain['dkim_value'] ?? ''));
+        $dkim = trim((string)($domain['dkim_expected'] ?? ''));
         if ($full !== '' && $selector !== '' && $dkim !== '') {
             $records[] = self::record('CNAME', $selector . '._domainkey.' . $full, $dkim, 'DKIM',
                 'DKIM — lets SMTP2GO sign mail as ' . $full . '.');
         }
 
         $rpath_selector = trim((string)($domain['rpath_selector'] ?? ''));
-        $rpath = trim((string)($domain['rpath_value'] ?? ''));
+        $rpath = trim((string)($domain['rpath_expected'] ?? ''));
         if ($full !== '' && $rpath_selector !== '' && $rpath !== '') {
             $records[] = self::record('CNAME', $rpath_selector . '.' . $full, $rpath, 'Return-Path',
                 'Return path — where bounces go, and what SPF is checked against.');
@@ -610,7 +617,7 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         foreach (self::asList($entry['trackers'] ?? array()) as $tracker) {
             if (!is_array($tracker) || empty($tracker['enabled'])) { continue; }
             $host = self::normalizeDomain((string)($tracker['fulldomain'] ?? ''));
-            $target = trim((string)($tracker['cname_value'] ?? ''));
+            $target = trim((string)($tracker['cname_expected'] ?? ''));
             if ($host !== '' && $target !== '') {
                 $records[] = self::record('CNAME', $host, $target, 'Link tracking',
                     'Link tracking — rewrites clicked links through ' . $host . '.');

@@ -143,8 +143,8 @@ $mail = ServiceTenant::forKey($key_id, 'mail');
 $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$mail->key);
 JoineryServices::grant($mail, '2036-10-01', $client);
 $reply(array(array('subaccount_id' => 'sub-w'), array(),
-	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_selector' => 's', 'dkim_value' => 'v',
-		'rpath_selector' => 'r', 'rpath_value' => 'w', 'dkim_verified' => true, 'rpath_verified' => true)))),
+	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_selector' => 's', 'dkim_expected' => 'v',
+		'rpath_selector' => 'r', 'rpath_expected' => 'w', 'dkim_verified' => true, 'rpath_verified' => true)))),
 	array('username' => 'x'),
 	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_verified' => true, 'rpath_verified' => true))))));
 JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
