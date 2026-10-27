@@ -8,6 +8,9 @@
  * completed key is never signed again. The run's ledger file goes to backup
  * storage and the tenant's figure is refreshed (specs/storage_targets.md §6, F4).
  *
+ * @version 1.2 - the chain the run extended is named; completed may be empty (a failed run, which cancels
+ *                everything it signed) and as long as a run that stores many offloaded files needs
+ *                (specs/easy_signup_completion.md WP4)
  * @version 1.1 - each completed object carries its sha256
  * @version 1.0
  */
@@ -26,7 +29,8 @@ function shelf_finish_run_logic(array $input): LogicResult {
 		$row = ShelfBroker::tenantFor($user_id, intval($session->get_api_key_id()));
 		// tenantFor() proved this is the caller's own tenant; the broker's records follow.
 		$data = SystemBase::rule_checked_write(function () use ($row, $input, $completed) {
-			return ShelfBroker::finishRun($row, intval($input['run_id'] ?? 0), is_array($completed) ? $completed : array());
+			return ShelfBroker::finishRun($row, intval($input['run_id'] ?? 0), is_array($completed) ? $completed : array(),
+				trim((string)($input['chain'] ?? '')));
 		});
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
@@ -42,12 +46,13 @@ function shelf_finish_run_logic_descriptor(): array {
 		'mutates'          => true,
 		'input'            => array(
 			'run_id'    => array('type' => 'integer', 'required' => true, 'label' => 'Run id'),
-			'completed' => array('type' => 'array',   'required' => true, 'label' => 'Completed objects: [{name, bytes, sha256}]', 'max_items' => 500,
+			'completed' => array('type' => 'array',   'required' => false, 'label' => 'Completed objects: [{name, bytes, sha256}]; none for a failed run', 'max_items' => 200000,
 				'items' => array(
 					'name'   => array('type' => 'string',  'required' => true,  'label' => 'Object name'),
 					'bytes'  => array('type' => 'integer', 'required' => false, 'label' => 'Size in bytes'),
 					'sha256' => array('type' => 'string',  'required' => true,  'label' => 'The object\'s sha256, hex'),
 				)),
+			'chain'     => array('type' => 'string',  'required' => false, 'label' => 'The chain the run extended'),
 		),
 	);
 }

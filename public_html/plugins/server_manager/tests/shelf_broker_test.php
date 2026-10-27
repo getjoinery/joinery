@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/shelf_broker_test.php
  *
+ * @version 1.4 - a finish asked again answers what was recorded (specs/easy_signup_completion.md WP4)
  * @version 1.3 - write-once: a completed key answers 'exists'; a completion carries its sha256; a failed run's
  *                key is the retry's (specs/storage_targets.md WP5)
  * @version 1.2 - a taken-over row stays counted; a retried multipart_create aborts the held upload
@@ -342,12 +343,12 @@ try {
 } catch (ShelfBrokerException $e) {
 	check(strpos($e->getMessage(), 'already finished') !== false, 'a spent run is refused');
 }
-try {
-	ShelfBroker::finishRun($row, $run_id, array());
-	check(false, 'finishing twice is refused');
-} catch (ShelfBrokerException $e) {
-	check(true, 'finishing a finished run is refused');
-}
+// A finish asked again (its reply was lost) is answered with what was
+// recorded, and changes nothing: the writer keeps the run it holds here.
+$again = ShelfBroker::finishRun($row, $run_id, array());
+check(!empty($again['already_finished']) && (int)$again['completed'] > 0
+	&& (string)(new ShelfRun($run_id, TRUE))->get('svr_state') === ShelfRun::STATE_FINISHED,
+	'a finish asked again answers what was recorded, and changes nothing', json_encode($again));
 $s = JoineryServices::statusOf($row);
 check($s['figure'] === 1000 && $s['used_label'] === '0 MB' && $s['allowance_label'] === '1 GB', 'status carries the figure');
 

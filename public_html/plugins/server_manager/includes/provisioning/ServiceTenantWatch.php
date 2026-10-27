@@ -51,6 +51,14 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.10 - the re-review: the offloaded-file pass leaves a space alone while one of the tenant's runs is open
+ *                 there (it may name what no kept index does yet); a draining space with no point left, once the
+ *                 move's hold is released, drops its offloaded files so it can retire; a ledger time is read as UTC
+ * @version 1.9 - retention files a tenant's backups into restore points as a node's are filed
+ *                (FleetBackupRetention::group): a standalone archive with its sidecar and index is a point, the
+ *                offloaded-file store is no point and is pruned by what the kept points still name, and points
+ *                order by the stamp in their names. A self-hosted site's standalone archives and objects were
+ *                never pruned, and objects/ took a keep slot (specs/easy_signup_completion.md WP4)
  * @version 1.8 - a released mail row whose domain or SMTP user is still at the provider is released again until both are gone
  * @version 1.7 - object lock (specs/storage_targets.md F8): retention keeps a chain the lock still holds whole, for a
  *                pass after its date; the lapse prune is finished (rows marked, tenant told) only once nothing
@@ -596,29 +604,56 @@ class ServiceTenantWatch {
 
 		$objects = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'completed' => true, 'pruned' => false,
 			'deleted' => false));
-		$families = array();   // profile => "chain|space" => ['chain', 'space', 'objects' => [ShelfObject]]
+		// The ledger as a listing per space and profile, filed into restore
+		// points exactly as a node's storage is (FleetBackupRetention::group):
+		// a chain by its directory, a standalone archive with its sidecar and
+		// index. The offloaded-file store (objects/) is no point; it is pruned
+		// after the points, by what the kept ones still name.
+		$listing = array();    // space id => profile => [['key', 'size', 'last_modified']]
+		$rows_by_key = array();
 		foreach ($objects as $object) {
 			$space = $spaces[(int)$object->get('svo_sps_storage_space_id')] ?? null;
 			if ($space === null) {
 				continue;
 			}
 			$key = (string)$object->get('svo_key');
-			$parts = explode('/', substr($key, strlen($space->base())));
-			if (!$space->holds_key($key) || count($parts) < 3) {
-				continue; // not {profile}/{chain}/{object}: not a chain's
+			if (!$space->holds_key($key)) {
+				continue;
 			}
-			$id = $parts[1] . '|' . (int)$space->key;
-			$families[$parts[0]][$id]['chain'] = $parts[1];
-			$families[$parts[0]][$id]['space'] = $space;
-			$families[$parts[0]][$id]['objects'][] = $object;
+			$rel = substr($key, strlen($space->base()));
+			$slash = strpos($rel, '/');
+			if ($slash === false || substr($rel, 0, $slash) === ShelfBroker::LEDGER_DIR) {
+				continue; // not under a profile, or a run's ledger file
+			}
+			$sid = (int)$space->key;
+			// The ledger's times are UTC without a zone: said so, so the object
+			// prune's comparison with an index's creation is not shifted by
+			// this machine's timezone.
+			$completed_time = trim((string)$object->get('svo_completed_time'));
+			$listing[$sid][substr($rel, 0, $slash)][] = array('key' => $key, 'size' => (int)$object->get('svo_bytes'),
+				'last_modified' => $completed_time !== '' ? $completed_time . ' UTC' : '');
+			$rows_by_key[$sid][$key] = $object;
+		}
+		$families = array();   // profile => "point|space" => ['chain' (the point's name), 'space', 'group', 'objects' => [ShelfObject]]
+		foreach ($listing as $sid => $profiles) {
+			foreach ($profiles as $profile => $list) {
+				foreach (FleetBackupRetention::group($list, $spaces[$sid]->base() . $profile . '/') as $name => $group) {
+					$rows = array();
+					foreach ($group['keys'] as $key) { $rows[] = $rows_by_key[$sid][$key]; }
+					$families[$profile][$name . '|' . $sid] = array('chain' => (string)$name, 'space' => $spaces[$sid],
+						'group' => $group, 'objects' => $rows);
+				}
+			}
 		}
 		$busy = array();
+		$open_in = array();   // space id => true while a run of this tenant is open there
 		$verified = array();
 		$floor = array();   // profile => start of its newest verified chain, from the runs alone
 		$runs = new MultiShelfRun(array('tenant_id' => (int)$row->key, 'deleted' => false));
 		foreach ($runs as $run) {
 			if ((string)$run->get('svr_state') === ShelfRun::STATE_OPEN) {
 				$busy[(string)$run->get('svr_chain')] = true;
+				$open_in[(int)$run->get('svr_sps_storage_space_id')] = true;
 			}
 			if ($run->get('svr_verified_time')) {
 				$verified[(string)$run->get('svr_chain') . '|' . (int)$run->get('svr_sps_storage_space_id')] = true;
@@ -638,7 +673,14 @@ class ServiceTenantWatch {
 		$listed = array();
 		$deleting = array();   // profile => [id]
 		foreach ($families as $profile => $chains) {
-			krsort($chains, SORT_STRING);   // chain-YYYYMMDD_HHMMSS|space: newest first
+			// Newest first by the stamp in each point's name: a chain directory
+			// and a standalone archive carry the same stamp, and a name sort
+			// would order them by family instead of by age.
+			uksort($chains, function ($a, $b) use ($chains) {
+				return FleetBackupRetention::start_time_of($chains[$b]['chain']) <=> FleetBackupRetention::start_time_of($chains[$a]['chain'])
+					?: strcmp($b, $a);
+			});
+			$families[$profile] = $chains;
 			$points = array();
 			$before = array();
 			foreach ($chains as $id => $family) {
@@ -658,6 +700,7 @@ class ServiceTenantWatch {
 		}
 
 		$pruned = 0;
+		$gone = array();   // profile => [point id => true], the points deleted this pass
 		foreach ($deleting as $profile => $ids) {
 			foreach ($ids as $id) {
 				$family = $families[$profile][$id];
@@ -697,6 +740,7 @@ class ServiceTenantWatch {
 						$object->markPruned(ShelfObject::PRUNED_RETENTION);
 					}
 					unset($listed[(int)$space->key][$profile . '/' . $family['chain']]);
+					$gone[$profile][$id] = true;
 					$pruned++;
 				} catch (\Throwable $e) {
 					$this->errors[] = $this->label($row) . ': retention of ' . $profile . '/' . $family['chain'] . ' in '
@@ -705,6 +749,54 @@ class ServiceTenantWatch {
 				}
 			}
 		}
+		// The third family: offloaded files no kept point names any more, judged
+		// per space and profile from the points that are LEFT, by the rule a
+		// node's storage is pruned by (FleetBackupRetention::prune_objects). A
+		// space held while the tenant moves keeps everything.
+		$pruned_objects = 0;
+		foreach ($listing as $sid => $profiles) {
+			$space = $spaces[$sid];
+			// Held while the tenant moves; and left alone while a run is open
+			// there, whose index (not yet uploaded) may name what no kept one does.
+			if (($space->is_draining() && $hold_draining) || isset($open_in[$sid])) {
+				continue;
+			}
+			foreach ($profiles as $profile => $list) {
+				$kept = array();
+				foreach ($families[$profile] ?? array() as $id => $family) {
+					if ((int)$family['space']->key === $sid && !isset($gone[$profile][$id])) {
+						$kept[] = $family['group'];
+					}
+				}
+				try {
+					list($target, $creds, $bucket) = $space->reach();
+					$delete = function ($key) use ($creds, $bucket, $sid, $rows_by_key) {
+						if (!$this->delete_object($creds, $bucket, (string)$key)) {
+							return false; // object lock still holds it: a later pass
+						}
+						if (isset($rows_by_key[$sid][$key])) {
+							$rows_by_key[$sid][$key]->markPruned(ShelfObject::PRUNED_RETENTION);
+						}
+					};
+					if ($space->is_draining() && !$kept) {
+						// A space the tenant moved away from with no point left:
+						// nothing in it is needed, and no run in the new space
+						// names what is here. Its offloaded files go with it, as
+						// a node's do, so it can retire.
+						foreach ($list as $o) {
+							if ($delete($o['key']) !== false) { $pruned_objects++; }
+						}
+						continue;
+					}
+					$pruned_objects += count(FleetBackupRetention::prune_objects($list, $space->base() . $profile . '/', $kept,
+						FleetBackupRetention::shelf_reader($creds, $bucket), $delete));
+				} catch (\Throwable $e) {
+					$this->errors[] = $this->label($row) . ': retention of the offloaded files in ' . $space->describe()
+						. ' failed: ' . $e->getMessage();
+				}
+			}
+		}
+
 		foreach ($spaces as $sid => $space) {
 			try {
 				$space->record_surplus($listed[$sid] ?? array());
@@ -712,7 +804,7 @@ class ServiceTenantWatch {
 				$this->errors[] = $this->label($row) . ': ' . $space->describe() . ' could not record what is surplus: ' . $e->getMessage();
 			}
 		}
-		if ($pruned) {
+		if ($pruned || $pruned_objects) {
 			ShelfBroker::refreshFigure($row);
 		}
 		foreach ($spaces as $space) {

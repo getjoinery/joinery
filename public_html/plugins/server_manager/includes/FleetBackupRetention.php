@@ -689,7 +689,7 @@ class FleetBackupRetention {
 	}
 
 	/** The default reader: a signed GET, decoded as a manifest or as a gzipped objects index by name. */
-	private static function shelf_reader(array $creds, $bucket) {
+	public static function shelf_reader(array $creds, $bucket) {
 		return function ($key) use ($creds, $bucket) {
 			$resp = S3Signer::get($creds, $bucket, '/' . ltrim($key, '/'));
 			if ((int)($resp['status'] ?? 0) !== 200) {

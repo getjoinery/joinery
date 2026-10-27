@@ -191,6 +191,12 @@
       "helptext": "The folder inside the bucket that holds this site's backups. Blank uses the project directory name, which is also what a fleet management node would call this site — so leaving it blank keeps one pile rather than starting a second beside the first. Letters, numbers, hyphens and underscores only."
     },
     {
+      "name": "backup_service_folder",
+      "default": "",
+      "managed": true,
+      "helptext": "The folder getjoinery keeps this site's backups in, as its backup storage signs them. Written by ServicesClient::applyShelfEnrolment() when the site chooses getjoinery backup storage; runs to that target are named under it (BackupRunner::slug_for()), and runs to a bucket of the site's own keep backup_path_slug."
+    },
+    {
       "name": "activation_required_login",
       "default": "1",
       "group": "general",

@@ -13,6 +13,8 @@
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.7.0 - a target in getjoinery's backup storage asks for the getjoinery account sign-in, the way back to
+ *                  those backups, not a bucket console it has none of (specs/easy_signup_completion.md WP4)
  * @version 1.6.0 - the recovery key's card says it also opens this server's encrypted data root, where the
  *                  data root's break-glass copy is sealed to it (WP4)
  * @version 1.5.0 - core: every site's Recovery Readiness page lists its backup recovery key and backup
@@ -118,6 +120,10 @@ class BackupReadinessItems {
 		$targets = new MultiBackupTarget(array('deleted' => false));
 		$targets->load();
 		foreach ($targets as $target) {
+			if ($target->is_service()) {
+				$items[] = self::serviceItem($target);
+				continue;
+			}
 			$provider_key = strtolower((string)$target->get('bkt_provider'));
 			$provider = StorageProvider::label($provider_key);
 			$bucket = (string)$target->get('bkt_bucket');
@@ -141,6 +147,33 @@ class BackupReadinessItems {
 			);
 		}
 		return $items;
+	}
+
+	/**
+	 * getjoinery's backup storage: after the server is lost, the way back to
+	 * these backups is the getjoinery account that holds them, so that is the
+	 * sign-in to keep working. There is no bucket console of this site's.
+	 */
+	private static function serviceItem(BackupTarget $target) {
+		$url = ServicesClient::operatorUrl();
+		$account = ServicesClient::account();
+		return array(
+			'key'      => 'bucket_console_' . (int)$target->key,
+			'title'    => 'getjoinery account access — ' . $target->get('bkt_name'),
+			'protects' => 'Reaching the backups at all after total server loss. getjoinery keeps them, and signing in to '
+				. 'your getjoinery account is the way back to them.',
+			'label'    => 'getjoinery account login' . ($account !== '' ? ' — ' . $account : ''),
+			'facts'    => array(
+				'Kept by' => 'getjoinery',
+				'Account' => $account !== '' ? $account : 'not recorded',
+			),
+			'verify'       => 'attested',
+			'instructions' => 'Open getjoinery in another tab and confirm the login saved in your password manager still '
+				. 'gets you in. This site cannot check that for you — recording it here just timestamps that you did.',
+			'action_url'   => preg_match('#^https://#', $url) ? $url : '',
+			'action_url_label' => 'Open getjoinery',
+			'attest_label' => 'Record it — I just signed in',
+		);
 	}
 
 	/**

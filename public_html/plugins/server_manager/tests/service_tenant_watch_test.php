@@ -28,6 +28,8 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.7 - the objects pass waits while a run of the tenant is open in the space (WP4 re-review R2)
+ * @version 1.6 - a site's standalone archives are points of their own and its offloaded-file store takes no keep slot (WP4 review H2)
  * @version 1.5 - the provider's fake domain answers name the host itself (B165)
  * @version 1.4 - the provider's send count is the subaccount listing's plan_used (B162)
  * @version 1.3 - a lapse prune that finds objects object lock still holds is not finished until they are gone
@@ -308,6 +310,37 @@ check(in_array('shelf/' . $base . 'site/chain-20260830_010000/db', $keys, true),
 check(in_array('shelf/' . $base . 'manager/chain-20260801_010000/db', $keys, true), 'the manager family is aged on its own');
 check((string)(new ShelfRun((int)$open['run_id'], TRUE))->get('svr_state') === 'open', 'a young open run is not aborted');
 
+section('shelf: a site\'s standalone archives are points; its offloaded files are not');
+// A self-hosted site's runs (WP4): database-only runs write standalone
+// archives straight under site/, and offloaded files go under site/objects/.
+// The archives are restore points like chains, ordered by the stamp in their
+// names; objects/ is no point and takes no keep slot.
+$standalone = array();
+foreach (array('20260701', '20260702') as $day) {
+	$name = 'jy-' . $day . '_010000.sql.gz.enc';
+	$r = ShelfBroker::beginRun($shelf, 'site', '', array(array('name' => $name, 'bytes' => 3)));
+	$cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$r['run_id']);
+	ShelfBroker::sign($shelf, (int)$r['run_id'], $name, 'put', array('bytes' => 3));
+	$put_raw($base . 'site/' . $name, 'abc');
+	ShelfBroker::finishRun($shelf, (int)$r['run_id'], array(array('name' => $name, 'bytes' => 3, 'sha256' => str_repeat('b', 64))));
+	$standalone[] = 'shelf/' . $base . 'site/' . $name;
+}
+$r = ShelfBroker::beginRun($shelf, 'site', '', array(array('name' => 'objects/e1/obj1', 'bytes' => 2)));
+$cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$r['run_id']);
+ShelfBroker::sign($shelf, (int)$r['run_id'], 'objects/e1/obj1', 'put', array('bytes' => 2));
+$put_raw($base . 'site/objects/e1/obj1', 'zz');
+ShelfBroker::finishRun($shelf, (int)$r['run_id'], array(array('name' => 'objects/e1/obj1', 'bytes' => 2, 'sha256' => str_repeat('c', 64))));
+$watch->watch($shelf, '2036-09-23 18:00:00');
+$watch->watch($shelf, '2036-09-24 19:00:00');
+$keys = s3fx_keys($fx);
+check(!in_array($standalone[0], $keys, true) && !in_array($standalone[1], $keys, true),
+	'standalone archives older than the newest verified chain are pruned, each a point of its own', json_encode($keys));
+check(in_array('shelf/' . $base . 'site/chain-20260910_010000/db', $keys, true)
+	&& in_array('shelf/' . $base . 'site/chain-20260920_010000/files', $keys, true),
+	'the offloaded-file store takes no keep slot: the newest two chains stay');
+check(in_array('shelf/' . $base . 'site/objects/e1/obj1', $keys, true),
+	'and it is not pruned as a point: no kept index can be read to judge it, so nothing goes');
+
 section('shelf: an abandoned run is aborted; the listing corrects the ledger');
 $db->exec("UPDATE svr_shelf_runs SET svr_create_time = now() - interval '48 hours' WHERE svr_shelf_run_id = " . (int)$open['run_id']);
 $shelf->set('svt_reconciled_time', null);
@@ -336,6 +369,29 @@ check(count($ledger_keys) >= 4 && (int)$ledger_rows === 0, 'the run ledger files
 	count($ledger_keys) . ' files, ' . $ledger_rows . ' rows');
 // db of 0910 was renamed away in the ledger and is in backup storage → adopted back (10); the aborted run's db (1) adopted too.
 check((int)$shelf->get('svt_figure') === ShelfObject::completedBytes((int)$shelf->key), 'the figure is the reconciled ledger');
+
+section('shelf: an offloaded file no kept index names goes, but never while a run is open');
+// The newest chain's index (written after the file landed) names nothing, so
+// the file is pruned by the rule a node's storage is. While a run of the
+// tenant is open in the space, whose index is not up yet, it waits.
+$finish_one = function (string $chain, string $name, string $bytes) use ($shelf, &$cleanup, $put_raw, $base) {
+	$r = ShelfBroker::beginRun($shelf, 'site', $chain, array(array('name' => $name, 'bytes' => strlen($bytes))));
+	$cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$r['run_id']);
+	ShelfBroker::sign($shelf, (int)$r['run_id'], $name, 'put', array('bytes' => strlen($bytes)));
+	$put_raw($base . 'site/' . $name, $bytes);
+	ShelfBroker::finishRun($shelf, (int)$r['run_id'], array(array('name' => $name, 'bytes' => strlen($bytes), 'sha256' => hash('sha256', $bytes))), $chain);
+};
+$finish_one('', 'objects/epoch-1/blobA.enc', 'aa');
+$index = gzencode(json_encode(array('version' => BackupObjects::INDEX_VERSION, 'created' => '2036-09-25T00:00:00Z', 'objects' => array())));
+$finish_one('chain-20260920_010000', 'chain-20260920_010000/objects-0000.json.gz', $index);
+$blob = 'shelf/' . $base . 'site/objects/epoch-1/blobA.enc';
+$open_r2 = ShelfBroker::beginRun($shelf, 'site', '', array(array('name' => 'chain-20261001_010000/db', 'bytes' => 1)));
+$cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$open_r2['run_id']);
+$watch->watch($shelf, '2036-09-25 18:00:00');
+check(in_array($blob, s3fx_keys($fx), true), 'while a run is open in the space, the offloaded files are left alone');
+ShelfBroker::finishRun($shelf, (int)$open_r2['run_id'], array());
+$watch->watch($shelf, '2036-09-25 18:30:00');
+check(!in_array($blob, s3fx_keys($fx), true), 'once it closes, a file no kept index names is pruned (so the check above means something)');
 
 section('shelf: the ladder suspends, the day comes, the prefix is pruned once');
 $watch->watch($shelf, '2036-10-02 00:00:00');

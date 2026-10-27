@@ -18,6 +18,7 @@
  *   decommissioned — a former owner had this slug (the site is gone; its backups remain)
  *   orphaned       — nothing in the map matches this slug
  *
+ * @version 2.3 - getjoinery's backup storage is refused a delete, by name: getjoinery prunes it (WP4 review L11)
  * @version 2.2 - the folder is the target's normalised prefix (BackupTarget::prefix()); a caller's map may
  *                name a folder's status, owner and storage space; slug_backup_count() is gone (a node's
  *                backups are counted from its storage spaces)
@@ -99,6 +100,7 @@ class TargetBackups {
 	 * validated so a crafted value cannot widen the delete beyond one site's prefix.
 	 */
 	public static function delete_prefix($target, $slug) {
+		self::refuse_service($target);
 		if (!preg_match('/^[A-Za-z0-9_-]+$/', (string)$slug)) {
 			throw new TargetBackupsException('Invalid site name.');
 		}
@@ -124,6 +126,7 @@ class TargetBackups {
 	 * forged key cannot reach an unrelated object in the bucket.
 	 */
 	public static function delete_object($target, $key) {
+		self::refuse_service($target);
 		$base = self::base_prefix($target);
 		$key  = (string)$key;
 		if (strpos($key, $base) !== 0) {
@@ -147,6 +150,13 @@ class TargetBackups {
 				'Delete failed for ' . $key . ': ' . $msg
 				. ($already > 0 ? " ({$already} already deleted)." : '.')
 			);
+		}
+	}
+
+	/** getjoinery's backup storage signs no delete: getjoinery prunes it by its own retention. */
+	private static function refuse_service($target) {
+		if ($target instanceof BackupTarget && $target->is_service()) {
+			throw new TargetBackupsException('getjoinery prunes its own backup storage; nothing there is deleted from here.');
 		}
 	}
 

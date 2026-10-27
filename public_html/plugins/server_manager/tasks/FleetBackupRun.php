@@ -34,6 +34,7 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.15 - the hidden-version sweep skips a site's own getjoinery backup storage target (WP4 review L11)
  * @version 1.14 - the run is told what the backup storage check proved missing from its space (objects_missing),
  *                 so it stores those offloaded files again
  * @version 1.13 - busy_machines names failStaleClaims and markLost, which free a lost claim (no requeue)
@@ -322,6 +323,10 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		$hidden_said = array();
 		if (!$dry) {
 			foreach (new MultiBackupTarget(array('deleted' => false)) as $target) {
+				// A site's own getjoinery backup storage is getjoinery's to sweep, not this machine's.
+				if ($target->is_service()) {
+					continue;
+				}
 				try {
 					$folder = BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix')) . '/';
 					$r = HiddenVersionSweep::run($target, $folder, 120);

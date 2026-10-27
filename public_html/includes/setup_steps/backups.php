@@ -9,6 +9,8 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.7 - getjoinery backup storage is offered first, before a bucket of the owner's own: Connect, then one
+ *                button; a target there shows as the service, with no bucket (specs/easy_signup_completion.md WP4)
  * @version 2.6 - the bucket note says the form takes any listed service, not only the three it names
  * @version 2.5 - the target form is BackupTargetForm (every catalogue provider); a wizard target is saved enabled
  *                and becomes the scheduled one as it is saved; the step shows that target, never the newest enabled.
@@ -38,6 +40,10 @@ $setup_bk_recovery = BackupRecoveryKey::setup_state();
 // them and the step is the recovery key alone.
 $setup_bk_managed = class_exists('ManagementNodeStatus') && ManagementNodeStatus::is_managed();
 $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_url() : '';
+// getjoinery's backup storage: a site linked to a getjoinery account stores
+// its backups there with one button; one not linked yet connects first.
+$setup_bk_services_connected = ServicesClient::connected();
+$setup_bk_services_account = ServicesClient::account();
 ?>
 
 <?php if ($setup_bk_managed) { ?>
@@ -48,7 +54,28 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 			Where they go, how often they run, and how many are kept are set there, not here.</p>
 	</div>
 <?php } else { ?>
+	<div class="jy-fieldset">
+		<h4>1 &middot; Where backups go</h4>
 <?php if ($setup_bk_target === null) { ?>
+		<h5>Store them with getjoinery</h5>
+		<p>No storage account to open and no keys to copy. Backups are encrypted here, with the recovery key below,
+			before they leave this site, so getjoinery keeps them without being able to read them.</p>
+<?php if ($setup_bk_services_connected) { ?>
+		<form method="POST" action="/setup">
+			<input type="hidden" name="action" value="services_shelf_use">
+			<input type="hidden" name="step" value="backups">
+			<button type="submit" class="btn btn-primary">Store backups with getjoinery</button>
+		</form>
+		<p class="jy-muted small">This site is connected to getjoinery<?php echo $setup_bk_services_account !== '' ? ' as <strong>' . htmlspecialchars($setup_bk_services_account) . '</strong>' : ''; ?>.</p>
+<?php } else { ?>
+		<form method="POST" action="/setup">
+			<input type="hidden" name="action" value="services_connect">
+			<input type="hidden" name="step" value="backups">
+			<button type="submit" class="btn btn-primary">Connect your getjoinery account</button>
+		</form>
+		<p class="jy-muted small">Nothing is typed: getjoinery asks you to sign in there and sends this site back here, connected.</p>
+<?php } ?>
+		<h5 class="jy-mt-3">Or use a storage account of your own</h5>
 	<p class="mb-1">You need a bucket at a storage service. Any service in the list below works the same here; these three are the most common:</p>
 	<ul class="small">
 		<li><a href="https://www.backblaze.com/sign-up/cloud-storage" target="_blank" rel="noopener">Backblaze B2</a>
@@ -60,9 +87,19 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 	</ul>
 <?php } ?>
 
-	<div class="jy-fieldset">
-		<h4>1 &middot; Where backups go</h4>
-<?php if ($setup_bk_target !== null) { ?>
+<?php if ($setup_bk_target !== null && $setup_bk_target->is_service()) { ?>
+		<p>
+			<span class="badge badge-success">Set</span>
+			getjoinery backup storage<?php echo $setup_bk_services_account !== '' ? ', for ' . htmlspecialchars($setup_bk_services_account) : ''; ?>.
+			Backups are encrypted here before they leave, and getjoinery keeps them.
+		</p>
+		<form method="POST" action="/setup">
+			<input type="hidden" name="action" value="test_target">
+			<input type="hidden" name="step" value="backups">
+			<input type="hidden" name="bkt_backup_target_id" value="<?php echo (int)$setup_bk_target->key; ?>">
+			<button type="submit" class="btn btn-secondary">Check it is taking backups</button>
+		</form>
+<?php } elseif ($setup_bk_target !== null) { ?>
 		<p>
 			<span class="badge badge-success">Set</span>
 			<?php echo htmlspecialchars($setup_bk_target->get('bkt_name')); ?>

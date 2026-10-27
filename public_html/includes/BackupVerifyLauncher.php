@@ -19,6 +19,7 @@
  * level in the background the way Run now starts a backup, and the result
  * lands on the run's own history row where Recent backups shows it.
  *
+ * @version 1.5 - the folder is BackupTarget::normalise_prefix(), the rule the engine writes by (WP4 review L12)
  * @version 1.4 - note_verified() / cooldown_left(): every verify leaves a machine-wide stamp, and the site's own
  *                scheduled verify waits out COOLDOWN_SECONDS after any verify, so a management node's verify and the
  *                site's never read back to back (the provider's inbound-traffic alert averages over 2 hours)
@@ -176,7 +177,7 @@ class BackupVerifyLauncher {
 		if (empty($creds) || $bucket === '') {
 			throw new BackupVerifyLauncherException('The backup target has no bucket or no stored credentials, so no link can be signed.');
 		}
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$prefix = BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix'));
 		$slug   = (string)($run->get('bkh_slug') ?: $plan['slug']);
 		$chain_key = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::SITE) . '/' . $chain_id;
 

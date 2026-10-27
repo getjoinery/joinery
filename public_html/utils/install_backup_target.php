@@ -35,6 +35,7 @@
  * the bucket could not be reached or the write failed. A site that already
  * has a scheduled target is left alone and reports ok with already=1.
  *
+ * @version 1.2 - getjoinery's backup storage is refused: it is enrolled in from the Backups page, never given keys
  * @version 1.1 - the providers, and how each names its endpoint, are StorageProvider's catalogue
  * @version 1.0
  */
@@ -63,8 +64,9 @@ $key      = trim((string)getenv('JOINERY_BACKUP_KEY'));
 $region   = trim((string)getenv('JOINERY_BACKUP_REGION'));
 $endpoint = trim((string)getenv('JOINERY_BACKUP_ENDPOINT'));
 
-if (!StorageProvider::known($provider)) {
-	install_backup_target_fail("'$provider' is not a backup provider this site knows (" . implode(', ', StorageProvider::slugs()) . ').', 2);
+if (!StorageProvider::known($provider) || $provider === StorageProvider::SERVICE) {
+	install_backup_target_fail("'$provider' is not a backup provider this site knows (" . implode(', ', array_keys(StorageProvider::options())) . ').'
+		. ($provider === StorageProvider::SERVICE ? ' getjoinery backup storage is chosen on the Backups page, not given keys here.' : ''), 2);
 }
 if ($bucket === '' || $key_id === '' || $key === '') {
 	install_backup_target_fail('JOINERY_BACKUP_BUCKET, JOINERY_BACKUP_KEY_ID and JOINERY_BACKUP_KEY are all required.', 2);

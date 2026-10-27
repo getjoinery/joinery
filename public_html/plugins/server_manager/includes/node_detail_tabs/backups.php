@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.22 - a site's own getjoinery backup storage target is never offered as where a node's backups move
  * @version 1.21 - Prepare stages its own row's run (it staged only the newest), and Restore is offered for a run
  *                 once it is prepared on the node, never queued for the node to refuse (B39, B40)
  * @version 1.20 - a scan that finishes while a dialog is open offers a reload instead of reloading under it, which
@@ -93,7 +94,8 @@
 	// there; nothing is copied (R3).
 	$move_options = [];
 	foreach (new MultiBackupTarget(['deleted' => false], ['bkt_name' => 'ASC']) as $t) {
-		if ($t->get('bkt_enabled') && (!$cloud_target || (int)$t->key !== (int)$cloud_target->key)) {
+		// Not this site's own getjoinery backup storage: it holds this site's backups, not its nodes'.
+		if ($t->get('bkt_enabled') && !$t->is_service() && (!$cloud_target || (int)$t->key !== (int)$cloud_target->key)) {
 			$move_options[(string)(int)$t->key] = $t->get('bkt_name') . ' (' . StorageProvider::label($t->get('bkt_provider')) . ')';
 		}
 	}

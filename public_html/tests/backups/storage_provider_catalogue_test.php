@@ -26,6 +26,7 @@
  *
  * Run: php tests/backups/storage_provider_catalogue_test.php
  *
+ * @version 1.3 - getjoinery's backup storage (managed) is a provider no form offers and with no console
  * @version 1.2 - the backup readiness items are core (includes/BackupReadinessItems.php)
  * @version 1.1 - one key per target (specs/storage_targets.md WP5)
  * @version 1.0
@@ -70,6 +71,10 @@ section('Each provider\'s console, region rule and addressing');
 foreach ($slugs as $slug) {
 	if ($slug === 'generic') {
 		check(StorageProvider::console_url($slug) === '', 'generic has no one console');
+	} elseif ($slug === StorageProvider::SERVICE) {
+		check(StorageProvider::console_url($slug) === '' && !isset(StorageProvider::options()[$slug])
+			&& !isset(StorageProvider::catalogue()[$slug]) && !isset(StorageProvider::visibility_rules()[$slug]),
+			'getjoinery\'s backup storage has no console and no form offers it');
 	} else {
 		check(strpos(StorageProvider::console_url($slug), 'https://') === 0, "$slug names its console sign-in");
 	}

@@ -48,6 +48,7 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.7.1 - the folder is BackupTarget::normalise_prefix(), the rule the engine writes by (WP4 review L12)
  * @version 1.7.0 - an object backup storage was proven not to hold is not held: the manager profile by the
  *                  locations its request carries from the management node's complete listing of the same space,
  *                  the site profile by its previous index against its own listing. The run stores it again
@@ -1691,7 +1692,7 @@ class BackupObjects {
 		if ($bucket === '') {
 			throw new BackupObjectsException('The backup target has no bucket configured.');
 		}
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$prefix = BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix'));
 		$base = $prefix . '/' . $plan['slug'] . '/' . BackupProfile::path_segment($plan['profile']) . '/';
 		return array($creds, $bucket, $base);
 	}

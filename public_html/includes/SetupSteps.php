@@ -36,7 +36,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.18
+ * @version 1.19
+ * @changelog 1.19 - The Backups step's intro offers getjoinery backup storage beside a bucket of the
+ *   owner's own (specs/easy_signup_completion.md WP4).
  * @changelog 1.18 - 'order' may be a callable. Backups comes straight after
  *   the secure connection on a site a management node backs up, because none of its backups
  *   can run until the owner's recovery key exists; its copy says so instead
@@ -765,7 +767,7 @@ class SetupSteps {
 				if (ManagementNodeStatus::is_managed()) {
 					return 'The management node that manages this server stores this site\'s backups, and none can run until you create the recovery key that encrypts them. Only you hold it: not even the management node can open them without it.';
 				}
-				return 'Everything here should survive this server dying. Point backups at a storage bucket, and create the recovery key that encrypts them to turn on nightly backups.';
+				return 'Everything here should survive this server dying. Store backups with getjoinery, or in a storage bucket of your own, and create the recovery key that encrypts them to turn on nightly backups.';
 			},
 			'render_file' => 'includes/setup_steps/backups.php',
 			'home_url' => '/admin/admin_backups',

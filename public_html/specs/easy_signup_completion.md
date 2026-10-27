@@ -485,6 +485,80 @@ store, `BackupRunner` site runs through `ServicesClient::shelf*`, the verify cal
 (`shelfVerifiedRun`), and a choice on the Backups step. Until the verify call exists a
 customer tenant alarms as never verified (`storage_targets.md`).
 
+- **Found 10-27:** the getjoinery side was complete (enrol opens the site's storage space and answers
+  its coordinates; the broker signs, ledgers and refuses deletes; the alarm reads verified runs), and
+  `ServicesClient` already had the six shelf calls with no caller. Nothing on the site used them: no
+  `managed` provider, no engine path, no wizard choice, no verify report.
+- **Built 10-27 (uncommitted):** a `managed` target holds no credential and answers its
+  `ServicesShelfBroker` (new; extends `BackupBroker` 1.3, whose run state and call seam opened to a
+  subclass) wherever a credential is asked for (`BackupTarget` 3.8). `S3LinkReader` (new) lets
+  `S3Signer` 1.15 list and presign a read through it, so every reader works unchanged. `BackupRunner`
+  1.36: a site run on it is begun, finished and aborted at getjoinery like a manager run at its broker,
+  prunes nothing there (and retention never deletes a run kept there, whatever the current target),
+  and its chain follows getjoinery's storage space. `BackupVerifier` 1.5 reports a passed verify
+  (`shelf_verified_run`). `TargetTester` 4.3 tests it by `shelf_status` (full allowance = fail).
+  `BackupReadinessItems` 1.7.0: its Recovery Readiness item is the getjoinery account sign-in, not a
+  bucket console. `ServicesClient` 1.2: `applyShelfEnrolment()` writes the target, `backup_path_slug` (the folder
+  getjoinery signs in) and `backup_target_id`; release switches it off. `StorageProvider` 2.2
+  (`SERVICE`, never in a form), `BucketCheck` 1.8, `install_backup_target.php` 1.2 (refuses it). UI:
+  the wizard step offers getjoinery first (Connect, then one button; setup_steps/backups.php 2.7,
+  `services_shelf_use` forwarded by setup_logic 2.15, handled by admin_backups_logic 1.27, which also
+  refuses to save a `managed` row through the form); the Backups page (1.17) shows the row as the
+  service with Test only, and offers the choice; disconnecting is refused while backups go there.
+  getjoinery side: `shelf_begin_run` 1.1 takes no artifacts list (an empty list was refused as
+  missing; the engine opens its run before it has names). Test: services_shelf_target 28/28 (the
+  site's code against getjoinery's own broker over the S3 fixture: enrol, a real chain run, the
+  ledger's hashes, listing, download, verify request, verified report, no delete, the allowance and
+  a moved space each a sentence, the Test button). docs/backups.md § A site's backups in
+  getjoinery's storage.
+- **reviewer2 review 10-27 (12 findings), all taken, fixed the same day:** H1 getjoinery never
+  learned a site run's chain, so its retention's verified floor never protected a self-hosted site
+  (finish now names the chain; getjoinery also derives it from the completed names). H2 getjoinery
+  never pruned a site's standalone archives or offloaded files, and objects/ took a keep slot
+  (`ServiceTenantWatch` 1.9 files the ledger with `FleetBackupRetention::group()` and prunes objects
+  with `prune_objects()`). H3 enrolling rewrote `backup_path_slug`, orphaning own-bucket runs
+  (`backup_service_folder` instead; `BackupRunner::slug_for()`, `plan_for_target()` follows it). H4
+  resolved by H3 (a records-only pass now sees only getjoinery runs). M5 the site's records drifted
+  from what getjoinery keeps (`reconcile_service_records()`). M6 begin accepted a site at its
+  allowance (refused at >=). M7 a repeated finish was refused (now answers what was recorded). M8
+  verify links died at an hour (get links take `expires`, up to 6 h; `S3LinkReader::read_link()`). M9
+  reads after a move missed old spaces, and a move stalled every run (all spaces listed, reads sign in
+  the key's space; a moved place is adopted for the next run). L10 a release left backups skipped in
+  silence (clears `backup_target_id`). L11 writes outside a run, deletes, and server_manager lists that
+  could reach the row (refused or skipped). L12 three prefix rules (one: `normalise_prefix`). Also
+  found while fixing: getjoinery's finish declared `completed` required with at most 500 entries, so
+  every abort (empty list) and any run with more than 500 offloaded files was refused over HTTP
+  (optional, 200,000). Tests: services_shelf_target 35/35, service_tenant_watch 47/47, shelf_broker
+  111/111.
+- **reviewer2 re-review 10-27 (R1-R7), all taken:** R1 after a move, the all-spaces listing made a run
+  treat old-space files as held (the object store now lists the active space only; a read of an
+  unplaced key lists its folder once). R2 the plane's objects pass could race an open run (skipped
+  while a run is open in the space). R3 a listing a space did not answer pruned records of runs still
+  held (the reconcile concludes nothing from it). R4 after a move every older record looked absent
+  (keys compared below the profile segment). R5 a drained space with no point never emptied or retired
+  (its objects go once the hold is released). R6 ledger times read in the machine's zone (marked UTC).
+  The test client now passes every call through the action's real descriptor. Tests:
+  services_shelf_target 42/42, service_tenant_watch 49/49. R5 is read-verified only (a move fixture
+  with aged chains was not built).
+- **reviewer2 round 3 10-27:** R1-R6 confirmed (R6 traced). V1 taken: the reconcile asks one listing per
+  point (a chain's folder, a standalone run's archives) instead of the whole site, so the offloaded-file
+  store is never listed for it (services_shelf_target 43/43). V2 and V3 are known limits below. Its last
+  note (a standalone run with no recorded keys was pruned unasked) closed: a point with nothing to ask
+  about is left listed. Review closed; full --changed gate 763/763.
+- **Known limits:** while backups go to getjoinery, earlier backups in the site's own bucket are left
+  as they are (pruned again if it goes back). One run may write past the allowance before the next
+  begin refuses. If getjoinery ever changes a site's folder on a move (it keeps svt_slug today), records
+  under the old folder stay listed (R7). After a release the nightly run is skipped quietly, with
+  "no backup target" on every surface and the two-night notice the only alarm (the site's own act).
+  After getjoinery moves a site, both spaces count against the allowance until the old one ages out
+  (a verified run in the new space, then retention), so a site above about half its allowance is
+  refused at begin until then (V2). If getjoinery has pruned every run of a site, the site keeps
+  listing them (V3; getjoinery always keeps the newest point while the site backs up). Offloaded files go through the same broker but are not in the end-to-end test; a
+  level-3 rehearsal signs one link per sampled object.
+- **Owed (live):** a self-hosted test site connected to dev's getjoinery account: Connect, Store
+  backups with getjoinery, a nightly or manual backup lands in dev's storage, a verify passes and dev
+  shows the tenant verified, a restore on that site.
+
 ### WP5 — "use getjoinery" at install
 
 The deploy form and the wizard's Email and Backups steps offer our mail and bucket beside

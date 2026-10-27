@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.15 - services_shelf_use joins the forwarded backups actions: getjoinery backup storage from the step
  * @version 2.14 - the backups actions forward only at the backups page's level (its header, 10): the logic no longer checks itself
  * @version 2.13 - action beta_permissions_save: the Beta permissions step's answer (emergency root access, one-way, and
  *                 log access), written with Setting::put as the Management Node page writes it
@@ -239,7 +240,7 @@ function setup_logic(array $input): LogicResult {
 	// them whole, to whoever may open the backups page (its header, which the
 	// router asks of the page and nothing asks here); return_to bounces its
 	// redirect back here.
-	$backup_actions = array('save_target', 'test_target',
+	$backup_actions = array('save_target', 'test_target', 'services_shelf_use',
 		'verify_recovery_key', 'clear_recovery_key');
 	if (in_array($action, $backup_actions, true)
 			&& Access::decide(AdminPageAccess::levelForFile('adm/admin_backups.php'), $session)) {
@@ -343,8 +344,12 @@ function setup_logic(array $input): LogicResult {
 		}
 	}
 	if ($action === 'services_disconnect' && Access::decide(10, $session)) {
+		$shelf_target = ServicesClient::serviceTarget();
 		if (ServicesClient::mailEnrolled()) {
 			$error = 'This site still sends its email through getjoinery. Switch to your own provider first; the release happens when the new one is proven.';
+		} elseif ($shelf_target !== null && $shelf_target->get('bkt_enabled')
+				&& (int)Globalvars::get_instance()->get_setting('backup_target_id') === (int)$shelf_target->key) {
+			$error = 'This site\'s backups still go to getjoinery backup storage. Choose storage of your own on the Backups page first.';
 		} else {
 			_setup_services_disconnect();
 			ServicesClient::clearConnection();

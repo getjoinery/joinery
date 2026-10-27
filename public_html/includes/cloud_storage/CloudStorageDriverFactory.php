@@ -14,6 +14,7 @@
  * - forTarget() is the driver for the store a row names. Every read, delete,
  *   pull-back and move follows the row, with the latch on or off.
  *
+ * @version 3.1 - a target with no credential of its own (getjoinery backup storage) builds options from nothing
  * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): current(), currentUnlatched(),
  *                currentTarget(), forTarget(), fromTarget(); the binding settings, driver(),
  *                driverUnlatched(), driverWithFallback() and binding() are gone
@@ -99,6 +100,10 @@ class CloudStorageDriverFactory {
 	/** What a driver is built from, for a target: its credentials and bucket. */
 	public static function options(BackupTarget $target): array {
 		$creds = $target->get_credentials() ?: [];
+		// getjoinery's backup storage holds no credential to build a driver from.
+		if (!is_array($creds)) {
+			$creds = [];
+		}
 		return [
 			'endpoint'   => (string)($creds['endpoint'] ?? ''),
 			'region'     => (string)($creds['region'] ?? ''),
