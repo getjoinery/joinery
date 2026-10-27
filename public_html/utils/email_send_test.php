@@ -20,6 +20,7 @@
  * "unverified". A second mode sends to any external address for a manual
  * deliverability spot-check.
  *
+ * @version 2.3 - works on a site without the mailbox plugin: loopback is offered only when it is active
  * @version 2.2
  */
 
@@ -44,8 +45,15 @@ $db = DbConnector::get_instance()->get_db_link();
 
 // ---------------------------------------------------------------- helpers
 
-/** Pick an enabled inbound domain for the loopback, preferring a store catch-all. */
+/**
+ * Pick an enabled inbound domain for the loopback, preferring a store catch-all.
+ * None when the mailbox plugin is not active: its tables are its own, and a
+ * site without it (getjoinery) still sends to an external address from here.
+ */
 function est_pick_loopback_domain($db) {
+    if (!class_exists('InboundEmailDomain')) {
+        return null;
+    }
     $sql = "SELECT ied_domain FROM ied_inbound_email_domains
             WHERE ied_is_enabled = true AND ied_delete_time IS NULL
             ORDER BY (ied_catch_all_mode = 'store') DESC, ied_domain ASC LIMIT 1";
@@ -118,7 +126,7 @@ function est_dkim_info($raw) {
 if (isset($_GET['check']) && $_GET['check'] !== '') {
     header('Content-Type: application/json');
     $token = preg_replace('/[^a-z0-9]/i', '', (string)$_GET['check']);
-    if ($token === '') { echo json_encode(['found' => false]); exit; }
+    if ($token === '' || !class_exists('InboundEmailMessage')) { echo json_encode(['found' => false]); exit; }
 
     $like = '%' . $token . '%';
     $stmt = $db->prepare(
@@ -302,7 +310,9 @@ if ($result['mode'] === 'external') {
     echo '<p>Now open that message in the recipient\'s mailbox and use <strong>"Show original"</strong> (Gmail) or '
         . '<strong>"View source / message headers"</strong> (others). You want to see, in the <code>Authentication-Results</code> line:</p>';
     echo '<ul><li><code>spf=pass</code></li><li><code>dkim=pass</code> (signed by your sending domain)</li><li><code>dmarc=pass</code></li></ul>';
-    echo '<p class="mb-0 text-muted">If it never arrives, check the Mailbox <a href="/plugins/mailbox/admin/admin_mailbox_logs">Logs</a> and your spam folder.</p>';
+    echo '<p class="mb-0 text-muted">If it never arrives, check '
+        . (class_exists('InboundEmailDomain') ? 'the Mailbox <a href="/plugins/mailbox/admin/admin_mailbox_logs">Logs</a> and ' : '')
+        . 'your spam folder.</p>';
     echo '</div></div>';
     echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Run another</a>';
     $page->admin_footer();
