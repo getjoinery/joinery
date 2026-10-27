@@ -63,7 +63,8 @@ Handles all sending operations with service selection:
 $sender = new EmailSender();
 $result = $sender->send($message);
 
-// Quick send (uses default template if HTML detected)
+// Quick send (an HTML body goes in the blank inner template, inside the outer
+// template the default_email_template setting names)
 $result = EmailSender::quickSend(
     'user@example.com', 
     'Subject', 
@@ -214,17 +215,56 @@ none (checkout, mailing-list sign-up, the admin "Resend activation" action).
 
 ## Template System
 
+### Default Templates
+
+Templates are rows in `emt_email_templates`, edited by site admins on the email
+templates page. The core templates every site starts with live in the repository,
+in `public_html/email_templates/`:
+
+- `email_templates.json` lists each one: `name`, `type` (1 outer, 2 inner,
+  3 footer, as in `emt_type`), `subject` and `file`.
+- One `<name>.html` per template holds its body.
+
+`EmailTemplateDefaults` reads the folder. The install builder
+(`utils/create_install_sql.php`) writes every listed template into
+`joinery-install.sql`, so a new site starts with exactly these. `update_database`
+runs `EmailTemplateDefaults::seed()`, which adds a listed template a site has no
+row of that name for. It never changes an existing row, since the wording is the
+site's own, and a soft-deleted row counts as present, so a template removed on a
+site is not brought back. The renderer never sends a soft-deleted template.
+
+The defaults are written for any organisation: they sign with `*site_name*` and
+link only through `*web_dir*`. The install builder refuses to finish when its
+output names Integral Zen, the site the platform grew out of, so one site's own
+content cannot reach every new site.
+
+- **A new core template** goes into the folder and the manifest. The seed adds it
+  to every site, existing and new; no migration is needed.
+- **Changing the wording of a default** takes the file (for new sites) and a core
+  migration for sites that already hold the row. The migration replaces only rows
+  still byte-for-byte the old shipped text, compared by a SHA-256 of it, and
+  leaves any row an admin has edited (`migrations/email_templates_neutral_defaults.php`
+  is the pattern).
+- **Plugin templates** ship with the plugin: a plugin migration inserts each one
+  when no row of that name exists, so they arrive when the plugin is activated.
+
+The welcome email (`new_account_content`) is told only `password_temporary`,
+whether the member has a password of their own. The password is never one of its
+values, so no template can mail it; a member with a generated password chooses
+one through the password reset link.
+
 ### Template Processing
 
 Templates support full conditional and variable processing:
 
-**Template Structure:**
+**Template Structure** (the subject is the template's `emt_subject`, the body its
+`emt_body`):
 ```
-subject:Welcome to *company_name*, *recipient->usr_first_name*!
+Subject: Welcome to *site_name*, *recipient->usr_first_name*!
 
 {~resend}
 <h1>Welcome!</h1>
-<p>Thanks for signing up on *company_name*! Please click this link to verify:</p>
+<p>Thanks for signing up on *site_name*! Please click this link to verify:</p>
 {end}
 
 {resend}
@@ -233,6 +273,10 @@ subject:Welcome to *company_name*, *recipient->usr_first_name*!
 
 <p><a href="*web_dir*/activate?code=*act_code*">Activate Account</a></p>
 ```
+
+The outer template wraps the body at its `*!**mail_body**!*` marker, and its own
+placeholders (such as `<title>*site_name*</title>`) are substituted on either
+side of it.
 
 ### Variable Syntax
 
@@ -318,24 +362,19 @@ all render the loop body zero times with no error.
 
 ### Subject Processing
 
-Three ways to set subject (priority order):
+The template's subject takes the same `*placeholders*` as its body, filled from
+the same values; a placeholder with no value renders empty. Two ways to set it,
+in priority order:
 
-1. **Direct assignment** (highest priority):
+1. **Direct assignment** (highest priority), including the `$subject` argument
+   of `EmailSender::sendTemplate()`:
    ```php
    $message->subject('Custom Subject');
    ```
 
-2. **Template subject line**:
-   ```
-   subject:Welcome to *company_name*!
-   <p>Email body...</p>
-   ```
-
-3. **Template variable**:
-   ```
-   subject:*subject*
-   <p>Email body...</p>
-   ```
+2. **The template's subject**, for example `Reset your *site_name* password`.
+   The blank templates' subject is `*subject*`, which renders the `subject`
+   value the caller passes.
 
 ## Bulk Email Recipient Targeting (Recipient-Group Providers)
 
@@ -547,8 +586,13 @@ tier so the safe/db parts stay in the pre-deploy gate and only the real-mail and
 real-DNS parts are gated to `live`:
 
 - **`email_template_render`** (db) — template → EmailMessage rendering: variable
-  substitution, subject extraction, subject override, the plain-text alternate,
-  and fail-loud on a missing template. Uses throwaway templates it creates.
+  substitution in the body, the subject and the outer template, subject override,
+  the plain-text alternate, quickSend's HTML wrapping, and fail-loud on a missing
+  or soft-deleted template. Uses throwaway templates it creates.
+- **`email_templates_seed`** (db) — the default templates: every template the
+  code sends by name is in `email_templates/` or a plugin migration, none names
+  one organisation, the seed adds without overwriting or reviving, and the
+  Integral Zen replacement migration touches only unchanged rows.
 - **`email_provider_config`** (safe) — the provider registry and per-provider
   config well-formedness (an unconfigured provider SKIPs, never fails).
 - **`email_send_delivery`** (live) — closed-loop delivery: sends through the
@@ -810,6 +854,7 @@ $success = EmailSender::sendTemplate('welcome',
 The system automatically provides:
 - `template_name` - Derived from template filename
 - `web_dir` - Site base URL
+- `site_name` - The `site_name` setting
 - `email_vars` - UTM tracking parameters
 - UTM defaults - `utm_source=email`, `utm_medium=email`, etc.
 

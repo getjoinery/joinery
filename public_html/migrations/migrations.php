@@ -1850,3 +1850,14 @@
 	$migration['migration_sql'] = "UPDATE cco_country_codes SET cco_code = 1345 WHERE cco_iso_code_2 = 'KY' AND cco_code = -344";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// Every site was installed with Integral Zen's account emails (B167). Each
+	// template still holding that exact text takes the neutral default from
+	// email_templates/; an edited one, and Integral Zen's own site, are left
+	// alone (spec email_template_defaults).
+	$migration = array();
+	$migration['database_version'] = '225';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'email_templates_neutral_defaults.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

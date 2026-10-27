@@ -6,6 +6,9 @@
  * with evt_survey_display = 'after_event' once the event has ended.
  * Only sends to registrants where evr_survey_completed is false.
  *
+ * @version 1.2 - each registrant is sent the survey once (evr_survey_sent_time), only for
+ *                an event that ended in the last SURVEY_WINDOW_DAYS days, and the
+ *                greeting has the member's first name (usr_fname is no column)
  * @version 1.1 - the survey link is absolute. It was built from a setting
  *                nothing declares, so it resolved to '' and every survey email
  *                carried a bare '/survey?...' with no scheme or host.
@@ -15,6 +18,10 @@ require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 class SendPostEventSurveys implements ScheduledTaskInterface {
+
+    // An event that ended longer ago than this gets no survey: the invitation
+    // is for people who were just there.
+    const SURVEY_WINDOW_DAYS = 7;
 
     public function run(array $config) {
         require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
@@ -37,10 +44,14 @@ class SendPostEventSurveys implements ScheduledTaskInterface {
                 WHERE evt_survey_display = 'after_event'
                 AND evt_svy_survey_id IS NOT NULL
                 AND evt_delete_time IS NULL
-                AND COALESCE(evt_end_time, evt_start_time) < :now";
+                AND COALESCE(evt_end_time, evt_start_time) < :now
+                AND COALESCE(evt_end_time, evt_start_time) >= :window_start";
 
         $q = $dblink->prepare($sql);
-        $q->execute([':now' => $now_utc]);
+        $q->execute([
+            ':now' => $now_utc,
+            ':window_start' => gmdate('Y-m-d H:i:s', time() - self::SURVEY_WINDOW_DAYS * 86400),
+        ]);
         $events = $q->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($events as $event_row) {
@@ -57,6 +68,7 @@ class SendPostEventSurveys implements ScheduledTaskInterface {
 
             foreach ($registrants as $registrant) {
                 if ($registrant->get('evr_survey_completed')) continue;
+                if ($registrant->get('evr_survey_sent_time')) continue;
 
                 $user = new User($registrant->get('evr_usr_user_id'), TRUE);
                 if (!$user || !$user->get('usr_email')) continue;
@@ -67,13 +79,15 @@ class SendPostEventSurveys implements ScheduledTaskInterface {
                 $email_fill = array(
                     'event_name' => $event_row['evt_name'],
                     'survey_url' => $survey_url,
-                    'first_name' => $user->get('usr_fname'),
+                    'first_name' => $user->get('usr_first_name'),
                     'site_name' => $settings->get_setting('site_name'),
                     'recipient' => $user->export_as_array(),
                 );
 
                 $success = EmailSender::sendTemplate('post_event_survey', $user->get('usr_email'), $email_fill);
                 if ($success) {
+                    $registrant->set('evr_survey_sent_time', gmdate('Y-m-d H:i:s'));
+                    $registrant->save();
                     $emails_sent++;
                 }
             }

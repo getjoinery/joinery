@@ -880,6 +880,19 @@
 			// Non-fatal — individual settings will still get added via admin settings save
 		}
 
+		// Step: Seed core email templates from public_html/email_templates/.
+		// Adds a listed template the site has no row for; never changes one it
+		// has, and never brings back one it deleted.
+		echo "<br>\n<strong>Core Email Templates Seed</strong><br>\n";
+		try {
+			$added_templates = EmailTemplateDefaults::seed();
+			echo $added_templates
+				? "✓ Added email templates: " . htmlspecialchars(implode(', ', $added_templates)) . "<br>\n"
+				: "✓ Core email templates present<br>\n";
+		} catch (Exception $e) {
+			echo "⚠️  Core email templates seed failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Provision the file-URL signing key while the process is cold.
 		// The seed above leaves file_signed_url_key present but empty, and the
 		// first request that needs a signed URL may well be one that has already

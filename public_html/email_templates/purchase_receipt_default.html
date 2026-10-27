@@ -1,0 +1,62 @@
+<p>Hi *recipient->usr_first_name*,</p>
+
+{is_billing}
+<p>Thanks for your order. Your receipt is below.</p>
+{end}
+{~is_billing}
+<p>You have access to the following items from a recent order:</p>
+{end}
+
+<table style="width:600px;border-collapse:collapse;margin:1rem 0;">
+{loop line_items as line}
+<tr style="border-bottom:1px solid #eee;">
+  <td style="padding:0.5rem 0;vertical-align:top;">
+    <strong>*line->product_name*</strong>
+    {line->quantity > 1} (x*line->quantity*){end}
+
+    {line->is_gift_to}
+      <br><em>Sent as a gift to *line->is_gift_to*</em>
+      {line->outcome == "digital"}{line->digital_link}
+        <br>Forwardable link: <a href="*line->digital_link*">*line->digital_link*</a>
+      {end}{end}
+    {end}
+
+    {~line->is_gift_to}
+      {line->outcome == "event"}{line->act_code}
+        <br><a href="*web_dir*/profile/event_register_finish?act_code=*line->act_code*&eventregistrantid=*line->event_registrant_id*">Confirm your registration for *line->event_name*</a>
+      {end}{end}
+
+      {line->outcome == "bundle"}
+        <br>Includes:<br>*line->event_list*
+        {line->act_code}
+          <br><a href="*web_dir*/profile/event_register_finish?act_code=*line->act_code*&eventregistrantid=*line->event_registrant_id*">Confirm your bundle registrations</a>
+        {end}
+      {end}
+
+      {line->outcome == "subscription"}
+        <br>Your subscription is active.
+      {end}
+
+      {line->outcome == "digital"}{line->digital_link}
+        <br><a href="*line->digital_link*">Access your purchase</a>
+      {end}{end}
+    {end}
+  </td>
+  {is_billing}
+  <td style="padding:0.5rem 0;text-align:right;vertical-align:top;font-weight:600;">
+    *currency_symbol**line->price*
+  </td>
+  {end}
+</tr>
+{end}
+</table>
+
+{is_billing}
+<p style="text-align:right;margin-top:1rem;"><strong>Total: *currency_symbol**order_total*</strong></p>
+
+{coupon_codes_used}
+<p><small>Coupon codes applied: {loop coupon_codes_used as code}*code* {end}</small></p>
+{end}
+{end}
+
+<p>Thanks,<br>*site_name*</p>
