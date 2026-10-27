@@ -13,6 +13,8 @@
  * has not had the chance. The dashboard's backup panel says so from the first
  * pass; the incident waits.
  *
+ * @version 1.2 - the grace is two days: long enough for a new owner's first sign-in, short enough
+ *                that an owner who skips the key is followed up within the week (easy_signup_completion WP3)
  * @version 1.1 - a node's first seven days without a recovery key open no incident
  * @version 1.0
  */
@@ -25,7 +27,7 @@ class IncidentSourceBackupsStopped implements IncidentSource {
 	}
 
 	/** How long a new node may go without a recovery key before this opens. */
-	const NEW_NODE_GRACE_SECONDS = 7 * 86400;
+	const NEW_NODE_GRACE_SECONDS = 2 * 86400;
 
 	public function evaluate(ManagedNode $node): ?array {
 		$v = IncidentBackupVerdict::for_node($node);

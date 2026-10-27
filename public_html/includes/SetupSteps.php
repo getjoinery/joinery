@@ -11,7 +11,8 @@
  * A step is an array:
  *   'title'       page heading
  *   'scope'       'site' | 'user' — site steps render only for permission 10
- *   'order'       position in the flow
+ *   'order'       position in the flow — an int, or callable(): int for a
+ *                 step whose place depends on the site (read once per steps())
  *   'copy'        the two-sentence intro (shared with the dashboard card) —
  *                 a string, or callable(?User $viewer): string for a step
  *                 whose framing depends on live state (read via copyFor())
@@ -35,7 +36,11 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.17
+ * @version 1.18
+ * @changelog 1.18 - 'order' may be a callable. Backups comes straight after
+ *   the secure connection on a site a management node backs up, because none of its backups
+ *   can run until the owner's recovery key exists; its copy says so instead
+ *   of asking for a bucket, and names the key as the owner's own.
  * @changelog 1.17 - New core step: 'beta_permissions' (site scope, order 3) — what
  *   the owner lets a management node keep while Joinery is in beta: emergency
  *   root access when the install offered it, and log access
@@ -128,7 +133,13 @@ class SetupSteps {
 	/** All registered steps, flow order. */
 	public static function steps(): array {
 		self::ensurePluginSteps();
-		$steps = array_values(self::$steps);
+		$steps = array();
+		foreach (self::$steps as $step) {
+			if (isset($step['order']) && is_callable($step['order'])) {
+				$step['order'] = (int)call_user_func($step['order']);
+			}
+			$steps[] = $step;
+		}
 		usort($steps, function ($a, $b) {
 			return ($a['order'] ?? 0) <=> ($b['order'] ?? 0);
 		});
@@ -736,14 +747,23 @@ class SetupSteps {
 		self::register('backups', array(
 			'title' => 'Backups',
 			'scope' => 'site',
-			'order' => 80,
+			// A site its management node backs up takes no backup at all until
+			// the owner's recovery key exists (BackupRunner::plan_manager), so
+			// there the key comes early rather than near the end: right after the
+			// secure connection (5), which the in-browser key generation needs.
+			'order' => function (): int {
+				return ManagementNodeStatus::is_managed() ? 6 : 80;
+			},
 			// A site backed up by its management node owes nothing here — the
 			// proof is the manager-profile history rows every fleet run writes
 			// locally, so the intro must not ask for a bucket it already has.
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 				if (BackupHistory::manager_coverage() !== null) {
-					return 'This site is already backed up: the management node that manages this server takes regular archives, sealed to a recovery key its operator holds. Nothing here needs your attention unless you also want backups this site runs itself.';
+					return 'This site is already backed up: the management node that manages this server takes regular archives, sealed to the recovery key you hold. Nothing here needs your attention unless you also want backups this site runs itself.';
+				}
+				if (ManagementNodeStatus::is_managed()) {
+					return 'The management node that manages this server stores this site\'s backups, and none can run until you create the recovery key that encrypts them. Only you hold it: not even the management node can open them without it.';
 				}
 				return 'Everything here should survive this server dying. Point backups at a storage bucket, and create the recovery key that encrypts them to turn on nightly backups.';
 			},

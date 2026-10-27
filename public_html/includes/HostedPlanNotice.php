@@ -29,6 +29,9 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.3 - a hosted site with no proven backup recovery key is told, urgently and on every admin
+ *                page, that its backups are off until the key exists; the trial no longer says
+ *                there is nothing to do while that is untrue (specs/easy_signup_completion.md WP3)
  * @version 1.2 - an allowance at 95% is urgent, not only one past 100%: a site that reaches its disk
  *                allowance stops taking uploads and stored mail (DiskAllowance), so the notice
  *                urges before that (specs/multi_tenant_docker_hosts.md WP4)
@@ -58,6 +61,16 @@ class HostedPlanNotice {
 	 */
 	const STATE_SERVICES = 'services';
 
+	/**
+	 * The states in which the management node backs this site up. Every one of
+	 * those backups seals to the site's own proven recovery key and none runs
+	 * without it, so in these states a missing key means no backups at all.
+	 */
+	const BACKED_UP_STATES = array('trial', 'subscribed', 'grace');
+
+	/** Where the owner creates the recovery key. */
+	const RECOVERY_KEY_URL = '/admin/admin_backups';
+
 	/** Percentage of an allowance at which its line turns into a warning. */
 	const ALLOWANCE_WARN_PERCENT = 80;
 	/** Percentage at which the notice urges: near enough that the next upload may be refused. */
@@ -75,6 +88,18 @@ class HostedPlanNotice {
 	/** The stored hosting state, or '' on a deployment nobody hosts. */
 	public static function state(): string {
 		return trim((string)Globalvars::get_instance()->get_setting('hosted_plan_state', false, true));
+	}
+
+	/**
+	 * Is this a site the management node backs up that holds no proven
+	 * recovery key — so the backups the plan includes are not happening?
+	 */
+	public static function backupKeyMissing(): bool {
+		if (!in_array(self::state(), self::BACKED_UP_STATES, true)) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		return !BackupRecoveryKey::is_ready();
 	}
 
 	/**
@@ -97,10 +122,11 @@ class HostedPlanNotice {
 
 		$days = self::daysUntil($until);
 		$when = self::whenPhrase($until);
-		list($headline, $body) = self::wording($state, $when);
+		$key_missing = self::backupKeyMissing();
+		list($headline, $body) = self::wording($state, $when, $key_missing);
 
 		$allowances = self::allowances();
-		$level = self::level($state, $days, $allowances, $notice);
+		$level = self::level($state, $days, $allowances, $notice, $key_missing);
 
 		$out = '<div class="jy-hosted-plan jy-hosted-plan--' . $level . '" role="status">'
 			. '<div class="jy-hosted-plan__text">'
@@ -110,6 +136,14 @@ class HostedPlanNotice {
 			$out .= ' ' . htmlspecialchars($notice, ENT_QUOTES, 'UTF-8');
 		}
 		$out .= '</div>';
+
+		if ($key_missing) {
+			$out .= '<div class="jy-hosted-plan__key">'
+				. '<strong>Your backups are off until you create your recovery key.</strong> '
+				. 'The key encrypts them so that only you can open them, and nothing is backed up until it exists. '
+				. '<a href="' . self::RECOVERY_KEY_URL . '">Create your recovery key</a>'
+				. '</div>';
+		}
 
 		if ($url !== '' && preg_match('#^https://#i', $url)) {
 			$out .= '<a class="jy-hosted-plan__action" href="'
@@ -174,8 +208,10 @@ class HostedPlanNotice {
 	 * whatever the dates say, and an operator notice is never calm; otherwise
 	 * the nearer of the deadline and the fullest allowance decides.
 	 */
-	public static function level(string $state, ?int $days, array $allowances, string $notice = ''): string {
-		if ($state === 'shutdown') {
+	public static function level(string $state, ?int $days, array $allowances, string $notice = '', bool $key_missing = false): string {
+		// No backups at all is as urgent as a lapsing payment: the day the site
+		// is lost is the day it turns out nothing was kept.
+		if ($state === 'shutdown' || $key_missing) {
 			return 'urgent';
 		}
 		if ($state === 'grace') {
@@ -199,15 +235,18 @@ class HostedPlanNotice {
 		return ($days !== null && $days <= self::SOON_DAYS) ? 'soon' : 'calm';
 	}
 
-	/** The headline and body for one state. */
-	private static function wording(string $state, string $when): array {
+	/**
+	 * The headline and body for one state. $key_missing: the backups the plan
+	 * includes are not running yet, so nothing may say there is nothing to do.
+	 */
+	private static function wording(string $state, string $when, bool $key_missing = false): array {
 		switch ($state) {
 			case 'trial':
 				return array(
 					'This site is on a free trial.',
 					'Hosting, email and backups are included' . ($when !== '' ? ' until ' . $when : '')
 						. '. Your card is already on file, and the subscription starts on its own when the '
-						. 'trial ends — there is nothing to do.');
+						. 'trial ends' . ($key_missing ? '.' : ' — there is nothing to do.'));
 			case 'grace':
 				// No arithmetic on periods this deployment does not know. Both
 				// the grace and backup storage are operator settings, and a sentence
@@ -303,6 +342,8 @@ class HostedPlanNotice {
 .jy-hosted-plan__action{flex:0 0 auto;display:inline-block;padding:.45rem .95rem;
  border-radius:.35rem;font-weight:600;text-decoration:none;background:#1f2937;color:#fff}
 .jy-hosted-plan__action:hover{background:#111827;color:#fff}
+.jy-hosted-plan__key{flex:1 1 100%;margin:0;padding:.55rem 0 0;border-top:1px solid rgba(0,0,0,.12)}
+.jy-hosted-plan__key a{font-weight:600;text-decoration:underline;color:inherit}
 .jy-hosted-plan__allowances{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.35rem .9rem;
  margin:.25rem 0 0;padding:.55rem 0 0;border-top:1px solid rgba(0,0,0,.12);font-size:.85rem}
 .jy-hosted-plan__allowance{display:flex;align-items:baseline;gap:.4rem}
@@ -315,7 +356,7 @@ class HostedPlanNotice {
 .jy-hosted-plan--urgent .jy-hosted-plan__action{background:#b91c1c}
 .jy-hosted-plan--urgent .jy-hosted-plan__action:hover{background:#991b1b}
 @media (prefers-color-scheme:dark){
- .jy-hosted-plan__allowances{border-top-color:rgba(255,255,255,.18)}
+ .jy-hosted-plan__allowances,.jy-hosted-plan__key{border-top-color:rgba(255,255,255,.18)}
  .jy-hosted-plan--calm{background:#16243a;border-color:#2c4a72;color:#dbeafe}
  .jy-hosted-plan--soon{background:#3a2c10;border-color:#78561a;color:#fef3c7}
  .jy-hosted-plan--urgent{background:#3a1717;border-color:#7f2a2a;color:#fee2e2}

@@ -543,7 +543,7 @@ An incident **needs you** when it is new, or snoozed and its time has come (`Inc
 | `plane:old_code_serving` | a node still serves code an update replaced: a php-fpm on a replaced binary (`check_status`'s `php`) ten minutes after its package was installed, or `needrestart` naming PHP-FPM, Apache or PostgreSQL ten minutes after the automatic updates last ran | critical |
 | `plane:cloud_account_key` | the key of the cloud account an encrypted machine is in, which this management node reads the machine's activity log with before it opens it, does not work, has never been checked, or expires within a week; raised on each machine it covers | critical; warning when it only expires within a week |
 | `plane:backup_failed` | the last backup this management node ran of the node failed | critical |
-| `plane:backups_stopped` | backups from here are not happening (no verified recovery key after a node's first seven days, never, not landing, overdue) | critical |
+| `plane:backups_stopped` | backups from here are not happening (no verified recovery key after a node's first two days, never, not landing, overdue) | critical |
 | `plane:backup_unverified` | a backup was taken but is not proven whole (suspiciously small, incomplete in storage, verification failed, stale or never done) | warning |
 | `plane:customer_backups` | this node only: a customer of backup storage has had no run finish here for two nights, or no run it reported verified for eight days (`IncidentSourceCustomerBackups`, the rule a site's Backups page applies to itself); one incident names every such customer | warning |
 | `plane:failed_units` | the latest host report names failed systemd units | warning |
