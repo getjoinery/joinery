@@ -204,12 +204,15 @@
 		echo '</div>';
 
 		// DNS Authentication Status (on-demand)
+		// The domain checked is the From address's: it is the one DMARC judges,
+		// whichever service sends.
 		$run_dns_check = isset($_GET['run_dns_check']);
-		$mailgun_domain_for_dns = $settings->get_setting('mailgun_domain');
-		$default_email_for_dns = $settings->get_setting('defaultemail');
-		$dns_domain = $mailgun_domain_for_dns;
-		if (!$dns_domain && $default_email_for_dns && strpos($default_email_for_dns, '@') !== false) {
-			$dns_domain = substr($default_email_for_dns, strpos($default_email_for_dns, '@') + 1);
+		$default_email_for_dns = (string)$settings->get_setting('defaultemail');
+		$dns_domain = strpos($default_email_for_dns, '@') !== false
+			? strtolower(substr($default_email_for_dns, strpos($default_email_for_dns, '@') + 1))
+			: '';
+		if ($dns_domain === '' && $current_service === 'mailgun') {
+			$dns_domain = (string)$settings->get_setting('mailgun_domain');
 		}
 
 		if ($dns_domain) {
@@ -223,7 +226,25 @@
 
 			if ($run_dns_check) {
 				require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
-				$dns_results = DnsAuthChecker::quickCheck($dns_domain);
+				// A DKIM key lives at a name its service chose (SMTP2GO's s<id>,
+				// Mailgun's own selector), which no list of common names finds.
+				// Ask the sending service first; the common names stay for a
+				// service that cannot say.
+				$dkim_selectors = array();
+				$primary_class = EmailSender::getDiscoveredProviders()[$current_service] ?? null;
+				if ($primary_class && is_callable(array($primary_class, 'getDkimStatus'))) {
+					try {
+						foreach ($primary_class::getDkimStatus($dns_domain)['records'] ?? array() as $record) {
+							$at = strpos((string)($record['name'] ?? ''), '._domainkey.');
+							if ($at) $dkim_selectors[] = substr($record['name'], 0, $at);
+						}
+					} catch (Throwable $e) {
+						error_log('admin_settings_email: getDkimStatus(' . $dns_domain . ') failed: ' . $e->getMessage());
+					}
+				}
+				$dkim_selectors = array_values(array_unique(array_merge(
+					$dkim_selectors, array('mx', 'default', 'mail', 'dkim', 'key1', 'selector1'))));
+				$dns_results = DnsAuthChecker::quickCheck($dns_domain, $dkim_selectors);
 
 				echo '<div class="alert alert-light border">';
 				echo '<strong>Domain:</strong> ' . htmlspecialchars($dns_domain) . '<br/>';
