@@ -306,6 +306,17 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   Smtp2GoClient 1.6 `subaccountName()` is letters and digits joined by hyphens (owner 10-27: start
   with what is sure to pass), e.g. `test-Joinery-hosted-wp2-joinerytest-com`. Which characters the
   provider accepts goes on the SMTP2GO call list.
+- **Mail leg PASSED to done 10-27 (B161 in):** subaccount zW2ONl `test-Joinery-hosted-wp2-joinerytest-com`
+  (Active, plan_size 2000); sender domain mail.wp2.joinerytest.com, its two CNAMEs read from
+  `*_expected` (B159 live) and published by hand in the joinerytest.com zone (own domain), verified
+  a minute later; SMTP user `test_wp2joinerytestcom-21f30f` in `sandbox` status; settings pushed.
+- **B162 (fixed 10-27):** `stats/email_summary` for a subaccount answers 403 to a master key ("does
+  not allow access via a parent accounts API key"), so `monthToDateSends` could never read a
+  tenant's count. Smtp2GoClient 1.7 reads `plan_used` from `subaccounts/search` (live: 0 for
+  zW2ONl); service_tenant_watch 1.4 fakes that listing.
+- **B163 (fixed 10-27):** the site's password reset hung on SMTP: Linode blocks outbound 587 (dev
+  itself cannot reach mail.smtp2go.com:587; 2525 is open). Smtp2GoLeg 1.3 hands out port 2525.
+  The test box got 587 and needs its settings pushed again.
 - **Send allowance 2,000 (owner 10-27):** "2000/month is our limit and the only plan we offer".
   The setting's default is 2,000 (server_manager 1.30.118); sm_028 moves a plane still at the old
   1,000 default; the getjoinery content pack (apply_hosted_product 3.2) says 2,000 emails a month.

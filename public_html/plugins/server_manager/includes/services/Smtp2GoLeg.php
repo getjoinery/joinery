@@ -22,6 +22,7 @@
  *
  * Nothing here ever puts the master key on a box.
  *
+ * @version 1.3 - customers send on port 2525: Linode blocks 587 (B163)
  * @version 1.2 - a blank allowance reads as 2,000, the default
  * @version 1.1 - createSubaccount() takes the allowance, not an email: the provider would invite
  *   the email into its console
@@ -29,9 +30,14 @@
  */
 class Smtp2GoLeg {
 
-	/** Where every customer sends through. */
+	/**
+	 * Where every customer sends through. Port 2525, not 587: Linode blocks
+	 * outbound 25, 465 and 587 on its accounts (dev's own cannot reach
+	 * mail.smtp2go.com:587, live 2026-10-27), and the provider takes the same
+	 * STARTTLS submission on 2525, which no cloud we use blocks.
+	 */
 	const SMTP_HOST = 'mail.smtp2go.com';
-	const SMTP_PORT = 587;
+	const SMTP_PORT = 2525;
 
 	/**
 	 * The sending identity is mail.<domain>, not the apex.

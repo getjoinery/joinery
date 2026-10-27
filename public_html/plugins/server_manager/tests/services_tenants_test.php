@@ -189,7 +189,7 @@ check(strpos($username, 't' . (int)$row->key . '-') === 0, 'the username carries
 
 $mail = $answer['mail'] ?? array();
 check($answer['entitled'] === true && $answer['state'] === 'active', 'the answer is entitled and active');
-check(($mail['service'] ?? '') === 'smtp' && ($mail['host'] ?? '') === 'mail.smtp2go.com' && ($mail['port'] ?? 0) === 587,
+check(($mail['service'] ?? '') === 'smtp' && ($mail['host'] ?? '') === 'mail.smtp2go.com' && ($mail['port'] ?? 0) === 2525,
 	'the send values name the provider\'s relay');
 check(($mail['username'] ?? '') === $username && strlen((string)($mail['password'] ?? '')) === 28,
 	'the credential minted is the credential returned');

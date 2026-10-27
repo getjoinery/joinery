@@ -33,6 +33,8 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.7 - monthToDateSends() reads the subaccount's plan_used from subaccounts/search: the
+ *   provider refuses stats/email_summary for a subaccount to a master key (403, live 2026-10-27; B162)
  * @version 1.6 - subaccountName(): the provider refuses some characters in a subaccount name (live
  *   2026-10-27) and does not say which, so the name is letters and digits joined by hyphens
  * @version 1.5 - the subaccount calls match the provider's published API, checked live 2026-10-26:
@@ -277,16 +279,20 @@ class Smtp2GoClient {
 	 *
 	 * The provider's figure and never the webhook tally: a webhook can be
 	 * spoofed or dropped, and this number is what a banner tells a customer
-	 * about the allowance they are paying for.
+	 * about the allowance they are paying for. It is plan_used on the
+	 * subaccount's own listing, the count its limit is enforced against, for
+	 * the current billing cycle: stats/email_summary would say the same but
+	 * refuses a master key acting for a subaccount.
 	 */
 	public function monthToDateSends(string $subaccount_id): int {
-		$data = $this->post('stats/email_summary', array('subaccount_id' => $subaccount_id));
-		foreach (array('sent', 'emails', 'email_count', 'total') as $key) {
-			if (isset($data[$key]) && is_numeric($data[$key])) {
-				return (int)$data[$key];
+		$data = $this->post('subaccounts/search', array('id' => $subaccount_id));
+		foreach ((array)($data['subaccounts'] ?? array()) as $entry) {
+			if (is_array($entry) && (string)($entry['id'] ?? '') === $subaccount_id
+					&& isset($entry['plan_used']) && is_numeric($entry['plan_used'])) {
+				return (int)$entry['plan_used'];
 			}
 		}
-		return 0;
+		throw new Smtp2GoException('The provider did not list subaccount ' . $subaccount_id . ' with a send count.');
 	}
 
 	// ── Transport ─────────────────────────────────────────────────────────────

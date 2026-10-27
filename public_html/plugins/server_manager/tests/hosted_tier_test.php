@@ -250,7 +250,7 @@ section('No primitive can NAME a setting — the mail credentials least of all')
 // ones that matter — a site whose outbound mail can be redirected is a site
 // whose password-reset email can be redirected.
 $mail_built = JobCommandBuilder::build_hosted_mail_settings($node, array(
-	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 587,
+	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525,
 	'username' => 'site-abc123', 'password' => 'a password with spaces',
 	'sender' => 'bounces@mail.example.com', 'helo' => 'mail.example.com',
 	'hostname' => 'mail.example.com',
@@ -356,7 +356,7 @@ check(ProvisionHostedMail::JOB_TYPE !== HostedTrialWatch::JOB_TYPE,
 $shared = ht_node('httest-types-' . $suffix);
 $mail_job = ManagementJob::createFromBuild($shared->key, ProvisionHostedMail::JOB_TYPE,
 	JobCommandBuilder::build_hosted_mail_settings($shared,
-		array('service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 587)),
+		array('service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525)),
 	array('provision_id' => 0), null);
 $banner_job = ManagementJob::createFromBuild($shared->key, HostedTrialWatch::JOB_TYPE,
 	JobCommandBuilder::build_hosted_plan_notice($shared, array('state' => 'trial')),
