@@ -225,90 +225,15 @@
 			echo '</h5>';
 
 			if ($run_dns_check) {
+				// The shared assessment (DnsAuthChecker::assess): the service's own
+				// key names, the domain it signs as, and the plain explanation that
+				// Detailed Analysis opens with too.
 				require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
-				// A DKIM key lives at a name its service chose (SMTP2GO's s<id>,
-				// Mailgun's own selector), which no list of common names finds.
-				// Ask the sending service first; the common names stay for a
-				// service that cannot say.
-				$provider_selectors = array();
-				$primary_class = EmailSender::getDiscoveredProviders()[$current_service] ?? null;
-				if ($primary_class && is_callable(array($primary_class, 'getDkimStatus'))) {
-					try {
-						foreach ($primary_class::getDkimStatus($dns_domain)['records'] ?? array() as $record) {
-							$at = strpos((string)($record['name'] ?? ''), '._domainkey.');
-							if ($at) $provider_selectors[] = substr($record['name'], 0, $at);
-						}
-					} catch (Throwable $e) {
-						error_log('admin_settings_email: getDkimStatus(' . $dns_domain . ') failed: ' . $e->getMessage());
-					}
-				}
-				$dkim_selectors = array_values(array_unique(array_merge(
-					$provider_selectors, array('mx', 'default', 'mail', 'dkim', 'key1', 'selector1'))));
-				$dns_results = DnsAuthChecker::quickCheck($dns_domain, $dkim_selectors);
-
-				// Each check in words an owner can act on; the protocol name and the
-				// raw record stay in small print for whoever needs them.
-				$spf = $dns_results['spf'];
-				$dkim = $dns_results['dkim'];
-				$dmarc = $dns_results['dmarc'];
-				$service_name = $service_labels[$current_service] ?? 'your email service';
-				$signed_by_service = $dkim['status'] === 'pass' && in_array($dkim['selector'], $provider_selectors, true);
-
-				if ($dkim['status'] !== 'pass') {
-					$verdict = array('danger', '&#10007;', 'Not yet. Your mail is not signed with a key other servers can find, so it is likely to land in spam.');
-				} elseif ($spf['status'] === 'pass' && $dmarc['status'] === 'pass') {
-					$verdict = array('success', '&#10003;', 'Yes. Your mail is signed, and your domain tells other servers what to do with mail that only pretends to be from you.');
-				} else {
-					$verdict = array('warning', '&#9888;', 'Mostly. Your mail is signed; one setting below could be stronger.');
-				}
-
-				$rows = array();
-				$rows[] = array(
-					'Signature', 'DKIM', $dkim['status'] === 'pass' ? 'success' : 'danger',
-					$dkim['status'] === 'pass'
-						? ($signed_by_service
-							? 'Your mail is signed by ' . htmlspecialchars($service_name) . ', so other servers can confirm it really came from you.'
-							: 'A signing key is published for this domain, so other servers can confirm mail signed with it came from you.')
-						: 'No signing key found for this domain. ' . htmlspecialchars($service_name) . ' lists the record to add when you set up your sending domain there.',
-					$dkim['selector'] !== '' ? 'key ' . $dkim['selector'] . '._domainkey.' . $dns_domain : 'checked ' . count($dkim['selectors_checked']) . ' key names',
-				);
-				$spf_rule = strpos($spf['record'], '-all') !== false ? 'and asks other servers to refuse mail from anywhere else'
-					: (strpos($spf['record'], '~all') !== false ? 'and asks other servers to treat mail from anywhere else with suspicion' : '');
-				$rows[] = array(
-					'Approved senders', 'SPF', $spf['status'] === 'pass' ? 'success' : ($spf['status'] === 'warn' ? 'warning' : 'danger'),
-					$spf['status'] === 'pass'
-						? 'Your domain lists the servers allowed to send its mail' . ($spf_rule !== '' ? ', ' . $spf_rule : '') . '.'
-						: ($spf['detail'] === 'Multiple SPF records found (only one allowed)'
-							? 'Your domain has more than one approved-senders list, and other servers ignore both. Merge them into one.'
-							: ($spf['status'] === 'warn'
-								? 'Your domain\'s approved-senders list lets any server send as you, so it protects nothing.'
-								: 'Your domain publishes no approved-senders list. Signed mail is still trusted, but publishing one is recommended.')),
-					$spf['record'] !== '' ? $spf['record'] : $spf['detail'],
-				);
-				$dmarc_text = array(
-					'reject'     => 'Other servers are told to refuse mail that claims to be from you but fails these checks.',
-					'quarantine' => 'Other servers are told to put mail that claims to be from you but fails these checks in spam.',
-					'none'       => 'Other servers are told to deliver mail that fails these checks anyway. Fine while setting up; stricter protects you from forgeries.',
-				);
-				$rows[] = array(
-					'Forgery policy', 'DMARC', $dmarc['status'] === 'pass' ? 'success' : ($dmarc['status'] === 'warn' ? 'warning' : 'danger'),
-					$dmarc_text[$dmarc['policy']] ?? ($dmarc['status'] === 'fail'
-						? 'Your domain gives no instructions for mail that pretends to be from you, so each server decides for itself.'
-						: 'Your domain\'s forgery policy is not one other servers recognise.'),
-					$dmarc['record'] !== '' ? $dmarc['record'] : $dmarc['detail'],
-				);
-
-				$marks = array('success' => '&#10003;', 'warning' => '&#9888;', 'danger' => '&#10007;');
-				// One wrapper: the admin theme lays an alert's children out in a row.
+				$assessment = DnsAuthChecker::assess($dns_domain, (string)$current_service);
 				echo '<div class="alert alert-light border"><div>';
-				echo '<p class="text-' . $verdict[0] . '"><strong>' . $verdict[1] . ' ' . $verdict[2] . '</strong></p>';
-				foreach ($rows as $row) {
-					list($title, $tech, $tone, $text, $raw) = $row;
-					echo '<div class="mb-2"><span class="text-' . $tone . '">' . $marks[$tone] . '</span> <strong>' . $title . ':</strong> ' . $text
-						. '<br><small class="text-muted">' . $tech . ': ' . htmlspecialchars($raw) . '</small></div>';
-				}
+				echo DnsAuthChecker::explanationHtml($assessment['explanation']);
 				echo '<div class="mt-2">';
-				echo '<a href="/utils/email_setup_check?domain=' . urlencode($dns_domain) . '" class="btn btn-outline-secondary btn-sm">Detailed Analysis</a>';
+				echo '<a href="/utils/email_setup_check?domain=' . urlencode($dns_domain) . '" class="btn btn-outline-secondary btn-sm">Technical details</a>';
 				echo '</div>';
 				echo '</div></div>';
 			}

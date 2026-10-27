@@ -15,6 +15,7 @@
  * it makes DnsAuthChecker's SPF/DKIM/DMARC logic testable offline.
  * Run:  php tests/unit/dns_auth_checker_test.php
  *
+ * @version 1.1 - the DKIM alignment mode, signaturesMatch(), and explain()'s plain reading
  * @version 1.0
  */
 
@@ -45,6 +46,14 @@ DnsResolver::setBackend(new FakeDnsBackend([
     // ── DMARC ──
     '_dmarc.reject.example.com|' . DNS_TXT      => [['txt' => 'v=DMARC1; p=reject; rua=mailto:r@example.com']],
     '_dmarc.monitor.example.com|' . DNS_TXT     => [['txt' => 'v=DMARC1; p=none']],
+
+    // ── A whole site, signed by its service under a key no wordlist holds ──
+    'site.example.com|' . DNS_TXT                     => [['txt' => 'v=spf1 include:mailgun.org -all']],
+    's123._domainkey.site.example.com|' . DNS_CNAME   => [['target' => 'k.dkimhost.example.net']],
+    '_dmarc.site.example.com|' . DNS_TXT              => [['txt' => 'v=DMARC1; p=quarantine; adkim=s; aspf=s']],
+    'loose.example.com|' . DNS_TXT                    => [['txt' => 'v=spf1 -all']],
+    's123._domainkey.loose.example.com|' . DNS_CNAME  => [['target' => 'k.dkimhost.example.net']],
+    '_dmarc.loose.example.com|' . DNS_TXT             => [['txt' => 'v=DMARC1; p=none']],
 ]));
 
 // ── checkSPF ─────────────────────────────────────────────────────────────
@@ -74,6 +83,58 @@ ok('checkDMARC fail when absent',   DnsAuthChecker::checkDMARC('dmarcmissing.exa
 $quick = DnsAuthChecker::quickCheck('pass.example.com', ['mail']);
 ok('quickCheck returns spf/dkim/dmarc keys',
       isset($quick['spf'], $quick['dkim'], $quick['dmarc']));
+
+// ── The DKIM alignment mode ──────────────────────────────────────────────
+ok('checkDMARC reads adkim=s',      DnsAuthChecker::checkDMARC('site.example.com')['adkim'] === 's');
+ok('checkDMARC defaults adkim to r', DnsAuthChecker::checkDMARC('reject.example.com')['adkim'] === 'r');
+
+// ── Does the signature count for the From address? ───────────────────────
+ok('match: the same domain, strict',        DnsAuthChecker::signaturesMatch('getjoinery.com', 'getjoinery.com', 's'));
+ok('no match: a subdomain under strict (B169)', !DnsAuthChecker::signaturesMatch('mail.getjoinery.com', 'getjoinery.com', 's'));
+ok('match: a subdomain under relaxed',      DnsAuthChecker::signaturesMatch('mail.getjoinery.com', 'getjoinery.com', 'r'));
+ok('no match: another organisation',        !DnsAuthChecker::signaturesMatch('mailgun.org', 'getjoinery.com', 'r'));
+ok('organisational domain under a country code', DnsAuthChecker::organisationalDomain('mail.shop.co.uk') === 'shop.co.uk');
+ok('organisational domain of a plain name', DnsAuthChecker::organisationalDomain('a.b.example.com') === 'example.com');
+
+// ── explain(): the plain reading ─────────────────────────────────────────
+$site = DnsAuthChecker::quickCheck('site.example.com', ['s123']);
+$good = DnsAuthChecker::explain($site, 'site.example.com', 'SMTP2GO', ['s123'], 'site.example.com');
+$titles = array_column($good['rows'], 'title');
+ok('a signed, matching, strict site reads Yes', $good['verdict']['tone'] === 'success' && strpos($good['verdict']['text'], 'Yes.') === 0);
+ok('  four rows, in order', $titles === ['Signature', 'Matches your address', 'Approved senders', 'Forgery policy']);
+ok('  the signature is credited to the service', strpos($good['rows'][0]['text'], 'signed by SMTP2GO') !== false);
+ok('  every row keeps its protocol name and record', $good['rows'][0]['tech'] === 'DKIM'
+    && strpos($good['rows'][0]['raw'], 's123._domainkey.site.example.com') !== false
+    && $good['rows'][2]['raw'] === 'v=spf1 include:mailgun.org -all');
+ok('  hard fail reads as refusing everyone else', strpos($good['rows'][2]['text'], 'refuse mail from anywhere else') !== false);
+
+$b169 = DnsAuthChecker::explain($site, 'site.example.com', 'Mailgun', ['s123'], 'mail.site.example.com');
+ok('signed as a subdomain under a strict, enforcing policy reads No (B169)',
+    $b169['verdict']['tone'] === 'danger' && strpos($b169['verdict']['text'], 'No.') === 0);
+ok('  the match row says why and what to do', $b169['rows'][1]['tone'] === 'danger'
+    && strpos($b169['rows'][1]['text'], 'match exactly') !== false
+    && strpos($b169['rows'][1]['text'], 'Set up site.example.com itself') !== false);
+
+$loose = DnsAuthChecker::explain(DnsAuthChecker::quickCheck('loose.example.com', ['s123']), 'loose.example.com', 'Mailgun', ['s123'], 'mail.other.example.net');
+ok('a mismatch under p=none warns, it does not fail', $loose['verdict']['tone'] === 'warning' && $loose['rows'][1]['tone'] === 'warning');
+
+$unknown = DnsAuthChecker::explain($site, 'site.example.com', '', [], null);
+ok('no service to ask: no match row, and the key is not credited to anyone',
+    !in_array('Matches your address', array_column($unknown['rows'], 'title'), true)
+    && strpos($unknown['rows'][0]['text'], 'A signing key is published') === 0);
+
+$unsigned = DnsAuthChecker::explain(DnsAuthChecker::quickCheck('reject.example.com', ['mail']), 'reject.example.com', 'SMTP2GO');
+ok('no key found reads Not yet, naming the service', $unsigned['verdict']['tone'] === 'danger'
+    && strpos($unsigned['rows'][0]['text'], 'SMTP2GO lists the record') !== false);
+
+$nobody = DnsAuthChecker::explain(DnsAuthChecker::quickCheck('reject.example.com', ['mail']), 'reject.example.com');
+ok('no key found and no service asked reads Could not tell, not Not yet',
+    $nobody['verdict']['tone'] === 'warning' && strpos($nobody['verdict']['text'], 'Could not tell.') === 0
+    && $nobody['rows'][0]['tone'] === 'warning');
+
+$html = DnsAuthChecker::explanationHtml($b169);
+ok('the HTML escapes and wraps in one block', strpos($html, '<div><p class="text-danger">') === 0
+    && strpos($html, 'DKIM d=mail.site.example.com') !== false);
 
 DnsResolver::clearBackend();
 
