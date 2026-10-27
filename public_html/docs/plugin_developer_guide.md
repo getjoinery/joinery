@@ -378,6 +378,8 @@ The `version` field is the source of truth for a component's released identity, 
 
 **Dependency version constraints** (`depends`) are evaluated against the dependency's **live manifest** version, read from its `plugin.json` on disk — not a cached copy. A constraint like `"depends": {"mailbox": ">=1.10.0"}` is satisfied whenever the installed `mailbox` manifest reports a version that meets it.
 
+**A plugin others depend on stays on.** Deactivating it is refused while an active plugin's `depends` names it, and uninstalling it is refused while any installed plugin's does. Both read each plugin's live `plugin.json`, so a `depends` an upgrade adds holds from that upgrade on.
+
 #### Declaring Dependencies
 
 A plugin that needs something installed on the host declares it; the platform installs it at the moments that have the privileges to do so. There are three tiers, matched to what each dependency kind needs:

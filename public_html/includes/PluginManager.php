@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.17 - getDependents() reads each installed plugin's live manifest; the stored dependency rows missed a depends added after activation, so store could be deactivated under event_manager; deactivation counts only active dependents
  * @version 1.16 - sync()'s table_messages are the schema changes it made, and nothing else: every table step's errors and warnings go to warnings (routeTableStep)
  * @version 1.15 - sync() reports each plugin migration it ran with its outcome (migrations_run: applied, failed or deferred), and words a deferred or failed one as such instead of 'applied'
  * @version 1.14 - sync() takes every plugin that is not active out of the menus (pruneInactivePluginMenus): the slugs it recorded and the slugs its manifest declares
@@ -1168,7 +1169,7 @@ class PluginManager extends AbstractExtensionManager {
         }
 
         // Block if other active plugins depend on this one
-        $dependents = $this->getDependents($name);
+        $dependents = $this->getDependents($name, true);
         if (!empty($dependents)) {
             throw new Exception("Cannot deactivate plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
         }
@@ -1910,25 +1911,34 @@ class PluginManager extends AbstractExtensionManager {
     /**
      * Get all plugins that depend on a given plugin
      * @param string $plugin_name Plugin name
+     * @param bool $active_only Only dependents that are active: deactivation
+     *        asks this, since an inactive dependent runs nothing and its own
+     *        activation refuses while what it needs is off. Uninstall counts
+     *        every installed dependent, whose data may still point at the
+     *        tables uninstall drops.
      * @return array Array of dependent plugin names
      */
-    protected function getDependents($plugin_name) {
+    protected function getDependents($plugin_name, $active_only = false) {
         $dependents = array();
-        
-        $deps = new MultiPluginDependency(array('depends_on' => $plugin_name));
-        $deps->load();
-        
-        foreach ($deps as $dep) {
-            $dependent = (string)$dep->get('pld_plugin_name');
-            // A dependency row belongs to an installed plugin. One whose row
-            // is uninstalled (or gone) depends on nothing any more.
-            $row = Plugin::get_by_plugin_name($dependent);
-            if ($row === null || $row->is_uninstalled()) {
+
+        // Each installed plugin's live manifest is asked, not the stored
+        // dependency rows: those are written only when a plugin is validated,
+        // so a depends added to plugin.json after its activation was never
+        // recorded, and the plugin it names could be deactivated under it.
+        // An uninstalled plugin depends on nothing any more.
+        foreach (new MultiPlugin() as $row) {
+            $dependent = (string)$row->get('plg_name');
+            if ($dependent === $plugin_name || $row->is_uninstalled()
+                || ($active_only && !$row->is_active())) {
                 continue;
             }
-            $dependents[] = $dependent;
+            $manifest = $this->liveManifest($dependent);
+            if (is_array($manifest) && isset($manifest['depends']) && is_array($manifest['depends'])
+                && array_key_exists($plugin_name, $manifest['depends'])) {
+                $dependents[] = $dependent;
+            }
         }
-        
+
         return array_unique($dependents);
     }
 
