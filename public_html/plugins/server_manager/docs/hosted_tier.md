@@ -103,7 +103,9 @@ than pretending otherwise.
    payment (`ord_test_mode` on the order) names everything the pipeline
    creates for it outside the platform with `test_` in front — the cloud
    instance's label, the node's name on the fleet board, the mail subaccount's
-   label and its SMTP username (`CustomerCloudProvision::external_name_prefix()`)
+   label (`test-` there: a subaccount name is letters and digits joined by
+   hyphens, the one shape known to pass the provider's check) and its SMTP username
+   (`CustomerCloudProvision::external_name_prefix()`)
    — so a rehearsal's leftovers are told from a customer's in every provider's
    console and are never mistaken for something to keep. The registered
    domain keeps its own name; a sandbox registration is not real.
