@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.4 - the provider's send count is the subaccount listing's plan_used (B162)
  * @version 1.3 - a lapse prune that finds objects object lock still holds is not finished until they are gone
  * @version 1.2 - retention waits a day before deleting a surplus chain, and keeps the newest verified chain and
  *                everything newer (specs/storage_targets.md F1, F3)
@@ -152,32 +153,39 @@ $drain();
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check((string)$mail->get('svt_state') === 'active', 'the mail tenant is active');
 
+// The provider's count is plan_used on the subaccount's own listing
+// (subaccounts/search): stats/email_summary refuses a master key acting for a
+// subaccount (live 2026-10-27).
+$listing = function (int $used, string $id = 'sub-w') {
+	return array('subaccounts' => array(array('id' => $id, 'plan_used' => $used, 'plan_size' => 2000, 'state' => 'Active')));
+};
+
 // Entitled: checked, and the provider's count read.
-$reply(array(array('sent' => 42)));
+$reply(array($listing(42)));
 $acted = $watch->watch($mail, '2036-09-20 12:00:00');
 $mail = ServiceTenant::forKey($key_id, 'mail');
-check($paths($drain()) === array('stats/email_summary') && (int)$mail->get('svt_figure') === 42
+check($paths($drain()) === array('subaccounts/search') && (int)$mail->get('svt_figure') === 42
 	&& substr((string)$mail->get('svt_figure_time'), 0, 19) === '2036-09-20 12:00:00',
 	'an entitled pass reads the provider\'s month-to-date count');
 check(substr((string)$mail->get('svt_checked_time'), 0, 19) === '2036-09-20 12:00:00', 'the check time is stamped (Q1)');
 $watch->watch($mail, '2036-09-20 12:30:00');
 check(count($drain()) === 0, 'the count is not re-read inside the hour');
-$reply(array(array('sent' => 43)));
+$reply(array($listing(43)));
 $watch->watch($mail, '2036-09-20 13:00:01');
-check($paths($drain()) === array('stats/email_summary'), 'and is re-read after it');
+check($paths($drain()) === array('subaccounts/search'), 'and is re-read after it');
 
 // The date passes: lapse, grace, suspend.
-$reply(array(array('sent' => 43)));
+$reply(array($listing(43)));
 $watch->watch($mail, '2036-10-02 00:00:00');
 $drain();
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check(substr((string)$mail->get('svt_lapse_time'), 0, 19) === '2036-10-02 00:00:00' && (string)$mail->get('svt_state') === 'active',
 	'the day after the date: lapsed, still active');
-$reply(array(array('sent' => 43)));
+$reply(array($listing(43)));
 $watch->watch($mail, '2036-10-10 00:00:00');
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check((string)$mail->get('svt_state') === 'active' && !in_array('subaccount/close', $paths($drain()), true), 'inside the grace window nothing closes');
-$reply(array(array(), array('sent' => 43)));   // subaccount/close, then the figure
+$reply(array(array(), $listing(43)));   // subaccount/close, then the figure
 $watch->watch($mail, '2036-10-16 00:00:01');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
@@ -188,7 +196,7 @@ check(in_array('subaccount/close', $calls, true) && (string)$mail->get('svt_stat
 // A new date: reactivated by the reconcile.
 $mail->set('svt_paid_until', '2037-01-01 00:00:00');
 $mail->save();
-$reply(array(array(), array('sent' => 0)));      // subaccount/reopen, then the figure
+$reply(array(array(), $listing(0)));      // subaccount/reopen, then the figure
 $watch->watch($mail, '2036-11-01 00:00:00');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
@@ -223,7 +231,7 @@ $drain();
 $mail = ServiceTenant::forKey($key_id, 'mail');
 check((string)$mail->get('svt_state') === 'suspended' && $mail->get('svt_revoked_time') === null,
 	'the row is on the suspended rung with no revoked time: the act did not land');
-$reply(array(array(), array('sent' => 0)));
+$reply(array(array(), $listing(0)));
 $watch->watch($mail, '2036-02-01 00:15:00');
 $calls = $paths($drain());
 $mail = ServiceTenant::forKey($key_id, 'mail');
@@ -380,7 +388,7 @@ check($shelf->get('svt_pruned_time') !== null && s3fx_object($fx, 'shelf', '/' .
 	&& s3fx_object($fx, 'shelf', '/' . $locked_keys[1]) === null, 'once the lock has passed, the next pass deletes them and finishes the prune');
 
 section('the phase runs inside the provisioning task');
-$reply(array(array('sent' => 1), array('sent' => 1), array('sent' => 1)));
+$reply(array($listing(1), $listing(1), $listing(1)));
 $out = $watch->run(array());
 check(in_array($out['status'], array('success', 'error'), true) && strpos($out['message'], 'Service tenants:') === 0,
 	'run() reports the rows it walked', $out['message']);
