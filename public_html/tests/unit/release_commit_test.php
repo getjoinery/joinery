@@ -449,11 +449,42 @@ check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('
 	'what else was staged stays staged, uncommitted');
 check(ReleaseCommit::onRemote($repo, $made['commit'])['on_remote'], 'and the commit is pushed');
 
-rc_git($repo, array('remote', 'set-url', 'origin', $tmp . '/no-such-remote.git'));
+// A commit pushed from elsewhere while the publish ran (B172): the release is
+// refused before anything is committed, so the checkout still fast-forwards.
+$other = $tmp . '/other';
+rc_git($tmp, array('clone', '-q', '-b', 'main', $bare, $other));
+rc_git($other, array('config', 'user.email', 'other@example.com'));
+rc_git($other, array('config', 'user.name', 'Other'));
+file_put_contents($other . '/elsewhere.txt', "pushed while publishing\n");
+rc_git($other, array('add', 'elsewhere.txt'));
+rc_git($other, array('commit', '-q', '-m', 'pushed elsewhere'));
+rc_git($other, array('push', '-q', 'origin', 'HEAD:main'));
+$before = ReleaseCommit::head($repo);
 file_put_contents($repo . '/public_html/VERSION', "0.8.472\n");
-$failed = ReleaseCommit::commitRelease($repo, array('public_html/VERSION'), 'Release 0.8.472');
+$moved = ReleaseCommit::commitRelease($repo, array('public_html/VERSION'), 'Release 0.8.472');
+check(!$moved['ok'] && $moved['commit'] === null && strpos($moved['reason'], 'moved to') !== false,
+	'a remote that moved during the publish is refused, with nothing committed', $moved['reason']);
+check(ReleaseCommit::head($repo) === $before, '  the checkout is still on the commit it was built from');
+check(rc_git($repo, array('merge', '-q', '--ff-only', 'FETCH_HEAD'))['exit'] === 0,
+	'  and still fast-forwards to the remote');
+
+// A push refused anyway (no remote to reach): the release commit is undone.
+rc_git($repo, array('remote', 'set-url', 'origin', $tmp . '/no-such-remote.git'));
+$before = ReleaseCommit::head($repo);
+file_put_contents($repo . '/public_html/VERSION', "0.8.472\n");
+$new_bin = 'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-aarch64';
+file_put_contents($repo . '/' . $new_bin, "\x7fELF arm\n");
+$failed = ReleaseCommit::commitRelease($repo, array('public_html/VERSION', $new_bin), 'Release 0.8.472');
 check(!$failed['ok'] && $failed['commit'] !== null && strpos($failed['reason'], 'git push') !== false,
 	'a push that fails is reported, naming the commit it made', $failed['reason']);
+check(ReleaseCommit::head($repo) === $before && strpos($failed['reason'], 'undone') !== false,
+	'  and that commit is undone, so the checkout is back where it was', $failed['reason']);
+check(trim((string)file_get_contents($repo . '/public_html/VERSION')) === '0.8.471',
+	'  with the release file back at the committed version');
+check(!file_exists($repo . '/' . $new_bin) && rc_git($repo, array('ls-files', '--', $new_bin))['out'] === array(),
+	'  and a release file the commit it was built from never had is gone');
+check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('public_html/includes/Mine.php'),
+	'  and what else was staged still staged');
 
 // ---------------------------------------------------------------------------
 section('The Go toolchain pin');
