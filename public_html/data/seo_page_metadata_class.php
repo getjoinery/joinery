@@ -77,7 +77,7 @@ class SeoPageMetadata extends SystemBase {
 		self::register_entity_class('post',         'Post',        'MultiPost',        'data/posts_class.php',         'post', '/admin/admin_post_edit?pst_post_id=', 'article');
 		self::register_entity_class('page',         'Page',        'MultiPage',        'data/pages_class.php',         'page', '/admin/admin_page_edit?pag_page_id=', 'website');
 		self::register_entity_class('video',        'Video',       'MultiVideo',       'data/videos_class.php',        'video', '/admin/admin_video_edit?vid_video_id=', 'article');
-		self::register_entity_class('mailing_list', 'MailingList', 'MultiMailingList', 'data/mailing_lists_class.php', 'list', '/admin/admin_list_edit?mlt_mailing_list_id=', 'website');
+		self::register_entity_class('mailing_list', 'MailingList', 'MultiMailingList', 'data/mailing_lists_class.php', 'list', '/admin/admin_mailing_list_edit?mlt_mailing_list_id=', 'website');
 		// event + location are registered from event_manager's serve.php;
 		// product from the store's serve.php.
 	}

@@ -135,7 +135,7 @@
 						$count++;
 					}
 					else{
-						$recipient->set('erc_status', EmailRecipient::ERROR);
+						$recipient->set('erc_status', EmailRecipient::SEND_FAILURE);
 						$recipient->save();
 						echo '<b>Failed to send to : '. htmlspecialchars($recipient_name).'</b><br>';
 					}				

@@ -267,9 +267,12 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 	$privacy_url = trim((string)$settings->get_setting('privacy_url'));
 	$formwriter->checkboxinput('privacy', 'I have read and agree to the privacy policy'
 		. ($privacy_url !== '' ? ' (' . $privacy_url . ')' : ''), ['value' => 'yes']);
-	$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
-		'value' => 'yes',
-	]);
+	// The box only means something when there is a list to add the member to.
+	if ($settings->get_setting('default_mailing_list')) {
+		$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
+			'value' => 'yes',
+		]);
+	}
 	$formwriter->checkboxinput('setcookie', 'Keep me logged in', [
 		'value' => 'yes',
 		'checked' => true,

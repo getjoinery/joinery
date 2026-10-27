@@ -273,6 +273,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			}
 					
 			if($mailing_list_ids == 'all'){
+				// "All lists" means every list that can be joined: a deleted list
+				// is gone, and add_registrant() refuses an inactive one.
+				if(!$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_delete_time')){
+					continue;
+				}
 				if($mailing_list->is_user_in_list($this->key)){
 					//IF USER IS ALREADY SUBSCRIBED
 					$thismessage['message_type'] = 'warn';

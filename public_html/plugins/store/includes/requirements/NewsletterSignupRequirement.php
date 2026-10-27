@@ -5,6 +5,7 @@
  * Tier 2 custom requirement: newsletter signup checkbox.
  * post_purchase() handles the newsletter subscription side effect.
  *
+ * @version 1.1 - post_purchase() subscribes the buyer to the default mailing list
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
@@ -39,10 +40,16 @@ class NewsletterSignupRequirement extends AbstractProductRequirement {
     }
 
     public function post_purchase($data, $order_item, $user, $order) {
-        // Newsletter subscription side effect
-        if (!empty($data['newsletter'])) {
-            // The actual newsletter subscription logic will be called here
-            // This was previously handled in cart_charge_logic.php
+        if (empty($data['newsletter']) || !$user || !$user->key) {
+            return;
         }
+        $list = Globalvars::get_instance()->get_setting('default_mailing_list');
+        if (!$list) {
+            return;
+        }
+        // Scoped to the default list: ticking this box subscribes the buyer
+        // and leaves every other list they are on as it is.
+        $scope = ($list === 'all') ? null : array((int)$list);
+        $user->add_user_to_mailing_lists($list, $scope);
     }
 }
