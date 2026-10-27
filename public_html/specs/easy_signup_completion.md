@@ -460,9 +460,23 @@ prove one backup lands for a test buyer, and prove a restore.
   and the trial no longer says there is nothing to do. `IncidentSourceBackupsStopped` 1.2: grace
   2 days. Suites: setup_steps_copy 11/11, hosted_tier 117/117, incident_sources 149/149,
   manager_coverage 8/8, setup_wizard_gates 31/31, setup_encryption_key_step 16/16.
-- **Owed (A5, after the next publish reaches wp2):** the banner and the step order seen on wp2;
-  create the key there; a backup lands (the 03:00 UTC run, or one dispatched from the node's
-  Backups tab); a restore from it opened with the buyer's key.
+- **A5 passed 10-27 on wp2 (0.8.543, upgraded by dev job 201655):** with no key, the admin banner was
+  urgent and read "Your backups are off until you create your recovery key"; the wizard ran Welcome,
+  Beta permissions, Secure connection, Backups (step 4 of 9). The key was made and verified in the
+  browser on wp2's Backups page (fingerprint da0607f9…); the banner went calm and said there is
+  nothing to do again. Dev's status check read the key proven (jobs 201657, 201658). A backup from
+  dev's node Backups tab (job 201659) landed: full, 59.8 MB, chain-20261027_182918, Backblaze B2
+  Joinery. The scheduled verify (201660) opened and read it: 5 archives, 2,848 files. Prepare (201662)
+  staged it on wp2 with the site's own key; Restore (201663) put an approval on wp2's Backups page,
+  written by wp2 from its own records; pasting the buyer's key approved it, and the restore finished
+  RESTORE_OK. The site then served and a fresh sign-in worked.
+- **B177 (fixed 10-27):** wp2's Backups page said "RECOVERY KEY verified" beside "Your recovery key
+  has never been proven". Setup's paste-back is the Recovery Readiness ceremony's own check
+  (`BackupReadinessItems::verify_recovery_key` calls `record_possession_proof`), but only the
+  readiness page wrote the ledger row. `BackupRecoveryKey::prove_for()` (1.3) records it;
+  `backup_recovery_prove` 1.1 and the Backups page's fallback form use it. Test:
+  recovery_one_screen_flow 21/21. wp2 itself keeps the old line until its key is proven again (or
+  the next site is set up): the fix applies to proofs made after it ships.
 
 ### WP4 — our backup storage for self-hosted sites
 

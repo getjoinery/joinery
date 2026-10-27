@@ -1609,9 +1609,10 @@ beneath it.
 **What no level proves, and how the ceremony closes it.** No level accepts a
 private key — for the same reason `stage_chain.php` refuses one, a key on the
 wire is a key in every job record — so none of them exercises the recovery
-private key an operator holds. That path is proven by the recovery-key ceremony
-on the Recovery Readiness page, which shows the private key opens a challenge
-sealed the way every envelope is. The two together are the proof: the ceremony
+private key an operator holds. That path is proven by the recovery-key ceremony,
+which shows the private key opens a challenge sealed the way every envelope is.
+It runs on the Recovery Readiness page, and the paste-back that proves a new key
+at setup is the same check, recorded the same way (`BackupRecoveryKey::prove_for()`). The two together are the proof: the ceremony
 shows the key opens an envelope, verification shows the envelope's contents are
 sound. The Backups page shows the two dates side by side for that reason.
 

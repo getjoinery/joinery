@@ -12,6 +12,7 @@
  * nightly backup task switches itself on when a scheduled target exists too
  * (BackupNightly::maybe_activate).
  *
+ * @version 1.1.0 - the proof is recorded as a recovery-key ceremony (BackupRecoveryKey::prove_for, B177)
  * @version 1.0.0
  */
 
@@ -24,7 +25,7 @@ function backup_recovery_prove_logic(array $input): LogicResult {
 	}
 
 	try {
-		BackupRecoveryKey::record_possession_proof((string)($input['proof'] ?? ''));
+		BackupRecoveryKey::prove_for((string)($input['proof'] ?? ''), (int)$session->get_user_id());
 	} catch (BackupRecoveryKeyException $e) {
 		return LogicResult::error($e->getMessage());
 	}
