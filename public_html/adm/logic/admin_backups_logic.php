@@ -6,6 +6,7 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.26 - verify_recovery_key records the proof as a recovery-key ceremony (BackupRecoveryKey::prove_for, B177)
  * @version 1.25 - download / download_offer: a whole-site backup built here to download (BackupDownload);
  *                ?download=backup sends it, after a fresh second factor
  * @version 1.24 - an approval passes on what the browser worked out for a backup's key box (approval_shared,
@@ -227,7 +228,7 @@ function _admin_backups_handle($action, array $input, $session) {
 				return $url . '#recovery-key';
 
 			case 'verify_recovery_key':
-				BackupRecoveryKey::record_possession_proof((string)($input['recovery_proof'] ?? ''));
+				BackupRecoveryKey::prove_for((string)($input['recovery_proof'] ?? ''), (int)$session->get_user_id());
 				$say('Verified — the key you hold opens what this site seals.', true);
 				return $url . '#recovery-key';
 

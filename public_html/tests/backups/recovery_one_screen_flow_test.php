@@ -87,8 +87,27 @@ try { BackupRecoveryKey::record_possession_proof('not the sentence'); } catch (B
 check($threw, 'a wrong proof is refused');
 check(BackupRecoveryKey::is_ready() === false, 'and the key stays unproven');
 
-BackupRecoveryKey::record_possession_proof($recovered);
+// Setup's proof is the readiness ceremony's own check, so it is recorded as
+// one: a key proven at setup is never shown as "never proven" (B177).
+$rof_owner = make_user('rof_owner', 10);
+$rof_last = function () use ($db) {
+	return (int)$db->query("SELECT coalesce(max(rcv_recovery_verification_id), 0) FROM rcv_recovery_verifications")->fetchColumn();
+};
+$rof_before = $rof_last();
+$threw = false;
+try { BackupRecoveryKey::prove_for('not the sentence', (int)$rof_owner->key); } catch (BackupRecoveryKeyException $e) { $threw = true; }
+check($threw && $rof_last() === $rof_before, 'a wrong proof at setup records no ceremony');
+
+BackupRecoveryKey::prove_for($recovered, (int)$rof_owner->key);
 check(BackupRecoveryKey::is_ready() === true, 'the recovered sentence flips the key to proven');
+$rof_row = new RecoveryVerification($rof_last(), TRUE);
+harness_register_model('RecoveryVerification', $rof_row->key);
+check($rof_row->key > $rof_before && $rof_row->get('rcv_item_key') === 'backup_recovery_key'
+	&& $rof_row->get('rcv_method') === RecoveryVerification::METHOD_CEREMONY && $rof_row->get('rcv_passed')
+	&& (int)$rof_row->get('rcv_usr_user_id') === (int)$rof_owner->key,
+	'and it is recorded as a passed recovery-key ceremony, by the person who proved it');
+check(isset(RecoveryVerification::latest_passed(array('backup_recovery_key'))['backup_recovery_key']),
+	'so the Backups page reads it as last proven');
 
 // ── What the proven key is for ──────────────────────────────────────────
 section('Every backup taken here seals to the key proven here');

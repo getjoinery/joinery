@@ -15,6 +15,8 @@
  * operator must open a challenge once before this site will seal anything to
  * the value, and encrypted backups refuse to run until they have.
  *
+ * @version 1.3 - prove_for(): setup's proof is the Recovery Readiness ceremony's own check, so it is
+ *                recorded in that ledger too; a new owner was told the key was verified and never proven (B177)
  * @version 1.2 - the key is established on this site alone. Nothing writes it from outside and no
  *                proof established elsewhere is accepted here; key_report() reports, and that is
  *                the whole of what a management node may do with this setting
@@ -186,6 +188,18 @@ class BackupRecoveryKey {
 				. 'produces.');
 		}
 		self::write_proof_setting(hash('sha256', self::parse_public_key()));
+	}
+
+	/**
+	 * A person's proof at setup, recorded where the Recovery Readiness page and
+	 * the Backups page read "last proven". It is the same check the readiness
+	 * ceremony makes (BackupReadinessItems::verify_recovery_key), so it counts
+	 * as one: proving the key at setup and being told it was never proven were
+	 * one fact said two ways. Throws on mismatch, recording nothing.
+	 */
+	public static function prove_for($pasted, int $user_id): void {
+		self::record_possession_proof($pasted);
+		RecoveryVerification::record('backup_recovery_key', RecoveryVerification::METHOD_CEREMONY, $user_id, true);
 	}
 
 	/**
