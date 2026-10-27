@@ -316,7 +316,17 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   zW2ONl); service_tenant_watch 1.4 fakes that listing.
 - **B163 (fixed 10-27):** the site's password reset hung on SMTP: Linode blocks outbound 587 (dev
   itself cannot reach mail.smtp2go.com:587; 2525 is open). Smtp2GoLeg 1.3 hands out port 2525.
-  The test box got 587 and needs its settings pushed again.
+  The test box got 587 and needs its settings pushed again. Done 10-27 03:03 UTC: old SMTP user
+  removed, mail step set back to domain_verified; the plane minted test_wp2joinerytestcom-ee1851
+  and pushed it (mail_state done 03:05). The site's own connection check reads Connection
+  Successful (authenticated) on mail.smtp2go.com:2525, and the password reset answered in 1.5 s.
+  plan_used stayed 0: sandbox sends appear not to count, so the send itself is only visible in the
+  SMTP2GO console's activity for subaccount zW2ONl (dev's key cannot read activity).
+- **B164 (fixed):** with the SMTP server unreachable, the test site's password reset hung for minutes
+  and ended in a 502 Proxy Error (curl 01:48 UTC): PHPMailer waits 300 s to connect and 300 s per
+  reply. SmtpMailer 2.5 gives up after 30 s (an unanswered connect measured 30.0 s); the failed send
+  is queued for retry. The reset page keeps its one answer for every outcome, so it still says
+  nothing about which accounts exist.
 - **Send allowance 2,000 (owner 10-27):** "2000/month is our limit and the only plan we offer".
   The setting's default is 2,000 (server_manager 1.30.118); sm_028 moves a plane still at the old
   1,000 default; the getjoinery content pack (apply_hosted_product 3.2) says 2,000 emails a month.

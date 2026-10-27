@@ -22,6 +22,8 @@ use PHPMailer\PHPMailer\SMTP;
  * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
  * applyMessage($m), send()".
  *
+ * @version 2.5 - a server that does not answer is given up on after TIMEOUT seconds, not
+ *   PHPMailer's 300: a send inside a page request held the page until the proxy gave up (B164)
  * @version 2.4 - the SMTP session keeps the server's reply to DATA, so a send can
  *   report its receipt (specs/mailbox_message_timeline.md A3)
  * @version 2.3 - UTF-8 charset; no X-Mailer fingerprint
@@ -52,6 +54,15 @@ class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
     const SMTP_ENCODING = 'quoted-printable';
 
+    /**
+     * Seconds to wait for the server to accept the connection or answer a
+     * command. PHPMailer's own default is 300, and most sends happen inside a
+     * page request (a password reset, a signup confirmation): with the server
+     * unreachable that page hung for five minutes and ended as the proxy's 502.
+     * A failed send is queued for retry, so giving up early loses nothing.
+     */
+    const TIMEOUT = 30;
+
     function __construct(?SmtpConfig $config = null) {
         $config = $config ?: SmtpConfig::fromSettings();
 
@@ -60,6 +71,8 @@ class SmtpMailer extends PHPMailer {
 
         // Set encoding (only truly universal value)
         $this->Encoding = self::SMTP_ENCODING;
+
+        $this->Timeout = self::TIMEOUT;
 
         // UTF-8, because the platform's text is UTF-8 everywhere else. PHPMailer
         // defaults to iso-8859-1 and does NOT transcode — it only labels — so the
@@ -130,6 +143,9 @@ class SmtpMailer extends PHPMailer {
     public function getSMTPInstance() {
         if (!is_object($this->smtp)) {
             $this->smtp = new SmtpReceiptSession();
+            // Timeout covers each read; Timelimit is the separate cap on one
+            // whole reply, also 300 by default.
+            $this->smtp->Timelimit = self::TIMEOUT;
         }
         return $this->smtp;
     }
