@@ -61,6 +61,8 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.10 - commitRelease() refuses when the remote branch moved during the publish, and undoes its
+ *               commit when the push is refused, so a fast-forward follower is never left off the branch (B172)
  * @version 1.9 - publish's own code is held: publish_upgrade.php, ReleaseCommit and every *Publisher class run
  *               from this disk, and an uncommitted support bundle list named scripts the commit did not have,
  *               so 0.8.496 shipped with no bundle at all (B70)
@@ -682,9 +684,28 @@ class ReleaseCommit {
 	 * named on the commit, so nothing else staged in the index (another
 	 * session's work in a shared tree) goes with them.
 	 *
+	 * The release goes on the commit it was built from, and that commit must
+	 * still be the remote branch's head: a commit pushed elsewhere while the
+	 * publish ran (from localdev, 2026-10-27, B172) makes the push a non-fast-
+	 * forward. So the remote is read first and a moved branch is refused with
+	 * nothing committed. A push refused anyway (a commit landing in the
+	 * seconds between) undoes the release commit, so a checkout that follows
+	 * the branch by fast-forward (dev's follow_main.sh) is not left off it.
+	 *
 	 * @return array{ok:bool, commit:?string, reason:string}
 	 */
 	public static function commitRelease($repo_root, array $paths, $message, $remote = 'origin', $branch = 'main') {
+		$base = self::head($repo_root);
+		$fetch = self::git($repo_root, array('fetch', '--quiet', $remote, $branch));
+		if ($fetch['exit'] === 0) {
+			$remote_head = self::git($repo_root, array('rev-parse', 'FETCH_HEAD'));
+			$remote_head = trim($remote_head['out'][0] ?? '');
+			if ($base !== null && $remote_head !== '' && $remote_head !== $base) {
+				return array('ok' => false, 'commit' => null, 'reason' => "{$remote} {$branch} moved to "
+					. substr($remote_head, 0, 12) . ' while this release was built from ' . substr($base, 0, 12)
+					. '. Nothing was committed. Publish again once this checkout has the new commit; it builds from that.');
+			}
+		}
 		// Added first: a path git does not know yet (a new jail binary, a first
 		// statement key's .pub) is refused by a commit that names it. Naming
 		// the paths on the commit still commits only them; whatever else sits
@@ -700,10 +721,45 @@ class ReleaseCommit {
 		$head = self::head($repo_root);
 		$push = self::git($repo_root, array('push', '--quiet', $remote, 'HEAD:' . $branch));
 		if ($push['exit'] !== 0) {
-			return array('ok' => false, 'commit' => $head, 'reason' => "committed {$head}, but git push to {$remote} {$branch} failed: "
-				. trim(implode(' | ', array_slice($push['out'], -3))));
+			$reason = "committed {$head}, but git push to {$remote} {$branch} failed: "
+				. trim(implode(' | ', array_slice($push['out'], -3)));
+			$undo = $base === null ? array('exit' => 1, 'out' => array('no commit to return to'))
+				: self::undoRelease($repo_root, $base, $paths);
+			$reason .= $undo['exit'] === 0
+				? '. The release commit was undone; this checkout is back on ' . substr($base, 0, 12) . '.'
+				: '. Undoing the release commit failed too (' . trim(implode(' | ', array_slice($undo['out'], -2)))
+					. '): this checkout is a commit ahead of ' . $remote . ' ' . $branch . ' until it is reset to '
+					. ($base === null ? 'it' : substr($base, 0, 12)) . '.';
+			return array('ok' => false, 'commit' => $head, 'reason' => $reason);
 		}
 		return array('ok' => true, 'commit' => $head, 'reason' => '');
+	}
+
+	/**
+	 * Put the checkout back on $base after a release commit that never left
+	 * it: HEAD moves back, and each release path returns to what $base holds
+	 * (one $base never had, a first jail binary, is removed). Only those paths
+	 * are touched, so whatever else is staged in a shared index stays staged.
+	 *
+	 * @return array{exit:int, out:string[]}
+	 */
+	private static function undoRelease($repo_root, $base, array $paths) {
+		$reset = self::git($repo_root, array('reset', '--quiet', '--soft', $base));
+		if ($reset['exit'] !== 0) {
+			return $reset;
+		}
+		foreach ($paths as $path) {
+			if (self::git($repo_root, array('cat-file', '-e', $base . ':' . $path))['exit'] === 0) {
+				$step = self::git($repo_root, array('restore', '--source=' . $base, '--staged', '--worktree', '--', $path));
+			} else {
+				$step = self::git($repo_root, array('rm', '--quiet', '--cached', '--', $path));
+				@unlink(rtrim($repo_root, '/') . '/' . $path);
+			}
+			if ($step['exit'] !== 0) {
+				return $step;
+			}
+		}
+		return array('exit' => 0, 'out' => array());
 	}
 }
 ?>
