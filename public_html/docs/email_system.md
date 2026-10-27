@@ -854,7 +854,7 @@ $success = EmailSender::sendTemplate('welcome',
 The system automatically provides:
 - `template_name` - Derived from template filename
 - `web_dir` - Site base URL
-- `site_name` - The `site_name` setting
+- `site_name` - The `site_name` setting, or the site's address (such as `example.org`) while that setting is blank
 - `email_vars` - UTM tracking parameters
 - UTM defaults - `utm_source=email`, `utm_medium=email`, etc.
 

@@ -21,6 +21,7 @@
  * assertions had gone stale (a removed CreateLegacyTemplate method, a
  * missing-subject "exception" the model never actually raised).
  *
+ * @version 1.2 - a site with no name yet is named by its address
  * @version 1.1 - subjects and the outer template take placeholders; a soft-deleted
  *                template is not sent (spec email_template_defaults)
  * @version 1.0
@@ -99,6 +100,22 @@ $msg5 = EmailMessage::fromTemplate($tpl_blank, ['subject' => 'Given Subject', 'b
 check($msg5->getSubject() === 'Given Subject', 'a *subject* subject renders the subject value');
 $msg6 = EmailMessage::fromTemplate($tpl_blank, ['body' => 'B']);
 check((string)$msg6->getSubject() === '', 'with no subject value it renders empty, not the literal placeholder', 'got: ' . var_export($msg6->getSubject(), true));
+
+section('a site with no name yet is named by its address, not a blank');
+// A blank setting in memory falls through to stg_settings, so the row is
+// blanked too, inside a transaction that is rolled back.
+$db = DbConnector::get_instance()->get_db_link();
+$db->beginTransaction();
+try {
+	$db->exec("UPDATE stg_settings SET stg_value = '' WHERE stg_name = 'site_name'");
+	harness_set_setting_mem('site_name', '');
+	$host = (string)parse_url(LibraryFunctions::get_absolute_url(''), PHP_URL_HOST);
+	$msg7 = EmailMessage::fromTemplate($tpl_sub, ['name' => 'Ada', 'act_code' => 'X']);
+	check($host !== '' && $msg7->getSubject() === 'Reset your ' . $host . ' password, Ada', 'the subject names the site by its address', 'got: ' . $msg7->getSubject());
+} finally {
+	$db->rollBack();
+	harness_set_setting_mem('site_name', $site_name);
+}
 
 section('the outer template takes placeholders around the body');
 $outer = tpl_fixture('', '<html><head><title>*site_name*</title></head><body>*!**mail_body**!*</body></html>', EmailTemplate::TEMPLATE_TYPE_OUTER);
