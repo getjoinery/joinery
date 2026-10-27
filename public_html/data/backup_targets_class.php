@@ -17,6 +17,8 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.8 - a `managed` target is getjoinery's backup storage (specs/easy_signup_completion.md WP4): it holds
+ *                no credential, and get_credentials() / write_credentials() answer its ServicesShelfBroker
  * @version 3.7 - bkt_lock_days, lock_days(), write_credentials(), lock_refusal(): a backup target can hold what is
  *                written to it under COMPLIANCE object lock; the lock is part of the location (F8)
  * @version 3.6 - bkt_hidden_sweep: what HiddenVersionSweep last found in each folder this machine sweeps
@@ -188,6 +190,26 @@ class BackupTarget extends SystemBase {
 	/** The folder used when a backup target names none. */
 	const DEFAULT_PREFIX = 'joinery-backups';
 
+	/** @var ServicesShelfBroker|null one per row, so a run's writes and its finish share one open run */
+	private $service_broker = null;
+
+	/**
+	 * Is this getjoinery's backup storage rather than a bucket of this site's
+	 * own? Such a row is written by enrolling, never by a form, and holds no
+	 * credential: getjoinery signs every request (ServicesShelfBroker).
+	 */
+	public function is_service(): bool {
+		return (string)$this->get('bkt_provider') === StorageProvider::SERVICE;
+	}
+
+	/** What a `managed` target signs with, in place of a credential. */
+	public function service_broker(): ServicesShelfBroker {
+		if ($this->service_broker === null) {
+			$this->service_broker = new ServicesShelfBroker($this);
+		}
+		return $this->service_broker;
+	}
+
 	/**
 	 * A folder inside a bucket in its one form: no leading or trailing slash,
 	 * no empty segment, the default when blank. Every key composed from a
@@ -302,9 +324,15 @@ class BackupTarget extends SystemBase {
 	/**
 	 * The credential to WRITE with: get_credentials(), locking every object it
 	 * puts for lock_days() (S3Signer::with_lock()). Reads, lists and deletes
-	 * use get_credentials().
+	 * use get_credentials(). A `managed` target's writes are getjoinery's to
+	 * lock: it answers its broker.
+	 *
+	 * @return array|ServicesShelfBroker
 	 */
-	public function write_credentials(): array {
+	public function write_credentials() {
+		if ($this->is_service()) {
+			return $this->service_broker();
+		}
 		return S3Signer::with_lock($this->get_credentials() ?: array(), $this->lock_days());
 	}
 
@@ -408,7 +436,8 @@ class BackupTarget extends SystemBase {
 	public function overlaps(BackupTarget $other): bool {
 		$endpoint = function (BackupTarget $t) {
 			try {
-				return (string)(($t->get_credentials() ?: array())['endpoint'] ?? '');
+				$creds = $t->get_credentials();
+				return is_array($creds) ? (string)($creds['endpoint'] ?? '') : '';
 			} catch (BackupTargetException $e) {
 				return '';
 			}
@@ -471,8 +500,16 @@ class BackupTarget extends SystemBase {
 	 * silence here would surface later as a baffling "missing access_key" job
 	 * failure while the real cause (rotated/missing secret_box_key, or a DB
 	 * restored to a machine without it) stays invisible.
+	 *
+	 * A `managed` target has no credential: it answers its ServicesShelfBroker,
+	 * which S3Signer takes in a credential's place.
+	 *
+	 * @return array|ServicesShelfBroker
 	 */
 	function get_credentials() {
+		if ($this->is_service()) {
+			return $this->service_broker();
+		}
 		return $this->heal_b2_location('bkt_credentials', $this->unseal_column('bkt_credentials'));
 	}
 

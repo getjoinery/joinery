@@ -14,6 +14,8 @@
  * management node's backup broker), and every finished write is reported to
  * it with its bytes and sha256. The request paths are the same either way.
  *
+ * @version 1.15 - an S3LinkReader lists for list() and signs the GET presign() is asked for: a target whose owner
+ *                 is getjoinery is read like any other (specs/easy_signup_completion.md WP4)
  * @version 1.14 - object lock (specs/storage_targets.md F8): with_lock() makes a write credential that holds
  *                 every object it puts in COMPLIANCE mode for its days, with the body's MD5 a locked PUT needs;
  *                 presign() signs headers the request must carry; a link source's answer may name headers;
@@ -315,6 +317,10 @@ class S3Signer {
 	 * @param bool   $truncated Set to true when $max stopped the listing short.
 	 */
 	public static function list($creds, $bucket, $prefix = '', $max = 0, &$truncated = null) {
+		if ($creds instanceof S3LinkReader) {
+			$truncated = false;
+			return $creds->list_objects((string)$prefix, (int)$max, $truncated);
+		}
 		$objects = [];
 		$token = null;
 		$truncated = false;
@@ -1307,6 +1313,18 @@ class S3Signer {
 	 *                        which the holder of the link cannot leave out.
 	 */
 	public static function presign($creds, $bucket, $path, $method = 'GET', array $query = [], $expires = 3600, array $headers = []) {
+		if ($creds instanceof S3LinkSource) {
+			// A source signs what it signs; a read is the one link a holder of
+			// no key is handed to pass on (a verify's download).
+			if (strtoupper(trim((string)$method)) !== 'GET' || $query || $headers) {
+				throw new S3SignerException('Only a read is presigned on a machine that holds no storage key.');
+			}
+			if ($creds instanceof S3LinkReader) {
+				return $creds->read_link('/' . ltrim((string)$path, '/'), (int)$expires);
+			}
+			$answer = $creds->link('GET', '/' . ltrim((string)$path, '/'), [], 0);
+			return is_array($answer) ? (string)$answer['url'] : (string)$answer;
+		}
 		self::validate_creds($creds);
 
 		$method = strtoupper(trim((string)$method));

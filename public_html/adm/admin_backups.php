@@ -21,6 +21,8 @@
  * @version 1.18 - Verify on the recovery-key line opens the backup recovery key's own card
  * @version 1.17 - the Status box says when no backup of the site's own has finished off-site for two nights, or
  *                 none has passed verification for a day past the interval (specs/storage_targets.md F1, F2)
+ * @version 1.17 - getjoinery backup storage: its row shows as the service, with Test and no Edit or Delete, and the
+ *                box offers it (one button once connected, the setup step to connect) (specs/easy_signup_completion.md WP4)
  * @version 1.16 - the target form is BackupTargetForm, shared with the setup wizard and the management node;
  *                 every provider in StorageProvider's catalogue, named by its label
  * @version 1.15 - one approval panel for every scope (ApprovalChallengePanel)
@@ -635,26 +637,32 @@ if ($rows) {
 	   . '<th>Name</th><th>Provider</th><th>Bucket</th><th>Folder</th><th>Enabled</th><th></th>'
 	   . '</tr></thead><tbody>';
 	foreach ($rows as $t) {
+		$service = $t->is_service();
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($t->get('bkt_name')) . '</td>';
 		echo '<td>' . htmlspecialchars(StorageProvider::label($t->get('bkt_provider'))) . '</td>';
-		echo '<td>' . htmlspecialchars((string)$t->get('bkt_bucket')) . '</td>';
-		echo '<td>' . htmlspecialchars((string)$t->get('bkt_path_prefix')) . '</td>';
+		// getjoinery keeps these: there is no bucket or folder of this site's to show.
+		echo '<td>' . ($service ? '<span class="text-muted">kept by getjoinery</span>' : htmlspecialchars((string)$t->get('bkt_bucket'))) . '</td>';
+		echo '<td>' . ($service ? '' : htmlspecialchars((string)$t->get('bkt_path_prefix'))) . '</td>';
 		echo '<td>' . ($t->get('bkt_enabled') ? 'Yes' : 'No') . '</td>';
 		echo '<td>';
-		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups?edit=' . (int)$t->key . '#targets">Edit</a>';
+		if (!$service) {
+			echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups?edit=' . (int)$t->key . '#targets">Edit</a>';
+		}
 		$ft = $page->getFormWriter('test_' . (int)$t->key);
 		$ft->begin_form();
 		$ft->hiddeninput('action', '', array('value' => 'test_target'));
 		$ft->hiddeninput('bkt_backup_target_id', '', array('value' => (int)$t->key));
 		$ft->submitbutton('btn_test_' . (int)$t->key, 'Test', array('class' => 'btn btn-sm btn-outline-secondary'));
 		$ft->end_form();
-		$fd = $page->getFormWriter('del_' . (int)$t->key);
-		$fd->begin_form();
-		$fd->hiddeninput('action', '', array('value' => 'delete_target'));
-		$fd->hiddeninput('bkt_backup_target_id', '', array('value' => (int)$t->key));
-		$fd->submitbutton('btn_del_' . (int)$t->key, 'Delete', array('class' => 'btn btn-sm btn-outline-secondary'));
-		$fd->end_form();
+		if (!$service) {
+			$fd = $page->getFormWriter('del_' . (int)$t->key);
+			$fd->begin_form();
+			$fd->hiddeninput('action', '', array('value' => 'delete_target'));
+			$fd->hiddeninput('bkt_backup_target_id', '', array('value' => (int)$t->key));
+			$fd->submitbutton('btn_del_' . (int)$t->key, 'Delete', array('class' => 'btn btn-sm btn-outline-secondary'));
+			$fd->end_form();
+		}
 		echo '</td></tr>';
 	}
 	echo '</tbody></table>';
@@ -662,11 +670,32 @@ if ($rows) {
 
 $editing = null;
 if ($edit_id) {
-	foreach ($rows as $t) { if ((int)$t->key === $edit_id) { $editing = $t; } }
+	foreach ($rows as $t) { if ((int)$t->key === $edit_id && !$t->is_service()) { $editing = $t; } }
 }
 
 if (!$rows && !$adding) {
 	echo '<p class="text-muted mb-0">No target is set up yet, so backups have nowhere to go.</p>';
+}
+
+// getjoinery's backup storage, offered while backups do not go there: one
+// button once this site is connected to a getjoinery account; the setup
+// step connects it (the connection is the same one the Email step makes).
+$service_target = ServicesClient::serviceTarget();
+$service_in_use = $service_target !== null && $service_target->get('bkt_enabled')
+	&& (int)Globalvars::get_instance()->get_setting('backup_target_id') === (int)$service_target->key;
+if (!$service_in_use && !$editing && !$adding) {
+	echo '<div class="mt-3"><strong>Or store backups with getjoinery.</strong> No storage account or keys: backups are '
+	   . 'encrypted here with your recovery key before they leave, and getjoinery keeps them. ';
+	if (ServicesClient::connected()) {
+		echo '</div>';
+		$fs = $page->getFormWriter('services_shelf_use');
+		$fs->begin_form();
+		$fs->hiddeninput('action', '', array('value' => 'services_shelf_use'));
+		$fs->submitbutton('btn_services_shelf_use', 'Store backups with getjoinery', array('class' => 'btn btn-sm btn-outline-primary'));
+		$fs->end_form();
+	} else {
+		echo '<a href="/setup?step=backups">Connect your getjoinery account</a> on the setup page first.</div>';
+	}
 }
 
 // The form only appears when asked for — the Add a target action on this box,

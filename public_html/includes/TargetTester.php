@@ -26,6 +26,8 @@
  * All providers (Backblaze via its S3 endpoint included) go through S3Signer;
  * only step 6 asks Backblaze itself.
  *
+ * @version 4.3 - getjoinery's backup storage (a `managed` target) is tested by asking getjoinery for its standing:
+ *                it holds no key to try (specs/easy_signup_completion.md WP4)
  * @version 4.2 - step 7, Lock: a target set to lock needs object lock on its bucket, proved with a probe locked for one day;
  *                a bucket that locks every new object by default fails Prune, saying so
  * @version 4.1 - one key per target: no node key to prove write-only and no minting capabilities to ask
@@ -40,9 +42,40 @@ require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 class TargetTester {
 
 	/**
+	 * getjoinery's backup storage: one question to getjoinery, whether a backup
+	 * run would be taken now and how much is stored. There is no bucket here to
+	 * probe — getjoinery signs every request.
+	 */
+	public static function test_service($client = null): array {
+		try {
+			$status = ($client ?? ServicesShelfBroker::$client_for_tests ?? new ServicesClient())->shelfStatus();
+		} catch (ServiceClientException $e) {
+			return array('success' => false, 'message' => $e->getMessage(),
+				'steps' => array(array('label' => 'getjoinery', 'status' => 'fail', 'message' => $e->getMessage())));
+		}
+		$figure = trim((string)($status['used_label'] ?? '') . ' of ' . (string)($status['allowance_label'] ?? ''));
+		// The allowance is checked as each run begins; a site already at it
+		// takes no more, so the button says so now rather than at 03:00.
+		$full = (int)($status['allowance'] ?? 0) > 0 && (int)($status['figure'] ?? 0) >= (int)$status['allowance'];
+		if (empty($status['writable']) || $full) {
+			$why = (string)($status['refusal'] ?? '')
+				?: ($full ? 'This site\'s getjoinery backup storage is full (' . $figure . '), so no new backup is taken there.'
+					: 'getjoinery is not taking backups for this site right now.');
+			return array('success' => false, 'message' => $why,
+				'steps' => array(array('label' => 'getjoinery', 'status' => 'fail', 'message' => $why)));
+		}
+		$message = 'getjoinery backup storage is taking backups for this site (' . $figure . ' stored).';
+		return array('success' => true, 'message' => $message,
+			'steps' => array(array('label' => 'getjoinery', 'status' => 'pass', 'message' => $message)));
+	}
+
+	/**
 	 * Test a BackupTarget, saved or not. Returns ['success', 'message', 'steps'].
 	 */
 	public static function test($target) {
+		if ($target instanceof BackupTarget && $target->is_service()) {
+			return self::test_service();
+		}
 		$bucket = trim((string)$target->get('bkt_bucket'));
 		$steps = array();
 		$done = function ($steps) use ($bucket) {

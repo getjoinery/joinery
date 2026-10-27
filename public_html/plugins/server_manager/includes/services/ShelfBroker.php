@@ -66,6 +66,10 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.9 - a run's chain is recorded at finish: the one the writer names, or the chain its completed names
+ *                sit in, so retention's verified floor sees a site's chains as it sees a node's; a finish asked again
+ *                of a finished run answers what was recorded; begin refuses a tenant already at its allowance; a get
+ *                link may ask for a longer life, up to GET_LIFE_MAX_SECONDS (specs/easy_signup_completion.md WP4)
  * @version 1.8 - a write to a target that locks carries COMPLIANCE lock headers signed into its link, which the
  *                answer names; a run's ledger file is locked too (specs/storage_targets.md F8)
  * @version 1.7 - write-once: a key a finished run completed is never signed again (sign answers 'exists'); finish
@@ -114,6 +118,9 @@ class ShelfBroker {
 
 	/** How long a signed URL lives. Parts come in batches of this many. */
 	const URL_LIFE_SECONDS = 3600;
+
+	/** The longest a get link may live when asked: a verify's links must outlast its run. */
+	const GET_LIFE_MAX_SECONDS = 21600;
 	const PARTS_PER_BATCH  = 10;
 
 	/** A run left open this long is treated as abandoned by the prune pass. */
@@ -241,7 +248,11 @@ class ShelfBroker {
 
 		$allowance = (int)$row->get('svt_allowance') ?: JoineryServices::allowance(ServiceTenant::SERVICE_SHELF);
 		$used = ShelfObject::completedBytes((int)$row->key);
-		if ($used + $declared > $allowance) {
+		// A run that declares nothing (a site's engine opens its run before it
+		// has built anything) is refused once the allowance is reached: it
+		// takes nothing more there, and the one run it may then write past
+		// the line is what the next begin counts.
+		if ($used + $declared > $allowance || ($declared === 0 && $used >= $allowance)) {
 			$sentence = 'This run would put backup storage over its allowance: '
 				. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, $used) . ' stored plus '
 				. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, $declared) . ' declared, of '
@@ -301,6 +312,10 @@ class ShelfBroker {
 		$expires_at = gmdate('Y-m-d H:i:s', time() + $expires);
 
 		if ($operation === 'get') {
+			if ((int)($args['expires'] ?? 0) > 0) {
+				$expires = max(60, min(self::GET_LIFE_MAX_SECONDS, (int)$args['expires']));
+				$expires_at = gmdate('Y-m-d H:i:s', time() + $expires);
+			}
 			$why = self::readRefusal($row);
 			if ($why !== '') {
 				throw new ShelfBrokerException($why);
@@ -493,8 +508,8 @@ class ShelfBroker {
 	 *                         never completed dropped — so a finished run's
 	 *                         ledger is exact.
 	 */
-	public static function finishRun(ServiceTenant $row, int $run_id, array $completed): array {
-		$out = self::completeRun(self::openRun($row, $run_id), $completed);
+	public static function finishRun(ServiceTenant $row, int $run_id, array $completed, string $chain = ''): array {
+		$out = self::completeRun(self::runOf($row, $run_id), $completed, $chain);
 		self::refreshFigure($row);
 		return $out + array('figure' => (int)$row->get('svt_figure'));
 	}
@@ -515,6 +530,11 @@ class ShelfBroker {
 		$db->prepare('SELECT pg_advisory_lock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
 		try {
 			$run = new ShelfRun((int)$run->key, TRUE);
+			// A finish asked again after its reply was lost: answered with
+			// what was recorded, so the writer keeps a run that is kept here.
+			if ((string)$run->get('svr_state') === ShelfRun::STATE_FINISHED) {
+				return self::finishedAnswer($run);
+			}
 			if ((string)$run->get('svr_state') !== ShelfRun::STATE_OPEN) {
 				throw new ShelfBrokerException('That run is already ' . $run->get('svr_state') . '.');
 			}
@@ -522,6 +542,15 @@ class ShelfBroker {
 		} finally {
 			$db->prepare('SELECT pg_advisory_unlock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
 		}
+	}
+
+	/** What a finished run's finish answered, from its ledger. */
+	private static function finishedAnswer(ShelfRun $run): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare('SELECT count(*) FROM svo_shelf_objects WHERE svo_svr_shelf_run_id = ? AND svo_completed_time IS NOT NULL');
+		$q->execute(array((int)$run->key));
+		return array('run_id' => (int)$run->key, 'completed' => (int)$q->fetchColumn(), 'cancelled' => 0, 'unhashed' => 0,
+			'already_finished' => true);
 	}
 
 	/** The advisory lock space a run's finish is serialised in. */
@@ -553,6 +582,14 @@ class ShelfBroker {
 			$marked++;
 		}
 		$cancelled = self::cancelUncompleted($run);
+		// The chain the run extended: what the writer named, else the chain
+		// its completed names sit in. Retention's verified floor is keyed by it.
+		if ($chain === '' && (string)$run->get('svr_chain') === '') {
+			foreach ($completed as $c) {
+				$chain = self::chainOfName(self::cleanName((string)($c['name'] ?? '')));
+				if ($chain !== '') { break; }
+			}
+		}
 		if ($chain !== '') {
 			$run->set('svr_chain', self::cleanChain($chain));
 		}

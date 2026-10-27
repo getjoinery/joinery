@@ -8,6 +8,9 @@
  * key — or refuses with the sentence the site's run history records as its
  * cause. Nothing is signed here; nothing moves.
  *
+ * @version 1.1 - the artifacts are optional: a site's backup engine opens its run before it has chosen a
+ *                chain or built anything, as a Managed node's does at its broker; the allowance is then checked
+ *                against what is already stored (specs/easy_signup_completion.md WP4)
  * @version 1.0
  */
 function shelf_begin_run_logic(array $input): LogicResult {
@@ -43,7 +46,7 @@ function shelf_begin_run_logic_descriptor(): array {
 		'input'            => array(
 			'profile'   => array('type' => 'string', 'required' => false, 'label' => 'Backup profile (site or manager)'),
 			'chain'     => array('type' => 'string', 'required' => false, 'label' => 'Chain id'),
-			'artifacts' => array('type' => 'array',  'required' => true,  'label' => 'Artifacts: [{name, bytes}]', 'max_items' => 500,
+			'artifacts' => array('type' => 'array',  'required' => false, 'label' => 'Artifacts: [{name, bytes}], when known', 'max_items' => 500,
 				'items' => array(
 					'name'  => array('type' => 'string',  'required' => true,  'label' => 'Object name'),
 					'bytes' => array('type' => 'integer', 'required' => false, 'label' => 'Size in bytes'),

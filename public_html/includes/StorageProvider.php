@@ -22,6 +22,8 @@
  * addressed (path style, or the bucket as a host label) is a property of the
  * provider (virtual_host()).
  *
+ * @version 2.2 - SERVICE ('managed'): getjoinery's backup storage, a provider a target is enrolled in and never
+ *                picked; it is in slugs() and has a label, and no form offers it (specs/easy_signup_completion.md WP4)
  * @version 2.1 - object_lock: whether a provider takes COMPLIANCE object lock (b2, s3, linode; F8)
  * @version 2.0 - the one provider list (specs/storage_targets.md WP1): Hetzner; each provider's console
  *                sign-in, addressing style and region rule; the one Backblaze region rule (b2_location());
@@ -32,6 +34,13 @@
 class StorageProvider {
 
 	const GENERIC = 'generic';
+
+	/**
+	 * getjoinery's backup storage: a target enrolled in it holds no credential
+	 * and getjoinery signs every request (ServicesShelfBroker). Never offered by
+	 * a form — options(), catalogue() and visibility_rules() leave it out.
+	 */
+	const SERVICE = 'managed';
 
 	/**
 	 * The catalogue. Per provider:
@@ -168,6 +177,21 @@ class StorageProvider {
 			// Object lock in COMPLIANCE mode, checked against this provider (F8).
 			'object_lock'   => false,
 		),
+		self::SERVICE => array(
+			'label'         => 'getjoinery backup storage',
+			'asks'          => array(),
+			'endpoint'      => '',
+			'region'        => '',
+			'host'          => '',
+			'endpoint_help' => '',
+			'region_help'   => '',
+			'example'       => array(),
+			'region_rule'   => '',
+			'addressing'    => 'path',
+			'console'       => '',
+			// getjoinery locks what it stores; nothing here asks the bucket.
+			'object_lock'   => false,
+		),
 	);
 
 	/**
@@ -183,6 +207,7 @@ class StorageProvider {
 	public static function options(): array {
 		$out = array();
 		foreach (self::$catalogue as $slug => $p) {
+			if ($slug === self::SERVICE) { continue; }
 			$out[$slug] = $p['label'];
 		}
 		return $out;
@@ -220,6 +245,7 @@ class StorageProvider {
 	public static function visibility_rules(array $names = array('region' => 'region', 'endpoint' => 'endpoint')): array {
 		$rules = array();
 		foreach (self::$catalogue as $slug => $p) {
+			if ($slug === self::SERVICE) { continue; }
 			$show = array();
 			$hide = array();
 			foreach (array('region', 'endpoint') as $field) {
@@ -249,6 +275,7 @@ class StorageProvider {
 	public static function catalogue(): array {
 		$out = array();
 		foreach (self::$catalogue as $slug => $p) {
+			if ($slug === self::SERVICE) { continue; }
 			$out[$slug] = array(
 				'label'         => $p['label'],
 				'asks'          => $p['asks'],

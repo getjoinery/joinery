@@ -74,6 +74,97 @@ run whose token expired. A node that cannot write through the broker — its
 core predates it — is refused at build with the release it needs, and keeps its
 backups on its own disk until it is upgraded.
 
+### A site's backups in getjoinery's storage: the `managed` target
+
+A self-hosted site connected to a getjoinery account can keep its own backups
+in getjoinery's backup storage instead of a bucket of its own. The Backups step
+of the setup wizard offers it first ("Store backups with getjoinery"), and the
+Backups page offers it while backups go elsewhere; both post
+`services_shelf_use`, which enrols the site over its connection
+(`ServicesClient::enrolShelf()`) and writes the answer with
+`ServicesClient::applyShelfEnrolment()`:
+
+- one backup target with provider `managed` (`StorageProvider::SERVICE`), its
+  bucket and folder prefix as getjoinery keeps them, and **no credential**;
+- `backup_service_folder`, the site's folder there. The engine names every key
+  `{prefix}/{slug}/site/…` and getjoinery signs only inside that folder, so a run
+  to this target takes it as its slug (`BackupRunner::slug_for()`); a run to
+  any other target keeps `backup_path_slug`, which enrolling never touches;
+- `backup_target_id`, so backups go there, and nightly backups switch on when
+  the recovery key is proven (`BackupNightly::maybe_activate()`).
+
+No form offers the `managed` provider (`StorageProvider::options()` leaves it
+out), the target form refuses to save one, and its row on the Backups page has
+Test and no Edit or Delete. `utils/install_backup_target.php` refuses it too.
+Backups taken before the switch stay where they went, under their own slug; this
+site's retention leaves them while its backups go to getjoinery, and prunes them
+again if it goes back to that bucket.
+
+Where a credential would go, the target hands out its `ServicesShelfBroker`
+(`BackupTarget::get_credentials()` and `write_credentials()`), one per row. It
+is the Managed node's broker over a different wire: every call is a services
+call on the site's connected key (`shelf_begin_run`, `shelf_sign`, `shelf_list`,
+`shelf_finish_run`) rather than a token to a broker address, and it reads as
+well as writes (`S3LinkReader`):
+
+- the engine opens a run before it builds anything, so a refusal (at the
+  allowance, an unpaid account) is the run's recorded cause; it finishes the run
+  with every object's size and sha256 and the chain it extended before
+  committing, and a failed run finishes naming nothing, which cancels what was
+  signed. A finish asked again after a lost reply is answered with what was
+  recorded. The chain follows the storage space getjoinery answers
+  (`bkh_remote_space_id`), as a manager run's does. Nothing is written outside a
+  run the broker opened;
+- `S3Signer::list()` asks it for the listing, `S3Signer::presign()` of a GET
+  asks it for the link (`read_link()`, with the life asked for, up to six hours),
+  and a download goes on a link it signed, so the Backups page, the verify
+  launcher and restore read it like any target. A listing covers every storage
+  space getjoinery keeps the site's backups in, and a read signs in the space
+  its key was listed in (a key no listing has placed is found by listing its
+  folder once), so runs taken before a move stay readable. The one exception is
+  the offloaded-file store (`site/objects/`): its listing is the active space's
+  alone, because a run decides from it what it need not send again, and a chain
+  stays in one space;
+- it signs **no delete**. A site plan on it sets `prunes_cloud` false, and no
+  retention pass deletes a run kept there, whatever the site backs up to now.
+  getjoinery prunes its storage by its own retention, and the site's records
+  follow it: `enforce_chain_retention()` on this plan reconciles them
+  (`reconcile_service_records()`) with one small listing per point — a chain's
+  folder, a standalone run's archives, named below the profile segment and
+  answered in every space, so a run recorded before a move still matches —
+  keeping a point listed while getjoinery lists it and marking it pruned, a
+  chain whole, once it does not. The offloaded-file store is never listed for
+  this, and a listing that fails or that a storage space did not answer
+  concludes nothing;
+- a passed verify of a run kept there is reported to getjoinery
+  (`BackupVerifier::report_to_service()`, `shelf_verified_run`), whose retention
+  keeps the newest verified chain and whose alarm otherwise counts the site
+  never verified;
+- a base key from getjoinery other than the one the target names (getjoinery
+  moved the site's storage) refuses that run and writes the new place onto the
+  target and `backup_service_folder`, so the next run goes there.
+
+Its Test button asks getjoinery for the site's standing (`shelf_status`):
+whether a run would be taken now, and how much is stored of the allowance; a
+site at its allowance is told it is full. The daily status poll puts the same
+figure on the hosted banner (`ServicesStatusPoll`). Disconnecting the site from
+getjoinery is refused while its backups go there; releasing the service switches
+the target off and keeps its row, so the backups already kept read back until
+getjoinery prunes them, and clears `backup_target_id`, so every surface says no
+backups are running.
+
+On getjoinery, a tenant's storage is pruned by `ServiceTenantWatch`, which files
+the ledger into restore points as a node's storage is filed
+(`FleetBackupRetention::group()`): a chain by its directory, a standalone archive
+with its sidecar and index, ordered by the stamp in their names; the newest N
+stay, and the newest verified chain and everything newer (keyed by the chain each
+run recorded at finish). The offloaded-file store is no point: its objects go
+once no kept point's index names them (`FleetBackupRetention::prune_objects()`),
+never while one of the tenant's runs is open in that space, and all at once in a
+space the tenant moved away from once no point is left there, so it can retire. On the Recovery Readiness page the target's item is the
+getjoinery account sign-in, the way back to those backups after the server is
+lost, where a bucket of the site's own asks for its provider console login.
+
 Reads need no broker call: for a restore, a verify or a download the management
 node signs one link per object into the job, so no credential of any kind
 travels for a read either.

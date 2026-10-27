@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.27 - services_shelf_use: store backups in getjoinery's backup storage, enrolled over the site's
+ *                getjoinery connection (specs/easy_signup_completion.md WP4)
  * @version 1.26 - verify_recovery_key records the proof as a recovery-key ceremony (BackupRecoveryKey::prove_for, B177)
  * @version 1.25 - download / download_offer: a whole-site backup built here to download (BackupDownload);
  *                ?download=backup sends it, after a fresh second factor
@@ -334,6 +336,12 @@ function _admin_backups_handle($action, array $input, $session) {
 				if ($id) {
 					$target->assert_found();
 				}
+				// getjoinery's backup storage is written by enrolling, never by
+				// the form: it has no bucket or key here to edit.
+				if ($target->is_service() || (string)($input['bkt_provider'] ?? '') === StorageProvider::SERVICE) {
+					$say('getjoinery backup storage is chosen with its own button, not edited here.', false);
+					return $url;
+				}
 				$saved = BackupTargetForm::save($target, $input);
 				// A site's first target is where its backups go, named here by
 				// the save that made it, never inferred later from the list.
@@ -475,6 +483,27 @@ function _admin_backups_handle($action, array $input, $session) {
 				// the file store cannot serve is touched; the result lands on
 				// the inventory record the Offloaded files box reads.
 				$say(BackupObjectRestoreLauncher::start_newest(BackupObjectRestore::MODE_MISSING), true);
+				return $url;
+			}
+
+			// getjoinery's backup storage: enrol over this site's connection, and
+			// the answer is the target backups go to. Nothing is typed; getjoinery
+			// says where, and signs every request from then on.
+			case 'services_shelf_use': {
+				if (!ServicesClient::connected()) {
+					$say('Connect this site to your getjoinery account first.', false);
+					return $url;
+				}
+				$answer = (new ServicesClient())->enrolShelf();
+				if (empty($answer['entitled'])) {
+					$where = (string)($answer['manage_url'] ?? '');
+					$say('getjoinery is not providing backup storage for this site'
+						. ((string)($answer['notice'] ?? '') !== '' ? ': ' . $answer['notice'] : '.')
+						. (preg_match('#^https://#', $where) ? ' See ' . $where . '.' : ''), false);
+					return $url;
+				}
+				ServicesClient::applyShelfEnrolment($answer);
+				$say('Backups now go to getjoinery backup storage. They are encrypted here with your recovery key before they leave.', true);
 				return $url;
 			}
 

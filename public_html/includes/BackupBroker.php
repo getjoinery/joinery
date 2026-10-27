@@ -25,6 +25,8 @@
  * management node signs into the job (download, verify, restore), never
  * through this.
  *
+ * @version 1.3 - its run state and its call seam are open to a subclass: a self-hosted site's broker over its
+ *                getjoinery connection (ServicesShelfBroker) differs only in how a call travels
  * @version 1.2 - a link the broker signed an object lock into carries its headers (F8)
  * @version 1.1 - a lost reply is asked again: every call is safe to repeat, and the test transport takes the
  *                same retry path as HTTP
@@ -47,14 +49,14 @@ class BackupBroker implements S3LinkSource {
 	/** Tests only: fn(string $action, array $body): array — answers a call instead of HTTP. */
 	public static $transport_for_tests = null;
 
-	private $url;
-	private $run_id;
-	private $token;
-	private $begun = null;
+	protected $url;
+	protected $run_id;
+	protected $token;
+	protected $begun = null;
 	/** upload id => [part number => url], the batch the broker signed last */
-	private $parts = array();
+	protected $parts = array();
 	/** name => ['name', 'bytes', 'sha256'] for every write that finished */
-	private $written = array();
+	protected $written = array();
 
 	/**
 	 * Whether a decoded credential slot is a broker run rather than a key:
@@ -165,7 +167,7 @@ class BackupBroker implements S3LinkSource {
 	 * object lock the write must carry — or S3ObjectExistsException for a key
 	 * already written.
 	 */
-	private function signed($name, $operation, array $args) {
+	protected function signed($name, $operation, array $args) {
 		$data = $this->call('sign', array('name' => $name, 'operation' => $operation) + $args);
 		if (!empty($data['exists'])) {
 			throw new S3ObjectExistsException((string)($data['key'] ?? $name), (int)($data['bytes'] ?? 0), (string)($data['sha256'] ?? ''));
@@ -183,7 +185,7 @@ class BackupBroker implements S3LinkSource {
 	}
 
 	/** A key named relative to the run's base key, or a refusal: nothing outside it is the run's to write. */
-	private function name_of($path) {
+	protected function name_of($path) {
 		$key = ltrim((string)$path, '/');
 		$base = $this->base_key();
 		if (strpos($key, $base) !== 0 || strlen($key) === strlen($base)) {
@@ -198,7 +200,7 @@ class BackupBroker implements S3LinkSource {
 	 * call is safe to repeat: a sign signs again, and a finish or an abort
 	 * asked again after a lost reply is answered with what was recorded.
 	 */
-	private function call($action, array $body) {
+	protected function call($action, array $body) {
 		$body['run_id'] = $this->run_id;
 		$last = '';
 		for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {

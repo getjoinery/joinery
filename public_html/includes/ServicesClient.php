@@ -16,6 +16,8 @@
  * sender domain; storeConnection() seals the pair; the daily poll writes the
  * banner settings from status().
  *
+ * @version 1.2 - applyShelfEnrolment() writes the `managed` backup target an enrol answers, and makes it where
+ *                backups go; serviceTarget(); a released shelf switches that target off (specs/easy_signup_completion.md WP4)
  * @version 1.1 - shelfVerifiedRun(): report a passed verify of a chain to backup storage (specs/storage_targets.md F1)
  * @version 1.0
  */
@@ -173,6 +175,20 @@ class ServicesClient extends ServiceClient {
 		if ($service === 'mail') {
 			self::recordMailAnswer($answer);
 		}
+		if ($service === 'shelf') {
+			// Released: nothing more can be written there. The row stays, so
+			// the backups already kept read back until getjoinery prunes them.
+			$target = self::serviceTarget();
+			if ($target !== null && $target->get('bkt_enabled')) {
+				$target->set('bkt_enabled', false);
+				$target->save();
+			}
+			// Backups no longer go anywhere: said as "no backup target" by
+			// every surface that reads it, not a run skipped in silence.
+			if ($target !== null && (int)Globalvars::get_instance()->get_setting('backup_target_id') === (int)$target->key) {
+				self::put('backup_target_id', '0');
+			}
+		}
 		return $answer;
 	}
 
@@ -190,8 +206,8 @@ class ServicesClient extends ServiceClient {
 		return $this->call('shelf_list', array('prefix' => $prefix));
 	}
 
-	public function shelfFinishRun(int $run_id, array $completed): array {
-		return $this->call('shelf_finish_run', array('run_id' => $run_id, 'completed' => $completed));
+	public function shelfFinishRun(int $run_id, array $completed, string $chain = ''): array {
+		return $this->call('shelf_finish_run', array('run_id' => $run_id, 'completed' => $completed, 'chain' => $chain));
 	}
 
 	public function shelfVerifiedRun(int $run_id): array {
@@ -200,6 +216,63 @@ class ServicesClient extends ServiceClient {
 
 	public function shelfStatus(): array {
 		return $this->call('shelf_status', array());
+	}
+
+	// ── What a backup storage answer does here ────────────────────────────────
+
+	/** The name this site's getjoinery backup storage target is shown by. */
+	const SHELF_TARGET_NAME = 'getjoinery backup storage';
+
+	/**
+	 * This site's getjoinery backup storage target, switched on or off, or
+	 * null when it never enrolled. One per site: enrolling again updates it.
+	 */
+	public static function serviceTarget(): ?BackupTarget {
+		$rows = new MultiBackupTarget(array('provider' => StorageProvider::SERVICE, 'deleted' => false),
+			array('bkt_backup_target_id' => 'ASC'), 1);
+		foreach ($rows as $row) {
+			return $row;
+		}
+		return null;
+	}
+
+	/**
+	 * An entitled backup storage enrol answer: write the `managed` target where
+	 * getjoinery keeps this site's backups — its bucket and folder, never a
+	 * credential — and make it where backups go. The engine names every key
+	 * {prefix}/{folder}/site/…, and getjoinery signs only inside its folder,
+	 * recorded as backup_service_folder (BackupRunner::slug_for()). The site's
+	 * own slug is left as it is, so backups already in a bucket of its own keep
+	 * their names, and are pruned there again if it goes back to one.
+	 *
+	 * @return BackupTarget|null the target, or null when the answer grants nothing
+	 */
+	public static function applyShelfEnrolment(array $answer): ?BackupTarget {
+		if (empty($answer['entitled']) || empty($answer['shelf']) || !is_array($answer['shelf'])) {
+			return null;
+		}
+		$shelf = $answer['shelf'];
+		$slug = trim((string)($shelf['slug'] ?? ''));
+		$bucket = trim((string)($shelf['bucket'] ?? ''));
+		if ($slug === '' || $bucket === '') {
+			throw new ServiceClientException('getjoinery answered without saying where this site\'s backups are kept.');
+		}
+		BackupRunner::validate_slug($slug);
+
+		$target = self::serviceTarget() ?? new BackupTarget(NULL);
+		if (!$target->key) {
+			$target->set('bkt_name', self::SHELF_TARGET_NAME);
+			$target->set('bkt_provider', StorageProvider::SERVICE);
+		}
+		$target->set('bkt_bucket', $bucket);
+		$target->set('bkt_path_prefix', trim((string)($shelf['path_prefix'] ?? '')));
+		$target->set('bkt_enabled', true);
+		$target->save();
+
+		self::put('backup_service_folder', $slug);
+		self::put('backup_target_id', (string)$target->key);
+		BackupNightly::maybe_activate();
+		return $target;
 	}
 
 	// ── What the mail answers do here ─────────────────────────────────────────

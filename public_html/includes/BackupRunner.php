@@ -33,6 +33,21 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.40 - the reconcile asks one small listing per point (a chain's folder, a standalone run's archives)
+ *                instead of listing the whole site, so the offloaded-file store is never listed for it (round-3 V1)
+ * @version 1.39 - the reconcile changes nothing when a storage space did not answer, and compares keys below the
+ *                profile segment, so a run recorded under a place getjoinery has since moved still matches (re-review R3, R4)
+ * @version 1.38 - a site plan on getjoinery's backup storage keeps its records as getjoinery keeps the runs
+ *                (reconcile_service_records): a run is listed while its objects are there, whatever this site's
+ *                window says; getjoinery prunes by its own rule (WP4 review M5)
+ * @version 1.37 - slug_for(): a run to getjoinery's backup storage is named under the folder getjoinery keeps for the
+ *                site (backup_service_folder), and every other target under the site's own slug, so the site's slug
+ *                is never rewritten and each target's runs keep the names they were taken under; plan_for_target()
+ *                follows it (specs/easy_signup_completion.md WP4 review H3)
+ * @version 1.36 - a site run to getjoinery's backup storage (a `managed` target) writes through its broker
+ *                (ServicesShelfBroker) exactly as a manager run does: begun first, finished before it is
+ *                committed, aborted on failure; it prunes nothing in backup storage, and its chain follows the
+ *                storage space getjoinery answers (specs/easy_signup_completion.md WP4)
  * @version 1.35 - a standalone project archive leaves out the backup_exclude names too, as the chain does
  * @version 1.34 - a manager request's objects_missing (what the management node's listing of the same space proved
  *                absent) reaches the plan; the run's epoch is retired when backup storage lost an object under it
@@ -474,11 +489,17 @@ class BackupRunner {
 
 		$base = self::output_dir();
 
+		// getjoinery's backup storage: no credential here, every request is
+		// signed there over this site's connected key, and the run is opened,
+		// finished and aborted there as a manager run is at its broker.
+		$broker = $target->is_service() ? $target->service_broker() : null;
+
 		return array(
 			'profile'      => BackupProfile::SITE,
 			// Where the run goes, recorded on its history row: one of this
 			// site's own targets, used directly.
 			'destination'  => 'target',
+			'broker'       => $broker,
 			'type'         => $type,
 			'mode'         => $mode,
 			'full_days'    => max(0, (int)self::setting('backup_full_interval_days')),
@@ -487,7 +508,7 @@ class BackupRunner {
 			'encrypt'      => $encrypt,
 			'recipients'   => BackupEnvelope::recipients(),
 			'recovery_fpr' => BackupRecoveryKey::fingerprint(BackupRecoveryKey::public_key()),
-			'slug'         => self::slug(),
+			'slug'         => self::slug_for($target),
 			'project'      => basename(PathHelper::getSiteRoot()),
 			'base_dir'     => $base,
 			'output_dir'   => BackupProfile::output_dir(BackupProfile::SITE, $base),
@@ -495,8 +516,10 @@ class BackupRunner {
 			'keep_local'   => max(0, (int)self::setting('backup_local_retention_days')),
 			'delete_local' => (string)self::setting('backup_delete_local_after_upload') === '1',
 			// This site prunes its own backup storage. It holds the credentials, and the
-			// backups being counted are its own.
-			'prunes_cloud' => true,
+			// backups being counted are its own. getjoinery's storage is pruned by
+			// getjoinery: its broker signs no delete, and retention here removes
+			// the records only, by the same rule and window.
+			'prunes_cloud' => ($broker === null),
 			// Offloaded files are stored in this backup storage and indexed by every run
 			// with files in it; a database-only backup carries no files and its
 			// profile is not enabled for objects. What backup storage holds is read
@@ -753,6 +776,25 @@ class BackupRunner {
 	}
 
 	/**
+	 * The folder a site run to $target is named under: getjoinery's backup
+	 * storage signs only inside the folder it keeps for this site
+	 * (backup_service_folder, written by enrolling); every other target takes
+	 * the site's own slug. Kept apart so choosing getjoinery never renames the
+	 * runs already in a bucket of the site's own.
+	 */
+	public static function slug_for(BackupTarget $target) {
+		if ($target->is_service()) {
+			$folder = trim((string)self::setting('backup_service_folder'));
+			if ($folder === '') {
+				throw new BackupRunnerException('getjoinery backup storage has no folder recorded for this site. '
+					. 'Choose it again on the Backups page.');
+			}
+			return self::validate_slug($folder);
+		}
+		return self::slug();
+	}
+
+	/**
 	 * The slug becomes an object key segment and a delete prefix, so it is
 	 * checked wherever it comes from — a setting on this site, or a value handed
 	 * over with a manager-profile run. Anything outside this set could widen a
@@ -867,6 +909,12 @@ class BackupRunner {
 			}
 			return 'service:' . (string)$plan['target']->get('bkt_name');
 		}
+		// getjoinery's backup storage: the space its broker took the run in,
+		// once a run is open. A page that only reads never opens one.
+		$broker = $plan['broker'] ?? null;
+		if ($broker instanceof ServicesShelfBroker && $broker->begun()) {
+			return 'space:' . (int)$broker->space_id();
+		}
 		return $plan['target']->key ? 'target:' . (int)$plan['target']->key : null;
 	}
 
@@ -877,6 +925,9 @@ class BackupRunner {
 				return 'space:' . (int)$row->get('bkh_remote_space_id');
 			}
 			return 'service:' . (string)$row->get('bkh_target_name');
+		}
+		if ((int)$row->get('bkh_remote_space_id') > 0) {
+			return 'space:' . (int)$row->get('bkh_remote_space_id');
 		}
 		return (string)$row->get('bkh_destination') === 'target'
 			? 'target:' . (int)$row->get('bkh_bkt_backup_target_id')
@@ -889,6 +940,15 @@ class BackupRunner {
 	 * plan (slug, working directories, recipients) is this site's own.
 	 */
 	public static function plan_for_target(array $plan, BackupTarget $target) {
+		// getjoinery's backup storage names runs under its own folder
+		// (slug_for()): crossing to or from it takes that target's name;
+		// between a site's own buckets the plan's slug stands.
+		if (($plan['profile'] ?? '') === BackupProfile::SITE) {
+			$was_service = ($plan['target'] ?? null) instanceof BackupTarget && $plan['target']->is_service();
+			if ($target->is_service() || $was_service) {
+				$plan['slug'] = self::slug_for($target);
+			}
+		}
 		$plan['target'] = $target;
 		return $plan;
 	}
@@ -1805,7 +1865,7 @@ class BackupRunner {
 		try {
 			$plan['broker']->finish((string)$chain_id);
 		} catch (\Throwable $e) {
-			throw new BackupRunnerException('The management node did not record this run, so it is not kept: ' . $e->getMessage());
+			throw new BackupRunnerException('Backup storage did not record this run, so it is not kept: ' . $e->getMessage());
 		}
 	}
 
@@ -1851,6 +1911,9 @@ class BackupRunner {
 	 * day apart.
 	 */
 	public static function enforce_chain_retention(array $plan, ?array &$pruned_indexes = null, $now = null) {
+		if (($plan['broker'] ?? null) instanceof ServicesShelfBroker) {
+			return self::reconcile_service_records($plan, $now);
+		}
 		if (empty($plan['keep_days'])) {
 			return 0;
 		}
@@ -1888,6 +1951,11 @@ class BackupRunner {
 				// old target, and a 404 from the wrong bucket is not a deletion.
 				foreach ($deletes ? $chains[$cid] : array() as $row) {
 					$rplan = self::row_plan($plan, $row, $targets);
+					// A run kept in getjoinery's backup storage is pruned there,
+					// whatever this site backs up to now: its records go below.
+					if ($rplan['target'] instanceof BackupTarget && $rplan['target']->is_service()) {
+						continue;
+					}
 					// Read what this run's index names BEFORE it goes: the object
 					// family is pruned by exactly that, per target
 					// (enforce_object_retention).
@@ -2626,7 +2694,8 @@ class BackupRunner {
 					continue;
 				}
 				$target = new BackupTarget((int)$tid, TRUE);
-				if (!$target->key || $target->get('bkt_delete_time')) {
+				// getjoinery's backup storage prunes its own objects.
+				if (!$target->key || $target->get('bkt_delete_time') || $target->is_service()) {
 					continue;
 				}
 				$deleted += BackupObjects::prune_site(self::plan_for_target($plan, $target), $candidates,
@@ -2687,6 +2756,12 @@ class BackupRunner {
 	 * nothing. Chains are pruned whole by enforce_chain_retention.
 	 */
 	public static function enforce_cloud_retention(array $plan, ?array &$pruned_indexes = null, $now = null) {
+		// getjoinery's backup storage: its records follow what getjoinery
+		// holds (enforce_chain_retention() reconciles them, chains and
+		// standalone runs alike).
+		if (($plan['broker'] ?? null) instanceof ServicesShelfBroker) {
+			return 0;
+		}
 		if (empty($plan['keep_days'])) {
 			return 0;
 		}
@@ -2717,9 +2792,14 @@ class BackupRunner {
 				continue;
 			}
 			try {
-				if ($deletes) {
+				$rplan = $deletes ? self::row_plan($plan, $old, $targets) : null;
+				// A run kept in getjoinery's backup storage is pruned there (see
+				// enforce_chain_retention): only its record goes.
+				if ($rplan !== null && $rplan['target'] instanceof BackupTarget && $rplan['target']->is_service()) {
+					$rplan = null;
+				}
+				if ($rplan !== null) {
 					// From the target this run went to (see enforce_chain_retention).
-					$rplan = self::row_plan($plan, $old, $targets);
 					if ($pruned_indexes !== null) {
 						$tid = (int)($rplan['target']->key ?? 0);
 						$pruned_indexes[$tid] = ($pruned_indexes[$tid] ?? array()) + self::index_entries_of_rows($rplan, array($old));
@@ -2765,6 +2845,110 @@ class BackupRunner {
 	}
 
 	/**
+	 * A site's runs in getjoinery's backup storage stay on its list exactly
+	 * while getjoinery still holds them. getjoinery prunes by its own rule
+	 * (whole chains, the newest verified one kept), so this site deletes
+	 * nothing there and ages nothing out by its own window: a chain whose
+	 * folder getjoinery no longer lists, or a standalone run none of whose
+	 * archives it lists, is marked pruned, a chain only as a whole.
+	 *
+	 * One small listing per point, not the whole site: the offloaded-file
+	 * store (most of the keys on a site with many files) is never listed
+	 * here. Each listing names the point below the profile segment and
+	 * getjoinery answers it in every space, so a run recorded before a move
+	 * still matches. A listing that fails, or that a storage space did not
+	 * answer, concludes nothing about its point; a run newer than
+	 * RECONCILE_GRACE_SECONDS is left for the next pass.
+	 *
+	 * @return int runs and chains marked pruned
+	 */
+	private static function reconcile_service_records(array $plan, $now = null) {
+		$now = ($now === null) ? time() : (int)$now;
+		$broker = $plan['broker'];
+		$bucket = (string)$plan['target']->get('bkt_bucket');
+		$segment = '/' . BackupProfile::path_segment(BackupProfile::SITE) . '/';
+		$base = $broker->base() . ltrim($segment, '/');
+		// A key's name below the profile segment ({chain}/{name}, or a
+		// standalone archive's name), '' when it has none.
+		$below = function ($key) use ($segment) {
+			$key = '/' . ltrim((string)$key, '/');
+			$at = strrpos($key, $segment);
+			return $at === false ? '' : substr($key, $at + strlen($segment));
+		};
+		$rows = new MultiBackupHistory(array('outcome' => 'success', 'offsite' => true, 'deleted' => false,
+			'slug' => $plan['slug'], 'profile' => BackupProfile::SITE), array('bkh_start_time' => 'DESC'), 2000, 0);
+		$groups = array();
+		foreach ($rows as $row) {
+			if ((int)$row->get('bkh_bkt_backup_target_id') !== (int)$plan['target']->key) {
+				continue;
+			}
+			$cid = (string)$row->get('bkh_chain_id');
+			$groups[$cid !== '' ? 'chain:' . $cid : 'run:' . (int)$row->key][] = $row;
+		}
+		$pruned = 0;
+		foreach ($groups as $gid => $group) {
+			$newest = 0;
+			foreach ($group as $row) {
+				$newest = max($newest, (int)strtotime((string)$row->get('bkh_start_time') . ' UTC'));
+			}
+			if ($newest > $now - self::RECONCILE_GRACE_SECONDS) {
+				continue;
+			}
+			// What to ask about: a chain's folder, or a standalone run's archives.
+			$names = array();
+			if (strpos($gid, 'chain:') === 0) {
+				$names[] = substr($gid, 6) . '/';
+			} else {
+				foreach ($group as $row) {
+					foreach ($row->object_keys() as $key) {
+						$names[] = $below($key);
+					}
+				}
+			}
+			// Nothing to ask about is nothing concluded.
+			if (!$names) {
+				continue;
+			}
+			$held = false;
+			foreach ($names as $name) {
+				// A key that cannot be placed is not proof of absence.
+				if ($name === '' || $name === '/') {
+					$held = true;
+					break;
+				}
+				try {
+					$listed = S3Signer::list($broker, $bucket, $base . $name, 1);
+				} catch (\Throwable $e) {
+					error_log('BackupRunner: could not ask getjoinery about ' . $name . ': ' . $e->getMessage());
+					$held = true;
+					break;
+				}
+				if ($listed || !$broker->listing_complete()) {
+					$held = true;
+					break;
+				}
+			}
+			if ($held) {
+				continue;
+			}
+			$stamp = gmdate('Y-m-d H:i:s');
+			foreach ($group as $row) {
+				$row->set('bkh_pruned_time', $stamp);
+				$row->set('bkh_delete_time', $stamp);
+				$row->save();
+			}
+			if (strpos($gid, 'chain:') === 0) {
+				self::rmtree(self::chain_dir($plan, substr($gid, 6)));
+			}
+			$pruned++;
+		}
+		return $pruned;
+	}
+
+	/** A run in getjoinery's storage this new is not reconciled yet: its finish may still be landing. */
+	const RECONCILE_GRACE_SECONDS = 7200;
+
+	/**
 	 * Delete every object a run recorded, from the target in the plan, which is
 	 * the run's own. A 404 is success: the object is not there, which is the
 	 * state being asked for, and in the run's own bucket that means it is gone.
@@ -2804,6 +2988,10 @@ class BackupRunner {
 		}
 		$said = array();
 		foreach ($targets as $t) {
+			// getjoinery's backup storage sweeps its own buckets.
+			if ($t->is_service()) {
+				continue;
+			}
 			try {
 				$folder = BackupTarget::normalise_prefix((string)$t->get('bkt_path_prefix')) . '/' . $plan['slug'] . '/';
 				$line = HiddenVersionSweep::sentence(HiddenVersionSweep::run($t, $folder), (string)$t->get('bkt_name'));

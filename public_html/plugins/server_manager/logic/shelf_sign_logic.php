@@ -15,6 +15,8 @@
  * for a key a finished run completed answers {exists, key, bytes, sha256}
  * instead of a link.
  *
+ * @version 1.5 - a get may ask for a longer life (expires, up to ShelfBroker::GET_LIFE_MAX_SECONDS): a verify
+ *                hands its links to a run that can outlast an hour (specs/easy_signup_completion.md WP4)
  * @version 1.4 - a write for a completed key answers 'exists' with what is there (specs/storage_targets.md §6)
  * @version 1.3 - space_id: a get names the storage space it reads from (specs/storage_targets.md WP4)
  * @version 1.2 - a signing failure is S3Signer's (the one presigner)
@@ -38,6 +40,7 @@ function shelf_sign_logic(array $input): LogicResult {
 					'first'     => intval($input['first'] ?? 1),
 					'count'     => intval($input['count'] ?? ShelfBroker::PARTS_PER_BATCH),
 					'space_id'  => intval($input['space_id'] ?? 0),
+					'expires'   => intval($input['expires'] ?? 0),
 				));
 		});
 	} catch (ShelfBrokerException $e) {
@@ -63,6 +66,7 @@ function shelf_sign_logic_descriptor(): array {
 			'upload_id' => array('type' => 'string',  'required' => false, 'label' => 'Multipart upload id'),
 			'first'     => array('type' => 'integer', 'required' => false, 'label' => 'First part number of the batch'),
 			'count'     => array('type' => 'integer', 'required' => false, 'label' => 'Parts in the batch (≤ 10)'),
+			'expires'   => array('type' => 'integer', 'required' => false, 'label' => 'Seconds a get link lives (an hour when absent; at most six)'),
 		),
 	);
 }

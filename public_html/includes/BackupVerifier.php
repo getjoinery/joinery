@@ -32,6 +32,9 @@
  * the shape format_contract() prints; nothing here prints, and nothing here
  * accepts a key other than the file it is pointed at.
  *
+ * @version 1.5 - a pass on a site run kept in getjoinery's backup storage is reported there (shelf_verified_run):
+ *                getjoinery's retention keeps the newest verified chain, and its alarm counts a customer never
+ *                verified until it hears (specs/easy_signup_completion.md WP4)
  * @version 1.4 - reads per-kind plans (manifest version 2): every tree kind is read and counted, the archive
  *                root comes from the files or data archive, disk_needed() counts each tree kind's full and
  *                a physical database's raw size, and a rehearsal of a pgdata run says it cannot load one
@@ -695,9 +698,35 @@ class BackupVerifier {
 				$row->set('bkh_verify_message', substr(self::describe($result), 0, 4000));
 			}
 			$row->save();
+			if ($outcome === self::RESULT_PASS) {
+				self::report_to_service($row);
+			}
 			$stamped++;
 		}
 		return $stamped;
+	}
+
+	/**
+	 * Tell getjoinery a site run kept in its backup storage verified: the run
+	 * it opened is the one this row records. Best effort — the row here is the
+	 * authority, and the next pass reports again.
+	 */
+	public static function report_to_service(BackupHistory $row, $client = null): bool {
+		$run_id = (int)$row->get('bkh_remote_run_id');
+		if ($run_id <= 0 || (string)$row->get('bkh_profile') !== BackupProfile::SITE) {
+			return false;
+		}
+		try {
+			$target = $row->stored_target();
+			if ($target === null || !$target->is_service()) {
+				return false;
+			}
+			($client ?? ServicesShelfBroker::$client_for_tests ?? new ServicesClient())->shelfVerifiedRun($run_id);
+			return true;
+		} catch (\Throwable $e) {
+			error_log('BackupVerifier: could not tell getjoinery run ' . $run_id . ' verified: ' . $e->getMessage());
+			return false;
+		}
 	}
 
 	/**

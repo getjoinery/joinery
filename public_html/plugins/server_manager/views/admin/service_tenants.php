@@ -7,6 +7,7 @@
  * Every self-hosted site renting this plane's outbound mail or backup storage,
  * one row per service, with the grant (a date) and release acts.
  *
+ * @version 1.3 - a site's own getjoinery backup storage target is never offered as where a customer's backups move
  * @version 1.2 - a backup storage row says which target holds it (and any it was moved away from) and moves
  * @version 1.1 - a node-linked row (a site moved off Managed) names its node instead of a key
  * @version 1.0 - specs/services_phase2_platform.md §10 item 5
@@ -102,7 +103,9 @@ its node's fleet backups.</p>
 				if ($t['spaces'] || ($s['service'] === 'shelf' && !$row->is_node_linked() && $s['state'] !== 'unpaid')) {
 					$move_options = array();
 					foreach ($move_targets as $mt) {
-						if (!$active_target || (int)$mt->key !== (int)$active_target->key) {
+						// Not a getjoinery backup storage target of this site's own: it is
+						// a customer of another operator, never somewhere to keep customers.
+						if (!$mt->is_service() && (!$active_target || (int)$mt->key !== (int)$active_target->key)) {
 							$move_options[(string)(int)$mt->key] = $mt->get('bkt_name');
 						}
 					}

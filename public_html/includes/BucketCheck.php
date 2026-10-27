@@ -19,6 +19,7 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.8 - a target with no credential of its own (getjoinery backup storage) names its bucket with no endpoint
  * @version 1.7 - a key missing only the lock capabilities is told what that costs (no double space)
  * @version 1.6 - B2_MINT_CAPABILITIES is gone: no key is minted per run (specs/storage_targets.md WP5)
  * @version 1.5 - the file store's buckets are its target rows (specs/storage_targets.md WP6); a backup target's
@@ -91,7 +92,8 @@ class BucketCheck {
 			$endpoint = '';
 			try {
 				$creds = $target->get_credentials();
-				$endpoint = (string)($creds['endpoint'] ?? '');
+				// getjoinery's backup storage holds no credential here (WP4).
+				$endpoint = is_array($creds) ? (string)($creds['endpoint'] ?? '') : '';
 			} catch (Exception $e) {
 				// An unreadable credential still names its bucket; the name is what matters here.
 			}
