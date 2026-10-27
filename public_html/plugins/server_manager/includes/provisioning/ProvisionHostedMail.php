@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.4 - the subaccount is created at the allowance, with no buyer email (B160)
  * @version 1.3 - the provider acts are Smtp2GoLeg's, shared with the services tenant enrol
  * @version 1.2 - a test purchase's subaccount label and SMTP username start with test_
  * @version 1.1 - server_manager_smtp2go_sandbox_users: a rehearsal plane mints every customer SMTP user
@@ -167,7 +168,7 @@ class ProvisionHostedMail {
 			// forgotten one is not.
 			$id = Smtp2GoLeg::createSubaccount($this->client,
 				$provision->external_name_prefix() . 'Joinery hosted — ' . $domain,
-				trim((string)$provision->get('cvp_buyer_email')));
+				self::send_allowance());
 			$provision->set('cvp_smtp2go_subaccount_id', $id);
 			$provision->save();
 		}

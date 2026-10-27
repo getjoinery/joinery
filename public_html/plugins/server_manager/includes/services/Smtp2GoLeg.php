@@ -22,6 +22,9 @@
  *
  * Nothing here ever puts the master key on a box.
  *
+ * @version 1.2 - a blank allowance reads as 2,000, the default
+ * @version 1.1 - createSubaccount() takes the allowance, not an email: the provider would invite
+ *   the email into its console
  * @version 1.0 - lifted from ProvisionHostedMail
  */
 class Smtp2GoLeg {
@@ -47,8 +50,8 @@ class Smtp2GoLeg {
 	 * BEFORE calling setLimit() — a crash between the two would otherwise
 	 * leave a subaccount at the provider that nothing here names again.
 	 */
-	public static function createSubaccount(Smtp2GoClient $client, string $label, string $email): string {
-		return $client->addSubaccount($label, $email);
+	public static function createSubaccount(Smtp2GoClient $client, string $label, int $allowance): string {
+		return $client->addSubaccount($label, $allowance);
 	}
 
 	/** Cap the subaccount at the allowance. Convergent; safe to repeat. */
@@ -131,7 +134,7 @@ class Smtp2GoLeg {
 	/** The monthly send allowance every customer subaccount is capped at. */
 	public static function sendAllowance(): int {
 		$value = (int)Globalvars::get_instance()->get_setting('server_manager_hosted_send_allowance', true, true);
-		return $value > 0 ? $value : 1000;
+		return $value > 0 ? $value : 2000;
 	}
 }
 

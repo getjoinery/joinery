@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.6 - the mail subaccount is created at the allowance, with no member email (B160)
  * @version 1.5 - releasing mail removes the sender domain and the SMTP user before closing the subaccount
  * @version 1.4 - releasing backup storage drains the customer's space; reactivating gives it one again
  * @version 1.3 - backup storage for a customer lives in its storage space: enrol opens one on the target
@@ -189,7 +190,6 @@ class JoineryServices {
 			$row->save();
 			throw new JoineryServicesException('Outbound mail is not available from this operator yet: no mail provider is configured.');
 		}
-		$user = new User((int)$row->get('svt_usr_user_id'), TRUE);
 		$prefix = self::externalNamePrefix($row);
 		if ((string)$row->get('svt_state') === ServiceTenant::STATE_UNPAID) {
 			$row->set('svt_state', ServiceTenant::STATE_PROVISIONING);
@@ -202,7 +202,7 @@ class JoineryServices {
 			$subaccount = trim((string)$row->get('svt_provider_subaccount_id'));
 			if ($subaccount === '') {
 				$subaccount = Smtp2GoLeg::createSubaccount($client,
-					$prefix . 'Joinery services — ' . $host, trim((string)$user->get('usr_email')));
+					$prefix . 'Joinery services — ' . $host, self::allowance(ServiceTenant::SERVICE_MAIL));
 				$row->set('svt_provider_subaccount_id', $subaccount);
 				$row->save();
 			}

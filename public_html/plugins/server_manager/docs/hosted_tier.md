@@ -218,7 +218,7 @@ one action for its service, and only once that allowance is actually near.
 
 | Allowance | Measured by | At 100% |
 |---|---|---|
-| Sends per month | the mail provider's own count | the provider refuses until the month rolls |
+| Sends per month | the mail provider's own count | the banner says so. The provider refuses at its cap, the smallest subaccount size it offers that covers the allowance (the default allowance, 2,000, is itself the smallest), until its billing cycle rolls |
 | Backup storage | the retention pass's listing (`mgn_backup_shelf_bytes`) | this node's fleet backups are paused, the site's banner says so, and nothing is deleted. They resume on their own once backup storage comes back under the allowance. |
 | Disk | the node's own status check | nothing automatic — a full disk stops the site on its own |
 | Outbound transfer | the account-wide pool | one operator alert per billing period. There is no per-customer figure, because there is no per-customer bill. |

@@ -33,6 +33,10 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.5 - the subaccount calls match the provider's published API, checked live 2026-10-26:
+ *   subaccount/add takes fullname and limit and no email (an email invites that address to
+ *   the provider's console); edit, close and reopen name the subaccount as id; a limit is
+ *   one of the provider's fixed sizes (subaccountLimit)
  * @version 1.4 - removeDomain(): a services tenant that changes host releases its old sender domain
  * @version 1.3 - mintUsername() takes a prefix (test_ for a test purchase)
  * @version 1.2 - addSmtpUser() can mint the user in the provider's sandbox status (accepted, never delivered)
@@ -49,6 +53,13 @@ class Smtp2GoException extends Exception {}
 class Smtp2GoClient {
 
 	const API_BASE = 'https://api.smtp2go.com/v3/';
+
+	/**
+	 * The monthly limits the provider accepts on a subaccount, and no others
+	 * (subaccount/add and subaccount/edit, "Valid values").
+	 */
+	const SUBACCOUNT_LIMITS = array(2000, 5000, 10000, 20000, 30000, 40000, 50000, 60000, 80000,
+		100000, 250000, 500000, 1000000, 2000000, 3000000, 5000000, 10000000);
 
 	/** @var Client */
 	private $http;
@@ -84,12 +95,15 @@ class Smtp2GoClient {
 	 *
 	 * The name carries the customer's domain so a person looking at the
 	 * provider's console can tell whose it is without a lookup table here.
+	 * No email is sent: the provider invites that address into its console as
+	 * the subaccount's first team member, and a hosted customer never has an
+	 * account at the provider. The limit is set here too, so the subaccount
+	 * never stands at the provider's default even for a moment.
 	 */
-	public function addSubaccount(string $label, string $email): string {
+	public function addSubaccount(string $label, int $allowance): string {
 		$data = $this->post('subaccount/add', array(
-			'subaccount_name' => $label,
-			'company_name'    => $label,
-			'email'           => $email,
+			'fullname' => $label,
+			'limit'    => self::subaccountLimit($allowance),
 		));
 		$id = self::firstScalar($data, array('subaccount_id', 'id'), array('subaccount', 'subaccounts'));
 		if ($id === '') {
@@ -105,21 +119,39 @@ class Smtp2GoClient {
 	 * one number in one place governs the whole hosted fleet. Convergent: it is
 	 * safe to call with the value already in force.
 	 */
-	public function setSubaccountLimit(string $subaccount_id, int $limit): void {
+	public function setSubaccountLimit(string $subaccount_id, int $allowance): void {
 		$this->post('subaccount/edit', array(
-			'subaccount_id' => $subaccount_id,
-			'limit'         => max(0, $limit),
+			'id'    => $subaccount_id,
+			'limit' => self::subaccountLimit($allowance),
 		));
 	}
 
-	/** Stop a subaccount sending. Reversible — see reopenSubaccount(). */
+	/**
+	 * The provider limit for an allowance: the smallest size it accepts that
+	 * covers the allowance, so a customer is never capped below what they were
+	 * promised. Above the largest size, the largest.
+	 */
+	public static function subaccountLimit(int $allowance): int {
+		foreach (self::SUBACCOUNT_LIMITS as $size) {
+			if ($size >= $allowance) {
+				return $size;
+			}
+		}
+		return end(self::SUBACCOUNT_LIMITS);
+	}
+
+	/**
+	 * Stop a subaccount sending. Reversible — see reopenSubaccount(). The
+	 * subaccount calls name it as id; subaccount_id elsewhere means acting on
+	 * its behalf.
+	 */
 	public function closeSubaccount(string $subaccount_id): void {
-		$this->post('subaccount/close', array('subaccount_id' => $subaccount_id));
+		$this->post('subaccount/close', array('id' => $subaccount_id));
 	}
 
 	/** Let a closed subaccount send again. */
 	public function reopenSubaccount(string $subaccount_id): void {
-		$this->post('subaccount/reopen', array('subaccount_id' => $subaccount_id));
+		$this->post('subaccount/reopen', array('id' => $subaccount_id));
 	}
 
 	// ── Sender domains ────────────────────────────────────────────────────────
