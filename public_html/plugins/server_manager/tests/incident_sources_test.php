@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.11 - plane:backups_stopped waits two days, not a week, for a new node with no recovery key
  * @version 1.10 - plane:site_refresh: a host running site containers with no nightly timer on (fleet_security_patching WP4)
  * @version 1.9 - plane:site_refresh: a site left down by a container replacement (critical), one rolled back, a
  *                base that did not build, or an engine host with no passing check for two days (multi_tenant_host_hardening D9)
@@ -560,13 +561,13 @@ $set(array('mgn_web_root' => '/var/www/html/sources/public_html', 'mgn_create_ti
 check($holding() === array('stopped') && IncidentBackupVerdict::for_node($node)['kind'] === 'stopped',
 	'No recovery key on the node: backups cannot run, so backups have stopped', json_encode($holding()));
 // A new site has had no chance to set one up, and only its own administrator
-// can: the panel says so at once, the incident waits a week (seen on every
+// can: the panel says so at once, the incident waits two days (seen on every
 // new test box, 2026-10-17).
 $set(array('mgn_create_time' => gmdate('Y-m-d H:i:s', time() - 86400)));
 check($holding() === array() && IncidentBackupVerdict::for_node($node)['label'] === 'Cannot be backed up: no verified recovery key on the node',
 	'A day-old node with no recovery key: the dashboard says so, no incident yet', json_encode($holding()));
-$set(array('mgn_create_time' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)));
-check($holding() === array('stopped'), 'Past its first week, the same node opens it', json_encode($holding()));
+$set(array('mgn_create_time' => gmdate('Y-m-d H:i:s', time() - 3 * 86400)));
+check($holding() === array('stopped'), 'Past its first two days, the same node opens it', json_encode($holding()));
 // From here on the node holds a proven key, so each case is judged on its runs.
 $set(array('mgn_last_status_data' => array('backup_recovery_state' => 'proven'), 'mgn_backup_recovery_fpr' => str_repeat('ab', 16)));
 $kinds_seen = array();

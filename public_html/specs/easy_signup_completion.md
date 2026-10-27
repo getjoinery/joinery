@@ -337,6 +337,13 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   default. HostedMailSettingsMap 1.1 defaultFrom(): when hosted mail arrives and the site has no From
   address, it gets hello@<domain> with Reply-To the owner account's address (the buyer's, set at
   install); never over an address already chosen. Node-side, so it reaches sites with the release.
+- **Send proven 10-27 04:07 UTC:** test order 38345 moved to its own domain (A record wp2 added;
+  mail.wp2 domain, its CNAMEs and login -ee1851 removed; mail step set back to subaccount_created).
+  The plane added wp2.joinerytest.com, its two CNAMEs were published by hand (buyer's own zone),
+  it verified, and login -9de15f was pushed (mail_state done 04:06). From set by hand to
+  hello@wp2.joinerytest.com (the site's release predates defaultFrom). A password reset left no
+  Send failed line in the site's log and moved the subaccount's plan_used 0 to 1: sandbox sends
+  count against the allowance. Owed: defaultFrom on a fresh hosted site once released.
 - **B164 (fixed):** with the SMTP server unreachable, the test site's password reset hung for minutes
   and ended in a 502 Proxy Error (curl 01:48 UTC): PHPMailer waits 300 s to connect and 300 s per
   reply. SmtpMailer 2.5 gives up after 30 s (an unanswered connect measured 30.0 s); the failed send
@@ -347,8 +354,10 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   1,000 default; the getjoinery content pack (apply_hosted_product 3.2) says 2,000 emails a month.
   Product rows already written keep their text until the pack is run again (getjoinery) or the
   description is edited (dev).
-- **B157 (open, step 4):** getjoinery.com's SPF names only `mailgun.org`; add
-  `include:spf.smtp2go.com` with the switch. DMARC passes on DKIM alone, so this is not blocking.
+- **B157 (closed 10-27, not needed):** getjoinery.com's SPF names only `mailgun.org`. SMTP2GO's mail is
+  SPF-checked against its return path (`em1127764.getjoinery.com`, a CNAME to SMTP2GO's own record),
+  never the apex, so the apex SPF needs no SMTP2GO include. Its `-all` stays. Revisit what it lists
+  when Mailgun is removed (step 5).
 - Run one Managed test order on dev to `mail_state = done`, and send a message from the site.
 - Then the self-hosted Connect path: a second dev box connects to dev's plane, enrols mail,
   sends, and switches back to its own provider (`services_phase2_platform.md` §11 steps 1 and 3).
@@ -361,18 +370,66 @@ and never through the site's email settings. Nothing in the Managed flow needs t
 it rides on the same account and is the first real send through `Smtp2GoProvider`, whose
 suites all run against a stubbed API.
 
+**Key plan (owner 10-27).** Every site that sends has its own subaccount, and its credential lives
+inside it. A key's permission groups limit which calls it makes, not which domain it sends as or
+how much: a main-account key with Emails could send as any domain the account holds. A
+subaccount sends only as the domains verified inside it and stops at its own monthly limit, so a
+leaked or runaway sender is contained to its own domain and cap.
+
+| Sender | Credential | Lives in | Limit |
+|---|---|---|---|
+| getjoinery's plane | API key: Subaccounts, Sender Domains, SMTP Users, Statistics | main account (the only key there) | makes subaccounts, sends nothing |
+| getjoinery's own mail | API key: Emails, Sender Domains | subaccount `getjoinery-own-mail` (zW2WEd) | 20,000 |
+| each Managed customer | SMTP user (built) | its own subaccount | 2,000 |
+| dev's own mail | API key: Emails, Sender Domains | subaccount `dev-own-mail` (e9DwRW) | 2,000 |
+| dev's plane | today's narrow key | main account | can see and close customers' subaccounts |
+
+Dev's plane key is the one exception: making subaccounts needs a main-account key. It stays until
+the first paying customer and is revoked then (owner 10-27); dev then gets an account of its own
+if it keeps testing the Managed mail path. Both own-mail subaccounts were made 10-27 with dev's
+key. A subaccount's API key is made in the provider's console (log into the subaccount, Sending,
+API Keys); no code changes: `Smtp2GoProvider` reads one key and `domain/add` with a subaccount key
+registers the domain inside that subaccount.
+
 1. Check what getjoinery uses Mailgun for, read-only through its agent. `Smtp2GoProvider`
    only sends (its header: not a `RawMessageRelay`); if getjoinery also receives through
    Mailgun, receiving stays there or moves to Postfix on the box, and that is decided first.
-2. The SMTP2GO account is the one WP2 opens (§7). Ask on the call whether getjoinery's own
-   sends and every customer subaccount draw on one monthly allowance.
-3. Dev first: `Smtp2GoProvider` on a test sending domain (`mg.joinerytest.com`), a password
-   reset and a receipt delivered and passing DKIM.
-4. getjoinery: a second key with only the Emails and Sender Domains groups
-   (`Smtp2GoProvider::ENDPOINTS_USED`), separate from the master key, so either is revoked
-   without the other. Add getjoinery.com as a sending domain, publish its three CNAMEs,
-   wait for verified, switch the email settings, send a test.
-5. After a clean day, remove Mailgun. Its DNS records stay until then, so going back is
+   10-27: getjoinery.com's MX is `relay1.getjoinery.com`, so Mailgun only sends. Mailgun holds
+   two of its domains, `getjoinery.com` (selector mailo) and `mail.getjoinery.com` (pic); which
+   one the site sends as, and whether its From matches it (DMARC is strict, adkim=s), is read
+   from its email settings before step 4.
+2. The SMTP2GO account is the one WP2 opens (§7). Ask on the call whether every subaccount draws
+   on the one plan allowance.
+3. Dev first: the `dev-own-mail` key in dev's `smtp2go_api_key`, sending domain
+   `mail.joinerytest.com` (the same shape as `mail.getjoinery.com`: a subdomain with no MX or
+   address record), a password reset and a receipt delivered and passing DKIM.
+   10-27: done for the reset. Key in dev's `smtp2go_api_key` (it lacks `/email/batch`; a refused
+   batch falls back to one send per address). `domain/add` with that key put `mail.joinerytest.com`
+   inside `dev-own-mail` only (the getjoinery subaccount answers that it does not exist); its two
+   CNAMEs (Linode records 48402022, 48402023) verified at once. Dev sends From
+   `info@mail.joinerytest.com`, Reply-To `info@dev.getjoinery.com` (was mailgun,
+   `info@dev.getjoinery.com`, no Reply-To). A reset at 12:48:05 UTC reached test@dev.getjoinery.com at
+   12:48:08: DKIM pass, SPF pass, ham 0.8; plan_used on `dev-own-mail` 0 to 1. So the API path takes
+   a sending subdomain with no MX or address record. Receipt 10-27: a guest test-card purchase
+   ('Test single product', $5, Stripe test mode, buyer gj-buyer8@dev.getjoinery.com) at 15:58 UTC
+   brought the welcome, the email confirmation and 'Your purchase receipt' within 5 seconds, all
+   From `info@mail.joinerytest.com` with DKIM pass and SPF pass; `dev-own-mail` plan_used 1 to 4.
+   DMARC reads none because joinerytest.com publishes no DMARC record (a test domain).
+4. getjoinery: the `getjoinery-own-mail` key in its `smtp2go_api_key`. Add its sending domain,
+   publish the records, wait for verified, switch the email settings, send a test.
+   10-27: key entered by the owner. getjoinery sends From `support@getjoinery.com` while Mailgun
+   signs as `mail.getjoinery.com`; with getjoinery.com's strict DMARC (adkim=s, p=quarantine) its
+   mail FAILS DMARC today (B169: dev's copy of its 08-20 'Your site is ready' mail, DKIM pass, SPF
+   pass, DMARC fail). So the SMTP2GO sending domain is `getjoinery.com` itself, which signs aligned
+   and fixes B169 on the switch. Root cause: `MailgunProvider::send()` always went through `mailgun_domain`,
+   even with the From domain active in the account; it now picks the From domain like the raw relay
+   (MailgunProvider 1.11, commit email-trust-plain). Added to `getjoinery-own-mail` with dev's plane key; it wants
+   CNAME `s1127764._domainkey` -> `dkim.smtp2go.net` and CNAME `em1127764` -> `return.smtp2go.net`
+   in the Cloudflare zone, DNS only (not proxied). Neither touches the apex SPF or Mailgun's records.
+   10-27 15:44 UTC: switched (primary SMTP2GO, fallback Mailgun). The self-test from getjoinery
+   (0.8.542) to test@dev.getjoinery.com arrived From `info@getjoinery.com` with DKIM pass, SPF pass,
+   DMARC pass (B169 closed for getjoinery), ham 1.3; `getjoinery-own-mail` plan_used 0 to 1.
+5. After a clean day (from 10-27 15:44 UTC), remove Mailgun. Its DNS records stay until then, so going back is
    one setting.
 
 ### WP3 — hosted backups have a recovery key
@@ -382,6 +439,30 @@ The Managed product promises backups sealed to a key only the buyer holds
 (inferred 10-25: trace `BackupRunner`'s refusal for a node with no recovery key first). Add the
 recovery-key step to the buyer's first sign-in (the Sites page reveal is the natural place),
 prove one backup lands for a test buyer, and prove a restore.
+
+- **Where the key is made (owner 10-27):** on the buyer's own site, in the existing setup wizard
+  step, not at checkout. A key handed over from getjoinery is exactly what `BackupRunner::plan_manager`
+  refuses (a key arriving over a wire could be anyone's), checkout is the worst place for a
+  password-manager step, and the site does not exist yet at checkout.
+- **Found 10-27 on wp2.joinerytest.com (node 223184, 23 h old):** no backup has ever been
+  dispatched to it. Its hourly key report reads `RECOVERY_KEY=none`, so the fleet run skips it
+  (`RecoveryKeyFleet` state missing). The buyer is not told: the hosted banner on every admin page
+  said "Hosting, email and backups are included … there is nothing to do" over "Backups stored
+  0 MB of 10 GB". The key step was step 8 of the wizard, and one "Finish later" ends the sign-in
+  redirect; a signed-in owner then lands on /profile, which never mentions backups. The step's
+  intro said "Point backups at a storage bucket" on a site the management node backs up, and its
+  covered copy called the key one "its operator holds". `plane:backups_stopped` waited 7 days.
+- **Built 10-27:** `SetupSteps` 1.18: `order` may be a callable; on a managed site
+  Backups is order 6, right after the secure connection (5) the in-browser key needs, and its
+  intro says the management node stores the backups and none run until the owner's key exists.
+  `HostedPlanNotice` 1.3: in trial, subscribed and grace with no proven key, the banner is urgent,
+  says "Your backups are off until you create your recovery key" with a link to the Backups page,
+  and the trial no longer says there is nothing to do. `IncidentSourceBackupsStopped` 1.2: grace
+  2 days. Suites: setup_steps_copy 11/11, hosted_tier 117/117, incident_sources 149/149,
+  manager_coverage 8/8, setup_wizard_gates 31/31, setup_encryption_key_step 16/16.
+- **Owed (A5, after the next publish reaches wp2):** the banner and the step order seen on wp2;
+  create the key there; a backup lands (the 03:00 UTC run, or one dispatched from the node's
+  Backups tab); a restore from it opened with the buyer's key.
 
 ### WP4 — our backup storage for self-hosted sites
 

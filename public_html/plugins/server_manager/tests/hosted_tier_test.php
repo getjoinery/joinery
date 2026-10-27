@@ -411,6 +411,22 @@ check(HostedPlanNotice::level('subscribed', 200, $quiet, '') === 'calm',
 check(!in_array('suspended', HostedPlanNotice::STATES, true),
 	'sending health is not a billing state — the provider owns it, and the banner has no word for it');
 
+// A hosted site with no proven recovery key has no backups at all: the
+// management node's runs seal only to the site's own key. The banner says so
+// as loudly as a lapsing payment, and never "there is nothing to do".
+check(HostedPlanNotice::level('subscribed', 200, $quiet, '', true) === 'urgent'
+	&& HostedPlanNotice::level('trial', 45, $quiet, '', true) === 'urgent',
+	'no recovery key makes the banner urgent, whatever the billing state');
+$wording = (new ReflectionClass('HostedPlanNotice'))->getMethod('wording');
+$wording->setAccessible(true);
+check(strpos($wording->invoke(null, 'trial', 'on December 1, 2026', false)[1], 'nothing to do') !== false
+	&& strpos($wording->invoke(null, 'trial', 'on December 1, 2026', true)[1], 'nothing to do') === false,
+	'a trial says there is nothing to do only while the backups it includes are actually running');
+check(!in_array('services', HostedPlanNotice::BACKED_UP_STATES, true)
+	&& !in_array('shutdown', HostedPlanNotice::BACKED_UP_STATES, true),
+	'the key warning is for sites the management node backs up, not a self-hosted services site or a shut-down one');
+check(!HostedPlanNotice::backupKeyMissing(), 'a deployment nobody hosts is never told its backups are off');
+
 check(HostedPlanNotice::daysUntil('') === null && HostedPlanNotice::daysUntil('soon') === null,
 	'an unreadable date is null, not zero — zero would read as "today"');
 

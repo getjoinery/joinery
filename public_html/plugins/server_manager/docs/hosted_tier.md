@@ -39,7 +39,10 @@ system.
 
 From then on the site's own admin pages carry a banner (`HostedPlanNotice`)
 saying what the hosting arrangement is, when the next date falls, and where an
-allowance is running out.
+allowance is running out. While the site holds no proven backup recovery key,
+the banner is urgent and says the backups are off until the key exists, with a
+link to the Backups page (`HostedPlanNotice::backupKeyMissing()`, for the trial,
+subscribed and grace states).
 
 ## Doctrine
 
@@ -184,7 +187,11 @@ Two consequences follow, and both are fleet-wide rather than hosted-only:
 - **Backups stay amber until the customer creates their recovery key.** A
   machine with no verified key of its own refuses to back up at all, by design.
   The fleet scheduler reports such a node as *awaiting its recovery key* and
-  does not dispatch at it; the wizard's Backups step is the one ceremony.
+  does not dispatch at it; the wizard's Backups step is the one ceremony. On a
+  managed site that step comes right after the secure connection rather than
+  near the end, the admin banner above says backups are off until it is done, and
+  `plane:backups_stopped` opens on the management node once the node is two days
+  old without a key.
 
 ## The billing clock, and what happens when a payment fails
 
