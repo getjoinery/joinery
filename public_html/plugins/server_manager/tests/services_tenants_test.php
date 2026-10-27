@@ -174,7 +174,7 @@ check($paths($calls) === array('subaccount/add', 'subaccount/edit', 'domain/add'
 	'subaccount, limit, sender domain, SMTP user, one verify probe — in that order', json_encode($paths($calls)));
 // The provider's published fields (checked live 2026-10-26): fullname, and no
 // email, which would invite that address into the provider's console.
-check(($calls[0]['body']['fullname'] ?? '') === 'Joinery services — ' . $host
+check(($calls[0]['body']['fullname'] ?? '') === 'Joinery-services-' . str_replace('.', '-', $host)
 	&& !isset($calls[0]['body']['email']) && !isset($calls[0]['body']['subaccount_email']),
 	'the subaccount is labelled for the host and invites nobody', json_encode($calls[0]['body']));
 check(($calls[0]['body']['limit'] ?? 0) === 2000, 'it is created at its limit, never the provider\'s default');
@@ -460,7 +460,9 @@ $reply(array(array('id' => 'sub-sand'), array(), $domain_entry('mail.' . $host4,
 	array('username' => 'x'), $domain_entry('mail.' . $host4, false)));
 JoineryServices::enrol($owner->key, $key3_id, 'mail', $host4, $client);
 $calls = $drain();
-check(strpos((string)($calls[0]['body']['fullname'] ?? ''), 'test_') === 0, 'the subaccount label starts test_');
+// The provider's name is letters and digits joined by hyphens, so test_ arrives as 'test-'.
+check(strpos((string)($calls[0]['body']['fullname'] ?? ''), 'test-Joinery-services-') === 0, 'the subaccount name starts test-',
+	(string)($calls[0]['body']['fullname'] ?? ''));
 check(strpos((string)($calls[3]['body']['username'] ?? ''), 'test_') === 0 && ($calls[3]['body']['status'] ?? '') === 'sandbox',
 	'the SMTP user starts test_ and is minted in the sandbox');
 harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '');

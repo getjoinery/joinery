@@ -33,6 +33,8 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.6 - subaccountName(): the provider refuses some characters in a subaccount name (live
+ *   2026-10-27) and does not say which, so the name is letters and digits joined by hyphens
  * @version 1.5 - the subaccount calls match the provider's published API, checked live 2026-10-26:
  *   subaccount/add takes fullname and limit and no email (an email invites that address to
  *   the provider's console); edit, close and reopen name the subaccount as id; a limit is
@@ -102,7 +104,7 @@ class Smtp2GoClient {
 	 */
 	public function addSubaccount(string $label, int $allowance): string {
 		$data = $this->post('subaccount/add', array(
-			'fullname' => $label,
+			'fullname' => self::subaccountName($label),
 			'limit'    => self::subaccountLimit($allowance),
 		));
 		$id = self::firstScalar($data, array('subaccount_id', 'id'), array('subaccount', 'subaccounts'));
@@ -124,6 +126,19 @@ class Smtp2GoClient {
 			'id'    => $subaccount_id,
 			'limit' => self::subaccountLimit($allowance),
 		));
+	}
+
+	/**
+	 * The name the provider is given for a label. It refuses some characters
+	 * ("Please ensure the Name field only contains valid characters") without
+	 * saying which, and a subaccount cannot be deleted, so names are not found
+	 * out by trial: every run of anything but letters and digits becomes one
+	 * hyphen ("test_Joinery hosted — a.example.com" is
+	 * "test-Joinery-hosted-a-example-com").
+	 */
+	public static function subaccountName(string $label): string {
+		$name = trim(preg_replace('/[^A-Za-z0-9]+/', '-', $label), '-');
+		return substr($name !== '' ? $name : 'Joinery', 0, 100);
 	}
 
 	/**

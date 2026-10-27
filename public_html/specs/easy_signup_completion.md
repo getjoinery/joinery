@@ -300,6 +300,12 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   ProvisionHostedMail 1.4, JoineryServices 1.6 follow; the services suites' fakes carry the
   published fields. `stats/email_summary` takes `subaccount_id` as acting on its behalf (checked
   live: a made-up id is refused by name), so `monthToDateSends` stands.
+- **B161 (fixed 10-27):** with B160 in, `subaccount/add` refused the name `test_Joinery hosted —
+  wp2.joinerytest.com` ("Please ensure the Name field only contains valid characters"); the
+  docs give no rule, and a subaccount cannot be deleted, so names are not found by trial.
+  Smtp2GoClient 1.6 `subaccountName()` is letters and digits joined by hyphens (owner 10-27: start
+  with what is sure to pass), e.g. `test-Joinery-hosted-wp2-joinerytest-com`. Which characters the
+  provider accepts goes on the SMTP2GO call list.
 - **Send allowance 2,000 (owner 10-27):** "2000/month is our limit and the only plan we offer".
   The setting's default is 2,000 (server_manager 1.30.118); sm_028 moves a plane still at the old
   1,000 default; the getjoinery content pack (apply_hosted_product 3.2) says 2,000 emails a month.
