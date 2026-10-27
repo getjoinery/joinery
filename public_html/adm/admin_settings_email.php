@@ -152,6 +152,8 @@
 		// Get actual database values (no fallback defaults)
 		$current_service = $settings->get_setting('email_service');
 		$fallback_service = $settings->get_setting('email_fallback_service');
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$service_labels = EmailSender::getAvailableServices();
 
 		echo '<div class="alert alert-info">';
 		
@@ -164,9 +166,9 @@
 			require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 			$primary_validation = EmailSender::validateService($current_service);
 			if ($primary_validation['valid']) {
-				echo '<span class="text-success">✓ ' . ucfirst($current_service) . ' configured</span>';
+				echo '<span class="text-success">✓ ' . htmlspecialchars($service_labels[$current_service] ?? $current_service) . ' configured</span>';
 			} else {
-				echo '<span class="text-danger">✗ ' . htmlspecialchars(ucfirst($current_service) . ' - ' . implode(', ', $primary_validation['errors'])) . '</span>';
+				echo '<span class="text-danger">✗ ' . htmlspecialchars(($service_labels[$current_service] ?? $current_service) . ' - ' . implode(', ', $primary_validation['errors'])) . '</span>';
 				// A service set up somewhere other than this page (connecting an
 				// account) says where; its fields here cannot finish it.
 				$primary_class = EmailSender::getDiscoveredProviders()[$current_service] ?? null;
@@ -188,9 +190,9 @@
 			}
 			$fallback_validation = EmailSender::validateService($fallback_service);
 			if ($fallback_validation['valid']) {
-				echo '<span class="text-success">✓ ' . ucfirst($fallback_service) . ' configured</span>';
+				echo '<span class="text-success">✓ ' . htmlspecialchars($service_labels[$fallback_service] ?? $fallback_service) . ' configured</span>';
 			} else {
-				echo '<span class="text-warning">⚠ ' . htmlspecialchars(ucfirst($fallback_service) . ' - ' . implode(', ', $fallback_validation['errors'])) . '</span>';
+				echo '<span class="text-warning">⚠ ' . htmlspecialchars(($service_labels[$fallback_service] ?? $fallback_service) . ' - ' . implode(', ', $fallback_validation['errors'])) . '</span>';
 				$fallback_class = EmailSender::getDiscoveredProviders()[$fallback_service] ?? null;
 				if ($fallback_class && method_exists($fallback_class, 'getSetupUrl')) {
 					echo ' <a href="' . htmlspecialchars($fallback_class::getSetupUrl()) . '">Set it up</a>';
@@ -273,7 +275,12 @@
 		// One section per sending service. The fields come from the service's
 		// declared group, so a new provider appears here by declaring settings
 		// in settings.json — this loop never learns its field names.
+		//
+		// Only the services the two pickers name are on screen, and choosing
+		// another shows its section at once. Hidden sections still submit, so
+		// switching away and back loses nothing.
 		$discovered_providers = EmailSender::getDiscoveredProviders();
+		$chosen_services = array((string)$current_service, (string)$fallback_service);
 		foreach ($discovered_providers as $provider_key => $provider_class) {
 			$provider_label = $provider_class::getLabel();
 			$provider_group = 'email_provider_' . $provider_key;
@@ -281,6 +288,8 @@
 
 			if (!SettingsFieldRenderer::namesFor($provider_group, 'core')) continue;
 
+			echo '<div class="email-provider-section" data-provider="' . htmlspecialchars($provider_key) . '"'
+				. (in_array($provider_key, $chosen_services, true) ? '' : ' style="display: none;"') . '>';
 			echo '<div class="row">';
 			echo '<div class="col-md-6">';
 			echo '<h5>' . htmlspecialchars($provider_label) . ' Settings</h5>';
@@ -336,7 +345,18 @@
 			echo '</div>';
 			echo '</div>';
 			echo '<div style="margin: 50px 0;"></div>';
+			echo '</div>';
 		}
+		$formwriter->addReadyScript('(function () {
+			var pickers = [document.getElementById("email_service"), document.getElementById("email_fallback_service")];
+			function showChosenEmailServices() {
+				var chosen = pickers.map(function (p) { return p ? p.value : ""; });
+				document.querySelectorAll(".email-provider-section").forEach(function (section) {
+					section.style.display = chosen.indexOf(section.getAttribute("data-provider")) !== -1 ? "" : "none";
+				});
+			}
+			pickers.forEach(function (p) { if (p) p.addEventListener("change", showChosenEmailServices); });
+		})();');
 
 		echo '<div style="margin: 30px 0;"></div>';
 
