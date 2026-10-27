@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.13 - sm_028 moves a send allowance still at the old 1,000 default to 2,000
  * @version 1.12 - sm_027 raises a provisioning service account sm_026 cannot find (no id setting) to 8
  * @version 1.11 - sm_020 drops sm_001's full unique index on mgn_slug: the column's partial index (unique among
  *                live nodes) is the rule, and the full one refused a new node the name of a removed one (B52)
@@ -798,6 +799,20 @@ return [
 						WHERE stg_name = 'server_manager_getjoinery_api_public_key' AND stg_value <> '' LIMIT 1))");
 			$q->execute();
 			error_log('sm_027: ' . (int)$q->rowCount() . ' legacy provisioning service account(s) raised to 8.');
+		},
+	],
+	[
+		// The send allowance is 2,000 a month, the smallest subaccount limit the
+		// provider accepts. A plane still at the old 1,000 default moves with it;
+		// any other value is an operator's own and stays.
+		'id' => 'sm_028_send_allowance_2000',
+		'version' => '1.30.118',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare("UPDATE stg_settings SET stg_value = '2000'
+				WHERE stg_name = 'server_manager_hosted_send_allowance' AND trim(stg_value) = '1000'");
+			$q->execute();
+			error_log('sm_028: ' . (int)$q->rowCount() . ' send allowance(s) moved from 1,000 to 2,000.');
 		},
 	],
 ];

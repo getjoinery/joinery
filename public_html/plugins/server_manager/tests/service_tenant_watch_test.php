@@ -142,7 +142,7 @@ JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $mail = ServiceTenant::forKey($key_id, 'mail');
 $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$mail->key);
 JoineryServices::grant($mail, '2036-10-01', $client);
-$reply(array(array('subaccount_id' => 'sub-w'), array(),
+$reply(array(array('id' => 'sub-w'), array(),
 	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_selector' => 's', 'dkim_expected' => 'v',
 		'rpath_selector' => 'r', 'rpath_expected' => 'w', 'dkim_verified' => true, 'rpath_verified' => true)))),
 	array('username' => 'x'),
@@ -201,8 +201,10 @@ harness_set_setting_mem('server_manager_hosted_send_allowance', '2500');
 $reply(array(array()));                          // subaccount/edit
 $watch->watch($mail, '2036-11-01 00:30:00');
 $calls = $drain();
-check(($calls[0]['path'] ?? '') === 'subaccount/edit' && ($calls[0]['body']['limit'] ?? 0) === 2500
-	&& (int)ServiceTenant::forKey($key_id, 'mail')->get('svt_allowance') === 2500, 'a changed allowance re-sets the subaccount limit');
+check(($calls[0]['path'] ?? '') === 'subaccount/edit' && ($calls[0]['body']['limit'] ?? 0) === 5000
+	&& ($calls[0]['body']['id'] ?? '') !== ''
+	&& (int)ServiceTenant::forKey($key_id, 'mail')->get('svt_allowance') === 2500,
+	'a changed allowance re-sets the subaccount limit, to the smallest provider size covering it');
 $watch->watch($mail, '2036-11-01 00:31:00');
 check(count($drain()) === 0, 'an unchanged allowance touches nothing');
 

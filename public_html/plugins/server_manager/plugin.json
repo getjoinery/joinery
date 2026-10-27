@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.116",
+  "version": "1.30.118",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -467,11 +467,11 @@
     },
     {
       "name": "server_manager_hosted_send_allowance",
-      "default": "1000",
+      "default": "2000",
       "group": "hosted",
       "label": "Sends per month, per customer",
       "type": "number",
-      "helptext": "Set as the monthly limit on every hosted customer's SMTP2GO subaccount, at creation and whenever this changes. The provider counts and enforces it; the platform is not in the send path."
+      "helptext": "What a hosted customer can send each month. Their SMTP2GO subaccount is capped at the smallest size SMTP2GO accepts that covers it (2,000, 5,000, 10,000 and up, so the default is the smallest), set at creation and whenever this changes. The provider counts and enforces the cap; the platform is not in the send path."
     },
     {
       "name": "server_manager_hosted_shelf_allowance_gb",

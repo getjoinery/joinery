@@ -162,7 +162,7 @@ check($row->entitled() && (string)$row->get('svt_state') === ServiceTenant::STAT
 check((int)$row->get('svt_allowance') === 1000, 'the allowance is snapshotted on grant');
 
 $reply(array(
-	array('subaccount_id' => 'sub-' . $host),                       // subaccount/add
+	array('id' => 'sub-' . $host),                                  // subaccount/add (the provider answers data.id)
 	array(),                                                          // subaccount/edit (limit)
 	$domain_entry('mail.' . $host, false),                            // domain/add
 	array('username' => 'ignored-by-caller'),                         // users/smtp/add
@@ -172,11 +172,15 @@ $answer = JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $calls = $drain();
 check($paths($calls) === array('subaccount/add', 'subaccount/edit', 'domain/add', 'users/smtp/add', 'domain/verify'),
 	'subaccount, limit, sender domain, SMTP user, one verify probe — in that order', json_encode($paths($calls)));
-check(($calls[0]['body']['subaccount_name'] ?? '') === 'Joinery services — ' . $host
-	&& ($calls[0]['body']['email'] ?? '') === (string)$owner->get('usr_email'),
-	'the subaccount is labelled for the host and owned by the account\'s address');
-check(($calls[1]['body']['limit'] ?? 0) === 1000 && ($calls[1]['body']['subaccount_id'] ?? '') === 'sub-' . $host,
-	'the limit is the allowance, on the tenant\'s own subaccount');
+// The provider's published fields (checked live 2026-10-26): fullname, and no
+// email, which would invite that address into the provider's console.
+check(($calls[0]['body']['fullname'] ?? '') === 'Joinery services — ' . $host
+	&& !isset($calls[0]['body']['email']) && !isset($calls[0]['body']['subaccount_email']),
+	'the subaccount is labelled for the host and invites nobody', json_encode($calls[0]['body']));
+check(($calls[0]['body']['limit'] ?? 0) === 2000, 'it is created at its limit, never the provider\'s default');
+// A limit is one of the provider's fixed sizes: the smallest covering 1,000 is 2,000.
+check(($calls[1]['body']['limit'] ?? 0) === 2000 && ($calls[1]['body']['id'] ?? '') === 'sub-' . $host,
+	'the limit is the smallest size covering the allowance, on the tenant\'s own subaccount (named as id)');
 check(($calls[2]['body']['domain'] ?? '') === 'mail.' . $host, 'the sender domain is mail.<host>');
 check(($calls[3]['body']['subaccount_id'] ?? '') === 'sub-' . $host && !isset($calls[3]['body']['status']),
 	'the SMTP user is minted inside the subaccount, delivering (no sandbox)');
@@ -338,7 +342,7 @@ $calls = $drain();
 check($paths($calls) === array('users/smtp/remove', 'domain/remove', 'subaccount/close'),
 	'mail release removes the SMTP user and the sender domain, then closes the subaccount', json_encode($paths($calls)));
 check(($calls[0]['body']['username'] ?? '') === $released_user && ($calls[1]['body']['domain'] ?? '') === $released_domain
-	&& ($calls[2]['body']['subaccount_id'] ?? '') === 'sub-' . $host, 'each names the tenant\'s own');
+	&& ($calls[2]['body']['id'] ?? '') === 'sub-' . $host, 'each names the tenant\'s own');
 $row = ServiceTenant::forKey($key_id, 'mail');
 check(trim((string)$row->get('svt_provider_user_id')) === '' && (string)$row->get('svt_provider_domain') === $released_domain,
 	'the removed user leaves the row; the domain whose removal failed stays named');
@@ -421,7 +425,7 @@ JoineryServices::enrol($owner->key, $key2_id, 'mail', $host3, $client);
 $zrow = $track(ServiceTenant::forKey($key2_id, 'mail'));
 JoineryServices::grant($zrow, '2030-01-01', $client);
 $reply(array(
-	array('subaccount_id' => 'sub-zero'),
+	array('id' => 'sub-zero'),
 	array(),
 	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host3)))),   // no selectors → no records
 ));
@@ -452,11 +456,11 @@ $host4 = 'sand-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';
 JoineryServices::enrol($owner->key, $key3_id, 'mail', $host4, $client);
 $srow = $track(ServiceTenant::forKey($key3_id, 'mail'));
 JoineryServices::grant($srow, '2030-01-01', $client);
-$reply(array(array('subaccount_id' => 'sub-sand'), array(), $domain_entry('mail.' . $host4, false),
+$reply(array(array('id' => 'sub-sand'), array(), $domain_entry('mail.' . $host4, false),
 	array('username' => 'x'), $domain_entry('mail.' . $host4, false)));
 JoineryServices::enrol($owner->key, $key3_id, 'mail', $host4, $client);
 $calls = $drain();
-check(strpos((string)($calls[0]['body']['subaccount_name'] ?? ''), 'test_') === 0, 'the subaccount label starts test_');
+check(strpos((string)($calls[0]['body']['fullname'] ?? ''), 'test_') === 0, 'the subaccount label starts test_');
 check(strpos((string)($calls[3]['body']['username'] ?? ''), 'test_') === 0 && ($calls[3]['body']['status'] ?? '') === 'sandbox',
 	'the SMTP user starts test_ and is minted in the sandbox');
 harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '');

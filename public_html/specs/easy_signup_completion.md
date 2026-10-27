@@ -287,6 +287,24 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   and a site switching to SMTP2GO would have been shown nothing to publish. Smtp2GoProvider 1.5
   reads `*_expected`; the four suites' fakes carry the live shape (provider_dkim 1.3 fails on the
   old reader). Checked against the live `domain/view` answer.
+- **Test order 10-27 (provision 38345, wp2.joinerytest.com, own domain, Stripe TEST card):** the site
+  built (node 223184); the mail leg stopped at `subaccount/add` with a 400.
+- **B160 (fixed 10-27):** the subaccount calls never matched the provider's published API
+  (developers.smtp2go.com reference, fetched 10-27). `subaccount/add` sent `subaccount_name`,
+  `company_name`, `email`; it takes `fullname` (required) and `limit`, and `subaccount_email`
+  invites that address into the provider's console, which a hosted customer must never get.
+  `subaccount/edit`, `close` and `reopen` sent `subaccount_id`; they take `id`. A `limit` is one of
+  fixed sizes (2,000, 5,000, 10,000 …), so the default allowance of 1,000 was never valid.
+  Smtp2GoClient 1.5: fullname plus limit at creation, no email, `id` on the subaccount calls, and
+  `subaccountLimit()` rounds an allowance up to the smallest size covering it. Smtp2GoLeg 1.1,
+  ProvisionHostedMail 1.4, JoineryServices 1.6 follow; the services suites' fakes carry the
+  published fields. `stats/email_summary` takes `subaccount_id` as acting on its behalf (checked
+  live: a made-up id is refused by name), so `monthToDateSends` stands.
+- **Send allowance 2,000 (owner 10-27):** "2000/month is our limit and the only plan we offer".
+  The setting's default is 2,000 (server_manager 1.30.118); sm_028 moves a plane still at the old
+  1,000 default; the getjoinery content pack (apply_hosted_product 3.2) says 2,000 emails a month.
+  Product rows already written keep their text until the pack is run again (getjoinery) or the
+  description is edited (dev).
 - **B157 (open, step 4):** getjoinery.com's SPF names only `mailgun.org`; add
   `include:spf.smtp2go.com` with the switch. DMARC passes on DKIM alone, so this is not blocking.
 - Run one Managed test order on dev to `mail_state = done`, and send a message from the site.
