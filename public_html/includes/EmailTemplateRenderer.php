@@ -151,11 +151,18 @@ class EmailTemplateRenderer {
         
         // Initialize template values
         $settings = Globalvars::get_instance();
+        $web_dir = LibraryFunctions::get_absolute_url('');
+        // A new site has no name until its admin finishes setup; its emails
+        // name the site by its address until then, never by a blank.
+        $site_name = trim((string)$settings->get_setting('site_name'));
+        if ($site_name === '') {
+            $site_name = (string)parse_url($web_dir, PHP_URL_HOST);
+        }
         $this->template_values = array(
             'template_name' => $this->template_name,
-            'web_dir' => LibraryFunctions::get_absolute_url(''),
+            'web_dir' => $web_dir,
             'email_vars' => $this->_generate_email_vars(),
-            'site_name' => $settings->get_setting('site_name'),
+            'site_name' => $site_name,
         );
         
         $this->inner_html = null;
