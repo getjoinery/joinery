@@ -17,6 +17,8 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.11 - send() and sendBatch() go through the From domain when the account has it active, so
+ *   the signature matches the From address (B169); dkimSigningDomain() says which domain signs
  * @version 1.10 - getSendingDomainError(): why the last sending-domain lookup failed
  * @version 1.9 - SendReceiptSource (the send response's id) and DeliveryEventSource (the
  *   Events API by Message-ID: accepted, delivered, deferred, failed, with the receiving
@@ -187,7 +189,9 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
         }
 
-        $domain = $settings->get_setting('mailgun_domain');
+        // The From domain when the account has it active, so the signature
+        // matches the From address for DMARC (B169); else the configured domain.
+        $domain = self::apiDomainForSender((string)$message->getFrom());
 
         $email_to_send = [
             'from' => $message->getFromName() . '<' . $message->getFrom() . '>',
@@ -414,7 +418,9 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
         }
 
-        $domain = $settings->get_setting('mailgun_domain');
+        // The From domain when the account has it active, so the signature
+        // matches the From address for DMARC (B169); else the configured domain.
+        $domain = self::apiDomainForSender((string)$message->getFrom());
 
         $email_to_send = [
             'from' => $message->getFromName() . '<' . $message->getFrom() . '>',
@@ -610,6 +616,15 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             self::$sending_domain_state[$domain] = $state;
         }
         return self::pickApiDomain($domain, self::$sending_domain_state[$domain], $configured);
+    }
+
+    /**
+     * The domain Mailgun signs a send from $from_domain as: the domain the
+     * send goes through (apiDomainForSender), whose DKIM authority is itself.
+     */
+    public static function dkimSigningDomain(string $from_domain): ?string {
+        $domain = strtolower(self::apiDomainForSender('x@' . $from_domain));
+        return $domain !== '' ? $domain : null;
     }
 
     /** Pure pick: an active account domain wins; anything else falls back. */

@@ -1036,6 +1036,40 @@ $spf = DnsAuthChecker::checkSPF('example.com');   // ['status'=>'pass|warn|fail'
 $all = DnsAuthChecker::quickCheck('example.com'); // ['spf'=>…, 'dkim'=>…, 'dmarc'=>…]
 ```
 
+### One site's mail, explained: `assess()`
+
+`DnsAuthChecker::assess($domain, $service_key)` answers the question a site
+owner actually has — will other mail servers trust mail from this domain — for
+the service that sends it:
+
+- **The service's own DKIM key names first.** Providers name their keys
+  themselves (SMTP2GO's `s<id>`, Mailgun's per-domain selector); no wordlist
+  finds them. `serviceKeyNames()` reads them from the provider's
+  `getDkimStatus()`, and `COMMON_KEY_NAMES` is tried after.
+- **The domain the mail is signed as**, from the provider's optional
+  `dkimSigningDomain($from_domain)`. The key is looked up under that domain.
+- **Whether the signature counts for the From address** (DMARC alignment):
+  `signaturesMatch()` compares the signing domain with the From domain under
+  the DMARC record's `adkim` mode — strict means the same domain, relaxed the
+  same organisational domain (`organisationalDomain()`, an approximation: no
+  public suffix list is shipped). A signature as `mail.example.com` on mail
+  From `example.com` under `adkim=s` and an enforcing policy is mail other
+  servers treat as forged.
+- **`explain()`** turns the results into a verdict and four rows in plain
+  words — Signature, Matches your address, Approved senders, Forgery policy —
+  each keeping its protocol name and raw record as small print.
+  `explanationHtml()` draws it. With no service to ask, a key not found under
+  the common names reads "Could not tell", never "not signed".
+
+Two layers read the same facts. **Settings › Email** shows the plain
+explanation alone, for the owner setting email up. **Technical details**
+(`utils/email_setup_check.php`) opens with the same explanation, then the
+records, mechanisms, every key found and the alignment terms, for whoever is
+troubleshooting; it asks the site's sending service only about the site's own
+From domain. The mailbox reader and the admin message view report on mail
+*received*, from `InboundEmailMessage::authReadout()`, in the same spirit:
+a plain headline, the raw verdicts beside it.
+
 > **The record's feedback loop.** A published DMARC (or TLS-RPT) policy makes
 > every large provider mail back reports about this deployment's sending — who
 > sent as the domain, what aligned, where TLS failed. Every deployment that
@@ -1060,6 +1094,7 @@ The email system uses a provider abstraction so that new email services can be a
 - **`EmailServiceProvider`** — interface in `includes/EmailServiceProvider.php` that all outbound providers implement
 - **`InboundEmailProvider`** — sibling interface in `includes/InboundEmailProvider.php` for inbound transports (Postfix, Mailgun webhook, etc.). A single provider class may implement both interfaces; the Mailbox plugin discovers inbound providers via `InboundProviderRegistry`. See [Mailbox Plugin](../plugins/mailbox/docs/overview.md#inbound-providers) for the inbound side.
 - **`RawMessageRelay`** — optional capability interface, declared alongside `EmailServiceProvider` in `includes/EmailServiceProvider.php`. A provider opts in to relay raw MIME with a chosen envelope sender; used by inbound-email forwarding. See [Raw-MIME relay](#raw-mime-relay-optional-capability) below.
+- **`dkimSigningDomain(string $from_domain): ?string`** — optional static method, checked with `is_callable`: the domain the provider signs a send from that From domain as, or null when it cannot say. Mailgun answers with the domain the send goes through (the From domain when the account has it active, else `mailgun_domain`); SMTP2GO with the From domain when it is an active sender domain there. `DnsAuthChecker::assess()` reads it for the "Matches your address" check.
 - **Provider classes** — live in `includes/email_providers/` (e.g., `MailgunProvider.php`, `SmtpProvider.php`, `SendGridProvider.php`)
 - **Auto-discovery** — `EmailSender` scans `includes/email_providers/` for classes implementing `EmailServiceProvider`; `InboundProviderRegistry` walks the same directory for classes implementing `InboundEmailProvider`. No manual registration needed in either case.
 
@@ -1177,9 +1212,9 @@ need both:
 | `smtp` | Native raw SMTP | Full `MAIL FROM` control | ❌ (SMTP submission) |
 
 **Mailgun submission-domain alignment.** The domain in Mailgun's API path is
-its DKIM signing identity, so `relayRawMessage()` picks it per message: when
-the envelope sender's domain is an **active** sending domain in the Mailgun
-account, the relay submits through it and Mailgun's signature aligns with the
+its DKIM signing identity, so `send()`, `sendBatch()` and `relayRawMessage()`
+pick it per message (`apiDomainForSender()`): when the sender's domain is an
+**active** sending domain in the Mailgun account, the message goes through it and Mailgun's signature aligns with the
 From domain for DMARC; otherwise the configured `mailgun_domain` carries the
 send. The account lookup is cached per request and any failure falls back —
 a send never breaks because the domains API hiccuped. SES needs no equivalent:

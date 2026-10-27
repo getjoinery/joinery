@@ -27,6 +27,7 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.6 - dkimSigningDomain(): the domain a send from a given From domain is signed as
  * @version 1.5 - records are read from dkim_expected / rpath_expected / cname_expected, what the provider
  *   asks for; the _value fields are what DNS shows now and are empty until published (B159)
  * @version 1.4 - with no API key, getSendingDomainState answers '' and says why without asking the
@@ -422,6 +423,17 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
      * when the account does not have the domain, and '' when the API did not
      * answer — which callers must render as unknown, never as a failure.
      */
+    /**
+     * The domain SMTP2GO signs a send from $from_domain as. It sends only from
+     * a sender domain the account holds and signs as that domain, so a From
+     * domain that is active there is the signing domain; anything else is not
+     * known here.
+     */
+    public static function dkimSigningDomain(string $from_domain): ?string {
+        $from_domain = self::normalizeDomain($from_domain);
+        return ($from_domain !== '' && self::getSendingDomainState($from_domain) === 'active') ? $from_domain : null;
+    }
+
     public static function getSendingDomainState(string $domain): string {
         $domain = self::normalizeDomain($domain);
         if ($domain === '') { return ''; }

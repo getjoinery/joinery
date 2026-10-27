@@ -104,8 +104,17 @@ $page->admin_header([
             if (!filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
                 echo '<div class="alert alert-danger">Invalid domain format</div>';
             } else {
+                // The plain assessment first (the same one Settings > Email shows).
+                // The sending service is asked only about this site's own From
+                // domain: what it signs as means nothing for someone else's.
+                require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+                $site_from = (string)$settings->get_setting('defaultemail');
+                $site_domain = strpos($site_from, '@') !== false ? strtolower(substr($site_from, strrpos($site_from, '@') + 1)) : '';
+                $own_domain = $site_domain !== '' && strtolower($domain) === $site_domain;
+                $assessment = DnsAuthChecker::assess($domain, $own_domain ? (string)$settings->get_setting('email_service') : '');
+
                 // Perform the checks
-                $checker = new EmailAuthChecker($domain, $is_comprehensive);
+                $checker = new EmailAuthChecker($domain, $is_comprehensive, $assessment['service_key_names']);
                 $results = $checker->checkAll();
                 
                 // Display results
@@ -121,6 +130,11 @@ $page->admin_header([
                     <p class="mb-0">Generated at: <?php echo date('Y-m-d H:i:s'); ?></p>
                 </div>
                 
+                <!-- In plain words -->
+                <div class="alert alert-light border">
+                    <?php echo DnsAuthChecker::explanationHtml($assessment['explanation']); ?>
+                </div>
+
                 <!-- SPF Results -->
                 <div class="mt-5 mb-4">
                     <h4 class="mb-3"><i class="fas fa-shield-alt"></i> SPF (Sender Policy Framework)</h4>
@@ -414,15 +428,24 @@ $page->admin_header([
                             </div>
                         </div>
                         
+                        <?php if ($assessment['signing_domain'] !== null): ?>
                         <hr>
-                        
-                        <h6>Overall Recommendations:</h6>
-                        <ul>
-                            <li>Ensure all three protocols (SPF, DKIM, DMARC) are properly configured</li>
-                            <li>Start with DMARC policy "p=none" to monitor, then move to "p=quarantine" or "p=reject"</li>
-                            <li>Set up DMARC reporting to monitor email authentication results</li>
-                            <li>Regularly review and update your email authentication configuration</li>
-                        </ul>
+                        <?php
+                        $adkim = $assessment['results']['dmarc']['adkim'] ?? 'r';
+                        $aligned = DnsAuthChecker::signaturesMatch($assessment['signing_domain'], $domain, $adkim);
+                        ?>
+                        <h6>DMARC alignment (DKIM)</h6>
+                        <p class="mb-0">
+                            <?php echo htmlspecialchars($assessment['service_label']); ?> signs as
+                            <code>d=<?php echo htmlspecialchars($assessment['signing_domain']); ?></code>; the From domain is
+                            <code><?php echo htmlspecialchars($domain); ?></code>; the policy asks for
+                            <code>adkim=<?php echo htmlspecialchars($adkim); ?></code>
+                            (<?php echo $adkim === 's' ? 'strict: the same domain' : 'relaxed: the same organisational domain'; ?>).
+                            <strong class="<?php echo $aligned ? 'text-success' : 'text-danger'; ?>">
+                                <?php echo $aligned ? 'Aligned' : 'Not aligned: DKIM cannot pass DMARC for this From domain'; ?>
+                            </strong>
+                        </p>
+                        <?php endif; ?>
                     </div>
                 </div>
                 
@@ -446,9 +469,13 @@ class EmailAuthChecker {
     private $results = [];
     private $is_comprehensive;
 
-    public function __construct($domain, $is_comprehensive = false) {
+    /** @var string[] DKIM key names the sending service reports, tried before any guess. */
+    private $service_key_names;
+
+    public function __construct($domain, $is_comprehensive = false, array $service_key_names = array()) {
         $this->domain = strtolower(trim($domain));
         $this->is_comprehensive = $is_comprehensive;
+        $this->service_key_names = $service_key_names;
     }
     
     public function checkAll() {
@@ -667,7 +694,18 @@ class EmailAuthChecker {
     
     private function discoverDKIMSelectors(&$dkim) {
         $foundSelectors = [];
-        
+
+        // Method 0: the key names the sending service itself reports. No
+        // wordlist holds SMTP2GO's s<id> or a provider's own selector.
+        if (!empty($this->service_key_names)) {
+            $dkim['discovery_methods'][] = 'Key names reported by the sending service';
+            foreach ($this->service_key_names as $selector) {
+                if ($this->checkSingleDKIMSelector($selector, $dkim)) {
+                    $foundSelectors[] = $selector;
+                }
+            }
+        }
+
         // Method 1: Common selectors wordlist
         $dkim['discovery_methods'][] = $this->is_comprehensive ? 'Comprehensive selectors wordlist' : 'Top 10 common selectors';
         $commonSelectors = $this->is_comprehensive ? $this->getComprehensiveSelectorList() : $this->getTopCommonSelectors();
@@ -755,6 +793,10 @@ class EmailAuthChecker {
     }
     
     private function checkSingleDKIMSelector($selector, &$dkim) {
+        // A name the service reported may be in a wordlist too; check it once.
+        if (in_array($selector, $dkim['selectors_checked'], true)) {
+            return false;
+        }
         $dkim['selectors_checked'][] = $selector;
         $dkimDomain = $selector . '._domainkey.' . $this->domain;
         
