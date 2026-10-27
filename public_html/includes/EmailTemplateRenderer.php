@@ -25,6 +25,9 @@ class EmailTemplateRenderer {
     protected $utm_content = 'email';
     protected $utm_campaign = '';
     
+    // The template's subject before substitution
+    protected $subject_template;
+
     // Processed content (access via getter methods)
     private $email_subject;
     private $email_html; 
@@ -62,7 +65,7 @@ class EmailTemplateRenderer {
         // Load outer template
         if (!$outer_template) {
             $templates = new MultiEmailTemplate(
-                array('email_template_name' => 'default_outer_template')
+                array('email_template_name' => 'default_outer_template', 'deleted' => false)
             );
             $templates->load();
             $count = $templates->count_all();
@@ -77,7 +80,7 @@ class EmailTemplateRenderer {
         // Load footer template
         if (!$footer) {
             $templates = new MultiEmailTemplate(
-                array('email_template_name' => 'default_footer')
+                array('email_template_name' => 'default_footer', 'deleted' => false)
             );
             $templates->load();
             $count = $templates->count_all();
@@ -92,14 +95,15 @@ class EmailTemplateRenderer {
         // Load inner template
         if (!$this->inner_template) {
             $templates = new MultiEmailTemplate(
-                array('email_template_name' => $inner_template)
+                array('email_template_name' => $inner_template, 'deleted' => false)
             );
             $templates->load();
             $count = $templates->count_all();
             if ($count) {
                 $this_template = $templates->get(0);
                 $this->inner_template = $this_template->get('emt_body');
-                $this->email_subject = $this_template->get('emt_subject');
+                $this->subject_template = $this_template->get('emt_subject');
+                $this->email_subject = $this->subject_template;
             } else {
                 throw new EmailTemplateError('We could not find the template ' . $inner_template);
             }
@@ -108,7 +112,7 @@ class EmailTemplateRenderer {
         // Load outer template if string provided
         if (!$this->outer_template && $outer_template) {
             $templates = new MultiEmailTemplate(
-                array('email_template_name' => $outer_template)
+                array('email_template_name' => $outer_template, 'deleted' => false)
             );
             $templates->load();
             $count = $templates->count_all();
@@ -123,7 +127,7 @@ class EmailTemplateRenderer {
         // Load footer if string provided
         if (!$this->footer && $footer) {
             $templates = new MultiEmailTemplate(
-                array('email_template_name' => $footer)
+                array('email_template_name' => $footer, 'deleted' => false)
             );
             $templates->load();
             $count = $templates->count_all();
@@ -206,17 +210,25 @@ class EmailTemplateRenderer {
             $set_values = array_merge($set_values, $footer_set_values);
         }
 
+        // The subject takes the same placeholders as the body
+        $all_values = array_merge($values, $set_values);
+        $this->email_subject = trim((string)$this->_substitute_variables((string)$this->subject_template, $all_values));
+
         // Check for content
         if (!trim($email_body)) {
             return;
         }
 
         // Substitute variables on combined inner+footer body
-        $all_values = array_merge($values, $set_values);
         $html = trim($this->_substitute_variables($email_body, $all_values));
 
-        // Merge with outer template
-        $html = str_replace('*!**mail_body**!*', $html, $this->outer_template);
+        // Merge with outer template, whose own placeholders (such as *site_name*
+        // in its title) are substituted on either side of the body marker
+        $outer_parts = explode('*!**mail_body**!*', (string)$this->outer_template);
+        foreach ($outer_parts as $k => $outer_part) {
+            $outer_parts[$k] = $this->_substitute_variables($outer_part, $all_values);
+        }
+        $html = implode($html, $outer_parts);
         
         // Add tracking to links if needed
         if (isset($values['utm_source'])) {

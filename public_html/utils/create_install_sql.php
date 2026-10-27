@@ -16,6 +16,8 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.9 - email templates come from public_html/email_templates/ (step 8.9), not
+ *                the publishing site's table (spec email_template_defaults)
  * @version 1.8 - the seeded accounts have usernames and no email: admin (user 1), system (2),
  *                deleted-user (3) (spec optional_username)
  * @version 1.7 - the admin menu rows carry no level: menus show what the reader may open
@@ -353,10 +355,11 @@ echo "[6/10] Exporting essential table data...\n";
 // to avoid exporting site-specific values (API keys, paths, etc.)
 // Note: amu_admin_menus is NOT included here - core menu rows are generated
 // from admin_menus.json (see step 8.8); plugin menu rows seed at activation time.
+// Note: emt_email_templates is NOT included here - core templates are generated
+// from email_templates/ (see step 8.9); plugin templates ship with their plugin.
 $essential_tables = [
     'cco_country_codes',  // Country reference data
     'zone',               // Timezone names (IANA)
-    'emt_email_templates', // Email templates
     'com_components'      // Page components (all Bootstrap-based, work with falcon theme)
 ];
 
@@ -891,6 +894,39 @@ fwrite($output_handle, "SELECT pg_catalog.setval('public.amu_admin_menus_amu_adm
 
 echo "   Generated " . count($admin_items) . " adminMenu rows + " . count($profile_items) . " profileMenu rows\n";
 
+// ============================================================================
+// CORE EMAIL TEMPLATES
+// Read from public_html/email_templates/. The publishing site's own rows are
+// not dumped: they are that site's wording, not the defaults.
+// ============================================================================
+
+echo "[8.9/10] Generating core email templates from email_templates/...\n";
+
+fwrite($output_handle, "\n-- ============================================================================\n");
+fwrite($output_handle, "-- CORE EMAIL TEMPLATES\n");
+fwrite($output_handle, "-- Read directly from public_html/email_templates/ (single source of truth).\n");
+fwrite($output_handle, "-- Plugin-owned templates are inserted by the plugin's migrations at activation.\n");
+fwrite($output_handle, "-- ============================================================================\n\n");
+
+try {
+    $email_templates = EmailTemplateDefaults::all();
+} catch (RuntimeException $e) {
+    fail("ERROR: " . $e->getMessage() . "\n");
+}
+foreach ($email_templates as $template) {
+    // Dollar-quoted like the migration SQL above, with a tag no template contains.
+    foreach (array('subject', 'body') as $field) {
+        if (strpos($template[$field], '$emt$') !== false) {
+            fail("ERROR: email template {$template['name']} contains the quoting tag \$emt\$\n");
+        }
+    }
+    fwrite($output_handle, "INSERT INTO public.emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time) "
+        . "VALUES ('" . $pg_escape($template['name']) . "', " . (int)$template['type'] . ", "
+        . "\$emt\$" . $template['subject'] . "\$emt\$, \$emt\$" . $template['body'] . "\$emt\$, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);\n");
+}
+
+echo "   Generated " . count($email_templates) . " email templates\n";
+
 // Write footer
 $footer = <<<SQL
 
@@ -902,6 +938,13 @@ SQL;
 
 fwrite($output_handle, $footer);
 fclose($output_handle);
+
+// Every new site starts from this file. One organisation's own name in it
+// reaches every site's members, which is what shipped Integral Zen's account
+// emails to every install (spec email_template_defaults).
+if (preg_match('/integral\s*zen/i', file_get_contents($temp_output))) {
+    fail("ERROR: the install SQL names Integral Zen; a seed table carries one site's own content\n");
+}
 
 // ============================================================================
 // COMPRESS OUTPUT IF REQUESTED

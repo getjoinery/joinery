@@ -268,8 +268,8 @@ class Activation {
 	 * account with no email gets only the recovery copy, if it has one.
 	 */
 	static function email_forgotpw_send(User $user){
-		//GENERATE SIGNUP CODE
-		$act_code = self::getTempCode($user->key, '30 day', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
+		// The reset email tells the member the link expires after 24 hours.
+		$act_code = self::getTempCode($user->key, '24 hours', Activation::EMAIL_VERIFY, NULL, $user->get('usr_email'));
 
 		$success = FALSE;
 		if ($user->get('usr_email')) {

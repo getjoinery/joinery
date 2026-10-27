@@ -12,6 +12,8 @@ require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.4 - quickSend() puts an HTML body in the blank inner template inside the default
+ *   outer template; it had rendered the outer template as the inner one, which dropped the body
  * @version 1.3 - the retry queue, the refused-send event and the debug log save as the server's own writes (no person owns them);
  *   a retry row with no display name is queued under the address, not refused
  * @version 1.2 - a refused protected-domain send logs its addresses, never its subject
@@ -581,10 +583,12 @@ class EmailSender {
             }
 
             try {
-                $message = EmailMessage::fromTemplate($defaultTemplate, [
+                // default_email_template names an outer template; the body goes
+                // in the blank inner one, with no list footer under it.
+                $template = new EmailTemplateRenderer('blank_template', $defaultTemplate, 'blank_footer');
+                $message = $template->createMessage([
                     'subject' => $subject,
-                    'content' => $body,
-                    'inner_template' => $body
+                    'body' => $body,
                 ]);
 
                 // Override subject since we want the one passed in, not from template

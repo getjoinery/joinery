@@ -85,6 +85,8 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 	    'evr_delete_time' => array('type'=>'timestamp(6)'),
 	    'evr_grp_group_id' => array('type'=>'int4'),
 	    'evr_survey_completed' => array('type'=>'bool', 'default'=>false),
+	    // When the post-event survey email went out (SendPostEventSurveys sends it once).
+	    'evr_survey_sent_time' => array('type'=>'timestamp(6)'),
 	);
 
 static function check_if_registrant_exists($userid, $eventid){

@@ -459,11 +459,11 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				return $user;
 			}
 	
+			// The welcome email is told only whether the member has a password of
+			// their own. The password itself is never one of its values, so no
+			// template, shipped or edited, can mail it.
 			if($password){
-					$email_fill = array(
-					'password_temporary' => false,
-					'password' => $password
-					);
+					$email_fill = array('password_temporary' => false);
 					$temp_password_hashed = User::GeneratePassword($password);
 			}
 			else{
@@ -471,10 +471,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 					// Not surfaced to the user — they reset via the forgot-password flow.
 					$temp_password = bin2hex(random_bytes(8));
 					$temp_password_hashed = User::GeneratePassword($temp_password);
-					$email_fill = array(
-					'password_temporary' => true,
-					'password' => $temp_password
-					);				
+					$email_fill = array('password_temporary' => true);
 			}
 	
 			$user = new User(NULL);

@@ -1,0 +1,25 @@
+{
+  "_comment": "The core email templates every site starts with. update_database adds a listed template a site does not have (live or deleted) and never changes one it has; the install builder writes them into joinery-install.sql. type: 1 outer, 2 inner, 3 footer (emt_type). See docs/email_system.md.",
+  "templates": [
+    {"name": "default_outer_template", "type": 1, "subject": "Email from Default Outer Template", "file": "default_outer_template.html"},
+    {"name": "default_footer", "type": 3, "subject": "Email from Default Footer", "file": "default_footer.html"},
+    {"name": "blank_footer", "type": 3, "subject": "Email from Blank Footer", "file": "blank_footer.html"},
+    {"name": "event_bulk_footer", "type": 3, "subject": "Email from Event Bulk Footer", "file": "event_bulk_footer.html"},
+    {"name": "blank_template", "type": 2, "subject": "*subject*", "file": "blank_template.html"},
+    {"name": "newsletter-1", "type": 2, "subject": "*subject*", "file": "newsletter-1.html"},
+    {"name": "activation_content", "type": 2, "subject": "Confirm your email for *site_name*", "file": "activation_content.html"},
+    {"name": "new_account_content", "type": 2, "subject": "Welcome to *site_name*", "file": "new_account_content.html"},
+    {"name": "forgotpw_content", "type": 2, "subject": "Reset your *site_name* password", "file": "forgotpw_content.html"},
+    {"name": "email_change_content", "type": 2, "subject": "Confirm your new email address for *site_name*", "file": "email_change_content.html"},
+    {"name": "subscription_upgraded", "type": 2, "subject": "Your subscription has been upgraded", "file": "subscription_upgraded.html"},
+    {"name": "subscription_downgraded", "type": 2, "subject": "Your subscription has been changed", "file": "subscription_downgraded.html"},
+    {"name": "subscription_cancelled", "type": 2, "subject": "Your subscription has been cancelled", "file": "subscription_cancelled.html"},
+    {"name": "subscription_reactivated", "type": 2, "subject": "Your subscription has been reactivated", "file": "subscription_reactivated.html"},
+    {"name": "subscription_expired", "type": 2, "subject": "Your subscription has expired", "file": "subscription_expired.html"},
+    {"name": "subscription_payment_failed", "type": 2, "subject": "Action required: subscription payment failed", "file": "subscription_payment_failed.html"},
+    {"name": "purchase_receipt_default", "type": 2, "subject": "Your purchase receipt", "file": "purchase_receipt_default.html"},
+    {"name": "purchase_receipt_product_default", "type": 2, "subject": "About your recent purchase", "file": "purchase_receipt_product_default.html"},
+    {"name": "calendar_reminder", "type": 2, "subject": "Calendar reminder", "file": "calendar_reminder.html"},
+    {"name": "calendar_summary", "type": 2, "subject": "Your calendar", "file": "calendar_summary.html"}
+  ]
+}
