@@ -1823,6 +1823,8 @@
 	function publish_require_committed(array $repos, $version, $commit_own_writes, array $base_commits = array()) {
 		$commits = array('core' => null, 'agent' => null);
 		$refused = false;
+		$written = array();   // repository root => the files this publish wrote there, not yet committed
+		$moved = array();     // name => root of each repository a commit landed in while this publish ran
 		foreach ($repos as $name => $root) {
 			if ($name === 'agent' && !is_dir($root . '/.git')) {
 				$blockers = null;
@@ -1846,6 +1848,9 @@
 				} else {
 					$owners[] = $path;
 				}
+			}
+			if ($commit_own_writes) {
+				$written[$root] = $own;
 			}
 			if ($owners !== array()) {
 				publish_output("\nRefusing to publish {$version} — the {$name} repository has changes that are not committed"
@@ -1878,7 +1883,8 @@
 				if ($now !== $base_head) {
 					publish_output("\nRefusing to publish {$version} — a commit landed in the {$name} repository while this publish ran ("
 						. substr((string)$base_head, 0, 12) . ' -> ' . substr((string)$now, 0, 12) . '), after this release was built from '
-						. substr((string)$base_head, 0, 12) . '. Publish again; it builds from the new commit.');
+						. substr((string)$base_head, 0, 12) . '.');
+					$moved[$name] = $root;
 					$refused = true;
 					continue;
 				}
@@ -1887,9 +1893,13 @@
 				$result = ReleaseCommit::commitRelease($root, $own, 'Release ' . $version);
 				if (!$result['ok']) {
 					publish_output("\nRefusing to publish {$version} — the release files could not be committed and pushed: {$result['reason']}");
+					if (!empty($result['moved'])) {
+						$moved[$name] = $root;
+					}
 					$refused = true;
 					continue;
 				}
+				unset($written[$root]);
 				publish_output("Committed and pushed the release files as {$result['commit']}: " . implode(', ', $own));
 			}
 			$head = ReleaseCommit::head($root);
@@ -1904,10 +1914,64 @@
 			publish_output("{$name} commit {$head} is committed and public");
 		}
 		if ($refused) {
+			// Leave the checkout as this publish found it. Its own files left
+			// behind (VERSION, the install SQL) are local changes, and dev's
+			// follow_main.sh will not pull over local changes, so every later
+			// publish would refuse too (2026-10-27).
+			$put_back = true;
+			foreach ($written as $root => $paths) {
+				if ($paths === array()) {
+					continue;
+				}
+				$undo = ReleaseCommit::restoreWrites($root, $paths);
+				if ($undo['exit'] === 0) {
+					publish_output('Put back the files this publish wrote: ' . implode(', ', $paths));
+				} else {
+					$put_back = false;
+					publish_output('Could not put back the files this publish wrote (' . trim(implode(' | ', array_slice($undo['out'], -2)))
+						. '); restore them before publishing again: cd ' . escapeshellarg($root) . ' && git restore -- '
+						. implode(' ', array_map('escapeshellarg', $paths)));
+				}
+			}
+			if ($moved !== array() && $put_back) {
+				publish_catch_up_and_rerun($moved, $version);
+			}
 			publish_output("\nNothing has been built" . ($commit_own_writes ? '.' : ', and nothing has been written.'));
 			exit(1);
 		}
 		return $commits;
+	}
+
+	/**
+	 * A commit landed while this publish ran, which is ordinary: the owner
+	 * commits from another machine at any time. Rather than ask for another
+	 * click, a command-line publish brings each repository up to its remote by
+	 * fast-forward and runs again from the top, tests and all, at most twice.
+	 * From the admin page, it says to publish again. Returns only when it
+	 * does not run again.
+	 */
+	function publish_catch_up_and_rerun(array $moved, $version) {
+		$runs = (int)getenv('JOINERY_PUBLISH_CATCH_UP');
+		if (php_sapi_name() !== 'cli' || $runs >= 2) {
+			publish_output("\nPublish again; it builds from the new commit.");
+			return;
+		}
+		foreach ($moved as $name => $root) {
+			$ff = ReleaseCommit::fastForward($root);
+			if (!$ff['ok']) {
+				publish_output("\nCould not catch the {$name} repository up ({$ff['reason']}). Publish again once it has the new commit.");
+				return;
+			}
+			publish_output("Caught the {$name} repository up to " . substr((string)$ff['head'], 0, 12) . '.');
+		}
+		publish_output("\nPublishing again from the new commit (catch-up " . ($runs + 1) . " of 2)...\n");
+		$cmd = 'JOINERY_PUBLISH_CATCH_UP=' . ($runs + 1) . ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__);
+		foreach (array_slice($GLOBALS['argv'] ?? array(), 1) as $arg) {
+			$cmd .= ' ' . escapeshellarg($arg);
+		}
+		$exit = 0;
+		passthru($cmd, $exit);
+		exit($exit);
 	}
 
 	/**
