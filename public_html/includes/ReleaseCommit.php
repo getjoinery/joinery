@@ -61,6 +61,8 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.11 - restoreWrites() and fastForward(), so a publish that refuses leaves the checkout as it
+ *               found it and can catch up with the remote; commitRelease() flags a moved remote
  * @version 1.10 - commitRelease() refuses when the remote branch moved during the publish, and undoes its
  *               commit when the push is refused, so a fast-forward follower is never left off the branch (B172)
  * @version 1.9 - publish's own code is held: publish_upgrade.php, ReleaseCommit and every *Publisher class run
@@ -692,7 +694,8 @@ class ReleaseCommit {
 	 * seconds between) undoes the release commit, so a checkout that follows
 	 * the branch by fast-forward (dev's follow_main.sh) is not left off it.
 	 *
-	 * @return array{ok:bool, commit:?string, reason:string}
+	 * @return array{ok:bool, commit:?string, reason:string, moved?:bool} moved: the
+	 *         remote branch was not the commit this release was built from
 	 */
 	public static function commitRelease($repo_root, array $paths, $message, $remote = 'origin', $branch = 'main') {
 		$base = self::head($repo_root);
@@ -701,7 +704,7 @@ class ReleaseCommit {
 			$remote_head = self::git($repo_root, array('rev-parse', 'FETCH_HEAD'));
 			$remote_head = trim($remote_head['out'][0] ?? '');
 			if ($base !== null && $remote_head !== '' && $remote_head !== $base) {
-				return array('ok' => false, 'commit' => null, 'reason' => "{$remote} {$branch} moved to "
+				return array('ok' => false, 'commit' => null, 'moved' => true, 'reason' => "{$remote} {$branch} moved to "
 					. substr($remote_head, 0, 12) . ' while this release was built from ' . substr($base, 0, 12)
 					. '. Nothing was committed. Publish again once this checkout has the new commit; it builds from that.');
 			}
@@ -748,11 +751,24 @@ class ReleaseCommit {
 		if ($reset['exit'] !== 0) {
 			return $reset;
 		}
+		return self::restoreWrites($repo_root, $paths, $base);
+	}
+
+	/**
+	 * Put the files a publish wrote back to what $source (HEAD by default)
+	 * holds, in the index and on disk; a file $source never had is removed.
+	 * A publish that refuses after writing calls it, so the checkout is left
+	 * as it found it — dev's follow_main.sh will not pull over local changes.
+	 *
+	 * @return array{exit:int, out:string[]}
+	 */
+	public static function restoreWrites($repo_root, array $paths, $source = 'HEAD') {
 		foreach ($paths as $path) {
-			if (self::git($repo_root, array('cat-file', '-e', $base . ':' . $path))['exit'] === 0) {
-				$step = self::git($repo_root, array('restore', '--source=' . $base, '--staged', '--worktree', '--', $path));
+			if (self::git($repo_root, array('cat-file', '-e', $source . ':' . $path))['exit'] === 0) {
+				$step = self::git($repo_root, array('restore', '--source=' . $source, '--staged', '--worktree', '--', $path));
 			} else {
-				$step = self::git($repo_root, array('rm', '--quiet', '--cached', '--', $path));
+				// New to git: staged (a release commit undone) or never added.
+				$step = self::git($repo_root, array('rm', '--quiet', '--cached', '--ignore-unmatch', '--', $path));
 				@unlink(rtrim($repo_root, '/') . '/' . $path);
 			}
 			if ($step['exit'] !== 0) {
@@ -760,6 +776,29 @@ class ReleaseCommit {
 			}
 		}
 		return array('exit' => 0, 'out' => array());
+	}
+
+	/**
+	 * Bring a clean checkout up to the remote branch by fast-forward only, as
+	 * dev's follow_main.sh does. Refuses local changes and a branch that is
+	 * not a fast-forward.
+	 *
+	 * @return array{ok:bool, reason:string, head:?string}
+	 */
+	public static function fastForward($repo_root, $remote = 'origin', $branch = 'main') {
+		$status = self::status($repo_root);
+		if ($status === null || $status['changed'] !== array() || $status['untracked'] !== array()) {
+			return array('ok' => false, 'reason' => 'the checkout has local changes', 'head' => self::head($repo_root));
+		}
+		$fetch = self::git($repo_root, array('fetch', '--quiet', $remote, $branch));
+		if ($fetch['exit'] !== 0) {
+			return array('ok' => false, 'reason' => 'could not fetch: ' . trim(implode(' | ', array_slice($fetch['out'], -2))), 'head' => self::head($repo_root));
+		}
+		$merge = self::git($repo_root, array('merge', '--quiet', '--ff-only', 'FETCH_HEAD'));
+		if ($merge['exit'] !== 0) {
+			return array('ok' => false, 'reason' => "{$remote} {$branch} is not a fast-forward of this checkout", 'head' => self::head($repo_root));
+		}
+		return array('ok' => true, 'reason' => '', 'head' => self::head($repo_root));
 	}
 }
 ?>

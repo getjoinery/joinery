@@ -486,6 +486,32 @@ check(!file_exists($repo . '/' . $new_bin) && rc_git($repo, array('ls-files', '-
 check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('public_html/includes/Mine.php'),
 	'  and what else was staged still staged');
 
+// A publish that refuses puts back what it wrote, so the checkout still
+// fast-forwards (dev's follow_main.sh will not pull over local changes).
+file_put_contents($repo . '/public_html/VERSION', "0.8.473\n");
+$fresh_bin = 'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-riscv64';
+file_put_contents($repo . '/' . $fresh_bin, "\x7fELF riscv\n");
+$restored = ReleaseCommit::restoreWrites($repo, array('public_html/VERSION', $fresh_bin));
+check($restored['exit'] === 0, 'restoreWrites succeeds', implode(' | ', $restored['out']));
+check(trim((string)file_get_contents($repo . '/public_html/VERSION')) === '0.8.471', '  a written file is back at HEAD');
+check(!file_exists($repo . '/' . $fresh_bin), '  a file git never had, never staged, is removed');
+check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('public_html/includes/Mine.php'),
+	'  and what else was staged is untouched');
+
+// fastForward: refuses local changes, then catches up once they are gone.
+rc_git($repo, array('remote', 'set-url', 'origin', $bare));
+file_put_contents($other . '/later.txt', "another commit elsewhere\n");
+rc_git($other, array('add', 'later.txt'));
+rc_git($other, array('commit', '-q', '-m', 'later'));
+rc_git($other, array('push', '-q', 'origin', 'HEAD:main'));
+$dirty = ReleaseCommit::fastForward($repo);
+check(!$dirty['ok'] && strpos($dirty['reason'], 'local changes') !== false, 'fastForward refuses a checkout with local changes', $dirty['reason']);
+rc_git($repo, array('reset', '-q', '--hard', 'HEAD'));
+rc_git($repo, array('clean', '-q', '-fd'));
+$caught = ReleaseCommit::fastForward($repo);
+check($caught['ok'] && $caught['head'] === trim(rc_git($other, array('rev-parse', 'HEAD'))['out'][0] ?? ''),
+	'  and on a clean checkout catches up to the remote', $caught['reason']);
+
 // ---------------------------------------------------------------------------
 section('The Go toolchain pin');
 

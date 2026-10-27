@@ -188,8 +188,16 @@ goes from a commit to a release:
    owner's identity and the push uses the owner's key, whoever started the
    publish. A held change found at this point (made while the publish ran)
    refuses the release, and so does a commit that landed in either repository
-   while it ran: the version bumps were decided from, and the agent built from,
-   the commits before it.
+   while it ran — locally, or on the remote, which the push would then refuse:
+   the version bumps were decided from, and the agent built from, the commits
+   before it. A refusal puts back every file publish wrote
+   (`ReleaseCommit::restoreWrites()`), so the checkout is left as it was found
+   and dev's `follow_main.sh` keeps fast-forwarding. When the only cause was a
+   commit landing, a command-line publish fast-forwards that repository
+   (`ReleaseCommit::fastForward()`) and runs again from the top, tests and all,
+   at most twice (`JOINERY_PUBLISH_CATCH_UP`); from the admin page it says to
+   publish again. A push refused after the commit was made undoes that commit,
+   so no release commit is ever left behind unpushed.
 5. Writes the release commit into a fresh build directory and builds every
    archive from it.
 6. Records both commits on the release row (`upg_core_commit`,
