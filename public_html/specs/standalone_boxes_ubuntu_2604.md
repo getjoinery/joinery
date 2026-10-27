@@ -1,6 +1,12 @@
-# Standalone Boxes to PostgreSQL 18 / PHP 8.5, on Ubuntu 24.04
+# Standalone Boxes to PostgreSQL 18 / PHP 8.5
 
-**Status:** Active (2026-09-26). WP1 and WP2 (dev) under way; WP3 (jeremytunnell) next.
+**Status:** Active. 2026-10-26: Ubuntu opened the 24.04 → 26.04 upgrade (`Supported: 1`), and the
+workspace has moved off dev to localdev, so dev takes the OS move in place (WP2, D5) instead of the
+outside-repository route. WP1 under way; WP3 (jeremytunnell) keeps the outside-repository route
+until decided otherwise.
+**WP2 done 2026-10-26:** dev runs Ubuntu 26.04.1, PostgreSQL 18.6 and PHP 8.5.4 from Ubuntu, on a
+4 GB plan; every check below passed, and `php8.3*` is purged. Left: one real publish and the next
+night's backups, then WP4 on 2026-11-02.
 **Related:** `specs/implemented/fleet_ubuntu_2604_postgres_upgrade.md` — the fleet move this is the
 rest of. All eight Docker sites run PostgreSQL 18 and PHP 8.5 on Ubuntu 26.04 images.
 `specs/backup_database_incrementals.md` — the payoff: a node's nightly database backup can shrink
@@ -13,7 +19,7 @@ and PHP 8.5, without changing their operating system. For jeremytunnell that is 
 whole fleet move: its nightly 1.65 GB database upload can drop to a fraction of that. For dev it also
 lets the database-incrementals tests run in the ordinary gate.
 
-**Why not the OS upgrade:** Ubuntu has not opened the 24.04 → 26.04 upgrade (`meta-release-lts`
+**Why not the OS upgrade (as of 2026-09-26; dev takes it after all, WP2):** Ubuntu had not opened the 24.04 → 26.04 upgrade (`meta-release-lts`
 still lists resolute with `Supported: 0`, checked 2026-09-26) and gives no date. Ubuntu 24.04 is
 supported to 2029, so the OS move is no longer needed for anything; it becomes optional (Later,
 below).
@@ -128,11 +134,66 @@ records every table's row count and every non-default server setting.
 - PHP: `a2disconf php8.5-fpm`, `a2enconf php8.3-fpm`, `systemctl enable --now php8.3-fpm`,
   `update-alternatives --set php /usr/bin/php8.3`, reload Apache.
 
-## WP2 — dev
+## WP2 — dev: the OS move in place (D5)
 
-First, because we use it all day and problems surface fast, and the way back is a restart. Dev is
-the management node: stay clear of 03:00–05:00 UTC, when it runs the fleet's backups. Other
-sessions working on dev see database errors during the cutover.
+Dev goes 24.04 → 26.04 with `do-release-upgrade`, and its PostgreSQL 18 and PHP 8.5 come from
+Ubuntu's own archive. The ondrej repository is removed (it has no 26.04 build). Dev keeps its
+address, keys, mail setup and allow-lists. It is the management node: stay clear of 03:00–05:00
+UTC, when it runs the fleet's backups. No agent sessions run on dev since the move to localdev, so
+the window touches only its public jobs (node check-ins retry, test mail waits, webhooks retry).
+
+**State before (checked 2026-10-26):** Ubuntu 24.04.4, kernel 6.8 booted by GRUB 2. PostgreSQL 16.15
+(Ubuntu's, with the unversioned `postgresql` package), cluster `16/main` on the data root
+(`/var/lib/postgresql` is a bind of `/srv/joinery/postgresql`). PHP 8.3.36 from ondrej, through
+FPM (`conf-enabled/php8.3-fpm.conf`, mpm_event, no mod_php). Outside repositories: ondrej (no
+resolute build), Tailscale (has resolute), Chrome and NodeSource (codename-free). Go 1.22 from
+Ubuntu (26.04 has 1.26; the Go modules ask for 1.22). Last site backup 06:00, verification level 2
+passed 10-25.
+
+The scripts are in `~user1/os_upgrade_2604/` on dev:
+
+1. **Record (Claude, as user1):** `record.sh before` — every table's exact row count in
+   `joinerytest` and `integral_membership`, non-default server settings, database sizes, roles,
+   PHP modules, running services, data-root mounts, the package list, and a full `pg_dumpall`
+   (the fallback if PostgreSQL 16 does not start on 26.04). About 45 seconds.
+2. **Before (owner):** a manual Linode snapshot in Cloud Manager. It is the way back for
+   everything; PHP 8.3 has no 26.04 build to fall back to.
+3. **Prepare (owner, root):** `sudo bash ~/os_upgrade_2604/1_prepare.sh` — pauses dev's
+   `follow_main` cron line, the host converger and automatic updates; sets
+   `create_main_cluster = false` so no empty 18 cluster appears; marks `postgresql-16` manual;
+   `apt full-upgrade` on 24.04. Reboot if it says so.
+4. **Upgrade (owner, root, inside `screen`):** `sudo do-release-upgrade`. Answers: continue over
+   SSH, yes; keep the locally modified version of every config file (the default); **No** to
+   removing obsolete packages (PostgreSQL 16 and its libraries must stay until the data moves);
+   reboot at the end.
+5. **After (owner, root):** `sudo bash ~/os_upgrade_2604/3_after.sh` — re-enables Chrome,
+   NodeSource and Tailscale (Tailscale pointed at resolute), deletes the ondrej source; installs
+   PostgreSQL 18 and moves the data with `pg_upgradecluster -m dump` (dump and reload rebuilds
+   every index, which the new C library's text sorting requires), copies `conf.d/`; installs PHP
+   8.5 with apcu and imagick (xhprof and imap have no 8.5 package; nothing in the platform uses
+   either), carries the FPM pool with its socket renamed, switches the `php` command and Apache's
+   conf, turns 8.3's FPM off; runs one full host converge; turns step 3's pauses back on.
+6. **Check (Claude):** `record.sh after` and compare: row counts and roles match (tables written
+   in the window named, not failed), settings carry over, every PHP module but xhprof and imap is
+   there, the same services run, the data-root mounts are back. Then the gates below, plus one
+   real publish (dev builds and signs releases, now with Go 1.26) and a mail round trip.
+7. **Same day, once the checks pass:** purge `php8.3*` and the other packages Ubuntu marks obsolete,
+   except `postgresql-16` and its libraries.
+
+**What actually happened on dev (2026-10-26), for jeremytunnell or any later box:**
+- `do-release-upgrade` moved the databases itself: 26.04's postgresql-common ran `pg_upgradecluster`
+  in dump mode during the upgrade (logged in `/var/log/dist-upgrade/screenlog.0`), leaving `18/main`
+  on 5432 and `16/main` stopped on 5433. It did not copy `conf.d/`, so step 3 only copies it.
+- Outside `.list` files come back renamed `*.list.disabled` with their lines commented, and the old
+  `sources.list` lands in `third-party.sources` (noble, `Enabled: no`). Each repository's line is
+  written back explicitly; a blanket "remove `Enabled: no`" would turn the 24.04 sources back on.
+- ondrej's `libgd3` and `php-common` carry higher version numbers than Ubuntu's, so apt keeps them;
+  step 3 installs Ubuntu's versions with `--allow-downgrades`.
+- Postfix runs as `postfix.service`, not `postfix@-`.
+
+**If PostgreSQL 16 will not start on 26.04:** create `18/main` with `pg_createcluster 18 main`,
+copy `conf.d/`, start it, load `before/dumpall.sql.gz` with `psql -U postgres -f -`, and run the same
+checks.
 
 ## WP3 — jeremytunnell
 
@@ -143,7 +204,8 @@ after.
 
 ## WP4 — Cleanup, a week after each box passes its gates
 
-`pg_dropcluster 16 main`, then purge `postgresql-16`, `postgresql-client-16` and `php8.3*`.
+`pg_dropcluster 16 main`, then purge `postgresql-16`, `postgresql-client-16` and `php8.3*`. On dev,
+also put `create_main_cluster` back and remove `~user1/os_upgrade_2604/` (it holds a database dump).
 
 ## Later — the OS move (optional)
 
@@ -162,6 +224,10 @@ PHP 8.5 replace the outside repositories' (same versions), and once no box runs 
 - **D3 — When do the boxes move?** Decided 2026-09-26: now, on 24.04, from the outside repositories;
   the OS upgrade is no longer needed for PostgreSQL 18.
 - **D4 — Which box first?** Decided 2026-09-26: dev.
+- **D5 — dev takes the OS move in place, its PHP and PostgreSQL from Ubuntu.** Decided by the owner
+  2026-10-26, once Ubuntu opened the upgrade: in place rather than a new 26.04 Linode, so dev keeps
+  its address and identity. Dev moved to a 4 GB plan in the same window, which stands in for the
+  planned shrink (`strategy/localdev_and_dev_split.md` WP5).
 
 ## Checking whether Ubuntu has opened the OS upgrade
 
