@@ -17,6 +17,8 @@
  * asks its Docker host in its own storage, and the host's converge timer
  * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.9.1 - a container's preferred route is always direct: its programs reach its Docker host, never a
+ *                relay, so a container with a relay was offered a switch to a route it cannot use (B176)
  * @version 1.9.0 - a site on a shared relay (relay 3.13) passes mail programs through it under its slot's mail name
  * @version 1.8.1 - containerNameProblem() no longer repeats the typed text (a message is shown unescaped)
  * @version 1.8.0 - a container site's own mail name (mail_apps_container_name, containerNameProblem()): for a web
@@ -76,11 +78,16 @@ class MailAppGateway {
 	/**
 	 * The route the rule picks now (specs/mail_apps_plugin.md § Which route a
 	 * deployment uses): through a relay of this deployment's own, else direct;
-	 * null where mail apps cannot be on, and cannotTurnOn() says why.
+	 * always direct in a container, whose programs reach its Docker host and
+	 * never a relay (A4); null where mail apps cannot be on, and cannotTurnOn()
+	 * says why.
 	 */
 	public static function preferredRoute(): ?string {
 		if (self::cannotTurnOn() !== null) {
 			return null;
+		}
+		if (self::inContainer()) {
+			return self::ROUTE_DIRECT;
 		}
 		return self::relay() !== null ? self::ROUTE_RELAY : self::ROUTE_DIRECT;
 	}

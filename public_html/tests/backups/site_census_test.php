@@ -297,8 +297,16 @@ check(SiteCensus::parse_output("PHP Warning: something\n" . $line . "more\n") ==
 	'it reads back through warnings around it');
 check(SiteCensus::parse_output("ERROR: the census could not be taken\n") === null, 'an error is no census');
 check(SiteCensus::parse_output('CENSUS={"version":1}') === null, 'a line missing its parts is no census');
-check(is_array($here['offloaded']) && $here['offloaded']['error'] === '' && $here['offloaded']['answered'] === $here['offloaded']['sampled'],
-	'this site\'s offloaded files answer from its bucket', json_encode($here['offloaded']));
+// Whether this box's bucket answers is the box's health, not this test's
+// subject: a copy of a database whose file store it cannot open (a workspace
+// restored from another machine) must be told apart from one whose files answer,
+// and never counted as answering.
+$off = $here['offloaded'];
+check(is_array($off) && $off['answered'] <= $off['sampled'] && $off['sampled'] <= $off['total']
+	&& ($off['answered'] === $off['sampled'] || $off['missing'] !== array())
+	&& ($off['total'] === 0 || $off['sampled'] > 0 || $off['error'] !== ''),
+	'this site\'s offloaded files are counted honestly: a store it cannot reach is named, never counted as answering',
+	json_encode($off));
 
 $script = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/site_census.php';
 $args_out = array();

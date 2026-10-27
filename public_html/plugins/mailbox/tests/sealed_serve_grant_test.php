@@ -71,7 +71,7 @@ $box = new SealedBox();
 $crypto = new VaultCrypto();
 
 // A tiny valid PNG (1x1), so MIME sniffing sees a real image.
-$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+$png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers
 
 // ---- Fixtures ------------------------------------------------------------
 $user = make_user('ServeGrant');

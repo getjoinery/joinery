@@ -155,7 +155,7 @@ $deliver = function (string $raw, InboundEmailAlias $a, InboundEmailDomain $d, s
 	return $id;
 };
 
-$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers
 $blob = random_bytes(9000);
 $msgs = array();
 $msgs['inbox'] = $deliver(mx_raw('Ann Sender <ann@sender.example>', $address, 'Inbox note ' . $suffix, 'inbox-' . $suffix . '@sender.example',

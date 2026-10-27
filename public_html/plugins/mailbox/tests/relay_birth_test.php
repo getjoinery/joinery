@@ -29,6 +29,13 @@ require_once(__DIR__ . '/lib/relay_ping_probe.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayBirthEndpoint.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
 
+// Sign with a key of this run's own, never the deployment's: a test must not
+// mint the real one as a side effect, nor need to open it (a database restored
+// on another machine cannot).
+RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_CLIENT);
+RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_OPERATOR);
+harness_defer(function () { RelayClientIdentity::resetForTests(); });
+
 $binary = RelayPingProbe::binary();
 if ($binary === null) {
 	harness_skip('the birth channel against the real relay', 'no prebuilt relay-sealer and no go toolchain');

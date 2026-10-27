@@ -18,6 +18,8 @@
  * relay gets a public key, the run row gets a public key, and an operator never
  * holds anything that could read a tenant's spool.
  *
+ * @version 1.1 - useThrowawayForTests(): a test run signs with an unsaved key of its own, never this
+ *                deployment's (which a test must neither mint as a side effect nor need to open)
  * @version 1.0
  */
 
@@ -99,6 +101,29 @@ class RelayClientIdentity extends SystemBase {
 	}
 
 	private static function mint(string $kind): RelayClientIdentity {
+		$row = self::fresh($kind);
+		$row->save();
+
+		$fresh = new RelayClientIdentity(intval($row->key), TRUE);
+		self::$cache[$kind] = $fresh;
+		return $fresh;
+	}
+
+	/**
+	 * A test run's own identity of a kind, held for this request and never
+	 * saved: everything that signs or names the kind's key uses it until
+	 * resetForTests(). The deployment's real key is left alone, so a test
+	 * neither mints it as a side effect nor depends on being able to open it
+	 * (a database restored on another machine cannot).
+	 */
+	public static function useThrowawayForTests(string $kind): RelayClientIdentity {
+		$row = self::fresh($kind);
+		self::$cache[$kind] = $row;
+		return $row;
+	}
+
+	/** A new keypair of a kind, sealed into an unsaved row. */
+	private static function fresh(string $kind): RelayClientIdentity {
 		self::assertKind($kind);
 		$pair   = sodium_crypto_sign_keypair();
 		$secret = sodium_crypto_sign_secretkey($pair);
@@ -111,12 +136,8 @@ class RelayClientIdentity extends SystemBase {
 		$row->set('rci_sealed_secret_key',
 			(new SecretBox())->seal('rci_relay_client_identities.rci_sealed_secret_key', base64_encode($secret)));
 		$row->set('rci_is_active', true);
-		$row->save();
 		sodium_memzero($secret);
-
-		$fresh = new RelayClientIdentity(intval($row->key), TRUE);
-		self::$cache[$kind] = $fresh;
-		return $fresh;
+		return $row;
 	}
 
 	/** The raw 64-byte secret key. Callers memzero it. */

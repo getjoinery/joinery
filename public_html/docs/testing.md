@@ -523,6 +523,11 @@ Fixtures and teardown (all LIFO, run automatically at finish or on crash):
   needs a real, deliverable one. Use it instead of writing an address by hand:
   the shared shape is what stops a leftover from colliding with the next run,
   and what lets teardown recognise the mail that address received.
+- `harness_unique_png()` — a valid 1x1 PNG whose bytes no other file on the
+  box shares. Stored files are deduplicated by content, so a fixed picture
+  lands on whatever blob already holds it, which on a database restored from
+  another machine may sit in a bucket this box cannot reach. Use it for any
+  picture a test stores and reads back.
 - `make_machine_key($user_id, $name, $permission = 4)` — an API key.
 - `harness_register_row($table, $pkey_col, $id)` / `harness_register_user($user)`
   / `harness_register_key_id($id)`.
