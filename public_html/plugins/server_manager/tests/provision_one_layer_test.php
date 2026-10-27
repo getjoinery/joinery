@@ -422,6 +422,11 @@ if (!class_exists('RelayCloudProvisioner') || !class_exists('RelayCloudProvision
 	), $rh);
 	RelayCloudProvisioner::$driver_factory = function ($run) use ($relay_driver) { return $relay_driver; };
 	harness_defer(function () { RelayCloudProvisioner::$driver_factory = null; });
+	// The birth's user-data names the relay keys: a run's own, so the test
+	// never mints the deployment's real ones as a side effect.
+	RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_CLIENT);
+	RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_OPERATOR);
+	harness_defer(function () { RelayClientIdentity::resetForTests(); });
 	$run = new RelayCloudProvision(NULL);
 	$run->set('rcl_kind', 'provision');
 	$run->set('rcl_status', 'ready');

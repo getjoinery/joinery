@@ -84,10 +84,9 @@ $upload_dir = $settings->get_setting('upload_dir');
 $fast_dir   = dirname($upload_dir) . '/static_files/uploads';
 
 // A real 1x1 PNG — the only way to prove "detected from the bytes" is to hand
-// the detector bytes that disagree with the name.
-$PNG_BYTES = base64_decode(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
-);
+// the detector bytes that disagree with the name. This run's own bytes, so it
+// never dedups onto a blob the box already holds.
+$PNG_BYTES = harness_unique_png();
 
 $owner = make_user('upload_safety', 5);
 

@@ -589,6 +589,21 @@ function harness_fixture_email($label) {
 }
 
 /**
+ * A valid 1x1 PNG no other file on this box shares: the same pixel every
+ * time, with a random text chunk. A fixed picture's bytes dedup onto whatever
+ * blob already holds them — on a workspace restored from another machine, one
+ * offloaded to a bucket it cannot reach — so a test that stores a picture and
+ * reads it back would be testing the box's leftovers instead of its own bytes.
+ */
+function harness_unique_png() {
+	$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+	$data = "Comment\0" . bin2hex(random_bytes(8));
+	$chunk = pack('N', strlen($data)) . 'tEXt' . $data . pack('N', crc32('tEXt' . $data));
+	// Before IEND, the last 12 bytes.
+	return substr($png, 0, -12) . $chunk . substr($png, -12);
+}
+
+/**
  * The run token a fixture address carries, or '' when it carries none.
  * Inverse of harness_fixture_email(): the token is the 8 hex characters
  * before the '@'.

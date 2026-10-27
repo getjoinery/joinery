@@ -90,7 +90,7 @@ function mb_raw(string $from, string $to, string $subject, string $mid, array $b
 		. "Date: Tue, 06 Oct 2026 08:00:00 +0000\r\n" . $extra . "MIME-Version: 1.0\r\n" . mb_part($body);
 }
 
-$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers
 $plain = array('type' => 'text/plain', 'body' => "Grüße — a line = with an equals\nand a long one " . str_repeat('x', 120) . " \n");
 $html = array('type' => 'text/html', 'body' => '<p>Hello <b>there</b> é</p>');
 $inner = mb_raw('Old <old@x.example>', 'You <you@x.example>', 'Inner', 'inner-' . $suffix . '@x.example',

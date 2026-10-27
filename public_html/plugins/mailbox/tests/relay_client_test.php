@@ -20,15 +20,22 @@
  *   - Direct egress on the public listener is signed
  *
  * The relay row is a fixture (disabled, so it never becomes this deployment's
- * active relay) and is removed at teardown. The client identity is this
- * deployment's real one - minting it is idempotent and it is what a relay
- * would be told about.
+ * active relay) and is removed at teardown. The client identity is a
+ * throwaway of this run's own (RelayClientIdentity::useThrowawayForTests),
+ * built and sealed exactly as the deployment's is.
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/lib/relay_ping_probe.php');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_client_identities_class.php'));
+
+// Sign with a key of this run's own, never the deployment's: a test must not
+// mint the real one as a side effect, nor need to open it (a database restored
+// on another machine cannot).
+RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_CLIENT);
+RelayClientIdentity::useThrowawayForTests(RelayClientIdentity::KIND_OPERATOR);
+harness_defer(function () { RelayClientIdentity::resetForTests(); });
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySpoolConsumer.php'));
@@ -47,6 +54,7 @@ $identity = RelayClientIdentity::ensure(RelayClientIdentity::KIND_CLIENT);
 $public = RelayClientIdentity::publicKey(RelayClientIdentity::KIND_CLIENT);
 check(strlen(base64_decode($public, true)) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES, 'the client identity is an Ed25519 key');
 check(RelayClientIdentity::ensure(RelayClientIdentity::KIND_CLIENT)->key === $identity->key, 'ensure() is idempotent');
+check($identity->key === null, 'the run signs with a key of its own, never saved over the deployment\'s');
 $sig = RelayClientIdentity::sign(RelayClientIdentity::KIND_CLIENT, 'hello');
 check(sodium_crypto_sign_verify_detached(base64_decode($sig), 'hello', base64_decode($public)), 'it signs, and the signature verifies against its public key');
 $stored = base64_decode((string)$identity->get('rci_sealed_secret_key'), true);

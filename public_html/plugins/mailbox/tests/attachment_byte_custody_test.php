@@ -144,7 +144,7 @@ harness_defer(function () use (&$file_ids, &$message_ids, $alias_id, $domain_id,
 });
 harness_defer(function () use ($uid) { VaultUnlock::lockAll($uid); });
 
-$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers
 $pdf = "%PDF-1.4\n% a small pretend document\n%%EOF\n";
 
 /** A multipart/mixed message carrying the given attachment parts. */

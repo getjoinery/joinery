@@ -250,7 +250,11 @@ check($off['ok'] && json_decode((string)file_get_contents($box . '/request.json'
 Setting::put('mail_apps_enabled', true);
 Setting::put('mail_apps_served_name', $web);
 Setting::put('mail_apps_route', 'direct');
-check(MailAppGateway::routeState() === null, 'no public-address warning in a container, relay or not: its host\'s address is public anyway');
+check(MailAppGateway::routeState() === null, 'no public-address warning in a container, relay or not: its host\'s address is public anyway',
+	json_encode(MailAppGateway::routeState()));
+check(MailAppGateway::relay() === null || MailAppGateway::preferredRoute() !== MailAppGateway::ROUTE_RELAY,
+	'  and with a relay present, a container never prefers it: its programs reach its own host (B176)',
+	(string)MailAppGateway::preferredRoute());
 check(MailAppGateway::checkAddress() === $web, 'the checks dial the served name, the host, not the container\'s own loopback');
 $kept = MailAppGateway::keepReachable();
 check($kept['ok'] && $calls === array(), 'the hourly task leaves a container to its host');

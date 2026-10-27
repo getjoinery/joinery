@@ -18,6 +18,12 @@
  * ephemeral keys and IVs, so browser, server and the phone ports are held to
  * one set of bytes.
  *
+ * Gzip is the one input that is not reproducible: zlib builds compress the
+ * same text to different, equally valid bytes (Ubuntu 26.04's Node does), so
+ * the build reuses the file's own gzip whenever it unpacks to exactly the text
+ * it would compress. The format is held to account, not the compressor.
+ *
+ * @version 1.1 - the search text's gzip is reused from the file when it unpacks to the text (box-agnostic)
  * @version 1.0
  */
 
@@ -84,7 +90,7 @@ const VC = globalThis.window.VaultCrypto;
 
 // ---- the vector ------------------------------------------------------------------
 
-async function build() {
+async function build(knownPacked) {
 	const deviceSecret = seeded('device-secret', 32);
 	const vaultSecret = seeded('mail-vault-secret', 32);
 
@@ -127,9 +133,12 @@ async function build() {
 	// The search text as packSearchText() stores a long one: 'gz:' + base64(gzip).
 	const searchText = ('Zoë Adams zoe@example.test Quarterly numbers draft report.pdf '
 		+ 'the quarterly numbers are attached, revenue up in every region '.repeat(12)).trim();
-	const gz = await new Response(new Blob([new TextEncoder().encode(searchText)]).stream()
-		.pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-	const packed = 'gz:' + b64(new Uint8Array(gz));
+	let packed = knownPacked;
+	if (!packed || unpackGz(packed) !== searchText) {
+		const gz = await new Response(new Blob([new TextEncoder().encode(searchText)]).stream()
+			.pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+		packed = 'gz:' + b64(new Uint8Array(gz));
+	}
 	const searchIv = seeded('field-iv/iem_search_text', 12);
 	randomQueue.push(searchIv);
 	const searchAd = adPrefix + id + ':iem_search_text';
@@ -171,6 +180,12 @@ async function build() {
 
 // ---- the check -------------------------------------------------------------------
 
+/** 'gz:' + base64 gzip back to its text, or null when it is not that. */
+function unpackGz(packed) {
+	if (typeof packed !== 'string' || !packed.startsWith('gz:')) return null;
+	try { return gunzipSync(Buffer.from(packed.slice(3), 'base64')).toString('utf8'); } catch (e) { return null; }
+}
+
 let passed = 0, failed = 0;
 function check(ok, label, detail) {
 	if (ok) { passed++; console.log('  PASS: ' + label); }
@@ -210,15 +225,17 @@ async function openAll(v) {
 		'the stored part opens to its bytes under mail:{id}:att:{mime_part}');
 }
 
-const built = await build();
+let onDisk = '';
+try { onDisk = readFileSync(OUT, 'utf8'); } catch (e) { onDisk = ''; }
+let diskPacked = null;
+try { diskPacked = JSON.parse(onDisk).row.search_text.packed; } catch (e) { diskPacked = null; }
+const built = await build(diskPacked);
 const text = JSON.stringify(built, null, '\t') + '\n';
 if (process.argv.includes('--write')) {
 	writeFileSync(OUT, text);
 	console.log('wrote ' + OUT);
 }
 console.log('\n== device handoff vector ==');
-let onDisk = '';
-try { onDisk = readFileSync(OUT, 'utf8'); } catch (e) { onDisk = ''; }
 check(onDisk === text, 'the file is what vault-crypto.js builds today (rebuild with --write if the format changed on purpose)');
 if (onDisk) await openAll(JSON.parse(onDisk));
 

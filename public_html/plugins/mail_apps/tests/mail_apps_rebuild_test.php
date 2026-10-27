@@ -56,7 +56,7 @@ $alias = mafx_alias($domain, 'reader', $uid);
 $address = strtolower($alias->get_full_address());
 harness_defer(function () { SessionControl::get_instance()->clear_api_user(); });
 
-$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers
 $corpus = array(
 	'plain only'      => mafx_raw($address, 'Plain', "Just text.\nTwo lines."),
 	'html only'       => mafx_raw($address, 'HTML', '', array(), '<p>Only <b>HTML</b></p>'),
