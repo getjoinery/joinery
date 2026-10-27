@@ -17,6 +17,8 @@
  * that boundary matters: a site whose outbound mail can be pointed elsewhere
  * is a site whose password resets can be.
  *
+ * @version 1.1 - defaultFrom(): a site that has no From address yet gets hello@ its sending
+ *   domain, replies to its owner (B166)
  * @version 1.0 - lifted from utils/hosted_mail_settings.php
  */
 class HostedMailSettingsMap {
@@ -66,6 +68,53 @@ class HostedMailSettingsMap {
 		Setting::put('smtp_auth', trim((string)($values['username'] ?? '')) !== '' ? '1' : '0');
 		Globalvars::get_instance()->forget_setting('smtp_auth');
 		$written[] = 'smtp_auth';
+		return $written;
+	}
+
+	/** The local part of the From address a site is given when it has none. */
+	const DEFAULT_FROM_LOCAL = 'hello';
+
+	/**
+	 * Give a site that has no From address one on its sending domain, with
+	 * replies to its owner. Returns the names written; empty when the site
+	 * already had a From address.
+	 *
+	 * A Managed site is born with no From address, and the setup wizard's
+	 * mail step is where the owner picks one. Until then every send would fail,
+	 * including the forgot-password the buyer falls back on if the one-time
+	 * admin password reveal is lost. So the mail credential arriving brings a
+	 * default: hello@<domain> (the domain the provider verified, so it can
+	 * send), replying to the owner account's address, which the install set to
+	 * the buyer's.
+	 *
+	 * ONLY WHEN BLANK, and that is the opposite of apply() on purpose: these
+	 * are the owner's choice, and a later push of a replacement credential must
+	 * never overwrite an address they picked. The values are fixed here, not
+	 * taken from the wire, so a management node can trigger this and cannot
+	 * choose what it writes.
+	 */
+	public static function defaultFrom(string $sending_domain): array {
+		$domain = strtolower(trim($sending_domain));
+		$settings = Globalvars::get_instance();
+		if ($domain === '' || trim((string)$settings->get_setting('defaultemail')) !== '') {
+			return array();
+		}
+		$written = array();
+		Setting::put('defaultemail', self::DEFAULT_FROM_LOCAL . '@' . $domain);
+		$settings->forget_setting('defaultemail');
+		$written[] = 'defaultemail';
+
+		if (trim((string)$settings->get_setting('defaultreplyto')) === '') {
+			$q = DbConnector::get_instance()->get_db_link()->query(
+				"SELECT usr_email FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL"
+				. " AND NOT usr_is_disabled AND COALESCE(usr_email, '') <> '' ORDER BY usr_user_id LIMIT 1");
+			$owner = trim((string)$q->fetchColumn());
+			if ($owner !== '' && filter_var($owner, FILTER_VALIDATE_EMAIL)) {
+				Setting::put('defaultreplyto', $owner);
+				$settings->forget_setting('defaultreplyto');
+				$written[] = 'defaultreplyto';
+			}
+		}
 		return $written;
 	}
 

@@ -112,9 +112,14 @@ than pretending otherwise.
 1. **A subaccount per customer.** The unit of isolation: its own SMTP users,
    its own sender domains, its own usage counter and its own monthly cap. Other
    customers' logs and recipients are invisible to it.
-2. **A sending domain**, `mail.<domain>` rather than the apex — so a customer
-   who later moves to their own provider is not fighting a record this operator
-   published on their apex.
+2. **A sending domain**: the site's own domain. Hosted mail is for the
+   owner's everyday email from their own address (`hello@<domain>`, which the
+   setup wizard suggests), on a small allowance; bulk mail, or automated mail on
+   a separate `mail.<domain>` identity, is for the customer's own provider
+   account. The site's domain is also routable, which the provider requires of
+   an envelope sender: it always has the address record the site answers on.
+   The provider's records are two uniquely named CNAMEs (`s<id>._domainkey`,
+   `em<id>`) that sit beside the domain's own SPF and DKIM.
 3. **Its DNS records**, published where this operator holds the zone. Where it
    does not, the records are kept on the provision and the leg says who has to
    publish them; it does not stall waiting for something nobody here can do.
@@ -130,6 +135,10 @@ than pretending otherwise.
    replacement is one call away, which is a better property than a copy in this
    database. If the site cannot take it (an agent too old for the primitive),
    nothing is minted at all, so a stale credential is never left behind.
+   A site that has no From address yet is given `hello@<domain>`, replying to
+   its owner account (`HostedMailSettingsMap::defaultFrom`), so password resets
+   work before the owner reaches the setup wizard's mail step. An address the
+   owner already chose is never overwritten.
 
 The send cap is the provider's own: it counts month-to-date sends against the
 subaccount's limit and refuses past it. Nothing on this platform is in the send

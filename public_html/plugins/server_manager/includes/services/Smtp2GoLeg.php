@@ -22,6 +22,8 @@
  *
  * Nothing here ever puts the master key on a box.
  *
+ * @version 1.4 - the sending identity is the customer's own domain, not mail.<domain>: the
+ *   provider refuses an envelope sender whose domain has no MX or address record (B165)
  * @version 1.3 - customers send on port 2525: Linode blocks 587 (B163)
  * @version 1.2 - a blank allowance reads as 2,000, the default
  * @version 1.1 - createSubaccount() takes the allowance, not an email: the provider would invite
@@ -40,15 +42,22 @@ class Smtp2GoLeg {
 	const SMTP_PORT = 2525;
 
 	/**
-	 * The sending identity is mail.<domain>, not the apex.
+	 * The sending identity is the customer's own domain.
 	 *
-	 * A subdomain keeps the customer's own apex SPF and DKIM out of the
-	 * operator's reach: a customer who later moves to their own provider, or who
-	 * already sends from the apex through something else, is not fighting a
-	 * record this plane published.
+	 * Hosted mail is an onboarding convenience for the owner's everyday email
+	 * (hello@theirdomain.com), with a small allowance; bulk or automated mail
+	 * on a split identity is for a customer's own provider account. So the
+	 * domain verified at the provider is the one the owner's From address is
+	 * on, which is what the setup wizard suggests ({first name}@{domain}).
+	 *
+	 * It is also the domain that can be routed. The provider refuses an
+	 * envelope sender whose domain has neither an MX nor an address record, and
+	 * a site's own domain always has the address record the site answers on.
+	 * The records it asks for are uniquely named CNAMEs (s<id>._domainkey,
+	 * em<id>), so they sit beside the domain's own SPF and DKIM, not over them.
 	 */
 	public static function sendingDomain(string $domain): string {
-		return 'mail.' . strtolower(trim($domain));
+		return strtolower(trim($domain));
 	}
 
 	/**

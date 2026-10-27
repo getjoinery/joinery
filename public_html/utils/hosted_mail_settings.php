@@ -51,9 +51,9 @@
  * Values arrive as one JSON object on stdin:
  *
  *   php utils/hosted_mail_settings.php <<'EOF'
- *   {"service":"smtp","host":"mail.example.net","port":"587",
- *    "username":"site-a1b2c3","password":"…","sender":"bounces@mail.example.com",
- *    "helo":"mail.example.com","hostname":"mail.example.com"}
+ *   {"service":"smtp","host":"mail.example.net","port":"2525",
+ *    "username":"site-a1b2c3","password":"…","sender":"bounces@example.com",
+ *    "helo":"example.com","hostname":"example.com"}
  *   EOF
  *
  * EVERY KEY IS WRITTEN EVERY TIME, including the ones that arrive empty, so an
@@ -81,6 +81,8 @@
  * of them is a password, and job output is stored on the management node and
  * read by people). Exits 0 on success, 2 on unusable input, 1 on a failed write.
  *
+ * @version 1.3 - a site with no From address is given hello@ its sending domain (B166)
+ * @version 1.2 - the usage example shows the hosted sending identity (the site's own domain, port 2525)
  * @version 1.1 - the names are HostedMailSettingsMap::MAP, shared with the services enrol path
  * @version 1.0
  */
@@ -151,6 +153,11 @@ $values = array(
 // (authentication is required exactly then; the wire need not carry it).
 try {
 	$written = HostedMailSettingsMap::apply($values);
+	// A site with no From address yet gets one on the domain it now sends as;
+	// one the owner already chose is left alone (HostedMailSettingsMap::defaultFrom).
+	if ($service !== '') {
+		$written = array_merge($written, HostedMailSettingsMap::defaultFrom($values['helo']));
+	}
 } catch (Throwable $e) {
 	// A declared-settings refusal, or the database. Either way the box may be
 	// half-written, which is worth saying out loud: the caller re-dispatches

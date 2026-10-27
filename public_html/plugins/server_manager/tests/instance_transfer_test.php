@@ -178,7 +178,7 @@ function xfer_site(string $slug, array $extra = array()): array {
 	$provision->set('cvp_smtp2go_subaccount_id', 'sub-' . $slug);
 	$provision->set('cvp_smtp2go_user_id', 'smtp-' . $slug);
 	$provision->set('cvp_mail_records', json_encode(array(
-		array('type' => 'CNAME', 'name' => 's1._domainkey.mail.' . $slug . '.example.com', 'value' => 'dkim.smtp2go.net', 'purpose' => 'DKIM'))));
+		array('type' => 'CNAME', 'name' => 's1._domainkey.' . $slug . '.example.com', 'value' => 'dkim.smtp2go.net', 'purpose' => 'DKIM'))));
 	foreach ($extra as $k => $v) { $provision->set($k, $v); }
 	$provision->save();
 	$provision->load();
@@ -508,7 +508,7 @@ $shelf = ServiceTenant::forNode((int)$n->key, ServiceTenant::SERVICE_SHELF);
 check($mail !== null && $shelf !== null, 'two node-linked Services rows exist: mail and backup storage');
 check($mail && (string)$mail->get('svt_provider_subaccount_id') === 'sub-xfer-a-' . $suffix
 	&& (string)$mail->get('svt_provider_user_id') === 'smtp-xfer-a-' . $suffix
-	&& (string)$mail->get('svt_provider_domain') === 'mail.xfer-a-' . $suffix . '.example.com'
+	&& (string)$mail->get('svt_provider_domain') === 'xfer-a-' . $suffix . '.example.com'
 	&& (string)$mail->get('svt_mail_state') === ServiceTenant::MAIL_DOMAIN_VERIFIED
 	&& count($mail->mailRecords()) === 1 && (string)$mail->get('svt_state') === ServiceTenant::STATE_ACTIVE,
 	'the mail row is the provision\'s provider pieces: subaccount, user, sender domain (not its id), records');

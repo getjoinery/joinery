@@ -13,7 +13,7 @@
  *     answer is not entitled. A date granted on the plane is what lets the
  *     next enrol build the service.
  *   - Mail enrol builds the subaccount (capped at the allowance), the sender
- *     domain (mail.<host>, records kept), and one SMTP user, and answers the
+ *     domain (the host itself, records kept), and one SMTP user, and answers the
  *     send values the site writes. A second enrol mints a fresh credential in
  *     the same subaccount and creates nothing else. A host change re-enrols
  *     the sender domain. Zero records from the provider fails loudly.
@@ -34,6 +34,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/services_tenants_test.php
  *
+ * @version 1.1 - the sender domain is the host itself (B165)
  * @version 1.0
  */
 
@@ -164,9 +165,9 @@ check((int)$row->get('svt_allowance') === 1000, 'the allowance is snapshotted on
 $reply(array(
 	array('id' => 'sub-' . $host),                                  // subaccount/add (the provider answers data.id)
 	array(),                                                          // subaccount/edit (limit)
-	$domain_entry('mail.' . $host, false),                            // domain/add
+	$domain_entry($host, false),                            // domain/add
 	array('username' => 'ignored-by-caller'),                         // users/smtp/add
-	$domain_entry('mail.' . $host, false),                            // domain/verify probe
+	$domain_entry($host, false),                            // domain/verify probe
 ));
 $answer = JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $calls = $drain();
@@ -181,7 +182,7 @@ check(($calls[0]['body']['limit'] ?? 0) === 2000, 'it is created at its limit, n
 // A limit is one of the provider's fixed sizes: the smallest covering 1,000 is 2,000.
 check(($calls[1]['body']['limit'] ?? 0) === 2000 && ($calls[1]['body']['id'] ?? '') === 'sub-' . $host,
 	'the limit is the smallest size covering the allowance, on the tenant\'s own subaccount (named as id)');
-check(($calls[2]['body']['domain'] ?? '') === 'mail.' . $host, 'the sender domain is mail.<host>');
+check(($calls[2]['body']['domain'] ?? '') === $host, 'the sender domain is the host itself');
 check(($calls[3]['body']['subaccount_id'] ?? '') === 'sub-' . $host && !isset($calls[3]['body']['status']),
 	'the SMTP user is minted inside the subaccount, delivering (no sandbox)');
 $username = (string)($calls[3]['body']['username'] ?? '');
@@ -193,15 +194,15 @@ check(($mail['service'] ?? '') === 'smtp' && ($mail['host'] ?? '') === 'mail.smt
 	'the send values name the provider\'s relay');
 check(($mail['username'] ?? '') === $username && strlen((string)($mail['password'] ?? '')) === 28,
 	'the credential minted is the credential returned');
-check(($mail['sender'] ?? '') === 'bounces@mail.' . $host && ($mail['helo'] ?? '') === 'mail.' . $host
-	&& ($mail['hostname'] ?? '') === 'mail.' . $host, 'sender, HELO and hostname are the sending identity');
+check(($mail['sender'] ?? '') === 'bounces@' . $host && ($mail['helo'] ?? '') === $host
+	&& ($mail['hostname'] ?? '') === $host, 'sender, HELO and hostname are the sending identity');
 check(count($mail['records'] ?? array()) === 2 && ($mail['records'][0]['type'] ?? '') === 'CNAME',
 	'the DNS records come back for the publish box', json_encode($mail['records'] ?? null));
 check(($mail['domain_state'] ?? '') === 'domain_added', 'the domain is added, not yet verified');
 
 $row = ServiceTenant::forKey($key_id, 'mail');
 check((string)$row->get('svt_provider_subaccount_id') === 'sub-' . $host
-	&& (string)$row->get('svt_provider_domain') === 'mail.' . $host
+	&& (string)$row->get('svt_provider_domain') === $host
 	&& (string)$row->get('svt_provider_user_id') === $username,
 	'the provider ids are on the row');
 check(count($row->mailRecords()) === 2, 'the records are kept on the row');
@@ -214,7 +215,7 @@ $reply(array(
 	array(),                                        // subaccount/edit
 	array(),                                        // users/smtp/remove
 	array('username' => 'x'),                       // users/smtp/add
-	$domain_entry('mail.' . $host, true),           // domain/verify → verified now
+	$domain_entry($host, true),           // domain/verify → verified now
 ));
 $again = JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $calls = $drain();
@@ -233,25 +234,25 @@ $host2 = 'moved-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';
 $reply(array(
 	array(),                                        // subaccount/edit
 	array(),                                        // domain/remove (old)
-	$domain_entry('mail.' . $host2, false),         // domain/add (new)
+	$domain_entry($host2, false),         // domain/add (new)
 	array(),                                        // users/smtp/remove
 	array('username' => 'x'),                       // users/smtp/add
-	$domain_entry('mail.' . $host2, false),         // domain/verify
+	$domain_entry($host2, false),         // domain/verify
 ));
 $moved = JoineryServices::enrol($owner->key, $key_id, 'mail', $host2, $client);
 $calls = $drain();
 check($paths($calls) === array('subaccount/edit', 'domain/remove', 'domain/add', 'users/smtp/remove', 'users/smtp/add', 'domain/verify'),
 	'the old sender domain is released and the new one added', json_encode($paths($calls)));
-check(($calls[1]['body']['domain'] ?? '') === 'mail.' . $host && ($calls[2]['body']['domain'] ?? '') === 'mail.' . $host2,
+check(($calls[1]['body']['domain'] ?? '') === $host && ($calls[2]['body']['domain'] ?? '') === $host2,
 	'old out, new in');
 $row = ServiceTenant::forKey($key_id, 'mail');
-check((string)$row->get('svt_host') === $host2 && (string)$row->get('svt_provider_domain') === 'mail.' . $host2
+check((string)$row->get('svt_host') === $host2 && (string)$row->get('svt_provider_domain') === $host2
 	&& $moved['service'] === 'mail', 'the row carries the new host and domain');
-check(($moved['mail']['sender'] ?? '') === 'bounces@mail.' . $host2, 'the send values follow the new host');
+check(($moved['mail']['sender'] ?? '') === 'bounces@' . $host2, 'the send values follow the new host');
 
 // ---------------------------------------------------------------------------
 section('status: contract C2, the host label, the webhook figure');
-$reply(array($domain_entry('mail.' . $host2, false)));       // domain/verify probe
+$reply(array($domain_entry($host2, false)));       // domain/verify probe
 $status = JoineryServices::status($owner->key, $key_id, $host2, $client);
 check($paths($drain()) === array('domain/verify'), 'an unverified domain is probed once on status');
 $m = $status['services']['mail'] ?? array();
@@ -382,9 +383,9 @@ check(count($drain()) === 0 && (string)$row->get('svt_state') === 'released',
 $reply(array(
 	array(),                                        // subaccount/reopen
 	array(),                                        // subaccount/edit
-	$domain_entry('mail.' . $host2, false),         // domain/add
+	$domain_entry($host2, false),         // domain/add
 	array('username' => 'x'),                       // users/smtp/add
-	$domain_entry('mail.' . $host2, false),         // domain/verify
+	$domain_entry($host2, false),         // domain/verify
 ));
 $back = JoineryServices::enrol($owner->key, $key_id, 'mail', $host2, $client);
 $calls = $drain();
@@ -427,7 +428,7 @@ JoineryServices::grant($zrow, '2030-01-01', $client);
 $reply(array(
 	array('id' => 'sub-zero'),
 	array(),
-	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host3)))),   // no selectors → no records
+	array('domains' => array(array('domain' => array('fulldomain' => $host3)))),   // no selectors → no records
 ));
 try {
 	JoineryServices::enrol($owner->key, $key2_id, 'mail', $host3, $client);
@@ -441,7 +442,7 @@ $zrow = ServiceTenant::forKey($key2_id, 'mail');
 check((string)$zrow->get('svt_provider_subaccount_id') === 'sub-zero' && (string)$zrow->get('svt_state') === 'provisioning'
 	&& strpos((string)$zrow->get('svt_notice'), 'DNS records') !== false,
 	'the subaccount is kept on the row, the state is provisioning, the notice is the sentence');
-$reply(array(array(), $domain_entry('mail.' . $host3, false), array('username' => 'x'), $domain_entry('mail.' . $host3, false)));
+$reply(array(array(), $domain_entry($host3, false), array('username' => 'x'), $domain_entry($host3, false)));
 $fixed = JoineryServices::enrol($owner->key, $key2_id, 'mail', $host3, $client);
 check($paths($drain()) === array('subaccount/edit', 'domain/add', 'users/smtp/add', 'domain/verify'),
 	'the retry does not create a second subaccount');
@@ -456,8 +457,8 @@ $host4 = 'sand-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';
 JoineryServices::enrol($owner->key, $key3_id, 'mail', $host4, $client);
 $srow = $track(ServiceTenant::forKey($key3_id, 'mail'));
 JoineryServices::grant($srow, '2030-01-01', $client);
-$reply(array(array('id' => 'sub-sand'), array(), $domain_entry('mail.' . $host4, false),
-	array('username' => 'x'), $domain_entry('mail.' . $host4, false)));
+$reply(array(array('id' => 'sub-sand'), array(), $domain_entry($host4, false),
+	array('username' => 'x'), $domain_entry($host4, false)));
 JoineryServices::enrol($owner->key, $key3_id, 'mail', $host4, $client);
 $calls = $drain();
 // The provider's name is letters and digits joined by hyphens, so test_ arrives as 'test-'.

@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.5 - the sending domain is the site's own domain (Smtp2GoLeg 1.4, B165)
  * @version 1.4 - the subaccount is created at the allowance, with no buyer email (B160)
  * @version 1.3 - the provider acts are Smtp2GoLeg's, shared with the services tenant enrol
  * @version 1.2 - a test purchase's subaccount label and SMTP username start with test_
@@ -181,14 +182,7 @@ class ProvisionHostedMail {
 
 	// ── Step 2: the sending domain ────────────────────────────────────────────
 
-	/**
-	 * The sending identity is mail.<domain>, not the apex.
-	 *
-	 * A subdomain keeps the customer's own apex SPF and DKIM out of the
-	 * operator's reach: a customer who later moves to their own provider, or who
-	 * already sends from the apex through something else, is not fighting a
-	 * record this plane published.
-	 */
+	/** The sending identity: the site's own domain (Smtp2GoLeg::sendingDomain). */
 	public static function sending_domain(string $domain): string {
 		return Smtp2GoLeg::sendingDomain($domain);
 	}

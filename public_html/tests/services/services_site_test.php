@@ -27,6 +27,8 @@
  *
  * Run: php tests/run.php --only=tests/services/services_site_test.php
  *
+ * @version 1.3 - HostedMailSettingsMap::defaultFrom gives a blank site hello@ its domain, once (B166)
+ * @version 1.2 - the operator fakes name the host itself as the sending domain
  * @version 1.1 - disconnect releases both services
  */
 
@@ -113,7 +115,8 @@ harness_set_setting_mem('webDir', $site_host);
 $touched = array('services_url', 'services_api_public_key', 'services_api_secret_key', 'services_account',
 	'services_mail_state', 'email_service', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password',
 	'smtp_sender', 'smtp_helo', 'smtp_hostname', 'smtp_auth', 'hosted_plan_state', 'hosted_plan_until_time',
-	'hosted_plan_notice', 'hosted_plan_allowances', 'hosted_plan_manage_url', 'email_test_send_last_success');
+	'hosted_plan_notice', 'hosted_plan_allowances', 'hosted_plan_manage_url', 'email_test_send_last_success',
+	'defaultemail', 'defaultreplyto');
 $before = array();
 foreach ($touched as $name) { $before[$name] = (string)get_setting_raw($name); }
 harness_defer(function () use ($touched, $before) {
@@ -225,17 +228,17 @@ check(!$v['valid'] && strpos($v['errors'][0], 'not set up') !== false, 'the prov
 
 section('provider: entitled writes the nine settings and keeps the records');
 $records = array(
-	array('type' => 'CNAME', 'name' => 's2g._domainkey.mail.' . $site_host, 'value' => 'dkim.smtp2go.net', 'purpose' => 'DKIM'),
-	array('type' => 'CNAME', 'name' => 'em.mail.' . $site_host, 'value' => 'return.smtp2go.net', 'purpose' => 'Return-Path'),
+	array('type' => 'CNAME', 'name' => 's2g._domainkey.' . $site_host, 'value' => 'dkim.smtp2go.net', 'purpose' => 'DKIM'),
+	array('type' => 'CNAME', 'name' => 'em.' . $site_host, 'value' => 'return.smtp2go.net', 'purpose' => 'Return-Path'),
 );
 svc_operator_answer($op, 'services_enroll', array('status' => 'success', 'data' => array(
 	'service' => 'mail', 'entitled' => true, 'state' => 'active', 'paid_until' => '2030-01-01 23:59:59', 'notice' => '',
 	'manage_url' => 'https://op.example/profile/server_manager/services',
-	'domain' => 'mail.' . $site_host, 'domain_state' => 'domain_added', 'records' => $records,
+	'domain' => $site_host, 'domain_state' => 'domain_added', 'records' => $records,
 	'mail' => array('service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 587, 'username' => 't9-abc123',
-		'password' => 'Pw ' . str_repeat('x', 25), 'sender' => 'bounces@mail.' . $site_host,
-		'helo' => 'mail.' . $site_host, 'hostname' => 'mail.' . $site_host,
-		'domain' => 'mail.' . $site_host, 'domain_state' => 'domain_added', 'records' => $records))));
+		'password' => 'Pw ' . str_repeat('x', 25), 'sender' => 'bounces@' . $site_host,
+		'helo' => $site_host, 'hostname' => $site_host,
+		'domain' => $site_host, 'domain_state' => 'domain_added', 'records' => $records))));
 $reg = JoineryServicesProvider::createSendingDomain($site_host);
 check($reg['status'] === 'ok', 'entitled: registered', json_encode($reg));
 $reqs = svc_operator_requests($op);
@@ -244,12 +247,12 @@ check((string)get_setting_raw('email_service') === 'joinery_services', 'email_se
 check((string)get_setting_raw('smtp_host') === 'mail.smtp2go.com' && (string)get_setting_raw('smtp_port') === '587'
 	&& (string)get_setting_raw('smtp_username') === 't9-abc123'
 	&& Setting::openStored('smtp_password', (string)get_setting_raw('smtp_password')) === 'Pw ' . str_repeat('x', 25)
-	&& (string)get_setting_raw('smtp_sender') === 'bounces@mail.' . $site_host && (string)get_setting_raw('smtp_helo') === 'mail.' . $site_host
-	&& (string)get_setting_raw('smtp_hostname') === 'mail.' . $site_host && (string)get_setting_raw('smtp_auth') === '1',
+	&& (string)get_setting_raw('smtp_sender') === 'bounces@' . $site_host && (string)get_setting_raw('smtp_helo') === $site_host
+	&& (string)get_setting_raw('smtp_hostname') === $site_host && (string)get_setting_raw('smtp_auth') === '1',
 	'the SMTP values land through the shared map, the password untrimmed');
 check(ServicesClient::mailEnrolled(), 'the site sends through getjoinery');
 $ms = ServicesClient::mailState();
-check($ms['domain'] === 'mail.' . $site_host && $ms['domain_state'] === 'domain_added' && count($ms['records']) === 2
+check($ms['domain'] === $site_host && $ms['domain_state'] === 'domain_added' && count($ms['records']) === 2
 	&& $ms['paid_until'] === '2030-01-01 23:59:59', 'the operator\'s answer is kept, without the password', json_encode($ms));
 check(strpos((string)get_setting_raw('services_mail_state'), 'Pw ') === false, 'no password in the recorded state');
 check(JoineryServicesProvider::validateConfiguration()['valid'], 'the provider is configured');
@@ -264,7 +267,7 @@ svc_operator_answer($op, 'services_status', array('status' => 'success', 'data' 
 		'figure' => 812, 'allowance' => 1000, 'unit' => 'sends', 'label' => 'Email sent this month', 'used_label' => '812',
 		'allowance_label' => '1,000', 'percent' => 81, 'notice' => '', 'action_label' => 'Use your own email account',
 		'action_url' => 'https://smtp2go.example/ref', 'manage_url' => 'https://op.example/profile/server_manager/services',
-		'domain' => 'mail.' . $site_host, 'domain_state' => 'domain_verified', 'records' => $records)))));
+		'domain' => $site_host, 'domain_state' => 'domain_verified', 'records' => $records)))));
 check(JoineryServicesProvider::verifySendingDomain($site_host) === 'active', 'Refresh asks the operator and sees the domain verified');
 svc_operator_requests($op);
 
@@ -296,10 +299,10 @@ check(_setup_services_release_mail_if_switched() === null, 'while the site still
 svc_operator_requests($op);
 $put('email_service', 'mailgun');
 svc_operator_answer($op, 'services_release', array('status' => 'success', 'data' => array(
-	'service' => 'mail', 'state' => 'released', 'released' => true, 'domain' => 'mail.' . $site_host, 'records' => $records,
+	'service' => 'mail', 'state' => 'released', 'released' => true, 'domain' => $site_host, 'records' => $records,
 	'notice' => 'Outbound mail through getjoinery is closed.')));
 $rel = _setup_services_release_mail_if_switched();
-check(is_array($rel) && $rel['error'] === '' && count($rel['records']) === 2 && $rel['domain'] === 'mail.' . $site_host,
+check(is_array($rel) && $rel['error'] === '' && count($rel['records']) === 2 && $rel['domain'] === $site_host,
 	'the release happens and lists the records to remove', json_encode($rel));
 $reqs = svc_operator_requests($op);
 check(count($reqs) === 1 && $reqs[0]['action'] === 'services_release' && ($reqs[0]['body']['service'] ?? '') === 'mail', 'one release call for mail');
@@ -324,6 +327,27 @@ check(count(HostedMailSettingsMap::MAP) === 8 && HostedMailSettingsMap::MAP['ema
 $script = file_get_contents(PathHelper::getIncludePath('utils/hosted_mail_settings.php'));
 check(strpos($script, 'HostedMailSettingsMap::apply') !== false && strpos($script, "'smtp_username' =>") === false,
 	'the node-side script writes through the map and carries no second list');
+
+section('a site with no From address is given one, once');
+$put('defaultemail', '');
+$put('defaultreplyto', '');
+$owner = new User(NULL);
+$owner->set('usr_email', 'owner-' . substr(md5(uniqid('', true)), 0, 6) . '@example.net');
+$owner->set('usr_first_name', 'Owner');
+$owner->set('usr_permission', 10);
+$owner->save();
+harness_defer(function () use ($owner) { $owner->permanent_delete(); });
+$given = HostedMailSettingsMap::defaultFrom($site_host);
+check($given === array('defaultemail', 'defaultreplyto')
+	&& (string)get_setting_raw('defaultemail') === 'hello@' . $site_host, 'blank: hello@ the sending domain', json_encode($given));
+check(filter_var((string)get_setting_raw('defaultreplyto'), FILTER_VALIDATE_EMAIL) !== false,
+	'replies go to an owner account address', (string)get_setting_raw('defaultreplyto'));
+$put('defaultemail', 'chosen@' . $site_host);
+$put('defaultreplyto', 'me@example.org');
+check(HostedMailSettingsMap::defaultFrom('other.example.com') === array()
+	&& (string)get_setting_raw('defaultemail') === 'chosen@' . $site_host
+	&& (string)get_setting_raw('defaultreplyto') === 'me@example.org', 'an address the owner chose is never overwritten');
+check(strpos($script, 'HostedMailSettingsMap::defaultFrom') !== false, 'the node-side script gives the default after the credential');
 
 $_SESSION = $saved_session;
 harness_finish();

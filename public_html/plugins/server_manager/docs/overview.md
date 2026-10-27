@@ -1669,7 +1669,7 @@ broker actions below. `JoineryServices` is the operator side of all of them.
 
 - *Mail enrol* builds everything at once (`Smtp2GoLeg`, shared with
   `ProvisionHostedMail`): the subaccount capped at
-  `server_manager_hosted_send_allowance`, the sender domain `mail.<host>`
+  `server_manager_hosted_send_allowance`, the sender domain (the host itself)
   (zero DNS records from the provider fails loudly), and one SMTP user. The
   answer carries the send values (host, port, username, password, sender,
   HELO, hostname) and the DNS records; the site writes them and publishes
