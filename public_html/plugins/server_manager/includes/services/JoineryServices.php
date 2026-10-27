@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.7 - the released-mail notice names the provider's two records on the site's domain
  * @version 1.6 - the mail subaccount is created at the allowance, with no member email (B160)
  * @version 1.5 - releasing mail removes the sender domain and the SMTP user before closing the subaccount
  * @version 1.4 - releasing backup storage drains the customer's space; reactivating gives it one again
@@ -671,7 +672,7 @@ class JoineryServices {
 
 	public static function releasedNotice(string $service): string {
 		if ($service === ServiceTenant::SERVICE_MAIL) {
-			return 'Outbound mail through getjoinery is closed. The mail.<domain> records it published can be removed.';
+			return 'Outbound mail through getjoinery is closed. The two CNAME records it published for your domain (s…._domainkey and em…) can be removed.';
 		}
 		return 'The getjoinery backup storage is no longer used. Its copies are kept ' . ServiceTenant::RETENTION_DAYS
 			. ' days from today and then pruned.';

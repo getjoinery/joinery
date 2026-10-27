@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.5 - the provider's fake domain answers name the host itself (B165)
  * @version 1.4 - the provider's send count is the subaccount listing's plan_used (B162)
  * @version 1.3 - a lapse prune that finds objects object lock still holds is not finished until they are gone
  * @version 1.2 - retention waits a day before deleting a surplus chain, and keeps the newest verified chain and
@@ -144,10 +145,10 @@ $mail = ServiceTenant::forKey($key_id, 'mail');
 $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$mail->key);
 JoineryServices::grant($mail, '2036-10-01', $client);
 $reply(array(array('id' => 'sub-w'), array(),
-	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_selector' => 's', 'dkim_expected' => 'v',
+	array('domains' => array(array('domain' => array('fulldomain' => $host, 'dkim_selector' => 's', 'dkim_expected' => 'v',
 		'rpath_selector' => 'r', 'rpath_expected' => 'w', 'dkim_verified' => true, 'rpath_verified' => true)))),
 	array('username' => 'x'),
-	array('domains' => array(array('domain' => array('fulldomain' => 'mail.' . $host, 'dkim_verified' => true, 'rpath_verified' => true))))));
+	array('domains' => array(array('domain' => array('fulldomain' => $host, 'dkim_verified' => true, 'rpath_verified' => true))))));
 JoineryServices::enrol($owner->key, $key_id, 'mail', $host, $client);
 $drain();
 $mail = ServiceTenant::forKey($key_id, 'mail');

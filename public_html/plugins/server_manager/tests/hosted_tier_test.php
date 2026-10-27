@@ -252,8 +252,8 @@ section('No primitive can NAME a setting — the mail credentials least of all')
 $mail_built = JobCommandBuilder::build_hosted_mail_settings($node, array(
 	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525,
 	'username' => 'site-abc123', 'password' => 'a password with spaces',
-	'sender' => 'bounces@mail.example.com', 'helo' => 'mail.example.com',
-	'hostname' => 'mail.example.com',
+	'sender' => 'bounces@example.com', 'helo' => 'example.com',
+	'hostname' => 'example.com',
 ));
 check(($mail_built['primitive'] ?? '') === 'hosted_mail_settings', 'the mail primitive builds');
 $mail_keys = array_keys($mail_built['params']);

@@ -319,9 +319,24 @@ checkout is the card form, and dev has no PayPal keys (live verification queue).
   The test box got 587 and needs its settings pushed again. Done 10-27 03:03 UTC: old SMTP user
   removed, mail step set back to domain_verified; the plane minted test_wp2joinerytestcom-ee1851
   and pushed it (mail_state done 03:05). The site's own connection check reads Connection
-  Successful (authenticated) on mail.smtp2go.com:2525, and the password reset answered in 1.5 s.
-  plan_used stayed 0: sandbox sends appear not to count, so the send itself is only visible in the
-  SMTP2GO console's activity for subaccount zW2ONl (dev's key cannot read activity).
+  Successful (authenticated) on mail.smtp2go.com:2525, and the password reset answered in 1.5 s,
+  but nothing was sent: the site's error log (read through the agent, job 201468) shows B165.
+- **B165 (fixed 10-27):** SMTP2GO refused every send at MAIL FROM: "Verification failed for
+  bounces@mail.wp2.joinerytest.com, Unrouteable address, domain verify fail, 550". The provider
+  requires the envelope sender's domain to have an MX or address record, and mail.<domain> carries
+  only the two provider CNAMEs. Owner decision 10-27: hosted mail is an onboarding convenience for
+  owners' everyday email from their own address, a small allowance, few transactional sends and
+  almost no lists; anything more complicated brings its own key. So the sending domain is the
+  site's own domain (Smtp2GoLeg 1.4), which is routable through the site's address record and is
+  the domain the setup wizard's suggested From ({first name}@{domain}) is on. The bare-domain rule
+  in mailbox/docs/domain_onboarding.md (automated mail on mail.<domain>) is for a customer's own
+  provider setup, not hosted mail.
+- **B166 (fixed 10-27):** a hosted site's From address (defaultemail) was blank until the owner ran
+  the setup wizard's mail step, so password resets before then failed, though the provision's admin
+  password comment relies on forgot-password once the mail leg is done. Owner 10-27: we pick a
+  default. HostedMailSettingsMap 1.1 defaultFrom(): when hosted mail arrives and the site has no From
+  address, it gets hello@<domain> with Reply-To the owner account's address (the buyer's, set at
+  install); never over an address already chosen. Node-side, so it reaches sites with the release.
 - **B164 (fixed):** with the SMTP server unreachable, the test site's password reset hung for minutes
   and ended in a 502 Proxy Error (curl 01:48 UTC): PHPMailer waits 300 s to connect and 300 s per
   reply. SmtpMailer 2.5 gives up after 30 s (an unanswered connect measured 30.0 s); the failed send
