@@ -126,6 +126,12 @@ list($code, $out) = install_tool_run($utils . '/install_backup_target.php', arra
 check($code === 2 && stripos(install_tool_line($out, 'reason'), 'REGION') !== false,
 	'a linode bucket without a region: exit 2, reason names the region');
 
+list($code, $out) = install_tool_run($utils . '/install_backup_target.php', array(
+	'JOINERY_BACKUP_BUCKET' => 'b', 'JOINERY_BACKUP_KEY_ID' => 'k', 'JOINERY_BACKUP_KEY' => 's',
+	'JOINERY_BACKUP_PROVIDER' => 'wasabi', 'JOINERY_BACKUP_REGION' => 's3.us-east-1.wasabisys.com'));
+check($code === 2 && stripos(install_tool_line($out, 'reason'), 'short name') !== false,
+	'an address typed as the region: exit 2, named as that mistake', install_tool_line($out, 'reason'));
+
 check($count_targets() === $before['targets'], 'no target row was created by a refusal');
 check($read('backup_target_id') === $before['backup_target_id'], 'backup_target_id untouched');
 

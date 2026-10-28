@@ -933,10 +933,34 @@ check(preg_match('/UDF name="JOINERY_BACKUP_KEY_PASSWORD"/', $wrapper_src) === 1
 // The wrapper's one translation: the masked names become the names the
 // handoff script reads. A field declared but never exported is a field the
 // deployer filled in for nothing.
-foreach (array('JOINERY_MAIL_API_KEY', 'JOINERY_BACKUP_KEY', 'JOINERY_BACKUP_BUCKET', 'JOINERY_BACKUP_KEY_ID') as $env) {
+foreach (array('JOINERY_MAIL_API_KEY', 'JOINERY_BACKUP_KEY', 'JOINERY_BACKUP_BUCKET', 'JOINERY_BACKUP_KEY_ID',
+        'JOINERY_BACKUP_PROVIDER', 'JOINERY_BACKUP_REGION') as $env) {
     check(preg_match('/export ' . $env . '=/', $wrapper_src) === 1,
         'the wrapper exports ' . $env . ' for the handoff');
 }
+
+// The provider list is what install_backup_target.php accepts, and the form
+// has a region field but no endpoint field: a listed provider that asked for
+// an endpoint could never be set up from the form.
+$provider_udf_ok = false;
+$provider_values = [];
+if (preg_match('/<UDF name="JOINERY_BACKUP_PROVIDER"[^>]*oneOf="([^"]*)"[^>]*default="b2"/', $wrapper_src, $pm)) {
+    $provider_values = explode(',', $pm[1]);
+    $provider_udf_ok = in_array('b2', $provider_values, true);
+}
+check($provider_udf_ok, 'the deploy form offers a list of bucket providers, Backblaze preselected');
+$provider_unfit = [];
+foreach ($provider_values as $pv) {
+    if (!StorageProvider::known($pv) || $pv === StorageProvider::SERVICE
+            || array_diff(StorageProvider::asks($pv), array('region'))) {
+        $provider_unfit[] = $pv;
+    }
+}
+check($provider_values && !$provider_unfit,
+    'and each is a provider the install takes that needs at most a region',
+    $provider_unfit ? 'unfit: ' . implode(', ', $provider_unfit) : implode(', ', $provider_values));
+check(preg_match('/UDF name="JOINERY_BACKUP_REGION"/', $wrapper_src) === 1,
+    'and the form asks for the bucket\'s region');
 
 // A field is required when it declares no default. The domain is required
 // because a site with no domain can get no certificate, and every link and

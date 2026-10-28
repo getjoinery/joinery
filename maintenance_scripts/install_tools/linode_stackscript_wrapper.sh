@@ -1,4 +1,8 @@
 #!/bin/bash
+#VERSION 2.1 - The bucket is any provider that needs at most a region: a provider
+#              list (Backblaze preselected) and a region field join the form, and
+#              the key fields name no provider. Blank email and backup fields
+#              say the setup wizard asks for them.
 #VERSION 2.0 - The handoff honours no SSH key: JOINERY_SSH_KEY is gone from every path.
 #VERSION 1.9 - The sending key field names no provider: the installer tells
 #              which provider issued the key (SMTP2GO, Mailgun and the other
@@ -72,10 +76,12 @@
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />
 # <UDF name="JOINERY_DOMAIN" label="Your domain" example="example.com" />
 # <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token with the Domains Read/Write scope (only if your DNS is at Linode)" default="" optional="true" />
-# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="Email sending API key, e.g. from SMTP2GO or Mailgun (optional: sets up email during the install)" default="" optional="true" />
-# <UDF name="JOINERY_BACKUP_BUCKET" label="Backblaze B2 bucket for backups (optional: sets up backups during the install)" default="" optional="true" />
-# <UDF name="JOINERY_BACKUP_KEY_ID" label="Backblaze application key ID for that bucket" default="" optional="true" />
-# <UDF name="JOINERY_BACKUP_KEY_PASSWORD" label="Backblaze application key for that bucket" default="" optional="true" />
+# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="Email sending API key, e.g. from SMTP2GO or Mailgun (optional: blank means the setup wizard asks)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_BUCKET" label="Bucket for backups (optional: blank means the setup wizard asks)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_PROVIDER" label="Where that bucket is: b2 = Backblaze B2, linode = Linode Object Storage, s3 = Amazon S3, wasabi, digitalocean = Spaces, hetzner" oneOf="b2,linode,s3,wasabi,digitalocean,hetzner" default="b2" optional="true" />
+# <UDF name="JOINERY_BACKUP_REGION" label="The bucket's region, e.g. us-east-1 (not needed for Backblaze)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_KEY_ID" label="Access key ID for that bucket (Backblaze: keyID)" default="" optional="true" />
+# <UDF name="JOINERY_BACKUP_KEY_PASSWORD" label="Secret key for that bucket (Backblaze: applicationKey)" default="" optional="true" />
 
 set -euo pipefail
 
@@ -123,6 +129,8 @@ run_install() {
     unset JOINERY_BACKUP_KEY_PASSWORD
     export JOINERY_BACKUP_BUCKET="${JOINERY_BACKUP_BUCKET:-}"
     export JOINERY_BACKUP_KEY_ID="${JOINERY_BACKUP_KEY_ID:-}"
+    export JOINERY_BACKUP_PROVIDER="${JOINERY_BACKUP_PROVIDER:-b2}"
+    export JOINERY_BACKUP_REGION="${JOINERY_BACKUP_REGION:-}"
 
     chmod +x "$HANDOFF"
     # Replaces this subshell, so the pipeline - and tee - outlive the handoff

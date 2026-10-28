@@ -119,7 +119,7 @@ See: docs/settings.md > System-managed settings
 Yes. Pass these to `install.sh site` in the environment:
 
 - `JOINERY_MAIL_API_KEY`: an email provider's sending key. The provider is detected from the key, the From address is derived from the admin address, and the domain is registered with the provider where its API allows.
-- `JOINERY_BACKUP_BUCKET`, `JOINERY_BACKUP_KEY_ID` and `JOINERY_BACKUP_KEY`: a backup bucket and its key pair (`JOINERY_BACKUP_PROVIDER` is `b2`, `s3` or `linode`, default `b2`).
+- `JOINERY_BACKUP_BUCKET`, `JOINERY_BACKUP_KEY_ID` and `JOINERY_BACKUP_KEY`: a backup bucket and its key pair (`JOINERY_BACKUP_PROVIDER` is any provider the Backups page offers, such as `b2`, `linode` or `s3`, default `b2`; `JOINERY_BACKUP_REGION` or `JOINERY_BACKUP_ENDPOINT` where the provider asks for one).
 
 ```bash
 JOINERY_MAIL_API_KEY=api-… \

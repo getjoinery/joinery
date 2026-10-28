@@ -6,6 +6,7 @@ refactors it waited on (declared_permissions, optional_username) are committed a
 WP1a built 10-26 (suite `card_checkout_failures` 33/33, Stripe doubled; its live check is in the
 live verification queue). WP1b built 10-26 (`order_refund` 18/18). WP1c built 10-26 (`card_checkout_failures` 45/45), verified on dev against Stripe test mode. WP1d built
 10-26 (`hosted_checkout` 24/24). WP1 is built; its remaining live checks are in the live verification queue.
+WP2 to WP5 built 10-27 (each section says what was verified; live checks in the queue). WP6 to WP9 not built.
 
 **Companions:** `managed_hosting_and_services.md` (the umbrella and its contracts C1/C2),
 `managed_hosting_phase1_purchase.md`, `services_phase2_platform.md`,
@@ -565,6 +566,41 @@ The deploy form and the wizard's Email and Backups steps offer our mail and buck
 "my own key". The deploy form gains the bucket's provider and region (it assumes Backblaze
 today). Depends on WP2 and WP4.
 
+**Found (10-27).** The wizard half was already there: the Email step offers getjoinery's
+email service (`setup_steps/mail_send.php` 3.6) and the Backups step its backup storage (WP4).
+The install scripts already took any provider and a region (`linode_stackscript.sh`,
+`utils/install_backup_target.php` 1.1); only the deploy form lacked the fields. Connecting to
+getjoinery is a browser sign-in, so the deploy form cannot choose our services itself; a blank
+field leaves the choice to the wizard. Our services are closed to a stranger: enrol needs a
+paid-through date, set today only by hand (`JoineryServices.php:13-15`), so offering them to
+strangers waits on WP9.
+
+**Decided 10-27 (Q5, option A).** Build the deploy form fields now, and name no getjoinery
+service on the form until WP9 can sell it.
+
+**Built (10-27).** `linode_stackscript_wrapper.sh` 2.1: a provider list (b2 preselected,
+linode, s3, wasabi, digitalocean, hetzner: every provider that needs at most a region) and a
+region field; the key fields name no provider; a blank email or bucket field says the wizard
+asks. R2 and a generic bucket need an endpoint and stay wizard-only. `linode_stackscript.sh`
+2.2 comment; `docs/installation.md` and `docs/faq/install.md`. `installer_contract` 961/961: the
+listed providers are ones the install takes and need at most a region.
+
+**Review (reviewer2, 10-27), all taken.** B1: Backblaze with a region typed in the form's
+always-visible region field kept that region beside the endpoint Backblaze named, which serves
+another; `install_backup_target.php` 1.3 reads only the fields the provider asks for, as the
+Backups page does. B2: the install-time save never ran `credential_problem()`, so an address
+typed as the region failed as a connection error; it runs now, and `linode_target_test` 1.3
+holds both save paths to it. A region typed in capitals is stored lower case for catalogue
+providers (`backup_targets_class.php` 3.9). A missing field is named as the form names it
+('The bucket's region (JOINERY_BACKUP_REGION) is required for ...'). Stale provider lists in
+`install.sh` 3.39 `site --help` and `_site_init.sh` corrected. Open, shared with the Backups page:
+whether DigitalOcean signs with the slug (nyc3); no live test covers it. Re-review 10-27
+confirmed all five fixes by running the tool on dev; nothing open.
+
+**Owed.** The owner re-pastes the wrapper into StackScript 2217113 (the form is Linode's copy,
+not the repo's). Its live check is part of WP6: one deploy with a non-Backblaze bucket. When WP9
+sells our services, the blank-field labels name them.
+
 ### WP6 — the self-hosted path, proven again
 
 Deploy the public StackScript on a fresh Linode with a new domain, through the token path,
@@ -623,6 +659,8 @@ Managed customer departure (`managed_customer_departure.md`), and the live run o
   a "first payment only / every payment" choice to the coupon (a Stripe coupon with
   `duration=once` or `forever`), or keep every coupon for life. The choice suits store customers
   running a promotion; for life is today's behaviour and one less field.
+- **Q5. Our services for strangers before WP9. Decided 10-27:** A, the deploy form fields now,
+  getjoinery not named on the form until it can be bought.
 
 ## 7. Owner operations
 
