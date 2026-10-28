@@ -1,6 +1,6 @@
 # Content Packs
 
-**Status: first cut built and committed 2026-10-28 (§6, f7b0109f2); plugin packs (§6a) built the same day; phase 2 open; phase 3 deferred (owner, 10-28). Live checks are in the live verification queue.** Draft 3 had reviewer2's design review folded in (F1-F17). The developer doc is `docs/content_packs.md`. Rewritten from the deferred 07-16 design, which copied raw table rows
+**Status: implemented 2026-10-28. First cut (§6, f7b0109f2), plugin packs (§6a, 59a08a5d0) and phase 2, pages and blocks (§7), built and tested on dev; reviewer2 reviewed the design and both rounds of code. Phase 3 is deferred (owner, 10-28) and gets its own spec when a site needs it; fragment edits too. Not yet run live: the getjoinery applies of the product and pages packs, a test-mode purchase, REST B2 and plugin packs. They are in the live verification queue.** Draft 3 had reviewer2's design review folded in (F1-F17). The developer doc is `docs/content_packs.md`. Rewritten from the deferred 07-16 design, which copied raw table rows
 from one site to another and ran from the command line only. getjoinery no longer has SSH, so the
 hand-written apply scripts in `content_packs/getjoinery/` can no longer be run, and
 `easy_signup_completion.md` WP7 (the Managed hosting and domain products on getjoinery) is blocked
@@ -306,7 +306,7 @@ were never run on dev. It was left unticked, so dev's text is unchanged. The own
 them to getjoinery, reads the plan, applies, and walks a test-mode purchase. That purchase is what
 mints the test-mode Stripe product, through B1.
 
-WP7 item 3 (the quick start copy: B135, B136, and WP6's F4 and F5) is pasted in the page editor until phase 2.
+WP7 item 3 (the quick start copy: B135, B136, and WP6's F4 and F5) is the pages pack of phase 2 (§7).
 
 ## 6a. Packs a plugin ships (built 10-28, owner's ask)
 
@@ -338,21 +338,74 @@ holding `pack.json` and its text files in the upload format.
 
 ## 7. Later phases
 
-**Phase 2: pages and blocks.**
+**Phase 2: pages and blocks. Built 10-28, uncommitted.**
 
-- `Page` keyed on `pag_link`, `PageContent` keyed on `pac_location_name` (unique,
-  `data/page_contents_class.php:69`).
-- `pac_config` is JSON: `{"merge": {...}}` sets named keys and compares them one by one, leaving
-  the rest alone.
-- `pag_component_layout` takes a list of refs.
-- `requires.components` lists the component types the pack's blocks need, and a missing one
-  refuses up front.
-- A fragment edit, `{"replace": [{"find": "...", "with": "..."}]}`, changes part of a long HTML
-  field. The field is **change** when every `find` is present, **same** when every `with` is
-  present, and **edited here** otherwise. This is what the scripts did for the install page's
-  ladder block.
-- `Page::save()` already writes a content version (`data/pages_class.php:203`), so the editor's
-  history covers pack writes too.
+- **The models.** `Page` is keyed on `pag_link` and opens `pag_title`, `pag_template`,
+  `pag_component_layout` and `pag_published_time`. `PageContent` is keyed on `pac_location_name`
+  (unique, `data/page_contents_class.php:69`) and opens `pac_title`, `pac_com_component_id` and
+  `pac_config`. `Component` declares `com_type_key` as its key and opens no field.
+- **Find entries** (`id`, `model`, `find`) replace the sketch's `requires.components`. A find names
+  a row already on the site, by a declared key set, for other entries to point at with
+  `{"ref"}`: a block's type is a ref to one. One mechanism covers what `requires.components` would
+  have, and refuses up front by name ("This pack needs Component com_type_key = ..., which is not
+  on this site"). A record entry on a model that opens no field is refused ("Use a find entry"),
+  so a pack never creates a component type.
+- **JSON columns.** In `set` and `on_create`, `{"merge": {...}}` sets the keys it names and leaves
+  the rest. Each key is its own plan line (`pac_config.html`), compared, ticked and tracked in
+  `cpv_content_pack_values` on its own. A list is a whole value: `pag_component_layout` is a list of
+  refs. Refs and files are read at any depth inside either. Values compare as canonical JSON:
+  object keys sorted, numbers as text, strings with CRLF as LF and trimmed. A bare object is
+  refused, so `{"merge"}` is never implied.
+- **A line waits for the new record it points at.** A line on an existing row whose value refers
+  to a record the apply creates carries `needs` and is skipped when that record is unticked. The
+  first cut wrote null in that case for any ref in `set` on an existing row. No pack hit it,
+  because product refs sit in `match`.
+- **A rename through `match_also`** shows the key line as **change**, ticked. The old value is
+  the pack's own earlier identity, not an edit. The first cut showed it as **edited here**.
+- **The form rules in the models** (as B2 did for products). `Page::prepare()` holds the link's slug
+  form and requires a template to be a `page_...` view on the site; `views/page.php` requires
+  it. `PageContent::prepare()` holds the editor's slug form (`generate_slug()`, which collapses
+  `--`) and requires the type to be live and active, as the editor's dropdown does. Each rule
+  checks a changed value only.
+- **Config keys are not checked against the component's schema.** `com_config_schema` rows can lag
+  the theme's files: dev's `marketing_hero` row has no `button_size`, which the getjoinery theme's
+  file declares. The editor drops unknown keys rather than refusing them. The plan shows each key.
+- **The check meets the models' rules** (reviewer2 R1). `plan_record()` puts each record through its
+  model's `prepare()`, without saving, with every line the pack could write set. A refusal refuses
+  the pack at check with the model's message (`dry_prepare()`). Otherwise a block of an inactive
+  type, or a template the theme lacks, showed as **new** and failed only at apply, after the owner
+  had ticked it. A pack model's `prepare()` must therefore only read; the four models' do (unique
+  checks, a file lookup, the fulfilment registry). The first cut's mid-apply failure test moved
+  to a value only the database refuses. On dev the pages pack is refused by name, because dev's
+  theme has no `page_marketing`. With the getjoinery theme set in memory, it plans as below.
+- **The check page** opens with a count of each state, unlisted rows included. It folds found rows
+  and records already right into two lists, so a 100-record pack reads. It names the new records
+  an item or a line waits for (R4).
+- **Limits** (R2, R3): a merged key's `column.key` is at most 100 characters (`cpv_field`). A column
+  sits in `set` or `on_create`, never both, so a pack cannot keep one key of a config and seed
+  another only on create. Nothing needs that yet.
+- **Not built: fragment edits** (`{"replace": [{"find", "with"}]}`). A whole-field line with its
+  diff covers WP7: the owner reads the diff and ticks. Build it when a pack must change part of a
+  field that the site also edits.
+- `Page::save()` and `PageContent::save()` write content versions (`data/pages_class.php:222`), so
+  the editors' history covers pack writes.
+- Code: `ContentPack.php` 1.1, `admin_content_packs.php` 1.1, `pages_class.php`,
+  `page_contents_class.php`, `components_class.php` 1.5.0. Test: `tests/core/content_pack_pages_test.php`
+  (33 checks, test database). Code review: reviewer2 10-28, R1-R8; R1, R2 and R4 fixed and R3 noted.
+  R5-R8 were notes needing no change.
+
+**The getjoinery pages pack (WP7 item 3).** `content_packs/getjoinery/build_pages_pack.php` writes
+`pages/` from `getjoinery_pages.php` 3.5: 14 pages, 86 blocks, 8 find entries, one `.html` file per
+custom_html block, 420 KB. It takes the place of `seed_getjoinery_content.php`, which needs a shell.
+Blocks are keyed `gj-{page}-{key}`, the form the editor saves. The seed's `gj-{page}--{key}` is
+each block's `match_also`, because the editor rewrites that name the first time a block is saved
+there. Checked on dev from the command line (a plan, nothing written): the 12 quick start blocks
+and 2 pages dev holds are found by their old names. 39 lines are **same**, 12 renames are
+**change**, and 5 HTML lines are **edited here**: the 3.5 copy (Domains-only token, the backup
+bucket step, installer 2217113) against dev's older text. The other 12 pages and their 74 blocks
+are **new**. 3.5 answers B135, B136 and F4: step 5 names every field. **F5 is still open:** 3.5
+says the site "then deletes its copy", and F5 found that the copy stays when email is skipped.
+That is the owner's wording to settle in `getjoinery_pages.php`. Rebuild the pack after it changes.
 
 **Phase 3: public site navigation and redirects. Deferred (owner, 10-28)** until a site needs it.
 It covers `public_menus` (the header menu visitors see) and `urls`, each keyed on a declared field,
@@ -415,6 +468,16 @@ has since been turned off. A pack's typo is still refused, because it differs fr
   rewriting the value. The database has no unique index on `pro_link`; `prepare()`'s duplicate
   check (`products_class.php:822-826`) is the only guard, and it ignores soft-deleted rows.
 
+**B3. A block's save left every page showing it cached with the old block.** `SystemBase::save()`
+clears the cached copy of the model's own URL, and `PageContent` has none
+(`includes/SystemBase.php:3701`). The static cache has no expiry, so a block edited in the editor
+stayed stale for logged-out visitors until something else cleared the page. Fixed:
+`PageContent::save()` clears each live page whose layout holds it.
+
+**B4. A page shown as the home page stayed cached at `/`.** With `alternate_homepage` set to
+`/page/{link}` (`serve.php:310-339`), the page is served at `/` too, and its save cleared only
+`/page/{link}`. Fixed: `Page::invalidate_cached_copies()` clears both, and `Page::save()` clears `/`.
+
 ## 9. Not in this spec
 
 - Copying a whole site's rows to another site, export, and install flavors (the 07-16 design). A
@@ -426,9 +489,9 @@ has since been turned off. A pack's typo is still refused, because it differs fr
 ## 10. Field notes from the 08-09 build, and the answers
 
 1. **References hidden inside JSON columns** (`pag_component_layout` holds block ids). Answered by
-   refs inside JSON values (phase 2). A pack never carries a raw id.
-2. **Blocks depend on component types that don't travel.** Answered by `requires.components`
-   (phase 2).
+   refs inside JSON values (phase 2, built). A pack never carries a raw id.
+2. **Blocks depend on component types that don't travel.** Answered by find entries (phase 2,
+   built): a missing type refuses the check by name.
 3. **Hash dedup can't tell "updated" from "new".** Answered by matching on declared keys, never on
    content.
 4. **Drift is immediate, so a check run isn't optional.** It is the main screen (§4). Partial apply

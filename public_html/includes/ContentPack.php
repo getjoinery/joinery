@@ -8,12 +8,20 @@
  * and text files inside its own zip. Nothing in it is run, and nothing in it
  * is extracted.
  *
+ * Internally a field's value is a scalar, ['ref' => id], or for a JSON column
+ * ['@json' => tree] (a whole value) or ['@merge' => [key => tree]] (the keys it
+ * names). Inside a tree, a one-key ['ref' => id] is a ref at any depth.
+ *
  *   $pack = ContentPack::read($zip_bytes);   // validates, or throws ContentPackRefusal
  *   $plan = $pack->plan();                   // reads only
  *   $result = $pack->apply($apply_record, $plan['hash'], $ticks, $session);
  *
  * See specs/content_pack_feature.md.
  *
+ * @version 1.1 - pages and blocks (phase 2): "find" entries, JSON fields with {"merge"} and
+ *                lists, refs inside JSON values, a line's own "needs"; each record is put
+ *                through its model's prepare() at check time (dry_prepare()), so a value the
+ *                model refuses refuses the pack before anyone ticks it
  * @version 1.0
  */
 
@@ -31,6 +39,7 @@ class ContentPack {
 	const UNLISTED_KEYS = array('model', 'unlisted');
 	const UNLISTED_INNER_KEYS = array('where', 'set');
 	const SETTING_KEYS = array('setting', 'value');
+	const FIND_KEYS = array('id', 'model', 'find');
 
 	/** Field states a plan line can be in. */
 	const STATE_NEW = 'new';
@@ -254,8 +263,8 @@ class ContentPack {
 				throw new ContentPackRefusal('Entry ' . ($i + 1) . ' is not an object.');
 			}
 			if (isset($entry['id'])) {
-				if (!is_string($entry['id']) || $entry['id'] === '' || !isset($entry['match'])) {
-					throw new ContentPackRefusal('Entry ' . ($i + 1) . ': "id" names a record entry, as text.');
+				if (!is_string($entry['id']) || $entry['id'] === '' || (!isset($entry['match']) && !isset($entry['find']))) {
+					throw new ContentPackRefusal('Entry ' . ($i + 1) . ': "id" names a record or find entry, as text.');
 				}
 				if (isset($this->ids[$entry['id']])) {
 					throw new ContentPackRefusal('Two entries are called "' . $entry['id'] . '".');
@@ -273,8 +282,10 @@ class ContentPack {
 				$this->entries[$i] = $this->validate_unlisted($entry, $where, $used_files);
 			} elseif (array_key_exists('match', $entry)) {
 				$this->entries[$i] = $this->validate_record($entry, $where, $used_files);
+			} elseif (array_key_exists('find', $entry)) {
+				$this->entries[$i] = $this->validate_find($entry, $where, $used_files);
 			} else {
-				throw new ContentPackRefusal($where . ' is none of a record ("match"), an unlisted ("unlisted") or a setting ("setting") entry.');
+				throw new ContentPackRefusal($where . ' is none of a record ("match"), a find ("find"), an unlisted ("unlisted") or a setting ("setting") entry.');
 			}
 		}
 
@@ -290,17 +301,13 @@ class ContentPack {
 	private function validate_record(array $entry, string $where, array &$used_files): array {
 		self::refuse_unknown_keys($entry, self::RECORD_KEYS, $where);
 		$class = $this->model_class($entry['model'] ?? null, $where);
-		$specs = $class::$field_specifications;
 		$label = $where . ' (' . $class . ')';
+		if (!property_exists($class, 'content_pack_fields') || !$class::$content_pack_fields) {
+			throw new ContentPackRefusal($label . ': a pack finds a ' . $class . ' and never writes one. Use a "find" entry.');
+		}
 
 		$match = $this->object_of($entry['match'], $label . ' "match"');
-		$key_sets = array_map(function ($set) { sort($set); return $set; }, $class::$content_pack_keys);
-		$match_fields = array_keys($match);
-		sort($match_fields);
-		if (!in_array($match_fields, $key_sets, true)) {
-			throw new ContentPackRefusal($label . ': "match" must name exactly one of the key sets ' . $class . ' declares: '
-				. implode('; ', array_map(function ($s) { return implode(' + ', $s); }, $key_sets)) . '.');
-		}
+		self::refuse_unless_key_set($class, $match, $label . ': "match"');
 
 		$match_also = array();
 		if (isset($entry['match_also'])) {
@@ -330,7 +337,7 @@ class ContentPack {
 					throw new ContentPackRefusal($label . ': ' . $field . ' is in "match"; a match value is kept on every apply already.');
 				}
 				$this->refuse_unwritable($class, $field, $label, false);
-				$fields[$field] = $this->value_of($value, $label . ' ' . $field, $used_files, true);
+				$fields[$field] = $this->field_value_of($class, $field, $value, $label . ' ' . $field, $used_files);
 			}
 		}
 		unset($fields);
@@ -342,6 +349,37 @@ class ContentPack {
 
 		return array('kind' => 'record', 'id' => $entry['id'] ?? null, 'model' => $class,
 			'match' => $match, 'match_also' => $match_also, 'set' => $set, 'on_create' => $on_create);
+	}
+
+	/**
+	 * A find entry: a row already on the site that other entries point at with
+	 * {"ref": id}, such as the component type a block is made of. It is never
+	 * created or changed, and a pack whose find matches nothing is refused.
+	 */
+	private function validate_find(array $entry, string $where, array &$used_files): array {
+		self::refuse_unknown_keys($entry, self::FIND_KEYS, $where);
+		$class = $this->model_class($entry['model'] ?? null, $where);
+		$label = $where . ' (' . $class . ' find)';
+		if (!isset($entry['id'])) {
+			throw new ContentPackRefusal($label . ': a find entry needs "id", the name other entries point at it by.');
+		}
+		$find = $this->object_of($entry['find'], $label . ' "find"');
+		self::refuse_unless_key_set($class, $find, $label . ': "find"');
+		foreach ($find as $field => $value) {
+			$find[$field] = $this->value_of($value, $label . ' ' . $field, $used_files, false);
+		}
+		return array('kind' => 'find', 'id' => $entry['id'], 'model' => $class, 'match' => $find);
+	}
+
+	/** $values must name exactly one of the key sets $class declares. */
+	private static function refuse_unless_key_set(string $class, array $values, string $where): void {
+		$key_sets = array_map(function ($set) { sort($set); return $set; }, $class::$content_pack_keys);
+		$fields = array_keys($values);
+		sort($fields);
+		if (!in_array($fields, $key_sets, true)) {
+			throw new ContentPackRefusal($where . ' must name exactly one of the key sets ' . $class . ' declares: '
+				. implode('; ', array_map(function ($s) { return implode(' + ', $s); }, $key_sets)) . '.');
+		}
 	}
 
 	private function validate_unlisted(array $entry, string $where, array &$used_files): array {
@@ -453,6 +491,58 @@ class ContentPack {
 			. ($files_ok ? ' or {"file": ...}' : '') . '.');
 	}
 
+	private static function is_json_type(string $type): bool {
+		$type = strtolower($type);
+		return $type === 'json' || $type === 'jsonb';
+	}
+
+	private static function column_type(string $class, string $column): string {
+		return strtolower($class::$field_specifications[$column]['type'] ?? 'text');
+	}
+
+	/**
+	 * A set or on_create value for $field. A JSON column takes {"merge": {...}},
+	 * which sets the keys it names and leaves the rest, or a whole list; refs and
+	 * files may sit anywhere inside either. Any other column takes value_of().
+	 */
+	private function field_value_of(string $class, string $field, $value, string $where, array &$used_files) {
+		if (!self::is_json_type(self::column_type($class, $field))) {
+			return $this->value_of($value, $where, $used_files, true);
+		}
+		if (is_array($value) && count($value) === 1 && array_key_exists('merge', $value)) {
+			$merge = $this->object_of($value['merge'], $where . ' "merge"');
+			if (!$merge) {
+				throw new ContentPackRefusal($where . ': "merge" names no key.');
+			}
+			foreach ($merge as $key => $inner) {
+				// Each key is tracked as "column.key" in cpv_field, varchar(100).
+				if (strlen($field . '.' . $key) > 100) {
+					throw new ContentPackRefusal($where . ': the key "' . $key . '" is too long; ' . $field . '.' . $key . ' must be at most 100 characters.');
+				}
+				$merge[$key] = $this->json_value_of($inner, $where . '.' . $key, $used_files);
+			}
+			return array('@merge' => $merge);
+		}
+		if (is_array($value) && array_is_list($value)) {
+			return array('@json' => $this->json_value_of($value, $where, $used_files));
+		}
+		throw new ContentPackRefusal($where . ' is a JSON field: it takes {"merge": {...}}, which sets the keys it names, or a list.');
+	}
+
+	/** Any JSON, with {"ref"} and {"file"} read at any depth. */
+	private function json_value_of($value, string $where, array &$used_files) {
+		if ($value === null || is_scalar($value)) {
+			return $value;
+		}
+		if (count($value) === 1 && (array_key_exists('ref', $value) || array_key_exists('file', $value))) {
+			return $this->value_of($value, $where, $used_files, true);
+		}
+		foreach ($value as $key => $inner) {
+			$value[$key] = $this->json_value_of($inner, $where . (is_int($key) ? '[' . $key . ']' : '.' . $key), $used_files);
+		}
+		return $value;
+	}
+
 	private static function refuse_unknown_keys(array $object, array $known, string $where): void {
 		foreach (array_keys($object) as $key) {
 			if (!in_array($key, $known, true)) {
@@ -461,17 +551,43 @@ class ContentPack {
 		}
 	}
 
-	/** The ids a record entry refers to, in match, set and on_create. */
+	/** The ids an entry refers to, in match, set, on_create and where. */
 	private static function refs_of(array $entry): array {
 		$refs = array();
 		foreach (array('match', 'set', 'on_create', 'where') as $part) {
 			foreach ($entry[$part] ?? array() as $value) {
-				if (is_array($value) && isset($value['ref'])) {
-					$refs[] = $value['ref'];
-				}
+				$refs = array_merge($refs, self::value_refs($value));
 			}
 		}
 		return array_values(array_unique($refs));
+	}
+
+	/** The ids one field's value refers to, inside JSON too. */
+	private static function value_refs($value): array {
+		if (!is_array($value)) {
+			return array();
+		}
+		if (array_key_exists('@merge', $value)) {
+			return self::tree_refs(array_values($value['@merge']));
+		}
+		if (array_key_exists('@json', $value)) {
+			return self::tree_refs($value['@json']);
+		}
+		return self::tree_refs($value);
+	}
+
+	private static function tree_refs($tree): array {
+		if (!is_array($tree)) {
+			return array();
+		}
+		if (count($tree) === 1 && array_key_exists('ref', $tree)) {
+			return array($tree['ref']);
+		}
+		$refs = array();
+		foreach ($tree as $inner) {
+			$refs = array_merge($refs, self::tree_refs($inner));
+		}
+		return $refs;
 	}
 
 	/** Record entries, each after the records it refers to. A cycle refuses the pack. */
@@ -493,7 +609,7 @@ class ContentPack {
 			$order[] = $i;
 		};
 		foreach ($this->entries as $i => $entry) {
-			if ($entry['kind'] === 'record') {
+			if ($entry['kind'] === 'record' || $entry['kind'] === 'find') {
 				$visit($i, array());
 			}
 		}
@@ -523,7 +639,7 @@ class ContentPack {
 		$items = array();
 
 		foreach ($this->record_order as $i) {
-			$items[$i] = $this->plan_record($i, $keys);
+			$items[$i] = $this->entries[$i]['kind'] === 'find' ? $this->plan_find($i, $keys) : $this->plan_record($i, $keys);
 			if ($this->entries[$i]['id'] !== null) {
 				$keys[$this->entries[$i]['id']] = $items[$i]['key'];
 			}
@@ -598,14 +714,12 @@ class ContentPack {
 		}
 
 		$lines = array();
-		$specs = $class::$field_specifications;
 		if ($found === null) {
-			foreach (array('match' => $entry['match'], 'set' => $entry['set'], 'on_create' => $entry['on_create']) as $part => $fields) {
-				foreach ($fields as $field => $value) {
-					$lines[] = array('field' => $field, 'part' => $part, 'state' => self::STATE_NEW,
-						'current' => null, 'new' => $this->display_value($value, $keys), 'tick' => null);
-				}
+			foreach (self::line_specs($entry, array('match', 'set', 'on_create')) as $spec) {
+				$lines[] = array('field' => $spec['field'], 'column' => $spec['column'], 'key' => $spec['key'], 'part' => $spec['part'],
+					'state' => self::STATE_NEW, 'current' => null, 'new' => $this->display_value($spec['value'], $keys), 'tick' => null);
 			}
+			$this->dry_prepare($class, null, self::line_specs($entry, array('match', 'set', 'on_create')), $keys, $label);
 			$tick = 'r' . $i;
 			return array('kind' => 'record', 'index' => $i, 'model' => $class, 'label' => $label, 'key' => null,
 				'via' => null, 'state' => self::STATE_NEW, 'tick' => $tick, 'default' => true,
@@ -614,23 +728,157 @@ class ContentPack {
 
 		$object = new $class($found, TRUE);
 		$target = $class . ':' . $found;
-		foreach (array('match' => $entry['match'], 'set' => $entry['set']) as $part => $fields) {
-			foreach ($fields as $field => $value) {
-				$current = $object->get($field);
-				$new = $this->resolve_value($value, $keys);
-				$type = $specs[$field]['type'] ?? 'text';
-				$state = $this->field_state($target, $field, $current, $new, $type);
-				$line = array('field' => $field, 'part' => $part, 'state' => $state,
-					'current' => self::display_scalar($current), 'new' => $this->display_value($value, $keys), 'tick' => null);
-				if ($state === self::STATE_CHANGE || $state === self::STATE_EDITED) {
-					$line['tick'] = 'r' . $i . '.' . $field;
-					$line['default'] = ($state === self::STATE_CHANGE);
-				}
-				$lines[] = $line;
+		$writable = array();   // every line the pack could write, ticked or not
+		foreach (self::line_specs($entry, array('match', 'set')) as $spec) {
+			$type = self::line_type($class, $spec);
+			$current = self::current_value($object, $spec, $label);
+			$unknown = false;
+			$new = $this->resolve_value($spec['value'], $keys, $unknown);
+			$state = $this->field_state($target, $spec['field'], $current, $new, $type, $unknown);
+			// Found by an earlier identity the pack names, the row's key is the
+			// pack's own old value, not an edit: taking the new one is a change.
+			if ($via === 'match_also' && $spec['part'] === 'match' && $state === self::STATE_EDITED) {
+				$state = self::STATE_CHANGE;
+			}
+			// A line pointing at a record this apply creates waits for it.
+			$line = array('field' => $spec['field'], 'column' => $spec['column'], 'key' => $spec['key'], 'part' => $spec['part'],
+				'state' => $state, 'current' => self::display_typed($current, $type), 'new' => $this->display_value($spec['value'], $keys),
+				'tick' => null, 'needs' => $this->line_needs($spec['value'], $keys));
+			if ($state === self::STATE_CHANGE || $state === self::STATE_EDITED) {
+				$line['tick'] = 'r' . $i . '.' . $spec['field'];
+				$line['default'] = ($state === self::STATE_CHANGE);
+			}
+			$lines[] = $line;
+			if ($state !== self::STATE_SAME && !$line['needs']) {
+				$writable[] = $spec;
 			}
 		}
+		$this->dry_prepare($class, $found, $writable, $keys, $label . ' (#' . $found . ')');
 		return array('kind' => 'record', 'index' => $i, 'model' => $class, 'label' => $label . ' (#' . $found . ')',
 			'key' => $found, 'via' => $via, 'state' => null, 'tick' => null, 'needs' => array(), 'lines' => $lines);
+	}
+
+	/**
+	 * Put the row the pack would write through its model's prepare(), and
+	 * refuse the pack with the model's message when it would be refused, so
+	 * the check never shows as landing what the apply cannot write. Nothing is
+	 * saved: prepare() on a pack model only reads (docs/content_packs.md). A
+	 * ref to a record still new is null here.
+	 */
+	private function dry_prepare(string $class, ?int $key, array $specs, array $keys, string $label): void {
+		if (!$specs) {
+			return;
+		}
+		$object = $key === null ? new $class(NULL) : new $class($key, TRUE);
+		$json = array();
+		foreach ($specs as $spec) {
+			$value = $this->resolve_value($spec['value'], $keys);
+			if ($spec['key'] !== null) {
+				if (!isset($json[$spec['column']])) {
+					$current = $key === null ? null : self::decoded($object->get($spec['column']));
+					$json[$spec['column']] = is_array($current) ? $current : array();
+				}
+				$json[$spec['column']][$spec['key']] = $value;
+			} else {
+				$object->set($spec['column'], $this->write_value($value, $class, $spec['column']));
+			}
+		}
+		foreach ($json as $column => $object_value) {
+			$object->set($column, $object_value);
+		}
+		try {
+			$object->prepare();
+		} catch (ContentPackRefusal $e) {
+			throw $e;
+		} catch (Exception $e) {
+			throw new ContentPackRefusal($label . ' would be refused: ' . $e->getMessage());
+		}
+	}
+
+	private function plan_find(int $i, array $keys): array {
+		$entry = $this->entries[$i];
+		$class = $entry['model'];
+		$label = $class . ' ' . self::describe($entry['match'], $keys);
+		$values = $this->resolve_values($entry['match'], $keys);
+		if ($values === null) {
+			throw new ContentPackRefusal($label . ' points at a record this pack creates. A find entry looks only at what is on the site.');
+		}
+		$hits = self::find_keys($class, $values);
+		if (!$hits) {
+			throw new ContentPackRefusal('This pack needs ' . $label . ', which is not on this site.');
+		}
+		if (count($hits) > 1) {
+			throw new ContentPackRefusal($label . ' matches more than one row (#' . implode(', #', $hits) . ').');
+		}
+		return array('kind' => 'find', 'index' => $i, 'model' => $class, 'label' => $label . ' (#' . $hits[0] . ')',
+			'key' => $hits[0], 'needs' => array());
+	}
+
+	/**
+	 * The lines of a record entry's parts, in order: one per field, and one per
+	 * key of a {"merge"} (field "column.key"). Each value is a scalar, a ref,
+	 * or ['@json' => tree].
+	 */
+	private static function line_specs(array $entry, array $parts): array {
+		$specs = array();
+		foreach ($parts as $part) {
+			foreach ($entry[$part] as $column => $value) {
+				if (is_array($value) && array_key_exists('@merge', $value)) {
+					foreach ($value['@merge'] as $key => $inner) {
+						$specs[] = array('part' => $part, 'field' => $column . '.' . $key, 'column' => $column,
+							'key' => (string)$key, 'value' => array('@json' => $inner));
+					}
+				} else {
+					$specs[] = array('part' => $part, 'field' => $column, 'column' => $column, 'key' => null, 'value' => $value);
+				}
+			}
+		}
+		return $specs;
+	}
+
+	/** How a line's values compare: JSON for a JSON column or a merged key, else the column's type. */
+	private static function line_type(string $class, array $spec): string {
+		return $spec['key'] !== null ? 'json' : self::column_type($class, $spec['column']);
+	}
+
+	/** What the row holds for a line: the column, or one key of a JSON object. */
+	private static function current_value($object, array $spec, string $label) {
+		$type = self::column_type(get_class($object), $spec['column']);
+		$value = $object->get($spec['column']);
+		if (!self::is_json_type($type)) {
+			return $value;
+		}
+		$value = self::decoded($value);
+		if ($spec['key'] === null) {
+			return $value;
+		}
+		if ($value === null || $value === '' || $value === array()) {
+			return null;
+		}
+		if (!is_array($value) || array_is_list($value)) {
+			throw new ContentPackRefusal($label . ': ' . $spec['column'] . ' holds no JSON object, so the pack cannot set "' . $spec['key'] . '" in it.');
+		}
+		return $value[$spec['key']] ?? null;
+	}
+
+	/** A JSON column's value as PHP: decoded when the model hands back text. */
+	private static function decoded($value) {
+		if (!is_string($value)) {
+			return $value;
+		}
+		$decoded = json_decode($value, true);
+		return json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
+	}
+
+	/** Tick ids of the new records a line's value points at. */
+	private function line_needs($value, array $keys): array {
+		$needs = array();
+		foreach (self::value_refs($value) as $ref) {
+			if (array_key_exists($ref, $keys) && $keys[$ref] === null) {
+				$needs[] = 'r' . $this->ids[$ref];
+			}
+		}
+		return array_values(array_unique($needs));
 	}
 
 	private function plan_unlisted(int $i, array $keys, array $items): array {
@@ -646,7 +894,7 @@ class ContentPack {
 		$named = array();
 		foreach ($this->record_order as $r) {
 			$record = $this->entries[$r];
-			if ($record['model'] !== $class) {
+			if ($record['kind'] !== 'record' || $record['model'] !== $class) {
 				continue;
 			}
 			if ($items[$r]['key'] !== null) {
@@ -717,6 +965,9 @@ class ContentPack {
 			return self::STATE_CHANGE;
 		}
 		$last = self::last_established($target, $field);
+		if ($last !== false && self::is_json_type($type) && $last !== null) {
+			$last = json_decode($last, true);   // stored as JSON text (stored_text())
+		}
 		if ($last !== false && self::normalize($last, $type) === $current_n) {
 			return self::STATE_CHANGE;
 		}
@@ -758,11 +1009,35 @@ class ContentPack {
 		return $resolved;
 	}
 
-	private function resolve_value($value, array $keys) {
-		if (is_array($value) && isset($value['ref'])) {
-			return isset($keys[$value['ref']]) ? (int)$keys[$value['ref']] : null;
+	/**
+	 * A field's value with refs replaced by keys, inside JSON too. A ref whose
+	 * record is still new becomes null and sets $unknown.
+	 */
+	private function resolve_value($value, array $keys, &$unknown = false) {
+		if (is_array($value) && array_key_exists('@json', $value)) {
+			return $this->resolve_tree($value['@json'], $keys, $unknown);
 		}
-		return $value;
+		if (is_array($value) && array_key_exists('@merge', $value)) {
+			return $this->resolve_tree($value['@merge'], $keys, $unknown);
+		}
+		return $this->resolve_tree($value, $keys, $unknown);
+	}
+
+	private function resolve_tree($tree, array $keys, &$unknown) {
+		if (!is_array($tree)) {
+			return $tree;
+		}
+		if (count($tree) === 1 && array_key_exists('ref', $tree)) {
+			if (!isset($keys[$tree['ref']])) {
+				$unknown = true;
+				return null;
+			}
+			return (int)$keys[$tree['ref']];
+		}
+		foreach ($tree as $key => $inner) {
+			$tree[$key] = $this->resolve_tree($inner, $keys, $unknown);
+		}
+		return $tree;
 	}
 
 	/** Rows of $class whose columns hold $values, live rows only. Text compares trimmed. */
@@ -824,10 +1099,19 @@ class ContentPack {
 
 	/**
 	 * A value in the form two values are compared in: line endings LF, text
-	 * trimmed (null and '' alike), booleans and numbers by value.
+	 * trimmed (null and '' alike), booleans and numbers by value. A JSON value
+	 * compares as canonical JSON: object keys sorted, numbers as text, strings
+	 * as text is compared; null, '' and an empty list alike.
 	 */
 	public static function normalize($value, string $type): ?string {
 		$type = strtolower($type);
+		if (self::is_json_type($type)) {
+			$value = self::canonical($value);
+			if ($value === null || $value === '' || $value === array()) {
+				return null;
+			}
+			return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		}
 		if (self::is_bool_type($type)) {
 			if ($value === null || $value === '') {
 				return null;
@@ -852,8 +1136,62 @@ class ContentPack {
 		return trim(str_replace("\r\n", "\n", (string)$value));
 	}
 
+	private static function canonical($value) {
+		if (is_string($value)) {
+			return trim(str_replace("\r\n", "\n", $value));
+		}
+		if (is_int($value) || is_float($value)) {
+			return (string)(0 + $value);
+		}
+		if (!is_array($value)) {
+			return $value;
+		}
+		if (!array_is_list($value)) {
+			ksort($value, SORT_STRING);
+		}
+		return array_map(function ($inner) { return self::canonical($inner); }, $value);
+	}
+
+	/** How a line's value is kept in cpv_content_pack_values: JSON text for a JSON line. */
+	private static function stored_text($value, string $type): ?string {
+		if (self::is_json_type($type)) {
+			return $value === null ? null : json_encode(self::canonical($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		}
+		return self::display_scalar($value);
+	}
+
+	/** A site value for a person to read: JSON shown as text or indented JSON. */
+	private static function display_typed($value, string $type): ?string {
+		return self::is_json_type($type) ? self::display_json($value) : self::display_scalar($value);
+	}
+
+	private static function display_json($value): ?string {
+		if ($value === null || is_scalar($value)) {
+			return self::display_scalar($value);
+		}
+		return json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+	}
+
+	/** A pack value's refs as keys, or as the new record's name while it is new. */
+	private function name_refs($tree, array $keys) {
+		if (!is_array($tree)) {
+			return $tree;
+		}
+		if (count($tree) === 1 && array_key_exists('ref', $tree)) {
+			$ref = $tree['ref'];
+			return isset($keys[$ref]) ? (int)$keys[$ref] : '(the new ' . $this->entries[$this->ids[$ref]]['model'] . ' "' . $ref . '")';
+		}
+		foreach ($tree as $key => $inner) {
+			$tree[$key] = $this->name_refs($inner, $keys);
+		}
+		return $tree;
+	}
+
 	/** A plan line's display of a pack value: refs named by the record they point at. */
 	private function display_value($value, array $keys) {
+		if (is_array($value) && array_key_exists('@json', $value)) {
+			return self::display_json($this->name_refs($value['@json'], $keys));
+		}
 		if (is_array($value) && isset($value['ref'])) {
 			$ref = $value['ref'];
 			if (isset($keys[$ref])) {
@@ -1025,7 +1363,8 @@ class ContentPack {
 			foreach ($this->record_order as $i) {
 				$entry = $this->entries[$i];
 				$item = $items[$i];
-				$key = $this->apply_record($entry, $item, $ticked, $keys, $created, $apply, $written);
+				$key = $entry['kind'] === 'find' ? $item['key']
+					: $this->apply_record($entry, $item, $ticked, $keys, $created, $apply, $written);
 				if ($entry['id'] !== null && $key !== null) {
 					$keys[$entry['id']] = $key;
 				}
@@ -1100,23 +1439,36 @@ class ContentPack {
 
 	private function apply_record(array $entry, array $item, array $ticked, array $keys, array &$created, ContentPackApply $apply, array &$written): ?int {
 		$class = $entry['model'];
+		$json = array();   // JSON column => the object its merged keys are written into
+
 		if ($item['key'] === null) {
 			if (!isset($ticked[$item['tick']]) || array_diff($item['needs'], array_keys($created))) {
 				return null;
 			}
 			$object = new $class(NULL);
-			$fields = array_merge($entry['match'], $entry['set'], $entry['on_create']);
 			$after = array();
-			foreach ($fields as $field => $value) {
-				$value = $this->write_value($this->resolve_value($value, $keys), $class, $field);
-				$object->set($field, $value);
-				$after[$field] = self::display_scalar($value);
+			$established = array();
+			foreach (self::line_specs($entry, array('match', 'set', 'on_create')) as $spec) {
+				$type = self::line_type($class, $spec);
+				$value = $this->resolve_value($spec['value'], $keys);
+				if ($spec['key'] !== null) {
+					$json[$spec['column']][$spec['key']] = $value;
+				} else {
+					$object->set($spec['column'], $this->write_value($value, $class, $spec['column']));
+				}
+				$after[$spec['field']] = self::display_typed($value, $type);
+				if ($spec['part'] !== 'on_create') {
+					$established[$spec['field']] = self::stored_text($value, $type);
+				}
+			}
+			foreach ($json as $column => $object_value) {
+				$object->set($column, $object_value);
 			}
 			$object->prepare();
 			$object->save();
 			$object->load();
 			$created[$item['tick']] = true;
-			$this->record_established($class . ':' . $object->key, array_merge($entry['match'], $entry['set']), $keys, $apply);
+			$this->record_established($class . ':' . $object->key, $established, $apply);
 			$written[] = array('target' => $class . ':' . $object->key, 'label' => $item['label'], 'created' => true,
 				'before' => array(), 'after' => $after);
 			return (int)$object->key;
@@ -1127,20 +1479,32 @@ class ContentPack {
 		$after = array();
 		$established = array();
 		foreach ($item['lines'] as $line) {
-			$field = $line['field'];
-			$value = array_key_exists($field, $entry['match']) ? $entry['match'][$field] : $entry['set'][$field];
+			$spec = self::line_spec($entry, $line);
+			$type = self::line_type($class, $spec);
 			if ($line['state'] === self::STATE_SAME) {
-				$established[$field] = $value;
+				$established[$line['field']] = self::stored_text($this->resolve_value($spec['value'], $keys), $type);
 				continue;
 			}
-			if (!isset($ticked[$line['tick']])) {
+			if (!isset($ticked[$line['tick']]) || array_diff($line['needs'] ?? array(), array_keys($created))) {
 				continue;
 			}
-			$new = $this->write_value($this->resolve_value($value, $keys), $class, $field);
-			$before[$field] = self::display_scalar($object->get($field));
-			$object->set($field, $new);
-			$after[$field] = self::display_scalar($new);
-			$established[$field] = $value;
+			$new = $this->resolve_value($spec['value'], $keys);
+			if ($spec['key'] !== null) {
+				if (!isset($json[$spec['column']])) {
+					$current = self::decoded($object->get($spec['column']));
+					$json[$spec['column']] = is_array($current) ? $current : array();
+				}
+				$before[$line['field']] = self::display_json($json[$spec['column']][$spec['key']] ?? null);
+				$json[$spec['column']][$spec['key']] = $new;
+			} else {
+				$before[$line['field']] = self::display_typed(self::current_value($object, $spec, $item['label']), $type);
+				$object->set($spec['column'], $this->write_value($new, $class, $spec['column']));
+			}
+			$after[$line['field']] = self::display_typed($new, $type);
+			$established[$line['field']] = self::stored_text($new, $type);
+		}
+		foreach ($json as $column => $object_value) {
+			$object->set($column, $object_value);
 		}
 		if ($after) {
 			$object->prepare();
@@ -1148,8 +1512,17 @@ class ContentPack {
 			$written[] = array('target' => $class . ':' . $object->key, 'label' => $item['label'], 'created' => false,
 				'before' => $before, 'after' => $after);
 		}
-		$this->record_established($class . ':' . $object->key, $established, $keys, $apply);
+		$this->record_established($class . ':' . $object->key, $established, $apply);
 		return (int)$object->key;
+	}
+
+	/** The pack's value for a plan line of an existing row. */
+	private static function line_spec(array $entry, array $line): array {
+		$value = $entry[$line['part']][$line['column']];
+		if ($line['key'] !== null) {
+			$value = array('@json' => $value['@merge'][$line['key']]);
+		}
+		return array('part' => $line['part'], 'field' => $line['field'], 'column' => $line['column'], 'key' => $line['key'], 'value' => $value);
 	}
 
 	private function apply_unlisted(array $entry, array $item, array $ticked, array $keys, array &$written): void {
@@ -1186,7 +1559,7 @@ class ContentPack {
 				'before' => array($entry['name'] => self::display_scalar($before)),
 				'after' => array($entry['name'] => self::display_scalar($value)));
 		}
-		$this->record_established('setting', array($entry['name'] => $value), $keys, $apply);
+		$this->record_established('setting', array($entry['name'] => self::display_scalar($value)), $apply);
 	}
 
 	/** A value as the model stores it: booleans as booleans, the rest as written. */
@@ -1198,10 +1571,9 @@ class ContentPack {
 		return $value;
 	}
 
-	/** Record that a pack established these values on $target (§4.2). */
-	private function record_established(string $target, array $values, array $keys, ContentPackApply $apply): void {
+	/** Record that a pack established these values (field => stored text) on $target (§4.2). */
+	private function record_established(string $target, array $values, ContentPackApply $apply): void {
 		foreach ($values as $field => $value) {
-			$value = $this->resolve_value($value, $keys);
 			$row = null;
 			foreach (new MultiContentPackValue(array('cpv_target' => $target, 'cpv_field' => $field)) as $existing) {
 				$row = $existing;
@@ -1211,7 +1583,7 @@ class ContentPack {
 				$row->set('cpv_target', $target);
 				$row->set('cpv_field', $field);
 			}
-			$row->set('cpv_value', $value === null ? null : self::display_scalar($value));
+			$row->set('cpv_value', $value);
 			$row->set('cpv_cpa_content_pack_apply_id', $apply->key);
 			$row->set('cpv_update_time', gmdate('Y-m-d H:i:s'));
 			$row->save();

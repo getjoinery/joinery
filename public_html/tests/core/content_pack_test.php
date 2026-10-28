@@ -437,9 +437,15 @@ check($apply_id === null && strpos($error, 'not a zip') !== false, 'a file that 
 section('Failures leave nothing behind');
 // ---------------------------------------------------------------------------
 
-$bad = cpt_pack($run . 'x', array('entries' => array(1 => array('set' => array('prv_price_type' => 'monthly')))));
+// A value the model refuses refuses the pack at check, before anything is ticked.
+$refused = cpt_pack($run . 'r', array('entries' => array(1 => array('set' => array('prv_price_type' => 'monthly')))));
+list($apply_id, $error) = cpt_check(cpt_zip($refused, $files));
+check($apply_id === null && strpos((string)$error, 'not a price type') !== false, 'a value the model refuses refuses the pack at check', (string)$error);
+
+// The database's own refusal comes only at apply: the order is no number.
+$bad = cpt_pack($run . 'x', array('entries' => array(1 => array('on_create' => array('prv_status' => 1, 'prv_order' => 'first')))));
 list($plan, $error) = cpt_apply(cpt_zip($bad, $files));
-check($error !== null && strpos($error, 'not a price type') !== false, 'a refusal by a model mid-apply fails the apply', (string)$error);
+check($error !== null, 'a failure mid-apply fails the apply', (string)$error);
 check(cpt_product_by_link('cpt-hosted-' . $run . 'x') === null, 'and the product it created first is rolled back');
 check(get_setting_raw('store_domain_registration_product_id') === (string)$pid, 'and the setting is untouched');
 $failed = $db->query("SELECT cpa_status, cpa_error FROM cpa_content_pack_applies WHERE cpa_pack_name = 'cpt-" . $run . "x' ORDER BY cpa_content_pack_apply_id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);

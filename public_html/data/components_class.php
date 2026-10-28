@@ -6,6 +6,7 @@
  * Each component type has a template file, config schema, and optional logic function.
  *
  * @see /specs/page_component_system.md
+ * @version 1.5.0 - content packs find a type by com_type_key (never write one)
  * @version 1.4.0
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -23,6 +24,11 @@ class Component extends SystemBase {
 	public static $tablename = 'com_components';
 	public static $access_class = 'content';
 	public static $pkey_column = 'com_component_id';
+
+	// Content packs find a component type by its key, to point a block at it
+	// ({"ref": ...} to a "find" entry). No field is open: types come from the
+	// theme and plugin files, never from a pack.
+	public static $content_pack_keys = [['com_type_key']];
 
 	/**
 	 * Field specifications define database column properties and validation rules
