@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 3.39 - site --help names every backup provider, with the region or endpoint it asks for
 #VERSION 3.38 - the admin login summary, its credentials file and the email first-task line name https
 #               once a CA-signed certificate is in place (B145)
 #VERSION 3.37 - the admin login summary names the username admin; an address is optional (spec optional_username)
@@ -4669,8 +4670,9 @@ do_site_create() {
                 echo "    JOINERY_MAIL_API_KEY     sending key: email is set up during the install"
                 echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (blank: detected from the key)"
                 echo "    JOINERY_BACKUP_BUCKET    bucket that becomes the backup target, with"
-                echo "    JOINERY_BACKUP_KEY_ID    JOINERY_BACKUP_KEY (and JOINERY_BACKUP_PROVIDER"
-                echo "                             b2/s3/linode, JOINERY_BACKUP_REGION for s3/linode)"
+                echo "    JOINERY_BACKUP_KEY_ID    JOINERY_BACKUP_KEY (and JOINERY_BACKUP_PROVIDER, any"
+                echo "                             the Backups page offers, default b2, with"
+                echo "                             JOINERY_BACKUP_REGION or _ENDPOINT where it asks)"
                 echo "    JOINERY_DNS_CREDENTIAL   DNS credential kept for the mail records, as the"
                 echo "                             JSON utils/install_dns_credential.php takes"
                 echo "  --activate THEME       Set active theme after installation"

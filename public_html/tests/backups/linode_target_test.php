@@ -19,6 +19,8 @@
  *
  * Run: php tests/backups/linode_target_test.php
  *
+ * @version 1.3 - the install-time save (utils/install_backup_target.php) runs the check too, and a
+ *   catalogue provider's region is stored lower case
  * @version 1.2 - no per-run key minting to check (specs/storage_targets.md WP5)
  * @version 1.1 - a bare cluster host signs as https in both signers
  * @version 1.0
@@ -80,6 +82,11 @@ section('Every target form saves through the one path, which runs the check');
 
 $form = (string)file_get_contents(__DIR__ . '/../../includes/BackupTargetForm.php');
 check(strpos($form, 'BackupTarget::credential_problem(') !== false, 'the shared save runs the check');
+$installer = (string)file_get_contents(__DIR__ . '/../../utils/install_backup_target.php');
+check(strpos($installer, 'BackupTarget::credential_problem(') !== false, 'and so does the install-time save');
+$hz = BackupTarget::complete_credentials('hetzner', array('region' => 'FSN1'));
+check($hz['creds']['region'] === 'fsn1' && $hz['creds']['endpoint'] === 'https://fsn1.your-objectstorage.com',
+	'a region typed in capitals is stored as the provider names it', json_encode($hz['creds']));
 foreach (array('adm/logic/admin_backups_logic.php' => 'the core Backups save', 'plugins/server_manager/views/admin/targets.php' => 'the server_manager Backup Targets save') as $rel => $label) {
 	$src = (string)file_get_contents(__DIR__ . '/../../' . $rel);
 	check(strpos($src, 'BackupTargetForm::save(') !== false, $label . ' is the shared save');

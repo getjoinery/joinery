@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.2 - The backup provider is any in StorageProvider's catalogue (the deploy form
+#              offers those that need at most a region).
 #VERSION 2.1 - The closing summary says root SSH login is off (install.sh server's default), that Lish still
 #              logs in as root, and how to allow root SSH login again.
 #VERSION 2.0 - No SSH key is honoured any more (JOINERY_SSH_KEY is gone): a server this
@@ -91,8 +93,10 @@
 #                           (utils/install_backup_target.php). The recovery
 #                           key is a secret shown once to a human and stays
 #                           the wizard's. The secret key is never printed.
-#   JOINERY_BACKUP_PROVIDER optional — b2 (default), s3 or linode.
-#   JOINERY_BACKUP_REGION   optional — region for s3 and linode buckets.
+#   JOINERY_BACKUP_PROVIDER optional — b2 (default), or any provider in
+#                           StorageProvider's catalogue (linode, s3, wasabi, …).
+#   JOINERY_BACKUP_REGION   optional — the bucket's region, where the
+#                           provider asks for one (not b2).
 #
 # Neither service is a condition of the install. A key the provider rejects
 # or a bucket that cannot be reached is reported in the closing summary and

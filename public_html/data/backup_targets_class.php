@@ -17,6 +17,8 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.9 - complete_credentials() lowercases a catalogue provider's region (every one names its
+ *   regions in lower case, and the region signs every request); a generic bucket's is kept as typed
  * @version 3.8 - a `managed` target is getjoinery's backup storage (specs/easy_signup_completion.md WP4): it holds
  *                no credential, and get_credentials() / write_credentials() answer its ServicesShelfBroker
  * @version 3.7 - bkt_lock_days, lock_days(), write_credentials(), lock_refusal(): a backup target can hold what is
@@ -652,6 +654,9 @@ class BackupTarget extends SystemBase {
 				}
 			}
 		} elseif (StorageProvider::known($provider)) {
+			if ($provider !== StorageProvider::GENERIC) {
+				$creds['region'] = strtolower($creds['region']);
+			}
 			$fixed_region = (string)(StorageProvider::catalogue()[$provider]['region'] ?? '');
 			if ($creds['region'] === '' && $fixed_region !== '') {
 				$creds['region'] = $fixed_region;

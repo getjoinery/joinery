@@ -35,6 +35,9 @@
  * the bucket could not be reached or the write failed. A site that already
  * has a scheduled target is left alone and reports ok with already=1.
  *
+ * @version 1.3 - reads only the fields the provider asks for (a region typed for Backblaze is
+ *   dropped, so Backblaze's own is used), and runs credential_problem() before saving, as the
+ *   Backups page does; a missing field is named as the form names it
  * @version 1.2 - getjoinery's backup storage is refused: it is enrolled in from the Backups page, never given keys
  * @version 1.1 - the providers, and how each names its endpoint, are StorageProvider's catalogue
  * @version 1.0
@@ -71,12 +74,27 @@ if (!StorageProvider::known($provider) || $provider === StorageProvider::SERVICE
 if ($bucket === '' || $key_id === '' || $key === '') {
 	install_backup_target_fail('JOINERY_BACKUP_BUCKET, JOINERY_BACKUP_KEY_ID and JOINERY_BACKUP_KEY are all required.', 2);
 }
-// What the provider asks for must be here. The rest is filled from the catalogue
-// by BackupTarget::complete_credentials; Backblaze is asked for its own.
-foreach (StorageProvider::asks($provider) as $asked) {
+// Only what the provider asks for is read, as on the Backups page: the deploy form
+// shows the region field for every provider, and a region typed for Backblaze would
+// otherwise be kept beside the endpoint Backblaze names, which serves another. The
+// rest is filled from the catalogue by BackupTarget::complete_credentials; Backblaze
+// is asked for its own. What the provider asks for must be here.
+$asks = StorageProvider::asks($provider);
+$region = in_array('region', $asks, true) ? $region : '';
+$endpoint = in_array('endpoint', $asks, true) ? $endpoint : '';
+foreach ($asks as $asked) {
 	if (($asked === 'region' && $region === '') || ($asked === 'endpoint' && $endpoint === '')) {
-		install_backup_target_fail('JOINERY_BACKUP_' . strtoupper($asked) . ' is required for ' . StorageProvider::label($provider) . '.', 2);
+		install_backup_target_fail('The bucket\'s ' . $asked . ' (JOINERY_BACKUP_' . strtoupper($asked) . ') is required for ' . StorageProvider::label($provider) . '.', 2);
 	}
+}
+// The provider's own fields are checked as the Backups page checks them, before
+// anything is asked of the provider, so an address typed as the region is named
+// as that mistake rather than surfacing as a failed connection. Completed without
+// the keys, so this asks no one: Backblaze is asked for its region at the save.
+$problem = BackupTarget::credential_problem($provider,
+	BackupTarget::complete_credentials($provider, array('region' => $region, 'endpoint' => $endpoint))['creds']);
+if ($problem !== '') {
+	install_backup_target_fail($problem, 2);
 }
 
 $settings = Globalvars::get_instance();

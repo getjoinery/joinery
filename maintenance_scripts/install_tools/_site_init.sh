@@ -136,8 +136,9 @@
 #                            alongside
 #   JOINERY_BACKUP_BUCKET    a bucket that becomes the scheduled backup target
 #   JOINERY_BACKUP_KEY_ID    (utils/install_backup_target.php), with
-#   JOINERY_BACKUP_KEY       JOINERY_BACKUP_PROVIDER (b2 default, s3, linode)
-#                            and JOINERY_BACKUP_REGION alongside
+#   JOINERY_BACKUP_KEY       JOINERY_BACKUP_PROVIDER (b2 default, or any in
+#                            StorageProvider) and JOINERY_BACKUP_REGION or
+#                            JOINERY_BACKUP_ENDPOINT where the provider asks
 #   JOINERY_OUTBOUND_NOTICE_GB  the monthly outbound notice's figure in GB
 #                            (outbound_monthly_notice_gb; 0 turns it off)
 #   JOINERY_BETA_ROOT_ACCESS 1: the management node keeps this machine's root
