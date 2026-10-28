@@ -627,11 +627,14 @@ Found, and what became of each:
   has no storage address. Fixed: `credential_problem()` refuses an unnumbered Linode region
   and names the bucket's address (`backup_targets_class.php` 3.10, region help in
   `StorageProvider.php` 2.3, `linode_target_test` 1.4).
-- F4. Quick start step 5 says it lists every field, but names only Backblaze's three. Owner
-  edits the page on getjoinery (text below).
+- F4. Quick start step 5 says it lists every field, but names only Backblaze's three. Fixed in
+  the pages pack (`getjoinery_pages.php` 3.6): it names all five, with Backblaze's values and
+  the numbered Linode region.
 - F5. Quick start step 4 says the site deletes the token. The site forgets its sealed copy
   after the wizard's mail DNS publish (`DnsInstallCredential::consume()`); with email skipped,
-  the copy stays; the token itself lives at Linode until its expiry. Owner edits the page.
+  the copy stays; the token itself lives at Linode until its expiry. Decided 10-28: the site
+  keeps the copy until the email records are in, so email set up later still publishes its
+  own records. Both quick starts say so (pages pack 3.6).
 - F6. The site's own owner met "Accept our Terms of Use" first, with getjoinery's terms
   (`terms_url` and `privacy_url` defaulted to getjoinery's pages for every site). Fixed (Q7, Q9):
   `TermsOwed` 1.0 decides who owes which terms, and the gate (`SessionControl.php` 1.11), the
@@ -658,10 +661,20 @@ Found, and what became of each:
 
 ### WP7 — getjoinery production
 
-- Products: run `apply_hosted_product.php` 3.1 and `apply_domain_product.php` on the node
-  (`--check` first), then activate.
+getjoinery has no shell, so its store and pages change through content packs
+(`docs/content_packs.md`), uploaded at `/admin/admin_content_packs`: Check first, then Apply.
+
+- Content packs phase 2 (`66b8e7b07`) reached getjoinery in 0.8.546 (10-28).
+- Products: `hosted_product.zip` and `domain_product.zip` from `content_packs/getjoinery/`
+  (outside git), then activate both products.
+- Pages: `pages.zip`, built by `build_pages_pack.php` from `getjoinery_pages.php` 3.6 (B135,
+  B136, the quick start's F4 and F5); plans cleanly on dev with the getjoinery theme.
 - Copy: write `getjoinery_hosted_tier_copy.md` §1–§6 and link `/server_manager/start` from the
-  site. Push content pack 3.5 (B135, B136).
+  site.
+- B178 (fixed 10-28): every form printed its validation rules to the browser console
+  ("=== FormWriterV2 DEBUG ==="), whatever the `debug` option said. They print only with it
+  (`FormWriterV2Base.php` 2.31.1), and the uploader's leftover debug logs are gone. Missed
+  0.8.546; reaches getjoinery with the next release.
 - Owner accounts (§7). Then the phase 1 live gate (`managed_hosting_phase1_purchase.md` §11):
   one test-mode order, then one real order, on getjoinery.
 
