@@ -1,6 +1,6 @@
 # Content Packs
 
-**Status: first cut built 2026-10-28 (§6), uncommitted; phases 2 and 3 open.** Draft 3 had reviewer2's design review folded in (F1-F17). The developer doc is `docs/content_packs.md`. Rewritten from the deferred 07-16 design, which copied raw table rows
+**Status: first cut built and committed 2026-10-28 (§6, f7b0109f2); plugin packs (§6a) built the same day; phase 2 open; phase 3 deferred (owner, 10-28). Live checks are in the live verification queue.** Draft 3 had reviewer2's design review folded in (F1-F17). The developer doc is `docs/content_packs.md`. Rewritten from the deferred 07-16 design, which copied raw table rows
 from one site to another and ran from the command line only. getjoinery no longer has SSH, so the
 hand-written apply scripts in `content_packs/getjoinery/` can no longer be run, and
 `easy_signup_completion.md` WP7 (the Managed hosting and domain products on getjoinery) is blocked
@@ -308,6 +308,34 @@ mints the test-mode Stripe product, through B1.
 
 WP7 item 3 (the quick start copy: B135, B136, and WP6's F4 and F5) is pasted in the page editor until phase 2.
 
+## 6a. Packs a plugin ships (built 10-28, owner's ask)
+
+A plugin can carry default content as packs: `plugins/{name}/content_packs/{pack}/`, each folder
+holding `pack.json` and its text files in the upload format.
+
+- **When.** Each pack lands once per install. `PluginManager::activate()` applies it after the
+  activation commits, and `sync()` applies any pack not applied since the plugin's
+  `plg_installed_time`. A pack added in a later plugin version therefore lands at the next sync.
+  Reinstalling applies the packs again. It runs after the commit, not inside `onActivate()`, because
+  install leaves a plugin inactive and only an active plugin's classes load
+  (`ClassAutoloader::flush()` runs after the commit, `AbstractExtensionManager::activate()`).
+- **How.** `ContentPack::apply_defaults()` takes the plan built inside its own transaction and that
+  plan's default ticks: new rows and **change** lines are applied, and **edited here** is left
+  alone. That is the check page's default, with nobody to untick it. The writes run as
+  `SystemBase::server_initiated_write()`. The plugin's files carry the pack, and an admin at 8 may
+  activate a plugin while the apply record is a keys-class row.
+- **Failure.** It never undoes the activation or stops a sync. The failure is a `failed` apply
+  record (source `plugin:{name}/{pack}`), an error_log line and a sync message
+  (`content_pack_messages`, printed by `update_database`), and the next sync tries again.
+- **Record.** `cpa_source` (`upload` or `plugin:{name}/{pack}`). `cpa_file` holds the folder's files
+  as JSON. The Content Packs page lists them with where they came from.
+- **Once per install, not per version.** A new version of the same pack does not re-run. Re-running
+  would bring back a row the owner deleted, because lookups ignore soft-deleted rows. A plugin that
+  must change its content later ships a new pack.
+- Code: `includes/PluginContentPacks.php`, `ContentPack::read_dir()` / `dir_members()` /
+  `apply_defaults()` / `default_ticks()`, `PluginManager::activate()` and `sync()` 1.18. Test:
+  `tests/core/plugin_content_packs_test.php` (13 checks), run as an admin at level 8.
+
 ## 7. Later phases
 
 **Phase 2: pages and blocks.**
@@ -326,8 +354,11 @@ WP7 item 3 (the quick start copy: B135, B136, and WP6's F4 and F5) is pasted in 
 - `Page::save()` already writes a content version (`data/pages_class.php:203`), so the editor's
   history covers pack writes too.
 
-**Phase 3: menus and redirects.** `public_menus` and `urls`, each keyed on a declared field, never
-on a visible label.
+**Phase 3: public site navigation and redirects. Deferred (owner, 10-28)** until a site needs it.
+It covers `public_menus` (the header menu visitors see) and `urls`, each keyed on a declared field,
+never on a visible label. It never covers the admin sidebar, profile or settings menus: plugins
+declare those in `plugin.json` (`adminMenu`, `profileMenu`, `settingsMenu`), `admin_menus.json`
+declares core's, and `PluginManager::syncMenus()` keeps them in step. A pack never writes them.
 
 **Later, no phase yet:**
 
@@ -386,8 +417,8 @@ has since been turned off. A pack's typo is still refused, because it differs fr
 
 ## 9. Not in this spec
 
-- Copying a whole site's rows to another site, export, install-time packs and install flavors (the
-  07-16 design). Site copy covers whole-site moves, and no install flavor is planned. If starter
+- Copying a whole site's rows to another site, export, and install flavors (the 07-16 design). A
+  plugin's own packs (§6a) are the install-time packs that remain. Site copy covers whole-site moves, and no install flavor is planned. If starter
   kits come back, they get their own spec.
 - Deleting records. `unlisted` retires by setting a field. A pack that must delete waits for a model
   that declares what retiring means for it.
@@ -403,7 +434,7 @@ has since been turned off. A pack's typo is still refused, because it differs fr
 4. **Drift is immediate, so a check run isn't optional.** It is the main screen (§4). Partial apply
    is the tickboxes.
 5. **Menu rows need identity, and labels aren't it.** Answered by keys that are declared fields
-   (phase 3).
+   (phase 3, deferred).
 
 ## 11. Decisions
 

@@ -10,7 +10,7 @@ settings, and text files inside its own zip. Nothing in it is run and nothing in
 It is never schema: tables and columns come from the data classes through `update_database`.
 
 Packs for one site live outside `public_html`, in `{site root}/content_packs/{site}/`, so no release
-carries them. `tests/unit/shipped_tree_hygiene_test.php` fails if a deployment-named script appears
+carries them. A plugin's own packs ship with the plugin ([below](#packs-a-plugin-ships)). `tests/unit/shipped_tree_hygiene_test.php` fails if a deployment-named script appears
 under `public_html/`.
 
 ## The file
@@ -97,6 +97,11 @@ API's field floor (`is_unwritable_field()`) applies as well.
 | `Product` | `pro_link` | `pro_name`, `pro_short_description`, `pro_description`, `pro_after_purchase_message`, `pro_fulfillment_provider`, `pro_fulfillment_ref`, `pro_max_cart_count`, `pro_is_active` |
 | `ProductVersion` | `prv_pro_product_id` + `prv_version_name` | `prv_version_price`, `prv_price_type`, `prv_trial_period_days`, `prv_status`, `prv_order` |
 
+Menus are not pack content. The admin sidebar, profile and settings menus are declared in a
+plugin's `plugin.json` (`adminMenu`, `profileMenu`, `settingsMenu`) and in `admin_menus.json` for
+core, and `PluginManager::syncMenus()` keeps them in step ([Plugin Menus](plugin_developer_guide.md#plugin-menus-declarative)).
+The public site's navigation and its redirects are not open to packs.
+
 Stripe product ids are not pack fields. Checkout mints a product's Stripe product in its mode the
 first time it needs one (`StripeHelper::ensure_stripe_product()`).
 
@@ -126,6 +131,16 @@ and `save()` under the owner's session. Any failure rolls everything back. Every
 `cpa_content_pack_applies` row: who, when, the file and its SHA-256, the plan as shown, the ticks,
 each written field's before and after value, and the outcome.
 
+## Packs a plugin ships
+
+A plugin keeps packs in `plugins/{name}/content_packs/{pack}/`, each folder holding `pack.json` and
+its text files. Each lands once per install: after the plugin's activation commits, and at every sync
+for one not yet applied since the plugin was installed, with the plan's default ticks (new rows,
+**change** lines; **edited here** left alone). They are recorded here with the source
+`plugin:{name}/{pack}`, applied by the platform rather than under the activating user's level. A
+failure is recorded, logged, never undoes the activation, and is tried again at the next sync. See
+[Plugin Developer Guide](plugin_developer_guide.md#content-packs).
+
 ## API
 
 The page's steps are API actions, all superadmin with a browser session:
@@ -136,5 +151,6 @@ The page's steps are API actions, all superadmin with a browser session:
 | `content_pack_apply` | `apply_id`, `plan_hash`, `ticks` | `written` |
 | `content_pack_history` | — | `applies` |
 
-The engine is `includes/ContentPack.php`: `ContentPack::read($zip_bytes)`, `->plan()`,
-`->apply($apply, $plan_hash, $ticks, $session)`. Tests: `tests/core/content_pack_test.php`.
+The engine is `includes/ContentPack.php`: `ContentPack::read($zip_bytes)` or `::read_dir($folder)`,
+`->plan()`, `->apply($apply, $plan_hash, $ticks, $session)`, and `->apply_defaults($apply)` for a
+plugin's packs. Tests: `tests/core/content_pack_test.php`, `tests/core/plugin_content_packs_test.php`.

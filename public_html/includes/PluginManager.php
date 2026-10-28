@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.18 - a plugin's content packs (content_packs/{pack}/) land once per install: after its activation
+ *                commits, and at sync for one not yet applied (PluginContentPacks)
  * @version 1.17 - getDependents() reads each installed plugin's live manifest; the stored dependency rows missed a depends added after activation, so store could be deactivated under event_manager; deactivation counts only active dependents
  * @version 1.16 - sync()'s table_messages are the schema changes it made, and nothing else: every table step's errors and warnings go to warnings (routeTableStep)
  * @version 1.15 - sync() reports each plugin migration it ran with its outcome (migrations_run: applied, failed or deferred), and words a deferred or failed one as such instead of 'applied'
@@ -1250,6 +1252,27 @@ class PluginManager extends AbstractExtensionManager {
      *   does not skip an existing directory, so refreshing there downloads
      *   upstream over the operator's own copy.
      */
+    /**
+     * Activate a plugin, then apply the content packs it ships that have not
+     * landed since it was installed. They run after the activation commits,
+     * because only then do the plugin's own classes load; a pack that fails
+     * is recorded and logged and never undoes the activation, and the next
+     * sync tries it again.
+     */
+    public function activate($name) {
+        parent::activate($name);
+        if (SandboxPlugins::isSandboxed($name)) {
+            return;
+        }
+        try {
+            foreach (PluginContentPacks::apply_pending($name) as $message) {
+                error_log("Plugin activation ('$name'): " . $message);
+            }
+        } catch (Throwable $e) {
+            error_log("Plugin activation ('$name'): content packs not applied: " . $e->getMessage());
+        }
+    }
+
     public function install($name, $refresh_files = true) {
         if (!$this->validateName($name)) {
             throw new Exception("Invalid plugin name: $name");
@@ -1842,6 +1865,28 @@ class PluginManager extends AbstractExtensionManager {
         }
         if (!empty($sync_hook_messages)) {
             $result['sync_hook_messages'] = $sync_hook_messages;
+        }
+
+        // Each active plugin's content packs not yet applied since its install:
+        // one added in a new version of the plugin, or one that failed before.
+        // After the hooks, so a pack can rely on whatever they seed.
+        $content_pack_messages = [];
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            if (SandboxPlugins::isSandboxed($plugin_name)) {
+                continue;
+            }
+            try {
+                foreach (PluginContentPacks::apply_pending($plugin_name) as $message) {
+                    $content_pack_messages[] = "$plugin_name: $message";
+                }
+            } catch (Throwable $e) {
+                $content_pack_messages[] = "$plugin_name: content packs not applied: " . $e->getMessage();
+                error_log("PluginManager sync: content packs for '$plugin_name' not applied: " . $e->getMessage());
+            }
+        }
+        if (!empty($content_pack_messages)) {
+            $result['content_pack_messages'] = $content_pack_messages;
         }
 
         return $result;

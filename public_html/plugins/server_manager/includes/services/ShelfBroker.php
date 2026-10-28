@@ -66,6 +66,8 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.10 - writeMissingLedgerFiles() takes each run under its lock and asks again whether it is due, so
+ *                 overlapping passes try a run once
  * @version 1.9 - a run's chain is recorded at finish: the one the writer names, or the chain its completed names
  *                sit in, so retention's verified floor sees a site's chains as it sees a node's; a finish asked again
  *                of a finished run answers what was recorded; begin refuses a tenant already at its allowance; a get
@@ -555,6 +557,8 @@ class ShelfBroker {
 
 	/** The advisory lock space a run's finish is serialised in. */
 	const FINISH_LOCK_SPACE = 7301;
+	/** writeMissingLedgerFiles() takes a run under this lock, keyed by run id. */
+	const LEDGER_LOCK_SPACE = 7302;
 
 	private static function completeLockedRun(ShelfRun $run, array $completed, string $chain): array {
 		$now = gmdate('Y-m-d H:i:s');
@@ -670,11 +674,29 @@ class ShelfBroker {
 	 */
 	public static function writeMissingLedgerFiles(int $limit = 50): array {
 		$written = 0;
-		$runs = new MultiShelfRun(array('state' => ShelfRun::STATE_FINISHED, 'ledger_written' => false, 'ledger_due' => true,
-			'deleted' => false), array('svr_shelf_run_id' => 'ASC'), $limit);
+		$due = array('state' => ShelfRun::STATE_FINISHED, 'ledger_written' => false, 'ledger_due' => true, 'deleted' => false);
+		$runs = new MultiShelfRun($due, array('svr_shelf_run_id' => 'ASC'), $limit);
+		$db = DbConnector::get_instance()->get_db_link();
 		foreach ($runs as $run) {
-			if (self::writeLedgerFile($run)) {
-				$written++;
+			// Two passes can overlap (the fleet task on every cron run, an
+			// operator's run, a slow pass). Each run is taken under its lock and
+			// asked again whether it is due, so it is tried once, not once per
+			// pass that listed it.
+			$lock = $db->prepare('SELECT pg_try_advisory_lock(:k1, :k2)');
+			$lock->execute(array(':k1' => self::LEDGER_LOCK_SPACE, ':k2' => (int)$run->key));
+			if (!$lock->fetchColumn()) {
+				continue;
+			}
+			try {
+				$still_due = null;
+				foreach (new MultiShelfRun($due + array('svr_shelf_run_id' => (int)$run->key)) as $fresh) {
+					$still_due = $fresh;
+				}
+				if ($still_due && self::writeLedgerFile($still_due)) {
+					$written++;
+				}
+			} finally {
+				$db->prepare('SELECT pg_advisory_unlock(:k1, :k2)')->execute(array(':k1' => self::LEDGER_LOCK_SPACE, ':k2' => (int)$run->key));
 			}
 		}
 		$stuck = new MultiShelfRun(array('state' => ShelfRun::STATE_FINISHED, 'ledger_written' => false, 'ledger_failed' => true,

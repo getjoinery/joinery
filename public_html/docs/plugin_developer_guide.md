@@ -82,6 +82,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Receiving email addressed to a feature of your plugin | `inboundHandlers` key in `plugin.json` — handler key → `InboundAddressHandler` class | [Mailbox: email handlers](../plugins/mailbox/docs/overview.md#email-handlers-and-personal-addresses) |
 | A button on a message in the mailbox reader | `mailboxMessageActions` key in `plugin.json` — action key → label, icon, same-site url | [Mailbox: buttons on a message](../plugins/mailbox/docs/overview.md#buttons-on-a-message-in-the-reader) |
 | A cross-instance payload kind on the Joinery Direct channel | `directKinds` key in `plugin.json` — kind name → handler class (`gate`/`ingest`) | [Joinery Direct](joinery_direct.md#serving-a-kind-the-plugin-surface) |
+| Default content in models that open to packs (products, versions, settings) | a content pack folder in `content_packs/` — applied once per install | [Content Packs](#content-packs) |
 | Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
 | Activate/deactivate logic | `activate.php`, `deactivate.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` | [Plugin Lifecycle](#plugin-lifecycle) |
 | Uninstall external cleanup *(optional)* | `uninstall.php` defining `{plugin}_uninstall()` — only for work the declarative systems can't do (external API calls, filesystem cleanup) | [Uninstall Script](#uninstall-script) |
@@ -283,6 +284,10 @@ Routes outside the namespace are dropped with a logged warning.
 ├── ajax/                        # External webhooks only (page JS uses /api/v1 actions)
 ├── includes/                    # Helper classes and libraries
 ├── migrations/                  # Database migrations
+├── content_packs/               # (optional) one folder per pack — applied once per install
+│   └── defaults/
+│       ├── pack.json
+│       └── description.txt
 ├── sync.php                     # (optional) runs on every sync — seed declared rows here
 └── uninstall.php               # (optional) external-cleanup hook — most plugins don't need one
 ```
@@ -1162,6 +1167,16 @@ Anything that only makes sense on the instance that authored the row — an owne
 
 Joinery AI is the worked example: `plugins/joinery_ai/recipes.json` declares a few curated recipes and its seeder is documented in [the plugin's overview](../plugins/joinery_ai/docs/overview.md#shipped-recipes).
 
+### Content Packs
+
+A plugin that ships default content in models that open themselves to packs (products and their versions, declared settings; see [Content Packs](content_packs.md#what-a-pack-may-write)) puts it in a content pack instead of code: one folder per pack under `content_packs/`, holding `pack.json` and the text files it names, in the format a pack uploaded on the Content Packs page uses.
+
+Each pack lands **once per install**. Right after the plugin's activation commits, and at every sync, each of its packs not applied since the plugin was last installed is applied with its plan's defaults: rows are created, fields still holding a pack's value are kept current, and a field edited on the site is left alone. A pack added in a later version of the plugin lands at the next sync. Reinstalling the plugin applies its packs again, under the same rule. A pack that fails is recorded on the Content Packs page and logged, never undoes the activation, and is tried again at the next sync. The writes are the platform's, so whoever activated the plugin needs no permission beyond activating it.
+
+A plugin's menus are never pack content: they stay declared in `plugin.json` ([Plugin Menus](#plugin-menus-declarative)).
+
+Packs run once the plugin is active because only then do its own classes load, so a pack may write the plugin's own models once they declare `$content_pack_keys`. Name the plugin in the pack's `requires.plugins`. `PluginContentPacks` (`includes/PluginContentPacks.php`) does the work.
+
 ### Plugin Lifecycle
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
@@ -1191,6 +1206,7 @@ A plugin whose `plugin.json` says `"is_system": true` cannot be uninstalled: it 
 5. Creates rows for tasks declaring `activate_on_install`, then runs the `sync.php` hook
 6. Resumes any suspended scheduled tasks for this plugin
 7. Sets `plg_active = 1`
+8. After the activation commits: applies the plugin's [content packs](#content-packs) not applied since its install
 
 **Developer workflow for schema changes** — Modify `$field_specifications` on an already-installed plugin, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync applies the full column reconciliation: new tables, new columns, type/length and nullability modifications (widening a `varchar`, adding `NOT NULL`) on existing columns, unique constraints, and indexes. Column *removal* is the one schema change sync never performs — dropping a column absent from the spec stays a deliberate migration-or-manual act. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
 
@@ -1203,6 +1219,7 @@ A plugin whose `plugin.json` says `"is_system": true` cannot be uninstalled: it 
 4. Runs pending migrations for all active plugins
 5. Re-registers deletion rules for all active plugins via `PluginHelper::registerAllActiveDeletionRules()`
 6. Seeds declared settings, activates declared tasks, then runs each active plugin's `sync.php` hook
+7. Applies each active plugin's [content packs](#content-packs) not applied since its install
 
 Sync is the recommended way to apply schema changes after code deploys. It is also available as an admin UI action on the Plugins page and the Themes page.
 

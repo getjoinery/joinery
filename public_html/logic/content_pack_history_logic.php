@@ -19,7 +19,7 @@ function content_pack_history_logic(array $input): LogicResult {
 	// Every column but the stored zip, which can be megabytes a row and is
 	// read only when one upload is opened.
 	$rows = DbConnector::get_instance()->get_db_link()->query(
-		'SELECT cpa_content_pack_apply_id, cpa_pack_name, cpa_pack_version, cpa_status, cpa_usr_user_id,
+		'SELECT cpa_content_pack_apply_id, cpa_pack_name, cpa_pack_version, cpa_source, cpa_status, cpa_usr_user_id,
 			cpa_create_time, cpa_applied_time, cpa_file_sha256, cpa_result, cpa_error
 		 FROM cpa_content_pack_applies ORDER BY cpa_content_pack_apply_id DESC LIMIT 50')->fetchAll(PDO::FETCH_ASSOC);
 	$applies = array();
@@ -28,6 +28,7 @@ function content_pack_history_logic(array $input): LogicResult {
 			'apply_id' => (int)$row['cpa_content_pack_apply_id'],
 			'pack' => $row['cpa_pack_name'],
 			'version' => $row['cpa_pack_version'],
+			'source' => $row['cpa_source'],
 			'status' => $row['cpa_status'],
 			'user_id' => (int)$row['cpa_usr_user_id'],
 			'checked' => LibraryFunctions::api_timestamp($row['cpa_create_time']),

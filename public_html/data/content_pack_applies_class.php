@@ -3,10 +3,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 /**
- * One content pack upload on this site: the file, who checked it, and, once it
- * is applied, the plan the owner was shown, what they ticked and every field's
- * value before and after. A row is made at check time (status 'checked'), so
- * a pack that was looked at and never applied is on record too.
+ * One content pack on this site: an upload, or a pack a plugin ships. It holds
+ * the file, who checked it, and, once applied, the plan, what was ticked and
+ * every field's value before and after. An upload's row is made at check time
+ * (status 'checked'), so a pack that was looked at and never applied is on
+ * record too; a plugin's pack gets its row when it is applied or fails.
  *
  * See specs/content_pack_feature.md and includes/ContentPack.php.
  */
@@ -31,8 +32,12 @@ class ContentPackApply extends SystemBase {
 		'cpa_usr_user_id'           => array('type'=>'int4'),
 		'cpa_pack_name'             => array('type'=>'varchar(100)', 'required'=>true),
 		'cpa_pack_version'          => array('type'=>'varchar(50)'),
+		// 'upload' for a pack checked on the Content Packs page; 'plugin:{name}/{folder}'
+		// for one a plugin ships, applied when the plugin is installed.
+		'cpa_source'                => array('type'=>'varchar(150)', 'default'=>'upload'),
 		'cpa_file_sha256'           => array('type'=>'varchar(64)', 'required'=>true),
-		// The uploaded zip, base64. A pack holds no credential (ContentPack refuses one).
+		// The pack as received, base64: the uploaded zip, or for a plugin's pack the
+		// JSON of its folder's files by name. A pack holds no credential.
 		'cpa_file'                  => array('type'=>'text', 'required'=>true),
 		'cpa_status'                => array('type'=>'varchar(20)', 'required'=>true),
 		'cpa_plan'                  => array('type'=>'jsonb'),

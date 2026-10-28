@@ -72,10 +72,55 @@ class ContentPack {
 			throw new ContentPackRefusal('A content pack is at most 2 MB; this file is ' . strlen($zip_bytes) . ' bytes.');
 		}
 
+		return self::from_members(self::zip_members($zip_bytes));
+	}
+
+	/**
+	 * Read and validate a pack from a folder on this server: a plugin's own
+	 * pack (plugins/{name}/content_packs/{pack}/). The folder holds pack.json
+	 * and the text files it names, as a zip would.
+	 *
+	 * @throws ContentPackRefusal naming what is wrong.
+	 */
+	public static function read_dir(string $dir): ContentPack {
+		return self::from_members(self::dir_members($dir));
+	}
+
+	/** Name => contents of each file in a pack folder, checked as a zip's members are. */
+	public static function dir_members(string $dir): array {
+		if (!is_dir($dir)) {
+			throw new ContentPackRefusal('There is no pack folder at ' . $dir . '.');
+		}
+		$members = array();
+		$total = 0;
+		foreach (scandir($dir) as $name) {
+			if ($name === '.' || $name === '..' || $name === '.DS_Store') {
+				continue;
+			}
+			$path = $dir . '/' . $name;
+			if (!is_file($path)) {
+				throw new ContentPackRefusal('"' . $name . '" in ' . $dir . ' is not a file. A pack is pack.json and the text files it names, side by side, with no folders.');
+			}
+			$size = filesize($path);
+			$total += $size;
+			if ($size > self::MAX_MEMBER_BYTES || $total > self::MAX_ZIP_BYTES) {
+				throw new ContentPackRefusal('The pack in ' . $dir . ' is larger than a pack may be (2 MB).');
+			}
+			$contents = (string)file_get_contents($path);
+			if (!mb_check_encoding($contents, 'UTF-8')) {
+				throw new ContentPackRefusal('"' . $name . '" is not UTF-8 text.');
+			}
+			$members[$name] = $contents;
+		}
+		ksort($members);
+		return $members;
+	}
+
+	/** A pack from its files by name: pack.json and the text files it names. */
+	private static function from_members(array $members): ContentPack {
 		$pack = new ContentPack();
-		$members = self::zip_members($zip_bytes);
 		if (!isset($members['pack.json'])) {
-			throw new ContentPackRefusal('The zip holds no pack.json.');
+			throw new ContentPackRefusal('The pack holds no pack.json.');
 		}
 		$manifest = json_decode($members['pack.json'], true);
 		if (!is_array($manifest) || array_is_list($manifest)) {
@@ -918,7 +963,31 @@ class ContentPack {
 		if (!Access::decide(10, $session)) {
 			throw new ContentPackRefusal('Only a superadmin applies a content pack.');
 		}
-		$ticks = array_values(array_unique(array_map('strval', $ticks)));
+		return $this->run_apply($apply, $shown_hash, $ticks);
+	}
+
+	/**
+	 * Apply the plan's default ticks with nobody to read it first: new rows,
+	 * and changes to fields that still hold what a pack established, while a
+	 * field edited on the site is left as it is. This is how a plugin's own
+	 * packs land when it is installed. The writes are the platform's (the
+	 * plugin's files carry the pack), so they are not checked against whoever
+	 * started the activation.
+	 *
+	 * @return array What was written, as apply() returns it.
+	 */
+	public function apply_defaults(ContentPackApply $apply): array {
+		return SystemBase::server_initiated_write(function () use ($apply) {
+			return $this->run_apply($apply, null, null);
+		});
+	}
+
+	/**
+	 * The apply itself. $shown_hash null takes the plan built here, and $ticks
+	 * null takes that plan's default ticks.
+	 */
+	private function run_apply(ContentPackApply $apply, ?string $shown_hash, ?array $ticks): array {
+		$ticks = $ticks === null ? null : array_values(array_unique(array_map('strval', $ticks)));
 		$dblink = DbConnector::get_instance()->get_db_link();
 		if ($dblink->inTransaction()) {
 			throw new ContentPackRefusal('A content pack applies in a transaction of its own.');
@@ -931,7 +1000,10 @@ class ContentPack {
 			// new cannot both create it.
 			$dblink->query("SELECT pg_advisory_xact_lock(hashtext('content_pack_apply'))");
 			$plan = $this->plan();
-			if (!hash_equals($plan['hash'], $shown_hash)) {
+			if ($ticks === null) {
+				$ticks = self::default_ticks($plan['items']);
+			}
+			if ($shown_hash !== null && !hash_equals($plan['hash'], $shown_hash)) {
 				throw new ContentPackRefusal('The site changed since this pack was checked. Check it again and read the new plan before applying.');
 			}
 			$tickable = self::tickable($plan['items']);
@@ -969,7 +1041,7 @@ class ContentPack {
 			}
 
 			$apply->set('cpa_status', ContentPackApply::STATUS_APPLIED);
-			$apply->set('cpa_plan', json_encode($plan));
+			$apply->set('cpa_plan', json_encode($plan, JSON_INVALID_UTF8_SUBSTITUTE));
 			$apply->set('cpa_ticks', json_encode($ticks));
 			$apply->set('cpa_result', json_encode($written));
 			$apply->set('cpa_applied_time', gmdate('Y-m-d H:i:s'));
@@ -984,6 +1056,27 @@ class ContentPack {
 				$dblink->rollBack();
 			}
 		}
+	}
+
+	/** The lines a plan ticks before anyone changes it. */
+	public static function default_ticks(array $items): array {
+		$ticks = array();
+		foreach ($items as $item) {
+			if (!empty($item['tick']) && !empty($item['default'])) {
+				$ticks[] = $item['tick'];
+			}
+			foreach ($item['lines'] ?? array() as $line) {
+				if (!empty($line['tick']) && !empty($line['default'])) {
+					$ticks[] = $line['tick'];
+				}
+			}
+			foreach ($item['records'] ?? array() as $record) {
+				if (!empty($record['default'])) {
+					$ticks[] = $record['tick'];
+				}
+			}
+		}
+		return $ticks;
 	}
 
 	/** Tick id => true for every line the plan lets the owner choose. */
