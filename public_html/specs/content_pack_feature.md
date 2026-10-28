@@ -1,715 +1,410 @@
----
-# Content Pack Feature
+# Content Packs
 
-**Status: deferred** (owner, 2026-07-16) — kept on the roadmap; other work
-took priority. **Field notes added 2026-08-09** after building getjoinery.com's
-pages with throwaway seeder scripts: five ways a pack could apply cleanly and
-still leave the target wrong. Read them before implementing.
+**Status: first cut built 2026-10-28 (§6), uncommitted; phases 2 and 3 open.** Draft 3 had reviewer2's design review folded in (F1-F17). The developer doc is `docs/content_packs.md`. Rewritten from the deferred 07-16 design, which copied raw table rows
+from one site to another and ran from the command line only. getjoinery no longer has SSH, so the
+hand-written apply scripts in `content_packs/getjoinery/` can no longer be run, and
+`easy_signup_completion.md` WP7 (the Managed hosting and domain products on getjoinery) is blocked
+on this. The field notes from the 08-09 build are kept below, each with the answer this design
+gives.
 
-The original triggering use case (preserving getjoinery content through the site
-pivot) was handled instead by hand-rolled seeder scripts, which now live at
-`{site root}/content_packs/getjoinery/` — deliberately outside `public_html` so
-no release archive carries one site's copy to another's install. They are what
-this spec would replace. A site copy (`specs/site_copy.md`) is not: a whole site
-moved to a new server is heavier and different in kind from a portable content pack.
+## 1. What it is
 
-## Problem
+A content pack is a file that says "make sure these records look like this". The owner uploads it
+on the site's admin page, sees every change it would make with the old and new value side by side,
+ticks what to apply, and confirms. The site then writes it through its own models in one
+transaction and records what it did.
 
-Joinery's "content" lives in two places: theme files (filesystem) and DB rows (settings, pages,
-products, pricing tiers, navigation). This split means there is no lightweight way to snapshot,
-share, or restore a specific site configuration. Preserving a site's look+content today requires
-either a full DB backup (heavy, not portable) or manually reconstructing the DB state from scratch.
+A pack is data. It never contains code, SQL, file paths or class names outside a fixed list, and the
+site never runs anything from it. Anything a pack can do, an admin could already do through the
+site's own edit screens.
 
-This is a recurring friction point when:
-- Pivoting a deployment to a new audience (the original org-facing getjoinery.com content needs
-  to be preserved when the site is rebuilt for developers)
-- Standing up a new sister-brand deployment that should start from a known content baseline
-- Sharing a "starter kit" with a new Joinery operator
-- Demoing the platform with realistic content that looks like a real site
+What a pack is not:
 
-## Proposed Solution: Content Packs
+- **Not schema.** Tables and columns come from the data classes through `update_database`. A pack
+  only writes records into tables that already exist.
+- **Not a site copy.** Moving a whole site is `site_copy.md`.
+- **Not in the release.** Packs live in `{site root}/content_packs/{site}/`, outside `public_html`,
+  as the scripts do today. `tests/unit/shipped_tree_hygiene_test.php` already fails if a
+  deployment-named script appears under `public_html/`. An uploaded pack is kept in the target's
+  apply record. The engine reads it from PHP's upload temp file, and nothing in it is extracted.
 
-A content pack is a maintenance artifact for moving DB content between sites as a file —
-similar to a backup, but scoped to "the site's content" rather than "everything in the
-DB." Packs are **not** a platform primitive: there is no in-DB tracking, no admin UI, no
-auto-discovery in the running system, no registered pack location in the repo. They are
-operator tools on the same plane as backup files.
+## 2. The file
 
-### Pack format
-
-A pack is a directory of JSON files, typically distributed as a zip:
+A pack is a zip holding `pack.json` and, optionally, text files for long copy.
 
 ```
-mypack/
-  pack.json          ← manifest: name, version, description, table selection,
-                       FK pins
-  settings.json      ← stg_settings rows
-  pages.json         ← page/post content rows (if page system exists)
-  products.json      ← products and pricing tiers
-  navigation.json    ← nav items (if stored in DB)
+hosted_product/
+  pack.json
+  description.md
+  after_purchase.md
 ```
-
-Packs are files. They are not part of the application repo, not registered in the DB,
-and have no fixed location on disk — operators store them wherever backups go or
-wherever else is convenient.
-
-### Pack specification
-
-`pack.json` is the manifest — small, declarative, no embedded SQL. Three fields:
 
 ```json
 {
-  "name": "orgcontent",
-  "version": "1.0.0",
-  "description": "Org-facing content baseline",
-  "tables": ["stg_settings", "pag_pages", "pro_products"],
-  "settings_include": [
-    "site_name",
-    "tagline",
-    "og_description",
-    "hero_text"
-  ],
-  "fk_pins": {
-    "pag_pages.pag_author_user_id": 1
-  }
+  "pack": "getjoinery-hosted-product",
+  "version": "3.2",
+  "description": "The Managed hosting product: $12.99 a month, no trial, created inactive.",
+  "requires": { "plugins": ["store", "server_manager"] },
+  "notes": "Activate the product once Provisioning Setup says a hosted order can be fulfilled.",
+  "entries": [
+    {
+      "id": "hosted",
+      "model": "Product",
+      "match": { "pro_link": "managed-hosting" },
+      "match_also": [ { "pro_link": "automatic-install-hosted" }, { "pro_name": "Automatic Install, hosted" } ],
+      "set": {
+        "pro_name": "Managed hosting",
+        "pro_short_description": "We create the server, install your site, ...",
+        "pro_description": { "file": "description.md" },
+        "pro_after_purchase_message": { "file": "after_purchase.md" },
+        "pro_fulfillment_provider": "customer_cloud",
+        "pro_fulfillment_ref": 1
+      },
+      "on_create": { "pro_is_active": false, "pro_max_cart_count": 1 }
+    },
+    {
+      "model": "ProductVersion",
+      "match": { "prv_pro_product_id": { "ref": "hosted" }, "prv_version_name": "Hosting" },
+      "set": { "prv_version_price": "12.99", "prv_price_type": "month", "prv_trial_period_days": null },
+      "on_create": { "prv_status": 1, "prv_order": 1 }
+    },
+    {
+      "model": "ProductVersion",
+      "unlisted": { "where": { "prv_pro_product_id": { "ref": "hosted" }, "prv_status": 1 },
+                    "set": { "prv_status": 0 } }
+    }
+  ]
 }
 ```
 
-**`tables`** — list of tables to include in the pack. All non-soft-deleted rows are
-exported from each named table. Tables not listed are excluded entirely.
-
-**`settings_include`** — allowlist of `stg_name` values, required when `stg_settings`
-appears in `tables`. Settings whose name isn't on this list are not exported.
-`stg_settings` mixes credentials with marketing copy, so the operator must enumerate
-what travels (see "Content scope"). A name listed in `settings_include` that doesn't
-exist in the source's `stg_settings` fails export with a clear error naming the missing
-key — silently shipping a partial allowlist is the worse failure mode than aborting,
-since the typical cause is a typo or a renamed setting.
-
-**`fk_pins`** — map of `<table>.<column>` → literal target PK, for FK columns whose
-target row isn't in the pack. The typical use is attaching pack content to the
-install-pinned admin (`usr_user_id=1`), which is stable across all Joinery installs.
-At apply time, the importer verifies each pinned row exists on the target before any
-inserts run; a missing pin target aborts the apply with a clear error rather than
-producing FK violations row-by-row.
-
-**Export-time enforcement.** The exporter walks every FK column on every included row.
-A reference is either resolved to an `_export_id` (target is in the pack), pinned via
-`fk_pins`, or — if the column is nullable — emitted as NULL. A non-nullable FK with no
-in-pack target and no `fk_pin` fails export with a clear error:
-
-```
-ERROR: pag_pages.pag_author_user_id references rows not in pack:
-  - pag_id=42 → usr_user_id=10
-  - pag_id=87 → usr_user_id=10
-Fix: include usr_users in `tables` (with the referenced rows) or add an entry to `fk_pins`.
-```
-
-A pack cannot be produced in a knowingly-broken state.
-
-### Apply behavior
-
-Built-in rules — nothing to configure per table:
-
-- **Hash-dedup, skip on match.** If a pack row's content hash matches an existing
-  target row's hash, the importer skips the insert and maps the row's `_export_id` to
-  that target row's PK. See "Row identity and references."
-- **Unique-constraint overwrite.** If the INSERT hits a unique-constraint violation,
-  the importer rolls back to a per-row savepoint, parses the violated constraint name
-  from the PG error, and UPDATEs the conflicting target row with the pack row's
-  content (every column the pack carries — PK, audit, and generated columns are
-  already excluded at export, so they don't appear in the SET clause). The target
-  row's PK is preserved, so target-side FK references that point at it (comments,
-  attachments, likes, etc.) survive the apply. The pack row's `_export_id` maps to the
-  preserved target PK.
-- **`stg_settings`** is a specific instance of the overwrite rule, since `stg_name` is
-  its only meaningful unique constraint. Pack-shipped marketing copy overwrites the
-  factory defaults the install SQL just inserted.
-- **Soft-deleted rows** — excluded at export when the table has a `delete_time` column.
-- **Generated columns** — excluded at export. PG-`GENERATED ALWAYS AS ... STORED`
-  columns reject any non-DEFAULT INSERT value, so the exporter detects them via
-  `information_schema.columns.is_generated` and omits them from the pack. The target
-  recomputes via its own generation expression on insert. (Identity-on-PK columns are
-  already covered by the auto-PK assignment rule.)
-- **Audit columns** — `*_created_time`, `*_updated_time`, and `*_delete_time` are
-  excluded at export. The target's column defaults populate them at INSERT
-  (`created_time = NOW()`, `updated_time = NOW()`), and the UPDATE path naturally has
-  nothing to set. Source-side audit history is not preserved — audit timestamps on the
-  target reflect when the apply happened, not when the source row was originally
-  written. Audit metadata is operational state, not content.
-
-**Tables with multiple unique constraints.** If a pack INSERT collides on one unique
-constraint and the resulting UPDATE collides on a *different* constraint (against a
-different target row), the secondary violation bubbles up and aborts the apply. Rare
-for content tables — most have a single natural-key constraint — but worth knowing if
-it happens.
-
-These rules cover both v1 use cases: install bootstrap (empty target, INSERT path
-always succeeds, overwrite never fires) and prod→dev content pulls (overlapping rows
-overwrite in place, preserving target-side FK references).
-
-### Type encoding
-
-Pack JSON is the canonical interchange format, so each PostgreSQL type maps to a defined
-JSON encoding. The exporter and importer agree on:
-
-- **Text, varchar, char** — JSON string. UTF-8 required end-to-end.
-- **Integer, smallint, serial** — JSON number.
-- **Bigint** — JSON number when within IEEE-754 safe-integer range (±2^53); otherwise
-  JSON string. The importer parses either form.
-- **Numeric, decimal** — JSON string, to preserve precision.
-- **Boolean** — JSON `true` / `false`.
-- **Timestamp, timestamptz** — JSON string in ISO-8601 UTC form (`YYYY-MM-DDTHH:MM:SSZ`).
-- **Date, time** — JSON string in ISO-8601 form.
-- **JSON, JSONB** — embedded as native JSON values, not escaped strings. The importer
-  re-serializes for insertion.
-- **Array types** — JSON arrays of the appropriate element encoding.
-- **Bytea** — JSON string, base64-encoded.
-- **NULL** — JSON `null` or key omitted; treated as equivalent everywhere (including in
-  the content hash).
-
-Types not in this list (geometric, range, enum, custom domains) are out of scope for v1 —
-the exporter fails with a clear error if a row contains a column of an unsupported type,
-so the operator knows to either skip the table or wait for type support.
-
-### Row identity and references
-
-Pack JSON cannot use source-DB primary keys directly — they are auto-increment integers tied
-to the source database and meaningless on any other deployment. The format uses indirection
-via export-time identifiers:
-
-**Export.** Each row is assigned a random identifier (`_export_id`) at export time. FK
-columns are encoded one of three ways: as the parent row's `_export_id` (target is in the
-same pack), as a pin marker carrying the literal target PK from `fk_pins` (target is
-external and pinned), or as NULL (target is external and the column is nullable with no
-pin).
-
-**Import.** Rows are inserted in dependency order. As each row is inserted, the importer
-captures the new auto-PK assigned by the target DB and adds an entry to an
-`{_export_id → target_pk}` map. For each FK column on a dependent row, `_export_id`
-references are resolved through this map; pin markers are emitted as the pinned literal
-PK; NULLs are emitted as NULL.
-
-**Row JSON format.** Each row in a pack's table file is a JSON object keyed by column
-name. The row carries its own `_export_id` (a string assigned at export time) as a
-top-level key. FK columns use type-tagged objects so reference semantics are
-unambiguous; all other columns hold their values directly per "Type encoding" below.
+And the domain pack's setting entry:
 
 ```json
-{
-  "_export_id": "abc123",
-  "pag_slug": "about-us",
-  "pag_title": "About Us",
-  "pag_body": "<p>...</p>",
-  "pag_author_user_id": {"_ref": "xyz789"},
-  "pag_category_id": {"_pin": 1},
-  "pag_template_id": null
-}
+{ "setting": "store_domain_registration_product_id", "value": { "ref": "domain" } }
 ```
 
-The four FK-column cases:
+### 2.1 Entry kinds
 
-- `{"_ref": "<export_id>"}` — link to another row in the same pack; resolved via the
-  export-id map at apply time.
-- `{"_pin": <literal_pk>}` — link to an external row whose PK is fixed by `fk_pins`.
-- `null` — link is empty (column is nullable, target is external, no pin).
-- Any other value is rejected — FK columns may only carry one of the three forms above.
+**Record entry** (`model` + `match`). Finds at most one record and makes its `set` fields true.
 
-Non-FK columns hold their values directly (string, number, boolean, JSON, etc.) per
-"Type encoding." Type-tagged objects keep link semantics structurally distinct from
-content, so a content column may hold any string — including ones that look like
-`"_ref:..."` or `"_pin:..."` — with no collision risk.
+- `match`: the fields that find the record. They must be one of the key sets the model declares
+  (§3). The `match` values are written on create and kept equal on every apply, like `set`. So a
+  record found through `match_also` takes the new key, and the plan shows that as a change line
+  (the hosted script updated `pro_link` this way, `apply_hosted_product.php:298`).
+- `match_also`: earlier identities, tried in order when `match` finds nothing, so a renamed record
+  is updated rather than doubled (the hosted script's `HOSTED_PREVIOUS_*`). Any declared column may
+  be used here, since it only reads.
+- Every lookup (`match`, `match_also`, `unlisted.where`) ignores soft-deleted rows, as the scripts
+  (`apply_hosted_product.php:254`) and `get_by_link` do. Otherwise a deleted product holding the
+  link would be found and revived by a `set`. Text values compare with surrounding whitespace
+  trimmed, as the scripts did (`:347`).
+- Two records found by one lookup, or `match` and `match_also` finding different records, refuses
+  the whole pack and names them both. This is not hypothetical: `ProductVersion` has no uniqueness
+  on (product, version name), and dev holds old products with the same version name three times.
+- `set`: written on create and kept equal on every later apply.
+- `on_create`: written only when the record is new, never compared afterward. This is how a product
+  is created inactive without a later apply switching it back off after the owner activated it
+  (the hosted script's "never silently reactivated").
+- `id`: optional. Lets other entries point at this record.
 
-This keeps the pack format self-contained: no schema changes, no required natural-key columns
-on underlying tables, works on any table the seeder supports.
+**Unlisted entry** (`model` + `unlisted`). `where` picks a set of records; those that no record
+entry in this pack matched get `unlisted.set`. This is the scripts' "retire any other active
+version". It only sets fields, under the same field rules as `set`; it never deletes.
 
-**Duplicate prevention.** Before inserting a row, the importer hashes its content and
-checks whether the target already has a row in the same table with an identical content
-hash. If so, the existing row's PK is added to the export-id map and the insert is skipped.
+**Setting entry** (`setting` + `value`). Goes through `Setting::put`, which already refuses an
+undeclared name (`data/settings_class.php:201-210`). A pack also refuses any setting declared
+`secret` (`SettingsDeclarations::isSecret`, `includes/SettingsDeclarations.php:164`) and any name
+matching the credential pattern (`SystemBase::CREDENTIAL_FIELD_PATTERN`,
+`includes/SystemBase.php:80`). It refuses a setting declared `managed` as well
+(`SettingsDeclarations::isManaged`, `includes/SettingsDeclarations.php:172`). Those are written by
+the machine and never appear on a form.
 
-Dedup serves two distinct roles. For tables with a unique constraint (most content
-tables — `pag_slug`, `pro_sku`, `stg_name`, etc.), it's an *optimization*: without it, a
-byte-identical INSERT would just hit the unique constraint and trigger a redundant
-UPDATE via the overwrite path. For tables without any unique constraint other than PK,
-it's a *correctness requirement*: without it, every re-apply creates fresh duplicates
-of every row. Both roles are needed in v1 — dedup is not a feature that can be quietly
-dropped once overwrite is in place.
+### 2.2 Values
 
-The content hash is computed over a canonical serialization that:
-- Excludes the primary key column.
-- Excludes audit-timestamp columns the platform manages (`*_created_time`,
-  `*_updated_time`, `*_delete_time`), since they fluctuate without semantic change.
-- For FK columns, hashes the *resolved target PK*, not the `_export_id` string. The same
-  function is applied to pack-side rows (after resolving FKs through the export-id map
-  and `fk_pins`) and to target-side candidate rows. Without this, the two sides would
-  never match.
-- Treats `null` and an omitted key as equivalent.
-- Canonicalizes `json` / `jsonb` column values before hashing — object keys sorted
-  recursively, numbers in shortest decimal form, insignificant whitespace stripped.
-  Without this, semantically equal JSON values can hash differently due to key-order
-  or whitespace drift (especially for `json` columns, which preserve insertion order
-  verbatim).
+- Plain JSON values: a string, number, boolean or `null`.
+- `{"ref": "<id>"}`: the key of another entry's record. The record is created first if it is new,
+  so an entry may refer to an entry that appears later in the file. A cycle refuses the pack.
+- `{"file": "<name>"}`: the UTF-8 contents of a file in the zip, read by name. A name holding `/`,
+  `\` or `..`, a file that isn't there, and a file that is in the zip but unused all refuse the pack.
+  Nothing is extracted to disk.
 
-Dedup and overwrite are both keyed on the target's *current* state — neither pack-apply
-history nor source-side row identity is tracked. Two consequences worth knowing:
+### 2.3 Strictness
 
-- **Target hand-edits are clobbered on re-apply.** If a target row was hand-edited
-  between applies, the next apply sees a hash mismatch, INSERTs, hits the unique
-  constraint, and overwrites the row with pack content. The hand-edit is lost.
-  Operators who want to preserve local changes should treat pack-managed rows as
-  read-only in the target.
-- **Source renames produce parallel rows.** If a row's natural key changes between
-  source exports (e.g., a slug renamed from "about" to "about-us"), the new export
-  looks like a brand-new row to the target — the INSERT succeeds against the new key,
-  and the target ends up with both old and new versions. Stable identity across source
-  edits would require deterministic export IDs (see "Future enhancement" below).
+Unknown keys anywhere refuse the pack, naming the key. This stands in for a format version: a pack
+written for a newer site fails by name on an older one instead of being half understood. A pack is
+at most 2 MB, and each member at most 2 MB uncompressed. The engine checks each member's size
+(`ZipArchive::statIndex()`) before reading it.
 
-**Future enhancement: deterministic export IDs.** If stable identity across re-exports of the
-same source ever becomes a requirement (e.g., to keep target-side FK references from non-pack
-rows pointing at the same logical row through refreshes), the export ID can be derived
-deterministically from `(source_site_id, table, source_pk)` instead of randomly. No schema
-change required, just a different function at export time. Deferred until a use case demands it.
+`requires.plugins` lists plugins that must be active. One that isn't refuses the pack up front.
 
-### Export and import
+## 3. What a pack may write
 
-Export and import are CLI scripts in `utils/`, run by operators directly:
+Data is not code, but data can still do damage: a User row with permission 10 is just data. A pack
+may write only what a model has explicitly opened to it.
 
-- `php utils/export_content_pack.php <output-path>` — dumps the current site's content
-  tables into a pack file.
-- `php utils/apply_content_pack.php <pack-path>` — applies a pack file to the current
-  site, inserting rows in dependency order, resolving FKs through the export-id map, and
-  skipping content-hash matches that already exist.
+A model opts in with two declarations:
 
-These two CLI scripts are the entire interface. No admin UI; no auto-discovery; no
-"installed pack" registry. Operators run them by hand, the same way they run backup
-and restore scripts.
+```php
+// Product
+public static $content_pack_keys = [['pro_link']];
+public static $content_pack_fields = ['pro_name', 'pro_short_description', 'pro_description',
+    'pro_after_purchase_message', 'pro_fulfillment_provider', 'pro_fulfillment_ref',
+    'pro_max_cart_count', 'pro_is_active'];
 
-**Apply output.** On success, the apply CLI prints a per-table summary showing
-inserted / overwritten / skipped counts:
-
-```
-Applied orgcontent.pack.zip
-  stg_settings:  3 inserted, 2 overwritten, 4 skipped (identical)
-  pag_pages:    12 inserted, 1 overwritten, 0 skipped
-  pro_products:  4 inserted, 0 overwritten, 0 skipped
+// ProductVersion
+public static $content_pack_keys = [['prv_pro_product_id', 'prv_version_name']];
+public static $content_pack_fields = ['prv_version_price', 'prv_price_type',
+    'prv_trial_period_days', 'prv_status', 'prv_order'];
 ```
 
-If any overwrites happened, a WARNING line follows the summary noting that pre-existing
-target rows with matching unique keys were replaced. Overwrite is potentially
-destructive on a live target (clobbers local edits on rows the pack also touches), so
-the operator gets explicit acknowledgement that it occurred.
+- A `model` name not on the list of opted-in models refuses the pack. The name is compared against
+  that list and is never handed to the class loader on its own.
+- A field not in `$content_pack_fields`, or one `is_unwritable_field()` refuses
+  (`includes/SystemBase.php:2442`), refuses the pack. So a pack never writes a field the API's
+  field floor forbids.
+- The Stripe ids are on neither list. B1 (§8) mints them at checkout.
 
-`--verbose` lists the specific rows overwritten — e.g., `pag_pages: overwrote
-pag_slug='about-us' (id=12)` — so the operator can audit changes and, if needed,
-recover from a pre-apply backup.
+**Why an explicit field list and not "every API-writable field":** the product form carries rules
+that are not in the model. It slugs `pro_link` (`admin_product_edit_logic.php:200-205`), refuses
+an ownership tag on a product with subscription versions (`:183`), and refuses a subscription
+version on a tagged product (`:59-64`). A pack saves through the model, so those rules wouldn't run.
+A field joins the list only when its rules live in the model's `prepare()`. Some listed fields have
+no rule anywhere but the form's dropdowns: a fulfilment provider key, a price type, a link's slug
+form. B2 (§8) moves all of those rules into `prepare()`, and the lists above are safe only once B2
+lands.
 
-**Error reporting.** PG errors raised during apply are caught and re-raised with
-context: table name, the row's `_export_id`, the operation stage (INSERT or UPDATE),
-and the violated constraint name if applicable. A raw PG error without context forces
-the operator to dig through logs to map "constraint violation" back to "which row in
-which table" — the wrapper does that mapping at the source.
+Columns the form stamps on create and a pack does not set are left NULL on a pack-created product:
+`pro_created_by` (`admin_product_edit_logic.php:80-82`, nullable for products that predate it,
+`products_class.php:118-120`), `pro_expires` and `pro_prg_product_group_id`. No reader treats NULL
+differently from 0: every reader in the store plugin is a truthiness test (`ShoppingCart.php:431`,
+`admin_product.php:66`, `admin_products.php:63`, `admin_product_logic.php:89`).
 
-**Soft-deleted rows.** When an included table has a `delete_time` column, the exporter
-filters out rows where `delete_time IS NOT NULL`. Operators who want soft-deleted rows
-in a pack should restore them in the source DB before exporting.
+## 4. The check page
 
-### Apply transactionality
+`/admin/admin_content_packs`, `@joinery-admin level=10`. Its three steps are API actions, so the
+management node can drive the same steps later (§9):
 
-The entire apply runs inside a single PostgreSQL transaction with FK constraints set
-`DEFERRED`. Either the whole pack lands or none of it does.
+| Action | Does |
+|---|---|
+| `content_pack_check` | Takes the uploaded zip. Validates it (§2, §3), stores it in a new apply record, and returns the plan. Writes nothing else. |
+| `content_pack_apply` | Takes the apply record id, the plan hash it was shown, and the ticked rows. Builds the plan again, refuses if it differs from the one shown ("the site changed since you checked; check again"), then applies in one transaction. |
+| `content_pack_history` | Lists earlier applies with their before and after values. |
 
-Within the outer transaction, each row's INSERT is wrapped in a `SAVEPOINT` so a
-unique-constraint violation can be recovered from (rolled back to the savepoint, then
-UPDATEd in place per the overwrite rule). Any other error during row processing
-escapes the savepoint and rolls back the whole apply.
+All three declare `min_user_permission => 10` and `requires_browser_session => true`, the
+pattern in `logic/backup_download_start_logic.php:40-50`. `content_pack_history` declares
+`mutates => false`.
 
-Deferring FK constraints handles **self-referencing trees with NULL at the root** —
-tables like `cat_categories.cat_parent_id` where the root row has no parent. Roots
-insert first, children insert in dependency order, and the per-row FK check is
-postponed until COMMIT.
+### 4.1 The plan
 
-Dependency order is computed at apply time by topologically sorting the included
-tables on their FK relationships in the target schema. Within a table that has a
-self-referencing FK, rows are further sorted parent-first.
+The page shows one block per record and one line per field:
 
-Genuine reference loops between rows (row A links to row B, B links back to A) are
-not supported — see Known limitations.
-
-The single-transaction approach holds locks and buffers for the duration of the apply.
-Acceptable for v1; chunked or resumable applies are deferred.
-
-### Schema compatibility
-
-A pack does not embed a Joinery version. At apply time, the importer compares pack columns
-to the target schema:
-
-- Table listed in pack but missing on target → apply fails with a clear error naming
-  the table. Typical cause: a plugin-owned table whose plugin hasn't been installed on
-  the target (see "Plugin and theme activation are out of pack scope" in Known
-  limitations).
-- Column present in pack but missing in target → apply fails with a clear error naming
-  the table and column. Operator either upgrades the target or removes the column from
-  the pack.
-- Column present in target but missing in pack → target's default value (or NULL) is
-  used. This is how a pack survives forward upgrades that add new columns.
-- Type mismatch on a shared column → apply fails. The importer does not coerce.
-
-The schema itself is the compatibility contract — no version comparison logic. Newer
-target with older pack works as long as new columns are nullable or have defaults; older
-target with newer pack fails fast.
-
-### Install-time application
-
-The install pipeline splits seed data by where it's authored:
-
-| Tier | Mechanism | Contents |
+| State | Meaning | Default |
 |---|---|---|
-| Schema + system seed data | `joinery-install.sql.gz` (from `create_install_sql.php`, unchanged) | CREATE TABLE/sequence/index DDL, hardcoded `usr_users` INSERTs, `stg_settings` defaults from `settings.json`, `amu_admin_menus` from `admin_menus.json`, `mig_migrations` baseline. All of this has existing canonical sources (code or JSON files), so packs do not duplicate it. |
-| Operator content (optional) | `install.pack.zip` | Products, tier definitions, page copy, custom navigation entries, and setting overrides for marketing copy or branding. Only shipped when a release needs to seed deployment-specific content. |
-
-`_site_init.sh` applies these in order: restore the install SQL, then apply the install
-pack if one is present in `maintenance_scripts/install_tools/`. A vanilla Joinery
-release may ship no pack at all; a branded deployment (e.g., getjoinery.com pivot,
-sister-brand site) ships a pack containing its content.
-
-Setting overrides in a pack overwrite the defaults the install SQL just inserted via
-the general unique-constraint overwrite path (`stg_name` is the unique constraint that
-fires). That's how marketing copy and branding travel between sites without duplicating
-rows.
-
-Once installed, the pack is not retained or tracked in the running system. It is an
-install-time artifact, like the install SQL file itself.
-
-### Flavored install packs (planned extension)
-
-The pack format supports multiple install packs per release with no changes to the
-format itself. Each flavor ships as its own zip in the release archive
-(`install-vibecoding.pack.zip`, `install-nonprofit.pack.zip`, etc.). The install
-pipeline picks which to apply via an env var read by `_site_init.sh`:
-
-```
-INSTALL_PACK=vibecoding ./install.sh
-```
-
-Unset means no pack (vanilla install). Documented in `install.sh --help` so operators
-can see which flavors a release offers.
-
-Two authoring approaches:
-- **Per-flavor reference DB.** Maintain one Joinery instance per flavor;
-  `publish_upgrade.php` runs against each in turn and ships the resulting packs
-  together. Clean separation, more ops overhead.
-- **Shared reference DB with per-flavor `pack.json`.** One ref site holds all flavors'
-  content; each flavor's `pack.json` selects a different subset via `tables` and
-  `settings_include`. Lighter ops, but each pack's config has to deliberately exclude
-  the other flavors' content.
-
-Plugin and theme activation are not in pack scope — flavors differ in content only
-(pages, products, settings, navigation, tier definitions). If a flavor needs different
-plugins active, that's set up per deployment outside the pack flow (admin UI,
-deployment scripts) before applying the pack.
-
-Code additions to make this usable: `_site_init.sh` reads the env var and resolves the
-filename (~10 lines); `publish_upgrade.php` generates multiple packs per release when
-multiple flavor configs are present (~30 lines). No pack-format changes.
-
-### Content scope
-
-What goes in a content pack vs. what stays deployment-specific:
-- **In pack:** settings that describe the site's identity and copy (site_name, tagline,
-  og_description, marketing copy settings, nav structure, tier features copy, product names/prices)
-- **NOT in pack:** credentials, API keys, Mailgun config, Stripe keys, per-deployment
-  secrets, user data, transactional data, uploaded files / asset content (images,
-  attachments, theme uploads — packs move DB rows, not files; file sync is a separate
-  operator concern, treated like backup restore), plugin and theme activation state
-  (which extensions a site runs is deployment/operator configuration, not content —
-  managed via admin UI or deployment scripts, not via packs)
-
-`stg_settings` is where this matters most — it stores both marketing copy and
-credentials, identified only by `stg_name`. The required `settings_include` allowlist in
-`pack.json` forces the operator to enumerate which names ship. Settings not on the list
-are excluded automatically; new credential keys added to the platform later can't sneak
-into the next export.
-
-## Field notes from doing this by hand (2026-08-09)
-
-getjoinery.com's marketing site was rebuilt as eleven CMS pages composed of component
-blocks, plus header navigation and redirects, using throwaway seeder scripts in place of
-the pack tooling this spec describes. That exercise surfaced five things the spec above
-does not yet account for. They are recorded here because each one is a way a pack could
-apply "successfully" and still leave the target wrong.
-
-**1. References hide inside JSON columns, and the FK walk cannot see them.**
-A page's block layout is `pag_pages.pag_component_layout` — a JSON array of
-`pac_page_content_id` values. It is not an FK column, so the export-time FK walk
-described above skips it and the array travels verbatim. On the target those integers
-address whatever rows happen to hold those ids, so the page renders somebody else's
-blocks, in the wrong order, with no error anywhere. This is worse than a broken import:
-it is a silently wrong page.
-
-A pack format that carries pages must let the manifest declare reference-bearing JSON
-paths, so the importer can remap them through the same `{_export_id → target_pk}` map it
-already builds — something like `json_refs: {"pag_pages.pag_component_layout": "pac_page_contents"}`.
-Any table with an ordered list of child ids in a column has this problem; page layout is
-just the first instance.
-
-**2. Blocks depend on component *types*, which are not content and do not travel.**
-Each block row names a `com_type_key` in `com_components`. Those rows are created by
-theme sync, from the JSON definitions in the *active* theme's `views/components/`
-directory. Import a pack of block-built pages onto a site whose theme does not provide
-those types and every page renders empty — again with no error, because the rows import
-cleanly.
-
-So a pack has a **theme dependency**: the block template is a theme file, the block
-content is a DB row, and a pack only carries the second half. `pack.json` should declare
-the component type keys it needs (and the theme that supplies them), and apply should
-refuse up front when the target cannot satisfy them. The hand-rolled seeder did exactly
-this and it earned its place immediately — the first run on a fresh site failed with
-"these component types are not registered: app_map, prose, ..." instead of producing
-eleven blank pages.
-
-**3. Hash-dedup answers "unchanged", not "updated".**
-The apply rules skip a row whose content hash matches an existing row. That covers
-re-applying an *unchanged* pack. It does not cover the common case: shipping v2 of a pack
-whose copy has been edited. The hash differs precisely because the content changed, so
-the row is inserted rather than updated, and the target ends up with both versions.
-
-Re-apply therefore needs a **stable natural key per row, declared per table**, not a
-per-export random `_export_id`. The seeder gave every block a deterministic location name
-(`gj-{page}--{block}`) purely so a second run could find and update the right row rather
-than duplicate it. Without an equivalent, "apply an updated pack" is not a supported
-operation and the spec should say so plainly rather than leave operators to discover it.
-
-**4. Drift is immediate, so dry-run is not a v1 nicety.**
-The moment content lands in the database, the admin page editor is where people edit it —
-and the pack becomes a stale second source of truth within hours. When the seeder's
-`--check` was first run against getjoinery.com it reported two pages as differing; both
-had been hand-edited live, and a blind apply would have destroyed that work.
-
-Two consequences for v1. A **diff/dry-run before apply** is what prevents data loss, not a
-convenience to defer. And **partial apply** — naming which pages to overwrite and leaving
-the rest — was load-bearing for the same reason; the seeder grew an `--only` flag on the
-same afternoon for exactly this.
-
-**5. Navigation rows need identity, and labels are not it.**
-The nav seeder matched menu rows by their visible name and pruned anything unmanaged.
-Two rows legitimately shared the label "Apps", so the prune kept one and the header
-rendered duplicate items pointing at dead URLs. Menus are a table where the human-readable
-field is emphatically not a key; identity has to be the row.
-
-Two smaller notes:
-
-- **`url_urls` (redirects) belongs in content scope.** The section above lists settings,
-  pages, products and nav. Redirects are the same kind of thing — they encode a site's URL
-  history — and they were part of this build.
-- **Where packs must not live, proven the hard way.** The seeders were written into
-  `public_html/utils/`, which is copied wholesale into the release archive, so one site's
-  marketing copy shipped to every Joinery install for four releases. This spec already says
-  packs are "not part of the application repo"; that is now enforced by
-  `tests/unit/shipped_tree_hygiene_test.php`, which fails if a script named after a
-  deployment reappears under `public_html/`.
-
-### Deferred for v1
-
-Capabilities considered and deferred to keep v1 lean. Each is reachable later without
-breaking the v1 format:
-
-- **Per-table row filters.** v1 exports all non-soft-deleted rows from listed tables.
-  Operators curate the reference site (delete or soft-delete rows they don't want) rather
-  than configuring SQL filters in `pack.json`. A declarative filter mechanism can be
-  added later.
-- **`fk_resolutions` with lookup SQL.** v1 has `fk_pins` (literal target PK) and the
-  implicit NULL fallback. Dynamic resolution via operator-authored SQL was prototyped and
-  pulled — it added attack surface (arbitrary SQL running against the target DB at apply
-  time) without serving the v1 use cases, since both bootstrap and site-to-site copy land
-  on the install-pinned admin at `usr_user_id=1`.
-- **Composite primary keys and PK-less tables.** v1 only supports tables with a single
-  auto-increment primary key. The exporter fails with a clear error on other shapes.
-- **Unsupported column types.** Geometric, range, enum, and custom-domain columns are
-  rejected at export. Add encodings as needed.
-- **Prune-to-pack mode.** v1 apply is additive — rows in target but not in pack are left
-  alone. No "make target exactly match pack" semantics.
-- **Pack signing and integrity verification.** v1 packs are unsigned zips. With arbitrary
-  SQL gone from `pack.json`, the attack surface is small (a tampered pack can insert
-  weird data, not run code), but signing is a future option.
-- **Dry-run mode.** v1 apply has no preview; the single transaction means failures roll
-  back cleanly, but "show me what would change" is a v2 feature.
-- **Cross-pack composition.** Each pack is self-contained. There's no way to say "this
-  FK points at a row from pack X."
-- **Upgrade-time pack application.** `install.pack.zip` runs only at fresh install via
-  `_site_init.sh`. `upgrade.php` does not apply packs. Applying a pack to a running
-  site needs operator-driven `apply_content_pack.php` so the operator can reason about
-  overlap.
-- **Replacing the install SQL data emission entirely.** The original direction was to
-  move `stg_settings`/`amu_admin_menus`/`mig_migrations` seeding out of
-  `create_install_sql.php` and into the install pack. Pulled back: those three have
-  existing canonical sources (`settings.json`, `admin_menus.json`, the migrations
-  directory), and routing them through a pack would create a second source of truth.
-  Install SQL emission stays.
-
-### Known limitations
-
-v1 is built for install bootstrap and site-to-site copy where exactness on the target
-isn't required. The limitations below are acceptable for those cases but should be
-understood before reaching for content packs in adjacent scenarios (live-target overlay,
-incremental sync, etc.). Cross-references to "Deferred for v1" mark items reachable
-without breaking the pack format.
-
-**Pack apply history is not tracked.** The importer doesn't record "this hash came
-from that pack." A target row hand-edited after an earlier apply is treated like any
-other target row on re-apply — hash dedup may match (no-op) or the unique-constraint
-overwrite path may fire (clobbering the hand-edit). No fix planned — tracking pack
-apply history is a larger architectural change.
-
-**Text columns are copied byte-for-byte.** References embedded in TEXT/HTML
-columns — a hardcoded link like `<a href="/user/10">`, an absolute path to
-`/uploads/...`, an environment-specific URL — copy as-is. The pack format does not
-parse or rewrite column contents, so deployment-specific references will keep pointing
-at the source after apply. Files themselves are out of scope by design (see Content
-scope); operators sync uploads separately.
-
-**`json`-typed columns are canonicalized on apply.** PostgreSQL's `json` type
-preserves insertion order and whitespace; the importer re-serializes from canonical
-form, so the target ends up storing the canonical version rather than the source's
-original byte sequence. Required for reliable hash-dedup; `jsonb` is unaffected
-(PG normalizes server-side). The semantic value is preserved either way.
-
-**Sequence values diverge between source and target.** Auto-PKs assigned during apply
-have no relationship to source PKs. External systems holding cached source PKs are not
-migrated.
-
-**Apply runs raw SQL, not application code paths.** The importer issues PDO INSERTs
-directly. PostgreSQL-level features still fire — CHECK constraints, FK constraints
-(deferred to commit), and any DB triggers on target tables (audit, NOTIFY,
-denormalization, etc.). PHP-level application lifecycle does *not* fire — `prepare()`
-validation, `SystemBase::save()`, plugin event hooks, post-purchase hooks, notification
-senders, search-indexers, and cache invalidators are all bypassed. This is
-*intentional* for bulk apply (no notification flood when seeding 200 pages), with two
-concrete consequences worth calling out:
-
-- **Settings caches don't auto-invalidate.** `Globalvars` caches settings in-process. A
-  mid-life apply that updates `stg_settings` won't be visible to a running PHP-FPM
-  worker until the worker restarts or the cache is otherwise cleared. After any apply
-  that touches `stg_settings`, reload PHP-FPM (`systemctl reload php8.x-fpm`).
-- **DB triggers fire per-row, not per-batch.** If a target table has a trigger written
-  for transactional inserts (one row at a time from the app), a pack apply with
-  hundreds of rows fires it hundreds of times. Plugin-authored triggers especially —
-  they may be unaware of pack apply as a bulk-insert path.
-
-Operators applying a pack to a live (post-install) site should treat denormalized
-counters, search indexes, and similar materialized state as potentially stale until
-the platform-specific recalc paths are run. None exist in core today — this is a
-forward-looking note for plugins that maintain such state.
-
-**Soft-deleted rows are excluded with no per-pack override.** Operators restore them in
-the source before exporting if they need them in the pack. *Fix path*: per-table row
-filter (Deferred).
-
-**Schema match is strict.** A column present in pack but missing on target fails the
-apply; a type mismatch on a shared column fails the apply. No coercion, no version
-compatibility layer (see "Schema compatibility").
-
-**Composite PKs, PK-less tables, and exotic column types are rejected at export.**
-Geometric, range, enum, and custom-domain columns fail with a clear error. Operators
-omit the table or wait for type support (Deferred).
-
-**Reference loops between pack rows are not supported.** The importer inserts rows in
-dependency order and resolves links through the export-id map as it goes, so a row
-needs its target to be inserted first. Self-referencing trees with empty roots work;
-genuine loops (A → B → A) do not. Out of scope, not deferred — loops are a schema
-shape Joinery's content tables don't have, and would be a schema-level fix if they
-ever appeared.
-
-**Apply is all-or-nothing.** The single-transaction model holds locks and buffers for
-the duration of the apply. Large packs (tens of thousands of rows across many tables)
-work but tax the target DB during the apply window. *Fix path*: chunked or resumable
-applies (Deferred).
-
-**Hash-dedup adds an upfront scan per table.** Target rows are hashed once into a
-PHP-side set when the importer enters a table; each pack row is then looked up in O(1).
-Total cost is O(target rows + pack rows) per table — not O(target rows × pack rows). For
-prod→dev pulls onto a target with a few thousand rows in some content table, this is the
-difference between "fast" and "noticeable wait." Tables with very large row counts still
-pay the upfront hashing cost; if that ever becomes prohibitive, a stored-hash column with
-an index would be the fix.
-
-**No dry-run.** Operators see what an apply would do by running it inside a transaction
-and rolling back, or by trial-and-error. *Fix path*: preview mode (Deferred).
-
-**No prune-to-pack.** Rows in target but not in pack are left alone — apply is
-additive only. *Fix path*: prune mode (Deferred).
-
-**Unsigned packs.** No integrity verification at apply. With operator-authored SQL gone
-from `pack.json`, a tampered pack's blast radius is limited to inserting weird data,
-but pack distribution should still be treated like backup distribution. *Fix path*:
-signing (Deferred).
-
-**No upgrade-time pack apply.** `install.pack.zip` runs only at fresh install via
-`_site_init.sh`. `upgrade.php` does not apply packs (Deferred).
-
-**`pack.json` is hand-authored.** No schema validation tool, no admin UI, no
-auto-suggestions. Errors surface at export or apply time with clear messages. Pack
-authoring is operator workflow rather than a user-facing feature.
-
-**Plugin and theme activation are out of pack scope.** Packs do not manage which
-plugins or themes are installed/active on a deployment — that's operator/deployment
-configuration (admin UI, deployment scripts). If a pack includes content rows from a
-plugin-owned table, the plugin must be installed and its tables present on the target
-before apply; otherwise apply fails under "schema match is strict." Activation itself
-is never carried in a pack.
-
-**Source DB curation is the operator's job.** With per-table filters deferred, what's
-in the reference site is what's in the pack. Stale drafts, test data, or experimental
-rows in the source will ship with the pack unless removed (or soft-deleted) first.
-
-### Implementation surface
-
-Two existing files gain new behavior. No model, schema, routing, or admin UI surface.
-`utils/create_install_sql.php` is **unchanged** — it continues to render `settings.json`,
-`admin_menus.json`, and the migrations baseline into install SQL as today.
-
-- **`maintenance_scripts/install_tools/_site_init.sh`** — After the `psql` restore of
-  `joinery-install.sql.gz`, check for an `install.pack.zip` in the same directory and
-  invoke `apply_content_pack.php` against it if present. Skipped silently if the file
-  isn't there (vanilla releases ship no pack).
-- **`plugins/server_manager/includes/publish_upgrade.php`** — When a release author wants
-  to ship a pack with the upgrade archive, the publish flow runs the new export script
-  against the publishing site's reference DB to produce `install.pack.zip` and includes
-  it. Vanilla releases skip this step.
-
-New files: two CLI entry points (`utils/export_content_pack.php`,
-`utils/apply_content_pack.php`) and one implementation class (`includes/ContentPack.php`)
-with two static methods — `ContentPack::export($pack_spec_path, $output_zip_path)` and
-`ContentPack::apply($pack_zip_path)`. The CLI scripts are thin wrappers; internal helpers
-stay private to the class.
-
-The reference DB on the publishing site needs operator discipline to stay clean enough
-to export from. With per-table filters deferred in v1, what's in the reference site is
-what's in the pack — curate carefully.
-
-## Open Questions
-
-1. **Versioning** — pack format version vs. Joinery version compatibility. Should `pack.json`
-   declare a minimum Joinery version?
-
-2. **Plugin content** — plugins can declare their own settings. Should plugin-owned settings be
-   exportable in a pack, or is that the plugin's responsibility?
-
-3. **Page/post system** — no longer minimal. As of 2026-08-09 getjoinery.com's entire
-   marketing site is CMS pages assembled from component blocks, so pages are now the
-   most valuable thing a pack could carry, and the most intricate — see the field notes
-   above on layout arrays, component-type dependencies and re-apply identity.
-
-4. **Hosted starter kits** — longer term, could getjoinery.com list downloadable starter packs
-   (org starter, developer framework starter, etc.)? This feature would enable that.
-
-## Immediate Use Case (trigger for this spec)
-
-getjoinery.com is being pivoted from org-facing to developer-facing. The current org-focused
-theme + content needs to be preserved. Short-term: spin up `orgs.getjoinery.com` as a sister
-deployment before the pivot (see sister_brand_deployment.md pattern). Longer-term: the content
-pack feature would let the org site be exported as a reusable starter kit.
-
-## Related Specs
-
-- `specs/implemented/multiple_domain_capability.md` — sister-brand deployment pattern
-- `specs/sister_brand_deployment.md` — NetworkSentry deployment runbook
+| **new** | The record doesn't exist and will be created with `match` + `set` + `on_create`. | ticked, whole record only |
+| **change** | The site still holds what a pack last established here (§4.2), or the field is empty, and the pack now says something else. An empty field holds no edit to protect. | ticked |
+| **same** | Already right. Collapsed. | n/a |
+| **edited here** | The site holds a value no pack established: someone changed it in the editor, or no pack has applied this field before. | **unticked**, highlighted |
+
+Old and new values are shown side by side, with a line diff for long text. Values are compared
+after normalizing: line endings to LF (the admin editor re-saves as CRLF), booleans and numbers by
+value (`'t'`, `true` and `1` are equal, and so are `12.99` and `12.990`). `on_create` fields show
+once, on new records only. The pack's `notes` and `description` show at the top.
+
+Unticking a field leaves it as it is on the site. A new record is created whole or not at all, and
+unticking it also skips every entry that refers to it. Each record an `unlisted` entry would
+change is its own line. When a record entry under the same `where` is new, the unlisted lines apply
+only if that record is created; the server enforces this, so unticking the new "Hosting" version
+never leaves the product with no active version. The page says so beside those lines.
+
+### 4.2 Knowing "change" from "edited here"
+
+Telling the two apart needs to know what a pack last established. Each apply records the pack's
+value for every `match`, `set` and setting field of every record it applies, whether the field was
+written or already **same**: `cpv_content_pack_values`, one row per (model, record key, field) or
+(setting name), holding the value and the apply that recorded it. An **edited here** field the
+owner left unticked gets no row, because the site's value is not the pack's. Without a row for the
+**same** fields, a field a pack never had to write would show as **edited here** forever, once a
+later version of the pack changes it. The plan compares:
+
+- current = new → **same**
+- current = last established by a pack → **change**
+- anything else, including no row at all → **edited here**
+
+The first apply of a pack to an existing record therefore shows every difference as **edited
+here**, unticked. That is the safe default: the owner sees the difference and ticks it on purpose.
+
+## 5. Applying
+
+- One database transaction. The plan is built again inside it, and compared with the hash the
+  owner was shown before anything is written, so the stale check and the writes see the same rows.
+  Any refusal or exception rolls everything back in a `finally`, and the record says so.
+  PostgreSQL aborts the transaction on any failed statement, so the engine never tries to carry on
+  after one.
+- Records are written through the model: `set`, `prepare()`, `save()`. That runs the model's own
+  validation (Product refuses a `pro_link` another product holds, `products_class.php:820-829`;
+  `SystemBase::prepare()` checks declared unique fields, `includes/SystemBase.php:3111`) and its
+  permission check with the owner's session (`save()` enforces write access,
+  `includes/SystemBase.php:3164-3171`). `save()` joins the open transaction rather than starting its
+  own.
+- Refs are resolved as records are saved: a new record is saved before anything that refers to it.
+- Settings go through `Setting::put`, which also clears the settings cache for that name
+  (`data/settings_class.php:230`) and purges the page caches that show it (`:233`). Both happen
+  outside the transaction. After a rollback, the next read fetches and renders the old value
+  again, so neither does harm.
+- Afterward, the apply record holds: who, when, the pack name and version, the file's SHA-256, the
+  file itself, the plan as shown, the ticks, the outcome, and each written field's before and after
+  value. `cpv_content_pack_values` is updated as §4.2 says: every field the pack established,
+  written or already **same**.
+
+New models: `ContentPackApply` (`cpa_content_pack_applies`, `$access_class = 'keys'`) and
+`ContentPackValue` (`cpv_content_pack_values`, same class). The engine is `includes/ContentPack.php`:
+`ContentPack::read($zip_bytes)`, `->plan()` and `->apply($ticks, $session)`. Tests call it directly.
+The admin menu entry goes in `admin_menus.json`.
+
+## 6. First cut: unblocks WP7 items 1 and 2
+
+All built 10-28, uncommitted.
+
+1. **B1**: checkout mints a missing Stripe product (§8).
+2. **B2**: the form-only product rules move into the models: ownership vs subscription, the
+   fulfilment provider key, the price type, the link's slug form (§8). `SystemBase` gains
+   `value_changes()` (a rule judges only a value being written) and `slug_form()` (what
+   `create_url()` makes before it looks for duplicates).
+3. `ContentPack` (`includes/ContentPack.php`) with record, unlisted and setting entries; `{"ref"}`,
+   `{"file"}`; the validation in §2-§3. A zip of one folder is read as that folder.
+4. The opt-in on `Product` and `ProductVersion` (§3).
+5. `ContentPackApply`, `ContentPackValue`, the three actions (`logic/content_pack_*_logic.php`), the
+   admin page (`adm/admin_content_packs.php`) and the menu entry (System → Content Packs).
+6. The two product scripts become packs in `content_packs/getjoinery/`: `hosted_product/`
+   (from `apply_hosted_product.php` 3.2) and `domain_product/` (from `apply_domain_product.php` 1.0).
+   The hosted script's detach of a leftover "Managed domain" requirement has no pack equivalent.
+   Dev's product 4769 has no such attachment. On getjoinery, the owner checks the product's page
+   once.
+7. Tests (`tests/core/content_pack_test.php`, db tier on the test database, 55 checks):
+   - the hosted pack on an empty store shows all **new**, applies, and a second check shows all **same**;
+   - a field edited after an apply shows **edited here**, unticked, and survives an apply;
+   - a pack edit to a field shows **change**, including a field that was **same** when the pack
+     was first applied;
+   - a rename is found through `match_also`, and the record takes the new key;
+   - a soft-deleted product holding the link is not found or revived;
+   - unticking the new version leaves the `unlisted` retirement unticked;
+   - B2's rules refuse an unknown fulfilment provider, an unknown price type and an unslugged link
+     when the value changes, and a legacy row holding one still saves untouched. The B2 and pack
+     tests register `CustomerCloudFulfillment` themselves, as `managed_site_purchase_test.php:395`
+     does, because the harness doesn't boot plugin `serve.php` files;
+   - `unlisted` retires the other version;
+   - each refusal in §2-§3 refuses by name and writes nothing;
+   - a failure mid-apply leaves nothing behind;
+   - a plan that went stale between check and apply is refused;
+   - the setting is refused when secret, managed or undeclared.
+
+**Proof before getjoinery:** check both packs on dev, which already holds products 4769 and 6702,
+and read the plan by hand. Then apply on dev, and check again (all **same**). Done 10-28 through the
+page: the domain pack was all **same**. The hosted pack was **same** except `pro_description`,
+**edited here**: dev holds the 3.0 text (1,000 emails, "sends and receives") because 3.1 and 3.2
+were never run on dev. It was left unticked, so dev's text is unchanged. The owner then uploads
+them to getjoinery, reads the plan, applies, and walks a test-mode purchase. That purchase is what
+mints the test-mode Stripe product, through B1.
+
+WP7 item 3 (the quick start copy: B135, B136, and WP6's F4 and F5) is pasted in the page editor until phase 2.
+
+## 7. Later phases
+
+**Phase 2: pages and blocks.**
+
+- `Page` keyed on `pag_link`, `PageContent` keyed on `pac_location_name` (unique,
+  `data/page_contents_class.php:69`).
+- `pac_config` is JSON: `{"merge": {...}}` sets named keys and compares them one by one, leaving
+  the rest alone.
+- `pag_component_layout` takes a list of refs.
+- `requires.components` lists the component types the pack's blocks need, and a missing one
+  refuses up front.
+- A fragment edit, `{"replace": [{"find": "...", "with": "..."}]}`, changes part of a long HTML
+  field. The field is **change** when every `find` is present, **same** when every `with` is
+  present, and **edited here** otherwise. This is what the scripts did for the install page's
+  ladder block.
+- `Page::save()` already writes a content version (`data/pages_class.php:203`), so the editor's
+  history covers pack writes too.
+
+**Phase 3: menus and redirects.** `public_menus` and `urls`, each keyed on a declared field, never
+on a visible label.
+
+**Later, no phase yet:**
+
+- delivery from the management node, through the same actions with a superadmin key;
+- an "undo this apply" button, built from the before values already recorded;
+- writing a pack from existing records, to help authoring.
+
+## 8. Bugs fixed on the way
+
+**B1. A product saved by anything other than the product form couldn't be bought.**
+`StripeHelper::get_or_create_price` created a missing Stripe *price* but threw "This product does
+not have a stripe product id" for a missing *product*. The form minted only the current mode's id,
+so a product created in test mode failed at its first live checkout as well.
+
+Fixed: `StripeHelper::ensure_stripe_product()` mints and sets the id for the helper's mode.
+`get_or_create_price` calls it and stores the id as a server write, as it already does for the price
+id. The write carries one column. `save()` on an existing record writes only the columns `set()`
+was called for and reads the rest back (`includes/SystemBase.php:3342-3367`), so an admin editing
+the product at the same moment loses nothing. The product form calls the same method. The caller
+list in `core_api_mechanical_test.php` names the new write. Test: `plugins/store/tests/stripe_product_self_heal_test.php`. A product written
+through the model gets its test id from a buyer's checkout, then its live id in live mode, and a
+Stripe refusal stores nothing. Two buyers checking out the same new product at the same moment can
+each mint one, and the later save wins. The other is an unused product in the Stripe dashboard,
+the same outcome the scripts already accepted. A product with no id in the checkout's mode now
+passes through `save()`'s own checks at checkout. A legacy row that fails a newer rule is refused
+with that rule's message instead of "no stripe product id". Both refuse.
+
+**B2. Product rules that live only in the admin form.** Part of the first cut. Each rule moves into
+the model's `prepare()`, and the form keeps its messages. Each rule checks a value only when it
+differs from the value the record was loaded with (`SystemBase` keeps that in `$this->original`,
+`includes/SystemBase.php:635-637`), or on a new record. A legacy row that fails a newer rule can
+still be saved untouched. That includes the save that deactivates a product whose provider plugin
+has since been turned off. A pack's typo is still refused, because it differs from what is stored.
+
+- **Ownership vs subscription.** A REST write to `Product` (`$api_writable`, `products_class.php:41`,
+  with no unwritable fields) can set `pro_ownership_tag` on a product with subscription versions,
+  which the form refuses (`admin_product_edit_logic.php:183-190`). The other direction, a
+  subscription version on a tagged product (`:59-64`), is not reachable over REST, because
+  `ProductVersion` is not API-writable. A pack is its first writer outside the form. Both
+  directions move.
+- **Fulfilment provider.** `pro_fulfillment_provider` is a bare `varchar(32)`
+  (`products_class.php:99`). The form only splits its dropdown's value (`admin_product_edit_logic.php:111-113`). At checkout an
+  unknown key completes the charge and stamps `ord_error`: the buyer paid and nothing was granted
+  (`cart_charge_logic.php:1424-1440`). `Product::prepare()` refuses a new non-empty key that
+  `FulfillmentRegistry::get()` does not know. Providers register only from each plugin's
+  `serve.php` on a web request, so the registry is empty from the command line. That is why the
+  rule checks changed values only.
+- **Price type.** `prv_price_type` is a bare `varchar(10)`. The form offers single, user, day,
+  week, month and year (`admin_product_version_edit.php:49`). A pack writing "monthly" would make
+  `is_subscription()` false, and a subscription would bill once. `ProductVersion::prepare()`
+  refuses anything outside that set.
+- **Link form.** The form slugs `pro_link` through `create_url` (`includes/SystemBase.php:585-587`).
+  `Product::prepare()` refuses a link that `create_url` would change. It fails loudly rather than
+  rewriting the value. The database has no unique index on `pro_link`; `prepare()`'s duplicate
+  check (`products_class.php:822-826`) is the only guard, and it ignores soft-deleted rows.
+
+## 9. Not in this spec
+
+- Copying a whole site's rows to another site, export, install-time packs and install flavors (the
+  07-16 design). Site copy covers whole-site moves, and no install flavor is planned. If starter
+  kits come back, they get their own spec.
+- Deleting records. `unlisted` retires by setting a field. A pack that must delete waits for a model
+  that declares what retiring means for it.
+
+## 10. Field notes from the 08-09 build, and the answers
+
+1. **References hidden inside JSON columns** (`pag_component_layout` holds block ids). Answered by
+   refs inside JSON values (phase 2). A pack never carries a raw id.
+2. **Blocks depend on component types that don't travel.** Answered by `requires.components`
+   (phase 2).
+3. **Hash dedup can't tell "updated" from "new".** Answered by matching on declared keys, never on
+   content.
+4. **Drift is immediate, so a check run isn't optional.** It is the main screen (§4). Partial apply
+   is the tickboxes.
+5. **Menu rows need identity, and labels aren't it.** Answered by keys that are declared fields
+   (phase 3).
+
+## 11. Decisions
+
+None open.

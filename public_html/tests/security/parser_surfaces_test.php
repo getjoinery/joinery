@@ -52,6 +52,7 @@ $allowed = array(
 	'plugins/server_manager/includes/domain_registrar/NamecheapRegistrar.php' => 'the registrar\'s API response under our own credentials',
 	'plugins/mailbox/includes/import/ZipReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
 	'plugins/mailbox/includes/import/TarReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
+	'includes/ContentPack.php'                           => 'a content pack a superadmin uploaded and reads the plan of before anything applies, at most 2 MB and each member size-checked before it is read',
 	'utils/sandbox_plugin.php'                           => 'a CLI never in a request: the zip a plugin author validates on their own site',
 	'includes/BackupObjects.php'                         => 'this site\'s own objects index, read back off its own backup storage (site credential, or a link its management node signed), size-capped',
 );
