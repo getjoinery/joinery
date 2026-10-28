@@ -1861,3 +1861,14 @@
 	$migration['migration_file'] = 'email_templates_neutral_defaults.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Every site named getjoinery's Terms of Use and Privacy Policy as its own,
+	// so its members accepted getjoinery's terms at sign-in. Where the setting
+	// still holds that default it is cleared; a site's own pages, and
+	// getjoinery's own site, are left alone (spec easy_signup_completion Q9).
+	$migration = array();
+	$migration['database_version'] = '226';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'terms_urls_not_getjoinery.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

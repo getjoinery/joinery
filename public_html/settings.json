@@ -1900,7 +1900,7 @@
     },
     {
       "name": "privacy_url",
-      "default": "https://getjoinery.com/page/privacy",
+      "default": "",
       "group": "general",
       "label": "Privacy Policy URL",
       "type": "text",
@@ -2132,7 +2132,7 @@
     },
     {
       "name": "terms_url",
-      "default": "https://getjoinery.com/page/terms",
+      "default": "",
       "group": "general",
       "label": "Terms of Service URL",
       "type": "text",
@@ -2649,9 +2649,9 @@
     },
     {
       "name": "agent_log_access",
-      "default": "1",
+      "default": "",
       "managed": true,
-      "helptext": "Whether a management node this machine is connected to may read this site's logs and host configuration: the last lines of the error and task logs, the newest rows of the login, request, event, form-error and webhook logs, the last lines of a service's journal, and the first lines of the host's configuration files. Member data and keys are never sent: the agent never reads a file that holds a key or a password, masks passwords, tokens, addresses and the personal half of email addresses on this machine before anything is sent, and leaves member addresses, submitted forms and raw payloads out entirely. On by default; set from the Management Node admin page, where what it grants is explained. Off refuses every such request on this machine, and the management node is told why. No effect until the machine is connected to a management node. specs/agent_log_access.md."
+      "helptext": "Whether a management node this machine is connected to may read this site's logs and host configuration: the last lines of the error and task logs, the newest rows of the login, request, event, form-error and webhook logs, the last lines of a service's journal, and the first lines of the host's configuration files. Member data and keys are never sent: the agent never reads a file that holds a key or a password, masks passwords, tokens, addresses and the personal half of email addresses on this machine before anything is sent, and leaves member addresses, submitted forms and raw payloads out entirely. Off until an administrator turns it on, on the setup wizard's Beta permissions step or the Management Node admin page, where what it grants is explained. Off refuses every such request on this machine, and the management node is told why. No effect until the machine is connected to a management node. specs/agent_log_access.md."
     },
     {
       "name": "agent_log_access_notice_seen",

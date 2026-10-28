@@ -7,6 +7,7 @@
  * preferences forwarded to the calendar_settings action. Included by
  * views/setup.php with $page, $page_vars, $viewer, $next_key in scope.
  *
+ * @version 1.2 - the reminders note names the Email step by its title
  * @version 1.1 - the protection level, first, when the viewer holds a vault
  * @version 1.0
  */
@@ -85,7 +86,7 @@ $setup_cal_form->end_form();
 	<div class="jy-fieldset jy-mt-3">
 		<h4>Reminders and summaries</h4>
 <?php if ($setup_cal_blocker !== null) { ?>
-		<div class="jy-alert jy-alert-info">Email reminders need sending set up first (the "Sending email" step). You can still choose here — they start working once sending does.</div>
+		<div class="jy-alert jy-alert-info">Email reminders need sending set up first (the Email step). You can still choose here — they start working once sending does.</div>
 <?php } ?>
 <?php
 $setup_cal_prefs_form = $page->getFormWriter('setup-cal-prefs', array('action' => '/setup', 'method' => 'POST'));

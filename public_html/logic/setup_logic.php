@@ -6,6 +6,9 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.16 - the final checklist releases the login interrupt for the rest of the session, so an owner who
+ *                 leaves it by a link rather than "Go to your site" is not sent back; "Go to your site" goes to
+ *                 the site's home page (specs/easy_signup_completion.md WP6)
  * @version 2.15 - services_shelf_use joins the forwarded backups actions: getjoinery backup storage from the step
  * @version 2.14 - the backups actions forward only at the backups page's level (its header, 10): the logic no longer checks itself
  * @version 2.13 - action beta_permissions_save: the Beta permissions step's answer (emergency root access, one-way, and
@@ -146,7 +149,7 @@ function setup_logic(array $input): LogicResult {
 			$viewer->save();
 			SetupSteps::invalidateSessionCache();
 		}
-		return LogicResult::redirect(Access::permits(10, $session) ? '/admin' : '/profile');
+		return LogicResult::redirect('/');
 	}
 
 	// "Not now" on an optional step: records a decision, never completion.
@@ -734,6 +737,10 @@ function setup_logic(array $input): LogicResult {
 	// broken — imports, reminders, and backups all silently stall without it.
 	$heartbeat_warning = '';
 	if ($current_key === 'done') {
+		// The owner has now seen every step. Only "Go to your site" records
+		// that (a page view writes nothing), but leaving by any other link
+		// must not land them back here for the rest of this visit.
+		$_SESSION[SetupSteps::SESSION_CLEAR] = 1;
 		$last_tick = (string)$settings->get_setting('scheduled_tasks_last_cron_run');
 		$stale = true;
 		if ($last_tick !== '') {

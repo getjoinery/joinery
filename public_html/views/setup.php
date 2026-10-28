@@ -49,6 +49,9 @@
 		'is_valid_page' => true,
 		'title'         => 'Set up — ' . $site_name,
 		'header_only'   => true,
+		// The banner covered the steps (and the install report on Welcome);
+		// the owner answers it on the site itself.
+		'consent_banner' => false,
 	]);
 ?>
 <div class="jy-ui">

@@ -604,9 +604,57 @@ sells our services, the blank-field labels name them.
 ### WP6 — the self-hosted path, proven again
 
 Deploy the public StackScript on a fresh Linode with a new domain, through the token path,
-following the quick start word for word, and record each screen. Then make it a per-release
-check: the StackScript installs whatever `latest_release` serves, so every release changes the
-buyer's path (inventory finding: 0.8.535 shipped with `site_install` unproven).
+following the quick start word for word, and record each screen. It needs a release carrying
+WP5 and the wrapper re-pasted first; the WP5 live check runs on the same deploy. No standing
+per-release check (Q6).
+
+**Run 10-28** (0.8.545, StackScript 2217113 with wrapper 2.1, Nanode in us-ord, token with
+Domains + Linodes Read/Write, wp6.joinerytest.com, a Linode Object Storage bucket with region
+us-ord-10, email key blank). HTTPS answered 9.5 minutes after create (Let's Encrypt, A record
+by token). Wizard: the install's Backups row named the bucket, Test passed, key made and
+verified; a manual backup (full, 59.7 MB) landed in the bucket. The WP5 check passed; B177
+seen passing on this self-hosted box. Not exercised: passkey and the personal key (the test
+browser holds no authenticator), email with a real key, creating a new zone (joinerytest.com
+already had one), Linode's form itself. Screens in the session's /tmp/playwright-mcp/wp6/.
+
+Found, and what became of each:
+
+- F1. 2217113 was private, so the quick start's installer link said "does not exist" to
+  everyone else. Owner made it public 10-28.
+- F2. getjoinery applied 0.8.540-0.8.545 without publishing, so new installs got 0.8.539.
+  Owner published 0.8.545.
+- F3. A Linode bucket lives in a numbered cluster (us-ord-10); the region Linode shows (us-ord)
+  has no storage address. Fixed: `credential_problem()` refuses an unnumbered Linode region
+  and names the bucket's address (`backup_targets_class.php` 3.10, region help in
+  `StorageProvider.php` 2.3, `linode_target_test` 1.4).
+- F4. Quick start step 5 says it lists every field, but names only Backblaze's three. Owner
+  edits the page on getjoinery (text below).
+- F5. Quick start step 4 says the site deletes the token. The site forgets its sealed copy
+  after the wizard's mail DNS publish (`DnsInstallCredential::consume()`); with email skipped,
+  the copy stays; the token itself lives at Linode until its expiry. Owner edits the page.
+- F6. The site's own owner met "Accept our Terms of Use" first, with getjoinery's terms
+  (`terms_url` and `privacy_url` defaulted to getjoinery's pages for every site). Fixed (Q7, Q9):
+  `TermsOwed` 1.0 decides who owes which terms, and the gate (`SessionControl.php` 1.11), the
+  terms page (`terms_accept_logic.php` 1.1) and both password pages (1.1) ask it; the defaults
+  are empty; migration 226 clears the old default on every site but getjoinery's own;
+  `terms_owed_test` 1.0. The reset page's terms links had always shown as raw markup inside the
+  escaped checkbox label; they sit above it now. The cookie banner no longer covers the wizard:
+  a page may leave it out (`'consent_banner' => false`, `PublicPageBase`), and `/setup` does.
+- F7. The Email step recommended Mailgun; its list and the quick start say SMTP2GO. Fixed
+  (`SetupSteps.php` 1.20).
+- F8. The Email and Backups steps offer getjoinery services a stranger cannot buy yet. Waits on
+  WP9.
+- F9. After "You're set up", every page went back to the wizard until "Go to your site" was
+  pressed. Fixed: the final checklist releases the hold for the session (`setup_logic.php`
+  2.16).
+- F10. "Go to your site" went to the admin user list. Fixed: it goes to the home page.
+- F11. The admin footer said v0.5.0 (a fixed string). Fixed: it reads the site's version
+  (`PublicPageJoinerySystem.php`, `PublicPageFalcon.php`).
+- F12. The Calendar step named a "Sending email" step. Fixed (`calendar.php` 1.2).
+- F13. With email skipped, the mailbox said "No mailboxes yet." and nothing more. Fixed: an
+  all-access viewer is linked to where one is added (`mailbox_reader.js` 2.97).
+- F14. Log access was ticked on the Beta permissions step without the owner choosing. Fixed (Q8):
+  off until the owner turns it on.
 
 ### WP7 — getjoinery production
 
@@ -661,6 +709,17 @@ Managed customer departure (`managed_customer_departure.md`), and the live run o
   running a promotion; for life is today's behaviour and one less field.
 - **Q5. Our services for strangers before WP9. Decided 10-27:** A, the deploy form fields now,
   getjoinery not named on the form until it can be bought.
+- **Q6. A deploy check on every release. Decided 10-28:** no. One deploy for this spec. The
+  StackScript runs the same install.sh every test box runs, so our own installs catch a break.
+  Only its own steps (the Linode DNS records, the form's fields) are exercised by this path alone.
+- **Q7. Terms at the owner's first sign-in. Decided 10-28:** a hosted site's operators accept
+  getjoinery's terms; a self-hosted site's accept none (one renting only our services
+  included); members accept the site's own terms when it has them. Built (F6).
+- **Q8. Log access. Decided 10-28:** off by default on every new site, hosted included; the owner
+  turns it on (`settings.json` agent_log_access default empty, `agent_log_access_test` 1.1).
+  Sites that already hold the setting keep it.
+- **Q9. Sites still holding getjoinery's terms as their own default. Decided 10-28:** clear
+  them (migration 226), except on getjoinery itself.
 
 ## 7. Owner operations
 

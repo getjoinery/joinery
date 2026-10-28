@@ -638,7 +638,7 @@ class PublicPageFalcon extends PublicPageBase {
                 <!--<p class="mb-0 text-600">Thank you for creating with Falcon <span class="d-none d-sm-inline-block">| </span><br class="d-sm-none" /> 2024 &copy; <a href="https://themewagon.com">Themewagon</a></p>-->
               </div>
               <div class="col-12 col-sm-auto text-center">
-                <p class="mb-0 text-600">v0.5.0</p>
+                <p class="mb-0 text-600">v<?php echo htmlspecialchars(LibraryFunctions::get_joinery_version(), ENT_QUOTES, 'UTF-8'); ?></p>
               </div>
             </div>
           </footer>

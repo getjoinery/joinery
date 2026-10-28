@@ -716,7 +716,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
       </main><!-- .page-body -->
 
       <footer class="page-footer">
-        <span>v0.5.0</span>
+        <span>v<?php echo htmlspecialchars(LibraryFunctions::get_joinery_version(), ENT_QUOTES, 'UTF-8'); ?></span>
         <span> &middot; <a href="/license">License</a></span>
       </footer>
     </div><!-- .main-content -->

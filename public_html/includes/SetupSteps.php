@@ -36,7 +36,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.19
+ * @version 1.20
+ * @changelog 1.20 - The Email step recommends SMTP2GO, as its provider list and the quick start do
+ *   (specs/easy_signup_completion.md WP6).
  * @changelog 1.19 - The Backups step's intro offers getjoinery backup storage beside a bucket of the
  *   owner's own (specs/easy_signup_completion.md WP4).
  * @changelog 1.18 - 'order' may be a callable. Backups comes straight after
@@ -673,7 +675,7 @@ class SetupSteps {
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 				if (EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none') {
-					$line = "Your site needs a way to send mail. We recommend Mailgun, because the free account gives you 100 free emails per day.";
+					$line = "Your site needs a way to send mail. We recommend SMTP2GO, because the free plan sends 1,000 messages a month.";
 					if (class_exists('InboundEmailAlias')) {
 						$line .= " The address you choose also becomes a mailbox here — mail sent to it arrives at this site.";
 					}

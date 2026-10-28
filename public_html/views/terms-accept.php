@@ -4,10 +4,7 @@
     require_once(PathHelper::getThemeFilePath('terms_accept_logic.php', 'logic'));
 
     $page_vars = process_logic(terms_accept_logic(array_merge($_GET, $_POST, $params ?? [])));
-    $settings  = Globalvars::get_instance();
-
-    $terms_url   = trim((string)$settings->get_setting('terms_url'));
-    $privacy_url = trim((string)$settings->get_setting('privacy_url'));
+    $owed = $page_vars['owed'];
 
     $page = new PublicPage();
     $page->public_header([
@@ -27,12 +24,12 @@
 
         <h3>One More Step</h3>
 
-        <?php
-        $terms_link   = $terms_url   !== '' ? '<a href="' . htmlspecialchars($terms_url,   ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>'   : 'Terms of Use';
-        $privacy_link = $privacy_url !== '' ? '<a href="' . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : 'Privacy Policy';
-        ?>
         <p class="jy-auth-note">
-            Before continuing, please confirm that you agree to our <?php echo $terms_link; ?> and <?php echo $privacy_link; ?>.
+            <?php if (!empty($owed['joinery'])): ?>
+            getjoinery hosts this site. Before continuing, please confirm that you agree to <?php echo TermsOwed::linksHtml($owed); ?>.
+            <?php else: ?>
+            Before continuing, please confirm that you agree to <?php echo TermsOwed::linksHtml($owed); ?>.
+            <?php endif; ?>
         </p>
 
         <?php
@@ -40,7 +37,7 @@
         $formwriter->begin_form();
 
         // A label is text (FormWriter escapes it); the links are in the note above.
-        echo $formwriter->checkboxinput('accept_terms', 'I agree to the Terms of Use and Privacy Policy.', [
+        echo $formwriter->checkboxinput('accept_terms', TermsOwed::labelText($owed), [
             'required' => true,
         ]);
         ?>

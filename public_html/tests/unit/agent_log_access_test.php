@@ -10,14 +10,15 @@
  * one-time notice.
  *
  * The agent reads agent_log_access with the same reader it reads agent_enabled
- * with, so the two settings must be declared the same way; the switch is on by
- * default by the owner's decision (2026-09-17); and the notice is due under
+ * with, so the two settings must be declared the same way; the switch is off
+ * until the owner turns it on (owner's decision 2026-10-28); and the notice is due under
  * exactly three stored facts and silent otherwise. The notice's acknowledgement
  * is a POST: nothing here writes on a page view.
  *
  * Runs offline, no DB.
  * Run: php tests/unit/agent_log_access_test.php
  *
+ * @version 1.1 - agent_log_access defaults to off: the owner turns it on (specs/easy_signup_completion.md Q8)
  * @version 1.0
  */
 
@@ -27,14 +28,14 @@ harness_boot();
 require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
 
 // ---------------------------------------------------------------------------
-section('A. The switch and its notice flag are declared managed, on by default');
+section('A. The switch and its notice flag are declared managed, off by default');
 
 $declared = json_decode(file_get_contents(PathHelper::getIncludePath('settings.json')), true);
 $by_name = array();
 foreach ($declared['settings'] as $s) { $by_name[$s['name']] = $s; }
 
 check(isset($by_name['agent_log_access']), 'agent_log_access is declared in settings.json');
-check(($by_name['agent_log_access']['default'] ?? null) === '1', 'agent_log_access defaults to on (the owner decided on by default, because the node redacts)');
+check(($by_name['agent_log_access']['default'] ?? null) === '', 'agent_log_access defaults to off: the owner turns it on, nothing ticks it for them');
 check(!empty($by_name['agent_log_access']['managed']), 'agent_log_access is a managed setting, set from the Management Node page like agent_enabled');
 check(isset($by_name['agent_log_access_notice_seen']), 'agent_log_access_notice_seen is declared');
 check(($by_name['agent_log_access_notice_seen']['default'] ?? null) === '', 'the notice flag defaults to empty: due until acknowledged');
