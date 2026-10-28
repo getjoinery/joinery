@@ -68,7 +68,8 @@ if (!$apply) {
 	echo '<div class="row"><div class="col-12">';
 	echo '<p>A content pack is a zip of <code>pack.json</code> and the text files it names. It says what some records '
 		. 'and settings should hold. Checking it changes nothing: you see every field it would change, side by side '
-		. 'with what this site holds, and tick what to apply.</p>';
+		. 'with what this site holds, and tick what to apply. Packs a plugin ships are applied when the plugin is '
+		. 'installed, leaving fields edited here alone, and are listed below too.</p>';
 
 	$formwriter = $page->getFormWriter('content_pack_upload', array('enctype' => 'multipart/form-data'));
 	$formwriter->begin_form();
@@ -79,12 +80,13 @@ if (!$apply) {
 	$formwriter->end_form();
 	echo '</div></div>';
 
-	$headers = array('Pack', 'Version', 'Status', 'Checked', 'Applied');
+	$headers = array('Pack', 'Version', 'From', 'Status', 'Checked', 'Applied');
 	$page->tableheader($headers, array('title' => 'Checked and applied'));
 	foreach ($page_vars['history'] as $row) {
 		$page->disprow(array(
 			'<a href="/admin/admin_content_packs?cpa_id=' . (int)$row['apply_id'] . '">' . $e($row['pack']) . '</a>',
 			$e($row['version']),
+			$e(strpos((string)$row['source'], 'plugin:') === 0 ? 'Plugin ' . substr((string)$row['source'], 7) : 'Upload'),
 			$e($row['status']),
 			$e(LibraryFunctions::convert_time($row['checked'], 'UTC', $session->get_timezone())),
 			$row['applied'] ? $e(LibraryFunctions::convert_time($row['applied'], 'UTC', $session->get_timezone())) : '',
@@ -103,6 +105,8 @@ $checked = ($status === ContentPackApply::STATUS_CHECKED);
 
 echo '<div class="row"><div class="col-12">';
 echo '<p><strong>' . $e($apply->get('cpa_pack_name')) . '</strong>'
+	. (strpos((string)$apply->get('cpa_source'), 'plugin:') === 0
+		? ' from plugin ' . $e(substr((string)$apply->get('cpa_source'), 7)) . ', applied when it was installed' : '')
 	. ($apply->get('cpa_pack_version') !== '' ? ' version ' . $e($apply->get('cpa_pack_version')) : '')
 	. ' &middot; ' . $e($status)
 	. ' &middot; file sha256 <code>' . $e(substr((string)$apply->get('cpa_file_sha256'), 0, 16)) . '</code></p>';

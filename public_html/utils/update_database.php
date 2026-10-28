@@ -1064,6 +1064,12 @@
 					echo "  Task: " . htmlspecialchars($tkm) . "<br>\n";
 				}
 			}
+			// A plugin's content pack applied, or failed and waiting for the next sync.
+			if (!empty($plugin_sync_result['content_pack_messages'])) {
+				foreach ($plugin_sync_result['content_pack_messages'] as $cpm) {
+					echo "  Content pack: " . htmlspecialchars($cpm) . "<br>\n";
+				}
+			}
 		} catch (Exception $e) {
 			echo "⚠️  Plugin/Theme sync failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 			// Non-fatal — core DB update already succeeded
