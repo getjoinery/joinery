@@ -34,6 +34,11 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	public static $ab_testable = true;
 	public static $ab_testable_fields = array('pag_title', 'pag_component_layout');
 
+	// Content packs (content_pack_feature.md): a page is found by its link.
+	// Its blocks are refs in the layout; each block is a PageContent entry.
+	public static $content_pack_keys = [['pag_link']];
+	public static $content_pack_fields = ['pag_title', 'pag_template', 'pag_component_layout', 'pag_published_time'];
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
@@ -189,8 +194,33 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 		return $photos->count() > 0 ? $photos->get(0) : null;
 	}
 
+	/**
+	 * The page form's rules for the link and the template, here so every
+	 * writer (the API, a content pack) meets them. Each checks a value only
+	 * when this save changes it, so a stored row that predates a rule still
+	 * saves untouched.
+	 */
+	function prepare() {
+		parent::prepare();
+
+		$link = (string)$this->get('pag_link');
+		if ($link !== '' && $this->value_changes('pag_link') && $link !== SystemBase::slug_form($link)) {
+			throw new SystemDisplayableError('A page link may hold only lower-case letters, digits and single dashes, like "'
+				. SystemBase::slug_form($link) . '".');
+		}
+
+		// A template is a view named page_..., required by views/page.php.
+		$template = (string)$this->get('pag_template');
+		if ($template !== '' && $this->value_changes('pag_template')
+			&& (!preg_match('/^page_[a-z0-9_]+$/', $template)
+				|| !PathHelper::getThemeFilePath($template . '.php', 'views', 'system', NULL, NULL, false, false))) {
+			throw new SystemDisplayableError('There is no page template called "' . $template . '" on this site. '
+				. 'A template is a view named page_... in the theme, a plugin or the core views.');
+		}
+	}
+
 	function save($debug=false) {
-		
+
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate('pag_link')){
 			throw new SystemAuthenticationError(
@@ -202,10 +232,37 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 			$this->guard_raw_write('write');
 			ContentVersion::NewVersion(ContentVersion::TYPE_PAGE, $this->key, $this->get_filled_content(), $this->get('pag_title'), $this->get('pag_title'));
 		}
-		
+
 		parent::save($debug);
+
+		// The save above clears /page/{link}; the home page may show it too.
+		$this->invalidate_home_copy();
 	}
-	
+
+	/**
+	 * Clear every cached copy of this page: /page/{link}, and / when the
+	 * alternate_homepage setting shows this page there. A block's save calls
+	 * it for each page the block is on.
+	 */
+	function invalidate_cached_copies() {
+		if (!class_exists('StaticPageCache')) {
+			return;
+		}
+		$url = $this->get_url();
+		if ($url) {
+			StaticPageCache::invalidateUrl($url);
+		}
+		$this->invalidate_home_copy();
+	}
+
+	private function invalidate_home_copy() {
+		$link = (string)$this->get('pag_link');
+		if ($link !== '' && class_exists('StaticPageCache')
+			&& rtrim((string)Globalvars::get_instance()->get_setting('alternate_homepage'), '/') === '/page/' . $link) {
+			StaticPageCache::invalidateUrl('/');
+		}
+	}
+
 }
 
 class MultiPage extends SystemMultiBase {

@@ -68,6 +68,8 @@ pag_template = 'page_register_thanks'
 
 `views/page.php` then delegates to `theme/{theme}/views/page_register_thanks.php`. That template is a normal view with `$page` available and no framework magic — write whatever PHP you need inline.
 
+A template's name starts with `page_`. `Page::prepare()` refuses a template that is not a `page_...` view in the theme, a plugin or the core views.
+
 ## Route Configuration Reference
 
 Routes are defined in `serve.php` in three categories:

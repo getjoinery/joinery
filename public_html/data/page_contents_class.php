@@ -81,6 +81,12 @@ class PageContent extends SystemBase {
 
 	public static $json_vars = array('pac_config');
 
+	// Content packs (content_pack_feature.md): a block is found by its slug.
+	// Its type is a ref to a "find" entry for the Component; pac_config is
+	// written with {"merge": {...}}, one key at a time.
+	public static $content_pack_keys = [['pac_location_name']];
+	public static $content_pack_fields = ['pac_title', 'pac_com_component_id', 'pac_config'];
+
 	/**
 	 * Get component by slug (location_name)
 	 *
@@ -225,6 +231,49 @@ class PageContent extends SystemBase {
 		}
 
 		parent::save($debug);
+
+		// Each page showing this block is cached with it; a page's own save
+		// clears only that page.
+		$this->invalidate_placing_pages();
+	}
+
+	/**
+	 * The block form's rules for the slug and the type, here so every writer
+	 * (the API, a content pack) meets them. Each checks a value only when this
+	 * save changes it, so a stored row that predates a rule still saves.
+	 */
+	function prepare() {
+		parent::prepare();
+
+		$slug = (string)$this->get('pac_location_name');
+		if ($slug !== '' && $this->value_changes('pac_location_name') && $slug !== $this->generate_slug($slug)) {
+			throw new SystemDisplayableError('A component slug may hold only lower-case letters, digits and single dashes, like "'
+				. $this->generate_slug($slug) . '".');
+		}
+
+		$type_id = $this->get('pac_com_component_id');
+		if ($type_id && $this->value_changes('pac_com_component_id')) {
+			$type = new Component((int)$type_id, TRUE);
+			if (!$type->key || $type->get('com_delete_time') || !$type->get('com_is_active')) {
+				throw new SystemDisplayableError('Component type #' . (int)$type_id . ' is not an active component type on this site.');
+			}
+		}
+	}
+
+	/** Clear the cached copy of every live page whose layout holds this block. */
+	private function invalidate_placing_pages() {
+		if (!$this->key || !class_exists('StaticPageCache')) {
+			return;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT pag_page_id FROM pag_pages
+			  WHERE pag_component_layout IS NOT NULL
+			    AND pag_component_layout::jsonb @> to_jsonb(?::int)
+			    AND pag_delete_time IS NULL");
+		$q->execute(array((int)$this->key));
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $page_id) {
+			(new Page((int)$page_id, TRUE))->invalidate_cached_copies();
+		}
 	}
 
 	/**

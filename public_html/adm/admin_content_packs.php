@@ -2,6 +2,8 @@
 /** @joinery-admin level=10 */
 // Content packs: upload a pack, read what it would change, tick and apply.
 // specs/content_pack_feature.md.
+// @version 1.1 - a summary of the plan, found rows in one list, records already right folded
+//                together, and a note naming the new records an item or line waits for
 // @version 1.0
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -164,14 +166,71 @@ $formwriter->hiddeninput('action', '', array('value' => 'apply', 'id' => 'apply_
 $formwriter->hiddeninput('cpa_id', '', array('value' => (int)$apply->key));
 $formwriter->hiddeninput('plan_hash', '', array('value' => $plan['hash']));
 
+// What the plan comes to, before the detail.
+$counts = array(ContentPack::STATE_NEW => 0, ContentPack::STATE_CHANGE => 0, ContentPack::STATE_EDITED => 0, ContentPack::STATE_SAME => 0);
+$found = array();
+$already = array();
+$unlisted = 0;
+$labels = array();   // tick id of each new record => its label, for "waits for" notes
+foreach ($plan['items'] as $item) {
+	if ($item['kind'] === 'record' && $item['key'] === null) {
+		$labels[$item['tick']] = $item['label'];
+	}
+	$unlisted += $item['kind'] === 'unlisted' ? count($item['records']) : 0;
+	if ($item['kind'] === 'find') {
+		$found[] = $item['label'];
+	} elseif ($item['kind'] === 'record' && $item['key'] === null) {
+		$counts[ContentPack::STATE_NEW]++;
+	} elseif ($item['kind'] === 'record') {
+		$states = array_unique(array_column($item['lines'], 'state'));
+		if ($states === array(ContentPack::STATE_SAME) || !$states) {
+			$already[] = $item['label'];
+		}
+		foreach ($item['lines'] as $line) {
+			$counts[$line['state']]++;
+		}
+	} elseif ($item['kind'] === 'setting') {
+		$counts[$item['state']]++;
+	}
+}
+echo '<p>' . $e($counts[ContentPack::STATE_NEW] . ' new ' . ($counts[ContentPack::STATE_NEW] === 1 ? 'record' : 'records') . ', '
+	. $counts[ContentPack::STATE_CHANGE] . ' to change, ' . $counts[ContentPack::STATE_EDITED] . ' edited here, '
+	. $counts[ContentPack::STATE_SAME] . ' already the same'
+	. ($unlisted ? ', ' . $unlisted . ' unlisted ' . ($unlisted === 1 ? 'row' : 'rows') . ' to change' : '') . '.') . '</p>';
+
+/** "Waits for: ..." naming the new records a plan item or line needs created. */
+$waits_for = function (array $needs) use ($labels) {
+	return 'Applies only when ' . (count($needs) === 1 ? 'this new record is' : 'these new records are') . ' created too: '
+		. implode('; ', array_map(function ($tick) use ($labels) { return $labels[$tick] ?? $tick; }, $needs)) . '.';
+};
+if ($found) {
+	echo '<details class="mb-3"><summary>Uses ' . count($found) . ' ' . (count($found) === 1 ? 'row' : 'rows')
+		. ' already on this site</summary><ul class="small">';
+	foreach ($found as $label) {
+		echo '<li>' . $e($label) . '</li>';
+	}
+	echo '</ul></details>';
+}
+if ($already) {
+	echo '<details class="mb-3"><summary>' . count($already) . ' ' . (count($already) === 1 ? 'record is' : 'records are')
+		. ' already as the pack says</summary><ul class="small">';
+	foreach ($already as $label) {
+		echo '<li>' . $e($label) . '</li>';
+	}
+	echo '</ul></details>';
+}
+
 $anything = false;
 foreach ($plan['items'] as $item) {
+	if ($item['kind'] === 'find' || ($item['kind'] === 'record' && in_array($item['label'], $already, true))) {
+		continue;
+	}
 	$options = array();
 	$checked_ticks = array();
 	// Table titles are plain text (the table escapes them); notes go above.
 	$notes = array();
 	if (!empty($item['needs'])) {
-		$notes[] = 'Applies only when the new record it points at is created.';
+		$notes[] = $waits_for($item['needs']);
 	}
 
 	if ($item['kind'] === 'record') {
@@ -186,7 +245,8 @@ foreach ($plan['items'] as $item) {
 		}
 		$page->tableheader(array('Field', 'State', 'On this site', 'In the pack'), array('title' => $item['label']));
 		foreach ($item['lines'] as $line) {
-			$label = '<code>' . $e($line['field']) . '</code>' . ($line['part'] === 'on_create' ? ' <em>(only when created)</em>' : '');
+			$label = '<code>' . $e($line['field']) . '</code>' . ($line['part'] === 'on_create' ? ' <em>(only when created)</em>' : '')
+				. (!empty($line['needs']) ? ' <em>(' . $e($waits_for($line['needs'])) . ')</em>' : '');
 			$page->disprow(array($label, $state_badge($line['state']),
 				$item['key'] === null ? '' : $show_value($line['current'], $line['new'], 'current'),
 				$show_value($line['current'], $line['new'], 'new')));
