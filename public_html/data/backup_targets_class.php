@@ -17,6 +17,9 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.10 - credential_problem() refuses a Linode region that is not a cluster: Linode shows its regions as
+ *                 us-ord, but a bucket lives in a numbered cluster (us-ord-10), and us-ord.linodeobjects.com
+ *                 does not exist (specs/easy_signup_completion.md WP6)
  * @version 3.9 - complete_credentials() lowercases a catalogue provider's region (every one names its
  *   regions in lower case, and the region signs every request); a generic bucket's is kept as typed
  * @version 3.8 - a `managed` target is getjoinery's backup storage (specs/easy_signup_completion.md WP4): it holds
@@ -694,6 +697,12 @@ class BackupTarget extends SystemBase {
 		}
 		if ($region === '') {
 			return 'Linode needs the region the bucket is in, such as us-east-1.';
+		}
+		// Every Linode storage cluster is numbered (us-east-1, us-ord-10). The
+		// region names Linode shows elsewhere (us-ord) are not clusters and have
+		// no storage address, so the bucket could never be reached.
+		if (!preg_match('/-[0-9]+$/', $region)) {
+			return 'Linode names the bucket\'s cluster in its address: for mybucket.us-ord-10.linodeobjects.com the region is us-ord-10, not us-ord.';
 		}
 		if ($endpoint === '') {
 			return 'Linode needs the endpoint, such as us-east-1.linodeobjects.com.';

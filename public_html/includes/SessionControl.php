@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.22 - the terms gate asks only for terms the person owes (TermsOwed): none on a site with no
+ *                 terms, none for a self-hosted site's operators, getjoinery's for a hosted site's
  * @version 1.21 - check_permission() sets its 401 with http_response_code() and throws with code 401, which
  *                ErrorStatus answers: a raw HTTP/ status line made the error handler's own http_response_code()
  *                warn on every refused page under PHP 8.5
@@ -2019,7 +2021,7 @@ class SessionControl{
 	}
 
 	/**
-	 * Check whether the current user still owes terms acceptance.
+	 * Check whether the current user still owes terms acceptance (TermsOwed).
 	 * Cached in session to avoid per-request DB hits; the cache is
 	 * cleared on /terms-accept submit and on logout.
 	 */
@@ -2031,7 +2033,7 @@ class SessionControl{
 		if (!isset($_SESSION['terms_accepted'])) {
 			require_once(PathHelper::getIncludePath('data/users_class.php'));
 			$user = new User($_SESSION['usr_user_id'], true);
-			$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
+			$_SESSION['terms_accepted'] = TermsOwed::owed($user) === null;
 		}
 
 		return !$_SESSION['terms_accepted'];
@@ -2061,7 +2063,7 @@ class SessionControl{
 		$_SESSION['ip_address'] = $this->_get_client_ip();
 		unset($_SESSION['ip_address_other_family']);
 		$_SESSION['timezone'] = $user->get('usr_timezone');
-		$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
+		$_SESSION['terms_accepted'] = TermsOwed::owed($user) === null;
 
 		$_SESSION['permission'] = $user->get('usr_permission');
 		// Store the original user

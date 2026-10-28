@@ -19,6 +19,7 @@
  *
  * Run: php tests/backups/linode_target_test.php
  *
+ * @version 1.4 - a Linode region that is not a numbered cluster (us-ord) is refused, naming the bucket's address
  * @version 1.3 - the install-time save (utils/install_backup_target.php) runs the check too, and a
  *   catalogue provider's region is stored lower case
  * @version 1.2 - no per-run key minting to check (specs/storage_targets.md WP5)
@@ -49,6 +50,7 @@ $ok = array(
 	array('us-east-1', 'https://us-east-1.linodeobjects.com/'),
 	array('us-east-1', 'US-EAST-1.LinodeObjects.com'),
 	array('us-iad-1', 'us-iad-1.linodeobjects.com'),
+	array('us-ord-10', 'us-ord-10.linodeobjects.com'),
 );
 foreach ($ok as $case) {
 	$problem = BackupTarget::credential_problem('linode', array('region' => $case[0], 'endpoint' => $case[1]));
@@ -64,6 +66,7 @@ $refused = array(
 	'an Amazon host'         => array('us-east-1', 's3.us-east-1.amazonaws.com', 'linodeobjects'),
 	'no cluster'             => array('us-east-1', 'linodeobjects.com', 'linodeobjects'),
 	'a lookalike domain'     => array('us-east-1', 'us-east-1.linodeobjects.com.example.net', 'linodeobjects'),
+	'a region, not a cluster' => array('us-ord', 'us-ord.linodeobjects.com', 'us-ord-10'),
 );
 foreach ($refused as $label => $case) {
 	$problem = BackupTarget::credential_problem('linode', array('region' => $case[0], 'endpoint' => $case[1]));

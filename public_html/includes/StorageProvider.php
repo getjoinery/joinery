@@ -22,6 +22,7 @@
  * addressed (path style, or the bucket as a host label) is a property of the
  * provider (virtual_host()).
  *
+ * @version 2.3 - Linode's region help names where its cluster is read: the bucket's own address
  * @version 2.2 - SERVICE ('managed'): getjoinery's backup storage, a provider a target is enrolled in and never
  *                picked; it is in slugs() and has a label, and no form offers it (specs/easy_signup_completion.md WP4)
  * @version 2.1 - object_lock: whether a provider takes COMPLIANCE object lock (b2, s3, linode; F8)
@@ -154,7 +155,7 @@ class StorageProvider {
 			'region'        => '',
 			'host'          => '/\.linodeobjects\.com$/i',
 			'endpoint_help' => '',
-			'region_help'   => 'The cluster the bucket is in.',
+			'region_help'   => 'The cluster in the bucket\'s address: for mybucket.us-ord-10.linodeobjects.com it is us-ord-10.',
 			'example'       => array('region' => 'us-east-1'),
 			'region_rule'   => '/^([a-z0-9-]+)\.linodeobjects\.com$/i',
 			'addressing'    => 'path',

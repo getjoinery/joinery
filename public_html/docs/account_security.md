@@ -138,6 +138,13 @@ logic checks only `is_logged_in()` cannot step around a gate. JSON and file
 surfaces (`/api/`, `/ajax/`, `/uploads/`, assets) are not navigation and keep
 their own rules; a CLI run has no request and meets no gate.
 
+Which terms a person owes is `TermsOwed`'s answer, read by the gate, the terms
+page and the password pages alike. A member owes the site's own terms
+(`terms_url`, `privacy_url`) and nothing when the site names none. A hosted
+site's operators (permission 10) owe getjoinery's terms, fixed in `TermsOwed`
+rather than read from the site's settings; a self-hosted site's operators,
+including one renting only getjoinery's services, owe none.
+
 ## Admin second-factor requirement
 
 `totp_require_admins` sends every admin (permission 5 and above) who holds no

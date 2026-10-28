@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -5468,9 +5468,16 @@
 				}
 			}
 		} else {
-			$('#mbx-threads').appendChild(emptyRow(seed.all_access
-				? 'No mailboxes yet.'
-				: 'No mailboxes have been shared with you.'));
+			var none = emptyRow(seed.all_access
+				? 'No mailboxes yet. '
+				: 'No mailboxes have been shared with you.');
+			if (seed.all_access) {
+				var add = el('a', '', 'Add one');
+				add.href = '/plugins/mailbox/admin/admin_mailbox_alias';
+				none.appendChild(add);
+				none.appendChild(document.createTextNode(' with the address it receives mail for.'));
+			}
+			$('#mbx-threads').appendChild(none);
 		}
 	}
 

@@ -4,10 +4,10 @@
  * already connected to a management node when log access arrived
  * (specs/agent_log_access.md §4.1).
  *
- * The log-access switch (agent_log_access) is on by default, and a node
- * connected after the switch existed saw it on the page it used to connect.
- * A node connected BEFORE that had the setting seeded on with no owner
- * action, which is the accepted default but must not be silent. So while
+ * The log-access switch (agent_log_access) starts off on a new install, and a
+ * node connected after the switch existed saw it on the page it used to
+ * connect. A node connected BEFORE that had the setting seeded on with no
+ * owner action, which must not be silent. So while
  * three stored facts hold — the node is connected, log access is on, and
  * nobody has acknowledged it — every admin page says so once, in the owner's
  * words, with the switch one click away.
@@ -16,6 +16,7 @@
  * the Management Node page, from the button here or from the switch there:
  * never a write made because somebody viewed a page.
  *
+ * @version 1.2 - the header names the switch's default as off on a new install
  * @version 1.1 - Calmer wording: what the node looks at and why, what is hidden, and where the switch is
  * @version 1.0
  */

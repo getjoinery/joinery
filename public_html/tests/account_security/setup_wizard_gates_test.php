@@ -62,7 +62,7 @@ $_SESSION['permission'] = 10;
 SetupSteps::resetViewer(); // viewerUser() is cached per request; this is a new viewer
 check(!SetupSteps::leftWizard($leaver), 'a fresh account has not left the wizard');
 $res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array('action' => 'leave'), 'POST');
-check($res->redirect === '/admin', 'Go to your site lands the owner on the site',
+check($res->redirect === '/', 'Go to your site lands the owner on the site\'s home page',
 	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
 $leaver->load();
 check($leaver->get('usr_setup_reviewed_time') !== null && $leaver->get('usr_setup_dismissed_time') === null,
@@ -74,18 +74,21 @@ check(SetupSteps::leftWizard($dismisser), 'and for a dismissed one (the fixture 
 unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
 SetupSteps::resetViewer();
 
-section('A fresh install\'s admin owes a password change and the terms, and can settle both');
+section('An account that owes a password change and the terms can settle both');
 // Found on the site copy's first live run (2026-10-01): every signed-in page
 // runs the gates, and the terms gate sent the admin off the password page
 // while the password gate sent them back, so a new site's admin could not
-// sign in. The first gate owed holds its own page; nothing loops.
-$fresh = make_user('GateFresh', 10);
+// sign in. The first gate owed holds its own page; nothing loops. A member
+// owes the site's own terms (an admin of a self-hosted site owes none:
+// terms_owed_test), so the site names some for the run.
+harness_set_setting_mem('terms_url', 'https://example.org/terms');
+$fresh = make_user('GateFresh', 0);
 $fresh->set('usr_force_password_change', 1);
 $fresh->set('usr_terms_accepted_time', null);
 $fresh->save();
 $_SESSION['usr_user_id'] = (int)$fresh->key;
 $_SESSION['loggedin'] = true;
-$_SESSION['permission'] = 10;
+$_SESSION['permission'] = 0;
 $session = SessionControl::get_instance();
 $owe = function () { unset($_SESSION['force_password_change'], $_SESSION['terms_accepted']); };
 $settles = function ($start) use ($session) {

@@ -1,4 +1,7 @@
 <?php
+/**
+ * @version 1.1 - the terms checkbox appears only for terms the person owes (TermsOwed)
+ */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function password_set_logic(array $input): LogicResult{
@@ -18,10 +21,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	// Determine whether the consent checkbox should be shown.
-	$page_vars['terms_already_accepted'] = false;
+	$page_vars['owed'] = null;
 	if ($session->get_user_id()) {
-		$current_user = new User($session->get_user_id(), TRUE);
-		$page_vars['terms_already_accepted'] = !empty($current_user->get('usr_terms_accepted_time'));
+		$page_vars['owed'] = TermsOwed::owed(new User($session->get_user_id(), TRUE));
 	}
 
 	if (!empty($_POST)) {
@@ -45,9 +47,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('Your password did not match in both fields.');
 		}
 
-		$terms_already_accepted = !empty($user->get('usr_terms_accepted_time'));
+		$terms_already_accepted = TermsOwed::owed($user) === null;
 		if (!$terms_already_accepted && empty($input['accept_terms'])) {
-			return LogicResult::error('You must agree to the Terms of Use and Privacy Policy to continue.');
+			return LogicResult::error('Tick the box to agree to the terms before you continue.');
 		}
 
 		$user->set('usr_password', User::GeneratePassword($input['usr_password']));

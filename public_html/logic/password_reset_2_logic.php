@@ -1,4 +1,8 @@
 <?php
+/**
+ * @version 1.1 - the terms checkbox appears only for terms the person owes (TermsOwed); its links sit above
+ *                 it, where they render, instead of inside the label FormWriter escapes
+ */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function password_reset_2_logic(array $input): LogicResult{
@@ -33,7 +37,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$pre_user_id = Activation::getIdFromTempCode($act_code, 2);
 		if ($pre_user_id) {
 			$pre_user = new User($pre_user_id, true);
-			$page_vars['terms_already_accepted'] = !empty($pre_user->get('usr_terms_accepted_time'));
+			$page_vars['terms_already_accepted'] = TermsOwed::owed($pre_user) === null;
 		}
 	}
 
@@ -68,9 +72,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				return LogicResult::error('This feature is turned off for this user.  Please email us to recover your password.');
 		}
 
-		$terms_already_accepted = !empty($user->get('usr_terms_accepted_time'));
+		$terms_already_accepted = TermsOwed::owed($user) === null;
 		if (!$terms_already_accepted && empty($input['accept_terms'])) {
-			return LogicResult::error('You must agree to the Terms of Use and Privacy Policy to continue.');
+			return LogicResult::error('Tick the box to agree to the terms before you continue.');
 		}
 
 		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
@@ -135,23 +139,18 @@ function password_reset_2_logic_form($formwriter, $user = null, $input = []) {
 		'autocomplete' => 'new-password',
 	]);
 
-	$terms_already_accepted = true;
+	$owed = null;
 	if ($act_code) {
 		$pre_user_id = Activation::getIdFromTempCode($act_code, 2);
 		if ($pre_user_id) {
-			$pre_user = new User($pre_user_id, true);
-			$terms_already_accepted = !empty($pre_user->get('usr_terms_accepted_time'));
+			$owed = TermsOwed::owed(new User($pre_user_id, true));
 		}
 	}
 
-	if (!$terms_already_accepted) {
-		$settings = Globalvars::get_instance();
-		$terms_url   = trim((string)$settings->get_setting('terms_url'));
-		$privacy_url = trim((string)$settings->get_setting('privacy_url'));
-		$terms_link   = $terms_url   !== '' ? '<a href="' . htmlspecialchars($terms_url,   ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms of Use</a>'   : 'Terms of Use';
-		$privacy_link = $privacy_url !== '' ? '<a href="' . htmlspecialchars($privacy_url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>' : 'Privacy Policy';
-
-		$formwriter->checkboxinput('accept_terms', 'I agree to the ' . $terms_link . ' and ' . $privacy_link . '.', [
+	if ($owed !== null) {
+		// A checkbox label is text (FormWriter escapes it), so the links go in a line above it.
+		echo '<p class="jy-auth-note">Please read ' . TermsOwed::linksHtml($owed) . '.</p>';
+		$formwriter->checkboxinput('accept_terms', TermsOwed::labelText($owed), [
 			'required' => true,
 		]);
 	}

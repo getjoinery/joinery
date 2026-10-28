@@ -928,8 +928,12 @@ abstract class PublicPageBase {
 		// Render tracking code (wrapped for consent if enabled)
 		echo $this->renderTrackingCode();
 
-		// Render cookie consent banner (if enabled) - JS waits for DOMContentLoaded
-		echo $this->renderConsentBanner();
+		// Render cookie consent banner (if enabled) - JS waits for DOMContentLoaded.
+		// A page may leave it out ('consent_banner' => false): the setup wizard,
+		// where it sat over the steps the site's owner is working through.
+		if (($options['consent_banner'] ?? true) !== false) {
+			echo $this->renderConsentBanner();
+		}
 	}
 
 	/** @var array<string,bool> vault scripts already emitted on this page */
