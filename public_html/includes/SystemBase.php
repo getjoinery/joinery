@@ -433,6 +433,19 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * Whether this save sets $column to something other than what the row
+	 * holds: always, for a row not yet saved. A prepare() rule asks this when
+	 * it should judge only a value being written, so a stored row that
+	 * predates the rule still saves untouched.
+	 */
+	public function value_changes(string $column): bool {
+		if ($this->key === NULL) {
+			return true;
+		}
+		return (string)$this->access_stored($column) !== (string)$this->get($column);
+	}
+
+	/**
 	 * Targeted single-row UPDATE of exactly the given columns, without loading
 	 * the row or running save()'s checks of every column. For columns some other
 	 * path owns (sealed content columns, adopted attachment bytes), and for
@@ -573,6 +586,13 @@ abstract class SystemBase {
 		}
 	}
 	
+	/** The slug form of a string, as create_url() makes it before it looks for duplicates. */
+	public static function slug_form(string $input): string {
+		$slug = strtolower(str_replace(' ', '-', $input));
+		$slug = preg_replace("/[^a-zA-Z0-9-]/", "", $slug);
+		return preg_replace('/-{2,}/', '-', $slug);
+	}
+
 	//CREATES A URL OR SLUG BASED ON AN INPUT STRING
 	function create_url($input_url) {
 		//REQUIRE THAT THE OBJECT IS LOADED
@@ -582,9 +602,7 @@ abstract class SystemBase {
 
 		$classname = get_called_class();
 
-		$tmp = strtolower(str_replace(' ', '-', $input_url));
-		$tmp = preg_replace("/[^a-zA-Z0-9-]/", "", $tmp);
-		$tmp = preg_replace('/-{2,}/', '-', $tmp);
+		$tmp = self::slug_form($input_url);
 		
 		//NO DUPLICATES
 		$safety = 0;

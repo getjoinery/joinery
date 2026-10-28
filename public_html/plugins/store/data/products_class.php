@@ -24,6 +24,12 @@ class BasicProductRequirementException extends SystemBaseException {}
 /**
  * Product - a store product.
  *
+ * prepare() refuses, on a value being changed, a link not in slug form, a fulfilment provider key
+ * this site does not register, and an ownership tag on a product with a subscription version. Every
+ * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
+ *
+ * @version 1.3 - prepare() holds the form's rules for the link's form, the fulfilment provider key and
+ *                ownership vs subscription; open to content packs (specs/content_pack_feature.md)
  * @version 1.2 - price_period_suffix(): the period a product's price is shown with ('/month')
  * @version 1.1 - assemble_validation_rules(): the client-side rule assembly is
  *                pure and per-constraint, so a Question requirement keeps its
@@ -46,6 +52,14 @@ class Product extends SystemBase {
 	public static $ai_owner_field     = false; // ownerless catalog — members read all rows
 	public static $ai_description     = 'Products available for purchase.';
 	public static $ai_excluded_fields = ['pro_stripe_product_id', 'pro_stripe_product_id_test', 'pro_product_scripts'];
+	// Content packs (specs/content_pack_feature.md): a pack finds a product by
+	// its link and may write these fields. A field joins this list only once
+	// every rule the product form holds for it lives in prepare().
+	public static $content_pack_keys = [['pro_link']];
+	public static $content_pack_fields = ['pro_name', 'pro_short_description', 'pro_description',
+		'pro_after_purchase_message', 'pro_fulfillment_provider', 'pro_fulfillment_ref',
+		'pro_max_cart_count', 'pro_is_active'];
+
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	// The four meanings own-once can have on the admin product edit page. The
@@ -827,7 +841,36 @@ public function get_requirement_info($output='text') {
 			}
 		}
 
+		// The rules below were the product form's alone, so a write from
+		// anywhere else (the API, a content pack) could skip them. Each checks
+		// a value only when this save changes it: a stored row that predates a
+		// rule still saves untouched, and the fulfilment registry, which only a
+		// web request fills, is not asked about a key nobody is changing.
+		$link = (string)$this->get('pro_link');
+		if($link !== '' && $this->value_changes('pro_link') && $link !== SystemBase::slug_form($link)){
+			throw new SystemDisplayableError('A product link may hold only lower-case letters, digits and single dashes, like "'
+				. SystemBase::slug_form($link) . '".');
+		}
+
+		$provider = (string)$this->get('pro_fulfillment_provider');
+		if($provider !== '' && $this->value_changes('pro_fulfillment_provider')){
+			require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
+			if(!FulfillmentRegistry::get($provider)){
+				throw new SystemDisplayableError('There is no fulfilment provider called "' . $provider
+					. '" on this site. A product sold with it would take the buyer\'s money and deliver nothing.');
+			}
+		}
+
+		if(trim((string)$this->get('pro_ownership_tag')) !== '' && $this->value_changes('pro_ownership_tag') && $this->key){
+			foreach($this->get_product_versions(TRUE) as $version){
+				if($version->is_subscription()){
+					throw new SystemDisplayableError('Ownership applies to one-time purchases only. '
+						. 'This product has a subscription version, so it cannot be limited to one per person.');
+				}
+			}
+		}
 	}
+
 
 	// ===== Entity Photo Methods =====
 

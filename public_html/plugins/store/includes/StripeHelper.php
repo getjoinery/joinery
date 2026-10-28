@@ -1351,8 +1351,38 @@ class StripeHelper {
 	}
 	
 	public function create_product($params){
-		$product = $this->client()->products->create($params);	
+		$product = $this->client()->products->create($params);
 		return $product;
+	}
+
+	/**
+	 * The Stripe product id of a product in this helper's mode, minted in
+	 * Stripe and set on the product when it has none yet. The caller saves the
+	 * product. Each mode holds its own id (pro_stripe_product_id and
+	 * pro_stripe_product_id_test), so a product saved in one mode, or written by
+	 * anything other than the product form, gets its id in the other mode the
+	 * first time a checkout there needs one.
+	 *
+	 * @throws SystemDisplayablePermanentError when Stripe refuses to create it.
+	 */
+	public function ensure_stripe_product($product){
+		$column = $this->test_mode ? 'pro_stripe_product_id_test' : 'pro_stripe_product_id';
+		$stripe_product_id = (string)$product->get($column);
+		if($stripe_product_id !== ''){
+			return $stripe_product_id;
+		}
+
+		try{
+			$stripe_product = $this->create_product(array('name' => $product->get('pro_name')));
+		}
+		catch (Exception $e) {
+			throw new SystemDisplayablePermanentError("Stripe product creation failed.  Message: ".$e->getMessage());
+		}
+		if(empty($stripe_product['id'])){
+			throw new SystemDisplayablePermanentError("Stripe returned no product id.");
+		}
+		$product->set($column, $stripe_product['id']);
+		return (string)$stripe_product['id'];
 	}
 
 	public function create_price($params){
@@ -1400,16 +1430,13 @@ class StripeHelper {
 		}
 	
 	
-		if($this->test_mode){
-			$stripe_product_id = $product->get('pro_stripe_product_id_test');
-		}
-		else{
-			$stripe_product_id = $product->get('pro_stripe_product_id');
-		}	
-		
-		if(!$stripe_product_id){
-			throw new SystemDisplayablePermanentError("This product does not have a stripe product id."); 
-			exit;
+		// A product with no Stripe product in this mode gets one here, the same
+		// way its prices do below, so a product written by anything but the
+		// product form can still be bought.
+		$stored_product_id = (string)$product->get($this->test_mode ? 'pro_stripe_product_id_test' : 'pro_stripe_product_id');
+		$stripe_product_id = $this->ensure_stripe_product($product);
+		if($stripe_product_id !== $stored_product_id){
+			SystemBase::server_initiated_write(function () use ($product) { $product->save(); });
 		}
 
 		$price_id_field = $this->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';

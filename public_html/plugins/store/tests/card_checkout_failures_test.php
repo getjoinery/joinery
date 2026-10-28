@@ -456,9 +456,9 @@ check($redirect === '/checkout' && $order && strpos((string)$order->get('ord_err
 ccf_cart(array($monthly_id), 'pe');
 $w = ccf_watermark();
 $stripe = new CcfStripe();
-$stripe->price_error = 'This product does not have a stripe product id.';
+$stripe->price_error = 'Stripe price creation failed.  Message: no such product';
 list($redirect, $order, $messages) = ccf_charge($stripe, $w);
-check($redirect === '/checkout' && ccf_status($order) === Order::STATUS_ERROR && strpos((string)$order->get('ord_error'), 'stripe product id') !== false,
+check($redirect === '/checkout' && ccf_status($order) === Order::STATUS_ERROR && strpos((string)$order->get('ord_error'), 'Stripe price creation failed') !== false,
 	'a price that cannot be found refuses the checkout and records why (R9)', $messages);
 
 ccf_cart(array($monthly_id, $monthly2_id), 'two');

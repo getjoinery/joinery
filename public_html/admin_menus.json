@@ -357,6 +357,13 @@
             "parent": "system"
         },
         {
+            "slug": "system-content-packs",
+            "title": "Content Packs",
+            "url": "admin_content_packs",
+            "order": 13,
+            "parent": "system"
+        },
+        {
             "slug": "cloud-storage",
             "title": "Cloud Storage",
             "url": "admin_cloud_storage",

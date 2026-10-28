@@ -212,29 +212,12 @@ function admin_product_edit_logic(array $input): LogicResult {
 		//IF STRIPE IS ENABLED, CREATE A PRODUCT
 		if($settings->get_setting('checkout_type') != 'none'){
 			$stripe_helper = new StripeHelper();
-			$product_info=array();
-			$product_info['name'] = $product->get('pro_name');
-			//$product_info['description'] = '';
-
-			if($stripe_helper->test_mode){
-				if(!$product->get('pro_stripe_product_id_test')){
-					$stripe_product = $stripe_helper->create_product($product_info);
-					$product->set('pro_stripe_product_id_test', $stripe_product['id']);
-					if(!$stripe_product['id']){
-						return LogicResult::error('Unable to create a stripe product.');
-					}
-				}
+			try{
+				$stripe_helper->ensure_stripe_product($product);
 			}
-			else{
-				if(!$product->get('pro_stripe_product_id')){
-					$stripe_product = $stripe_helper->create_product($product_info);
-					if(!$stripe_product['id']){
-						return LogicResult::error('Unable to create a stripe product.');
-					}
-					$product->set('pro_stripe_product_id', $stripe_product['id']);
-				}
+			catch (SystemDisplayablePermanentError $e) {
+				return LogicResult::error('Unable to create a stripe product. '.$e->getMessage());
 			}
-
 		}
 
 		$product->save();
