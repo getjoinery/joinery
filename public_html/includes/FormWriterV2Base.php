@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.31.1 - validation details reach the browser console only with the 'debug' option; the uploader's debug logs are gone
  * @version 2.31.0 - a passed model's rules: hidden columns are not emitted, locked ones are disabled, a row the reader may not change is read-only with a note
  * @version 2.30.0 - validateWhenChanged(): the browser checks a field only once its value changes
  * @version 2.29.0 - the upload row shows a file's `warning` (saved, but its sizes could not be made)
@@ -3030,19 +3031,25 @@ abstract class FormWriterV2Base {
     protected function outputJavascriptValidation() {
         $validation_rules = $this->getAllValidationRules();
 
+        $debug = !empty($this->options['debug']);
+
         if (empty($validation_rules)) {
-            echo '<script type="text/javascript">';
-            echo 'console.log("No validation rules found for form");';
-            echo '</script>';
+            if ($debug) {
+                echo '<script type="text/javascript">';
+                echo 'console.log("No validation rules found for form");';
+                echo '</script>';
+            }
             return;  // No validation needed
         }
 
         echo '<script type="text/javascript">';
-        echo 'console.log("=== FormWriterV2 DEBUG ===");';
-        echo 'console.log("Form ID:", "' . htmlspecialchars($this->form_id) . '");';
+        if ($debug) {
+            echo 'console.log("=== FormWriterV2 DEBUG ===");';
+            echo 'console.log("Form ID:", "' . htmlspecialchars($this->form_id) . '");';
+        }
 
         // Output model validation information
-        if (!empty($this->model_validated_fields)) {
+        if ($debug && !empty($this->model_validated_fields)) {
             echo 'console.log("🔍 Automatic Model Validation Detected:");';
             foreach ($this->model_validated_fields as $field_name => $info) {
                 echo 'console.log("  ✓ ' . htmlspecialchars($field_name) . ' → Model: ' . htmlspecialchars($info['model']) . '", ' . json_encode($info['rules']) . ');';
@@ -3220,7 +3227,7 @@ abstract class FormWriterV2Base {
         }
 
         // Output JoineryValidator initialization
-        if (!empty($js_rules)) {
+        if ($debug && !empty($js_rules)) {
             echo '        console.log("✓ Validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
         }
         echo '        var validator = new JoineryValidator(form, {';
@@ -4933,7 +4940,6 @@ JS;
                                 const response = JSON.parse(xhr.responseText);
                                 if (response.files && response.files[0]) {
                                     const file = response.files[0];
-                                    console.log('Upload response file object:', file); // Debug log
                                     if (file.url) {
                                         // Success. A warning is a file that was saved but could not have
                                         // its sizes made (a photo over the decode ceiling): say so on the row.
@@ -4954,13 +4960,10 @@ JS;
                                         `;
 
                                         // Make filename clickable if we have a file ID
-                                        console.log('Checking for file_id:', file.file_id); // Debug log
                                         if (file.file_id) {
                                             const nameElement = row.querySelector('.file-name');
                                             const fileName = nameElement.textContent;
                                             const fileIcon = getFileIcon(fileName);
-
-                                            console.log('Making filename clickable:', fileName, 'with ID:', file.file_id); // Debug log
 
                                             nameElement.parentElement.innerHTML = `
                                                 <div style="display: flex; align-items: center;">
@@ -4968,8 +4971,6 @@ JS;
                                                     <a href="/admin/admin_file?fil_file_id=${file.file_id}" style="color: #0066cc; text-decoration: none;">${fileName}</a>
                                                 </div>
                                             `;
-                                        } else {
-                                            console.log('No file_id found in response'); // Debug log
                                         }
 
                                         fileObj.status = 'completed';
@@ -5018,7 +5019,6 @@ JS;
             }
 
             // Event Handlers
-            console.log('File uploader initialized, attaching event listeners...');
             // Note: Browse button is now a <label for="file-input"> which natively triggers the file input
             // No JavaScript handler needed for the browse button
 
@@ -5148,12 +5148,9 @@ JS;
             } // end initFileUploader
 
             // Run immediately if DOM is already ready, otherwise wait for DOMContentLoaded
-            console.log('File uploader script loaded, readyState:', document.readyState);
             if (document.readyState === 'loading') {
-                console.log('DOM still loading, waiting for DOMContentLoaded...');
                 document.addEventListener('DOMContentLoaded', initFileUploader);
             } else {
-                console.log('DOM already ready, initializing immediately...');
                 initFileUploader();
             }
         })();
