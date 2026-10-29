@@ -30,6 +30,7 @@
  *     and counted past it (`truncated`).
  *   - Exit 0 whenever the object was printed; exit 2 for a refused argument.
  *
+ * @version 1.4 - the throwaway viewer is marked past onboarding with every step seen (SetupSteps::markPastOnboarding)
  * @version 1.3 - the throwaway viewer is a username with no email (spec optional_username), so
  *               no address's domain is ever checked
  * @version 1.2 - the throwaway viewer is saved without the email domain check: on a site
@@ -112,7 +113,7 @@ try {
 		$user->set('usr_permission', $viewer === 'admin' ? 10 : 0);
 		$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$user->set('usr_is_activated', true);
-		$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
+		SetupSteps::markPastOnboarding($user);
 		$user->save();
 		$user->load();
 	}

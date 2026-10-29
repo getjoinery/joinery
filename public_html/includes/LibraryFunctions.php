@@ -487,6 +487,12 @@ class LibraryFunctions {
 			$host = $_SERVER['HTTP_HOST'];
 		}
 		
+		// A path is relative to the site root whether or not the caller wrote
+		// its leading slash: 'recovery-verify' must not run into the host.
+		$path = (string)$path;
+		if ($path !== '' && strpos('/?#', $path[0]) === false) {
+			$path = '/' . $path;
+		}
 		return $protocol . '://' . $host . $path;
 	}
 	

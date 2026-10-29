@@ -36,6 +36,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.21
+ * @changelog 1.21 - unseenSteps(), recordSeen(), markPastOnboarding(): someone who left the wizard is brought back once
+ *   for a step never shown to them (usr_setup_seen_steps); shouldInterrupt() asks it
  * @version 1.20
  * @changelog 1.20 - The Email step recommends SMTP2GO, as its provider list and the quick start do
  *   (specs/easy_signup_completion.md WP6).
@@ -315,6 +318,54 @@ class SetupSteps {
 		return (bool)$viewer->get('usr_setup_dismissed_time') || (bool)$viewer->get('usr_setup_reviewed_time');
 	}
 
+	/**
+	 * The steps a person who left the wizard has never had in front of it:
+	 * in their scope now, not done, and not among the steps recorded when they
+	 * last left. A step added by a release, a step whose feature was switched
+	 * on, or a site step for someone since promoted. Leaving again records
+	 * them, so each is shown once. An account with no record (one that left
+	 * before the record existed) has seen nothing.
+	 *
+	 * The record holds step keys: renaming a step's key makes it new again.
+	 */
+	public static function unseenSteps(User $viewer, int $permission): array {
+		$seen = $viewer->get('usr_setup_seen_steps');
+		if (is_string($seen)) { $seen = json_decode($seen, true); }
+		$seen = is_array($seen) ? $seen : array();
+		$out = array();
+		foreach (self::stepsForViewer($permission, $viewer) as $step) {
+			if (!in_array($step['key'], $seen, true) && self::statusFor($step, $viewer) !== self::STATUS_GREEN) {
+				$out[] = $step;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Record that $viewer has had every step in their scope in front of them
+	 * (they are leaving the wizard). Kept with what was recorded before, so a
+	 * step out of scope today (a site step after a demotion) stays seen.
+	 * Saves nothing: the caller saves the row it is already writing.
+	 */
+	public static function recordSeen(User $viewer, int $permission): void {
+		$seen = $viewer->get('usr_setup_seen_steps');
+		if (is_string($seen)) { $seen = json_decode($seen, true); }
+		$seen = is_array($seen) ? $seen : array();
+		foreach (self::stepsForViewer($permission, $viewer) as $step) {
+			$seen[] = $step['key'];
+		}
+		$viewer->set('usr_setup_seen_steps', json_encode(array_values(array_unique($seen))));
+	}
+
+	/**
+	 * An account that is past onboarding and has seen every step there is: a
+	 * test fixture or a probe's throwaway viewer. Saves nothing.
+	 */
+	public static function markPastOnboarding(User $user): void {
+		$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
+		$user->set('usr_setup_seen_steps', json_encode(array_map(function ($s) { return $s['key']; }, self::steps())));
+	}
+
 	public static function shouldInterrupt(): bool {
 		if (PHP_SAPI === 'cli') {
 			return false;
@@ -331,6 +382,10 @@ class SetupSteps {
 			return false;
 		}
 		if (self::leftWizard($viewer)) {
+			// Left it: back only for a step never shown to them.
+			if (self::unseenSteps($viewer, (int)$session->get_permission())) {
+				return true;
+			}
 			$_SESSION[self::SESSION_CLEAR] = 1;
 			return false;
 		}

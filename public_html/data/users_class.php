@@ -175,6 +175,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    // site: the login interrupt stops, the header pill stays until every
 	    // step is green.
 	    'usr_setup_reviewed_time' => array('type'=>'timestamp(6)'),
+	    // The wizard steps this user had in front of them when they last left it
+	    // (step keys). A step not listed that applies to them now and is not done
+	    // brings the wizard back once, at just that step (SetupSteps::unseenSteps).
+	    'usr_setup_seen_steps' => array('type'=>'jsonb', 'is_nullable'=>true),
 	    'usr_pic_picture_id' => array('type'=>'int4'),
 	    'usr_phn_phone_number_id' => array('type'=>'int4'),
 	    'usr_contact_preferences' => array('type'=>'varchar(32)'),

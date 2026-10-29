@@ -318,7 +318,7 @@ class Activation {
 
 		$settings = Globalvars::get_instance();
 		$site = (string)$settings->get_setting('site_name');
-		$link = LibraryFunctions::get_absolute_url('recovery-verify?act_code=' . rawurlencode($act_code));
+		$link = LibraryFunctions::get_absolute_url('/recovery-verify?act_code=' . rawurlencode($act_code));
 		EmailSender::quickSend(
 			strtolower(trim($recovery_email)),
 			trim($site . ' — confirm your recovery address'),

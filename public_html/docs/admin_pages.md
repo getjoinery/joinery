@@ -927,11 +927,20 @@ answer, recorded in `sud_setup_decisions`; real state always outranks the
 decision row).
 
 The login redirect lives in `SessionControl::check_permission()` alongside the
-other interstitials and fires only for accounts that have never left the
-wizard (`SetupSteps::leftWizard()`): neither "Finish later"
+other interstitials and fires for accounts that have never left the wizard
+(`SetupSteps::leftWizard()`): neither "Finish later"
 (`usr_setup_dismissed_time`, which also hides the header pill) nor "Go to your
 site" from the final checklist (`usr_setup_reviewed_time`, after which the pill
-keeps counting the skipped steps). `SetupSteps::interruptExempt()` names the
+keeps counting the skipped steps). Either way of leaving records the steps then
+in the person's scope (`usr_setup_seen_steps`, `SetupSteps::recordSeen()`). A
+person who has left is brought back once for a step never shown to them, in
+their scope now and not done (`SetupSteps::unseenSteps()`): a step a release
+adds, a step whose `active()` turns on, or a site step for someone promoted to
+owner. The wizard then walks just those steps, unless a step is asked for by
+name (`?step=`), and leaving records them. An account with no record has seen
+nothing. The record holds step keys, so renaming a step's key makes it unseen
+again. A test fixture or probe viewer is marked past onboarding with every step
+seen (`SetupSteps::markPastOnboarding()`). `SetupSteps::interruptExempt()` names the
 paths it leaves alone: the wizard, logout, the API, the security page (where
 the encryption step sends a user to add a passkey that can derive a key) and
 the step-up ceremony. The wizard applies the forced-password-change and terms
