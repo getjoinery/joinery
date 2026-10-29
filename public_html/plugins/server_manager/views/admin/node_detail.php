@@ -12,6 +12,7 @@
  * views/, so a partial is never reachable as a standalone URL that would bypass
  * this file's node loading and the router's level.
  *
+ * @version 2.7 - Diagnostics tab: Install Report, Compare edge and direct, Logs, Diagnose and repair
  * @version 2.6 - opens at 7 (its header); each POST action needs its own level; below 8 only the reading tabs
  * @version 2.5 - a node whose agent moved away says so above every tab: managed elsewhere, nothing here reaches it
  * @version 2.4 - Copy tab (specs/site_copy.md WP8)
@@ -62,11 +63,11 @@ $skip_joinery = $node->get('mgn_skip_joinery_checks');
 // recorded — a property given up knowingly, and the reason A1 was argued rather
 // than assumed.
 $valid_tabs = $skip_joinery
-	? ['overview', 'jobs', 'api_keys']
-	: ['overview', 'backups', 'database', 'updates', 'copy', 'jobs', 'api_keys'];
+	? ['overview', 'diagnostics', 'jobs', 'api_keys']
+	: ['overview', 'diagnostics', 'backups', 'database', 'updates', 'copy', 'jobs', 'api_keys'];
 // Below 8 a reader runs the looks and reads; the tabs that change a node are not theirs.
 if (!$may_change) {
-	$valid_tabs = array_values(array_intersect($valid_tabs, ['overview', 'backups', 'jobs']));
+	$valid_tabs = array_values(array_intersect($valid_tabs, ['overview', 'diagnostics', 'backups', 'jobs']));
 }
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
@@ -142,6 +143,7 @@ echo '<script>var smNodeName = '
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'copy' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=copy">Copy</a></li>
 	<?php endif; ?>
+	<li class="nav-item"><a class="nav-link <?php echo $tab === 'diagnostics' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=diagnostics">Diagnostics</a></li>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'api_keys' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=api_keys">API Keys</a></li>
 </ul>

@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.80 - refresh_status: one Refresh on the node page queues the check_status and the host_report the node
+ *                 offers, and returns to the page
  * @version 1.79 - copy_new_server no longer reads a copy_data_root_encrypted field: the Copy tab decides the layer
  *                 (SiteCopyRunner::copy_encryption()) and renders no such tick (reviewer2 F3 on B114)
  * @version 1.78 - disable_root_login (agent 1.95.0): root SSH login off for good, through the machine's own agent
@@ -190,20 +192,21 @@ class NodeDetailActions {
 	/** Which tab a failed action redirects back to (its error message shows there). */
 	private static $error_tab = [
 		'check_status'             => 'overview',
-		'install_report'           => 'overview',
+		'refresh_status'           => 'overview',
+		'install_report'           => 'diagnostics',
 		'host_report'              => 'overview',
 		'host_converge'            => 'overview',
-		'site_log'                 => 'overview',
-		'site_log_count'           => 'overview',
-		'log_table_tail'           => 'overview',
+		'site_log'                 => 'diagnostics',
+		'site_log_count'           => 'diagnostics',
+		'log_table_tail'           => 'diagnostics',
 		'unit_journal'             => 'overview',
-		'disk_usage'               => 'overview',
-		'listening_sockets'        => 'overview',
-		'site_state_report'        => 'overview',
+		'disk_usage'               => 'diagnostics',
+		'listening_sockets'        => 'diagnostics',
+		'site_state_report'        => 'diagnostics',
 		'install_security_updates' => 'overview',
 		'refresh_site_containers'  => 'overview',
-		'container_inventory'      => 'overview',
-		'spam_learning_status'     => 'overview',
+		'container_inventory'      => 'diagnostics',
+		'spam_learning_status'     => 'diagnostics',
 		'reboot_machine'           => 'overview',
 		'disable_root_login'       => 'overview',
 		'reset_failed_unit'        => 'overview',
@@ -222,16 +225,16 @@ class NodeDetailActions {
 		'data_root_rekey'          => 'overview',
 		'data_root_escrow_excuse'  => 'overview',
 		'outbound_limits'          => 'overview',
-		'run_installer'            => 'overview',
-		'file_head'                => 'overview',
-		'schema_probe'             => 'overview',
-		'reclaim_managed_file'     => 'overview',
+		'run_installer'            => 'diagnostics',
+		'file_head'                => 'diagnostics',
+		'schema_probe'             => 'diagnostics',
+		'reclaim_managed_file'     => 'diagnostics',
 		'restore_release_file'     => 'overview',
 		'repair_release_files'     => 'overview',
-		'page_probe'               => 'overview',
-		'net_health'               => 'overview',
-		'web_workers'              => 'overview',
-		'edge_vs_origin'           => 'overview',
+		'page_probe'               => 'diagnostics',
+		'net_health'               => 'diagnostics',
+		'web_workers'              => 'diagnostics',
+		'edge_vs_origin'           => 'diagnostics',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -318,6 +321,24 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_check_status($node);
 				$job = ManagementJob::createFromBuild($node->key, 'check_status', $built, null, $uid);
 				return self::jobUrl($job);
+			}
+
+			case 'refresh_status': {
+				// The site's figures (check_status) and the machine's account
+				// (host_report): one ask from a person, whichever the node offers.
+				// A job already queued or running for either is left to answer.
+				$queued = 0;
+				foreach (array('check_status' => 'build_check_status', 'host_report' => 'build_host_report') as $word => $builder) {
+					if ($word === 'host_report' && !JobCommandBuilder::has_primitive($node, 'host_report')) { continue; }
+					$open = ManagementJob::latestForNode($node->key, $word);
+					if ($open && in_array($open->get('mjb_status'), array('pending', 'running'), true)) { $queued++; continue; }
+					ManagementJob::createFromBuild($node->key, $word, JobCommandBuilder::$builder($node), null, $uid);
+					$queued++;
+				}
+				$session->save_message(new DisplayMessage(
+					'Refresh asked for. The node answers at its next check-in, usually within a minute; reload this page to see the new figures.',
+					'Refresh asked for', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url . '&tab=overview';
 			}
 
 			case 'install_report': {

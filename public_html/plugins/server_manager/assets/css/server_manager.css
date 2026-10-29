@@ -34,6 +34,26 @@
 .svm-gauge::before { left: 75%; }
 .svm-gauge::after { left: 90%; }
 .svm-gauge-fill { height: 100%; width: var(--svm-pct, 0%); border-radius: 5px 0 0 5px; }
+/* Status and Details rows: one line each (dot, name, finding), opening to the
+   full account. A row with nothing more to say is flat. */
+.svm-status { border: 1px solid #dee2e6; border-radius: 0.375rem; }
+.svm-status-row + .svm-status-row { border-top: 1px solid #dee2e6; }
+.svm-status-head { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.6rem 0.9rem; }
+details.svm-status-row > summary { cursor: pointer; list-style: none; }
+details.svm-status-row > summary::-webkit-details-marker { display: none; }
+details.svm-status-row > summary::after { content: '\203A'; margin-left: auto; padding-left: 0.5rem; color: #6c757d;
+                                          transition: transform 0.12s ease; }
+details.svm-status-row[open] > summary::after { transform: rotate(90deg); }
+details.svm-status-row > summary:hover { background: #f8f9fa; }
+.svm-status-head .svm-dot { align-self: center; }
+.svm-status-title { font-weight: 600; flex: none; min-width: 9rem; }
+.svm-status-summary { color: #6c757d; min-width: 0; overflow-wrap: anywhere; }
+.svm-status-body { padding: 0.25rem 0.9rem 0.9rem 2.15rem; }
+@media (max-width: 600px) {
+	.svm-status-head { flex-wrap: wrap; }
+	.svm-status-title { min-width: 0; }
+	.svm-status-body { padding-left: 0.9rem; }
+}
 
 /* --- Target info --- */
 .svm-mw600 { max-width: 600px; }
