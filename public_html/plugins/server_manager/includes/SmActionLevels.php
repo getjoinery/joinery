@@ -20,7 +20,7 @@ final class SmActionLevels {
 	const PAGES = array(
 		'node_detail' => array(
 			// Looks (7)
-			'check_status' => 7, 'install_report' => 7, 'host_report' => 7, 'site_log' => 7, 'site_log_count' => 7,
+			'check_status' => 7, 'refresh_status' => 7, 'install_report' => 7, 'host_report' => 7, 'site_log' => 7, 'site_log_count' => 7,
 			'log_table_tail' => 7, 'unit_journal' => 7, 'disk_usage' => 7, 'listening_sockets' => 7,
 			'site_state_report' => 7, 'container_inventory' => 7, 'spam_learning_status' => 7, 'file_head' => 7,
 			'schema_probe' => 7, 'page_probe' => 7, 'net_health' => 7, 'web_workers' => 7, 'edge_vs_origin' => 7,
