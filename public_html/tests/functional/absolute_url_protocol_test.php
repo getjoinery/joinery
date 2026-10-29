@@ -77,6 +77,10 @@ $live = LibraryFunctions::get_absolute_url('/x');
 $want = LibraryFunctions::resolve_scheme((string)$settings->get_setting('protocol_mode'),
 	(string)$settings->get_setting('protocol_observed_scheme', true, true), null);
 check(strpos($live, $want . '://') === 0, 'get_absolute_url() headless agrees with the resolver for this site\'s settings', $live);
+$bare = LibraryFunctions::get_absolute_url('recovery-verify?act_code=x');
+check(substr($bare, -strlen('/recovery-verify?act_code=x')) === '/recovery-verify?act_code=x' && substr_count($bare, '//') === 1,
+	'a path given without its leading slash still gets one, so it never runs into the host', $bare);
+check(substr($live, -2) === '/x' && substr_count($live, '//') === 1, 'a path with its slash is left as it is', $live);
 
 section('Forwarding headers are believed only from a proxy we know');
 

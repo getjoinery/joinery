@@ -7,6 +7,7 @@
  * instead of kept. Raised on this management node's own node; cleared when the
  * holder is fit or the setting is off.
  *
+ * @version 1.2 - links to the holder setting and, once a holder is named, to where the holder sets up a vault and a second factor
  * @version 1.1 - the fix names the holder field as a user picker
  * @version 1.0
  */
@@ -35,8 +36,9 @@ class IncidentSourceBreakGlassNoHolder implements IncidentSource {
 					. 'read and retire it. Until one is named and fit, every new install\'s password is retired as soon as its '
 					. 'agents are admitted, leaving no way back in if the agent breaks.',
 				'What to do'    => 'Choose the holder in Server Manager settings (Emergency root access holder, under Customer provisioning). They need a '
-					. 'vault and a second factor. Or turn emergency root access off.',
-			),
+					. 'vault and a second factor, both set up by the holder on their own Profile > Security page here. Or turn emergency root access off.',
+				'Holder setting' => '/admin/admin_settings',
+			) + (BreakGlassRootAccess::holder_id() > 0 ? array('The holder sets up a vault and a second factor at' => '/profile/security') : array()),
 		);
 	}
 

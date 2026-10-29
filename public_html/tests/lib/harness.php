@@ -902,8 +902,10 @@ function make_user_row($suffix, $permission = 0) {
 	// so without this a fixture's web session is redirected to /setup before it
 	// ever reaches the page under test — which reads as a login failure, or as
 	// a permission gate answering 302 instead of 401, in whichever suite hits
-	// it. Tests about the wizard itself clear this back to null explicitly.
-	$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
+	// it. It has seen every step, too, or a step it was never shown would bring
+	// the wizard back (SetupSteps::unseenSteps). Tests about the wizard itself
+	// clear these back to null explicitly.
+	SetupSteps::markPastOnboarding($user);
 	$user->save();
 	$user->load();
 	harness_register_user($user);

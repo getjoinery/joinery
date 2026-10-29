@@ -13,6 +13,7 @@
  * nothing a node or a note said becomes a link. The only links here are the
  * plane's own pages by id.
  *
+ * @version 1.4 - a detail value that is only a path on this site is a link
  * @version 1.3 - the timeline shows a cleared incident the reconciler resolved
  * @version 1.2 - the triage badge names a fix awaiting its proof; Looking is gone; the timeline shows the
  *                reconciler putting an unproven fix back to new
@@ -318,7 +319,12 @@ class IncidentViews {
 		if (is_array($detail) && $detail) {
 			$rows = array();
 			foreach ($detail as $k => $v) {
-				$rows[(string)$k] = '<span class="svm-incident-text">' . self::e(is_scalar($v) ? $v : json_encode($v)) . '</span>';
+				$text = is_scalar($v) ? (string)$v : json_encode($v);
+				// A value that is only a path on this site (a source's 'The run',
+				// 'Where to set it') is a link; anything else stays text.
+				$rows[(string)$k] = preg_match('#^/[A-Za-z0-9_/.?=&%-]*$#', $text)
+					? '<a href="' . self::e($text) . '">' . self::e($text) . '</a>'
+					: '<span class="svm-incident-text">' . self::e($text) . '</span>';
 			}
 			$html .= '<div class="mt-3 small">' . self::facts($rows) . '</div>';
 		}

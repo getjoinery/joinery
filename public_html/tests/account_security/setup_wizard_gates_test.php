@@ -17,6 +17,8 @@
  *    which made "Add a passkey elsewhere" (the encryption step's route for a
  *    passkey that cannot derive a key) a dead end: the security page was
  *    bounced back into the wizard. The exemption list is one function.
+ *  - Someone who left the wizard is brought back once for a step never shown
+ *    to them, and walks just those steps.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -119,5 +121,67 @@ foreach (array('/', '/change-password-required', '/setup', '/profile/security') 
 check($session->navigation_gate_target('/logout') === NULL, 'and /logout is always open');
 unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
 $owe();
+
+section('A step never shown to someone who left the wizard brings it back once, at just that step');
+// Steps of this test's own, so the cases do not hang on what the real steps'
+// status is on this database.
+$sw_state = array('sw_new_user' => false, 'sw_done_user' => true, 'sw_new_site' => false, 'sw_gated' => false);
+$sw_on = false;
+$sw_status = function ($key) use (&$sw_state) {
+	return function () use (&$sw_state, $key) { return $sw_state[$key] ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE; };
+};
+$sw_keys = function (array $steps) { return array_map(function ($st) { return $st['key']; }, $steps); };
+$sw_user = make_user('SetupSeen', 0);
+check(SetupSteps::leftWizard($sw_user) && !SetupSteps::unseenSteps($sw_user, 0),
+	'a fixture has left the wizard and seen every step there is');
+
+SetupSteps::register('sw_new_user', array('title' => 'New user step', 'scope' => 'user', 'order' => 991, 'status' => $sw_status('sw_new_user')));
+SetupSteps::register('sw_done_user', array('title' => 'Done user step', 'scope' => 'user', 'order' => 992, 'status' => $sw_status('sw_done_user')));
+SetupSteps::register('sw_new_site', array('title' => 'New site step', 'scope' => 'site', 'order' => 993, 'status' => $sw_status('sw_new_site')));
+SetupSteps::register('sw_gated', array('title' => 'Gated step', 'scope' => 'user', 'order' => 994, 'status' => $sw_status('sw_gated'),
+	'active' => function () use (&$sw_on) { return $sw_on; }));
+
+check($sw_keys(SetupSteps::unseenSteps($sw_user, 0)) === array('sw_new_user'),
+	'a step added since they left, not done, is unseen; one already done and a site step for a member are not',
+	json_encode($sw_keys(SetupSteps::unseenSteps($sw_user, 0))));
+check(in_array('sw_new_site', $sw_keys(SetupSteps::unseenSteps($sw_user, 10)), true),
+	'the site step becomes unseen once they are an owner (a promotion)');
+$sw_on = true;
+check(in_array('sw_gated', $sw_keys(SetupSteps::unseenSteps($sw_user, 0)), true),
+	'a step whose feature is switched on is unseen');
+$sw_on = false;
+
+$_SESSION['usr_user_id'] = (int)$sw_user->key;
+$_SESSION['loggedin'] = true;
+$_SESSION['permission'] = 0;
+SetupSteps::resetViewer();
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array(), 'GET');
+check($res->redirect === null && ($res->data['current_key'] ?? '') === 'sw_new_user' && (int)($res->data['total'] ?? 0) === 1,
+	'the wizard opens at the unseen step, as a walk of one step',
+	'redirect: ' . var_export($res->redirect, true) . ' current: ' . var_export($res->data['current_key'] ?? null, true)
+	. ' total: ' . var_export($res->data['total'] ?? null, true));
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array('step' => 'sw_done_user'), 'GET');
+check(($res->data['current_key'] ?? '') === 'sw_done_user' && (int)($res->data['total'] ?? 0) > 1,
+	'a step asked for by name opens in the whole walk',
+	'current: ' . var_export($res->data['current_key'] ?? null, true));
+
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array('action' => 'leave'), 'POST');
+$sw_user->load();
+SetupSteps::resetViewer();
+check($res->redirect === '/' && !SetupSteps::unseenSteps($sw_user, 0),
+	'leaving records it as seen: it does not bring the wizard back again, though it is still not done',
+	'unseen: ' . json_encode($sw_keys(SetupSteps::unseenSteps($sw_user, 0))));
+
+$sw_user->set('usr_setup_seen_steps', null);
+$sw_user->save();
+$sw_user->load();
+check(in_array('sw_new_user', $sw_keys(SetupSteps::unseenSteps($sw_user, 0)), true)
+	&& !in_array('sw_done_user', $sw_keys(SetupSteps::unseenSteps($sw_user, 0)), true),
+	'an account that left before the record existed has seen nothing: every step not done is unseen once');
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic', array('action' => 'dismiss', 'understand' => '1'), 'POST');
+$sw_user->load();
+check(!SetupSteps::unseenSteps($sw_user, 0), 'Finish later records what was shown as well');
+unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
+SetupSteps::resetViewer();
 
 harness_finish();

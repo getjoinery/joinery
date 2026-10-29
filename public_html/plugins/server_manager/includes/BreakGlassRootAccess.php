@@ -15,6 +15,7 @@
  * kept password: it is sealed to the holder's vault, not under SecretBox,
  * whose key sits in the config.
  *
+ * @version 1.3 - holder_unfit_reason() names a missing vault and a missing second factor together, and where the vault is set up
  * @version 1.2 - confirm_first_url(): where the holder confirms their second factor before Reveal or Retire, so a click is
  *                never spent on the confirmation and lost
  * @version 1.1 - break_glass_root_login_off: a machine whose root login its own agent turned off (disable_root_login,
@@ -57,14 +58,16 @@ class BreakGlassRootAccess {
 		if (!$user->key || $user->get('usr_delete_time')) {
 			return "the holder (user #{$user_id}) does not exist";
 		}
+		// Both said at once, so fixing one does not uncover the other.
+		$missing = array();
 		$vault = UserEncryptionVault::loadForUser($user_id, UserEncryptionVault::SCOPE_USER);
 		if (!$vault || !$vault->key) {
-			return 'the holder (' . $user->display_name() . ') has no vault';
+			$missing[] = 'no vault (set one up under Profile > Security on this site)';
 		}
 		if (!SessionControl::get_instance()->user_has_second_factor($user)) {
-			return 'the holder (' . $user->display_name() . ') has no second factor';
+			$missing[] = 'no second factor';
 		}
-		return null;
+		return $missing ? 'the holder (' . $user->display_name() . ') has ' . implode(' and ', $missing) : null;
 	}
 
 	/**

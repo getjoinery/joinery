@@ -446,6 +446,10 @@
                             return String(a.pkc_create_time || '').localeCompare(String(b.pkc_create_time || ''));
                         });
                         credentialCount = credentials.length;
+                        // The vault panel offers setup only to an account with a
+                        // passkey to wrap the key under; it reads the count here.
+                        window.joineryPasskeyCount = credentials.length;
+                        document.dispatchEvent(new CustomEvent('joinery:passkeys-loaded', { detail: { count: credentials.length } }));
                         var activeIds = vaultActiveIds();
                         document.getElementById('passkeys-vault-th').classList.toggle('d-none', !vaultStatus);
                         tableBody.innerHTML = '';
@@ -752,6 +756,7 @@
 
                 <div id="vault-not-set-up">
                     <p>Seal your mail and chat content so it's readable only when you unlock it with a passkey or a recovery code.</p>
+                    <p class="d-none" id="vault-needs-passkey"><strong>Add a passkey first.</strong> Your vault opens with a passkey, so set one up under Passkeys above; you can then set up your vault here.</p>
                     <button type="button" class="btn btn-primary" id="vault-setup-btn">Set Up Your Vault</button>
                 </div>
 
@@ -852,6 +857,15 @@ $pac_writer->end_form();
                 }
                 var codesPre = document.getElementById('vault-codes-pre');
                 var lastKeyFile = null;
+
+                // Setup wraps the key under a passkey: with none enrolled, say
+                // so in place of a button that could only fail.
+                function applyPasskeyGate(count) {
+                    document.getElementById('vault-needs-passkey').classList.toggle('d-none', count > 0);
+                    document.getElementById('vault-setup-btn').classList.toggle('d-none', count === 0);
+                }
+                document.addEventListener('joinery:passkeys-loaded', function (e) { applyPasskeyGate(e.detail.count); });
+                if (typeof window.joineryPasskeyCount === 'number') { applyPasskeyGate(window.joineryPasskeyCount); }
 
                 function apiFetch(url, options) {
                     options = options || {};

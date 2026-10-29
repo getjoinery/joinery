@@ -6,6 +6,8 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.17 - leaving (Finish later, Go to your site) records the steps shown (usr_setup_seen_steps); someone
+ *                 who left and has a step never shown to them walks just those steps (SetupSteps::unseenSteps)
  * @version 2.16 - the final checklist releases the login interrupt for the rest of the session, so an owner who
  *                 leaves it by a link rather than "Go to your site" is not sent back; "Go to your site" goes to
  *                 the site's home page (specs/easy_signup_completion.md WP6)
@@ -109,6 +111,17 @@ function setup_logic(array $input): LogicResult {
 	if (!$steps) {
 		return LogicResult::redirect('/');
 	}
+	// Someone who left the wizard and is back for steps never shown to them
+	// walks just those, unless they asked for another step by name (the
+	// header pill, a link from a page that needs one).
+	if (SetupSteps::leftWizard($viewer)) {
+		$unseen = SetupSteps::unseenSteps($viewer, $permission);
+		$unseen_keys = array_map(function ($s) { return $s['key']; }, $unseen);
+		$asked = (string)($input['step'] ?? ($input['step_key'] ?? ''));
+		if ($unseen && ($asked === '' || $asked === 'done' || in_array($asked, $unseen_keys, true))) {
+			$steps = $unseen;
+		}
+	}
 
 	$error = '';
 	// Every action here is a button (POST); opening a step is a GET and changes
@@ -134,6 +147,7 @@ function setup_logic(array $input): LogicResult {
 			$error = 'Check "I understand" to finish later.';
 		} else {
 			$viewer->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
+			SetupSteps::recordSeen($viewer, $permission);
 			$viewer->save();
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect(Access::permits(10, $session) ? '/admin' : '/profile');
@@ -146,9 +160,10 @@ function setup_logic(array $input): LogicResult {
 	if ($action === 'leave') {
 		if (!$viewer->get('usr_setup_reviewed_time')) {
 			$viewer->set('usr_setup_reviewed_time', gmdate('Y-m-d H:i:s'));
-			$viewer->save();
-			SetupSteps::invalidateSessionCache();
 		}
+		SetupSteps::recordSeen($viewer, $permission);
+		$viewer->save();
+		SetupSteps::invalidateSessionCache();
 		return LogicResult::redirect('/');
 	}
 
