@@ -172,7 +172,7 @@ function admin_event_logic(array $input): LogicResult {
 			$options['altlinks']['Email Registrants'] = '/plugins/event_manager/admin/admin_event_emails?evt_event_id='.$event->key;
 		}
 		if($event->can_delete(SessionControl::get_instance())) {
-			$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'delete', 'evt_event_id' => $event->key));
+			$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'delete', 'evt_event_id' => $event->key), 'confirm' => 'Delete this event? You can undelete it later.');
 		}
 	}
 	else {

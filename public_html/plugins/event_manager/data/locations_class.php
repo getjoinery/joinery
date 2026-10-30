@@ -65,7 +65,7 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			// This save's own rule first: the version below is its bookkeeping.
 			$this->guard_raw_write('write');
-			ContentVersion::NewVersion(ContentVersion::TYPE_LOCATION, $this->key, $this->get('loc_description'), $this->get('loc_name'), $this->get('loc_name'));
+			ContentVersion::NewVersion(ContentVersion::TYPE_LOCATION, $this->key, $this->access_stored('loc_description'), $this->access_stored('loc_name'), $this->access_stored('loc_name'));
 		}
 		parent::save($debug);
 	}

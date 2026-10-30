@@ -72,14 +72,11 @@
 	}
 
 	$title = $item->get('itm_name');
-	$content = $item->get('itm_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($_GET['cvn_content_version_id'])){
-		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
-		$content_version->assert_found();
-		$content = $content_version->get('cvn_content');
-		$title = $content_version->get('cvn_title');
+		ContentVersion::show_in_record($_GET['cvn_content_version_id'], $item, ContentVersion::TYPE_ITEM, 'itm_body', 'itm_name');
 	}
+	$content = $item->get('itm_body');
 
 	$page = new AdminPage();
 	$page->admin_header(

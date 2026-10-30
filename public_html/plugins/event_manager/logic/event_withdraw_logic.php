@@ -60,6 +60,10 @@ function event_withdraw_logic(array $input): LogicResult {
 	// GET request — load data for the confirmation form
 	if (EventRegistrant::check_if_exists($evr_event_registrant_id)) {
 		$event_registrant = new EventRegistrant($evr_event_registrant_id, true);
+		// Only someone who may withdraw it is shown the confirmation (the POST
+		// asks the same): another member's registration is not theirs to see.
+		$session->check_permission(0);
+		$event_registrant->assert_can_write($session);
 		$user = new User($event_registrant->get('evr_usr_user_id'), TRUE);
 		$event = new Event($event_registrant->get('evr_evt_event_id'), true);
 		$page_vars['event_registrant'] = $event_registrant;

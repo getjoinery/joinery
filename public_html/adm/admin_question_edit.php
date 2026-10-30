@@ -127,9 +127,9 @@
 
 	$formwriter->checkboxlist('validation_options', 'Validation options', [
 		'options' => [
-			'Required' => 'required',
-			'Integer (Example: 5)' => 'integer',
-			'Decimal (Example: 5.5)' => 'decimal'
+			'required' => 'Required',
+			'integer' => 'Integer (Example: 5)',
+			'decimal' => 'Decimal (Example: 5.5)'
 		],
 		'checked' => $checked_vals
 	]);

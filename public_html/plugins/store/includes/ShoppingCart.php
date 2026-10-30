@@ -300,9 +300,13 @@ class ShoppingCart {
 					'Sorry, the cart may contain only one subscription, and it cannot be mixed with other items.  Remove the other items or the subscription or check out with those first. <a href="/cart">Return to the cart</a>');
 		}
 
-		// Ensure Stripe price ID exists if Stripe is enabled
+		// Ensure Stripe price ID exists if Stripe is enabled. A free one-time
+		// item is never charged (a free order completes without a gateway), so
+		// it needs no Stripe price and adds even where Stripe is not set up.
 		$checkout_type = $settings->get_setting('checkout_type');
-		if ($checkout_type == 'stripe_regular' || $checkout_type == 'stripe_checkout') {
+		$is_free_one_time = !$product_version->is_subscription()
+			&& (int)round((float)$product->get_price($product_version, $form_data) * 100) === 0;
+		if (($checkout_type == 'stripe_regular' || $checkout_type == 'stripe_checkout') && !$is_free_one_time) {
 			$stripe_helper = new StripeHelper();
 			try {
 				$stripe_helper->get_or_create_price($product_version);

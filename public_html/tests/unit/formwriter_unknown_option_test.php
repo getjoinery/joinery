@@ -247,4 +247,16 @@ check(empty($offenders),
 	'every option key handed to a field method is one the writer reads',
 	empty($offenders) ? 'clean' : implode(' | ', array_slice(array_unique($offenders), 0, 8)));
 
+section('A hidden field given its value as the second argument carries it');
+
+$hid = new FormWriterV2HTML5('fw_hidden_probe', array('deferred_output' => true));
+$hid->hiddeninput('cmt_comment_id_parent', 42);
+$hid->hiddeninput('product_id', '', array('value' => 7));
+$hid->hiddeninput('action', array('value' => 'save'));
+$hidden_html = $hid->getFieldsHTML();
+check(preg_match('/name="cmt_comment_id_parent"[^>]*value="42"|value="42"[^>]*name="cmt_comment_id_parent"/', $hidden_html) === 1,
+	'hiddeninput(name, value) sends the value', $hidden_html);
+check(strpos($hidden_html, 'value="7"') !== false && strpos($hidden_html, 'value="save"') !== false,
+	'the options and legacy array forms still work', $hidden_html);
+
 harness_finish();

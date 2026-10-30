@@ -106,5 +106,9 @@ section('A user in no group renders no button and no warning');
 list($html, $warnings) = $render($loner);
 check($warnings === array(), 'no warning', implode('; ', $warnings));
 check(strpos($html, 'grm_group_member_id') === false, 'no Remove button');
+// An empty answer stays empty when it is counted or iterated: it is never
+// every group on the site (which also emptied the page's Add-to-group list).
+check(count(Group::get_groups_for_member($loner->key, 'user', false, 'objects')) === 0, 'the group list is empty');
+check(Group::get_groups_for_member($loner->key, 'user', false, 'ids') === array(), 'and so is the id list');
 
 harness_finish();

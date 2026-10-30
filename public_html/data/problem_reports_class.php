@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.3.0 - an error in a command-line script kept outside the site (an ad-hoc script in /tmp) is never reported automatically (fromOutsideScript())
  * @version 1.2.0 - an error a test caused is never reported automatically (fromTest())
  * @version 1.1.1 - no save() override: an update writes only the columns it set, so a recurrence counted meanwhile is never put back
  * @version 1.1.0 - automatic reports: noteError(), counts, and the count update on send
@@ -348,6 +349,27 @@ class ProblemReport extends SystemBase {
 		return defined('JOINERY_HARNESS_LOADED') || self::requestMarkedAsTest($_SERVER);
 	}
 
+	/**
+	 * Whether the failing process is a command-line script that lives outside
+	 * the site's directory: someone's throwaway script that loads the site's
+	 * classes. Its error is in that script, not in the site, and the person
+	 * running it sees it on their terminal. The site's own scripts (cron,
+	 * maintenance_scripts, utils) live inside the site and still report.
+	 */
+	public static function fromOutsideScript(string $sapi = PHP_SAPI, ?string $script = null, ?string $site_root = null): bool {
+		if ($sapi !== 'cli') {
+			return false;
+		}
+		$script = $script ?? (string)($_SERVER['SCRIPT_FILENAME'] ?? '');
+		$site_root = $site_root ?? dirname(__DIR__, 2);
+		$real_script = $script !== '' ? realpath($script) : false;
+		$real_root = realpath($site_root);
+		if ($real_script === false || $real_root === false) {
+			return false;
+		}
+		return strpos($real_script, rtrim($real_root, '/') . '/') !== 0;
+	}
+
 	/** Whether a request ($_SERVER's shape) carries the harness's header and came from this machine. */
 	public static function requestMarkedAsTest(array $server): bool {
 		if (empty($server[self::TEST_HEADER])) {
@@ -395,7 +417,8 @@ class ProblemReport extends SystemBase {
 		self::$noting = true;
 		try {
 			if (!self::autoSendEnabled() || !self::sendingEnabled() || !self::isUnexpected($e)
-					|| (self::fromTest() && !self::$note_test_errors)) {
+					|| (self::fromTest() && !self::$note_test_errors)
+					|| self::fromOutsideScript()) {
 				return;
 			}
 			$row = new GeneralError($error_id, TRUE);

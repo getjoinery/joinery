@@ -45,6 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.22.0 - a served file is named by get_name() (a renamed file's title), inline types too
  * @version 1.21.0 - a served body leaves the router's output buffers first, so a download larger than half
  *                   of memory_limit is streamed instead of dying with the request
  * @version 1.20.0 - a stored name has one extension, and only an allowed one (allowed_upload_extensions or INERT_EXTENSIONS),
@@ -1187,9 +1188,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		header('Content-Type: ' . $content_type);
 		header('X-Content-Type-Options: nosniff');
 		header('Cache-Control: ' . $cache_control);
-		if (!self::is_inline_safe_type($content_type)) {
-			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
-		}
+		header($this->content_disposition($content_type));
 		self::leave_output_buffers();
 		if ($bytes !== null) {
 			// Served through a decrypt hook: the plaintext is produced in memory
@@ -1278,6 +1277,23 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * a failure is a clean 423/416/404 rather than a half-written 200. Once
 	 * headers are out, the only remaining work is decrypt-and-echo.
 	 */
+	/**
+	 * The Content-Disposition header a served file carries: saved under the
+	 * name the owner sees (a renamed file's title, keeping the stored file's
+	 * extension), never the stored name with its uniqueness suffix; inline for
+	 * a type safe to show, otherwise a download.
+	 */
+	private function content_disposition($content_type) {
+		$shown = basename(str_replace('\\', '/', (string)$this->get_name()));
+		$stored_ext = pathinfo((string)$this->get('fil_name'), PATHINFO_EXTENSION);
+		if ($stored_ext !== '' && strcasecmp(pathinfo($shown, PATHINFO_EXTENSION), $stored_ext) !== 0) {
+			$shown .= '.' . $stored_ext;
+		}
+		$ascii = preg_replace('/[^A-Za-z0-9 ._()-]/', '_', $shown);
+		return 'Content-Disposition: ' . (self::is_inline_safe_type($content_type) ? 'inline' : 'attachment')
+			. '; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($shown);
+	}
+
 	private function _serve_streaming_decrypt(FileStreamingDecryptor $streamer, $path, $cache_control) {
 		try {
 			$streamer->prepare($path);
@@ -1308,7 +1324,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		header('X-Content-Type-Options: nosniff');
 		header('Cache-Control: ' . $cache_control);
 		if (!self::is_inline_safe_type($content_type)) {
-			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
+			header($this->content_disposition($content_type));
 		}
 		header('Accept-Ranges: bytes');
 

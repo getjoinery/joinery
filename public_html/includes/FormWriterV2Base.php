@@ -7,6 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.31.3 - hiddeninput: a plain second argument is the value (it was dropped, sending the field empty)
+ * @version 2.31.2 - the validator's own debug follows the 'debug' option too (it was always on)
  * @version 2.31.1 - validation details reach the browser console only with the 'debug' option; the uploader's debug logs are gone
  * @version 2.31.0 - a passed model's rules: hidden columns are not emitted, locked ones are disabled, a row the reader may not change is read-only with a note
  * @version 2.30.0 - validateWhenChanged(): the browser checks a field only once its value changes
@@ -1148,6 +1150,12 @@ abstract class FormWriterV2Base {
         if (is_array($label)) {
             $options = $label;
             $label = '';
+        }
+        // A hidden field shows no label, so a plain second argument can only be
+        // meant as its value (hiddeninput('id', $obj->key)); dropping it sent
+        // the field empty.
+        if ($label !== '' && $label !== null && !array_key_exists('value', $options)) {
+            $options['value'] = $label;
         }
         if (isset($this->hidden_columns[$name])) return;
         $this->registerField($name, 'hidden', '', $options);
@@ -3240,7 +3248,7 @@ abstract class FormWriterV2Base {
         if (!empty($this->options['error_summary_title'])) {
             echo '            errorSummaryTitle: ' . json_encode($this->options['error_summary_title'], JSON_UNESCAPED_SLASHES) . ',';
         }
-        echo '            debug: true';  // Always enable debug
+        echo '            debug: ' . ($debug ? 'true' : 'false');
         echo '        });';
         // Expose the instance so page JS can take over submission (set
         // validator.submitHandler) — the validator otherwise re-submits the

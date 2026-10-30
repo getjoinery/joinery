@@ -85,7 +85,7 @@ function prepare() {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			// This save's own rule first: the version below is its bookkeeping.
 			$this->guard_raw_write('write');
-			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));			
+			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->access_stored('pst_body'), $this->access_stored('pst_title'), $this->access_stored('pst_title'));			
 			$q = DbConnector::get_instance()->get_db_link()->prepare(
 				'SELECT pst_published_time IS NOT NULL AND pst_delete_time IS NULL FROM pst_posts WHERE pst_post_id = ?');
 			$q->execute(array((int)$this->key));
@@ -227,7 +227,7 @@ class MultiPost extends SystemMultiBase {
 		);
 		$group_members->load();
 
-		$posts = new MultiPost;
+		$posts = new MultiPost(NULL); // hand-built: a tag with no shown posts lists none, never every post
 		foreach ($group_members as $group_member){
 			$post = new Post($group_member->get('grm_foreign_key_id'), TRUE);
 			if(!$post->get('pst_delete_time') && $post->get('pst_is_on_homepage') && $post->get('pst_published_time')){ 

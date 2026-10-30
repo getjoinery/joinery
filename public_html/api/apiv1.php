@@ -794,6 +794,8 @@ if (in_array($operation, $classes)) {
 			null, ['model' => $class_name, 'verb' => 'update']);
 
 		parse_str($_SERVER['QUERY_STRING'], $url_parts);
+		// Re-parsing the raw query string resurrects the rewrite's __route; it is not a field.
+		unset($url_parts['__route']);
 
 		try {
 			$object = new $class_name($entity_id, TRUE);

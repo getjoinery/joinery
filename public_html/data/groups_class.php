@@ -207,7 +207,7 @@ class Group extends SystemBase {
 		}
 
 		$groups = $q->fetchAll();
-		$groups_out = new MultiGroup();
+		$groups_out = new MultiGroup(NULL); // hand-built: an empty result stays empty, never every group
 		foreach($groups as $group){
 			$group_out = new Group($group->grp_group_id , TRUE);
 			$groups_out->add($group_out);

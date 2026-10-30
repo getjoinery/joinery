@@ -22,6 +22,12 @@
 		$page = new Page(NULL);
 	}
 
+	// A chosen version shows its title in the form (a page version holds the
+	// title; its content lives in the page's components). Nothing is saved.
+	if(!empty($_GET['cvn_content_version_id'])){
+		ContentVersion::show_in_record($_GET['cvn_content_version_id'], $page, ContentVersion::TYPE_PAGE, NULL, 'pag_title');
+	}
+
 	// Only process form submission if this is a POST request
 	// GET requests (from version loading) should skip form processing
 	if($_POST && !isset($_GET['cvn_content_version_id'])){

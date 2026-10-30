@@ -213,11 +213,17 @@ class PageContent extends SystemBase {
 			// SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			// pac_config comes back decoded (an array); the version table holds text,
 			// and the component edit page json_decodes it when loading a version.
-			$config = $this->get('pac_config');
+			// The version keeps the block as it was before this save, so loading
+			// it restores the earlier content.
+			$config = $this->access_stored('pac_config');
+			if (is_string($config) && $config !== '') {
+				$decoded = json_decode($config, true);
+				$config = is_array($decoded) ? $decoded : $config;
+			}
 			if (is_array($config)) {
 				$config = $config ? json_encode($config) : null;
 			}
-			$version_content = $config ?: $this->get('pac_body');
+			$version_content = $config ?: $this->access_stored('pac_body');
 
 			// This save's own rule first: the version below is its bookkeeping.
 			$this->guard_raw_write('write');
@@ -225,8 +231,8 @@ class PageContent extends SystemBase {
 				ContentVersion::TYPE_PAGE_CONTENT,
 				$this->key,
 				$version_content,
-				$this->get('pac_title'),
-				$this->get('pac_title')
+				$this->access_stored('pac_title'),
+				$this->access_stored('pac_title')
 			);
 		}
 

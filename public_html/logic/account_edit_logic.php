@@ -57,6 +57,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$user->set('usr_first_name', trim(strip_tags(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$input['usr_first_name']))));
 			$user->set('usr_last_name', trim(strip_tags(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$input['usr_last_name']))));
 			$user->set('usr_timezone', preg_replace("/[^a-zA-Z\/_-]/", "", $input['usr_timezone']));
+			// The form shows the nickname only when the site displays one.
+			if ($page_vars['settings']->get_setting('nickname_display_as') && array_key_exists('usr_nickname', $input)) {
+				$user->set('usr_nickname', mb_substr(trim(strip_tags(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$input['usr_nickname']))), 0, 32));
+			}
 			$user->save();
 		}
 		else if(!$user = User::GetByEmail($input['usr_email'])){
@@ -201,7 +205,7 @@ function account_edit_logic_form($formwriter, $user = null, $input = []) {
 	$nickname_display = $settings->get_setting('nickname_display_as');
 	if ($nickname_display) {
 		$formwriter->textinput('usr_nickname', $nickname_display, [
-			'maxlength' => 255
+			'maxlength' => 32
 		]);
 	}
 

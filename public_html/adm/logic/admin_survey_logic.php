@@ -104,7 +104,13 @@ function admin_survey_logic(array $input): LogicResult {
         NULL
     );
     $questions->load();
-    $numquestions = $questions->count_all();
+    // A question already on this survey is not offered again.
+    if ($survey->key) {
+        foreach (new MultiSurveyQuestion(array('survey_id' => $survey->key)) as $attached) {
+            $questions->remove_by_key($attached->get('srq_qst_question_id'));
+        }
+    }
+    $numquestions = count($questions);
 
     // Return data for view
     return LogicResult::render([

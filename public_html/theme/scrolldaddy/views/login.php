@@ -7,11 +7,8 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$page_vars = process_logic(login_logic(array_merge($_GET, $_POST)));
 
 	$email = $page_vars['email'] ?? '';
-	if ($email) {
-		$forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
-	} else {
-		$forgot_link = '/password-reset-1';
-	}
+	// The typed address never goes into a link: the reset page asks for it.
+	$forgot_link = '/password-reset-1';
 
 	$page = new PublicPage();
 	$hoptions=array(
@@ -45,7 +42,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		echo $formwriter->begin_form();
 	?>
       <div class="mb-4">
-		<?php echo $formwriter->textinput('email', 'Email or username', ['maxlength' => 255, 'autocomplete' => 'username', 'value' => htmlspecialchars((string)($page_vars['email'] ?? ''))]); ?>
+		<?php echo $formwriter->textinput('email', 'Email or username', ['maxlength' => 255, 'autocomplete' => 'username', 'value' => (string)($page_vars['email'] ?? '')]); ?>
 
       </div>
       <div class="mb-4">

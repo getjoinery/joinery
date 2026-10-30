@@ -47,8 +47,14 @@ $page->admin_header([
     'header_action' => $dropdown_button,
 ]);
 
-// Count total responses (would need to query survey_answers table to get actual count)
+// Total responses: the people who answered it (each answers several questions).
 $total_responses = 0;
+if ($survey->key) {
+	$q = DbConnector::get_instance()->get_db_link()->prepare(
+		'SELECT COUNT(DISTINCT sva_usr_user_id) FROM sva_survey_answers WHERE sva_svy_survey_id = ?');
+	$q->execute(array((int)$survey->key));
+	$total_responses = (int)$q->fetchColumn();
+}
 ?>
 
 <!-- Two Column Layout -->

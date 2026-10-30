@@ -143,7 +143,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Your username or password was incorrect. Please try again, or sign up if you don\'t have an account.');
 			} else {
-				return LogicResult::redirect("/login?retry=1&e=" . rawurlencode($email));
+				// The typed address waits in the session for the retry form,
+				// never in the URL (history, access logs, referers).
+				$_SESSION['login_retry_email'] = (string)$email;
+				return LogicResult::redirect('/login?retry=1');
 			}
 		}
 
@@ -155,7 +158,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Login from this IP address (' . $client_ip . ') is not permitted for this account.');
 			} else {
-				return LogicResult::redirect("/login?retry=1&e=" . rawurlencode($email) . "&ip_blocked=1&ip=" . rawurlencode($client_ip));
+				$_SESSION['login_retry_email'] = (string)$email;
+				return LogicResult::redirect("/login?retry=1&ip_blocked=1&ip=" . rawurlencode($client_ip));
 			}
 		}
 
@@ -275,7 +279,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	$email = '';
-	if (isset($input['e'])) {
+	$retry_email = null;
+	if (isset($input['retry']) && isset($_SESSION['login_retry_email'])) {
+		$retry_email = (string)$_SESSION['login_retry_email'];
+	}
+	unset($_SESSION['login_retry_email']);
+	if ($retry_email !== null) {
+		// What this browser typed a moment ago: an email or a username.
+		$page_vars['email'] = mb_substr($retry_email, 0, 255);
+		$email = LibraryFunctions::IsValidEmail($retry_email) ? $retry_email : '';
+	}
+	else if (isset($input['e'])) {
 		$e = rawurldecode($input['e']);
 		if (LibraryFunctions::IsValidEmail($e)) {
 			$page_vars['email'] = $e;

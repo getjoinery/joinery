@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.23 - save_formfields() never keeps a password, card, token or secret field in the session
  * @version 1.22 - the terms gate asks only for terms the person owes (TermsOwed): none on a site with no
  *                 terms, none for a self-hosted site's operators, getjoinery's for a hosted site's
  * @version 1.21 - check_permission() sets its 401 with http_response_code() and throws with code 401, which
@@ -2136,7 +2137,19 @@ class SessionControl{
 			if($formname != ''){
 				$_SESSION['formname'] = $formname;
 			}
-			$_SESSION['formfields'] = serialize($_POST);
+			// Kept to refill the form after a refusal. A secret is never kept in
+			// the session: passwords, card details, tokens. The match is on the
+			// top-level field name and by substring, so a field named, say,
+			// 'passport' or 'cardholder_name' is dropped too; name such a field
+			// so it survives if a form needs it refilled.
+			$keep = array();
+			foreach ($_POST as $key => $value) {
+				if (preg_match('/pass|pwd|card|cvc|cvv|secret|token|csrf/i', (string)$key)) {
+					continue;
+				}
+				$keep[$key] = $value;
+			}
+			$_SESSION['formfields'] = serialize($keep);
 
 	}
 

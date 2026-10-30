@@ -118,7 +118,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product->set('pro_prg_product_group_id', (int)$input['pro_prg_product_group_id']);
 
 		//PRICE MUST BE INTEGER
-		if($input['pro_grp_group_id']){
+		if(!empty($input['pro_grp_group_id'])){
 			$input['pro_grp_group_id'] = (int)$input['pro_grp_group_id'];
 		}
 		else{
@@ -134,7 +134,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 		}
 
 		// Handle subscription tier ID
-		if($input['pro_sbt_subscription_tier_id']){
+		if(!empty($input['pro_sbt_subscription_tier_id'])){
 			$input['pro_sbt_subscription_tier_id'] = (int)$input['pro_sbt_subscription_tier_id'];
 		}
 		else{
@@ -143,7 +143,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 
 		//STORE THE PRODUCT SCRIPTS
 		$product->set('pro_product_scripts', NULL);
-		if(is_array($input['product_scripts'])){
+		if(is_array($input['product_scripts'] ?? null)){
 			$product->set('pro_product_scripts', implode(',', $input['product_scripts']));
 		}
 
@@ -209,9 +209,11 @@ function admin_product_edit_logic(array $input): LogicResult {
 		// Asked before Stripe is told about the product, so a refused save leaves nothing there.
 		$product->assert_can_write($session);
 
-		//IF STRIPE IS ENABLED, CREATE A PRODUCT
-		if($settings->get_setting('checkout_type') != 'none'){
-			$stripe_helper = new StripeHelper();
+		//IF STRIPE IS ENABLED, CREATE A PRODUCT. Where its keys are not set yet
+		//the product still saves: the first purchase makes the Stripe product
+		//(get_or_create_price), the same as for any product not written here.
+		$stripe_helper = ($settings->get_setting('checkout_type') != 'none') ? new StripeHelper() : null;
+		if($stripe_helper && $stripe_helper->is_initialized()){
 			try{
 				$stripe_helper->ensure_stripe_product($product);
 			}
