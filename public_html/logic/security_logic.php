@@ -254,6 +254,12 @@ function security_logic(array $input): LogicResult{
 
 		$page_vars['totp_enabled'] = true;
 		$page_vars['totp_enabled_time'] = $user->get('usr_totp_enabled_time');
+		// This path renders in place, so the factor summary read before the
+		// action must be refreshed or the panel says "Status: Off" beside
+		// "Your authenticator app is set up".
+		$page_vars['has_second_factor'] = $session->user_has_second_factor($user);
+		$page_vars['factor_summary']['active'] = $page_vars['has_second_factor'];
+		$page_vars['factor_summary']['totp'] = true;
 		$page_vars['just_enabled'] = true;
 		$page_vars['backup_codes'] = $backup_codes;
 		return LogicResult::render($page_vars);
