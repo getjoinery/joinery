@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.14 - sm_029 marks the provisioning service account as a machine account
  * @version 1.13 - sm_028 moves a send allowance still at the old 1,000 default to 2,000
  * @version 1.12 - sm_027 raises a provisioning service account sm_026 cannot find (no id setting) to 8
  * @version 1.11 - sm_020 drops sm_001's full unique index on mgn_slug: the column's partial index (unique among
@@ -813,6 +814,27 @@ return [
 				WHERE stg_name = 'server_manager_hosted_send_allowance' AND trim(stg_value) = '1000'");
 			$q->execute();
 			error_log('sm_028: ' . (int)$q->rowCount() . ' send allowance(s) moved from 1,000 to 2,000.');
+		},
+	],
+	[
+		// The provisioning service account is a machine account
+		// (machine_accounts.md): it works through its key and never signs in.
+		// The one the id setting names, and a legacy provisioning@ account that owns
+		// the configured key (sm_027's rule), are marked.
+		'id' => 'sm_029_mark_provisioning_machine_account',
+		'version' => '1.30.125',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare("UPDATE usr_users SET usr_is_machine = TRUE
+				WHERE COALESCE(usr_is_machine, FALSE) = FALSE AND usr_delete_time IS NULL
+				AND (usr_user_id = (SELECT CASE WHEN stg_value ~ '^[0-9]+$' THEN stg_value::int END FROM stg_settings
+						WHERE stg_name = 'server_manager_provisioning_service_user_id' LIMIT 1)
+					OR (usr_email ILIKE 'provisioning@%'
+						AND usr_user_id IN (SELECT apk_usr_user_id FROM apk_api_keys
+							WHERE apk_is_active AND apk_public_key = (SELECT stg_value FROM stg_settings
+								WHERE stg_name = 'server_manager_getjoinery_api_public_key' AND stg_value <> '' LIMIT 1))))");
+			$q->execute();
+			error_log('sm_029: ' . (int)$q->rowCount() . ' provisioning service account(s) marked as machine accounts.');
 		},
 	],
 ];

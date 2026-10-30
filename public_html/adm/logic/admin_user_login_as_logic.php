@@ -28,6 +28,10 @@ function admin_user_login_as_logic(array $input): LogicResult {
 	if ($user->get('usr_delete_time')) {
 		return LogicResult::error('Cannot log in as a deleted user.');
 	}
+	// Refused before the audit row: a machine account has no website session to switch into.
+	if ($user->is_machine_account()) {
+		return LogicResult::error('A machine account has no website sign-in.');
+	}
 
 	// Capture admin ID before switching session
 	$admin_user_id = $session->get_user_id();

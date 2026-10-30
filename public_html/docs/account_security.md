@@ -164,7 +164,39 @@ admin page while any admin has no second factor: it names them, offers "Enrol
 yours" to a viewer who is one of them, and offers a superadmin a one-button
 "Require one of every admin" (`/admin/admin_require_second_factor`, a POST
 that switches the setting on). It is information, never a gate, and silent
-when every admin holds a factor.
+when every admin holds a factor. Machine accounts are not counted.
+
+## Machine accounts
+
+Some accounts belong to a program, not a person: the provisioning pipeline's
+service user, or an account that exists so alerts reach a shared mailbox. Such
+an account is marked `usr_is_machine` (`User::is_machine_account()`), and then
+no door gives it a session:
+
+- **Website.** `SessionControl::store_session_variables()`, which every website
+  sign-in passes through (password, second-factor completion, passkey,
+  remember-me cookie, the native app bridge, sign-in at checkout, "Log in as
+  user"), refuses it. `validate_account_standing()` signs out a session the
+  account already holds at its next request, so marking an account ends its
+  sessions. "Log in as user" is not offered for it and refuses it before
+  writing its audit row.
+- **API.** `POST /api/v1/auth/login` refuses it with 403 after the password
+  verifies, and `ApiAuth::authenticate()` accepts only its machine keys: a
+  session key or app password it owns is refused.
+
+What keeps working: its machine API keys, its email, and its place in the
+`admins` and `superadmins` notification audiences (a machine account is not
+disabled; disabling would refuse its keys and drop it from those audiences).
+
+Since no password, passkey or app password can sign it in, a password alone
+opens nothing, so `AdminSecondFactorNotice` leaves it out and it needs no
+second factor. A password reset can still set its password; no door takes it.
+
+A superadmin (level 10) marks or unmarks an account on its edit page, never
+their own. The column is unwritable through the CRUD and AI surfaces. The
+server_manager provisioning service user is made as a machine account, and an
+existing one is marked when its credentials are set up and by migration
+`sm_029_mark_provisioning_machine_account`.
 
 ## Vault re-enrollment after an administrative reset
 

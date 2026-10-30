@@ -62,7 +62,9 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.10.0
+ * @version 1.11.0
+ * @changelog 1.11.0 - A machine account accepts only machine keys, and auth/login refuses it
+ *   (reason 'machine'; machine_accounts.md).
  * @changelog 1.10.0 - The user floor is Access::allows(): min_user_permission may be a level or
  *   class:verb, and a malformed one throws instead of reading as 0.
  * @changelog 1.9.0 - A key's address restriction compares as addresses and accepts prefixes of
@@ -266,6 +268,14 @@ class ApiAuth {
 		// re-enabled (disabling is undone, so its keys are not revoked).
 		if (!$api_user->actions_allowed()) {
 			self::auth_failure(401, 'API user is disabled', 'This account is disabled');
+		}
+
+		// A machine account works through the machine keys an admin issued it.
+		// A session key or app password comes from someone signing in, which a
+		// machine account never does; one minted before it was marked is refused.
+		if ($api_user->is_machine_account() && $api_entry->get('apk_type') !== ApiKey::TYPE_MACHINE) {
+			self::auth_failure(401, 'Non-machine key presented for a machine account',
+				'This key type is not accepted for a machine account');
 		}
 
 		// An app credential is good only while its purpose is declared: the
@@ -831,6 +841,10 @@ class ApiAuth {
 		// Said only after the password verifies, like activation below.
 		if (!$user->actions_allowed()) {
 			return array('ok' => false, 'user' => $user, 'reason' => 'disabled');
+		}
+		// A machine account holds no session: its work goes through machine keys.
+		if ($user->is_machine_account()) {
+			return array('ok' => false, 'user' => $user, 'reason' => 'machine');
 		}
 
 		$settings = Globalvars::get_instance();

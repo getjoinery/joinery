@@ -10,7 +10,8 @@
  * /admin/server_manager/provisioning_setup:
  *
  *  - writeSetting/readSetting round-trip (create + update).
- *  - setupApiCredentials: mints service user + key + settings; idempotent
+ *  - setupApiCredentials: mints service user + key + settings; idempotent; the
+ *    service user, new or adopted, is a machine account
  *    when configured; rotation retires the old key and updates settings.
  *  - The service account is found by its id: an account at the old
  *    provisioning@<host> address is adopted once only when it owns the
@@ -112,6 +113,8 @@ if (!empty($r1['api_key_id'])) $cleanup_key_ids[] = $r1['api_key_id'];
 
 check($r1['ok'] === true, 'setup reports ok');
 check(!empty($r1['api_key_id']), 'api key minted');
+check(!empty($r1['user_id']) && (new User((int)$r1['user_id'], TRUE))->is_machine_account(),
+	'the service user is a machine account');
 check(ProvisioningSetup::readSetting('server_manager_getjoinery_api_url') === ProvisioningSetup::selfApiUrl(),
 	'api url setting is self');
 $pub1 = ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key');
@@ -232,6 +235,7 @@ check(!empty($ad['adopted']) && (int)$ad['user_id'] === (int)$existing->key && e
 	'the first setup adopts it and mints nothing: the pipeline key is not stranded', $ad['message']);
 check((int)ProvisioningSetup::readSetting(ProvisioningSetup::SERVICE_USER_SETTING) === (int)$existing->key,
 	'its id is recorded');
+check((new User((int)$existing->key, TRUE))->is_machine_account(), 'the adopted account is marked a machine account');
 check((bool)(new ApiKey($live_key->key, TRUE))->get('apk_is_active')
 	&& ProvisioningSetup::readSetting('server_manager_getjoinery_api_public_key') === (string)$live_key->get('apk_public_key'),
 	'and the configured key stays live');

@@ -115,6 +115,19 @@ function admin_users_edit_logic(array $input): LogicResult {
 			$user->set('usr_permission', (int)$level);
 		}
 
+		// Machine account (machine_accounts.md): only a 10 changes it, and
+		// never on their own account, which it would sign out for good.
+		if (array_key_exists('usr_is_machine', $input)) {
+			$machine = !empty($input['usr_is_machine']);
+			if ($machine !== $user->is_machine_account()) {
+				Access::demand(10, $session);
+				if ((int)$user->key === (int)$session->get_user_id()) {
+					return LogicResult::error('You cannot make your own account a machine account.');
+				}
+				$user->set('usr_is_machine', $machine);
+			}
+		}
+
 		// Handle allowed IPs - convert newline-separated list to JSON array
 		if (isset($input['usr_allowed_ips'])) {
 			$allowed_ips_input = trim($input['usr_allowed_ips']);

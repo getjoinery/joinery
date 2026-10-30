@@ -1015,7 +1015,7 @@ fulfillment, products), **Domains** (registration) and **Cleanup** (the
 test-account cleanup). Every requirement shows a live status badge, and each
 automatable step is a one-click, idempotent action backed by
 `includes/ProvisioningSetup.php` — mint the store API service user
-(permission 8, password recovery disabled, a random `provisioning-<hex>@<host>`
+(permission 8, a machine account (no website or password sign-in; its key keeps working), password recovery disabled, a random `provisioning-<hex>@<host>`
 address; found by the id in the managed setting
 `server_manager_provisioning_service_user_id`, never by address — an account
 at the old `provisioning@<host>` address is adopted once only when it owns the

@@ -15,6 +15,8 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.11 - the service user is a machine account: made with usr_is_machine, and an existing or adopted
+ *                 one is marked by setupApiCredentials() (machine_accounts.md)
  * @version 1.10 - the API probe asks for one row with numperpage, a parameter the API has, and says why it failed
  *                 (probeApiProblem); it sent limit, which the API refuses as an unknown filter (B21)
  * @version 1.9 - the API secret counts as configured only when it opens (a dead sealed value is not set)
@@ -265,6 +267,13 @@ class ProvisioningSetup {
 				$adopted = true;
 			}
 		}
+		// The service account is a machine account: it works through its key and
+		// never signs in (machine_accounts.md). One from before the marker
+		// existed is marked here.
+		if ($user !== null && !$user->is_machine_account()) {
+			$user->set('usr_is_machine', TRUE);
+			$user->save();
+		}
 		if ($configured && !$rotate && $user !== null) {
 			return array('ok' => true, 'message' => ($adopted
 				? 'Service account ' . $user->get('usr_email') . ' (user ' . (int)$user->key . ') adopted: it owns the configured key. '
@@ -301,6 +310,7 @@ class ProvisioningSetup {
 			// Machine account: never allow password recovery into an
 			// admin-level user whose mailbox nobody reads.
 			$user->set('usr_password_recovery_disabled', TRUE);
+			$user->set('usr_is_machine', TRUE);
 			$user->save();
 			$user->load();
 			$user_created = true;

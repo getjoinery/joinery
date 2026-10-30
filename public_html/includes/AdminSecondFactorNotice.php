@@ -14,7 +14,7 @@
  * Reads stored facts only: the admin rows, their factor columns, and one
  * setting. Silent when every admin holds a factor.
  *
- * @version 1.0
+ * @version 1.1 - machine accounts are not counted (machine_accounts.md)
  */
 class AdminSecondFactorNotice {
 
@@ -33,7 +33,7 @@ class AdminSecondFactorNotice {
 	}
 
 	/**
-	 * Admins (permission 5 and above, live) with no usable second factor: no
+	 * Admins (permission 5 and above, live, not machine accounts) with no usable second factor: no
 	 * authenticator app, and no passkey while passkey sign-in is enabled.
 	 *
 	 * @return array<int, array{id:int, name:string}>
@@ -41,11 +41,13 @@ class AdminSecondFactorNotice {
 	public static function adminsWithoutSecondFactor(): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$passkeys_count = (bool)Globalvars::get_instance()->get_setting('passkeys_enabled', false, true);
-		// The platform's own accounts are not people and cannot enrol anything.
+		// The platform's own accounts are not people and cannot enrol anything,
+		// and a machine account has no sign-in for a password alone to open.
 		$sql = "SELECT usr_user_id, usr_first_name, usr_last_name, usr_email, usr_username
 			FROM usr_users
 			WHERE usr_permission >= 5 AND usr_delete_time IS NULL
 			  AND usr_user_id NOT IN (" . (int)User::USER_SYSTEM . ", " . (int)User::USER_DELETED . ")
+			  AND COALESCE(usr_is_machine, FALSE) = FALSE
 			  AND COALESCE(usr_is_disabled, FALSE) = FALSE
 			  AND usr_totp_enabled_time IS NULL";
 		if ($passkeys_count) {

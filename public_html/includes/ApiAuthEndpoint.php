@@ -22,7 +22,8 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.8.0
+ * @version 1.9.0
+ * @changelog 1.9.0 - auth/login refuses a machine account with 403 (machine_accounts.md)
  * @changelog 1.8.0 - login and device_link write as the server (server_initiated_write): the proved credential is the authority
  * @changelog 1.7.0 - auth/login refuses a disabled account with 403 and the web login's words
  * @changelog 1.6.0 - the device-link poll is a POST: the approved answer hands over a
@@ -141,6 +142,16 @@ class ApiAuthEndpoint {
 				]);
 				api_error('This account is currently de-activated.  Please contact us to resolve the situation.',
 					'AuthenticationError', 403);
+			}
+			// A machine account has no password sign-in, here or on the website.
+			if (($result['reason'] ?? '') === 'machine') {
+				RequestLogger::log('api_auth', 'auth/login', false, [
+					'user_id' => $result['user']->key,
+					'status_code' => 403,
+					'error_type' => 'AuthenticationError',
+					'note' => 'Machine account'
+				]);
+				api_error('This is a machine account. It has no password sign-in.', 'AuthenticationError', 403);
 			}
 			// Valid credentials on an unactivated account (activation_required_login
 			// on): refused with the reason, matching the web login door. The

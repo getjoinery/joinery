@@ -79,6 +79,12 @@ if(Access::permits(10, $session)){
 	$formwriter->dropinput('usr_permission', 'Permission level', [
 		'options' => $optionvals
 	]);
+	if ((int)$user->key !== (int)$session->get_user_id()) {
+		$formwriter->dropinput('usr_is_machine', 'Machine account', [
+			'options' => array(0 => 'No', 1 => 'Yes'),
+			'helptext' => 'Machine accounts never sign in on the website or with a password. Their machine API keys and email keep working.',
+		]);
+	}
 }
 
 // IP restriction field - convert JSON array to newline-separated list for display
