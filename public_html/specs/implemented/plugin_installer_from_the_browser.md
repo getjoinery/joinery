@@ -1,5 +1,20 @@
 # Plugin Installers From the Browser
 
+**Status:** Built 2026-10-29 (D1–D5, docs, tests). Verified on dev (localdev): `plugin_installer_request` gate 34/34, `provisioning_refused` 33/33, `root_request` 120/120, `vault_health` 108/108, `host_converger` 135/135, the safe `--changed` run 50/50. In the browser, persona_browser's Run setup again queued a request, the converger carried it out as root, the panel showed Done with the transcript, and the record moved to the new run. The Mailbox checks (Run setup again restarting Postfix once, and the unmet-check button with Postfix stopped) need a box whose mailbox package verifies, and are in the live verification queue under this spec's name.
+
+Where the build departs from the design below:
+- **office_editor** also declared `script`; it now declares `fixed_by_installer` (0.1.5). Without it its check would report `error`.
+- **Mailbox's spam scanner messages** (`InboundEmailHealth`) named `sudo bash …provision_spam_scanner.sh install`; they point at Run setup again, and `MailboxSpamPolicy::installCommand()` is gone.
+- **The kind list** held thirteen kinds, not nine; it holds fourteen.
+- **The page renders the status line server-side** (a file read per plugin), and the button reloads the page at `?installer_request=ID`, where the existing root-request panel shows it. `plugin_provisioning_check` carries `installer_status` and `actor_state` as D4 says.
+- **D5 names only plugins whose outcome fails a run** (`failed`, `refused-untrusted`). An unsigned plugin is skipped on every run without the runner recording a failure, so naming it blamed it for a core installer's failure (seen on localdev).
+- **An outcome `inactive`** (switched off since the pass began) maps to exit 2 and writes no record.
+
+Reviewed by reviewer2 2026-10-29; every finding taken:
+- **B1** A failed request overwrote the run's `installer-failed` with `request-failed`, so the D5 notice vanished exactly when Run setup again hit a failing installer. `request-failed` now only replaces a clean `converged`.
+- **B2** `fix_permissions.sh`'s data-set sweep handed `cache/plugin_installers`, `logs/plugin_installers` and `logs/root_requests` back to www-data 770 between converges, so the web user could plant a link at a name root writes through. The three directories are pinned out of the sweep (fix_permissions 4.11); the runner takes them back to root:www-data 750 and removes each file before writing it. `logs/root_requests` had the same hole before this work. The gate checks that a planted link is not followed.
+- **B3** `HostConvergerNotice::facts()` read every plugin's record on every admin page; it reads them only when the run reported a failed or refused installer. The Plugins page reads the root actor once.
+
 ## The problem in plain terms
 
 Some plugins need software on the server itself. The Mailbox plugin, for example, needs Postfix and rspamd. On most boxes this already happens with no shell: the host converger (a root timer every install leaves behind) notices when a plugin is turned on and runs that plugin's installer within a minute.

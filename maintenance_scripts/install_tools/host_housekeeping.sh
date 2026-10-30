@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.34 - A developer's box (config/tree_owner names the account the tree belongs to, not root) does
+#                not install the hourly security check and does not count it a failure; the exemption
+#                read the release signing key, which only the publishing box holds, so a workstation
+#                serving its working tree failed every converge
 # Version: 1.33 - joinery-remoteip.conf tells PHP whether the connection came from a proxy it trusts
 #                (JOINERY_FORWARDER_KNOWN / JOINERY_FORWARDER_TRUSTED), so a client's own X-Forwarded-Proto
 #                is no longer believed (LibraryFunctions::forwarded_headers_trusted())
@@ -1180,19 +1184,39 @@ fi
 # afternoon was not known of until the next morning. Written where it
 # differs; a tree that is not root's alone is refused, as for 10c.
 #
-# The publishing box is the one machine whose tree is its developers', not
-# root's alone, and it holds the release signing key. The check is not
+# A developer's box is the one machine whose tree is deliberately not root's
+# alone: its root-written config/tree_owner (fix_permissions.sh) names a
+# developer's account, and the tree is that account's. The publishing box is
+# one, and so is a workstation that serves the working tree. The check is not
 # installed there, and that is said, not counted as a failure: failing every
-# run on it hid every other failure on that box (B24). Anywhere else a tree
-# that is not root's alone still fails: a site on a host that refuses unsigned
-# code has a root-owned tree, and a machine run from the bundle has no key.
+# run hid every other failure on the box (B24, and localdev on 2026-10-29).
+# Anywhere else a tree that is not root's alone still fails: a node's record
+# names root, a site on a host that refuses unsigned code has a root-owned
+# tree whatever the record says, and a tree that drifted from its record is
+# not the developer's.
 SCK="${SCRIPT_DIR}/../sysadmin_tools/security_check.sh"
-sck_publishing_box() {
-    [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] || return 1
-    [[ "$(stat -L -c %u "$(dirname "${SCK}")" 2>/dev/null)" != 0 ]]
+sck_developer_tree() {
+    if [[ -f "${SCRIPT_DIR}/_host_restrictions.sh" ]]; then
+        # shellcheck source=_host_restrictions.sh
+        . "${SCRIPT_DIR}/_host_restrictions.sh"
+        host_restriction_on "${SITE_ROOT}/public_html" unsigned_packages && return 1
+    fi
+    # The publishing box holds the release signing key in a tree that is not
+    # root's, whatever its record says.
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] \
+            && [[ "$(stat -L -c %u "$(dirname "${SCK}")" 2>/dev/null)" != 0 ]]; then
+        return 0
+    fi
+    [[ -f "${SCRIPT_DIR}/_tree_trust.sh" ]] || return 1
+    # shellcheck source=_tree_trust.sh
+    . "${SCRIPT_DIR}/_tree_trust.sh"
+    local owner
+    owner="$(joinery_tree_owner_record "${SITE_ROOT}" 2>/dev/null)" || return 1
+    [[ -n "${owner}" && "${owner}" != root ]] || return 1
+    [[ "$(stat -L -c %U "$(dirname "${SCK}")" 2>/dev/null)" == "${owner}" ]]
 }
-if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]] && sck_publishing_box; then
-    say "the hourly security check is not installed: this is the publishing box, whose tree is its developers', and a root timer will not run from it"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]] && sck_developer_tree; then
+    say "the hourly security check is not installed: this is a developer's box, whose tree is $(stat -L -c %U "$(dirname "${SCK}")" 2>/dev/null)'s by its record, and a root timer will not run from it"
 elif [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
     if SCK_OUT="$(bash "${SCK}" install 2>&1)"; then
         printf '%s\n' "${SCK_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'

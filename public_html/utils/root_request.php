@@ -24,6 +24,8 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.8 - run_plugin_installer is refused here: the host converger carries it out itself, and a
+ *                runner older than the tree would otherwise report it done with nothing run
  * @version 1.7 - remove_plugin: a directory already gone is done, not refused, as a retried request is (B22)
  * @version 1.6 - data_root_encrypt passes --no-tpm2 when the request says tpm2 'off', and data_root_tpm2_off takes
  *                the TPM2 chip's slot away (B43). Only the stricter way is read from a request: the queue is the
@@ -332,6 +334,15 @@ switch ($kind) {
 		$count = PluginRemoval::remove($name, $plugins_dir);
 		echo "removed plugins/$name ($count files and directories)\n";
 		exit(0);
+
+	case 'run_plugin_installer':
+		// The runner carries this kind out in its own request loop
+		// (plugin_installer_from_the_browser.md D1). A second runner
+		// started from here would wait on the first one's lock and exit 0
+		// with nothing run, so reaching this case means the runner is older
+		// than the tree, and it says so instead of claiming success.
+		fwrite(STDERR, "root_request: this kind is carried out by the host converger itself; this runner is older than the tree\n");
+		exit(2);
 
 	case 'data_root_tpm2_off': {
 		// The TPM2 chip no longer opens the data root (B43): each boot asks

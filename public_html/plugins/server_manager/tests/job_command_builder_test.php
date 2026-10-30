@@ -2665,8 +2665,37 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 	}
 	check(!array_key_exists('sshd', JobCommandBuilder::UNIT_JOURNAL_UNITS),
 		'sshd is not on the list: that journal is who connected and from where, which host_report counts and refuses to quote');
-	check(count(JobCommandBuilder::UNIT_JOURNAL_UNITS) === 13 && array_key_exists('joinery-mail-gateway', JobCommandBuilder::UNIT_JOURNAL_UNITS),
-		'the mirrored list is the twelve units disk_headroom_and_unit_diagnosis.md names, plus the mail apps gateway (mail_apps_plugin.md, Running the gateway)');
+	check(count(JobCommandBuilder::UNIT_JOURNAL_UNITS) === 14 && array_key_exists('joinery-mail-gateway', JobCommandBuilder::UNIT_JOURNAL_UNITS)
+		&& array_key_exists('joinery-host-converger', JobCommandBuilder::UNIT_JOURNAL_UNITS),
+		'the mirrored list is the twelve units disk_headroom_and_unit_diagnosis.md names, the mail apps gateway (mail_apps_plugin.md, Running the gateway) and the host converger');
+
+	// The converger is a per-value floor: an agent before it refuses the
+	// value, so the plane neither offers it nor sends it.
+	$old_agent = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
+		'mgn_agent_version'    => '1.96.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
+		'mgn_agent_log_access' => 'on',
+	));
+	$new_agent = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+		'mgn_agent_version'    => JobCommandBuilder::UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION,
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
+		'mgn_agent_log_access' => 'on',
+	));
+	check(!array_key_exists('joinery-host-converger', JobCommandBuilder::unit_journal_units_for($old_agent))
+		&& array_key_exists('joinery-host-converger', JobCommandBuilder::unit_journal_units_for($new_agent)),
+		'the converger is offered only to an agent at UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION or newer');
+	$msg = '';
+	try { JobCommandBuilder::build_unit_journal($old_agent, 'joinery-host-converger', 50); } catch (Exception $e) { $msg = $e->getMessage(); }
+	check(strpos($msg, JobCommandBuilder::UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION . ' or newer') !== false,
+		'an older agent is refused on the plane with the version it needs', $msg);
+	$msg = '';
+	try { JobCommandBuilder::build_reset_failed_unit($old_agent, 'joinery-host-converger'); } catch (Exception $e) { $msg = $e->getMessage(); }
+	check(strpos($msg, 'or newer') !== false, 'and so is clearing it', $msg);
+	check(JobCommandBuilder::build_unit_journal($new_agent, 'joinery-host-converger', 50)
+		=== array('primitive' => 'unit_journal', 'params' => array('unit' => 'joinery-host-converger', 'lines' => 50)),
+		'a new enough agent is asked for the converger\'s journal');
 
 	$built = JobCommandBuilder::build_disk_usage($ask_node);
 	check($built === array('primitive' => 'disk_usage', 'params' => array()),

@@ -29,6 +29,7 @@
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
+ * @version 2.2 - the scanner check declares fixed_by_installer; the relay check names no script
  * @version 2.1 - senderDomainDisowns(): which auth filings no allow rule lifts
  * @version 2.0 - the verdict order of spam learning in core; the ingest re-scan tests are gone
  * @version 1.5
@@ -334,8 +335,11 @@ class SpamFilteringTest {
 		foreach (($manifest['provisioners'] ?? array()) as $p) {
 			$prov[(string)($p['key'] ?? '')] = $p;
 		}
-		$this->eq('provisioning/provision_spam_scanner.sh', $prov['content_spam_scanner']['script'] ?? null,
-			'the scanner health entry\'s fix is the scanner provisioner');
+		check(($prov['content_spam_scanner']['fixed_by_installer'] ?? null) === true
+			&& !isset($prov['content_spam_scanner']['script']),
+			'the scanner health entry is fixed by the plugin\'s own installer, never a script of its own');
+		check(!isset($prov['relay_reachable']['script']) && empty($prov['relay_reachable']['fixed_by_installer']),
+			'the relay check offers no installer: a relay is fixed from the mailbox Setup tab, not on this box (B1)');
 		check(stripos((string)($prov['content_spam_scanner']['details'] ?? ''), 'redis') === false,
 			'and its text names rspamd only');
 	}

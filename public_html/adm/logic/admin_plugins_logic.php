@@ -4,6 +4,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.7 - `installer_status`: each active plugin's last host installer run, and ?installer_request=
+ *                shows a Run setup again request's panel (plugin_installer_from_the_browser.md)
  * @version 1.6 - Sync counts only the plugin migrations that applied; a failed or deferred one is named in the list, not counted
  * @version 1.5 - a sandboxed plugin waiting on approval: activate says so, with a link to approve it; never looked up as a fork
  * @version 1.4 - `edited`: shipped plugins whose files changed here since
@@ -425,8 +427,31 @@ function admin_plugins_logic(array $input): LogicResult {
 		error_log('admin_plugins_logic: provisioner discovery failed: ' . $e->getMessage());
 	}
 
+	// Each active plugin with a host installer: what its last run did (null
+	// when none is recorded). A file read per plugin; nothing is run.
+	$installer_status = array();
+	try {
+		foreach (array_keys(PluginHelper::getActivePlugins()) as $name) {
+			if (PluginProvisioning::hasHostInstaller($name)) {
+				$installer_status[$name] = PluginInstallerStatus::forPlugin($name);
+			}
+		}
+	} catch (Throwable $e) {
+		error_log('admin_plugins_logic: installer status failed: ' . $e->getMessage());
+	}
+
+	// Run setup again posts to plugin_installer_run and comes back here with
+	// the request's id. Only that kind is shown from the URL.
+	if ($root_request_id === '' && !empty($input['installer_request'])) {
+		$status = RootRequest::status((string)$input['installer_request']);
+		if ($status['kind'] === 'run_plugin_installer') {
+			$root_request_id = $status['id'];
+		}
+	}
+
 	return LogicResult::render(array(
 		'system_health' => $system_health,
+		'installer_status' => $installer_status,
 		'message' => $message,
 		'message_type' => $message_type,
 		'plugins' => $plugins,

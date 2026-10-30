@@ -23,6 +23,9 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.7 - an unmet check names the plugin's own installer (`fixed_by_installer`), never a script
+ *                path to run by hand; a declaration still carrying `script`, or naming the installer on a
+ *                plugin that has none, is an error (plugin_installer_from_the_browser.md D3)
  * @version 1.6 - no fix command for a check that cannot be met on this site (ProvisioningCheckRefused)
  * @version 1.5 - the mail check passes when either the mail service or its fallback works, as the sender
  *                tries both; a failure names each
@@ -66,7 +69,7 @@ class PluginProvisioning {
      *
      * @return array [pluginName => [provisionerKey => resultArray, ...], ...]
      *               resultArray = [key, label, details, state, reason,
-     *                              script?, script_command?]
+     *                              fixed_by_installer?]
      *               state ∈ {verified, reachable, unmet, error}
      */
     public static function runChecks() {
@@ -212,6 +215,20 @@ class PluginProvisioning {
             'reason'  => '',
         ];
 
+        // Root only ever runs a plugin's declared host_installer, so a check
+        // names that, never a script of its own: a second path per check
+        // would be a second list of files that could run as root.
+        if (array_key_exists('script', $declaration)) {
+            $result['reason'] = "Provisioner declares 'script', which is no longer read. "
+                . "Declare \"fixed_by_installer\": true when the plugin's host_installer fixes this check.";
+            return $result;
+        }
+        $fixed_by_installer = !empty($declaration['fixed_by_installer']);
+        if ($fixed_by_installer && !self::hasHostInstaller($plugin)) {
+            $result['reason'] = "Provisioner declares fixed_by_installer, but the plugin declares no host_installer to run.";
+            return $result;
+        }
+
         $check = $declaration['check'] ?? null;
         if (!is_array($check) || empty($check['type'])) {
             $result['reason'] = 'Provisioner declaration is missing a valid check.';
@@ -227,16 +244,20 @@ class PluginProvisioning {
         $result['state']  = $outcome['state'];
         $result['reason'] = $outcome['reason'];
 
-        // A fix command is only meaningful for an unmet provisioner that
-        // declares a script, and that running it could fix. Resolve it to an
-        // absolute path.
-        if ($result['state'] === 'unmet' && empty($outcome['refused']) && !empty($declaration['script'])) {
-            $rel = 'plugins/' . $plugin . '/' . ltrim($declaration['script'], '/');
-            $result['script']         = $declaration['script'];
-            $result['script_command'] = 'sudo bash ' . PathHelper::getAbsolutePath($rel);
+        // The page offers Run setup again only for an unmet check the
+        // plugin's installer could fix, and not one refused on this site.
+        if ($result['state'] === 'unmet' && empty($outcome['refused']) && $fixed_by_installer) {
+            $result['fixed_by_installer'] = true;
         }
 
         return $result;
+    }
+
+    /** Whether the plugin's manifest declares a non-empty host_installer. */
+    public static function hasHostInstaller($plugin) {
+        $helper = PluginHelper::getInstance($plugin);
+        $declared = $helper ? $helper->get('host_installer', '') : '';
+        return is_string($declared) && $declared !== '';
     }
 
     /**

@@ -12,6 +12,8 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.9 - a failed plugin installer is named with the Plugins page; a failed core installer names its
+ *                log; neither offers the converger reinstall (plugin_installer_from_the_browser.md D5)
  * @version 1.8 - encrypt_offer refuses while the provider's own disk encryption is on (provider_layer, B114)
  * @version 1.7 - DataRootStatus's TPM2 chip and choice (B43)
  * @version 1.6 - the unsigned-extensions row (specs/package_signing.md WP6)
@@ -195,6 +197,24 @@ check(strpos($queue_notice, '3 root requests') !== false,
 check(strpos($queue_notice, '4 hours') !== false, 'and how long the oldest has waited');
 check(strpos(HostConvergerNotice::forState(true, $now - 300, 'installer-refused', $now, 'cmd'), 'attribute') !== false,
 	'a refused installer is reported on the page too');
+
+$plugin_failed = HostConvergerNotice::forState(true, $now - 300, 'installer-failed', $now, 'sudo bash x', 0, null, null, array('mailbox'));
+check(strpos($plugin_failed, 'mailbox') !== false && strpos($plugin_failed, '/admin/admin_plugins') !== false,
+	'a failed plugin installer is named, with a link to the Plugins page', $plugin_failed);
+check(strpos($plugin_failed, 'sudo bash x') === false,
+	'and the converger reinstall is not offered: it fixes nothing when one plugin failed');
+$core_failed = HostConvergerNotice::forState(true, $now - 300, 'installer-failed', $now, 'sudo bash x');
+check(strpos($core_failed, 'core installer') !== false && strpos($core_failed, 'logs/host_converger.log') !== false,
+	'with no failed plugin record, a core installer failed and its log is named', $core_failed);
+check(strpos($core_failed, 'sudo bash x') === false && strpos($core_failed, 'admin_plugins') === false,
+	'with neither the reinstall nor the Plugins page, which has no button for core');
+$hcp = VaultHealth::checkHostConverger(['installed' => true, 'last_run' => $now - 300, 'outcome' => 'installer-failed',
+	'failed_plugins' => array('office_editor')], $now);
+check($hcp['state'] === 'unmet' && strpos($hcp['reason'], 'office_editor') !== false && strpos($hcp['reason'], 'Plugins page') !== false,
+	'the health check names the failed plugin and the Plugins page', $hcp['reason']);
+check(strpos($hc(true, $now - 300, 'installer-failed')['reason'], 'logs/host_converger.log') !== false,
+	'and a core failure names the log');
+check(array_key_exists('failed_plugins', $facts), 'the live fact reader reports the failed plugin installers');
 
 // ---------------------------------------------------------------------------
 section('Swap: the device type decides, read from sysfs');

@@ -21,6 +21,9 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.5 - fourteen kinds: run_plugin_installer, carried out by the runner itself, the one kind whose
+ *                argument becomes a (checked) shell word; a second submit for the same plugin returns the
+ *                first while it is queued or running (plugin_installer_from_the_browser.md D1)
  * @version 1.4 - thirteen kinds: data_root_tpm2_off, and data_root_encrypt's tpm2 'off', the stricter way only (B43)
  * @version 1.3 - the runner's lock pin reads the bounded wait (flock -w), the shape the lock has since the runner's 2.16
  * @version 1.2 - remove_plugin is a kind; root's checks before it deletes a plugin directory (specs/post_release_fleet_defects.md B1)
@@ -100,7 +103,7 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 // verifies a staged upload, writes something that is not executed, or seals
 // this server's data root to the site's own recovery key, which its backups
 // already trust. If that stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 13, 'there are thirteen kinds', implode(', ', RootRequest::KINDS));
+check(count(RootRequest::KINDS) === 14, 'there are fourteen kinds', implode(', ', RootRequest::KINDS));
 
 // B43: the TPM2 choice. The queue is the web user's to write, so only the
 // stricter way is read from a request: data_root_encrypt's tpm2 'off' (and
@@ -279,6 +282,33 @@ foreach (array('../../../etc/passwd', 'a/../b', '../secrets', '1789000000-ZZZZZZ
 }
 
 @unlink($path);
+
+section('run_plugin_installer: the one kind whose argument reaches a shell, and only once per plugin');
+
+// The invariant is stated in three places, and each names its one exception.
+$rr_source = (string)file_get_contents(PathHelper::getIncludePath('includes/RootRequest.php'));
+check(strpos($rr_source, 'It is the only kind that does.') !== false,
+	'RootRequest\'s header names run_plugin_installer as the only kind whose argument becomes a shell word');
+check(strpos($runner, 'with one exception,') !== false && strpos($runner, '^[a-z][a-z0-9_]{1,49}$') !== false,
+	'so does the runner, with the pattern the name must match first');
+check(strpos($dispatcher, 'this runner is older than the tree') !== false,
+	'the dispatcher refuses it: only the runner carries it out');
+
+$first = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
+$second = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
+check($second === $first, 'a second click while one is queued returns the first request');
+$other = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_other'), 4500);
+check($other !== $first, 'a different plugin gets its own request');
+$qdir = PathHelper::getSiteRoot() . '/' . RootRequest::QUEUE_DIR;
+@mkdir($qdir . '/running', 0770, true);
+rename($qdir . '/' . $first . '.json', $qdir . '/running/' . $first . '.json');
+check(RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500) === $first,
+	'and while it is running');
+@unlink($qdir . '/running/' . $first . '.json');
+@unlink($qdir . '/' . $other . '.json');
+$third = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
+check($third !== $first, 'once it is finished, a click queues a new one');
+@unlink($qdir . '/' . $third . '.json');
 
 section('The runner carries requests out, and refuses what it does not know');
 

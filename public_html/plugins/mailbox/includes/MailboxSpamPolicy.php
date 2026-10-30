@@ -34,6 +34,7 @@
  *     reached. The stored row survives as a remembered preference, inert until
  *     filing returns.
  *
+ * @version 2.1 - installCommand() is gone: a check points at Run setup again on the Plugins page
  * @version 2.0 - learning lives in core: the rspamd controller, its probe and the
  *   ingest re-scan posture are gone; milterAnswering() is the health probe's check
  * @version 1.2
@@ -119,12 +120,6 @@ class MailboxSpamPolicy {
 		}
 		@fclose($sock);
 		return true;
-	}
-
-	/** The command that installs or repairs the scanner on this box. */
-	public static function installCommand(): string {
-		return 'sudo bash ' . PathHelper::getAbsolutePath(
-			'plugins/mailbox/provisioning/provision_spam_scanner.sh') . ' install';
 	}
 
 	/**
