@@ -21,8 +21,13 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.1 - Pulls under umask 022. user1's umask on dev is 0002, so every file a
+#               fast-forward rewrote came out group-writable, and the host converger,
+#               which runs installers as root, refuses one writable by anyone but its
+#               owner: host_housekeeping.sh at 775 stopped every run (installer-refused).
 # @version 1.0
 set -u
+umask 022   # see 1.1: the converger runs this tree's installers as root
 
 REPO="${FOLLOW_MAIN_REPO:-/var/www/html/joinerytest}"   # override only to try it on a scratch clone
 BRANCH="main"
