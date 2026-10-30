@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.48 - The converge stamp covers who owns each script and its mode, which decide
+#                whether it is trusted. A refused run wrote the stamp, so mending the
+#                refused file changed nothing the stamp saw, and the refusal stood until
+#                the daily run.
 # Version: 2.47 - The record and transcript directories are root's (750 root:www-data), and every
 #                file root writes there is created afresh, so a link the web user planted is
 #                never followed; a failed request no longer hides the run's failed installer
@@ -1458,6 +1462,9 @@ converge_hash() {
         # templates render_vhost.sh applies: a change to any of them is a
         # reason to converge, not something to wait a day for.
         cat "${TOOLS_DIR}"/*.sh "${TOOLS_DIR}"/default_*.conf "${TOOLS_DIR}"/vhost_history/*.conf 2>/dev/null
+        # Owner and mode decide whether a script is trusted to run at all
+        # (installer_is_trusted): mending a refused one is a reason to run.
+        stat -c '%U %a %n' "${TOOLS_DIR}"/*.sh 2>/dev/null
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
         # A sandboxed plugin's manifest: one arriving or leaving decides
         # whether the site runs a plugin host (install_sandbox_host.sh).
