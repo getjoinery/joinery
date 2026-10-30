@@ -112,7 +112,7 @@ section('An undeclared column is named, not 500');
 // Gate two. Without it a bad column reaches Postgres and comes back a server
 // error, which also leaks column existence by status code.
 $r = sort_attempt(array('usr_no_such_column' => 'ASC'));
-check(!$r['ok'] && strpos((string)$r['error'], 'not a sortable column') !== false,
+check(!$r['ok'] && strpos((string)$r['error'], 'is not a column this list can sort by') !== false,
 	'an undeclared column is refused by name',
 	'got: ' . var_export($r, true));
 
@@ -130,7 +130,7 @@ try {
 	$leaked = false;
 	$msg = 'WRONG EXCEPTION ' . get_class($e);
 }
-check(!$leaked && strpos($msg, 'pkc_passkey_credentials') !== false,
+check(!$leaked && strpos($msg, 'is not a column this list can sort by') !== false,
 	'the allowlist is the queried model\'s own columns, not any model\'s',
 	'got: ' . $msg);
 

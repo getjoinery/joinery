@@ -39,7 +39,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $api_readable = true;
 	public static $api_writable = true;
 	public static $api_unwritable_fields = array(
-		'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
+		'usr_permission', 'usr_is_disabled', 'usr_disabled_time', 'usr_is_machine',
 		'usr_email_is_verified', 'usr_password_recovery_disabled', 'usr_session_generation',
 	);
 	// The sign-in identifiers change only through the account page, behind a
@@ -165,6 +165,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_email_bounce_unverify_time' => array('type'=>'timestamp(6)'),
 	    'usr_is_activated' => array('type'=>'bool', 'default'=>false),
 	    'usr_is_disabled' => array('type'=>'bool', 'default'=>false),
+	    // A machine account belongs to a program, not a person: it never holds a
+	    // website session or an API session, and only its machine keys work
+	    // (machine_accounts.md).
+	    'usr_is_machine' => array('type'=>'bool', 'default'=>false),
 	    'usr_lastlogin_time' => array('type'=>'timestamp(6)'),
 	    'usr_terms_accepted_time' => array('type'=>'timestamp(6)'),
 	    // When the user chose "Finish later" on the /setup wizard: the login
@@ -1264,6 +1268,14 @@ class User extends SystemBase {	public static $prefix = 'usr';
 
 		return $returnval;
 		
+	}
+
+	/**
+	 * A program's account: no sign-in on the website or by password over the
+	 * API, by any door; its machine API keys and its email keep working.
+	 */
+	function is_machine_account(): bool {
+		return (bool)$this->get('usr_is_machine');
 	}
 
 	function actions_allowed() {

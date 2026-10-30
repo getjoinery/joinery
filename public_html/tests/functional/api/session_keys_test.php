@@ -20,6 +20,8 @@
  *   - A disabled account: its session and machine keys get 401 while it stays
  *     disabled (refused, not revoked; re-enabling restores them) and auth/login
  *     with the right password gets 403.
+ *   - A machine account (machine_accounts.md): its machine key works, a
+ *     session key it holds gets 401, and auth/login with the right password 403.
  *   - Expired and revoked keys get 401; logout revokes only the presented key
  *     and refuses machine keys; password change revokes all session keys and
  *     no machine keys (and a silent hash upgrade revokes nothing).
@@ -296,6 +298,40 @@ try {
 		'a deleted owner\'s key with a wrong secret gets the ordinary 401, saying nothing about the account', $r['raw']);
 	$r = api_request('GET', '/api/v1/auth/session', $d_machine_h);
 	check($r['status'] === 400 && stripos($r['raw'], 'deleted') !== false, 'with its secret it is told the owner is deleted', $r['raw']);
+
+	// ------------------------------------------------------------------
+	section('A machine account works only through its machine keys');
+	// The disabled-account refusals above count toward the failed-auth limit
+	// from this address; clear them so this section is not locked out.
+	$q = DbConnector::get_instance()->get_db_link()->prepare("DELETE FROM rql_request_logs
+		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address = ?");
+	$q->execute([(string)$GLOBALS['__harness_http']['from']]);
+	$user_m = make_user($suffix . 'M', 5);
+	$password_m = 'TestPassword_' . $suffix . 'M';
+	$m_session = ApiKey::CreateSessionKey($user_m->key, 'M Phone ' . $suffix);
+	harness_register_key_id($m_session['api_key']->key);
+	$m_machine = make_machine_key($user_m->key, 'mkeyM-' . $suffix);
+	$m_session_h = key_headers($m_session['api_key']->get('apk_public_key'), $m_session['secret_key']);
+	$m_machine_h = key_headers($m_machine['api_key']->get('apk_public_key'), $m_machine['secret_key']);
+	$um = new User($user_m->key, TRUE);
+	$um->set('usr_is_machine', TRUE);
+	$um->save();
+	$r = api_request('GET', '/api/v1/auth/session', $m_machine_h);
+	check($r['status'] === 200, 'its machine key works', $r['raw']);
+	$r = api_request('GET', '/api/v1/auth/session', $m_session_h);
+	check($r['status'] === 401 && stripos($r['raw'], 'machine account') !== false,
+		'a session key it holds from before it was marked gets 401, saying why', $r['raw']);
+	$r = api_request('POST', '/api/v1/auth/login', array(), array(
+		'email' => $user_m->get('usr_email'),
+		'password' => $password_m,
+	));
+	check($r['status'] === 403 && stripos($r['raw'], 'machine account') !== false,
+		'auth/login with the right password refuses it, saying so', $r['raw']);
+	$r = api_request('POST', '/api/v1/auth/login', array(), array(
+		'email' => $user_m->get('usr_email'),
+		'password' => 'definitely-wrong',
+	));
+	check($r['status'] === 401, 'a wrong password on it is the ordinary 401', $r['raw']);
 
 	// Those refusals count toward the failed-auth limit from this run's
 	// address; clear them, as Cleanup does, so the sections after this one

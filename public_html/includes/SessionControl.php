@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.24 - a machine account holds no website session: store_session_variables() refuses it and
+ *                 validate_account_standing() signs out one marked mid-session (machine_accounts.md)
  * @version 1.23 - save_formfields() never keeps a password, card, token or secret field in the session
  * @version 1.22 - the terms gate asks only for terms the person owes (TermsOwed): none on a site with no
  *                 terms, none for a self-hosted site's operators, getjoinery's for a hosted site's
@@ -1285,7 +1287,7 @@ class SessionControl{
 		}
 		if (!$user->key) {
 			$this->logout(true);
-		} elseif ($user->get('usr_delete_time') || !$user->actions_allowed()
+		} elseif ($user->get('usr_delete_time') || !$user->actions_allowed() || $user->is_machine_account()
 				|| (int)($_SESSION['session_generation'] ?? 0) !== (int)$user->get('usr_session_generation')) {
 			$this->logout();
 		} elseif (!Access::allows((int)($_SESSION['permission'] ?? 0), (int)$user->get('usr_permission'))) {
@@ -2045,6 +2047,11 @@ class SessionControl{
 		if (!$user->actions_allowed()) {
 			throw new SystemDisplayablePermanentError(
 				'This account is currently de-activated.  Please contact us to resolve the situation.');
+		}
+		// Every website door (password, passkey, remember-me, app bridge,
+		// checkout, log in as user) arrives here.
+		if ($user->is_machine_account()) {
+			throw new SystemDisplayablePermanentError('This is a machine account. It has no website sign-in.');
 		}
 
 		// Regenerate session ID to prevent session fixation attacks

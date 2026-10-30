@@ -131,6 +131,12 @@ array(
 							<td class="p-1"><span class="badge badge-warning">Disabled</span></td>
 						</tr>
 						<?php endif; ?>
+						<?php if($user->is_machine_account()): ?>
+						<tr>
+							<td class="p-1" style="width: 35%;">Account type:</td>
+							<td class="p-1"><span class="badge badge-info">Machine account</span> signs in only with its machine API keys</td>
+						</tr>
+						<?php endif; ?>
 						<tr>
 							<td class="p-1" style="width: 35%;">Phone:</td>
 							<td class="p-1 text-600">

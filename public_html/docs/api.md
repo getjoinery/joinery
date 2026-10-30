@@ -238,6 +238,8 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 
 A key also stops working while its owner's account is deleted or disabled. A disabled account's keys get 401 for as long as it stays disabled and work again if it is re-enabled; they are not revoked. The browser-session credential is refused the same way.
 
+A machine account (`usr_is_machine`, see [Account Security](account_security.md#machine-accounts)) accepts only machine keys: a session key or app password it owns gets 401.
+
 ### Scoped machine keys
 
 A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` lists what a key may do, one entry per item, comma separated. Two kinds of entry:
@@ -315,7 +317,7 @@ Success returns the key pair — **the only time the secret plaintext is ever re
 }
 ```
 
-Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit. The right password on a disabled account returns 403 `AuthenticationError` saying the account is de-activated, the same words the website's login uses.
+Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit. The right password on a disabled account returns 403 `AuthenticationError` saying the account is de-activated, the same words the website's login uses. The right password on a machine account returns 403 `AuthenticationError`: a machine account has no password sign-in.
 
 ### `GET /api/v1/auth/session` — any credential
 
@@ -616,7 +618,7 @@ the embed key only when it is on `$api_derived_fields`.
 ```php
 // data/users_class.php — usr_permission is readable but must never be set via the API
 public static $api_unwritable_fields = array(
-    'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
+    'usr_permission', 'usr_is_disabled', 'usr_disabled_time', 'usr_is_machine',
     'usr_email_is_verified', 'usr_password_recovery_disabled',
 );
 ```

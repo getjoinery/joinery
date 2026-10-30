@@ -252,7 +252,7 @@ function admin_user_logic(array $input): LogicResult {
 			if(!$user->get('usr_is_activated')) {
 				$options['altlinks']['Activate User'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'activate', 'usr_user_id' => $user->key));
 			}
-			if (Access::permits(10, $session)) {
+			if (Access::permits(10, $session) && !$user->is_machine_account()) {
 				$options['altlinks']['Log in as user'] = array('post' => '/admin/admin_user_login_as', 'hidden' => array('usr_user_id' => $user->key));
 			}
 		}
