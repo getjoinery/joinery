@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.35 - A machine run from the bundle is never a developer's box, and reads nothing to say so:
+#                a host's restrictions file with no reader in the bundle printed a line every run (reviewer2 N1);
+#                a directory stat cannot read no longer passes for the publishing box's
 # Version: 1.34 - A developer's box (config/tree_owner names the account the tree belongs to, not root) does
 #                not install the hourly security check and does not count it a failure; the exemption
 #                read the release signing key, which only the publishing box holds, so a workstation
@@ -1196,6 +1199,10 @@ fi
 # not the developer's.
 SCK="${SCRIPT_DIR}/../sysadmin_tools/security_check.sh"
 sck_developer_tree() {
+    # A machine run from the bundle has no site, no record and no developer;
+    # nothing is read for it (a host's restrictions file with no reader in the
+    # bundle would say so on every run).
+    [[ "${MACHINE}" == 0 ]] || return 1
     if [[ -f "${SCRIPT_DIR}/_host_restrictions.sh" ]]; then
         # shellcheck source=_host_restrictions.sh
         . "${SCRIPT_DIR}/_host_restrictions.sh"
@@ -1203,8 +1210,11 @@ sck_developer_tree() {
     fi
     # The publishing box holds the release signing key in a tree that is not
     # root's, whatever its record says.
-    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] \
-            && [[ "$(stat -L -c %u "$(dirname "${SCK}")" 2>/dev/null)" != 0 ]]; then
+    # A directory stat cannot read is not a developer's: an empty answer
+    # must not pass for "not root".
+    local sck_uid
+    sck_uid="$(stat -L -c %u "$(dirname "${SCK}")" 2>/dev/null)"
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" && "${sck_uid}" =~ ^[0-9]+$ && "${sck_uid}" != 0 ]]; then
         return 0
     fi
     [[ -f "${SCRIPT_DIR}/_tree_trust.sh" ]] || return 1

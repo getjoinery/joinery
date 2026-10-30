@@ -656,7 +656,7 @@ cat > "$DT/install_tools/_host_restrictions.sh" <<'STUB'
 host_restriction_on() { [ "${STUB_UNSIGNED:-0}" = 1 ]; }
 STUB
 dev_tree() {
-    ( SCRIPT_DIR="$DT/install_tools"; SITE_ROOT="$DT/site"; SCK="$DT/sysadmin_tools/security_check.sh"
+    ( SCRIPT_DIR="$DT/install_tools"; SITE_ROOT="$DT/site"; SCK="$DT/sysadmin_tools/security_check.sh"; MACHINE="${STUB_MACHINE:-0}"
       eval "$(sed -n '/^sck_developer_tree() {/,/^}/p' "$HK")"
       sck_developer_tree && echo developer || echo node )
 }
@@ -665,6 +665,15 @@ chk "a record naming the account that owns the tree is a developer's box" "$(STU
 chk "a record naming root is a node, and still fails" "$(STUB_OWNER=root dev_tree)" "node"
 chk "a tree that drifted from its record is not the developer's" "$(STUB_OWNER=nobody dev_tree)" "node"
 chk "a host that refuses unsigned code never is, whatever the record says" "$(STUB_OWNER="$ME" STUB_UNSIGNED=1 dev_tree)" "node"
+# A machine reads nothing: the stub that would answer on is never reached.
+cat > "$DT/install_tools/_host_restrictions.sh" <<'STUB'
+host_restriction_on() { echo "restrictions read" >&2; return 1; }
+STUB
+chk "a machine run from the bundle is never a developer's box, and reads nothing" \
+    "$(STUB_OWNER="$ME" STUB_MACHINE=1 dev_tree 2>&1)" "node"
+cat > "$DT/install_tools/_host_restrictions.sh" <<'STUB'
+host_restriction_on() { [ "${STUB_UNSIGNED:-0}" = 1 ]; }
+STUB
 touch "$DT/site/config/agent_signing_key"
 chk "the publishing box is one by its signing key, whatever its record says" "$(STUB_OWNER=root dev_tree)" "developer"
 rm -rf "$DT"

@@ -28,10 +28,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$session->set_return();
 
 	//ACCEPT EITHER VARIABLE
-	if($input['evt_event_id']){
+	if(!empty($input['evt_event_id'])){
 		$event_id = $input['evt_event_id'];
 	}
-	else if ($input['event_id']){
+	else if (!empty($input['event_id'])){
 		$event_id = $input['event_id'];
 	}
 	else{

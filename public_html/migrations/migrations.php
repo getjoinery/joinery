@@ -1872,3 +1872,13 @@
 	$migration['migration_file'] = 'terms_urls_not_getjoinery.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// cme_calendar_emails.cme_usr_user_id becomes a database foreign key; a
+	// calendar email recorded for a user deleted in the same moment would block
+	// it, so those rows go first (the FOREIGN KEYS step runs after migrations).
+	$migration = array();
+	$migration['database_version'] = '227';
+	$migration['test'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM cme_calendar_emails c WHERE NOT EXISTS (SELECT 1 FROM usr_users u WHERE u.usr_user_id = c.cme_usr_user_id)";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
