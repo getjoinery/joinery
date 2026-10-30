@@ -31,6 +31,7 @@
  * envelope; the answer is stored as text and escaped where shown; a next step
  * is a value from a closed list, never a command.
  *
+ * @version 1.1 - the unit_journal units it offers are the ones this node's agent accepts (unit_journal_units_for)
  * @version 1.0
  */
 
@@ -338,7 +339,7 @@ class IncidentAnalyst {
 				'name' => 'observe',
 				'description' => 'Ask the machine\'s agent for one read-only report. host_report: services, failed units, disk, memory, '
 					. 'kernel errors. disk_usage: what is using the disk. unit_journal: why one service is in its state (args.unit, one of: '
-					. implode(', ', array_keys(JobCommandBuilder::UNIT_JOURNAL_UNITS)) . '). site_log: the last lines of one site log '
+					. implode(', ', array_keys(JobCommandBuilder::unit_journal_units_for($node))) . '). site_log: the last lines of one site log '
 					. '(args.file, one of: ' . implode(', ', array_keys(JobCommandBuilder::site_log_files_for($node))) . '). check_status: '
 					. 'the site\'s own status (version, database, backups).',
 				'input_schema' => array(

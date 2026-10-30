@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.36 - carries _host_restrictions.sh, which host_housekeeping.sh reads before it treats a tree that
+ *                is not root's as a developer's box
  * @version 1.35 - carries disable_root_login.sh, the machine word of agent 1.95.0 that turns root SSH login off
  *                 (specs/implemented/beta_break_glass_root_access.md 5.3)
  * @version 1.34 - carries arm_ssl_retry.sh: setup_ssl.sh run from the bundle armed no certificate retry,
@@ -315,6 +317,10 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/_plugin_installers_start.sh',
 		'maintenance_scripts/install_tools/_tree_trust.sh',
 		'maintenance_scripts/install_tools/host_housekeeping.sh',
+		// host_housekeeping.sh asks whether the host refuses unsigned code
+		// before it treats a tree that is not root's as a developer's box. A
+		// machine with no restrictions record answers off, quietly.
+		'maintenance_scripts/install_tools/_host_restrictions.sh',
 		// The kernel and network settings every machine pins, one list:
 		// host_housekeeping.sh writes them and host_report.sh reports
 		// whether the kernel holds them (hardening). Sources nothing.

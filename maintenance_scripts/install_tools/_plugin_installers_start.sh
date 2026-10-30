@@ -3,7 +3,17 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
-# Version: 2.45 - A plugin switched off while a run works through the installers before its own is
+# Version: 2.47 - The record and transcript directories are root's (750 root:www-data), and every
+#                file root writes there is created afresh, so a link the web user planted is
+#                never followed; a failed request no longer hides the run's failed installer
+#                (reviewer2 B1, B2).
+# Version: 2.46 - Each plugin installer run leaves a record the Plugins page reads
+#                (cache/plugin_installers/<plugin>.json, its output in
+#                logs/plugin_installers/<plugin>.log), refusals included, and the
+#                run_plugin_installer root request (the page's Run setup again) is
+#                carried out here, copying this pass's run rather than repeating it
+#                (plugin_installer_from_the_browser.md D1, D2).
+# Version: 2.45 -A plugin switched off while a run works through the installers before its own is
 #                skipped: the active list is read when the run begins, and an installer can take
 #                minutes, so the one switched off in between was set up again after its
 #                deactivate hook took it down (office_editor, 0.8.529 post-release check).
@@ -1104,8 +1114,85 @@ plugin_still_active() {
     grep -qxF -- "$1" <<< "${now}"
 }
 
+# --- The record of each plugin's last install run ----------------------------
+# The Plugins page says, per plugin, what its installer did last time and
+# shows the output (plugin_installer_from_the_browser.md D2):
+# cache/plugin_installers/<plugin>.json and logs/plugin_installers/<plugin>.log,
+# root writes and the pool reads, the arrangement of root-request transcripts.
+# Every run writes them, however it was started. The log is written as .tmp and
+# moved into place, so a daemon the last run left holding its descriptor writes
+# into the old file, never at an offset in the new one.
+PLUGIN_RECORD_DIR="${SITE_ROOT}/cache/plugin_installers"
+PLUGIN_LOG_DIR="${SITE_ROOT}/logs/plugin_installers"
+
+# The names this pass ran, and how each went: a root request for one of them
+# copies that run instead of installing a second time.
+declare -A PASS_OUTCOME=()
+
+# Root's directories (fix_permissions.sh pins them out of the data-set sweep).
+# A box that ran before the pin may have left them the web user's, and a link
+# planted at a .tmp name would have root write, chown and chmod through it; so
+# they are taken back first, and every .tmp is removed before it is written
+# (plugin_record_tmp). Once the directory is root's 750, nothing else can put
+# a name in it.
+plugin_record_dirs() {
+    mkdir -p "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || return 1
+    chown root:www-data "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
+    chmod 750 "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
+}
+
+# A fresh .tmp: whatever is at the name (a planted link) is removed, never
+# followed.
+plugin_record_tmp() {
+    rm -f -- "$1" 2>/dev/null
+    : > "$1" 2>/dev/null
+}
+
+plugin_record_publish() {
+    chown root:www-data "$1" 2>/dev/null || true
+    chmod 640 "$1" 2>/dev/null || true
+    mv -f "$1" "$2" 2>/dev/null || true
+}
+
+# PLUGIN INSTALLER_REL STARTED OUTCOME EXIT_CODE - after the log is in place.
+plugin_record_write() {
+    local rec="${PLUGIN_RECORD_DIR}/$1.json"
+    plugin_record_tmp "${rec}.tmp" || return 0
+    php -r '
+        echo json_encode([
+            "plugin" => $argv[1], "installer" => $argv[2],
+            "started_at" => $argv[3], "finished_at" => gmdate("Y-m-d\TH:i:s\Z"),
+            "outcome" => $argv[4], "exit_code" => (int)$argv[5],
+            "release" => trim((string)@file_get_contents($argv[6])),
+        ], JSON_UNESCAPED_SLASHES) . "\n";
+    ' "$1" "$2" "$3" "$4" "$5" "${PUBLIC_HTML}/VERSION" > "${rec}.tmp" 2>/dev/null \
+        || { rm -f "${rec}.tmp"; return 0; }
+    plugin_record_publish "${rec}.tmp" "${rec}"
+}
+
+# A run that stopped before its installer: the reason goes to stderr, as it
+# always has, and into the log, so the page and a request's transcript say why.
+# PLUGIN INSTALLER_REL STARTED OUTCOME REASON
+plugin_record_refusal() {
+    INSTALLER_OUTCOME="$4"
+    PASS_OUTCOME["$1"]="$4"
+    [[ -n "$5" ]] && printf '%s\n' "$5" >&2
+    [[ "${MACHINE}" == "0" ]] || return 0
+    plugin_record_dirs || return 0
+    local log="${PLUGIN_LOG_DIR}/$1.log"
+    plugin_record_tmp "${log}.tmp" || return 0
+    printf '%s\n' "${5:-plugin installers: $1: $4}" > "${log}.tmp" 2>/dev/null || return 0
+    plugin_record_publish "${log}.tmp" "${log}"
+    plugin_record_write "$1" "$2" "$3" "$4" 2
+}
+
+# Always returns 0, so a full run never exits non-zero for one plugin; how the
+# run went is INSTALLER_OUTCOME: ok, failed, refused-untrusted,
+# refused-unsigned, missing, or inactive (switched off since the run began),
+# and empty when the plugin declares no installer at all.
 run_one_plugin_installer() {
-    local PLUGIN="$1" MANIFEST INSTALLER_REL INSTALLER
+    local PLUGIN="$1" MANIFEST INSTALLER_REL INSTALLER STARTED REASON LOG
+    INSTALLER_OUTCOME=""
     MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
     [[ -f "${MANIFEST}" ]] || return 0
 
@@ -1118,45 +1205,72 @@ run_one_plugin_installer() {
     [[ -n "${INSTALLER_REL}" ]] || return 0
 
     INSTALLER="${PUBLIC_HTML}/plugins/${PLUGIN}/${INSTALLER_REL}"
+    STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     # Refuse path escapes (host_installer must stay inside the plugin dir).
     case "$(realpath -m "${INSTALLER}")" in
         "$(realpath -m "${PUBLIC_HTML}/plugins/${PLUGIN}")"/*) : ;;
         *)
-            echo "plugin installers: ${PLUGIN}: host_installer escapes plugin directory - refused" >&2
+            plugin_record_refusal "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" refused-untrusted \
+                "plugin installers: ${PLUGIN}: host_installer escapes plugin directory - refused"
             return 0
             ;;
     esac
 
     if [[ ! -f "${INSTALLER}" ]]; then
-        echo "plugin installers: ${PLUGIN}: declared installer missing (${INSTALLER_REL}) - skipping" >&2
+        plugin_record_refusal "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" missing \
+            "plugin installers: ${PLUGIN}: declared installer missing (${INSTALLER_REL}) - skipping"
         return 0
     fi
 
-    if ! installer_is_trusted "${INSTALLER}"; then
+    if ! REASON="$(installer_is_trusted "${INSTALLER}" 2>&1)"; then
         CONVERGE_OUTCOME="installer-refused"
+        plugin_record_refusal "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" refused-untrusted "${REASON}"
         return 0
     fi
 
     # Who built it. Ownership says root put it there; the signature says we
     # did. An unsigned plugin (installed on the owner's acknowledgement) keeps
     # its files and its row, and never gets a script run as root out of it.
-    if ! plugin_package_verified "${PLUGIN}"; then
+    if ! REASON="$(plugin_package_verified "${PLUGIN}" 2>&1)"; then
+        plugin_record_refusal "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" refused-unsigned "${REASON}"
         return 0
     fi
 
     if ! plugin_still_active "${PLUGIN}"; then
         echo "plugin installers: ${PLUGIN}: switched off since this run began - skipped"
+        INSTALLER_OUTCOME="inactive"
+        PASS_OUTCOME["${PLUGIN}"]="inactive"
         return 0
     fi
 
     echo "plugin installers: ${PLUGIN}: running ${INSTALLER_REL}"
-    if bash "${INSTALLER}"; then
+    # To a file, never through a pipe: an installer may leave a daemon holding
+    # stdout, and a pipe it holds never closes. The file is then put in place
+    # and copied to this run's stdout, where its lines always appeared.
+    LOG="/dev/null"
+    if [[ "${MACHINE}" == "0" ]] && plugin_record_dirs; then
+        LOG="${PLUGIN_LOG_DIR}/${PLUGIN}.log"
+        plugin_record_tmp "${LOG}.tmp" || LOG="/dev/null"
+    fi
+    local rc=0
+    if [[ "${LOG}" == "/dev/null" ]]; then
+        bash "${INSTALLER}" || rc=$?
+    else
+        bash "${INSTALLER}" > "${LOG}.tmp" 2>&1 || rc=$?
+        plugin_record_publish "${LOG}.tmp" "${LOG}"
+        cat "${LOG}" 2>/dev/null || true
+    fi
+    if (( rc == 0 )); then
+        INSTALLER_OUTCOME="ok"
         echo "plugin installers: ${PLUGIN}: ok"
     else
+        INSTALLER_OUTCOME="failed"
         echo "plugin installers: WARNING - ${PLUGIN} installer failed; its services may be down." >&2
         CONVERGE_OUTCOME="installer-failed"
     fi
+    PASS_OUTCOME["${PLUGIN}"]="${INSTALLER_OUTCOME}"
+    [[ "${LOG}" == "/dev/null" ]] || plugin_record_write "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" "${INSTALLER_OUTCOME}" "${rc}"
 }
 
 if [[ -n "${ONLY_INSTALLER}" ]]; then
@@ -1635,7 +1749,14 @@ write_certificate_summary
 #
 # What crosses is a NAME. `kind` is matched against a fixed list below; the
 # arguments stay in the file and are read by the PHP that acts on them, so
-# nothing a web request wrote ever becomes a shell word.
+# nothing a web request wrote becomes a shell word - with one exception,
+# run_plugin_installer, the only kind this loop carries out itself. It reads
+# exactly one field, `plugin`, and uses it only after it matches
+# ^[a-z][a-z0-9_]{1,49}$ and names an active plugin with a host_installer; it
+# is then one quoted word, and everything else (the installer, its trust, its
+# signature) comes from the root-owned tree, as in the daily pass. A forged
+# request can make an install happen sooner; it cannot change what runs.
+# (plugin_installer_from_the_browser.md D1.)
 #
 # One at a time, oldest first: these are installs and upgrades, and two of them
 # at once on one machine is not a thing anybody wants to debug.
@@ -1643,6 +1764,62 @@ write_certificate_summary
 # EX_TEMPFAIL: it is not an exit code any handler produces, and it is a number,
 # which is what the page reads.
 REQUEST_ABANDONED_CODE=75
+
+# The one field a run_plugin_installer request is read for. Empty when the
+# file is not a request or the field is not a string.
+plugin_request_name() {
+    php -r '
+        $r = json_decode(file_get_contents($argv[1]), true);
+        $a = is_array($r) && isset($r["args"]) && is_array($r["args"]) ? $r["args"] : [];
+        echo isset($a["plugin"]) && is_string($a["plugin"]) ? $a["plugin"] : "";
+    ' "$1" 2>/dev/null || true
+}
+
+# Carries out one run_plugin_installer request, its output going to the
+# request's transcript. ACTIVE is the active set, already read. Returns the
+# request's exit code: 0 ok, 1 the installer failed, 2 nothing ran.
+# This pass's plugin loop has almost always run the installer already (a
+# queued request is what started the pass); then the run is copied, not
+# repeated, so one click never restarts a plugin's services twice.
+run_plugin_installer_request() {
+    local name="$1" active="$2" rel
+    if [[ ! "${name}" =~ ^[a-z][a-z0-9_]{1,49}$ ]]; then
+        echo "run_plugin_installer: the request names no plugin this box could have - refused"
+        return 2
+    fi
+    if ! grep -qxF -- "${name}" <<< "${active}"; then
+        echo "run_plugin_installer: ${name} is not an active plugin here - nothing ran"
+        return 2
+    fi
+    rel=""
+    if [[ -f "${PUBLIC_HTML}/plugins/${name}/plugin.json" ]]; then
+        rel="$(php -r '
+            $m = json_decode(file_get_contents($argv[1]), true);
+            echo isset($m["host_installer"]) && is_string($m["host_installer"]) ? $m["host_installer"] : "";
+        ' "${PUBLIC_HTML}/plugins/${name}/plugin.json" 2>/dev/null || true)"
+    fi
+    if [[ -z "${rel}" ]]; then
+        echo "run_plugin_installer: ${name} declares no host_installer - nothing ran"
+        return 2
+    fi
+
+    if [[ -n "${PASS_OUTCOME[${name}]+set}" ]]; then
+        INSTALLER_OUTCOME="${PASS_OUTCOME[${name}]}"
+        echo "run_plugin_installer: ${name}'s installer ran in this pass of the host converger; its output:"
+        if [[ -s "${PLUGIN_LOG_DIR}/${name}.log" ]]; then
+            cat "${PLUGIN_LOG_DIR}/${name}.log"
+        else
+            echo "(the installer printed nothing)"
+        fi
+    else
+        run_one_plugin_installer "${name}" 2>&1
+    fi
+    case "${INSTALLER_OUTCOME}" in
+        ok)     return 0 ;;
+        failed) return 1 ;;
+        *)      echo "run_plugin_installer: ${name}: ${INSTALLER_OUTCOME:-nothing ran}"; return 2 ;;
+    esac
+}
 
 run_root_requests() {
     [[ "${MACHINE}" == "0" ]] || return 0            # no web user queues anything on a machine
@@ -1652,6 +1829,12 @@ run_root_requests() {
     [[ "$(id -u)" == "0" ]] || return 0
 
     mkdir -p "${queue}/running" "${queue}/done" "${queue}/failed" "${logs}" 2>/dev/null || true
+    # The transcripts are root's: the web user reads them and writes none. A
+    # directory it owned would let the submitter, who chose the id, plant a
+    # link at <id>.log for root to truncate and chown through
+    # (fix_permissions.sh pins it out of the data-set sweep).
+    chown root:www-data "${logs}" 2>/dev/null || true
+    chmod 750 "${logs}" 2>/dev/null || true
 
     # No lock of its own: the runner lock on descriptor 9, taken at the top
     # before anything changed the host, is still held here and covers the
@@ -1705,7 +1888,7 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same thirteen as RootRequest::KINDS, and no more. install_package
+            # The same fourteen as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
@@ -1713,7 +1896,8 @@ run_root_requests() {
             # row as uninstalled and the manifest as not is_system (PluginRemoval).
             upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
             write_agent_files|save_doc|set_receives_upgrades|remove_plugin|\
-            data_root_encrypt|data_root_reseal|data_root_rekey|data_root_tpm2_off) : ;;
+            data_root_encrypt|data_root_reseal|data_root_rekey|data_root_tpm2_off|\
+            run_plugin_installer) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2
                 printf '2\n' > "${queue}/failed/${id}.exit" 2>/dev/null || true
@@ -1721,6 +1905,19 @@ run_root_requests() {
                 continue
                 ;;
         esac
+
+        # A run_plugin_installer request needs the active set. When the
+        # database cannot say, the request waits where it is: the pass dropped
+        # its stamp, so the next tick tries again and carries it out.
+        local req_active=""
+        if [[ "${kind}" == "run_plugin_installer" ]]; then
+            if [[ -n "${JOINERY_ACTIVE_PLUGINS:-}" ]]; then
+                req_active="$(printf '%s\n' ${JOINERY_ACTIVE_PLUGINS})"
+            elif ! req_active="$(read_active_plugins)"; then
+                echo "root request: ${id} (${kind}) waits - the site database could not be read" >&2
+                continue
+            fi
+        fi
 
         echo "root request: ${id} (${kind})"
         mv -f "${req}" "${queue}/running/${id}.json" || continue
@@ -1730,13 +1927,23 @@ run_root_requests() {
 
         # The transcript is what the admin page polls, so it is written as the
         # run goes rather than collected at the end.
+        rm -f -- "${logs}/${id}.log" 2>/dev/null
         : > "${logs}/${id}.log"
         chmod 640 "${logs}/${id}.log" 2>/dev/null || true
         chown root:www-data "${logs}/${id}.log" 2>/dev/null || true
 
-        php "${PUBLIC_HTML}/utils/root_request.php" "${kind}" "--request=${id}" \
-            >> "${logs}/${id}.log" 2>&1
-        rc=$?
+        if [[ "${kind}" == "run_plugin_installer" ]]; then
+            # Here, not through utils/root_request.php: a second runner started
+            # from a request would wait on this run's own lock and report
+            # success with nothing run.
+            rc=0
+            run_plugin_installer_request "$(plugin_request_name "${queue}/running/${id}.json")" "${req_active}" \
+                >> "${logs}/${id}.log" 2>&1 || rc=$?
+        else
+            php "${PUBLIC_HTML}/utils/root_request.php" "${kind}" "--request=${id}" \
+                >> "${logs}/${id}.log" 2>&1
+            rc=$?
+        fi
 
         printf '%s\n' "${rc}" > "${queue}/running/${id}.exit" 2>/dev/null || true
         if (( rc == 0 )); then
@@ -1747,7 +1954,10 @@ run_root_requests() {
             mv -f "${queue}/running/${id}.json" "${queue}/failed/" 2>/dev/null || true
             mv -f "${queue}/running/${id}.exit" "${queue}/failed/" 2>/dev/null || true
             echo "root request: ${id} failed (exit ${rc})" >&2
-            CONVERGE_OUTCOME="request-failed"
+            # A run that already reported a failed or refused installer keeps
+            # saying so: a Run setup again on a failing installer is exactly
+            # that case, and the notice reads the installer outcome.
+            [[ "${CONVERGE_OUTCOME}" == "converged" ]] && CONVERGE_OUTCOME="request-failed"
         fi
     done
 }

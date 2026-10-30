@@ -18,13 +18,18 @@
  * set here and mapped to a command by the runner; `args` are stored verbatim
  * and validated by the CLI that carries the kind out, which is the only thing
  * that knows what a valid argument for it looks like. Nothing in a request file
- * is ever passed to a shell by this class.
+ * is ever passed to a shell by this class. One kind, run_plugin_installer, is
+ * carried out by the runner itself, and its `plugin` argument becomes one
+ * quoted shell word there - only after it matches ^[a-z][a-z0-9_]{1,49}$ and
+ * names an active plugin with a host_installer. It is the only kind that does.
  *
  * A request is a file rather than a database row on purpose: the root actor
  * runs with no settings and no database, and adding either to the one process
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.6 - run_plugin_installer {plugin}: the Plugins page's Run setup again. A second click while one
+ *                is queued or running returns the first one's id (plugin_installer_from_the_browser.md D1).
  * @version 1.5 - actorState() reads HostConvergerNotice::runState(): a converger installed minutes ago is
  *                present while its first tick comes, so a new site's upload pages no longer say it has not run
  * @version 1.5 - data_root_tpm2_off: the TPM2 chip no longer opens this server's data root, and data_root_encrypt
@@ -71,7 +76,16 @@ class RootRequest {
 		'data_root_reseal',        // seal the data root's break-glass copy to this site's own proven recovery key
 		'data_root_rekey',         // re-encrypt this server's data root under a new volume key (a key that may have been seen)
 		'data_root_tpm2_off',      // {}: the TPM2 chip no longer opens this server's data root; each boot asks for its key
+		'run_plugin_installer',    // {plugin}: run one active plugin's host_installer now (carried out by the runner itself)
 	);
+	/*
+	 * run_plugin_installer (plugin_installer_from_the_browser.md D1)
+	 * adds no power: root reads only the plugin's name from the request, and
+	 * works out the installer, its trust and its signature from the root-owned
+	 * tree, exactly as the daily pass does. A forged request makes an install
+	 * happen sooner; it cannot change what runs. utils/root_request.php
+	 * refuses it, since only the runner may carry it out.
+	 */
 	/*
 	 * data_root_encrypt, data_root_reseal, data_root_rekey, data_root_tpm2_off
 	 * (specs/hosted_data_promise_disk_encryption.md WP4, D2, D8): a server not
@@ -174,6 +188,16 @@ class RootRequest {
 				'RootRequest: unknown kind "' . $kind . '". Known kinds: ' . implode(', ', self::KINDS));
 		}
 
+		// One install at a time per plugin: a second click returns the request
+		// already queued or running. pending() carries no arguments, so each
+		// body is read.
+		if ($kind === 'run_plugin_installer') {
+			$existing = self::open_installer_request((string)($args['plugin'] ?? ''));
+			if ($existing !== null) {
+				return $existing;
+			}
+		}
+
 		$dir = self::queue_dir();
 		if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) {
 			throw new RuntimeException('RootRequest: could not create the queue directory at ' . $dir);
@@ -212,6 +236,20 @@ class RootRequest {
 		}
 
 		return $id;
+	}
+
+	/** The id of a run_plugin_installer request for this plugin still queued or running, or null. */
+	private static function open_installer_request(string $plugin): ?string {
+		$paths = array_merge(glob(self::queue_dir() . '/*.json') ?: array(),
+		                     glob(self::queue_dir() . '/running/*.json') ?: array());
+		foreach ($paths as $path) {
+			$body = json_decode((string)@file_get_contents($path), true);
+			if (is_array($body) && ($body['kind'] ?? null) === 'run_plugin_installer'
+				&& is_array($body['args'] ?? null) && ($body['args']['plugin'] ?? null) === $plugin) {
+				return basename($path, '.json');
+			}
+		}
+		return null;
 	}
 
 	// ---- reading back ------------------------------------------------------

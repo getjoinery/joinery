@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.92 - Why? and Clear are offered for a unit this node's agent accepts (unit_journal_units_for)
  * @version 1.91 - a Backups row (IncidentBackupVerdict); one Refresh button (refresh_status) in place of Check Status and Host Report; the page under the gauges is two lists of one-line rows that open to the full account: Status
  *                 (incidents, services, certificates, machine, agent, security, recent jobs; a problem opens by
  *                 itself) and Details and configuration (PHP, PHP workers, plugins, databases, connection, reverse
@@ -1271,7 +1272,7 @@
 						. SmAdminCsrf::field() . '</form>';
 				}
 				if (JobCommandBuilder::has_primitive($node, 'unit_journal') && JobCommandBuilder::log_access_refusal($node) === null
-						&& array_key_exists($mg_unit, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+						&& array_key_exists($mg_unit, JobCommandBuilder::unit_journal_units_for($node))) {
 					echo ' <button type="submit" form="nodeActionUnitJournal_mail_gateway"'
 						. ' class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 						. ' title="Read the gateway\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
@@ -1613,7 +1614,7 @@
 				foreach ($hr['failed_units'] as $unit) {
 					echo '<li>' . $hr_str($unit);
 					$bare = preg_replace('/\.service$/', '', (string)$unit);
-					if ($can_ask && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+					if ($can_ask && array_key_exists($bare, JobCommandBuilder::unit_journal_units_for($node))) {
 						echo ' <button type="submit" form="nodeActionUnitJournal_' . $hr_str($bare)
 							. '" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 							. ' title="Read this unit\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
@@ -1624,7 +1625,7 @@
 							. '<input type="hidden" name="lines" value="100">'
 							. SmAdminCsrf::field() . '</form>';
 					}
-					if ($can_clear && array_key_exists($bare, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+					if ($can_clear && array_key_exists($bare, JobCommandBuilder::unit_journal_units_for($node))) {
 						$form_id = 'nodeActionResetUnit_' . $bare;
 						$confirm = 'Clear the failed record for ' . $bare . '? This clears the record only: it does not start, '
 							. 'stop or fix the unit. If the unit is still broken it fails again the next time it runs, '

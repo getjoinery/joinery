@@ -4,6 +4,8 @@
 # object on stdout: the unit's state, the result systemd recorded, its exit
 # status, when it last ran, and the last N lines of its journal.
 #
+# Version: 1.3 - joinery-host-converger: on a host with a data root its journal is the only record
+#                of which installer failed a run (agent 1.97.0)
 # Version: 1.2 - joinery-mail-gateway, the mail apps gateway
 # Version: 1.1 - postgresql reads the cluster unit (postgresql@16-main): the umbrella
 #                postgresql.service is a /bin/true oneshot with no journal, so the word
@@ -62,6 +64,7 @@ UNITS=(
     apt-daily apt-daily-upgrade
     fstrim e2scrub_all
     joinery-mail-gateway
+    joinery-host-converger
 )
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }

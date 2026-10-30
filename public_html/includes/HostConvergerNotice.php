@@ -17,6 +17,10 @@
  * that never had one — a container converges at every start
  * and a managed node through its upgrade job.
  *
+ * @version 1.3 - A failed or refused plugin installer is named, with the Plugins page where its output and
+ *                Run setup again are; reinstalling the converger fixes neither. A failed core installer
+ *                names logs/host_converger.log. The reinstall command stays for an absent or stale
+ *                converger (plugin_installer_from_the_browser.md D5).
  * @version 1.2 - One rule for whether the converger is keeping up, runState(), which the root-request
  *                warning and VaultHealth read too. A converger installed minutes ago that has not had its
  *                first tick is starting, not dead: every new site's upload pages said its root actor had
@@ -54,7 +58,47 @@ class HostConvergerNotice {
 		$facts = self::facts();
 		return self::forState($facts['installed'], $facts['last_run'], $facts['outcome'], time(),
 			self::installCommand(), (int)($facts['pending_requests'] ?? 0), $facts['oldest_request_age'] ?? null,
-			$facts['installed_time']);
+			$facts['installed_time'], $facts['failed_plugins'] ?? array());
+	}
+
+	/**
+	 * The active plugins whose last host installer run failed, or was refused
+	 * as untrusted, from their install records (PluginInstallerStatus): the
+	 * plugin outcomes that make the runner record installer-failed or
+	 * installer-refused. A core installer
+	 * writes no record, so a failed run that names none here was core's.
+	 */
+	public static function failedPlugins(): array {
+		$out = array();
+		try {
+			foreach (array_keys(PluginHelper::getActivePlugins()) as $name) {
+				if (!PluginProvisioning::hasHostInstaller($name)) {
+					continue;
+				}
+				// Only the outcomes that make a run report a failed or refused
+				// installer: an unsigned plugin is skipped on every run without
+				// either, so naming it would blame it for a core failure.
+				$record = PluginInstallerStatus::forPlugin($name);
+				if ($record !== null && in_array($record['outcome'], array('failed', 'refused-untrusted'), true)) {
+					$out[] = $name;
+				}
+			}
+		} catch (\Throwable $e) {
+			error_log('HostConvergerNotice: could not read plugin install records: ' . $e->getMessage());
+		}
+		return $out;
+	}
+
+	/** What the notice and the health check say about a failed run of a fresh converger. */
+	public static function failedRunAdvice(string $outcome, array $failed_plugins): string {
+		if ($failed_plugins) {
+			$names = implode(', ', $failed_plugins);
+			return (count($failed_plugins) === 1 ? 'The plugin ' . $names . ' did not finish its' : 'The plugins ' . $names . ' did not finish their')
+				. ' setup on this server. The output, and Run setup again, are on the Plugins page.';
+		}
+		return $outcome === 'installer-refused'
+			? 'A core installer was refused because it could not be attributed: it is owned by the wrong account or is writable by more than its owner. The reason is in logs/host_converger.log on the host (journalctl -u joinery-host-converger on a host with a data root).'
+			: 'A core installer failed. Its output is in logs/host_converger.log on the host (journalctl -u joinery-host-converger on a host with a data root).';
 	}
 
 	/**
@@ -120,12 +164,17 @@ class HostConvergerNotice {
 			'outcome'            => $outcome,
 			'pending_requests'   => count($pending),
 			'oldest_request_age' => $oldest_age,
+			// Read only when it is used: a glob of plugins/ and a file per
+			// plugin, and facts() runs on every admin page.
+			'failed_plugins'     => in_array($outcome, array('installer-failed', 'installer-refused'), true)
+				? self::failedPlugins() : array(),
 		);
 	}
 
 	/** The notice for one set of facts. Public and pure so the wording can be tested. */
 	public static function forState(bool $installed, ?int $last_run, string $outcome, int $now,
-			string $command, int $pending = 0, ?int $oldest_age = null, ?int $installed_time = null): string {
+			string $command, int $pending = 0, ?int $oldest_age = null, ?int $installed_time = null,
+			array $failed_plugins = array()): string {
 		$run = self::runState(array('installed' => $installed, 'installed_time' => $installed_time, 'last_run' => $last_run), $now);
 		if ($run === 'absent' || $run === 'starting') {
 			return '';
@@ -166,14 +215,26 @@ class HostConvergerNotice {
 		if ($fresh && $outcome !== 'installer-failed' && $outcome !== 'installer-refused') {
 			return '';
 		}
+		// The converger is running; one installer is not. Reinstalling the
+		// converger would fix nothing, so the notice says where the failure is.
+		if ($fresh) {
+			$link = $failed_plugins
+				? ' <a href="/admin/admin_plugins">Open the Plugins page</a>'
+				: '';
+			return self::css()
+				. '<div class="jy-converger-notice" role="status">'
+				. '<div class="jy-converger-notice__text"><strong>'
+				. htmlspecialchars($outcome === 'installer-refused'
+					? 'The host converger refused an installer it could not attribute.'
+					: 'The host converger\'s last run reported a failed installer.', ENT_QUOTES, 'UTF-8')
+				. '</strong> '
+				. htmlspecialchars(self::failedRunAdvice($outcome, $failed_plugins), ENT_QUOTES, 'UTF-8')
+				. $link . '</div></div>';
+		}
 		if ($last_run === null) {
 			$lead = 'The host converger has never run on this box.';
-		} elseif (!$fresh) {
-			$lead = 'The host converger has not run since ' . gmdate('Y-m-d H:i', $last_run) . ' UTC.';
-		} elseif ($outcome === 'installer-refused') {
-			$lead = 'The host converger refused an installer it could not attribute.';
 		} else {
-			$lead = 'The host converger\'s last run reported a failed installer.';
+			$lead = 'The host converger has not run since ' . gmdate('Y-m-d H:i', $last_run) . ' UTC.';
 		}
 		$body = 'Upgrades land the code, but the root half — PHP extensions, the parser jail, plugin services — '
 			. 'is applied by a root timer, and it is not doing so. Run this on the host as root to reinstall it:';

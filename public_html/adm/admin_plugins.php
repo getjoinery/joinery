@@ -1,5 +1,8 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.8 - Host setup: each active plugin with a host installer shows its last install run and Run setup
+//               again, which also replaces the sudo command on an unmet setup check
+//               (plugin_installer_from_the_browser.md)
 // @version 1.7 - Waiting for approval says why: a lapsed approval (access off) or a newer version asking for more
 // @version 1.6 - a sandboxed plugin: the Sandboxed badge, Waiting for approval, Review and activate / What it may do
 //               (admin_sandbox_approve) in place of Activate while it waits on an approval; never a fork
@@ -29,6 +32,15 @@ $message_type = $page_vars['message_type'];
 $system_health = $page_vars['system_health'];
 $plugins = $page_vars['plugins'];
 $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
+// name => the last host installer run (null: not run yet), for every active
+// plugin with a host installer (PluginInstallerStatus).
+$installer_status = $page_vars['installer_status'] ?? array();
+// Run setup again queues a root request, which the API takes from a superadmin.
+$can_run_installer = Access::permits(10, $session);
+// What a plugin whose setup has not run yet is waiting for; read once.
+$installer_next = RootRequest::actorState() === 'present'
+    ? 'the server runs it shortly'
+    : RootRequest::actorWarning();
 // Names the upgrade source publishes; null when it was not asked or did not answer.
 $published_plugins = $page_vars['published_plugins'] ?? null;
 // Installing a plugin writes the code tree, which only root does here, so the
@@ -322,6 +334,26 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= '</div>';
                 }
 
+                // Host setup: what the plugin's installer did last time on this
+                // server, and Run setup again.
+                if (array_key_exists($plugin['name'], $installer_status)) {
+                    $record = $installer_status[$plugin['name']];
+                    $failed = $record !== null && PluginInstallerStatus::isFailure($record['outcome']);
+                    $status_cell .= '<div class="plugin-host-setup' . ($failed ? ' plugin-host-setup-failed' : '') . '">';
+                    $status_cell .= htmlspecialchars(PluginInstallerStatus::statusLine($record));
+                    if ($record === null) {
+                        $status_cell .= ' &mdash; ' . htmlspecialchars($installer_next);
+                    }
+                    if ($can_run_installer) {
+                        $status_cell .= ' <button type="button" class="btn btn-sm btn-outline-secondary plugin-run-installer"'
+                            . ' data-run-installer="' . htmlspecialchars($plugin['name']) . '">Run setup again</button>';
+                    }
+                    if ($failed && $record['tail'] !== '') {
+                        $status_cell .= '<pre class="plugin-host-setup-log">' . htmlspecialchars($record['tail']) . '</pre>';
+                    }
+                    $status_cell .= '</div>';
+                }
+
                 // Provisioning setup indicator — resolved asynchronously by
                 // the script at the bottom of the page.
                 if (in_array($plugin['name'], $provisioning_plugins, true)) {
@@ -562,7 +594,34 @@ function confirmPluginAction(action, pluginName, message) {
         submitPluginAction(action, pluginName);
     });
 }
+
+// Run setup again: queue the plugin's host installer as a root request, then
+// show that request's panel. A second press while it waits returns the same one.
+document.addEventListener('click', function(e) {
+    var button = e.target.closest('[data-run-installer]');
+    if (!button) { return; }
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = 'Queuing…';
+    joineryApi.post('plugin_installer_run', { plugin: button.getAttribute('data-run-installer') })
+        .then(function(data) {
+            if (!data || !data.request_id) { throw new Error('no request'); }
+            window.location = '/admin/admin_plugins?installer_request=' + encodeURIComponent(data.request_id);
+        })
+        .catch(function(err) {
+            button.disabled = false;
+            button.textContent = 'Run setup again';
+            JoineryModal.alert('Could not queue the setup run' + (err && err.message ? ': ' + err.message : '.'));
+        });
+});
 </script>
+<style>
+.plugin-host-setup { margin-top: 4px; font-size: 0.8em; color: #495057; }
+.plugin-host-setup-failed { color: #c82333; }
+.plugin-host-setup .plugin-run-installer { font-size: 0.95em; padding: 1px 8px; margin-left: 4px; }
+.plugin-host-setup-log { background: #212529; color: #f8f9fa; padding: 6px 8px; border-radius: 4px;
+    margin: 4px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
 
 <?php if (!empty($provisioning_plugins)): ?>
 <style>
@@ -583,20 +642,19 @@ function confirmPluginAction(action, pluginName, message) {
 .prov-item-status { margin-top: 2px; }
 .prov-item-unmet .prov-item-status { color: #9a7400; }
 .prov-item-error .prov-item-status { color: #c82333; }
-.prov-item-command { background: #212529; color: #f8f9fa; padding: 6px 8px;
-    border-radius: 4px; margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; }
 </style>
 <script>
 (function() {
     var nodes = document.querySelectorAll('[data-provisioning-plugin]');
     if (!nodes.length) { return; }
+    var canRunInstaller = <?php echo $can_run_installer ? 'true' : 'false'; ?>;
 
     joineryApi.post('plugin_provisioning_check', {})
         .then(function(data) {
             if (!data || !data.plugins) { throw new Error('bad response'); }
             nodes.forEach(function(node) {
                 var name = node.getAttribute('data-provisioning-plugin');
-                render(node, data.plugins[name] || {});
+                render(node, name, data.plugins[name] || {});
             });
         })
         .catch(function() {
@@ -605,7 +663,7 @@ function confirmPluginAction(action, pluginName, message) {
             });
         });
 
-    function render(node, provisionersMap) {
+    function render(node, pluginName, provisionersMap) {
         var items = Object.keys(provisionersMap).map(function(k) { return provisionersMap[k]; });
         if (!items.length) { node.innerHTML = ''; return; }
 
@@ -630,7 +688,7 @@ function confirmPluginAction(action, pluginName, message) {
         badge.tabIndex = 0;
         badge.title = 'Click for details';
 
-        var panel = buildPanel(items);
+        var panel = buildPanel(pluginName, items);
         node.appendChild(badge);
         node.appendChild(panel);
 
@@ -643,12 +701,12 @@ function confirmPluginAction(action, pluginName, message) {
         });
     }
 
-    function buildPanel(items) {
+    function buildPanel(pluginName, items) {
         var panel = document.createElement('div');
         panel.className = 'prov-panel';
         panel.style.display = 'none';
 
-        var seenCommands = {};
+        var offeredRun = false;
         items.forEach(function(it) {
             var row = document.createElement('div');
             row.className = 'prov-item prov-item-' + it.state;
@@ -678,12 +736,15 @@ function confirmPluginAction(action, pluginName, message) {
             }
             row.appendChild(status);
 
-            if (it.state === 'unmet' && it.script_command && !seenCommands[it.script_command]) {
-                seenCommands[it.script_command] = true;
-                var cmd = document.createElement('pre');
-                cmd.className = 'prov-item-command';
-                cmd.textContent = it.script_command;
-                row.appendChild(cmd);
+            // The plugin's own installer fixes this one: offer it once per panel.
+            if (it.state === 'unmet' && it.fixed_by_installer && canRunInstaller && !offeredRun) {
+                offeredRun = true;
+                var run = document.createElement('button');
+                run.type = 'button';
+                run.className = 'btn btn-sm btn-outline-secondary plugin-run-installer';
+                run.setAttribute('data-run-installer', pluginName);
+                run.textContent = 'Run setup again';
+                row.appendChild(run);
             }
             panel.appendChild(row);
         });

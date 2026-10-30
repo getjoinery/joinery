@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.144.11",
+    "version": "1.144.12",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -81,7 +81,7 @@
                 "type": "code",
                 "call": "InboundEmailHealth::checkInboundMailServer"
             },
-            "script": "provisioning/install_email.sh"
+            "fixed_by_installer": true
         },
         {
             "key": "outbound_forwarding_relay",
@@ -136,7 +136,7 @@
                 "type": "code",
                 "call": "InboundEmailHealth::checkSearchIndexEngine"
             },
-            "script": "provisioning/install_email.sh"
+            "fixed_by_installer": true
         },
         {
             "key": "search_index_storage",
@@ -151,22 +151,21 @@
         {
             "key": "content_spam_scanner",
             "label": "Spam scanner on this server",
-            "details": "Ships with the mail stack: install_email.sh installs rspamd, a stateless milter that stamps spam headers the app reads. Where this server receives mail directly, verified wired into Postfix's milter chain and answering on 11332. A deployment fronted by a relay or a webhook provider has its mail scanned before it arrives and is not checked. provision_spam_scanner.sh install repairs drift.",
+            "details": "Ships with the mail stack: install_email.sh installs rspamd, a stateless milter that stamps spam headers the app reads. Where this server receives mail directly, verified wired into Postfix's milter chain and answering on 11332. A deployment fronted by a relay or a webhook provider has its mail scanned before it arrives and is not checked. The mail setup repairs drift: Run setup again on the Plugins page.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkContentSpamScanner"
             },
-            "script": "provisioning/provision_spam_scanner.sh"
+            "fixed_by_installer": true
         },
         {
             "key": "relay_reachable",
             "label": "Hardened relay reachable",
-            "details": "A relay without a shell answers one pinned, signed health ping over its own HTTPS API; the failure class (refused, unreachable, pin mismatch, signature refused) names what stopped it. No-op on colocated deployments.",
+            "details": "A relay without a shell answers one pinned, signed health ping over its own HTTPS API; the failure class (refused, unreachable, pin mismatch, signature refused) names what stopped it. No-op on colocated deployments. Fixed from the mailbox Setup tab (and, for a managed relay, Server Manager), never by a script on this server.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkRelayReachable"
-            },
-            "script": "provisioning/provision_relay.sh"
+            }
         },
         {
             "key": "relay_spool_draining",

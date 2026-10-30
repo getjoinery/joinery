@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.13 - a failed or refused installer names the plugin and the Plugins page, or, for a core
+ *                 installer, logs/host_converger.log (plugin_installer_from_the_browser.md D5)
  * @version 1.12 - the converger row reads HostConvergerNotice::runState(): one installed minutes ago that has
  *                 not run yet is unknown rather than unmet
  * @version 1.11 - the converger's advice names the journal: on a host with a data root it logs there
@@ -248,13 +250,11 @@ class VaultHealth {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 				'reason' => 'The host converger last ran ' . gmdate('Y-m-d H:i', $facts['last_run']) . ' UTC, over a day ago. On the host: ' . HostConvergerNotice::installCommand()];
 		}
-		if ($facts['outcome'] === 'installer-failed') {
+		if ($facts['outcome'] === 'installer-failed' || $facts['outcome'] === 'installer-refused') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-				'reason' => 'The host converger ran but an installer failed; see journalctl -u joinery-host-converger on the host (logs/host_converger.log on a host with no data root).'];
-		}
-		if ($facts['outcome'] === 'installer-refused') {
-			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-				'reason' => 'The host converger refused to run an installer it could not attribute — one is owned by the wrong account or is writable by more than its owner. See journalctl -u joinery-host-converger on the host (logs/host_converger.log on a host with no data root).'];
+				'reason' => 'The host converger ran, but an installer did not. '
+					. HostConvergerNotice::failedRunAdvice($facts['outcome'],
+						$facts['failed_plugins'] ?? array())];
 		}
 		// The converger is also what carries out root requests, so a queue that
 		// is not moving is the same fact as a converger that is not running,

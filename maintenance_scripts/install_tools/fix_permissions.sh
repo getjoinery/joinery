@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 4.11 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are pinned out of the data-set sweep: root writes them and the pool only reads them (plugin_installer_from_the_browser, reviewer2 B2)
 #VERSION 4.10 - config/release_trust (the trusted set and its authority, specs/release_key_rotation.md R1)
 #               is pinned root:root 0644 and pruned from the config/ sweep like the key files it records
 #VERSION 4.9 - On a host that refuses unsigned code (host_restrictions.sh) the tree owner is root,
@@ -281,6 +282,13 @@ PINNED=(
 # -not -path skips the directory and then walks straight into it.
 PINNED_DIRS=(
     "$SITE_ROOT/config/backup-ledger"
+    # Root writes these and the pool only reads them, 750 root:www-data with
+    # 640 files, set by the host converger's runner. In the data set they
+    # would be the web user's between converges, and a link planted at a name
+    # root writes would have root write through it.
+    "$SITE_ROOT/cache/plugin_installers"
+    "$SITE_ROOT/logs/plugin_installers"
+    "$SITE_ROOT/logs/root_requests"
 )
 
 PRUNE=()

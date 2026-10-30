@@ -33,6 +33,7 @@
  *
  * Run: php plugins/server_manager/tests/provision_one_layer_test.php
  *
+ * @version 1.3 - each adoption case's address is one no provision holds and the other case did not draw
  * @version 1.2 - the adopted servers are in a real account of ours, whose provider adoption records (B40)
  * @version 1.1 - a copy's layer is decided by SiteCopyRunner::copy_encryption(), never ticked, and a copy into its
  *               owner's account with a proven site key is born sealed to it (specs/site_copy_final_test.md E1)
@@ -466,8 +467,15 @@ $pol_oca->store_credential('harness-pol-token');
 $pol_oca->save();
 $pol_oca->load();
 harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $pol_oca->key);
+// Each case's server needs an address no provision holds: adoption refuses one
+// that is held, and a random draw could repeat the other case's or meet a row
+// another suite made (a db --changed gate, 2026-10-30).
+$pol_used = array();
 foreach (array('enabled' => 'enabled', 'absent' => 'unknown') as $case => $expect) {
-	$v4 = '192.0.2.' . random_int(100, 250);
+	do {
+		$v4 = '192.0.2.' . random_int(100, 250);
+	} while (in_array($v4, $pol_used, true) || CustomerCloudProvision::for_machine_address($v4));
+	$pol_used[] = $v4;
 	$an = new ManagedNode(NULL);
 	$an->set('mgn_name', 'HarnessTest adopt ' . $case . ' ' . $suffix);
 	$an->set('mgn_slug', 'harnesstest-ol-adopt-' . $case . '-' . $suffix);

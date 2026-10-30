@@ -644,6 +644,31 @@ MC="$T/metal-ctr"; cp -r "$MT" "$MC"; rm -f "$MC"/etc/php/8.3/fpm/pool.d/zz-join
 MEMORY_PLAN_CPUS=1 JOINERY_HOUSEKEEPING_ROOT="$MC" bash "$SCRIPT" >/dev/null 2>&1
 chk "a container is left to its own start (_site_start.sh)" "$(ls "$MC"/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf "$MC"/etc/postgresql/16/main/conf.d/20-joinery-memory.conf 2>/dev/null | wc -l)" "0"
 
+echo "== the hourly security check: a developer's box is said, not failed (localdev 2026-10-29) =="
+# The decision alone, with its two helpers stubbed: the branch that uses it
+# runs only against the real system.
+DT="$(mktemp -d)"
+mkdir -p "$DT/install_tools" "$DT/sysadmin_tools" "$DT/site/config"
+cat > "$DT/install_tools/_tree_trust.sh" <<'STUB'
+joinery_tree_owner_record() { echo "${STUB_OWNER}"; [ "${STUB_OWNER}" != root ]; }
+STUB
+cat > "$DT/install_tools/_host_restrictions.sh" <<'STUB'
+host_restriction_on() { [ "${STUB_UNSIGNED:-0}" = 1 ]; }
+STUB
+dev_tree() {
+    ( SCRIPT_DIR="$DT/install_tools"; SITE_ROOT="$DT/site"; SCK="$DT/sysadmin_tools/security_check.sh"
+      eval "$(sed -n '/^sck_developer_tree() {/,/^}/p' "$HK")"
+      sck_developer_tree && echo developer || echo node )
+}
+ME="$(id -un)"
+chk "a record naming the account that owns the tree is a developer's box" "$(STUB_OWNER="$ME" dev_tree)" "developer"
+chk "a record naming root is a node, and still fails" "$(STUB_OWNER=root dev_tree)" "node"
+chk "a tree that drifted from its record is not the developer's" "$(STUB_OWNER=nobody dev_tree)" "node"
+chk "a host that refuses unsigned code never is, whatever the record says" "$(STUB_OWNER="$ME" STUB_UNSIGNED=1 dev_tree)" "node"
+touch "$DT/site/config/agent_signing_key"
+chk "the publishing box is one by its signing key, whatever its record says" "$(STUB_OWNER=root dev_tree)" "developer"
+rm -rf "$DT"
+
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

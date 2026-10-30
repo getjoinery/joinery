@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.149 - unit_journal and reset_failed_unit take joinery-host-converger, per value from agent 1.97.0
+ *                  (UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION, unit_journal_units_for): its journal is the only record of
+ *                  which installer failed a run on a host with a data root
  * @version 1.148 - build_data_root_provider_layer (agent 1.96.0): the machine is told the provider's own disk
  *                 encryption under it, enabled or disabled (specs/site_copy_final_test.md E2, B114)
  * @version 1.147 - a copy's install passes --keep-root-login only to a release that knows it (keep_root_login_flag,
@@ -530,7 +533,39 @@ class JobCommandBuilder {
 		'fstrim'              => 'fstrim',
 		'e2scrub_all'         => 'e2scrub_all',
 		'joinery-mail-gateway' => 'Mail apps gateway',
+		'joinery-host-converger' => 'Host converger',
 	];
+
+	/**
+	 * The host converger is a per-value floor, as the access log is for
+	 * site_log: an older agent refuses the value, not the word.
+	 */
+	const UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION = '1.97.0';
+
+	/**
+	 * Which of UNIT_JOURNAL_UNITS this node's agent will answer about (and
+	 * clear, since reset_failed_unit validates against the same list).
+	 */
+	public static function unit_journal_units_for($node) {
+		$units = self::UNIT_JOURNAL_UNITS;
+		$agent = (string)AgentVocabulary::version($node);
+		if ($agent === '' || version_compare($agent, self::UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION, '<')) {
+			unset($units['joinery-host-converger']);
+		}
+		return $units;
+	}
+
+	/**
+	 * The refusal for a unit this node's agent is too old for, or null.
+	 */
+	private static function unit_too_new_for_agent($node, $unit) {
+		if (array_key_exists($unit, self::UNIT_JOURNAL_UNITS) && !array_key_exists($unit, self::unit_journal_units_for($node))) {
+			return "Node '{$node->get('mgn_slug')}' cannot name the unit '{$unit}': its agent is "
+				. ((string)AgentVocabulary::version($node) ?: 'of an unknown version') . ', and this needs '
+				. self::UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION . ' or newer.';
+		}
+		return null;
+	}
 
 	/**
 	 * The platform release that carries the decommission approval panel
@@ -2103,6 +2138,10 @@ class JobCommandBuilder {
 		// A unit name arrives from a card that renders whatever the node
 		// reported failed, so it is checked against the list rather than
 		// trusted for being on screen.
+		$too_new = self::unit_too_new_for_agent($node, $unit);
+		if ($too_new !== null) {
+			throw new Exception($too_new);
+		}
 		if (!array_key_exists($unit, self::UNIT_JOURNAL_UNITS)) {
 			throw new Exception("'" . $unit . "' is not a unit the node will read a journal for. Choose one of: "
 				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');
@@ -2798,6 +2837,10 @@ class JobCommandBuilder {
 
 	public static function build_reset_failed_unit_primitive($node, $unit) {
 		$unit = (string)$unit;
+		$too_new = self::unit_too_new_for_agent($node, $unit);
+		if ($too_new !== null) {
+			throw new Exception($too_new);
+		}
 		if (!array_key_exists($unit, self::UNIT_JOURNAL_UNITS)) {
 			throw new Exception("'" . $unit . "' is not a unit the node will clear. Choose one of: "
 				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');

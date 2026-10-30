@@ -12,6 +12,8 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.1 - Logs: the host converger's journal (unit_journal joinery-host-converger, agent 1.97.0), the
+ *                record of which installer failed a converge on a host with a data root
  * @version 1.0 - Reports, the machine's questions, Logs, Diagnose and repair
  */
 ?>
@@ -178,6 +180,27 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 			$fw_tbl->numberinput('rows', 'Rows (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
 			$fw_tbl->submitbutton('btn_log_table', 'Read log table', ['class' => 'btn btn-sm btn-outline-secondary']);
 			$fw_tbl->end_form();
+			echo '</div>';
+		}
+		// The converger's journal: on a host with a data root it is the only
+		// record of which installer failed a run, and the converger exits 0
+		// either way, so it never appears among the failed units.
+		if (JobCommandBuilder::has_primitive($node, 'unit_journal')
+				&& array_key_exists('joinery-host-converger', JobCommandBuilder::unit_journal_units_for($node))) {
+			echo '<div>';
+			$fw_hc = $page->getFormWriter('converger_journal_form', [
+				'action' => $base_url . '&tab=diagnostics',
+				'values' => ['lines' => '200'],
+			]);
+			$fw_hc->begin_form();
+			$fw_hc->hiddeninput('action', '', ['id' => 'converger_journal_action', 'value' => 'unit_journal']);
+			$fw_hc->hiddeninput('unit', '', ['id' => 'converger_journal_unit', 'value' => 'joinery-host-converger']);
+			$fw_hc->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'converger_journal_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_hc->numberinput('lines', 'Host converger: lines of its journal (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')',
+				['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT,
+				 'helptext' => 'Which installer failed the last runs, and why: each run says which installers ran and which did not.']);
+			$fw_hc->submitbutton('btn_converger_journal', 'Read converger journal', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_hc->end_form();
 			echo '</div>';
 		}
 		// Host configuration, from the compiled readable list: the node

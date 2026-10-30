@@ -420,9 +420,9 @@ A plugin that needs something installed on the host declares it; the platform in
   — trusts its own tree, because every plugin there is the source the archives
   are built from.
 
-The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal node, activating a plugin after install has no such moment — run the installers on demand from the node's detail page in Server Manager (Actions → Run Plugin Installers), which queues a `run_plugin_installers` job. A machine with no site (a Docker host, a relay; the runner's `--machine` mode) has no plugins and runs no plugin installer, only its host set, so the action is not offered there. The runner is fail-safe — an installer failure logs a warning and never blocks container start. It holds one kernel lock for the whole of every run, taken before anything changes the host; a second runner started beside it (a cron tick, an agent job, an operator's `sudo`) waits for the lock, ten minutes at most, and then runs, and only a holder that outlives the wait makes it print who holds the lock and since when and exit 0 having done nothing; `--only=<core installer>` runs a single core installer under that lock and nothing else, and `--only-plugin=<plugin>` one active plugin's installer (see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades)). The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
+The runner `maintenance_scripts/install_tools/_plugin_installers_start.sh` executes every **active** plugin's declared installer at the root moments without systemd: the container `CMD` (every start), `install.sh` site builds, and `upgrade.php`. On a bare-metal site the host converger (below) runs them when the active set changes, and an admin can run one plugin's installer again from the Plugins page (see [Host setup](#host-setup-the-last-install-run-and-run-setup-again)); a managed node's detail page in Server Manager also runs every installer (Actions → Run Plugin Installers, a `run_plugin_installers` job). A machine with no site (a Docker host, a relay; the runner's `--machine` mode) has no plugins and runs no plugin installer, only its host set, so the action is not offered there. The runner is fail-safe — an installer failure logs a warning and never blocks container start. It holds one kernel lock for the whole of every run, taken before anything changes the host; a second runner started beside it (a cron tick, an agent job, an operator's `sudo`) waits for the lock, ten minutes at most, and then runs, and only a holder that outlives the wait makes it print who holds the lock and since when and exit 0 having done nothing; `--only=<core installer>` runs a single core installer under that lock and nothing else, and `--only-plugin=<plugin>` one active plugin's installer (see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades)). The Mailbox plugin's `provisioning/install_email.sh` is the reference implementation.
 
-Activation cannot run a `host_installer` itself (web requests lack root), but the host converger — a root timer every site install leaves behind, see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades) — runs the installers within a minute of a change in the active set, so a newly activated plugin's services arrive without a shell. Still pair the installer with `provisioners` entries (below) so the admin UI detects missing host state and points at the fix; on Docker nodes a container restart runs the installer automatically.
+Activation cannot run a `host_installer` itself (web requests lack root), but the host converger — a root timer every site install leaves behind, see [Deploy and Upgrade](deploy_and_upgrade.md#who-owns-the-code-and-how-the-browser-upgrades) — runs the installers within a minute of a change in the active set, so a newly activated plugin's services arrive without a shell. Still pair the installer with `provisioners` entries (below), declared `fixed_by_installer`, so the admin UI detects missing host state and offers Run setup again; on Docker nodes a container restart runs the installer automatically.
 
 #### A plugin never writes the code tree
 
@@ -1612,7 +1612,7 @@ handoff.
 
 `update_database` handles the *database* side of plugin setup. **Provisioners** handle the other side: the external runtime resources a plugin needs that the database system knows nothing about — mail servers, relays, services, extensions, APIs.
 
-A plugin can be installed and activated while one of these resources is missing or misconfigured, so the feature silently fails. Provisioning checks detect that on demand and surface it on the admin Plugins page (`/admin/admin_plugins`), with the command that fixes it where one exists. The provisioning check itself **only detects and reports — it never runs a fix.** Installation is the job of the plugin's declared `host_installer` (see [Declaring Dependencies](#declaring-dependencies)), which the platform runs automatically at container start, site build, and upgrade; a provisioner's `script` field typically points at that same installer so the admin UI names the fix.
+A plugin can be installed and activated while one of these resources is missing or misconfigured, so the feature silently fails. Provisioning checks detect that on demand and surface it on the admin Plugins page (`/admin/admin_plugins`). The provisioning check itself **only detects and reports — it never runs a fix.** Installation is the job of the plugin's declared `host_installer` (see [Declaring Dependencies](#declaring-dependencies)), which the platform runs automatically at container start, site build, upgrade and whenever the active set changes; a provisioner that the installer fixes declares `fixed_by_installer`, and the page offers **Run setup again** beside it. A check never names a script of its own: root only ever runs a plugin's declared `host_installer`, so a second path per check would be a second list of files that could run as root.
 
 ### Declaration
 
@@ -1625,7 +1625,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
     "label": "Inbound mail server (Postfix) running",
     "details": "Postfix on the host receives inbound mail and pipes it to the forwarder.",
     "check": { "type": "probe", "probe": "tcp", "host": "host-gateway", "port": 25 },
-    "script": "provisioning/install_email.sh"
+    "fixed_by_installer": true
   },
   {
     "key": "outbound_forwarding_relay",
@@ -1642,7 +1642,7 @@ Declare runtime dependencies as a `provisioners` array in `plugin.json`, alongsi
 | `label` | yes | Human-readable name shown in the admin UI. |
 | `details` | no | One-line explanation shown under the label. |
 | `check` | yes | A check object; `type` is `code` or `probe`. |
-| `script` | no | Path to a fix script, relative to the plugin root. Include it only when the fix is a host-level install; omit it when the failure is a configuration problem the admin fixes directly. |
+| `fixed_by_installer` | no | `true` when the plugin's own `host_installer` fixes this check: an unmet check then offers **Run setup again**. Omit it when the failure is configuration the admin fixes on a page (DNS, a relay, a credential). Declaring it on a plugin with no `host_installer`, or declaring a `script` field (no check names a script of its own), makes the check report `error` naming the problem. |
 | `fleet_report` | no | `true` to report this check to a management node. See [Reporting a check to a management node](#reporting-a-check-to-a-management-node). |
 
 ### Two check types — when to use each
@@ -1681,9 +1681,17 @@ Checks run asynchronously (via the `plugin_provisioning_check` API action) after
 | Any `unmet` | amber **Needs setup** |
 | Any `error` | red **Check failed** |
 
-The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for `unmet` provisioners that declare a `script`, unless the check refused — the fix command as an absolute path.
+The teal state is deliberate: a plugin whose green status rests on probes never claims the unqualified "Setup complete." Expanding the badge lists each provisioner, with the reason and — for an `unmet` provisioner declared `fixed_by_installer`, unless the check refused — the **Run setup again** button.
 
-The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results and exits non-zero when anything is `unmet` or `error`.
+The CLI equivalent is `php utils/check_provisioning.php`, which prints the same results, each plugin's host setup line (below), and exits non-zero when anything is `unmet` or `error`.
+
+### Host setup: the last install run, and Run setup again
+
+Every run of a plugin's `host_installer` leaves a record, however it was started (the converger's pass, `--only-plugin`, a managed node's job, or the button): `cache/plugin_installers/<plugin>.json` holds `{plugin, installer, started_at, finished_at, outcome, exit_code, release}` and `logs/plugin_installers/<plugin>.log` the run's full output, written by root and readable by the web user. `outcome` is `ok`, `failed`, `refused-untrusted` (root did not put the installer there, or it is writable by others), `refused-unsigned` (not a package we built) or `missing`; a refusal's one-line reason is the log. `PluginInstallerStatus::forPlugin($name)` reads a record and the last 20 lines of its log, and `statusLine()` renders it.
+
+On the Plugins page every active plugin with a `host_installer` shows one line — `Host setup: installed 2026-10-11 14:02 UTC (release 0.8.484)`, `Host setup: failed …` with the last lines of its output, or `Host setup: not run yet` with what happens next (the server runs it shortly, or why it cannot) — and, for a superadmin, **Run setup again**. The button calls the `plugin_installer_run` API action, which queues a `run_plugin_installer` root request (`{plugin}`); the root-request panel shows it until it finishes, then the installer's output. A second press while one is queued or running returns the same request. The host converger carries the request out in its own request loop: a queued request starts a full converge, whose plugin pass has already run every active installer, so the request copies that run's record and log rather than installing a second time. It exits 0 when the installer succeeded, 1 when it failed, and 2 when nothing ran (a plugin that is not active, declares no installer, or was refused).
+
+A failed or refused plugin installer is named in the admin header notice and in VaultHealth, with a link to the Plugins page.
 
 ### Reporting a check to a management node
 

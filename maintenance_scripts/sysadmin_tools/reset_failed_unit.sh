@@ -3,6 +3,8 @@
 # reset_failed_unit.sh - clear systemd's record that one unit failed, and say
 # what the unit's state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.2 - joinery-host-converger: on a host with a data root its journal is the only record
+#                of which installer failed a run (agent 1.97.0)
 # Version: 1.1 - joinery-mail-gateway, as unit_journal.sh 1.2
 # Version: 1.0 - the reset_failed_unit operate word of
 #                specs/disk_headroom_and_unit_diagnosis.md § 9. The agent runs
@@ -43,6 +45,7 @@ UNITS=(
     apt-daily apt-daily-upgrade
     fstrim e2scrub_all
     joinery-mail-gateway
+    joinery-host-converger
 )
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }

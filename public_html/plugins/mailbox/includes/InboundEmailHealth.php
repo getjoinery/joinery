@@ -20,6 +20,8 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.28 - the spam scanner checks point at Run setup again on the Plugins page, not a command to
+ *                 type on the host (plugin_installer_from_the_browser.md D3)
  * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.26 - a site container has no mail server: checkInboundMailServer asks for an enabled
  *   relay when its mail arrives by SMTP and a domain receives here; checkOriginHidden does not apply
@@ -413,8 +415,7 @@ class InboundEmailHealth {
             throw new ProvisioningCheckFailed(
                 'Postfix is not handing mail to the spam scanner (' . MailboxSpamPolicy::MILTER_ENTRY
                 . ' is missing from smtpd_milters), so inbound mail carries no scanner verdict. '
-                . 'Re-run the idempotent installer to repair the wiring: '
-                . MailboxSpamPolicy::installCommand()
+                . 'The mail setup repairs the wiring: Run setup again on the Plugins page.'
             );
         }
 
@@ -422,8 +423,7 @@ class InboundEmailHealth {
             throw new ProvisioningCheckFailed(
                 'The spam scanner that ships with the mail stack is not answering on port '
                 . MailboxSpamPolicy::MILTER_PORT . '. Mail is unaffected (Postfix accepts it unscanned), '
-                . 'but it carries no scanner verdict. Install or repair it with: '
-                . MailboxSpamPolicy::installCommand()
+                . 'but it carries no scanner verdict. The mail setup installs or repairs it: Run setup again on the Plugins page.'
             );
         }
     }
