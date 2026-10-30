@@ -9,6 +9,7 @@
  * access is the existing agent_log_access switch, also on the Management Node
  * page.
  *
+ * @version 1.2 - log access reads as one plain sentence, no help text
  * @version 1.1 - the line saying nothing reads the logs yet shows only on a site not yet connected (reviewer2 B1)
  * @version 1.0
  */
@@ -45,10 +46,8 @@ if ($beta_offered) {
 	<?php
 }
 
-echo $formwriter->checkboxinput('allow_log_access', 'Log access', array(
+echo $formwriter->checkboxinput('allow_log_access', "Allow Joinery's agent to read errors and logs on this site for troubleshooting purposes.", array(
 	'checked' => BetaPermissions::log_access_on(),
-	'helptext' => "Lets us read your server's error and activity logs when diagnosing a problem. Passwords, keys, member "
-		. 'addresses and form contents are never sent. You can change this any time on the Management Node page.',
 ));
 ?>
 <div class="jy-mt-2">
