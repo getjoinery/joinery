@@ -8,6 +8,7 @@
  * re-run (or a concurrent run) can never email the same reminder twice.
  * The descriptive columns exist for reporting and admin inspection.
  *
+ * @version 1.1 - cme_usr_user_id is a database foreign key to usr_users (ON DELETE CASCADE)
  * @version 1.0
  */
 
@@ -39,7 +40,12 @@ class CalendarEmail extends SystemBase {
 
 	public static $field_specifications = array(
 		'cme_calendar_email_id'    => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'cme_usr_user_id'          => array('type' => 'int4', 'required' => true),
+		// A database key, not only the deletion rule: the engine loads its
+		// users and then claims each send, so a user deleted in between left
+		// a row behind (referential_integrity, 2026-10-30). The claim now
+		// fails like a duplicate and nothing is sent.
+		'cme_usr_user_id'          => array('type' => 'int4', 'required' => true,
+			'foreign_key' => array('table' => 'usr_users', 'column' => 'usr_user_id', 'on_delete' => 'CASCADE')),
 		// reminder | summary_daily | summary_weekly
 		'cme_kind'                 => array('type' => 'varchar(20)', 'required' => true),
 		// Reminders only; NULL for summaries.

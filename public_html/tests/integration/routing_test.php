@@ -718,11 +718,17 @@ class HttpRoutingTestRunner {
         // Test real page URLs from database
         try {
             require_once(PathHelper::getIncludePath('data/pages_class.php'));
-            $pages = new MultiPage(['deleted' => false], ['pag_page_id' => 'DESC'], 2);
+            // Only a page an anonymous visitor may open answers 200: published,
+            // not deleted, and not behind a tier. A draft another session made
+            // (hunt9-page, 2026-10-30) answers 404, correctly.
+            $pages = new MultiPage(['deleted' => false, 'published' => true], ['pag_page_id' => 'DESC'], 5);
             if ($pages->count_all() > 0) {
                 $pages->load();
                 $index = 1;
                 foreach ($pages as $page) {
+                    if ($index > 2 || $page->get('pag_tier_min_level')) {
+                        continue;
+                    }
                     if ($page->get('pag_link')) {
                         $test_cases[] = [$page->get_url(), 200, 'Page #' . $index . ' from database'];
                         $index++;

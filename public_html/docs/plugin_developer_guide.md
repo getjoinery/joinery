@@ -401,6 +401,7 @@ A plugin that needs something installed on the host declares it; the platform in
 - **Root** — it may `apt-get install` and edit `/etc`; it should verify root and refuse otherwise.
 - **Non-interactive** — set `DEBIAN_FRONTEND=noninteractive`; never prompt.
 - **Exit 0 when not-applicable** — plugin inactive for the site, feature setting off, wrong platform.
+- **Prints no secret.** Its output is the plugin's record on the Plugins page and the request's transcript, and it reaches the host converger's journal, which a management node can read (`unit_journal`). Print a public key or a DNS record if the operator needs it; never a password, token or private key, and never run under `set -x`.
 - **Leaves no background process holding inherited descriptors.** The runner lock is a kernel `flock` held by every process that inherits the runner's descriptor, so a daemon the installer starts and leaves behind would hold the lock for as long as it lives, and every later run would wait on it. Close every descriptor above stdio before launching anything that outlives the installer; the agent keepalive in `install_agent.sh` is the reference.
 - **Owned by the tree owner, and writable by nobody else.** The runner checks
   before it executes: an installer owned by another account, or carrying a group

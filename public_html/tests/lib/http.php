@@ -425,12 +425,54 @@ function harness_csrf_header($token) {
 }
 
 /**
+ * Give a staff fixture of this run the second factor the site requires of its
+ * admins, when it requires one and the fixture holds none: a TOTP secret, with
+ * the 'sensitive_only' cadence so the password sign-in stays one step, as it
+ * may for a real admin. Sensitive actions still ask for a fresh factor
+ * (step-up), which is what tests about step-up exercise.
+ *
+ * Only an account this run made (its email carries the run's token) is
+ * touched, and only when the setting is on; a real account is never changed.
+ * A test of the admin gate itself checks an account with no factor without
+ * signing it in through here.
+ */
+function harness_fixture_admin_factor($email) {
+	$h = $GLOBALS['__harness'] ?? array();
+	if (harness_fixture_email_token($email) === '' || harness_fixture_email_token($email) !== ($h['run_token'] ?? null)) {
+		return;
+	}
+	if (!Globalvars::get_instance()->get_setting('totp_require_admins', true, true)) {
+		return;
+	}
+	$user = User::GetByEmail($email);
+	if (!$user || !Access::allows(Access::staffLevel(), (int)$user->get('usr_permission'))) {
+		return;
+	}
+	if (SessionControl::get_instance()->user_has_second_factor($user)) {
+		return;
+	}
+	$alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+	$secret = '';
+	for ($i = 0; $i < 32; $i++) {
+		$secret .= $alphabet[random_int(0, 31)];
+	}
+	$user->set('usr_2fa_cadence', 'sensitive_only');
+	$user->enable_totp($secret);
+}
+
+/**
  * Log a user in over the real form-post path, leaving the session in $jar.
  *
  * Returns the CSRF token from the resulting logged-in page, or null when login
  * did not take — callers should assert on that rather than push on.
+ *
+ * A staff fixture signs in as a staff account on this site would: where the
+ * site requires a second factor of its admins (totp_require_admins, on almost
+ * everywhere), one that holds none is given one first, or every page it opens
+ * is redirected to /profile/security. See harness_fixture_admin_factor().
  */
 function harness_web_login($jar, $email, $password) {
+	harness_fixture_admin_factor($email);
 	// The sign-in form's token, as a browser has it from the page it posts.
 	$form = harness_request('GET', '/login', array('jar' => $jar, 'accept' => null));
 	$token = preg_match('/name="_csrf_token"[^>]*value="([^"]+)"/', (string)$form['body'], $m) ? html_entity_decode($m[1]) : '';
