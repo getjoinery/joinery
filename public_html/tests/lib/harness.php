@@ -1301,6 +1301,40 @@ function harness_apply_reference_rules($table, int $id): void {
 	} catch (\Throwable $e) {
 		return; // no rules table on this install: nothing to apply
 	}
+	// A prevent rule is why the model refused: rows still point at this
+	// fixture. They were made by this run (nothing else knew the fixture), so
+	// they go first, through their own model so their cascades run. A flat
+	// DELETE of the fixture alone would leave them naming an id that no longer
+	// exists.
+	try {
+		$q = $db->prepare("SELECT del_target_table, del_target_column FROM del_deletion_rules
+			WHERE del_source_table = ? AND del_action = 'prevent'");
+		$q->execute(array($table));
+		$prevent_rules = $q->fetchAll(PDO::FETCH_ASSOC);
+	} catch (\Throwable $e) {
+		$prevent_rules = array();
+	}
+	foreach ($prevent_rules as $rule) {
+		$target = $rule['del_target_table'];
+		$column = $rule['del_target_column'];
+		if (!preg_match('/^[a-z0-9_]+$/', $target . $column)) continue;
+		$child_class = harness_model_class_for_table($target);
+		try {
+			if ($child_class === null || !class_exists($child_class)) {
+				$db->prepare("DELETE FROM $target WHERE $column = ?")->execute(array($id));
+				continue;
+			}
+			$pkey = $child_class::$pkey_column;
+			$q = $db->prepare("SELECT $pkey FROM $target WHERE $column = ?");
+			$q->execute(array($id));
+			foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $child_id) {
+				$child = new $child_class((int)$child_id, TRUE);
+				if ($child->key) { $child->permanent_delete(); }
+			}
+		} catch (\Throwable $e) {
+			echo "  WARNING: could not remove the $target rows that point at $table row $id: " . $e->getMessage() . "\n";
+		}
+	}
 	foreach ($rules as $rule) {
 		$target = $rule['del_target_table'];
 		$column = $rule['del_target_column'];

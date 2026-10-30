@@ -525,6 +525,12 @@ function get_leader() {
 		if ($this->data === NULL) {
 			throw new eventException('This request has no data.');
 		}
+		// Both local times are in the event's own timezone, so they compare directly.
+		$start = (string)$this->get('evt_start_time_local');
+		$end = (string)$this->get('evt_end_time_local');
+		if ($start !== '' && $end !== '' && strtotime($end) < strtotime($start)) {
+			throw new SystemDisplayableErrorNoLog('The event ends before it starts. Set the end time after the start time.');
+		}
 	}
 
 	function export_as_array($session=NULL) { 
@@ -538,7 +544,7 @@ function get_leader() {
 		if ($this->key) {
 			// This save's own rule first: the version below is its bookkeeping.
 			$this->guard_raw_write('write');
-			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->get('evt_description'), $this->get('evt_name'), $this->get('evt_name'));
+			ContentVersion::NewVersion(ContentVersion::TYPE_EVENT, $this->key, $this->access_stored('evt_description'), $this->access_stored('evt_name'), $this->access_stored('evt_name'));
 		}
 
 		// Derive UTC from local + timezone. Local is the source of truth; UTC is the

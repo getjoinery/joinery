@@ -780,7 +780,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 	
-	if($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout'){
+	// A free cart with no subscription never reaches a gateway, so it makes no
+	// Stripe customer either, and completes where Stripe is not set up.
+	if(($settings->get_setting('checkout_type') == 'stripe_regular' || $settings->get_setting('checkout_type') == 'stripe_checkout')
+			&& ($charge_total > 0 || $cart->get_num_recurring() > 0)){
 		$stripe_helper = _cart_charge_gateway('StripeHelper');
 		$stripe_customer_id = $stripe_helper->get_or_create_stripe_customer($billing_user);
 	}

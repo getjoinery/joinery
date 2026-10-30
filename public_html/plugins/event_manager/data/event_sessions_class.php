@@ -373,7 +373,7 @@ public static function GetBySessionNumber($event_id, $session_number){
 		
 		$results = $q->fetchAll();
 
-		$multilist = new MultiFile();
+		$multilist = new MultiFile(NULL); // hand-built: a session with no files lists none, never every file
 		foreach ($results as $result){
 			$multilist_item = new File($result['esf_fil_file_id'], TRUE);	
 			$multilist->add($multilist_item);

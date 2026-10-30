@@ -106,7 +106,8 @@ class EventsPanel implements AdminUserPanel {
 			$page->disprow(array($event_cell, $added_cell, $expires_cell, $action_cell));
 		endforeach;
 
-		$formwriter = $page->getFormWriter('form3', array('deferred_output' => true));
+		$formwriter = $page->getFormWriter('form3', array('deferred_output' => true, 'action' => '/admin/admin_user'));
+		$formwriter->begin_form();
 		$events = new MultiEvent(
 			array('deleted' => false),
 			array('start_time' => 'DESC'),
@@ -126,6 +127,7 @@ class EventsPanel implements AdminUserPanel {
 			'validation' => array('required' => true),
 		));
 		$formwriter->submitbutton('submit_button', 'Add');
+		$formwriter->end_form();
 		$add_form = $formwriter->getFieldsHTML();
 		echo '<tr><td colspan="4" class="pt-3">' . $add_form . '</td></tr>';
 

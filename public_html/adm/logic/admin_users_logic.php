@@ -49,6 +49,8 @@ function admin_users_logic(array $input): LogicResult {
 			$search_criteria['last_name_like'] = $fsearch;
 			$search_criteria['nickname_like'] = $fsearch;
 			$search_criteria['username_like'] = ltrim($searchterm, '@');
+			// Part of an address ('jane.doe', 'example.com') finds it too.
+			$search_criteria['email_like'] = $fsearch;
 		}
 
 		if(is_numeric($searchterm) && (int)$searchterm > 0 && (int)$searchterm < 2147483647) {

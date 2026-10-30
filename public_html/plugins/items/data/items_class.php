@@ -65,7 +65,7 @@ class Item extends SystemBase {
 		if ($this->key) {
 			// This save's own rule first: the version below is its bookkeeping.
 			$this->guard_raw_write('write');
-			ContentVersion::NewVersion(ContentVersion::TYPE_ITEM, $this->key, $this->get('itm_body'), $this->get('itm_name'), $this->get('itm_name'));
+			ContentVersion::NewVersion(ContentVersion::TYPE_ITEM, $this->key, $this->access_stored('itm_body'), $this->access_stored('itm_name'), $this->access_stored('itm_name'));
 		}
 		
 		parent::save($debug);

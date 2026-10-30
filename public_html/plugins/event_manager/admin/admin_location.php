@@ -38,7 +38,7 @@
 	}
 
 	if(!$location->get('loc_delete_time') && $location->can_delete(SessionControl::get_instance())) {
-		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_location', 'hidden' => array('action' => 'delete', 'loc_location_id' => $location->key));
+		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_location', 'hidden' => array('action' => 'delete', 'loc_location_id' => $location->key), 'confirm' => 'Delete this location? You can undelete it later.');
 	}
 
 	// Build dropdown button from altlinks

@@ -258,6 +258,12 @@ section('Which errors are sent automatically');
 check(ProblemReport::isUnexpected(new RuntimeException('boom')), 'an ordinary exception is unexpected');
 check(!ProblemReport::isUnexpected(new SystemDisplayableError('Enter a date.')), 'a message marked safe to show is not');
 check(!ProblemReport::isUnexpected(new SystemAuthenticationError('No permission.')), 'a permission refusal is not');
+$site_root = dirname(PathHelper::getIncludePath(''), 1);
+$outside = tempnam(sys_get_temp_dir(), 'prr_scratch_');
+check(ProblemReport::fromOutsideScript('cli', $outside, $site_root), 'a command-line script outside the site is not reported');
+check(!ProblemReport::fromOutsideScript('cli', __FILE__, $site_root), 'a command-line script inside the site is');
+check(!ProblemReport::fromOutsideScript('fpm-fcgi', $outside, $site_root), 'a web request is, wherever its script is');
+@unlink($outside);
 
 section('What an automatic report carries');
 

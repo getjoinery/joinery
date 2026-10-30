@@ -271,4 +271,19 @@ check((int)$after_repeat === (int)$after,
 	'registering the same user again does not consume a second seat',
 	"after: $after after_repeat: $after_repeat");
 
+section('An event cannot end before it starts');
+
+$backwards = new Event(NULL);
+$backwards->set('evt_name', 'HarnessTest backwards');
+$backwards->set('evt_timezone', 'America/New_York');
+$backwards->set('evt_start_time_local', '2026-11-23 20:00:00');
+$backwards->set('evt_end_time_local', '2026-11-23 19:00:00');
+$refused = false;
+try { $backwards->prepare(); } catch (SystemDisplayableErrorNoLog $e) { $refused = true; }
+check($refused, 'an end before the start is refused before anything is saved');
+$backwards->set('evt_end_time_local', '2026-11-23 21:00:00');
+$refused = false;
+try { $backwards->prepare(); } catch (SystemDisplayableErrorNoLog $e) { $refused = true; }
+check(!$refused, 'an end after the start is accepted');
+
 harness_finish();

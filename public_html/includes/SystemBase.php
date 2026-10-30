@@ -4201,8 +4201,10 @@ class UnknownMultiOptionException extends SystemBaseException {}
 
 /** Thrown when a sort names something that is not a column of the table being
  *  queried. A sort column cannot be a bound parameter — SQL has no placeholder
- *  for an identifier — so it is validated instead. */
-class UnsortableColumnException extends SystemBaseException {}
+ *  for an identifier — so it is validated instead. The sort usually comes from
+ *  the request (?sort=), so it is the requester's to fix: a 400 naming the
+ *  column, not a server fault. */
+class UnsortableColumnException extends SystemBaseException implements DisplayableErrorMessage {}
 
 abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
@@ -4533,7 +4535,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			&& !empty($model::$field_specifications)
 			&& !array_key_exists($column, $model::$field_specifications)) {
 			throw new UnsortableColumnException(
-				"'" . $column . "' is not a sortable column of " . $table . '.');
+				"'" . $column . "' is not a column this list can sort by.");
 		}
 
 		return $column;

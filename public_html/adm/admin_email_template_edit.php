@@ -21,10 +21,12 @@
 
 	if($_POST){
 
-		$editable_fields = array('emt_body', 'emt_name', 'emt_type');
+		$editable_fields = array('emt_body', 'emt_name', 'emt_type', 'emt_subject');
 
 		foreach($editable_fields as $field) {
-			$email_template->set($field, $_POST[$field]);
+			if (array_key_exists($field, $_POST)) {
+				$email_template->set($field, $_POST[$field]);
+			}
 		}
 
 		$email_template->prepare();
@@ -39,10 +41,7 @@
 	$content = $email_template->get('emt_body');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($_GET['cvn_content_version_id'])){
-		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
-		$content_version->assert_found();
-		$content = $content_version->get('cvn_content');
-		$title = $content_version->get('cvn_title');
+		ContentVersion::show_in_record($_GET['cvn_content_version_id'], $email_template, ContentVersion::TYPE_EMAIL_TEMPLATE, 'emt_body', 'emt_name');
 	}
 
 	$page = new AdminPage();

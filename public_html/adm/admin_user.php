@@ -222,8 +222,10 @@ array(
 								<td colspan="2" class="pt-3">
 									<?php
 										$formwriter = $page->getFormWriter('form5', [
-											'deferred_output' => true
+											'deferred_output' => true,
+											'action' => '/admin/admin_user',
 										]);
+										$formwriter->begin_form();
 
 										$group_drops = new MultiGroup(
 											array('category'=>'user'),
@@ -246,6 +248,7 @@ array(
 											'validation' => ['required' => true]
 										]);
 										$formwriter->submitbutton('submit_button', 'Add');
+										$formwriter->end_form();
 										echo $formwriter->getFieldsHTML();
 									?>
 								</td>

@@ -29,6 +29,7 @@
                     $formwriter = $page->getFormWriter('form1', ['action' => '/survey']);
                     $formwriter->begin_form();
 
+                    $invalid_messages = $page_vars['invalid_messages'] ?? array();
                     if ($invalid_messages): ?>
                         <div class="alert alert-danger mb-4" role="alert">
                             <h6 class="alert-heading mb-2">Please correct the following:</h6>
@@ -41,8 +42,8 @@
                     foreach ($page_vars['survey_questions'] as $survey_question):
                         $question = new Question($survey_question->get('srq_qst_question_id'), true);
 
+                        $answer_fill = null;
                         foreach ($page_vars['survey_answers'] as $survey_answer):
-                            $answer_fill = null;
                             if ($survey_answer->get('sva_qst_question_id') == $question->key) {
                                 if ($question->get('qst_type') == Question::TYPE_CHECKBOX_LIST) {
                                     $answer_fill = explode(',', $survey_answer->get('sva_answer'));

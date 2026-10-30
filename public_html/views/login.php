@@ -7,11 +7,8 @@
     $settings = $page_vars['settings'];
     $email = $page_vars['email'] ?? null;
 
-    if ($email) {
-        $forgot_link = '/password-reset-1?e=' . rawurlencode(htmlspecialchars($email));
-    } else {
-        $forgot_link = '/password-reset-1';
-    }
+    // The typed address never goes into a link: the reset page asks for it.
+	$forgot_link = '/password-reset-1';
 
     $page = new PublicPage();
     $page->public_header([
@@ -38,6 +35,7 @@
         $formwriter->begin_form();
 
         $formwriter->textinput('email', 'Email or username:', [
+            'value'        => $email ?? '',
             'required'     => true,
             'autocomplete' => 'username',
         ]);

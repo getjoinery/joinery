@@ -53,8 +53,8 @@
 	echo '<br />';
 
 	echo '<br /><strong>Max uses:</strong> ';
-	if($coupon_code->get('ccd_max_uses') > 0){
-		echo htmlspecialchars($coupon_code->get('ccd_max_uses'));
+	if($coupon_code->get('ccd_max_num_uses') > 0){
+		echo htmlspecialchars($coupon_code->get('ccd_max_num_uses'));
 	}
 	else{
 		echo 'Unlimited';

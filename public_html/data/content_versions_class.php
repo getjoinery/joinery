@@ -15,6 +15,8 @@ class ContentVersionException extends SystemBaseException {}
  * location, item, agent file), keyed by cvn_type + cvn_foreign_key_id and
  * chained through cvn_previous_version_id / cvn_next_version_id.
  *
+ * @version 1.3 - show_in_record(): an edit form shows a loaded version (the pages read it and then showed the live record)
+ * @version 1.2 - foreign_key_id NULL (an unsaved record) matches no versions instead of every record's
  * @version 1.1 - prefix cvn, table cvn_content_versions: cnv is Conversation's alone
  *   (specs/implemented/shared_prefix_content_version.md)
  */
@@ -93,6 +95,31 @@ function get_previous_version(){
 	 * already decided (the model asks guard_raw_write('write') first, or calls
 	 * this after its save), so the version rows are that save's bookkeeping.
 	 */
+	/**
+	 * Show a saved version in an edit form: put its content (and title, when
+	 * given a column for it) onto $record in memory, so a form built from the
+	 * record shows that version. Nothing is saved until the editor submits.
+	 * A version of another record, or of another kind, is ignored.
+	 * Returns the version shown, or NULL.
+	 */
+	static function show_in_record($version_id, SystemBase $record, $type, $content_column, $title_column = NULL) {
+		if (!$version_id || !$record->key) {
+			return NULL;
+		}
+		$version = new ContentVersion($version_id, TRUE);
+		if (!$version->key || (int)$version->get('cvn_type') !== (int)$type
+				|| (int)$version->get('cvn_foreign_key_id') !== (int)$record->key) {
+			return NULL;
+		}
+		if ($content_column !== NULL) {
+			$record->set($content_column, $version->get('cvn_content'));
+		}
+		if ($title_column !== NULL && (string)$version->get('cvn_title') !== '') {
+			$record->set($title_column, $version->get('cvn_title'));
+		}
+		return $version;
+	}
+
 	static function NewVersion($type, $foreign_key_id, $content, $description=NULL, $title=NULL){
 		return SystemBase::rule_checked_write(function () use ($type, $foreign_key_id, $content, $description, $title) {
 			return self::write_version($type, $foreign_key_id, $content, $description, $title);
@@ -229,7 +256,9 @@ class MultiContentVersion extends SystemMultiBase {
             $filters['cvn_type'] = [$this->options['type'], PDO::PARAM_INT];
         }
 
-        if (isset($this->options['foreign_key_id'])) {
+        // A NULL record id is a record not saved yet: it has no versions, so it
+        // matches none, never every record's.
+        if (array_key_exists('foreign_key_id', $this->options)) {
             $filters['cvn_foreign_key_id'] = [$this->options['foreign_key_id'], PDO::PARAM_INT];
         }
 

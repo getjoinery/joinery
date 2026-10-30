@@ -123,6 +123,10 @@ foreach (array('no token' => '', 'a token this session never issued' => str_repe
 $res = login_call(array('email' => $email, 'password' => $password . 'X'));
 check(login_is_retry($res), 'a wrong password is refused',
 	'redirect: ' . var_export($res->redirect, true));
+check(strpos((string)$res->redirect, rawurlencode($email)) === false && strpos((string)$res->redirect, $email) === false,
+	'the typed address is not put in the retry URL',
+	'redirect: ' . var_export($res->redirect, true));
+check(($_SESSION['login_retry_email'] ?? null) === $email, 'it waits in the session to refill the form');
 
 $res = login_call(array('email' => 'nobody_' . bin2hex(random_bytes(4)) . '@example.com', 'password' => $password));
 check(login_is_retry($res), 'an unknown email is refused',

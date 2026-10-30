@@ -124,11 +124,11 @@
 									<?php
 									$visibility = $event->get('evt_visibility');
 									if($visibility == 0):
-										echo '<span class="badge rounded-pill badge-subtle-warning"><span>Private</span><span class="fas fa-lock ms-1" data-fa-transform="shrink-4"></span></span>';
+										echo '<span class="badge rounded-pill badge-subtle-warning"><span>Hidden</span><span class="fas fa-lock ms-1" data-fa-transform="shrink-4"></span></span>';
 									elseif($visibility == 1):
-										echo '<span class="badge rounded-pill badge-subtle-info"><span>Public</span><span class="fas fa-globe ms-1" data-fa-transform="shrink-4"></span></span>';
+										echo '<span class="badge rounded-pill badge-subtle-info"><span>Live</span><span class="fas fa-globe ms-1" data-fa-transform="shrink-4"></span></span>';
 									else:
-										echo '<span class="badge rounded-pill badge-subtle-secondary"><span>Unlisted</span><span class="fas fa-eye-slash ms-1" data-fa-transform="shrink-4"></span></span>';
+										echo '<span class="badge rounded-pill badge-subtle-secondary"><span>Live but unlisted</span><span class="fas fa-eye-slash ms-1" data-fa-transform="shrink-4"></span></span>';
 									endif;
 									?>
 								</td>

@@ -81,8 +81,17 @@ function admin_event_edit_logic(array $input): LogicResult {
 	// Process POST actions
 	if(LibraryFunctions::isFormSubmission()){
 
+		// A backwards time is refused before anything is written: editing a
+		// virtual instance materializes it, and a refusal after that would
+		// leave a customized occurrence behind. Event::prepare() refuses it too.
+		$posted_start = FormWriterV2Base::process_datetimeinput($input, 'evt_start_time', false);
+		$posted_end = FormWriterV2Base::process_datetimeinput($input, 'evt_end_time', false);
+		if ($posted_start !== NULL && $posted_end !== NULL && strtotime($posted_end) < strtotime($posted_start)) {
+			return LogicResult::error('The event ends before it starts. Set the end time after the start time.');
+		}
+
 		// If editing a virtual instance, materialize it first
-		if ($is_virtual_edit && !$input['edit_primary_key_value']) {
+		if ($is_virtual_edit && empty($input['edit_primary_key_value'])) {
 			$parent = new Event($parent_event_id, TRUE);
 			$parent->assert_found();
 			$parent->assert_can_write($session);
@@ -124,6 +133,10 @@ function admin_event_edit_logic(array $input): LogicResult {
 			$numproducts = $products->count_all();
 			if(!$numproducts){
 				$input['evt_is_accepting_signups'] = 0;
+				SessionControl::get_instance()->save_message(new DisplayMessage(
+					'Registration was left closed: this event has no registration product. Link a product to the event (or give it an external registration link), then open registration.',
+					'Registration closed', '/\/plugins\/event_manager\/admin\/admin_event/',
+					DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 			}
 		}
 
@@ -191,6 +204,12 @@ function admin_event_edit_logic(array $input): LogicResult {
 		$integer_fields = array('evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
+			// A field the form did not send was not edited. evt_picture_link
+			// and evt_survey_required are not on the form, and setting them
+			// from a missing key blanked the event's picture on every save.
+			if(!array_key_exists($field, $input)) {
+				continue;
+			}
 			$value = $input[$field];
 			// Convert empty strings to NULL for integer fields
 			if(in_array($field, $integer_fields) && $value === '') {
@@ -200,7 +219,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 		}
 
 		if(!$event->get('evt_link') || Access::permits(10)){
-			if($input['evt_link']){
+			if(!empty($input['evt_link'])){
 				$event->set('evt_link', $event->create_url($input['evt_link']));
 			}
 			else{
@@ -229,10 +248,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	$content = $event->get('evt_description');
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($input['cvn_content_version_id'])){
-		$content_version = new ContentVersion($input['cvn_content_version_id'], TRUE);
-		$content_version->assert_found();
-		$content = $content_version->get('cvn_content');
-		$title = $content_version->get('cvn_title');
+		ContentVersion::show_in_record($input['cvn_content_version_id'], $event, ContentVersion::TYPE_EVENT, 'evt_description', 'evt_name');
 	}
 
 	// Load files for dropdown

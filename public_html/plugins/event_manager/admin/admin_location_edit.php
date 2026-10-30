@@ -51,16 +51,13 @@
 		return;
 	}
 
-	$title = $location->get('loc_name');
-	$content = $location->get('loc_description');
-
 	//LOAD THE ALTERNATE CONTENT VERSION IF NEEDED
 	if(!empty($_GET['cvn_content_version_id'])){
-		$content_version = new ContentVersion($_GET['cvn_content_version_id'], TRUE);
-		$content_version->assert_found();
-		$content = $content_version->get('cvn_content');
-		$title = $content_version->get('cvn_title');
+		ContentVersion::show_in_record($_GET['cvn_content_version_id'], $location, ContentVersion::TYPE_LOCATION, 'loc_description', 'loc_name');
 	}
+
+	$title = $location->get('loc_name');
+	$content = $location->get('loc_description');
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -110,8 +107,11 @@
 	$formwriter->textinput('loc_website', 'Location website');
 
 	if(!$location->get('loc_link') || Access::permits(10)){
+		// Left blank, the link is made from the name on save, so the model's
+		// required column is not required of the person.
 		$formwriter->textinput('loc_link', 'Link (optional)', [
-			'prepend' => $settings->get_setting('webDir').'/location/'
+			'prepend' => $settings->get_setting('webDir').'/location/',
+			'validation' => ['required' => false],
 		]);
 	}
 
@@ -155,7 +155,8 @@
 	
 	if(count($optionvals)){
 
-		$formwriter = $page->getFormWriter('form_load_version');
+		// A GET: loading a version shows it in the form and saves nothing.
+		$formwriter = $page->getFormWriter('form_load_version', ['action' => '/plugins/event_manager/admin/admin_location_edit', 'method' => 'GET']);
 
 		echo $formwriter->begin_form();
 		$formwriter->hiddeninput('loc_location_id', '', ['value' => $location->key]);
