@@ -36,6 +36,8 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.22
+ * @changelog 1.22 - Beta permissions step retitled Privacy settings, with the owner's copy
  * @version 1.21
  * @changelog 1.21 - unseenSteps(), recordSeen(), markPastOnboarding(): someone who left the wizard is brought back once
  *   for a step never shown to them (usr_setup_seen_steps); shouldInterrupt() asks it
@@ -553,13 +555,13 @@ class SetupSteps {
 		// would add a "Not now"); answering it is what makes it green, and an
 		// owner who never opens it keeps both on.
 		self::register('beta_permissions', array(
-			'title' => 'Beta permissions',
+			'title' => 'Privacy settings',
 			'scope' => 'site',
 			'order' => 3,
-			'copy'  => 'While Joinery is in beta, we keep ways to help if something goes wrong. Choose which ones this site allows.',
+			'copy'  => 'Please consider relaxing these privacy settings to help us troubleshoot any issues that arise through the beta. You can change these settings at any time.',
 			'render_file' => 'includes/setup_steps/beta_permissions.php',
 			'home_url' => '/admin/admin_management_node',
-			'dismiss_line' => 'Beta permissions are not answered.',
+			'dismiss_line' => 'Privacy settings are not answered.',
 			'status' => function (?User $viewer): string {
 				return SetupSteps::hasDecision('beta_permissions', NULL)
 					? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
