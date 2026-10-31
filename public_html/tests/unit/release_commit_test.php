@@ -508,9 +508,12 @@ $dirty = ReleaseCommit::fastForward($repo);
 check(!$dirty['ok'] && strpos($dirty['reason'], 'local changes') !== false, 'fastForward refuses a checkout with local changes', $dirty['reason']);
 rc_git($repo, array('reset', '-q', '--hard', 'HEAD'));
 rc_git($repo, array('clean', '-q', '-fd'));
+// A mode the host converger set is not a local change.
+chmod($repo . '/public_html/VERSION', 0755);
+check(ReleaseCommit::status($repo)['changed'] === array(), '  a file whose mode alone differs from git is not a change');
 $caught = ReleaseCommit::fastForward($repo);
 check($caught['ok'] && $caught['head'] === trim(rc_git($other, array('rev-parse', 'HEAD'))['out'][0] ?? ''),
-	'  and on a clean checkout catches up to the remote', $caught['reason']);
+	'  and a checkout clean but for modes catches up to the remote', $caught['reason']);
 
 // ---------------------------------------------------------------------------
 section('The Go toolchain pin');
