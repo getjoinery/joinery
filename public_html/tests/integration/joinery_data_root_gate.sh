@@ -838,7 +838,11 @@ chk "no recovery recipient: refused, nothing made" \
     "$rc|$(grep -c 'run joinery_data_root.sh recipient PUBLIC_KEY first' <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo img || echo none)|$(grep -c cryptsetup "$LOG")" "1|1|none|0"
 out="$(run recipient not-a-key 2>&1)"; rc=$?
 chk "recipient: a value that is not a public key is refused" "$rc|$(grep -c 'not a recovery public key' <<< "$out")" "1|1"
-PUB="$(head -c 32 /dev/urandom | base64)"
+# An old X25519 key (32 bytes) is refused, naming the rotation; an X-Wing
+# key (1216 bytes) is what a recipient is (specs/post_quantum_sealing.md WP3).
+out="$(run recipient "$(head -c 32 /dev/urandom | base64)" 2>&1)"; rc=$?
+chk "recipient: an old X25519 key is refused, naming the rotation" "$rc|$(grep -c 'old X25519 recovery key' <<< "$out")|$(grep -c 'Rotate key' <<< "$out")" "1|1|1"
+PUB="$(head -c 1216 /dev/urandom | base64 -w0)"
 FPR="$(printf '%s' "$PUB" | base64 -d | sha256sum | awk '{ print $1 }')"
 out="$(run recipient "$PUB" 2>&1)"; rc=$?
 chk "recipient: the key and its fingerprint recorded" \
@@ -1000,7 +1004,7 @@ chk "after the window: nothing until tomorrow's" "$(grep -c '^systemctl reboot$'
 rm -f "$T/preflight_fails" "$R/var/run/reboot-required" "$R/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"
 
 echo "--- the recipient, once sealed: a rotation re-seals (D8) ---"
-NEWPUB="$(head -c 32 /dev/urandom | base64)"
+NEWPUB="$(head -c 1216 /dev/urandom | base64 -w0)"
 out="$(run recipient "$NEWPUB" 2>&1)"; rc=$?
 chk "another recipient under a sealed volume: taken, and it says the next tick seals again" "$rc|$(grep -c 'seals it again' <<< "$out")" "0|1"
 printf '{"recipients":[{"fingerprint":"%s","sealed":"x"}]}\n' "$FPR" > "$R/srv/joinery.img.recovery"

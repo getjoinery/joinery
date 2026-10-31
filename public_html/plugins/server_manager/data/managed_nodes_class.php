@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.71 - mgn_agent_kem_public_key and mgn_agent_kem_signature: the node's own X-Wing key, signed by its agent key
  * @version 1.70 - mgn_backup_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
  * @version 1.69 - mgn_agent_test_build also marks the site copy live test's nodes (SiteCopyLiveRun): the test cloud's
  *                cleanup takes them with their servers when a run is killed before its teardown
@@ -389,6 +390,13 @@ class ManagedNode extends SystemBase {
 		// authenticate AS the node. Compromising this plane yields no
 		// credential to steal — which is the whole point of the migration.
 		'mgn_agent_public_key'    => array('type'=>'varchar(64)'),
+		// The node's own X-Wing key (base64, 1216 bytes) and its agent key's
+		// signature over it (specs/post_quantum_sealing.md R6): what a copy
+		// export to this node is sealed to. Reported at every poll from agent
+		// 1.99.0 and kept only when the signature verifies against
+		// mgn_agent_public_key; the source checks it again before sealing.
+		'mgn_agent_kem_public_key' => array('type'=>'text'),
+		'mgn_agent_kem_signature'  => array('type'=>'varchar(128)'),
 
 		// Enrollment shares no secret (Phase 1.5, A6): the node initiates a
 		// join carrying only its public key, and a human approves it after

@@ -2867,7 +2867,12 @@ $cp_source = jcb_node(array(
 	'mgn_slug'                 => 'copysrc-' . bin2hex(random_bytes(2)),
 	'backup_target_id' => $cp_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x07", 32))));
-$cp_copy_key = base64_encode(str_repeat("\x08", 32));
+// The copy's agent key is a real Ed25519 pair, so it can sign its X-Wing key
+// as the agent does at poll (specs/post_quantum_sealing.md R6).
+$cp_copy_pair = sodium_crypto_sign_keypair();
+$cp_copy_key = base64_encode(sodium_crypto_sign_publickey($cp_copy_pair));
+$cp_kem = base64_encode((new XWing())->publicKey(random_bytes(32)));
+$cp_kem_sig = base64_encode(sodium_crypto_sign_detached("joinery-agent-kem-v1\n" . $cp_kem, sodium_crypto_sign_secretkey($cp_copy_pair)));
 $cp_copy = jcb_node(array(
 	'mgn_install_state'    => 'copy',
 	'mgn_copy_of_node_id'  => $cp_source->key,
@@ -2938,25 +2943,51 @@ catch (Exception $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'does not record which node') !== false, 'a copy that does not say whose copy it is is refused by name', $threw);
 check(ManagedNode::backup_node_of($cp_source)->key === $cp_source->key, 'every other row is its own backup node');
 
+// A copy that has not reported a signed X-Wing key has nothing to seal to
+// (the source's agent is one that seals to one).
+$cp_source->set('mgn_agent_version', JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION);
+foreach (array('no key reported' => array('', ''),
+		'a key its agent key did not sign' => array($cp_kem, base64_encode(str_repeat("\x01", 64))),
+		'an old 32-byte key' => array(base64_encode(random_bytes(32)), $cp_kem_sig)) as $what => list($k, $sig)) {
+	$cp_copy->set('mgn_agent_kem_public_key', $k);
+	$cp_copy->set('mgn_agent_kem_signature', $sig);
+	$threw = '';
+	try { JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203')); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'has not reported its post-quantum key') !== false && strpos($threw, JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION) !== false,
+		"an export to a copy with {$what} is refused, naming the agent that reports one", $threw);
+}
+$cp_copy->set('mgn_agent_kem_public_key', $cp_kem);
+$cp_copy->set('mgn_agent_kem_signature', $cp_kem_sig);
 $cp_export = JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
 check($cp_export === array('primitive' => 'copy_export', 'params' => array(
-		'profile' => 'manager', 'chain_id' => 'chain-20260930_010203', 'target_public_key' => $cp_copy_key)),
-	'the export names the chain and the copy\'s recorded agent key, and nothing else', var_export($cp_export, true));
+		'profile' => 'manager', 'chain_id' => 'chain-20260930_010203', 'target_public_key' => $cp_copy_key,
+		'target_kem_public_key' => $cp_kem, 'target_kem_signature' => $cp_kem_sig)),
+	'the export names the chain, the copy\'s recorded agent key and its signed X-Wing key, and nothing else', var_export($cp_export, true));
 check(in_array('copy_export', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
 	'an export is routed as a destructive word: only to an agent that asks its own operator');
 // The site's backup history goes when both agents carry it, and never otherwise:
 // an older copy refuses a bundle with anything in it that it does not know.
-foreach (array(array(true, true, true), array(true, false, false), array(false, true, false)) as list($src_new, $copy_new, $want)) {
-	$cp_source->set('mgn_agent_version', $src_new ? JobCommandBuilder::COPY_HISTORY_MIN_AGENT_VERSION : '1.84.2');
+// (A source exports only from agent COPY_EXPORT_KEM_MIN_AGENT_VERSION, which
+// reads the history too; the copy's version still decides.)
+foreach (array(array(true, true), array(false, false)) as list($copy_new, $want)) {
+	$cp_source->set('mgn_agent_version', JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION);
 	$cp_copy->set('mgn_agent_version', $copy_new ? JobCommandBuilder::COPY_HISTORY_MIN_AGENT_VERSION : '1.84.2');
 	$cp_h = JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
 	check(!empty($cp_h['params']['history']) === $want,
-		'source ' . ($src_new ? 'new' : 'old') . ', copy ' . ($copy_new ? 'new' : 'old') . ': the history is '
-		. ($want ? 'asked for' : 'not asked for'), json_encode($cp_h['params']));
+		'copy ' . ($copy_new ? 'new' : 'old') . ': the history is ' . ($want ? 'asked for' : 'not asked for'), json_encode($cp_h['params']));
 }
+// A source whose agent cannot seal to the copy's X-Wing key is refused before
+// anything is sent, naming the agent it needs (reviewer2 WP3 B1).
+$cp_source->set('mgn_agent_version', '1.98.0');
+$threw = '';
+try { JobCommandBuilder::build_copy_export($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203')); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'cannot seal its site') !== false && strpos($threw, JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION) !== false,
+	'a source on an agent before ' . JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION . ' is refused, naming the update', $threw);
 $cp_vouch_h = JobCommandBuilder::build_copy_vouch($cp_source, $cp_copy, array('chain_id' => 'chain-20260930_010203'));
 check(!isset($cp_vouch_h['params']['history']), 'a vouch never asks for the history: copy_vouch has no such parameter');
-$cp_source->set('mgn_agent_version', AgentVocabulary::FLOOR);
+$cp_source->set('mgn_agent_version', JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION);
 $cp_copy->set('mgn_agent_version', AgentVocabulary::FLOOR);
 foreach (array('a working node' => $cp_source, 'a copy of another node' => $cp_orphan) as $what => $not_its_copy) {
 	$threw = '';
@@ -3041,7 +3072,7 @@ check(!in_array('copy_take_key', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true
 	'it is not a destructive word: the owner answers on the copy\'s own page, in the word itself');
 foreach (array('a working node' => array($cp_source, $cp_req), 'a bad chain id' => array($cp_copy, array_merge($cp_req, array('chain_id' => '../x'))),
 	'no sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => ''))),
-	'an oversized sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => str_repeat('A', 600)))),
+	'an oversized sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => str_repeat('A', 2100)))),
 	'a bad fingerprint' => array($cp_copy, array_merge($cp_req, array('recovery_fingerprint' => 'abc'))),
 	'no link to the manifest' => array($cp_copy, array_merge($cp_req, array('manifest_url' => ''))),
 	'a plain http link' => array($cp_copy, array_merge($cp_req, array('manifest_url' => 'http://s3.example.com/m.json')))) as $what => $args) {

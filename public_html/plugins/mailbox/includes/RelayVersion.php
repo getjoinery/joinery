@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.8 - SEALS_POST_QUANTUM 3.16: the relay that seals to an X-Wing key (post_quantum_sealing Q8)
  * @version 1.7 - PASSES_MAIL_APPS_SHARED 3.13: a shared shard passes each tenant's mail programs under its slot name
  * @version 1.6 - PASSES_MAIL_APPS 3.12: 3.11 dialed the server's 465 onward, which cloud providers block, so
  *                sending never got through; 3.12 dials 10465
@@ -109,6 +110,21 @@ class RelayVersion {
 		$running = trim($relay->provisionedVersion());
 		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
 			&& version_compare($running, self::SEALS_FOR_BROWSERS, '>=');
+	}
+
+	/**
+	 * The first relay version that seals to a 1216-byte X-Wing key (and still
+	 * to a 32-byte one not yet rotated): specs/post_quantum_sealing.md Q8. An
+	 * older relay refuses every map entry carrying a new key, so a site behind
+	 * one cannot move its mailboxes onto new keys.
+	 */
+	const SEALS_POST_QUANTUM = '3.16';
+
+	/** Does a relay running $running seal to X-Wing keys? Unknown reads as no. */
+	public static function sealsPostQuantum(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::SEALS_POST_QUANTUM, '>=');
 	}
 
 	/**

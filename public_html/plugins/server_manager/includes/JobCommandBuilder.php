@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.151 - data_root_recipient and install_node take an X-Wing recovery key (1216 bytes); a copy_take_key request carries a v2 box;
+ *                 copy_export carries the copy's X-Wing key and its agent key's signature, and refuses without them (post_quantum_sealing WP3)
  * @version 1.150 - build_site_converger (agent 1.98.0): whether one site container's converger is running, read by its machine
  * @version 1.149 - unit_journal and reset_failed_unit take joinery-host-converger, per value from agent 1.97.0
  *                  (UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION, unit_journal_units_for): its journal is the only record of
@@ -601,6 +603,9 @@ class JobCommandBuilder {
 	 * the parameter; it is refused here, naming the update.
 	 */
 	const COPY_TAKE_KEY_MIN_AGENT_VERSION = '1.68.0';
+
+	/** The agent that reports its own X-Wing key at poll, which a copy export is sealed to. */
+	const COPY_EXPORT_KEM_MIN_AGENT_VERSION = '1.99.0';
 
 	/**
 	 * The first agent whose backup_run takes the storage check's missing
@@ -3080,6 +3085,14 @@ class JobCommandBuilder {
 				"Node '{$node->get('mgn_slug')}' cannot hand its site to a copy. "
 				. AgentVocabulary::needs_newer_agent_text($node, ['copy_export']));
 		}
+		// The source seals to the copy's X-Wing key, which an agent before
+		// 1.99.0 cannot: it would refuse the key's parameters as unknown.
+		$v = AgentVocabulary::version($node);
+		if ($v === '' || version_compare($v, self::COPY_EXPORT_KEM_MIN_AGENT_VERSION, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' runs agent " . ($v ?: 'of an unknown version')
+				. ', which cannot seal its site to a copy\'s post-quantum key. Update its agent to '
+				. self::COPY_EXPORT_KEM_MIN_AGENT_VERSION . ' or newer.');
+		}
 		$built = self::build_copy_export_primitive($node, $copy, $params);
 		// The site's backup history goes with it, so its backups from before a
 		// switch restore on the copy, when both agents read it.
@@ -3101,6 +3114,23 @@ class JobCommandBuilder {
 	}
 
 	public static function build_copy_export_primitive($node, $copy = null, $params = []) {
+		$export = self::copy_target_params($node, $copy, $params);
+		// Sealed to the copy's X-Wing key, signed by its agent key (the source
+		// checks the signature before sealing; specs/post_quantum_sealing.md R6).
+		$kem = AgentChannelEndpoint::verified_kem_key($copy, (string)$copy->get('mgn_agent_kem_public_key'),
+			(string)$copy->get('mgn_agent_kem_signature'));
+		if ($kem === null) {
+			throw new Exception("The copy '{$copy->get('mgn_slug')}' has not reported its post-quantum key yet, so there is "
+				. 'nothing to seal the export to. Its agent reports one from ' . self::COPY_EXPORT_KEM_MIN_AGENT_VERSION
+				. ' on, at its next poll: update the copy\'s agent.');
+		}
+		$export['params']['target_kem_public_key'] = $kem[0];
+		$export['params']['target_kem_signature'] = $kem[1];
+		return $export;
+	}
+
+	/** The checks and params an export and a vouch share: the copy, its agent key, the chain, the profile. */
+	private static function copy_target_params($node, $copy, $params) {
 		if (!$copy || trim((string)$copy->get('mgn_install_state')) !== 'copy'
 				|| (int)$copy->get('mgn_copy_of_node_id') !== (int)$node->key) {
 			throw new Exception("An export goes only to a dormant copy of '{$node->get('mgn_slug')}', recorded as one.");
@@ -3176,7 +3206,8 @@ class JobCommandBuilder {
 
 	public static function build_copy_vouch_primitive($node, $copy = null, $params = []) {
 		// The same target and chain an export names: the checks are the export's.
-		$export = self::build_copy_export_primitive($node, $copy, $params);
+		// A vouch seals nothing, so it needs no X-Wing key.
+		$export = self::copy_target_params($node, $copy, $params);
 		return ['primitive' => 'copy_vouch', 'params' => $export['params']];
 	}
 
@@ -3271,7 +3302,7 @@ class JobCommandBuilder {
 		}
 		if (!preg_match('/^chain-[0-9_]+$/', $params['chain_id']) || !preg_match('/^[0-9a-f]{64}$/', $params['manifest_sha256'])
 				|| !preg_match('/^[0-9a-f]{64}$/', $params['recovery_fingerprint'])
-				|| strlen((string)base64_decode($params['recovery_sealed'], true)) <= 48 || strlen($params['recovery_sealed']) > 512) {
+				|| strlen((string)base64_decode($params['recovery_sealed'], true)) <= 48 || strlen($params['recovery_sealed']) > 2048) {
 			throw new Exception('Taking a key from backups needs the chain, its manifest hash, and the key sealed to the recovery key.');
 		}
 		return ['primitive' => 'copy_take_key', 'params' => $params];
@@ -3822,8 +3853,10 @@ class JobCommandBuilder {
 	 * the data_root_recipient word. Public; the node checks its shape.
 	 */
 	public static function build_data_root_recipient($node, string $public_key) {
-		if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $public_key) || strlen((string)base64_decode($public_key, true)) !== 32) {
-			throw new Exception('That is not a recovery public key.');
+		// An X-Wing key (specs/post_quantum_sealing.md R3): the agent seals the
+		// break-glass copy to nothing else.
+		if (!preg_match('#^[A-Za-z0-9+/]{1622}==$#', $public_key) || strlen((string)base64_decode($public_key, true)) !== XWing::PUBLIC_KEY_BYTES) {
+			throw new Exception('That is not a recovery public key (a 1216-byte X-Wing key; an old X25519 key is rotated on its site\'s Backups page first).');
 		}
 		if (!self::has_primitive($node, 'data_root_recipient')) {
 			throw new Exception(
@@ -6080,9 +6113,9 @@ class JobCommandBuilder {
 		$encrypted_flags = '';
 		if (!empty($params['encrypted_data_root'])) {
 			$recovery_key = (string)($params['recovery_public_key'] ?? '');
-			if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $recovery_key) || strlen((string)base64_decode($recovery_key, true)) !== 32) {
+			if (!preg_match('#^[A-Za-z0-9+/]{1622}==$#', $recovery_key) || strlen((string)base64_decode($recovery_key, true)) !== XWing::PUBLIC_KEY_BYTES) {
 				throw new Exception('install_node: an encrypted data root needs the recovery public key its break-glass copy '
-					. 'is sealed to (recovery_public_key, base64).');
+					. 'is sealed to (recovery_public_key, base64 of a 1216-byte X-Wing key).');
 			}
 			$encrypted_flags = ' --encrypted-data-root --recovery-public-key=' . escapeshellarg($recovery_key);
 		}

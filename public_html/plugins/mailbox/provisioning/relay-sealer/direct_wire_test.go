@@ -115,10 +115,15 @@ func TestKeylessRealRecipientAcceptsWithoutADecoyKey(t *testing.T) {
 		TransportPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 	}
 	m := &routingMap{
-		Version:    1,
-		Tenants:    map[string]tenantConfig{"main": tc},
-		Domains:    map[string]domainEntry{"served.example": {Tenant: "main", CatchAllMode: "none", RejectUnmatched: true}},
-		Recipients: map[string]routingEntry{"group@served.example": {Tenant: "main"}}, // real, NO public key
+		Version: 1,
+		Tenants: map[string]tenantConfig{"main": tc},
+		Domains: map[string]domainEntry{"served.example": {Tenant: "main", CatchAllMode: "none", RejectUnmatched: true}},
+		Recipients: map[string]routingEntry{
+			"group@served.example": {Tenant: "main"}, // real, NO public key
+			// A vault still on an old 32-byte key, and one on an X-Wing key.
+			"old@served.example": {Tenant: "main", KeyKind: keyKindUser, PublicKey: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))},
+			"new@served.example": {Tenant: "main", KeyKind: keyKindUser, PublicKey: testXWingKey},
+		},
 	}
 	data, _ := json.Marshal(m)
 	mapPath := filepath.Join(dir, "routing.json")
@@ -182,7 +187,29 @@ func TestKeylessRealRecipientAcceptsWithoutADecoyKey(t *testing.T) {
 	if pm["key"] != decoyPublicKey("a-decoy-seed", "postmaster@served.example") {
 		t.Fatalf("an alias-less postmaster should get its decoy key, got %v", pm)
 	}
+
+	// A vault still on an old X25519 key is answered with that key: the sender
+	// refuses it and falls back to SMTP, which still delivers to it, rather than
+	// sealing to a decoy and losing the mail (owner, 2026-10-31).
+	old := accept("old@served.example", "dddddddddddddddddddddddddddddddd")
+	if old["key"] != base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)) {
+		t.Fatalf("a vault on an old key must be answered with its own key, got %v", old["key"])
+	}
+	upgraded := accept("new@served.example", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if upgraded["key"] != testXWingKey {
+		t.Fatalf("a vault on an X-Wing key is answered with its key, got %v", upgraded["key"])
+	}
 }
+
+// testXWingKey is a real X-Wing public key (base64url, unpadded, as a server
+// vault's key is written).
+var testXWingKey = func() string {
+	pub, err := xwingPublicKey(bytes.Repeat([]byte{3}, 32))
+	if err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(pub)
+}()
 
 func TestPreflightSigningBytesAreCanonical(t *testing.T) {
 	env := directEnvelope{
@@ -261,23 +288,33 @@ func TestSealedSizeCeilingCoversRealSealing(t *testing.T) {
 	// and larger. If the ceiling were ever below the real sealed size, every
 	// honest sealed delivery would abort for arriving exactly as asked.
 	//
-	// A Direct part is sealed RAW (crypto_box_seal, no base64) — that is what the
+	// A Direct part is sealed RAW (the v2 seal, no base64) — that is what the
 	// ceiling measures. NOT sealToPublicKey, which base64-wraps for the SMTP relay
 	// spool: a different format, opened by a different path, and never a Direct
-	// part on the wire.
-	pk, err := decodePublicKey(testPublicKey(t))
+	// part on the wire. A v1 seal (an unrotated key) is 48 bytes larger than its
+	// plaintext, inside the same ceiling.
+	pk, err := xwingPublicKey(make([]byte, 32))
 	if err != nil {
-		t.Fatalf("decode key: %v", err)
+		t.Fatalf("key: %v", err)
 	}
+	v1, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("v1 key: %v", err)
+	}
+	v1pk := *v1
 	for _, size := range []int{0, 1, 17, 1000, 1 << 20} {
-		plaintext := strings.Repeat("x", size)
-		sealed, err := box.SealAnonymous(nil, []byte(plaintext), pk, rand.Reader)
+		plaintext := []byte(strings.Repeat("x", size))
+		sealed, err := sealV2(plaintext, pk, v2ScopeDEK)
 		if err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 		if int64(len(sealed)) != sealedSizeCeiling(int64(size)) {
 			t.Fatalf("raw-sealed %d bytes to %d, ceiling says %d — the two must agree exactly",
 				size, len(sealed), sealedSizeCeiling(int64(size)))
+		}
+		old, err := box.SealAnonymous(nil, plaintext, &v1pk, rand.Reader)
+		if err != nil || int64(len(old)) > sealedSizeCeiling(int64(size)) {
+			t.Fatalf("a v1 seal of %d bytes is %d, above the ceiling (%v)", size, len(old), err)
 		}
 	}
 }
@@ -343,8 +380,8 @@ func TestDecoyKeysAreValidDeterministicAndDistinct(t *testing.T) {
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(a)
-	if err != nil || len(raw) != x25519PublicKeyBytes {
-		t.Fatalf("a decoy must be a full-length X25519 public key: %v (%d bytes)", err, len(raw))
+	if err != nil || len(raw) != xwingPublicKeyBytes {
+		t.Fatalf("a decoy must be a full-length X-Wing public key, as every vault key on the wire is: %v (%d bytes)", err, len(raw))
 	}
 	// The load-bearing property: a sender must be able to SEAL to it, or a
 	// malformed-key failure would identify the decoy immediately.
@@ -530,7 +567,7 @@ func TestSpoolCapsCountHeldBytes(t *testing.T) {
 
 func testPublicKey(t *testing.T) string {
 	t.Helper()
-	// A fixed, valid X25519 public key: the decoy derivation produces one from
+	// A fixed, valid X-Wing public key: the decoy derivation produces one from
 	// any secret, which is exactly the property being relied on here.
 	return decoyPublicKey("test-secret", "anyone@example.com")
 }

@@ -42,7 +42,10 @@ DbConnector::get_instance()->get_db_link()->query('SELECT pg_advisory_lock(' . S
 
 $tag = bin2hex(random_bytes(3));
 $source_key = base64_encode(random_bytes(32));
-$copy_key = base64_encode(random_bytes(32));
+// The copy's agent key is a real Ed25519 pair: at its first poll it signs its
+// X-Wing key with it, which an export is sealed to (post_quantum_sealing R6).
+$copy_pair = sodium_crypto_sign_keypair();
+$copy_key = base64_encode(sodium_crypto_sign_publickey($copy_pair));
 
 $mk_node = function (string $suffix, array $set) use ($tag) {
 	$n = new ManagedNode(NULL);
@@ -267,7 +270,8 @@ section('Preflight');
 
 $src_status = json_encode(array('backup_recovery_state' => 'proven'));
 $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_site_url' => 'https://scp.example.org',
-	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.50.0', 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
+	// The source's agent seals to the copy's X-Wing key (COPY_EXPORT_KEM_MIN_AGENT_VERSION).
+	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.497',
 	'mgn_last_status_data' => $src_status, 'mgn_backup_recovery_fpr' => str_repeat('ab', 32),
 	'mgn_agent_server_manager' => 'inactive',
@@ -475,6 +479,10 @@ check(!$cnode->is_operational(), 'and no automation treats it as a working site'
 SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_WAITING, 'before the copy reports its words, the run waits');
 $cnode->set('mgn_agent_primitives', 'host_report,copy_import,copy_stage,copy_restore,site_census,take_node_id');
+$copy_kem = base64_encode((new XWing())->publicKey(random_bytes(32)));
+$cnode->set('mgn_agent_kem_public_key', $copy_kem);
+$cnode->set('mgn_agent_kem_signature', base64_encode(sodium_crypto_sign_detached("joinery-agent-kem-v1\n" . $copy_kem,
+	sodium_crypto_sign_secretkey($copy_pair))));
 $cnode->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 1000000000),
 	'disk' => array('avail_bytes' => 9000000000))));
 $cnode->save();

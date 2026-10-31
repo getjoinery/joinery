@@ -234,6 +234,12 @@ func (h *directHandler) handlePreflight(w http.ResponseWriter, r *http.Request) 
 		generation = decoyGeneration
 		isDecoy = true
 	}
+	// A real key still on an old 32-byte X25519 key is answered as it is
+	// (owner, 2026-10-31; specs/post_quantum_sealing.md R3): the sender refuses
+	// to seal to it and falls back to SMTP, which seals the mail to it in the
+	// old format (Q8), so the mail arrives. A decoy here would drop the mail
+	// and report it delivered. The cost: until its holder rotates, the old key
+	// shows a prober that the address is real.
 
 	ttl := orInt(tc.DirectSessionTTLSeconds, 900)
 	h.state.openSession(&directSession{

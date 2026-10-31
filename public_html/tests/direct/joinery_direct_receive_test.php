@@ -96,6 +96,11 @@ $RECIPIENT_VAULT_KEY = $RECIPIENT_VAULT['public'];
 
 /** Install the kind registry and recipient posture for one scenario. */
 function direct_test_setup(bool $seals_content, array $extra_kinds = array(), bool $recipient_has_vault = true) {
+	// The per-instance preflight limit counts this sender's earlier preflights
+	// in the request log, this run's and every recent run's: start each setup
+	// from none, or a few runs in a row are refused 429 before any check runs.
+	DbConnector::get_instance()->get_db_link()->prepare('DELETE FROM rql_request_logs WHERE rql_feature = ? AND rql_action = ?')
+		->execute(array(DirectProtocol::LOG_FEATURE, 'preflight:sender-test.invalid'));
 	global $TEST_DOMAIN, $REAL, $registry, $handlers, $RECIPIENT_VAULT_KEY;
 
 	$registry->setValue(null, array_merge(array(
@@ -431,6 +436,25 @@ check($held_row !== null && intval($held_row->get('jdp_recipient_alias_id')) ===
 if ($held_row !== null) {
 	harness_defer(function () use ($held_row) { try { $held_row->permanent_delete(); } catch (Throwable $e) {} });
 }
+
+// ---------------------------------------------------------------------------
+section('A vault still on an old X25519 key is answered with that key');
+// ---------------------------------------------------------------------------
+
+// Not its decoy (owner, 2026-10-31; post_quantum_sealing R3): the sender
+// refuses to seal to a 32-byte key and falls back to SMTP, where the message
+// waits for the holder's rotation. A decoy would drop it and report it delivered.
+$x_wing_key = $RECIPIENT_VAULT_KEY;
+$RECIPIENT_VAULT_KEY = SealedBox::b64url(random_bytes(32));
+direct_test_setup(true);
+$old_answer = (new DirectReceiver())->preflight(direct_test_envelope($REAL), direct_test_manifest('x'), $LOOPBACK);
+check($old_answer['answer'] === DirectProtocol::ANSWER_ACCEPT && ($old_answer['key'] ?? '') === $RECIPIENT_VAULT_KEY,
+	'the real address answers with its own old key, so the sender falls back rather than sealing to a decoy',
+	(string)($old_answer['key'] ?? ''));
+$threw = '';
+try { (new SealedBox())->sealBinary('x', $RECIPIENT_VAULT_KEY); } catch (Throwable $e) { $threw = $e->getMessage(); }
+check($threw === SealedBox::V1_KEY_REFUSAL, 'and a sender\'s seal refuses it as an old key, which is what sends the mail by SMTP', $threw);
+$RECIPIENT_VAULT_KEY = $x_wing_key;
 
 // ---------------------------------------------------------------------------
 section('A decoy delivery keeps its byte charge, so a full spool is not an existence oracle');

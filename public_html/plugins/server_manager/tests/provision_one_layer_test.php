@@ -345,7 +345,7 @@ if (!$key_ready) {
 	$want = "--encrypted-data-root --recovery-public-key='" . $recovery_key . "'";
 	check(preg_match('/install\.sh -y -q server[^;]*' . preg_quote($want, '/') . '/', $cmd) === 1,
 		'the bootstrap runs install.sh server --encrypted-data-root --recovery-public-key=<this management node\'s key>', $cmd);
-	check(strlen($recovery_key) === 44, 'the key passed is the 44-character base64 public key');
+	check(strlen($recovery_key) === 1624, 'the key passed is the base64 X-Wing public key (1624 characters)');
 	check(!empty($params['encrypted_data_root']) && ($params['recovery_public_key'] ?? '') === $recovery_key,
 		'the job\'s parameters carry it too, so a retried install is encrypted the same way');
 
@@ -376,7 +376,7 @@ $node->set('mgn_port', 8080);
 $node->save();
 $node->load();
 harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
-$sample_key = base64_encode(str_repeat("\x07", 32));
+$sample_key = base64_encode(str_repeat("\x07", XWing::PUBLIC_KEY_BYTES)); // an X-Wing key's size (post_quantum_sealing R3)
 $flags = "--encrypted-data-root --recovery-public-key='" . $sample_key . "'";
 $base = array('mode' => 'fresh', 'sitename' => 'olsite' . $suffix, 'domain' => 'ol-' . $suffix . '.example.com');
 $ssh = function (array $steps) {

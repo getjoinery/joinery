@@ -14,6 +14,10 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.16 - the sealer seals in the format each key names: a 1216-byte X-Wing key gets the v2 seal
+#                (v2.seal. / v2.edgeseal.), a 32-byte key not yet rotated the v1; the routing map takes
+#                both sizes; Direct decoys are X-Wing keys and the sealed-size ceiling is the v2 overhead
+#                (specs/post_quantum_sealing.md WP3, Q8)
 # Version: 3.15 - the sealer's outbound guard (Direct egress) refuses what the platform's and the sandboxed
 #                plugin host's do, all three tested against tests/fixtures/outbound_address_cases.json:
 #                192.0.0.0/24, 2001:db8::/32, Teredo, IPv4-translated, site-local and IPv6 benchmarking
@@ -119,7 +123,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.15"
+RELAY_VERSION="3.16"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

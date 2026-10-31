@@ -16,8 +16,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"strings"
-
-	"golang.org/x/crypto/curve25519"
 )
 
 // decodeSigningKey accepts either base64 alphabet, padded or not — the box
@@ -94,16 +92,11 @@ func decoyPublicKey(domainSecret, address string) string {
 	mac.Write([]byte(asciiLower(strings.TrimSpace(address))))
 	scalar := mac.Sum(nil)
 
-	// Clamp the way X25519 clamps, so the point is on the curve and in the
-	// right subgroup — a real key in every observable respect.
-	scalar[0] &= 248
-	scalar[31] &= 127
-	scalar[31] |= 64
-
-	public, err := curve25519.X25519(scalar, curve25519.Basepoint)
-	for i := range scalar {
-		scalar[i] = 0
-	}
+	// The HMAC output is an X-Wing seed and the decoy its 1216-byte public key,
+	// as DirectDecoyKeys::publicKeyFor makes one: a real key in every
+	// observable respect, the same size as every vault key on the wire.
+	public, err := xwingPublicKey(scalar)
+	zero(scalar)
 	if err != nil {
 		return ""
 	}

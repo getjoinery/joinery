@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.58 - the claim takes the node's X-Wing key and its agent key's signature (agent 1.99.0) and keeps it when verified
+ *                (a new signature over the same key too); forgetAgent and approveJoin clear it
  * @version 1.57 - the channel's writes run as the server's own (server_initiated_write): no person is behind them
  * @version 1.56 - root_access: the node reports its owner's emergency root access answer (on|off), stored in
  *                 mgn_agent_root_access only when it is one and differs; absent for an agent before 1.94.0
@@ -1030,6 +1032,10 @@ class AgentChannelEndpoint {
 	 */
 	public static function approveJoin($request, $node) {
 		$node->set('mgn_agent_public_key', (string)$request->get('ajr_public_key'));
+		// A KEM key is signed by the agent key it came with: a new agent key
+		// reports its own at its first poll.
+		$node->set('mgn_agent_kem_public_key', null);
+		$node->set('mgn_agent_kem_signature', null);
 		$node->record_reported_addresses($request->addresses());
 		$node->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
 		$node->set('mgn_agent_last_poll', null);
@@ -1204,6 +1210,10 @@ class AgentChannelEndpoint {
 			// The largest claim this agent reads (1.45.0). Bounded again where
 			// it is used (claim_body_limit): believed only up to MAX_CLAIM_BODY.
 			'claim_bytes'    => ['type' => 'int'],
+			// The node's X-Wing key and its agent key's signature over it
+			// (agent 1.99.0): what a copy export to it is sealed to.
+			'kem_public_key' => ['type' => 'string', 'max' => 2048, 'pattern' => '#^[A-Za-z0-9+/]*={0,2}$#'],
+			'kem_signature'  => ['type' => 'string', 'max' => 128, 'pattern' => '#^[A-Za-z0-9+/]*={0,2}$#'],
 			// The node's own account of what it can do. A comma-separated list
 			// rather than a JSON array on purpose: it validates under the
 			// rules this endpoint already applies to every string — a pattern
@@ -1319,6 +1329,15 @@ class AgentChannelEndpoint {
 		$reported = trim((string)($in['agent_version'] ?? ''));
 		if ($reported !== '' && $reported !== (string)$node->get('mgn_agent_version')) {
 			$node->set('mgn_agent_version', $reported);
+		}
+
+		// Its X-Wing key, kept only when its own agent key signed it: a copy
+		// export is sealed to this (the source checks the signature again).
+		$kem = self::verified_kem_key($node, (string)($in['kem_public_key'] ?? ''), (string)($in['kem_signature'] ?? ''));
+		if ($kem !== null && ($kem[0] !== (string)$node->get('mgn_agent_kem_public_key')
+				|| $kem[1] !== (string)$node->get('mgn_agent_kem_signature'))) {
+			$node->set('mgn_agent_kem_public_key', $kem[0]);
+			$node->set('mgn_agent_kem_signature', $kem[1]);
 		}
 
 		// And what it can DO, which is a different fact from what it is
@@ -2818,8 +2837,30 @@ class AgentChannelEndpoint {
 		return array('job_id' => (int)$job->key, 'withdrawn' => $withdrawn);
 	}
 
+	/**
+	 * [kem_public_key, signature] when the signature is the node's agent key's
+	 * over 'joinery-agent-kem-v1' \n the key (the agent's AgentKEMMessage) and
+	 * the key is a 1216-byte X-Wing key; null otherwise.
+	 */
+	public static function verified_kem_key($node, string $kem_b64, string $sig_b64) {
+		$kem = base64_decode($kem_b64, true);
+		$sig = base64_decode($sig_b64, true);
+		$agent = base64_decode((string)$node->get('mgn_agent_public_key'), true);
+		if ($kem === false || strlen($kem) !== XWing::PUBLIC_KEY_BYTES || $sig === false
+				|| strlen($sig) !== SODIUM_CRYPTO_SIGN_BYTES || $agent === false || strlen($agent) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+			return null;
+		}
+		$canonical = base64_encode($kem);
+		if (!sodium_crypto_sign_verify_detached($sig, "joinery-agent-kem-v1\n" . $canonical, $agent)) {
+			return null;
+		}
+		return array($canonical, base64_encode($sig));
+	}
+
 	public static function forgetAgent($node) {
 		$node->set('mgn_agent_public_key', null);
+		$node->set('mgn_agent_kem_public_key', null);
+		$node->set('mgn_agent_kem_signature', null);
 		$node->set('mgn_agent_paired_time', null);
 		$node->save();
 	}

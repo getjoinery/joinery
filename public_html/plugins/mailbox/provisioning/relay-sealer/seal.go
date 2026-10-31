@@ -15,44 +15,58 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-// sealWireVersion is the self-describing prefix SealedBox.php (openDek) expects.
-// A sealed blob is exactly: "v1.seal." + rawurlbase64(crypto_box_seal(msg, pk)).
-// box.SealAnonymous produces the libsodium-wire-compatible sealed box
-// (ephemeral_pubkey || box), so the PHP side opens it with
-// sodium_crypto_box_seal_open without any format translation.
-const sealWirePrefix = "v1.seal."
+// The self-describing prefixes SealedBox.php (openDek) expects. The sealer
+// seals in the format the recipient's key names (specs/post_quantum_sealing.md
+// Q8): a 1216-byte X-Wing key gets "v2.seal." + rawurlbase64(the v2 seal, scope
+// dek); a 32-byte X25519 key, one whose site has not upgraded and rotated yet,
+// gets "v1.seal." + rawurlbase64(crypto_box_seal(msg, pk)), libsodium's wire
+// form (box.SealAnonymous), opened with sodium_crypto_box_seal_open.
+const (
+	sealWirePrefix   = "v1.seal."
+	sealWirePrefixV2 = "v2.seal."
+)
 
 // x25519PublicKeyBytes is the fixed length of a Curve25519 public key.
 const x25519PublicKeyBytes = 32
 
-// decodePublicKey reads an X25519 public key in either base64 alphabet: a
+// decodePublicKey reads a recipient public key in either base64 alphabet: a
 // server vault's key is base64url with the padding trimmed
 // (SealedBox::b64url_encode), a browser-held key is standard base64
 // (vault-crypto.js), and the routing map carries whichever the vault stores.
-func decodePublicKey(encoded string) (*[32]byte, error) {
+// It is an X-Wing key (1216 bytes) or an X25519 one (32 bytes); its length is
+// its version.
+func decodePublicKey(encoded string) ([]byte, error) {
 	raw, err := decodeAnyBase64(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("public key is not valid base64: %w", err)
 	}
-	if len(raw) != x25519PublicKeyBytes {
-		return nil, fmt.Errorf("public key must decode to %d bytes, got %d", x25519PublicKeyBytes, len(raw))
+	if len(raw) != x25519PublicKeyBytes && len(raw) != xwingPublicKeyBytes {
+		return nil, fmt.Errorf("public key must decode to %d (X-Wing) or %d (X25519) bytes, got %d",
+			xwingPublicKeyBytes, x25519PublicKeyBytes, len(raw))
 	}
-	var pk [32]byte
-	copy(pk[:], raw)
-	return &pk, nil
+	return raw, nil
 }
 
 // sealToPublicKey seals the entire raw message to the recipient public key and
-// returns the SealedBox wire string ("v1.seal.<rawurlbase64>"). Anonymous seal:
-// anyone with the public key can seal, only the secret key opens. There is NO
-// DEK and NO AEAD at this layer — the blob is opened exactly once at deferred
-// ingest and re-sealed there with the real per-message DEK.
+// returns the SealedBox wire string. Anonymous seal: anyone with the public key
+// can seal, only the secret key opens. There is NO DEK at this layer — the
+// blob is opened exactly once at deferred ingest and re-sealed there with the
+// real per-message DEK.
 func sealToPublicKey(message []byte, publicKeyB64 string) (string, error) {
 	pk, err := decodePublicKey(publicKeyB64)
 	if err != nil {
 		return "", err
 	}
-	sealed, err := box.SealAnonymous(nil, message, pk, rand.Reader)
+	if len(pk) == xwingPublicKeyBytes {
+		sealed, err := sealV2(message, pk, v2ScopeDEK)
+		if err != nil {
+			return "", fmt.Errorf("v2 seal failed: %w", err)
+		}
+		return sealWirePrefixV2 + base64.RawURLEncoding.EncodeToString(sealed), nil
+	}
+	var pk32 [32]byte
+	copy(pk32[:], pk)
+	sealed, err := box.SealAnonymous(nil, message, &pk32, rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("crypto_box_seal (SealAnonymous) failed: %w", err)
 	}
@@ -80,16 +94,19 @@ func decodeAnyBase64(encoded string) ([]byte, error) {
 // pinned by tests/vault/fixtures/edge_vector.json.
 //
 //	body : "v1.edge." + base64(IV[12] ‖ ct ‖ tag[16]), AD "mail:relay:{spool_id}"
-//	DEK  : "v1.edgeseal.{scope}." + base64(ephPub[32] ‖ IV[12] ‖ ct ‖ tag[16])
+//	DEK  : to a 1216-byte X-Wing key, "v2.edgeseal.{scope}." + base64(the v2
+//	       seal, scope dek); to a 32-byte X25519 key not yet rotated,
+//	       "v1.edgeseal.{scope}." + base64(ephPub[32] ‖ IV[12] ‖ ct ‖ tag[16])
 //
 // The relay forgets the DEK when the function returns; nothing here can open
 // either blob again.
 
 const (
-	edgeFieldPrefix = "v1.edge."
-	edgeSealPrefix  = "v1.edgeseal."
-	edgeKDFLabel    = "sealed-vault:dek"
-	edgeIVBytes     = 12
+	edgeFieldPrefix  = "v1.edge."
+	edgeSealPrefix   = "v1.edgeseal."
+	edgeSealPrefixV2 = "v2.edgeseal."
+	edgeKDFLabel     = "sealed-vault:dek"
+	edgeIVBytes      = 12
 )
 
 // The scope names a vault; the browser reads it back out of the frame, so it
@@ -121,6 +138,17 @@ func sealEdge(raw []byte, recipientPubB64, scope, spoolID string) (string, strin
 	if err != nil {
 		return "", "", err
 	}
+	recipient, err := decodePublicKey(recipientPubB64)
+	if err != nil {
+		return "", "", err
+	}
+	if len(recipient) == xwingPublicKeyBytes {
+		sealed, err := sealV2(dek, recipient, v2ScopeDEK)
+		if err != nil {
+			return "", "", fmt.Errorf("v2 seal failed: %w", err)
+		}
+		return edgeFieldPrefix + body, edgeSealPrefixV2 + scope + "." + base64.StdEncoding.EncodeToString(sealed), nil
+	}
 	ephSecret := make([]byte, curve25519.ScalarSize)
 	if _, err := io.ReadFull(rand.Reader, ephSecret); err != nil {
 		return "", "", fmt.Errorf("ephemeral key: %w", err)
@@ -149,7 +177,7 @@ func edgeFieldWith(plaintext, key []byte, ad string, iv []byte) (string, error) 
 	return base64.StdEncoding.EncodeToString(out), nil
 }
 
-// edgeSealWith is sealEdge's DEK half with its randomness supplied:
+// edgeSealWith is sealEdge's v1 DEK half with its randomness supplied:
 // base64(ephPub ‖ IV ‖ ct ‖ tag), the AES key HKDF-SHA256 over
 // X25519(eph, recipient) with info 'sealed-vault:dek' ‖ ephPub ‖ recipientPub
 // and an empty salt.
@@ -157,6 +185,9 @@ func edgeSealWith(dek []byte, recipientPubB64 string, ephSecret, iv []byte) (str
 	recipient, err := decodePublicKey(recipientPubB64)
 	if err != nil {
 		return "", err
+	}
+	if len(recipient) != x25519PublicKeyBytes {
+		return "", fmt.Errorf("a v1 edge seal needs a %d-byte X25519 key", x25519PublicKeyBytes)
 	}
 	ephPub, err := curve25519.X25519(ephSecret, curve25519.Basepoint)
 	if err != nil {

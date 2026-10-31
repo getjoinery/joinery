@@ -4,6 +4,8 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.33 - the recovery recipient is an X-Wing key (1216 bytes, specs/post_quantum_sealing.md WP3); a
+#                recipient file still holding an old 32-byte key is read, and only an X-Wing key is set
 # Version: 1.32 - provider-layer records what its management node knows of the provider's own disk
 #                encryption under this machine; encrypt refuses while it says enabled, unless
 #                --keep-provider-layer (a management node), and the status file says it for the
@@ -1027,11 +1029,14 @@ ensure_units() {
 # ---------------------------------------------------------------------------
 
 # The recipient file is a recovery public key and its fingerprint, as the
-# Backups page shows them (D2). Nothing else is sealed to.
+# Backups page shows them (D2). Nothing else is sealed to. The key is an
+# X-Wing one (1216 bytes, 1624 characters of base64); an old X25519 key
+# (32 bytes) set before is still read, so its break-glass copy stays openable,
+# and the agent refuses to seal anything new to it.
 recipient_ok() {
     local key fpr
     key="$(recipient_get public_key)"; fpr="$(recipient_get fingerprint)"
-    [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || return 1
+    [[ "$key" =~ ^[A-Za-z0-9+/]{1622}==$ || "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || return 1
     [[ "$(printf '%s' "$key" | base64 -d 2>/dev/null | sha256sum | awk '{ print $1 }')" == "$fpr" ]]
 }
 
@@ -1330,8 +1335,11 @@ do_recipient() {
         return 1
     fi
     need_root
-    [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ && "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ]] \
-        || die "that is not a recovery public key: give the one base64 line (44 characters) the Backups page shows for it"
+    if [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+        die "that is an old X25519 recovery key, which nothing seals to any more: rotate the recovery key on the site's Backups page (Recovery key, Actions, Rotate key) and give the new one"
+    fi
+    [[ "$key" =~ ^[A-Za-z0-9+/]{1622}==$ && "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -eq 1216 ]] \
+        || die "that is not a recovery public key: give the one base64 line (1624 characters) the Backups page shows for it"
     fpr="$(printf '%s' "$key" | base64 -d | sha256sum | awk '{ print $1 }')"
     cur="$(recipient_get fingerprint)"
     # A key this machine was moved off is never taken again: a rotation is
