@@ -29,6 +29,8 @@
  * server key. These are raw primitives like the rest; the `v1.edgeseal.` /
  * `v1.edge.` framing belongs to the row layer (VaultCrypto).
  *
+ * @version 1.9 - pqReady()/pqReadyReason()/pqReadyCause(): whether this process can reach ML-KEM
+ *                (specs/post_quantum_sealing.md R4)
  * @version 1.8 - the `v1.stream.` file format retired: files seal as SealedFileContainer
  * @version 1.7 - kekFromPassphrase() retired: the browser derives a phrase's KEK
  * @version 1.6 - the browser format: sealEdge()/openEdge() and
@@ -61,6 +63,55 @@ class SealedBox {
 				. 'The Sealed Vault has no fallback for asymmetric sealing.'
 			);
 		}
+	}
+
+	private static $pq_reason = false;
+
+	/**
+	 * Whether this process can seal with post-quantum keys: FFI is loaded and
+	 * allowed in this SAPI, libcrypto is OpenSSL 3.5 or later, and one ML-KEM
+	 * encapsulate/decapsulate round trip agrees. Answered once per process.
+	 */
+	public static function pqReady(): bool {
+		return self::pqReadyReason() === null;
+	}
+
+	/**
+	 * Null when pqReady(), otherwise one plain sentence naming what is missing
+	 * and the floor (Ubuntu 26.04, ffi.enable = On). Never throws.
+	 */
+	public static function pqReadyReason(): ?string {
+		if (self::$pq_reason !== false) {
+			return self::$pq_reason;
+		}
+		$why = MlKem768::unavailableReason();
+		if ($why === null) {
+			try {
+				$kem = new MlKem768();
+				$seed = random_bytes(MlKem768::SEED_BYTES);
+				[$ct, $ss] = $kem->encapsulate($kem->keygen($seed));
+				if (!hash_equals($ss, $kem->decapsulate($seed, $ct))) {
+					$why = 'an ML-KEM round trip did not agree';
+				}
+			} catch (Throwable $e) {
+				$why = 'an ML-KEM round trip failed: ' . $e->getMessage();
+			}
+		}
+		self::$pq_reason = $why === null ? null
+			: 'This server is not ready for post-quantum key protection (' . $why . '). ' . MlKem768::FLOOR_MESSAGE;
+		return self::$pq_reason;
+	}
+
+	/**
+	 * Null when pqReady(); otherwise one of MlKem768's CAUSE_* codes, or
+	 * 'round_trip' when ML-KEM loaded but did not agree with itself. Lets a
+	 * caller name the fix: configuration for a setting, a newer OS for OpenSSL.
+	 */
+	public static function pqReadyCause(): ?string {
+		if (self::pqReadyReason() === null) {
+			return null;
+		}
+		return MlKem768::unavailableCause() ?? 'round_trip';
 	}
 
 	/**

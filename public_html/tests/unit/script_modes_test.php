@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_plugin_installers_start.sh]
  */
 /**
  * Git records every file in the trees the host converger keeps at the mode

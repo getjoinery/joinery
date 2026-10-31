@@ -36,6 +36,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.23
+ * @changelog 1.23 - New core step: 'post_quantum' (site scope, order 84), present only while this server
+ *   cannot seal with post-quantum keys (specs/post_quantum_sealing.md R4)
  * @version 1.22
  * @changelog 1.22 - Beta permissions step retitled Privacy settings, with the owner's copy
  * @version 1.21
@@ -645,6 +648,29 @@ class SetupSteps {
 				$v = call_user_func($sealed_attention);
 				return ($v['operator'] + $v['needs_ack']) > 0
 					? SetupSteps::STATUS_AMBER : SetupSteps::STATUS_NONE;
+			},
+		));
+
+		// Like Stored secrets: a fault, not an onboarding step. Absent on every
+		// server that meets the floor (Ubuntu 26.04, ffi.enable = On for
+		// PHP-FPM); amber on one that does not, because it cannot reach the
+		// ML-KEM post-quantum key protection needs (specs/post_quantum_sealing.md R4).
+		self::register('post_quantum', array(
+			'title' => 'Post-quantum sealing',
+			'scope' => 'site',
+			'order' => 84,
+			'copy'  => function (?User $viewer): string {
+				return 'This server is not ready for post-quantum key protection, which keeps the keys to '
+					. 'private mail, files, passwords and backups safe from future quantum computers. It needs '
+					. 'Ubuntu 26.04 or later with PHP allowed to reach OpenSSL; the server\'s maintenance task sets the second.';
+			},
+			'render_file' => 'includes/setup_steps/post_quantum.php',
+			'dismiss_line' => 'This server is not ready for post-quantum key protection.',
+			'active' => function (?User $viewer): bool {
+				return !SealedBox::pqReady();
+			},
+			'status' => function (?User $viewer): string {
+				return SealedBox::pqReady() ? SetupSteps::STATUS_NONE : SetupSteps::STATUS_AMBER;
 			},
 		));
 
