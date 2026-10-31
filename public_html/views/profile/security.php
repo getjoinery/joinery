@@ -25,6 +25,9 @@
             // (specs/post_quantum_sealing.md R7). An unlock elsewhere sends the
             // person here (VaultRotationOwedException::ROTATE_URL).
             $pq_old_scopes = UserEncryptionVault::oldKeyScopesFor((int)SessionControl::get_instance()->get_user_id());
+            // The account vault (with the root) rotates first: every other part
+            // opens through it, so its own Rotate stays off until then.
+            $pq_main_first = isset($pq_old_scopes[UserEncryptionVault::SCOPE_USER]) || isset($pq_old_scopes[VaultScopes::ROOT_SCOPE]);
             if ($pq_old_scopes): ?>
             <div class="jy-alert jy-alert-warning" id="vault-rotation-owed">
                 <strong>Your vault needs new keys.</strong>
@@ -32,13 +35,27 @@
                 <?php echo count($pq_old_scopes) === 1 ? 'has a key' : 'have keys'; ?> from before post-quantum protection, so
                 <?php echo count($pq_old_scopes) === 1 ? 'it does' : 'they do'; ?> not open, and mail and files sealed for you wait until
                 <?php echo count($pq_old_scopes) === 1 ? 'it moves' : 'they move'; ?> to a new key.
-                <?php if (isset($pq_old_scopes[UserEncryptionVault::SCOPE_USER]) || isset($pq_old_scopes[VaultScopes::ROOT_SCOPE])): ?>
-                    Start with <em>Encrypted Vault, Actions, Rotate Vault Key</em> below: it takes your passkey and gives you new recovery codes.
-                <?php endif; ?>
-                <?php if (count(array_diff_key($pq_old_scopes, array(UserEncryptionVault::SCOPE_USER => 1, VaultScopes::ROOT_SCOPE => 1)))): ?>
-                    Then use each part's <em>Rotate</em> button further down.
+                <?php if ($pq_main_first): ?>
+                    First your vault itself: one passkey touch, and you get new recovery codes.
+                    <?php if (count(array_diff_key($pq_old_scopes, array(UserEncryptionVault::SCOPE_USER => 1, VaultScopes::ROOT_SCOPE => 1)))): ?>
+                        Then each part's <em>Rotate</em> button further down, which stays off until this is done.
+                    <?php endif; ?>
+                    <div class="jy-mt-2"><button type="button" class="btn btn-primary" id="vault-rotate-owed-btn">Rotate your vault now</button></div>
+                <?php elseif (count(array_diff_key($pq_old_scopes, array(UserEncryptionVault::SCOPE_USER => 1, VaultScopes::ROOT_SCOPE => 1)))): ?>
+                    Use each part's <em>Rotate</em> button further down.
                 <?php endif; ?>
             </div>
+            <script>
+            // The notice's button runs the same rotation as Encrypted Vault, Actions,
+            // Rotate Vault Key (that button's handler).
+            document.addEventListener('DOMContentLoaded', function () {
+                var owed = document.getElementById('vault-rotate-owed-btn');
+                if (owed) owed.addEventListener('click', function () {
+                    var main = document.getElementById('vault-rotate-btn');
+                    if (main) main.click();
+                });
+            });
+            </script>
             <?php endif; ?>
 
             <div class="jy-page-header">
@@ -1426,6 +1443,13 @@ $pac_writer->end_form();
                     var scope = card.getAttribute('data-vault-rotate');
                     var btn = card.querySelector('[data-vault-rotate-btn]');
                     var status = card.querySelector('[data-vault-rotate-status]');
+                    <?php if (!empty($pq_main_first)): ?>
+                    // A part opens through your vault, which is still on an old key:
+                    // it rotates first (the notice at the top).
+                    btn.disabled = true;
+                    status.textContent = 'Rotate your vault first (the button at the top of this page); this one is next.';
+                    return;
+                    <?php endif; ?>
                     btn.addEventListener('click', function () {
                         if (!window.JoinerySealed) { status.textContent = 'Rotating is unavailable on this page.'; return; }
                         btn.disabled = true;

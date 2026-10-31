@@ -23,6 +23,7 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.9 - rotationAware(): an unlock the server refuses for a rotation owed still opens the root
  * @version 1.8 - rootKeyReplacement(): the root vault's new key for the account rotation; a server answer of rotation_required (an old X25519 vault key) sends the unlock to the Security page;
  *   a content vault on an old key opens only to be rotated (specs/post_quantum_sealing.md R7)
  * @version 1.7 - session.mac() and session.derivedPublicKey(): the relay pin
@@ -1009,7 +1010,7 @@ window.VaultKeyring = (function () {
 			body.root = made.payload;
 			codes = set.codes;
 		}
-		var res = await api('vault_unlock_passkey', body);
+		var res = await rotationAware(api('vault_unlock_passkey', body));
 		// The server adopts only when it can (not during an unfinished
 		// rotation): otherwise the codes and the root made here were not kept.
 		if (made && !(res && res.code_set_adopted)) {
@@ -1021,13 +1022,29 @@ window.VaultKeyring = (function () {
 			rootSession: made ? made.session : null };
 	}
 
+	// A vault on an old X25519 key does not open on the server (rotation
+	// required), but the same touch or phrase still opens the root here, which
+	// the rotation needs open (specs/post_quantum_sealing.md R7). So the
+	// refusal comes back as an answer, { rotation_required, rotate_url,
+	// message }, not an error that would stop the ceremony before the root.
+	async function rotationAware(call) {
+		try {
+			return await call;
+		} catch (e) {
+			if (e && e.data && e.data.rotation_required) {
+				return { rotation_required: true, rotate_url: e.data.rotate_url, message: e.message };
+			}
+			throw e;
+		}
+	}
+
 	// The passphrase: one Argon2id run, the account half posted, the root half
 	// kept. Resolves { res, rootSession }.
 	async function passphraseUnlock(st, phrase) {
 		var rootSt = st.root || {};
 		if (!rootSt.set_up) throw new Error('Your vault is not set up for a passphrase on this account.');
 		var k = await VaultCrypto.passphraseKeks(phrase, rootSt.salt, rootSt.kdf_params);
-		var res = await api('vault_unlock_passphrase', { passphrase_kek: VaultCrypto.b64urlEncode(k.account) });
+		var res = await rotationAware(api('vault_unlock_passphrase', { passphrase_kek: VaultCrypto.b64urlEncode(k.account) }));
 		k.account.fill(0);
 		return { res: res, rootSession: await openRoot(rootSt, k.root, 'passphrase') };
 	}
