@@ -59,6 +59,8 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.6 - the challenge's scope is always this scope's own label; a request row naming another is refused
+ *                (reviewer2 WP2 B1)
  * @version 1.5 - a key box in either seal version (specs/post_quantum_sealing.md R2): v2 carries the X-Wing
  *                ciphertext and its answer the 1216-byte public key; v1 (a backup sealed to an old recovery
  *                key) keeps its ephemeral key
@@ -306,6 +308,15 @@ class ApprovalChallenge {
 		if (!is_array($req) || empty($req['job_id']) || empty($req['challenge'])) {
 			return null;
 		}
+		// The challenge's scope is this scope's, never the row's. The agent
+		// writes exactly that label; a row naming another one is not its
+		// request. Taking it from the row would let whoever writes the row aim
+		// the page at any box sealed to the recovery key (a backup's data key
+		// is a 'dek' seal, as a challenge is a seal under its own scope) and
+		// have the pasted key open it into the answer field.
+		if (isset($req['info']) && (string)$req['info'] !== $s['info']) {
+			return null;
+		}
 
 		$expires = strtotime((string)($req['expires_time'] ?? '') . ' UTC');
 		$left = $expires ? ($expires - time()) : 0;
@@ -329,7 +340,7 @@ class ApprovalChallenge {
 			'facts'        => is_array($req['facts'] ?? null) ? $req['facts'] : array(),
 			'challenge'    => (string)$req['challenge'],
 			'public_key'   => (string)($req['public_key'] ?? ''),
-			'info'         => (string)($req['info'] ?? $s['info']),
+			'info'         => $s['info'],
 			'issued_time'  => (string)($req['issued_time'] ?? ''),
 			'expires_time' => (string)($req['expires_time'] ?? ''),
 			'seconds_left' => (int)$left,

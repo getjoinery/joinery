@@ -25,6 +25,7 @@
  * builds at once; a search meanwhile answers over what is indexed. Locking the
  * vault ends the worker; the saved index stays sealed.
  *
+ * @version 1.3 - the search key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.2 - a status notice comes only from a save or a build that ends or fails, never from
  *   a build that did not start (another tab holds it), so the reader's refresh-on-notice cannot
  *   loop; a failed build is not retried until a reload, an unlock or Rebuild; a search refreshes
@@ -37,7 +38,9 @@ window.MailboxSearch = (function () {
 	'use strict';
 
 	var SCOPE = 'mail';
-	var EDGE_SEAL = 'v1.edgeseal.' + SCOPE + '.';
+	// Written v2 (X-Wing); a key written before reads v1, the same length, and
+	// is opened by slicing the frame off either way.
+	var EDGE_SEAL = 'v2.edgeseal.' + SCOPE + '.';
 	var EDGE_FIELD = 'v1.edge.';
 
 	function cfg() { return window.MAILBOX_READER || {}; }

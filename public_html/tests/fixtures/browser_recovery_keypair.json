@@ -1,8 +1,8 @@
 {
-	"_what": "A recovery keypair produced by a real browser's WebCrypto through recoveryReadiness.generateKeypair(). Captured once so the encoding contract is pinned against bytes a browser actually emitted, not bytes PHP made up.",
-	"_warning": "THROWAWAY. This is test material and protects nothing. Never configure it as a real backup recovery key.",
-	"_captured": "2026-08-03",
-	"_browser": "Chrome 148 (HeadlessChrome/148.0.0.0, Linux x86_64)",
-	"private_key_b64": "7zYai8ySN5ca/FvntaL4YaK97wem/N4Iz0MeQGMHh6c=",
-	"public_key_b64": "bqnUsDY+tPipQDmZUfbcIky6V0zCxIfsVyIVWELDPDs="
+  "_what": "An X-Wing recovery keypair emitted by recovery-readiness.js generateKeypair() (on vault-crypto.js and the vendored X-Wing) in a real browser: the 32-byte seed and the 1216-byte public key, each one line of standard base64.",
+  "_warning": "THROWAWAY. This is test material and protects nothing. Never configure it as a real backup recovery key.",
+  "_captured": "2026-10-31, localdev /admin/admin_recovery_readiness",
+  "_browser": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+  "private_key_b64": "hFXr1VJ6zcqzfL7zlEQCUmk0z8ZcG0H9rBYt+nqPt6Q=",
+  "public_key_b64": "XSm7doBVPnyf28M+5QlVdehuWMu2A0RxliG4n9HP83kpi6eZ9mQLNuOhRwYJlyyKcbst7Tu0BsStlSm9e/Gp/BZe9moMC5CMN4t1ftKqwqRF7GIIBWC9poIDqIl42kuEkSxQvPcEL1hqjftwSqrI67gFvcw+staI5SthT4cHnDxHC0kL4/IYVaYL5TuGqnOZSDFL+/swjvwhoLSRBzUQEsJPPLC/+DU3sKhT8EuJuDvNPZOSrZqYYoAn5TKUyQtxoGSm0shAjOFUCwdiDQgPNVbMk7Fy4HNHYmJfNKWLVxZ2DqwsyvYkGfuKFBofgzq7Y0gwpPZlYstNn0GQ6UN70HeGraw8pORTM2Yse/ep3LKmSvtZwWFpUSQp9LhFJ3Vt64Sv6yRu3wW3tkai1TOICmEP1ctih/ZSF7pTPbEnESVEoUGAAiqqV1dxmxXPHxeK6QxNFAJrJkkcAeQhB9u7CXNVt3B1SlYcf2suIMOnGgmmSEwp4yUwUlJ0jyUFz/DFtmp9pQJEvhJODPqk4sVMj9cQdNYsY2yPdxKSD1BJ/gwXXdllp2Ft3YEHomoJd8am7YsgB6xyAjsyODOCNrBJi4Ce5QQf/JwVjYmPqTVMlFQxd0JAkFB3g3EG3RdfrkAyKyJBEgaWj3WaBWaAhSiW19h8+cYvGlMckiAQ4cKvNPLE5oXCPPobFHSf9eFM2Zm0pvq8yciowbq2FdmclCAOwqF52lt6orRsnBBqmBFiHmcm0yF/1DVuRuhmB4dK1ee9o0U8JgpJq7SlkmUaPjIJUssu22lOQXAGT5s/vAhPaoo6QUth2PwgQGCYeyQSJRbDTYaRa0iRdZMX2TfGKSUvf0pL0QYZoSmhN5dQ9bEfHvpNKUGdjZOwLsoSEVmaAuJ5pJd/Rxmc7zCkqisVugtn6iqBxkOR4UuMnlVgORG8tlMKrgRaFbsuSHlGHmG3sIk2PzgXUJcdV4V6WhsvaWMn8McDkOWi7GJ37AIdMrgzAaFBBbqpJcAk2BsYjua1m4ukfMGBv+lFi0pcrpBRbsvIkiKuxjpDkthmRWCMWEWmvGlmWMEemPaAEeyZmiYdZZqZkpBsVCnAFTSXi8gDbISTTzdxlBmaheU1aKEWBGoN4eEaidwGDmfB24ibHIAT4TQPkhCG6qehkJlKyfo28mV2vegpHfSTCJICOKpzS8yWJKUBJLPER3ojw7BApTltMONHOWhLGdVs/1abFvVc9NerfNhKXUMMM7PNNuQA1iNNLkY3ygRB8PilMDlcIEl11atkJCVcG3E4ixeK8bu5ClasWuRV4at2nWqV7zaBhreu3lJrk4gswEYQ4xZWeQYQzzO1LyUW9mVVK7eEgJlaqqNhwgYFFMQCyuG6zAhKZoJP03V8oXGc8/C85oq2ruaAGVoks1FvYwu54IU1BMIViFZZKHumfoU0pdCytavNGowYrblKNqVGcVOtWRLBmJda6tXA5nEhnxaSnYAOBtIbW+UPe3NK6de3gnC16AjEBPe5QDKGmeImXSrFM3EJYDKGdheZqXRB4rwN6vGLjkmf2ByKTChXRSw5QSYh+I9POkoewowdrHGB13ofr0J4Ilib5qqGLQjWmaqaY+XoLdY+ZMH4ZA=="
 }

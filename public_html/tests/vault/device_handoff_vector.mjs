@@ -9,20 +9,23 @@
  *                                           vault-crypto.js and compare the plaintexts
  *   node device_handoff_vector.mjs --write  rewrite the file
  *
- * Every random input (the key pairs, the ephemeral keys, the IVs) is drawn
- * from a fixed seed: vault-crypto.js runs unchanged, but the WebCrypto it
- * calls hands out the seeded values where it would have drawn random ones.
- * So a rebuild reproduces the file exactly, and a change to the browser's
- * format shows up as a difference. tests/vault/device_handoff_vector_test.php
- * reproduces the same bytes with the server's SealedBox from the recorded
- * ephemeral keys and IVs, so browser, server and the phone ports are held to
- * one set of bytes.
+ * Every random input (the key seeds, the X-Wing encapsulation seeds, the IVs)
+ * is drawn from a fixed seed: vault-crypto.js runs unchanged, but the
+ * getRandomValues it calls hands out the seeded values where it would have
+ * drawn random ones, and the two key seals go through VaultCrypto.sealV2With,
+ * the same v2 seal with its randomness supplied (X-Wing draws its own inside
+ * the vendored module, which nothing here can seed). So a rebuild reproduces
+ * the file exactly, and a change to the browser's format shows up as a
+ * difference. tests/vault/device_handoff_vector_test.php reproduces the same
+ * bytes with the server's SealedBox from the recorded seeds and IVs, so
+ * browser, server and the phone ports are held to one set of bytes.
  *
  * Gzip is the one input that is not reproducible: zlib builds compress the
  * same text to different, equally valid bytes (Ubuntu 26.04's Node does), so
  * the build reuses the file's own gzip whenever it unpacks to exactly the text
  * it would compress. The format is held to account, not the compressor.
  *
+ * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): key seeds, v2 seals, vault.seed_hex
  * @version 1.1 - the search text's gzip is reused from the file when it unpacks to the text (box-agnostic)
  * @version 1.0
  */
@@ -30,52 +33,32 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, createPrivateKey, createPublicKey, webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
 const OUT = join(here, 'fixtures', 'device_handoff_vector.json');
-const PKCS8_X25519_PREFIX = '302e020100300506032b656e04220420';
 
 const subtle = webcrypto.subtle;
 const hex = (b) => Buffer.from(b).toString('hex');
 const b64 = (b) => Buffer.from(b).toString('base64');
-const seeded = (label, n) => new Uint8Array(createHash('sha256').update('fortress-mobile-vector/' + label).digest()).slice(0, n);
+const seeded = (label, n) => {
+	const out = new Uint8Array(n);
+	for (let i = 0, block = 0; i < n; block++) {
+		const h = createHash('sha256').update('fortress-mobile-vector/' + label + (block ? '/' + block : '')).digest();
+		for (let j = 0; j < h.length && i < n; j++) out[i++] = h[j];
+	}
+	return out;
+};
 
 // ---- WebCrypto that hands out seeded values ---------------------------------------
 
 const randomQueue = [];   // byte arrays getRandomValues returns, in order
-const keyQueue = [];      // X25519 secrets generateKey returns, in order
-
-function pkcs8Of(secret) { return Buffer.concat([Buffer.from(PKCS8_X25519_PREFIX, 'hex'), Buffer.from(secret)]); }
-
-function publicOf(secret) {
-	const jwk = createPublicKey(createPrivateKey({ key: pkcs8Of(secret), format: 'der', type: 'pkcs8' })).export({ format: 'jwk' });
-	return new Uint8Array(Buffer.from(jwk.x, 'base64url'));
-}
-
-const seededSubtle = new Proxy(subtle, {
-	get(target, prop) {
-		if (prop === 'generateKey') {
-			return async function (alg, extractable, usages) {
-				if (!alg || alg.name !== 'X25519') return target.generateKey(alg, extractable, usages);
-				if (!keyQueue.length) throw new Error('an unseeded X25519 key was asked for');
-				const secret = keyQueue.shift();
-				return {
-					privateKey: await target.importKey('pkcs8', pkcs8Of(secret), { name: 'X25519' }, true, usages),
-					publicKey: await target.importKey('raw', publicOf(secret), { name: 'X25519' }, true, []),
-				};
-			};
-		}
-		const v = target[prop];
-		return typeof v === 'function' ? v.bind(target) : v;
-	},
-});
 
 globalThis.window = {
 	crypto: {
-		subtle: seededSubtle,
+		subtle,
 		getRandomValues(buf) {
 			if (!randomQueue.length) throw new Error('unseeded random bytes were asked for');
 			const next = randomQueue.shift();
@@ -85,37 +68,36 @@ globalThis.window = {
 		},
 	},
 };
+// The vendored X-Wing first (vault-crypto.js finds it on window), then the module.
+new Function(readFileSync(join(root, 'assets', 'vendor', 'noble', 'noble-post-quantum-xwing.min.js'), 'utf8'))();
+globalThis.window.JoineryPQ = globalThis.JoineryPQ;
 new Function(readFileSync(join(root, 'assets', 'js', 'vault-crypto.js'), 'utf8'))();
 const VC = globalThis.window.VaultCrypto;
 
 // ---- the vector ------------------------------------------------------------------
 
 async function build(knownPacked) {
-	const deviceSecret = seeded('device-secret', 32);
-	const vaultSecret = seeded('mail-vault-secret', 32);
+	const deviceSeed = seeded('device-seed', 32);
+	const vaultSeed = seeded('mail-vault-seed', 32);
 
 	// Both key pairs as vault-crypto.js makes them (generateVaultKeypair).
-	keyQueue.push(deviceSecret, vaultSecret);
+	randomQueue.push(deviceSeed, vaultSeed);
 	const device = await VC.generateVaultKeypair();
 	const vault = await VC.generateVaultKeypair();
 
-	// The handoff: the browser seals the vault's PKCS#8 secret to the device key
-	// (vault-keyring.js session.sealSecretKeyTo -> VaultCrypto.sealToPublicKey).
-	const handoffEph = seeded('handoff-ephemeral', 32);
+	// The handoff: the browser seals the vault's secret, its 32-byte seed, to the
+	// device key (vault-keyring.js session.sealSecretKeyTo -> VaultCrypto.sealToPublicKey).
+	const handoffEseed = seeded('handoff-eseed', 64);
 	const handoffIv = seeded('handoff-iv', 12);
-	keyQueue.push(handoffEph);
-	randomQueue.push(handoffIv);
-	const handoffBlob = await VC.sealToPublicKey(vault.secretKeyBytes, device.publicKeyB64);
+	const handoffBlob = await VC.sealV2With(vault.secretKeyBytes, device.publicKeyB64, 'dek', handoffEseed, handoffIv);
 
 	// One Fortress row, as the server or a browser seals it.
 	const id = 4242;
 	const adPrefix = 'mail:';
 	const dek = seeded('row-dek', 32);
-	const dekEph = seeded('row-dek-ephemeral', 32);
+	const dekEseed = seeded('row-dek-eseed', 64);
 	const dekIv = seeded('row-dek-iv', 12);
-	keyQueue.push(dekEph);
-	randomQueue.push(dekIv);
-	const sealedDek = 'v1.edgeseal.mail.' + await VC.sealToPublicKey(dek, vault.publicKeyB64);
+	const sealedDek = 'v2.edgeseal.mail.' + await VC.sealV2With(dek, vault.publicKeyB64, 'dek', dekEseed, dekIv);
 	const dekKey = await VC.importDek(dek);
 
 	const fieldPlain = {
@@ -156,23 +138,26 @@ async function build(knownPacked) {
 	const part = { mime_part: '2', ad: partAd, bytes_b64: b64(partBytes), sha256_hex: createHash('sha256').update(partBytes).digest('hex'),
 		iv_hex: hex(partIv), stored: 'v1.edge.' + b64(Buffer.concat([partIv, partCt])) };
 
-	if (randomQueue.length || keyQueue.length) throw new Error('seeded values left over: the browser code changed what it draws');
+	if (randomQueue.length) throw new Error('seeded values left over: the browser code changed what it draws');
 
 	return {
 		_about: 'Device handoff and one Fortress row, built by assets/js/vault-crypto.js from seeded randomness '
-			+ '(tests/vault/device_handoff_vector.mjs). Standard base64 with padding throughout. A phone: (1) opens '
-			+ 'handoff.blob with device.secret (X25519, HKDF-SHA256 salt empty info "sealed-vault:dek" ‖ ephPub ‖ devicePub, '
-			+ 'AES-256-GCM, no AAD) and gets vault.pkcs8_hex, whose last 32 bytes are the mail secret; (2) opens '
-			+ 'row.sealed_dek (strip "v1.edgeseal.mail.", same seal) with that secret to get row.dek_hex; (3) opens each '
-			+ 'v1.edge. value (base64 IV[12] ‖ ct ‖ tag[16]) under the DEK with its AD. A search text whose plaintext '
-			+ 'starts "gz:" is base64 gzip. A part is the stored text itself, same box, AD mail:{id}:att:{mime_part}.',
-		kdf_info_prefix: 'sealed-vault:dek',
-		device: { secret_hex: hex(deviceSecret), public_b64: device.publicKeyB64 },
-		vault: { secret_hex: hex(vaultSecret), public_b64: vault.publicKeyB64, pkcs8_hex: hex(vault.secretKeyBytes) },
-		handoff: { eph_secret_hex: hex(handoffEph), iv_hex: hex(handoffIv), blob: handoffBlob },
+			+ '(tests/vault/device_handoff_vector.mjs). Standard base64 with padding throughout. Every key is X-Wing '
+			+ '(draft-connolly-cfrg-xwing-kem): the secret a 32-byte seed, the public key 1216 bytes. Every key seal is v2: '
+			+ 'base64(ct[1120] ‖ IV[12] ‖ AES-256-GCM ‖ tag[16]), no AAD, AES key = HKDF-SHA256(X-Wing shared secret, '
+			+ 'salt empty, info "joinery-seal:v2:dek"). A phone: (1) opens handoff.blob with device.seed_hex and gets '
+			+ 'vault.seed_hex, the mail secret; (2) opens row.sealed_dek (strip "v2.edgeseal.mail.", same seal) with it '
+			+ 'to get row.dek_hex; (3) opens each v1.edge. value (base64 IV[12] ‖ ct ‖ tag[16]) under the DEK with its AD. '
+			+ 'A search text whose plaintext starts "gz:" is base64 gzip. A part is the stored text itself, same box, '
+			+ 'AD mail:{id}:att:{mime_part}. The eseed_hex values are the X-Wing encapsulation seeds, for a runtime that '
+			+ 'can reproduce the seals byte for byte.',
+		kdf_info: 'joinery-seal:v2:dek',
+		device: { seed_hex: hex(deviceSeed), public_b64: device.publicKeyB64 },
+		vault: { seed_hex: hex(vaultSeed), public_b64: vault.publicKeyB64 },
+		handoff: { eseed_hex: hex(handoffEseed), iv_hex: hex(handoffIv), blob: handoffBlob },
 		row: {
 			id, ad_prefix: adPrefix, dek_hex: hex(dek),
-			sealed_dek: sealedDek, dek_eph_secret_hex: hex(dekEph), dek_iv_hex: hex(dekIv),
+			sealed_dek: sealedDek, dek_eseed_hex: hex(dekEseed), dek_iv_hex: hex(dekIv),
 			fields, search_text: search, part,
 		},
 	};
@@ -194,18 +179,20 @@ function check(ok, label, detail) {
 
 async function openAll(v) {
 	const fromHex = (h) => new Uint8Array(Buffer.from(h, 'hex'));
-	const pkcs8 = await VC.openFromSecretKey(v.handoff.blob, fromHex(PKCS8_X25519_PREFIX + v.device.secret_hex), v.device.public_b64);
-	check(hex(pkcs8) === v.vault.pkcs8_hex, 'the handoff blob opens with the device secret to the vault PKCS#8');
-	check(v.vault.pkcs8_hex === PKCS8_X25519_PREFIX + v.vault.secret_hex, 'the PKCS#8 is the fixed prefix and the raw scalar');
-	check(b64(publicOf(fromHex(v.vault.secret_hex))) === v.vault.public_b64, 'the vault public key is the secret\'s X25519 public key');
+	check(v.vault.seed_hex.length === 64 && v.device.seed_hex.length === 64, 'both secrets are 32-byte seeds');
+	check(await VC.publicKeyFromSecret(fromHex(v.device.seed_hex)) === v.device.public_b64
+		&& Buffer.from(v.device.public_b64, 'base64').length === 1216, 'the device public key is its seed\'s 1216-byte X-Wing key');
+	check(await VC.publicKeyFromSecret(fromHex(v.vault.seed_hex)) === v.vault.public_b64, 'the vault public key is its seed\'s X-Wing key');
+	const seed = await VC.openFromSecretKey(v.handoff.blob, fromHex(v.device.seed_hex), v.device.public_b64);
+	check(hex(seed) === v.vault.seed_hex, 'the handoff blob opens with the device seed to the vault seed');
 	let refused = false;
-	try { await VC.openFromSecretKey(v.handoff.blob, fromHex(PKCS8_X25519_PREFIX + v.vault.secret_hex), v.vault.public_b64); } catch (e) { refused = true; }
+	try { await VC.openFromSecretKey(v.handoff.blob, fromHex(v.vault.seed_hex), v.vault.public_b64); } catch (e) { refused = true; }
 	check(refused, 'the handoff blob refuses another key');
 
-	const blob = v.row.sealed_dek.slice('v1.edgeseal.mail.'.length);
-	check(v.row.sealed_dek.startsWith('v1.edgeseal.mail.'), 'the row DEK carries the v1.edgeseal.mail. prefix');
-	const dek = await VC.openFromSecretKey(blob, pkcs8, v.vault.public_b64);
-	check(hex(dek) === v.row.dek_hex, 'the row DEK opens with the mail secret');
+	const blob = v.row.sealed_dek.slice('v2.edgeseal.mail.'.length);
+	check(v.row.sealed_dek.startsWith('v2.edgeseal.mail.'), 'the row DEK carries the v2.edgeseal.mail. prefix');
+	const dek = await VC.openFromSecretKey(blob, seed, v.vault.public_b64);
+	check(hex(dek) === v.row.dek_hex, 'the row DEK opens with the mail seed');
 	const dekKey = await VC.importDek(dek);
 	for (const f of v.row.fields.concat([v.row.search_text])) {
 		check(f.ad === v.row.ad_prefix + v.row.id + ':' + f.column, f.column + ': AD is {prefix}{id}:{column}');

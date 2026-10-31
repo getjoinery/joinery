@@ -21,6 +21,7 @@
  *
  * Depends on VaultCrypto (assets/js/vault-crypto.js).
  *
+ * @version 1.2 - contentSupported(): the share page's check, which needs no X-Wing module
  * @version 1.1
  */
 window.DriveCrypto = (function () {
@@ -234,6 +235,8 @@ window.DriveCrypto = (function () {
 		CHUNK_BYTES: CHUNK_BYTES,
 		THUMB_MAX: THUMB_MAX,
 		isSupported: function () { return enc().isSupported(); },
+		// A public share link opens content only: no key seal, no X-Wing module.
+		contentSupported: function () { return enc().contentSupported(); },
 		newFileKey: newFileKey,
 		importFileKey: importFileKey,
 		encryptFile: encryptFile,

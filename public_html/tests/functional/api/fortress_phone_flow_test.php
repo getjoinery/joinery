@@ -14,7 +14,7 @@
  *  - `mailboxes` names the mailbox Fortress, with its newest_unread_id;
  *  - `thread_list` carries the row sealed, nothing readable;
  *  - `device_key_enroll` → the owner approves (the link page's handover: the
- *    mail secret as PKCS#8 sealed to the device key) → the poll hands the
+ *    mail secret, its X-Wing seed, sealed to the device key) → the poll hands the
  *    phone the sealed key, which its device secret opens to the vault's secret;
  *  - with it, the phone opens the row's DEK and the subject;
  *  - `thread` gives every part a signed URL; fetched with no credential at
@@ -105,20 +105,18 @@ $enroll = $r['json']['data'] ?? array();
 check($r['status'] === 200 && !empty($enroll['link_code']), 'the phone gets a code', substr($r['raw'], 0, 200));
 
 // The link page's handover, as the owner's browser does it: the mail secret
-// (PKCS#8) sealed to the device key.
+// (the vault's 32-byte X-Wing seed) sealed to the device key.
 $mail_secret = SealedBox::b64url_decode($fx['pair']['secret']);
-$pkcs8 = hex2bin('302e020100300506032b656e04220420') . $mail_secret;
 $session->set_api_user($fx['owner_id']);
 $approved = drive_device_link_approve_logic(array('code' => $enroll['link_code'] ?? '',
-	'sealed_vault_keys' => array('mail' => $fx['box']->sealEdge($pkcs8, $device_pub))));
+	'sealed_vault_keys' => array('mail' => $fx['box']->sealEdge($mail_secret, $device_pub))));
 $session->clear_api_user();
 check(!$approved->error, 'the owner approves', (string)$approved->error);
 
 $r = api_request('POST', '/api/v1/auth/device_link/' . ($enroll['poll_token'] ?? ''));
 $blob = (string)($r['json']['data']['sealed_vault_keys']['mail'] ?? '');
 $opened = $blob !== '' ? $fx['box']->openEdge($blob, $device_secret, $device_pub) : '';
-check($opened === $pkcs8, 'the poll\'s sealed key opens with the device secret to the vault\'s PKCS#8');
-check(substr($opened, 16) === $mail_secret, 'whose last 32 bytes are the mail secret');
+check($opened === $mail_secret, 'the poll\'s sealed key opens with the device secret to the mail vault\'s seed');
 
 // ---------------------------------------------------------------------------
 section('the phone reads');

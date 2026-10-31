@@ -243,6 +243,7 @@ if (count($vault_aggregate)) {
 <?php
 $stepup = isset($page_vars['stepup']) ? $page_vars['stepup'] : array('needed' => false, 'passkey' => false);
 ?>
+<?php echo VaultCrypto::browserScriptTag(); ?>
 <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
 <script>
 window.rrCeremonyConfigs = <?php echo json_encode($ceremony_configs); ?>;

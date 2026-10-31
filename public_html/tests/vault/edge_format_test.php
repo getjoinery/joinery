@@ -153,6 +153,7 @@ if ($node === '') {
 } else {
 	$runner = tempnam(sys_get_temp_dir(), 'edgevec') . '.js';
 	file_put_contents($runner, "globalThis.window = globalThis;\n"
+		. "require(" . json_encode(PathHelper::getIncludePath('assets/vendor/noble/noble-post-quantum-xwing.min.js')) . ");\n"
 		. "require(" . json_encode($js_path) . ");\n"
 		. "window.VaultCrypto.selfCheck().then(function (ok) { process.stdout.write(ok ? 'OK' : 'FALSE'); })"
 		. ".catch(function (e) { process.stdout.write('ERR ' + e.message); });\n");

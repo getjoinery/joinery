@@ -10,6 +10,9 @@
  *
  * Usage: node open_approval_challenge.mjs <fixture.json>
  * Exit 0 when the recovered plaintext is byte-for-byte what the agent sealed.
+ *
+ * The browser opens only v2 (X-Wing) challenges; the agent seals one from WP3
+ * of specs/post_quantum_sealing.md, and until then this fails at the open.
  */
 
 import { readFileSync } from 'node:fs';
@@ -47,6 +50,12 @@ const sandbox = {
 sandbox.window.crypto = webcrypto;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
+// As the page loads them: the vendored X-Wing, vault-crypto.js, then the file.
+const vendored = path.resolve(here, '../../assets/vendor/noble/noble-post-quantum-xwing.min.js');
+vm.runInContext(readFileSync(vendored, 'utf8'), sandbox, { filename: vendored });
+sandbox.window.JoineryPQ = sandbox.JoineryPQ;
+const vcPath = path.resolve(here, '../../assets/js/vault-crypto.js');
+vm.runInContext(readFileSync(vcPath, 'utf8'), sandbox, { filename: vcPath });
 vm.runInContext(source, sandbox, { filename: scriptPath });
 
 const api = sandbox.window.rrRecovery || sandbox.window.recoveryReadiness || sandbox.rrRecovery;
@@ -117,7 +126,9 @@ try {
 // that opens its key box, which the agent finishes opening. The fixture's
 // value was checked to open the box in Go; the shipped code must produce it,
 // and the key's public half, and refuse a key the box is not sealed to.
-if (fixture.boxEphemeral) {
+if (fixture.boxEphemeral || fixture.boxCiphertext) {
+	const box = { version: fixture.boxCiphertext ? 2 : 1, ciphertext: fixture.boxCiphertext || '',
+		ephemeralPublic: fixture.boxEphemeral || '', fingerprint: fixture.boxFingerprint };
 	const openKeyBox = api && api.openKeyBox;
 	if (typeof openKeyBox !== 'function') {
 		console.error('FAIL: recovery-readiness.js exposes no openKeyBox, so a restore of a backup another server '
@@ -125,7 +136,7 @@ if (fixture.boxEphemeral) {
 		process.exit(1);
 	}
 	try {
-		const r = await openKeyBox(fixture.privateKey, fixture.boxEphemeral, fixture.boxFingerprint);
+		const r = await openKeyBox(fixture.privateKey, box);
 		if (r.shared !== fixture.boxShared || r.pub !== fixture.publicKey) {
 			console.error('FAIL: the browser worked out a different value for the backup key box.');
 			console.error('  expected: ' + fixture.boxShared + ' / ' + fixture.publicKey);
@@ -138,7 +149,7 @@ if (fixture.boxEphemeral) {
 		process.exit(1);
 	}
 	try {
-		await openKeyBox(Buffer.alloc(32, 7).toString('base64'), fixture.boxEphemeral, fixture.boxFingerprint);
+		await openKeyBox(Buffer.alloc(32, 7).toString('base64'), box);
 		console.error('FAIL: a key the backup is not sealed to was used for its key box.');
 		process.exit(1);
 	} catch (err) {

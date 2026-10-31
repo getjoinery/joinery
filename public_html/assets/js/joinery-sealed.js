@@ -46,8 +46,10 @@
  * Closing the tab loses the tab's half; signing out loses the server's. The
  * idle clock survives reloads: a tab idle past its limit does not reopen.
  *
- * Framing lives here: `v1.edgeseal.{scope}.` on a sealed DEK and `v1.edge.` on
- * a field. vault-crypto.js stays raw.
+ * Framing lives here: `v2.edgeseal.{scope}.` on a sealed DEK and `v1.edge.` on
+ * a field. vault-crypto.js stays raw. A key written before X-Wing reads
+ * `v1.edgeseal.{scope}.`: it is still opened (by the old key, during that
+ * vault's rotation) and never written.
  *
  * Depends on VaultCrypto, VaultKeyring and joineryApi (at call time).
  *
@@ -55,6 +57,7 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.12 - writes v2.edgeseal. (X-Wing, specs/post_quantum_sealing.md WP2); reads both frames
  * @version 1.11 - openDek(scope, sealedDek): one browser-sealed row key opened to raw bytes
  * @version 1.10 - resealScope() rotates a vault that opens through the root under the root,
  *   and proves the stored new wrapping opens before moving anything (proveThroughRoot); a
@@ -76,7 +79,8 @@
 window.JoinerySealed = (function () {
 	'use strict';
 
-	var EDGE_SEAL = 'v1.edgeseal.';
+	var EDGE_SEAL = 'v2.edgeseal.';
+	var EDGE_SEAL_READ = /^v[12]\.edgeseal\./;   // a v1 key is opened, never written
 	var EDGE_FIELD = 'v1.edge.';
 
 	var sessions = {};      // scope -> keyring session (closure)
@@ -293,9 +297,11 @@ window.JoinerySealed = (function () {
 
 	function isEdgeField(v) { return typeof v === 'string' && v.indexOf(EDGE_FIELD) === 0; }
 
-	// The scope and raw blob of a `v1.edgeseal.{scope}.` key, or null.
+	// The scope and raw blob of a `v2.edgeseal.{scope}.` (or v1) key, or null.
+	// The blob's version need not be returned: the session opening it goes by
+	// its own key, and a frame that is not its key's version fails to open.
 	function parseSealedDek(sealed) {
-		if (typeof sealed !== 'string' || sealed.indexOf(EDGE_SEAL) !== 0) return null;
+		if (typeof sealed !== 'string' || !EDGE_SEAL_READ.test(sealed)) return null;
 		var rest = sealed.slice(EDGE_SEAL.length);
 		var dot = rest.indexOf('.');
 		if (dot < 1) return null;
@@ -570,7 +576,7 @@ window.JoinerySealed = (function () {
 	}
 
 	/**
-	 * Open one browser-sealed row key (`v1.edgeseal.{scope}.`) with `scope`'s
+	 * Open one browser-sealed row key (`v2.edgeseal.{scope}.`, or v1) with `scope`'s
 	 * session and hand back its raw bytes: the caller imports them and zeroes
 	 * them. A key sealed to another scope is refused. `opts` goes to session()
 	 * (the ceremony's reason).
