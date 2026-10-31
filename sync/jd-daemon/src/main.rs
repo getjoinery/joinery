@@ -667,6 +667,13 @@ fn cmd_status() -> Result<(), String> {
         answer.get("settled").and_then(Value::as_u64).unwrap_or(0),
         answer.get("tracked").and_then(Value::as_u64).unwrap_or(0),
     );
+    if let Some(system) = answer.get("system_files").and_then(Value::as_u64) {
+        match system {
+            0 => {}
+            1 => println!("  system   : 1 system file, not synced"),
+            n => println!("  system   : {n} system files, not synced"),
+        }
+    }
     if let Some(pending) = answer.get("pending_ops").and_then(Value::as_u64) {
         if pending > 0 {
             println!("  waiting  : {pending} transfers");

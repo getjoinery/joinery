@@ -810,7 +810,11 @@ One that was never agreed is `ignored` (`LocalStatus::Ignored`): made here, it
 is never sent, and held by the server and never had here, it is never brought
 here. Each device keeps its own, so nothing is said about them, and a server
 copy beside a device's own under the same name is no conflict. `ignored` counts
-as settled. The pass marks them before the round and the round skips them
+as settled. The status headline ("Up to date — N items") counts only what is in
+Drive and leaves them out, so two devices holding the same files say the same
+number; the status details give how many system files are not synced
+(`system_files`).
+The pass marks them before the round and the round skips them
 (`pass::mark_system_files`); a remote delete still reaches the record.
 
 They are records, not a filter on the walk. A temporary file renamed over a

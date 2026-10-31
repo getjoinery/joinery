@@ -308,6 +308,7 @@
     callout($('status-blocker'), s.blocker && s.blocker !== s.summary ? s.blocker : null);
     facts($('status-facts'), [
       ['Items', s.tracked != null ? s.settled + ' of ' + s.tracked + ' settled' : null],
+      ['System files not synced', s.system_files ? s.system_files : null],
       ['Transfers waiting', s.pending_ops ? s.pending_ops : null],
       ['Waiting for a key', s.waiting_for_keys ? s.waiting_for_keys : null],
       ['Last checked', s.last_pass_ms ? ago(s.last_pass_ms) : null]

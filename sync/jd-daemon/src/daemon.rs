@@ -1230,6 +1230,7 @@ pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         "waiting_for_keys": s.health.waiting_for_keys(),
         "tracked": s.health.tracked(),
         "settled": s.health.settled(),
+        "system_files": s.health.system_files(),
         "pending_ops": s.health.pending_ops,
         "cursor": s.health.cursor,
         "last_pass_ms": s.health.last_pass_ms,
