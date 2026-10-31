@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.70 - mgn_backup_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
  * @version 1.69 - mgn_agent_test_build also marks the site copy live test's nodes (SiteCopyLiveRun): the test cloud's
  *                cleanup takes them with their servers when a run is killed before its teardown
  * @version 1.68 - mgn_api_secret_key is stored sealed (API_SECRET_LOCATOR): api_secret_key() opens it,
@@ -205,7 +206,7 @@ class ManagedNode extends SystemBase {
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
 		// The public half of that key, when the node reports it proven
 		// (base64): what a copy into its owner's own account is born sealed to.
-		'mgn_backup_recovery_public_key' => array('type'=>'varchar(64)'),
+		'mgn_backup_recovery_public_key' => array('type'=>'text'),
 		'mgn_backup_verify_recovery_fpr' => array('type'=>'varchar(64)'),
 
 		// The old machine of a switch-over (state retired): whether its domain

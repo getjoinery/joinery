@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 4.12 - config/backup_site_key.retired* (an old X25519 site key moved aside, specs/post_quantum_sealing.md R7) is pinned 640 like the live key
 #VERSION 4.11 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are pinned out of the data-set sweep: root writes them and the pool only reads them (plugin_installer_from_the_browser, reviewer2 B2)
 #VERSION 4.10 - config/release_trust (the trusted set and its authority, specs/release_key_rotation.md R1)
 #               is pinned root:root 0644 and pruned from the config/ sweep like the key files it records
@@ -462,12 +463,15 @@ done
 # stops at 640 rather than 600 because backups run under more than one account —
 # the web user on the scheduled run, the deploy account from a shell — and both
 # live in www-data.
-BACKUP_KEY="$SITE_ROOT/config/backup_site_key"
-if [ -f "$BACKUP_KEY" ]; then
-    echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
-    chown www-data:www-data "$BACKUP_KEY"
-    chmod 640 "$BACKUP_KEY"
-fi
+# An old X25519 key the converger moved aside (backup_site_key.retired*,
+# _config_secrets.sh) still opens the backups it sealed, so it is held the same.
+for BACKUP_KEY in "$SITE_ROOT/config/backup_site_key" "$SITE_ROOT"/config/backup_site_key.retired*; do
+    if [ -f "$BACKUP_KEY" ]; then
+        echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
+        chown www-data:www-data "$BACKUP_KEY"
+        chmod 640 "$BACKUP_KEY"
+    fi
+done
 
 # config/backup-ledger records what this machine uploaded, and a restore checks
 # an archive against it before loading it as root over live data. A 770 sweep

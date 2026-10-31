@@ -21,6 +21,7 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.4 - the command-line proof command comes from BackupRecoveryKey::cli_unseal_command()
  * @version 2.3 - Rotate key asks whether the current key could have been seen, where an encrypted data
  *                root is sealed to it (here, or on the servers a management node hosts), and says what to
  *                re-encrypt and what the old key still opens (D8)
@@ -204,10 +205,8 @@ class RecoveryKeySetupPanel {
 		$fw->end_form();
 
 		echo '<details class="mt-2"><summary class="small">Or verify at the command line</summary>';
-		echo '<pre class="border rounded p-2 small mt-2">echo \''
-		   . htmlspecialchars(BackupRecoveryKey::possession_challenge())
-		   . '\' | php ' . htmlspecialchars(PathHelper::getSiteRoot())
-		   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal --private ~/recovery.key</pre>';
+		echo '<pre class="border rounded p-2 small mt-2">'
+		   . htmlspecialchars(BackupRecoveryKey::cli_unseal_command('~/recovery.key')) . '</pre>';
 		$fw3 = $page->getFormWriter('recovery_cli_proof_form');
 		$fw3->begin_form();
 		$fw3->hiddeninput('action', '', array('value' => 'verify_recovery_key', 'id' => 'rk-cli-action'));

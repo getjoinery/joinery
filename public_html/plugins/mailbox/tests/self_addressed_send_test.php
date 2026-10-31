@@ -35,6 +35,7 @@
  *
  * Run: php tests/run.php db --filter=self_addressed_send
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - harness_finish() runs after the body, not from a finally: an exit() reached while
  *                an exception unwinds would report PASS on however many checks had run
  * @version 1.0
@@ -139,10 +140,10 @@ $address = strtolower($alias->get_full_address());
 // The owner holds a vault. On a Standard mailbox that must change nothing —
 // it is exactly the condition that used to seal the Sent copy alone.
 $owner = make_user('SelfSend' . $suffix);
-$keys  = sodium_crypto_box_keypair();
+$keys  = (new SealedBox())->generateKeypair();
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', intval($owner->key));
-$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
+$vault->set('uev_public_key', $keys['public']);
 $vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 $vault->save();
 $vault->load();

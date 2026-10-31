@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_action_queue_test.php
  *
+ * @version 1.3 - X-Wing test vault, minted outside the hot state
  * @version 1.2 - Past: approve after a decline or a failure; labelled calendar card fields
  * @version 1.1 - a sealed recipe proposal approved in-window lands; the card states a failure plainly
  * @version 1.0
@@ -337,13 +338,15 @@ check(stripos($refused, 'vault') !== false,
 	'hot with no vault to seal to → the enqueue is refused, never stored in the clear', $refused);
 
 // With a vault: the arguments land as ciphertext, sealed to the owner.
-$kp = sodium_crypto_box_keypair();
-$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
+$kp = (new SealedBox())->generateKeypair();
+$secret = $kp['secret'];
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $owner_id);
-$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+$vault->set('uev_public_key', $kp['public']);
 $vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
-$vault->save();
+// The vault is minted by its own request, not this hot one: an X-Wing public
+// key is long enough for the egress guard to weigh.
+SealedEgressGuard::isolate(function () use ($vault) { $vault->save(); });
 $vault->load();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($vault->key));
 

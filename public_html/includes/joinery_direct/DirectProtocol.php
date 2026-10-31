@@ -26,6 +26,7 @@
  * signature, so version skew across a federation converges on the caller's
  * fallback and never breaks anything.
  *
+ * @version 1.1 - sealedSizeCeiling() adds the v2 seal's 1148 bytes
  * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
@@ -192,13 +193,13 @@ class DirectProtocol {
 	 * enforcing the manifest has to know by how much or it would abort every
 	 * honest sealed delivery.
 	 *
-	 * The growth is fixed and knowable: a Direct part is sealed raw with
-	 * `crypto_box_seal` (SealedBox::sealBinary), which adds only an ephemeral
-	 * public key and a MAC — no base64, no prefix, because a bulk part carries no
-	 * DEK text wrapping. Nothing here depends on the content.
+	 * The growth is fixed and knowable: a Direct part is sealed raw
+	 * (SealedBox::sealBinary), which adds only the X-Wing ciphertext, an IV and
+	 * a tag (SealedBox::V2_OVERHEAD, 1148 bytes) — no base64, no prefix, because
+	 * a bulk part carries no DEK text wrapping. Nothing here depends on the content.
 	 */
 	public static function sealedSizeCeiling(int $plaintext_bytes): int {
-		return max(0, $plaintext_bytes) + SODIUM_CRYPTO_BOX_SEALBYTES;
+		return max(0, $plaintext_bytes) + SealedBox::V2_OVERHEAD;
 	}
 
 	/** A fresh 128-bit delivery nonce, hex. */

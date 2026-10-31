@@ -35,6 +35,7 @@
  * a live proof's is: the test cloud's cleanup removes it with its server if
  * the run is killed before its teardown.
  *
+ * @version 1.1 - the run's recovery key is an X-Wing seed; the challenges open as v2 seals
  * @version 1.0
  */
 class SiteCopyLiveRun {
@@ -305,41 +306,28 @@ class SiteCopyLiveRun {
 	 * owner does it on the Backups page: the challenge is opened here, and only
 	 * what it opened to goes back. Returns the key's state on the site.
 	 */
-	public static function prove_recovery_key(array $server, string $site, string $keypair): string {
-		$pub = base64_encode(sodium_crypto_box_publickey($keypair));
+	public static function prove_recovery_key(array $server, string $site, string $recovery_seed): string {
+		$pub = base64_encode((new XWing())->publicKey($recovery_seed));
 		$challenge = (string)(self::source($server, $site, 'copy_live_source.php', array('recovery-key', $pub))['CHALLENGE'] ?? '');
-		$opened = sodium_crypto_box_seal_open((string)base64_decode($challenge, true), $keypair);
-		if ($opened === false) {
+		try {
+			$opened = SealedBox::openV2((string)base64_decode($challenge, true), $recovery_seed);
+		} catch (RuntimeException $e) {
 			throw new Exception('the site\'s possession challenge does not open with the run\'s key');
 		}
 		return (string)(self::source($server, $site, 'copy_live_source.php', array('prove', base64_encode($opened)))['STATE'] ?? '');
 	}
 
 	/**
-	 * What an approval challenge opens to with the recovery key's private half:
-	 * X25519 with the challenge's ephemeral key, HKDF-SHA256 over the scope's
-	 * info, AES-256-GCM, as the Backups page opens it in the browser
-	 * (recovery-readiness.js).
+	 * What an approval challenge opens to with the recovery key's seed: a v2
+	 * seal under the scope's info as its own scope, as the Backups page opens
+	 * it in the browser (recovery-readiness.js).
 	 */
-	public static function open_challenge(string $challenge_b64, string $keypair, string $info): string {
-		$blob = (string)base64_decode($challenge_b64, true);
-		if (strlen($blob) < 32 + 12 + 16 + 1) {
-			throw new Exception('the challenge is too short to be one');
-		}
-		$eph = substr($blob, 0, 32);
-		$iv = substr($blob, 32, 12);
-		$tag = substr($blob, -16);
-		$ct = substr($blob, 44, -16);
-		$pub = sodium_crypto_box_publickey($keypair);
-		$shared = sodium_crypto_scalarmult(sodium_crypto_box_secretkey($keypair), $eph);
-		$key = hash_hkdf('sha256', $shared, 32, $info . $eph . $pub, '');
-		$plain = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-		sodium_memzero($shared);
-		sodium_memzero($key);
-		if ($plain === false) {
+	public static function open_challenge(string $challenge_b64, string $recovery_seed, string $info): string {
+		try {
+			return SealedBox::openV2((string)base64_decode($challenge_b64, true), $recovery_seed, $info);
+		} catch (RuntimeException $e) {
 			throw new Exception('the challenge does not open with the run\'s key');
 		}
-		return $plain;
 	}
 
 	/**
@@ -348,7 +336,7 @@ class SiteCopyLiveRun {
 	 * own, from the key this management node approved its join by. Returns
 	 * the job approved, or null when nothing is waiting.
 	 */
-	public static function answer_export(array $server, string $site, string $keypair, SiteCopy $copy): ?int {
+	public static function answer_export(array $server, string $site, string $recovery_seed, SiteCopy $copy): ?int {
 		$pending = json_decode((string)(self::source($server, $site, 'copy_live_source.php', array('export-pending'))['PENDING'] ?? 'null'), true);
 		if (!is_array($pending) || ($pending['answered'] ?? null) !== null) {
 			return null;
@@ -368,7 +356,7 @@ class SiteCopyLiveRun {
 			throw new Exception('the export names the machine ' . ($named !== '' ? substr($named, 0, 16) : 'none')
 				. ', not the copy (' . substr($want, 0, 16) . '): not approved');
 		}
-		$answer = self::open_challenge((string)$pending['challenge'], $keypair, (string)$pending['info']);
+		$answer = self::open_challenge((string)$pending['challenge'], $recovery_seed, (string)$pending['info']);
 		self::source($server, $site, 'copy_live_source.php', array('export-answer', (string)(int)$pending['job_id'], base64_encode($answer)));
 		return (int)$pending['job_id'];
 	}

@@ -44,7 +44,7 @@ $seed = vault_fixture_key($kp['secret']);
 $throwaway_kek = random_bytes(32);
 $throwaway_ad = 'vault-test:seed';
 $opened = VaultUnlock::openKey((int)$user->key,
-	['wrapped' => $box->wrapKey($kp['secret'], $throwaway_kek, $throwaway_ad), 'kek' => $throwaway_kek, 'ad' => $throwaway_ad],
+	['wrapped' => $box->wrapKey(PoolVaultKey::wrappedForm($kp['secret'], SealedBox::V2), $throwaway_kek, $throwaway_ad), 'kek' => $throwaway_kek, 'ad' => $throwaway_ad],
 	[$w->wrapEntry($kek)]);
 check($opened['key']->id() === $seed->id(), 'openKey() under a valid unlocker yields the same key');
 check(count($opened['wrappings']) === 1, 'one wrap entry, one wrapping back');
@@ -52,7 +52,8 @@ $w->storeWrapped($opened['wrappings'][0]);
 $w = new UserEncryptionWrapping((int)$w->key, TRUE);
 check($w->get('uew_salt') === null || $w->get('uew_salt') === '', 'passkey wrapping stores no salt');
 $ad = UserEncryptionWrapping::adFor($vault_id, (int)$w->key);
-check($box->unwrapKey($w->get('uew_wrapped_secret_key'), $kek, $ad) === $kp['secret'], 'wrapping unwraps under its own AD');
+check($box->unwrapKey($w->get('uew_wrapped_secret_key'), $kek, $ad) === PoolVaultKey::wrappedForm($kp['secret'], SealedBox::V2),
+	'wrapping unwraps under its own AD, to the v2-tagged secret');
 $threw = false;
 try { $box->unwrapKey($w->get('uew_wrapped_secret_key'), $kek, UserEncryptionWrapping::adFor($vault_id, (int)$w->key + 1)); } catch (Exception $e) { $threw = true; }
 check($threw, 'wrapping refuses another row\'s AD (splice defense)');

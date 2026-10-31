@@ -27,6 +27,7 @@
  *
  * Run: php tests/backups/backup_verify_objects_test.php
  *
+ * @version 1.2 - a foreign recovery key is an X-Wing key (post-quantum sealing WP1)
  * @version 1.1 - one file store: an object's visibility reads private
  * @version 1.0
  */
@@ -225,7 +226,7 @@ $r = BackupVerifier::read_all($dir_x, $manifest, 0, $key_x, $objects_x);
 check($r['result'] === 'fail' && strpos($r['reason'], 'was minted for') !== false && strpos($r['reason'], $epoch) !== false,
 	'an envelope that is not the epoch\'s is refused, naming the epoch', $r['reason']);
 // An envelope this machine's key does not open.
-$foreign = BackupEnvelope::build(random_bytes(32), $epoch, array(array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey(sodium_crypto_box_keypair()))));
+$foreign = BackupEnvelope::build(random_bytes(32), $epoch, array(array('kind' => 'recovery', 'pub' => (new XWing())->publicKey(random_bytes(32)))));
 BackupEnvelope::write_sidecar($objects_x['envelopes'][$epoch], $foreign);
 $r = BackupVerifier::read_all($dir_x, $manifest, 0, $key_x, $objects_x);
 check($r['result'] === 'fail' && strpos($r['reason'], 'does not open with this machine') !== false,

@@ -40,9 +40,10 @@ $work = sys_get_temp_dir() . '/backup_staging_recovery_' . getmypid();
 harness_defer(function() use ($work) { exec('rm -rf ' . escapeshellarg($work)); });
 BackupStaging::prepare_workspace($work);
 
-$recovery = sodium_crypto_box_keypair();
-$recovery_pub = sodium_crypto_box_publickey($recovery);
-$other_server = sodium_crypto_box_keypair();
+$recovery = random_bytes(32);   // X-Wing seeds
+$recovery_pub = (new XWing())->publicKey($recovery);
+$other_server = random_bytes(32);
+$other_server_pub = (new XWing())->publicKey($other_server);
 $data_key = base64_encode(random_bytes(32));
 $envelope = function (array $recipients) use ($data_key) {
 	return BackupEnvelope::build($data_key, 'chain-20261001_000000', $recipients);
@@ -55,11 +56,12 @@ section('The recovery box is read from the envelope');
 
 $theirs = $manifest_of($envelope(array(
 	array('kind' => 'recovery', 'pub' => $recovery_pub),
-	array('kind' => 'site', 'pub' => sodium_crypto_box_publickey($other_server)),
+	array('kind' => 'site', 'pub' => $other_server_pub),
 )));
 $box = BackupStaging::recovery_box($theirs);
 check(is_array($box) && $box['fingerprint'] === hash('sha256', $recovery_pub)
-		&& sodium_crypto_box_seal_open(base64_decode($box['sealed']), $recovery) === $data_key,
+		&& ($box['alg'] ?? '') === BackupEnvelope::ALG_XWING
+		&& SealedBox::openV2(base64_decode($box['sealed']), $recovery) === $data_key,
 	'the box sealed to the recovery key, with that key\'s fingerprint');
 check(BackupStaging::recovery_box($manifest_of($envelope(array(array('kind' => 'site', 'pub' => $recovery_pub))))) === null,
 	'an envelope with no recovery recipient has none');
@@ -86,7 +88,7 @@ if (!$have_site_key) {
 
 	$threw = null;
 	try {
-		BackupStaging::stage_key($manifest_of($envelope(array(array('kind' => 'site', 'pub' => sodium_crypto_box_publickey($other_server))))), $work);
+		BackupStaging::stage_key($manifest_of($envelope(array(array('kind' => 'site', 'pub' => $other_server_pub)))), $work);
 	} catch (BackupStagingException $e) { $threw = $e; }
 	check($threw !== null && strpos($threw->getMessage(), 'different machine') !== false,
 		'a chain sealed to no recovery key is refused, as before', $threw ? $threw->getMessage() : 'no refusal');

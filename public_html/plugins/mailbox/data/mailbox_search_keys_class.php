@@ -21,6 +21,7 @@
  * msk_sealed_key / msk_key_generation / msk_sealed_owner_user_id like a
  * message row's.
  *
+ * @version 1.3 - acceptBrowserKey() takes either frame version, and refuses one that is not its key's
  * @version 1.2 - a lowering never moves it: browserCustodyPage() lists nothing and
  *   browserCustodyBacklog() counts 0
  * @version 1.1 - authenticate_write refuses: acceptBrowserKey() is the only way a key is written
@@ -77,7 +78,7 @@ class MailboxSearchKey extends SystemBase {
 		return 0;
 	}
 
-	/** The user's sealed search key (`v1.edgeseal.mail.…`), or null before their first browser made one. */
+	/** The user's sealed search key (`v2.edgeseal.mail.…`), or null before their first browser made one. */
 	public static function sealedKeyFor(int $user_id): ?string {
 		$row = self::loadForUser($user_id);
 		$sealed = $row ? (string)$row->get('msk_sealed_key') : '';
@@ -93,8 +94,8 @@ class MailboxSearchKey extends SystemBase {
 	 *   no mail vault, or sealed to a key the vault does not have
 	 */
 	public static function acceptBrowserKey(int $user_id, string $sealed_key, string $public_key): void {
-		$prefix = 'v1.edgeseal.' . self::SCOPE . '.';
-		if (strncmp($sealed_key, $prefix, strlen($prefix)) !== 0 || strlen($sealed_key) <= strlen($prefix)) {
+		$frame = VaultCrypto::edgeFrame($sealed_key);
+		if ($frame === null || $frame['scope'] !== self::SCOPE || $frame['body'] === '') {
 			throw new MailboxSearchKeyException('That is not a key sealed to your mail vault.');
 		}
 		if (self::sealedKeyFor($user_id) !== null) {
@@ -111,6 +112,9 @@ class MailboxSearchKey extends SystemBase {
 			$generation = (int)$vault->get('uev_pending_key_generation');
 		} else {
 			throw new MailboxSearchKeyException('That key is sealed to a key your vault does not have.');
+		}
+		if (!VaultCrypto::edgeVersionMatchesKey($sealed_key, $public_key)) {
+			throw new MailboxSearchKeyException('That key is sealed in another format than your vault key. Reload the page and try again.');
 		}
 
 		// One statement, and the unique user column decides a race: the loser's

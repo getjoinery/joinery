@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_rotation
  *
+ * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
 
@@ -62,7 +63,7 @@ try {
 		->execute(array($pending_id));
 	$db->prepare('UPDATE iem_inbound_email_messages SET iem_delete_time = now() WHERE iem_inbound_email_message_id = ?')
 		->execute(array($deleted_id));
-	$search_key = 'v1.edgeseal.mail.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']);
+	$search_key = 'v2.edgeseal.mail.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']);
 	MailboxSearchKey::acceptBrowserKey($owner_id, $search_key, $fx['pub']);
 	$others_id = fortress_ingest($other, 'Not the owner\'s');
 	check($others_id > 0, 'another owner has a Fortress message too');
@@ -142,7 +143,7 @@ try {
 	$reseal = function (array $r) use ($fx, $new_pub) {
 		$dek = fortress_open_dek($fx, $r['sealed_dek']);
 		return array('model' => $r['model'], 'id' => $r['id'],
-			'sealed_dek' => 'v1.edgeseal.mail.' . $fx['box']->sealEdge($dek, $new_pub));
+			'sealed_dek' => 'v2.edgeseal.mail.' . $fx['box']->sealEdge($dek, $new_pub));
 	};
 	$last = array_pop($listed);
 	check(VaultClientRotation::resealRows($owner_id, array_map($reseal, $listed)) === 3, 'three are re-sealed');
@@ -178,7 +179,7 @@ try {
 		'the search key is the same key, so no browser rebuilds its index');
 	check(frt_throws(function () use ($fx, $ids) { fortress_open_dek($fx, (string)fortress_row($ids[0])['iem_sealed_key']); }) !== null,
 		'the old key opens none of it');
-	check(strpos((string)fortress_row($others_id)['iem_sealed_key'], 'v1.edgeseal.mail.') === 0
+	check(strpos((string)fortress_row($others_id)['iem_sealed_key'], 'v2.edgeseal.mail.') === 0
 		&& fortress_open_dek($other, (string)fortress_row($others_id)['iem_sealed_key']) !== '',
 		'another owner\'s row is untouched');
 
@@ -225,7 +226,7 @@ try {
 	check(count($rrows) === 1 && $rrows[0]['id'] === $rmsg, 'the walk lists its message');
 	VaultClientRotation::resealRows($rid, array_map(function ($r) use ($rfx, $rpub) {
 		return array('model' => $r['model'], 'id' => $r['id'],
-			'sealed_dek' => 'v1.edgeseal.mail.' . $rfx['box']->sealEdge(fortress_open_dek($rfx, $r['sealed_dek']), $rpub));
+			'sealed_dek' => 'v2.edgeseal.mail.' . $rfx['box']->sealEdge(fortress_open_dek($rfx, $r['sealed_dek']), $rpub));
 	}, $rrows));
 	VaultClientRotation::commit($rid, 'mail');
 	$after = VaultClientCustody::statusPayload($rid, 'mail');

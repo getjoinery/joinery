@@ -36,6 +36,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_egress_guard
  *
+ * @version 1.3 - v2 (X-Wing) seal and edge-seal prefixes count as sealed
  * @version 1.2 - consentToValues() and contentFree()
  * @version 1.1 - integer id lists pass at any length
  * @version 1.0
@@ -209,7 +210,9 @@ try {
 	// The browser's format is sealed too: a Fortress row's fields and its
 	// edge-sealed DEK, written by a hot process (a raise to end-to-end).
 	check(SealedEgressGuard::isSealedBlob('v1.edge.' . base64_encode(random_bytes(80)))
-		&& SealedEgressGuard::isSealedBlob('v1.edgeseal.mail.' . base64_encode(random_bytes(80))),
+		&& SealedEgressGuard::isSealedBlob('v1.edgeseal.mail.' . base64_encode(random_bytes(80)))
+		&& SealedEgressGuard::isSealedBlob('v2.edgeseal.mail.' . base64_encode(random_bytes(80)))
+		&& SealedEgressGuard::isSealedBlob('v2.seal.' . base64_encode(random_bytes(80))),
 		'browser-format content and keys count as sealed');
 	check(!SealedEgressGuard::isSealedBlob('v1.edgy plaintext ' . seg_long('e')),
 		'and a near-miss prefix does not');

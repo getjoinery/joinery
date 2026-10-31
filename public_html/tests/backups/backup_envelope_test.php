@@ -22,13 +22,18 @@ require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 // Stand-in recipients, so the round trip never depends on (or disturbs) the
 // site's real recovery key.
-$recovery = sodium_crypto_box_keypair();
-$site     = sodium_crypto_box_keypair();
-$stranger = sodium_crypto_box_keypair();
+// X-Wing seeds; their public keys are 1216 bytes.
+$xw = new XWing();
+$recovery = random_bytes(32);
+$site     = random_bytes(32);
+$stranger = random_bytes(32);
+$recovery_pub = $xw->publicKey($recovery);
+$site_pub     = $xw->publicKey($site);
+$stranger_pub = $xw->publicKey($stranger);
 
 $recipients = [
-	['kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($recovery)],
-	['kind' => 'site',     'pub' => sodium_crypto_box_publickey($site)],
+	['kind' => 'recovery', 'pub' => $recovery_pub],
+	['kind' => 'site',     'pub' => $site_pub],
 ];
 
 // ── Round trip ──────────────────────────────────────────────────────────────
@@ -40,6 +45,11 @@ $env = BackupEnvelope::build($data_key, 'demo-2026-08-02.tar.gz.enc', $recipient
 check(count($env['recipients']) === 2, 'envelope seals to both recipients',
 	'got ' . count($env['recipients']));
 check($env['cipher'] === BackupEnvelope::CIPHER, 'envelope names the archive cipher');
+check($env['version'] === 2, 'a new envelope is version 2', (string)$env['version']);
+check(($env['recipients'][0]['alg'] ?? '') === BackupEnvelope::ALG_XWING
+		&& $env['recipients'][0]['fingerprint'] === hash('sha256', $recovery_pub)
+		&& strlen(base64_decode($env['recipients'][0]['sealed'])) === SealedBox::V2_OVERHEAD + strlen($data_key),
+	'each recipient is an X-Wing v2 seal carrying its public key\'s fingerprint');
 check(strpos(json_encode($env), $data_key) === false,
 	'the plaintext data key never appears in the envelope');
 
@@ -60,16 +70,12 @@ check(BackupEnvelope::open($recovery_only, $recovery) === $data_key,
 // ── Identity shapes ─────────────────────────────────────────────────────────
 section('Key shapes a human might paste');
 
-$sk = sodium_crypto_box_secretkey($recovery);
-check(BackupEnvelope::open($env, $sk) === $data_key, 'a bare secret key works');
-check(BackupEnvelope::open($env, base64_encode($sk)) === $data_key, 'base64 secret key works');
-check(BackupEnvelope::open($env, base64_encode($recovery)) === $data_key, 'base64 keypair works');
+check(BackupEnvelope::open($env, base64_encode($recovery)) === $data_key, 'base64 seed works');
 
-// A public key is the same 32 bytes as a secret key, so only the envelope can
-// tell them apart — and the error has to say which mistake was made, because
-// the fixes are opposite.
+// Pasting the public key is a mistake only the envelope can name — and the
+// error has to say which mistake was made, because the fixes are opposite.
 $msg = '';
-try { BackupEnvelope::open($env, base64_encode(sodium_crypto_box_publickey($recovery))); }
+try { BackupEnvelope::open($env, base64_encode($recovery_pub)); }
 catch (BackupEnvelopeException $e) { $msg = $e->getMessage(); }
 check(strpos($msg, 'PUBLIC half') !== false,
 	'pasting the PUBLIC key is named as such, not reported as a wrong key', $msg);
@@ -79,6 +85,35 @@ try { BackupEnvelope::open($env, 'nonsense'); }
 catch (BackupEnvelopeException $e) { $msg = $e->getMessage(); }
 check($msg !== '' && strpos($msg, 'PUBLIC half') === false,
 	'an actually-wrong key still reports as a wrong key', $msg);
+
+// ── Version 1 still opens ───────────────────────────────────────────────────
+section('An old v1 envelope still opens');
+
+// Built by hand with sodium: v1 sealing is gone, but archives made before the
+// switch must open with the X25519 key their owner saved.
+$v1_kp  = sodium_crypto_box_keypair();
+$v1_pub = sodium_crypto_box_publickey($v1_kp);
+$v1_env = [
+	'version' => 1, 'artifact' => 'old.tar.gz.enc', 'cipher' => BackupEnvelope::CIPHER,
+	'created' => '2026-01-01T00:00:00Z',
+	'recipients' => [[
+		'kind' => 'recovery', 'fingerprint' => hash('sha256', $v1_pub),
+		'sealed' => base64_encode(sodium_crypto_box_seal($data_key, $v1_pub)),
+	]],
+];
+$v1_env = BackupEnvelope::decode(BackupEnvelope::encode($v1_env));
+check(BackupEnvelope::open($v1_env, $v1_kp) === $data_key, 'a v1 envelope opens with its 64-byte keypair');
+check(BackupEnvelope::open($v1_env, base64_encode(sodium_crypto_box_secretkey($v1_kp))) === $data_key,
+	'a v1 envelope opens with its base64 32-byte secret');
+$refused = false;
+try { BackupEnvelope::open($v1_env, $recovery); }
+catch (BackupEnvelopeException $e) { $refused = true; }
+check($refused, 'an X-Wing seed does not open a v1 envelope sealed to another key');
+
+$threw = '';
+try { BackupEnvelope::build($data_key, 'x.tar.gz.enc', [['kind' => 'recovery', 'pub' => $v1_pub]]); }
+catch (BackupEnvelopeException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'old X25519') !== false, 'sealing to a 32-byte X25519 key is refused', $threw);
 
 // ── Encoding ────────────────────────────────────────────────────────────────
 section('Sidecar encoding');
@@ -146,11 +181,12 @@ if (is_file($site_path) && @file_get_contents($site_path) === false) {
 
 if (empty($skip_site_key)) {
 
-$kp1 = BackupEnvelope::site_keypair();
-check(strlen($kp1) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES, 'site keypair is a sodium box keypair');
+$kp1 = BackupEnvelope::site_secret();
+check(strlen($kp1) === 32, 'site secret is a 32-byte X-Wing seed');
+check(strlen(BackupEnvelope::site_public_key()) === XWing::PUBLIC_KEY_BYTES, 'site public key is 1216 bytes');
 check(is_file($site_path), 'site key is persisted to config/');
 
-$kp2 = BackupEnvelope::site_keypair();
+$kp2 = BackupEnvelope::site_secret();
 check($kp1 === $kp2, 'a second call returns the same key, never a fresh one');
 
 // 640, not 600. Backups run under more than one account — the web user on the
@@ -171,14 +207,18 @@ check(BackupEnvelope::open_as_site($site_env) === $data_key, 'the site opens its
 // ── Recovery key state machine ──────────────────────────────────────────────
 section('Recovery key state');
 
-$pub_b64 = base64_encode(sodium_crypto_box_publickey($recovery));
-$fpr     = hash('sha256', sodium_crypto_box_publickey($recovery));
+$pub_b64 = base64_encode($recovery_pub);
+$fpr     = hash('sha256', $recovery_pub);
 
 $c = BackupRecoveryKey::classify_key('', '');
 check($c['state'] === 'unconfigured', 'no key set reads as unconfigured', $c['state']);
 
 $c = BackupRecoveryKey::classify_key('this is not base64 key material', '');
 check($c['state'] === 'invalid', 'a non-key value reads as invalid', $c['state']);
+
+$c = BackupRecoveryKey::classify_key(base64_encode($v1_pub), '');
+check($c['state'] === 'invalid' && strpos(json_encode($c), 'old X25519') !== false,
+	'an old 32-byte X25519 key reads as invalid, naming it as old', json_encode($c));
 
 $c = BackupRecoveryKey::classify_key($pub_b64, '');
 check($c['state'] === 'unproven', 'a set-but-unproven key reads as unproven', $c['state']);
@@ -190,12 +230,12 @@ $c = BackupRecoveryKey::classify_key($pub_b64, hash('sha256', 'someone elses key
 check($c['state'] === 'unproven', 'a proof for a DIFFERENT key does not count', $c['state']);
 
 check(!BackupRecoveryKey::key_in_use($pub_b64, ''), 'an unproven key is free to replace');
-check(BackupRecoveryKey::key_in_use(sodium_crypto_box_publickey($recovery), $fpr),
+check(BackupRecoveryKey::key_in_use($recovery_pub, $fpr),
 	'a proven key counts as in use');
 
 // The possession sentence must bind to the key, or a proof recovered for one
 // key would satisfy another.
-$other_fpr = hash('sha256', sodium_crypto_box_publickey($stranger));
+$other_fpr = hash('sha256', $stranger_pub);
 check(strpos(
 	'Your recovery key opened this message. Backup recovery is proven for key fingerprint ' . $fpr . '.',
 	$other_fpr) === false, 'the proof sentence names exactly one key');

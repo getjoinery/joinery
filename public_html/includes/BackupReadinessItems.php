@@ -13,6 +13,7 @@
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.7.1 - the CLI proof command comes from BackupRecoveryKey::cli_unseal_command() (its own scope)
  * @version 1.7.0 - a target in getjoinery's backup storage asks for the getjoinery account sign-in, the way back to
  *                  those backups, not a bucket console it has none of (specs/easy_signup_completion.md WP4)
  * @version 1.6.0 - the recovery key's card says it also opens this server's encrypted data root, where the
@@ -82,9 +83,7 @@ class BackupReadinessItems {
 			// the server used, so a rename on either side would otherwise break
 			// the ceremony silently and only for people trying to verify a key.
 			'info_prefix' => BackupRecoveryKey::BROWSER_INFO,
-			'cli_command' => "echo '" . BackupRecoveryKey::possession_challenge() . "' | php "
-				. PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php'
-				. ' unseal --private /path/to/recovery.key',
+			'cli_command' => BackupRecoveryKey::cli_unseal_command('/path/to/recovery.key'),
 		);
 		return $item;
 	}

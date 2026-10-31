@@ -16,13 +16,14 @@
  * allow-list (a body in particular, which would be a rewrite of the received
  * message), a column that is not sealed at all, plaintext, a row that is not
  * sealed, a row whose key is sealed to a server-custody scope
- * (`v1.edgeseal.user.`, a lowered row), a row still waiting for its browser
+ * (`v2.edgeseal.user.`, a lowered row), a row still waiting for its browser
  * parse; and a verdict added while the mail key is being rotated opens after
  * the rotation moves the row's key to the new generation. Who may post is the
  * caller's check, pinned in plugins/mailbox/tests/fortress_device_ai_test.php.
  *
  * Run: php tests/run.php test-db --filter=accept_browser_sealed_fields
  *
+ * @version 1.1 the mail key and the browser's seals are X-Wing (v2.edgeseal.)
  * @version 1.0
  */
 
@@ -52,7 +53,7 @@ try {
 	$fx = fortress_fixture('AppendFields');
 	$mid = fortress_ingest($fx);
 	$row = fortress_row($mid);
-	check($mid > 0 && strncmp((string)$row['iem_sealed_key'], 'v1.edgeseal.mail.', 17) === 0, 'a Fortress message is stored under the mail key');
+	check($mid > 0 && strncmp((string)$row['iem_sealed_key'], 'v2.edgeseal.mail.', 17) === 0, 'a Fortress message is stored under the mail key');
 	$dek = fortress_open_dek($fx, (string)$row['iem_sealed_key']);
 	$seal = function (string $field, string $plain, int $id = 0) use ($crypto, $dek, $mid) {
 		return $crypto->sealFieldForBrowser($plain, $dek, 'mail:' . ($id ?: $mid) . ':' . $field);
@@ -108,12 +109,12 @@ try {
 	check($e !== null && strpos($e, 'waiting to be read') !== false, 'a row waiting for its browser parse: refused', (string)$e);
 	$set('UPDATE iem_inbound_email_messages SET iem_pending_parse = false WHERE iem_inbound_email_message_id = ?', array($mid));
 
-	$lowered = 'v1.edgeseal.user.' . substr((string)$row['iem_sealed_key'], strlen('v1.edgeseal.mail.'));
+	$lowered = 'v2.edgeseal.user.' . substr((string)$row['iem_sealed_key'], strlen('v2.edgeseal.mail.'));
 	$set('UPDATE iem_inbound_email_messages SET iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?', array($lowered, $mid));
 	$e = absf_refusal(function () use ($mid, $seal) {
 		InboundEmailMessage::acceptBrowserSealedFields($mid, array('iem_ai_scan' => $seal('iem_ai_scan', '{}')));
 	});
-	check($e !== null && strpos($e, 'client-custody') !== false, 'a row sealed to a server-custody scope (v1.edgeseal.user.): refused', (string)$e);
+	check($e !== null && strpos($e, 'client-custody') !== false, 'a row sealed to a server-custody scope (v2.edgeseal.user.): refused', (string)$e);
 	$set('UPDATE iem_inbound_email_messages SET iem_content_sealed = false, iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?',
 		array($row['iem_sealed_key'], $mid));
 	$e = absf_refusal(function () use ($mid, $seal) {
@@ -142,7 +143,7 @@ try {
 	$rotated = fortress_row($mid);
 	check((int)$rotated['iem_key_generation'] === $gen + 1 && $rotated['iem_sealed_key'] !== $row['iem_sealed_key'],
 		'the rotation moved the row to the new key');
-	$new_dek = $fx['box']->openEdge(substr((string)$rotated['iem_sealed_key'], strlen('v1.edgeseal.mail.')), $next['secret'], $next_pub);
+	$new_dek = $fx['box']->openEdge(substr((string)$rotated['iem_sealed_key'], strlen('v2.edgeseal.mail.')), $next['secret'], $next_pub);
 	check(fortress_open_field($fx, $rotated['iem_ai_scan'], $new_dek, 'mail:' . $mid . ':iem_ai_scan') === $scan_json
 		&& fortress_open_field($fx, $rotated['iem_ai_summary'], $new_dek, 'mail:' . $mid . ':iem_ai_summary') === 'Order confirmation with two attachments.',
 		'both verdicts open under the new key');

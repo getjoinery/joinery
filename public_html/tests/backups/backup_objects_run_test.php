@@ -29,6 +29,7 @@
  *
  * Run: php tests/backups/backup_objects_run_test.php
  *
+ * @version 1.3 - a foreign site key is an X-Wing key (post-quantum sealing WP1)
  * @version 1.2 - aged rows are marked as found surplus a day before, so a run's retention deletes on the window alone
  * @version 1.1 - one file store: an object's visibility reads private
  * @version 1.0
@@ -608,10 +609,10 @@ section('An epoch the site key cannot open is written down as retired, and the r
 // The envelope in backup storage is replaced by one sealed to the recovery key and
 // a site key this machine does not hold: after another rotation the run can
 // neither re-seal it nor open it, so it stays sealed to the retired key alone.
-$foreign = sodium_crypto_box_keypair();
+$foreign_pub = (new XWing())->publicKey(random_bytes(32));
 $lost_env = BackupEnvelope::build(BackupEnvelope::open_as_site($env_after), $epoch, array(
 	array('kind' => 'recovery', 'pub' => $rot_plan['recipients'][0]['pub']),
-	array('kind' => 'site',     'pub' => sodium_crypto_box_publickey($foreign)),
+	array('kind' => 'site',     'pub' => $foreign_pub),
 ));
 file_put_contents(s3fx_object_file($fx['dir'], 'bkt', '/' . $env_key), json_encode($lost_env));
 BackupObjects::$test_hooks['fetch'] = function ($url, $sink) use ($fx) {

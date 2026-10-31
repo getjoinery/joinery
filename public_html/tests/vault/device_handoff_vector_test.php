@@ -11,9 +11,11 @@
  * tests/vault/fixtures/device_handoff_vector.json is built by the browser's
  * vault-crypto.js (device_handoff_vector_gate.sh holds it to that) and is what
  * the phone apps test their crypto against (specs/fortress_mobile_apps.md WP1).
- * Here SealedBox reproduces every blob in it exactly from the recorded
- * ephemeral keys and IVs, and opens each one: so browser, server and phones
- * agree on one set of bytes.
+ * Its key seals are the v1 format (X25519 ECIES), which the server no longer
+ * writes but still opens for a holder rotating off a v1 key: here SealedBox
+ * opens each one, and reproduces each field (a format v2 did not change)
+ * exactly from its recorded IV. The vector is re-cut in the v2 format with the
+ * browser's (specs/post_quantum_sealing.md WP2).
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -49,18 +51,12 @@ check($v['vault']['pkcs8_hex'] === '302e020100300506032b656e04220420' . $v['vaul
 
 section('The handoff');
 $pkcs8 = hex2bin($v['vault']['pkcs8_hex']);
-$handoff = dhv_private('sealEdgeWith', array($pkcs8, $v['device']['public_b64'],
-	hex2bin($v['handoff']['eph_secret_hex']), hex2bin($v['handoff']['iv_hex'])));
-check($handoff === $v['handoff']['blob'], 'SealedBox seals the PKCS#8 to the device key into exactly the browser\'s bytes');
 check($box->openEdge($v['handoff']['blob'], SealedBox::b64url($device_secret), $v['device']['public_b64']) === $pkcs8,
 	'and opens the browser\'s blob with the device secret');
 
 section('The row');
 $row = $v['row'];
 $dek = hex2bin($row['dek_hex']);
-$sealed = 'v1.edgeseal.mail.' . dhv_private('sealEdgeWith', array($dek, $v['vault']['public_b64'],
-	hex2bin($row['dek_eph_secret_hex']), hex2bin($row['dek_iv_hex'])));
-check($sealed === $row['sealed_dek'], 'the row DEK seals to the vault key into exactly the browser\'s bytes');
 check(VaultCrypto::parseEdgeScope($row['sealed_dek']) === 'mail', 'the sealed DEK names the mail scope');
 check($box->openEdge(substr($row['sealed_dek'], strlen('v1.edgeseal.mail.')), SealedBox::b64url($vault_secret), $v['vault']['public_b64']) === $dek,
 	'and opens with the mail secret');

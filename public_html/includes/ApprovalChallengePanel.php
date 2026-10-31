@@ -22,6 +22,7 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.3 - the key box carries its seal version and, for v2, the X-Wing ciphertext
  * @version 1.2 - a restore of a backup another server made opens that backup's key with the pasted key too, and
  *                asks for the earlier recovery key when the backup was sealed to one (B20)
  * @version 1.1 - an answered request shows that it was answered, not the form again: the page
@@ -168,7 +169,9 @@ class ApprovalChallengePanel {
 			'publicKey'  => $pending['public_key'],
 			'infoPrefix' => $pending['info'],
 			'keyBox'     => $box === null ? null : array(
-				'ephemeralPublic' => $box['ephemeral_public'],
+				'version'         => $box['version'],
+				'ephemeralPublic' => $box['ephemeral_public'] ?? '',
+				'ciphertext'      => $box['ciphertext'] ?? '',
 				'fingerprint'     => $box['recovery_fingerprint'],
 				'keyInputId'      => $box_input,
 				'sharedId'        => $id . '-shared',

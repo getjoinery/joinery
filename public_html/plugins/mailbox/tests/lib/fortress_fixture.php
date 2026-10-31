@@ -11,6 +11,7 @@
  * image through the real MTA path. fortress_open_*() open what was stored the
  * way the owner's browser would.
  *
+ * @version 1.1 - fortress_open_dek() reads the edge frame, so a v1 or v2 seal opens
  * @version 1.0
  */
 
@@ -153,7 +154,7 @@ function fortress_row(int $id): array {
 
 /** A sealed row's DEK, opened as the owner's browser opens it. */
 function fortress_open_dek(array $fx, string $sealed_dek): string {
-	return $fx['box']->openEdge(substr($sealed_dek, strlen('v1.edgeseal.mail.')), $fx['pair']['secret'], $fx['pub']);
+	return $fx['box']->openEdge((string)VaultCrypto::edgeFrame($sealed_dek)['body'], $fx['pair']['secret'], $fx['pub']);
 }
 
 /** One `v1.edge.` value opened under $dek and $ad. */

@@ -15,6 +15,13 @@
  * operator must open a challenge once before this site will seal anything to
  * the value, and encrypted backups refuse to run until they have.
  *
+ * The key is a 1216-byte X-Wing public key and a 32-byte seed
+ * (specs/post_quantum_sealing.md R3). A stored 32-byte X25519 key is an old
+ * one: nothing is sealed to it, and every parse says the operator owes a new
+ * key.
+ *
+ * @version 1.4 - X-Wing keys: parsing takes 1216 bytes and names a 32-byte key as one to rotate;
+ *                both challenges are v2 seals, each under its own scope (BROWSER_INFO, CLI_INFO)
  * @version 1.3 - prove_for(): setup's proof is the Recovery Readiness ceremony's own check, so it is
  *                recorded in that ledger too; a new owner was told the key was verified and never proven (B177)
  * @version 1.2 - the key is established on this site alone. Nothing writes it from outside and no
@@ -84,12 +91,28 @@ class BackupRecoveryKey {
 				. 'Encrypted backups refuse to run until a recovery public key is set.');
 		}
 		$raw = base64_decode($b64, true);
-		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-			throw new BackupRecoveryKeyException(
-				self::PUBLIC_KEY_SETTING . ' is not a valid base64 box public key.');
+		$why = self::key_shape_error($raw);
+		if ($why !== null) {
+			throw new BackupRecoveryKeyException($why);
 		}
 		return $raw;
 	}
+
+	/** What makes a decoded stored key unusable, or null when it is a 1216-byte key. */
+	private static function key_shape_error($raw): ?string {
+		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			return self::OLD_KEY_MESSAGE;
+		}
+		if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
+			return self::PUBLIC_KEY_SETTING . ' is not a valid base64 recovery public key.';
+		}
+		return null;
+	}
+
+	/** What every surface says about a stored X25519 (v1) recovery key. */
+	const OLD_KEY_MESSAGE = 'The recovery key is an old X25519 key, and backups seal to post-quantum keys only. '
+		. 'Rotate it from the Backups page (Recovery key, Actions, Rotate key); backups already made stay openable '
+		. 'with the key you have.';
 
 	/** True when a public key is set but not yet proven (the verify card should show). */
 	public static function needs_possession_proof() {
@@ -123,55 +146,52 @@ class BackupRecoveryKey {
 			. hash('sha256', self::parse_public_key()) . '.';
 	}
 
+	/** The command-line proof's own scope: escrow_keypair.php unseal --scope takes it. */
+	const CLI_INFO = 'joinery-backup-recovery-possession-cli:';
+
 	/**
-	 * A fresh challenge: the expected proof string sealed to the configured
-	 * public key. Only the holder of the matching private key can open it.
-	 * (Sealed boxes are randomized, so the blob differs per call — the content
-	 * is what matters.)
+	 * A fresh challenge: the expected proof string sealed (a v2 seal under
+	 * CLI_INFO) to the configured public key. Only the holder of the matching
+	 * private key can open it. Its own scope, not `dek`: a box in the dek scope
+	 * is what every backup's data key is, so a challenge opened there would let
+	 * a page that swapped one in have the operator paste back a backup's key.
+	 * (Seals are randomized, so the blob differs per call — the content is what
+	 * matters.)
 	 */
 	public static function possession_challenge() {
-		return base64_encode(sodium_crypto_box_seal(self::expected_proof_string(), self::parse_public_key()));
+		return base64_encode(SealedBox::sealV2(self::expected_proof_string(), self::parse_public_key(), self::CLI_INFO));
+	}
+
+	/**
+	 * The command that opens possession_challenge() with a private key file.
+	 * A path of plain characters is printed as given, so `~/recovery.key`
+	 * still expands in the operator's shell; anything else is quoted.
+	 */
+	public static function cli_unseal_command(string $private_path): string {
+		$path = preg_match('#^[A-Za-z0-9_./~-]+$#', $private_path) ? $private_path : escapeshellarg($private_path);
+		return "echo '" . self::possession_challenge() . "' | php " . escapeshellarg(PathHelper::getSiteRoot()
+			. '/maintenance_scripts/sysadmin_tools/escrow_keypair.php') . ' unseal --scope ' . self::CLI_INFO
+			. ' --private ' . $path;
 	}
 
 	/** HKDF context for the browser challenge — never reused by another blob. */
 	const BROWSER_INFO = 'joinery-backup-recovery-possession:';
 
 	/**
-	 * The same challenge in a form a browser can open with WebCrypto alone
-	 * (X25519 + HKDF-SHA256 + AES-256-GCM), so the operator can prove possession
-	 * by pasting the key straight out of their password manager — which is the
-	 * copy that has to work in a disaster, not a file left on a server.
+	 * The same challenge sealed under the browser proof's own scope, so the
+	 * operator can prove possession by pasting the key straight out of their
+	 * password manager — which is the copy that has to work in a disaster, not
+	 * a file left on a server. Opening it needs exactly the same seed as the CLI
+	 * challenge; the scope keeps one from ever opening as the other.
 	 *
-	 * Opening it needs exactly the same X25519 secret key as a sealed box does;
-	 * only the packaging differs, because libsodium's sealed-box construction
-	 * (XSalsa20-Poly1305 with a blake2b nonce) has no WebCrypto equivalent.
-	 *
-	 * Layout: base64( ephemeralPub[32] || iv[12] || ciphertext || tag[16] ).
+	 * Layout: base64 of SealedBox::sealV2()'s raw form.
 	 */
 	public static function browser_challenge(): string {
-		$recipient = self::parse_public_key();
-
-		$eph    = sodium_crypto_box_keypair();
-		$eph_sk = sodium_crypto_box_secretkey($eph);
-		$eph_pk = sodium_crypto_box_publickey($eph);
-
-		$shared  = sodium_crypto_scalarmult($eph_sk, $recipient);
-		$aes_key = hash_hkdf('sha256', $shared, 32, self::BROWSER_INFO . $eph_pk . $recipient, '');
-
-		$iv  = random_bytes(12);
-		$tag = '';
-		$ct  = openssl_encrypt(self::expected_proof_string(), 'aes-256-gcm', $aes_key,
-			OPENSSL_RAW_DATA, $iv, $tag);
-
-		sodium_memzero($eph_sk);
-		sodium_memzero($eph);
-		sodium_memzero($shared);
-		sodium_memzero($aes_key);
-
-		if ($ct === false) {
-			throw new BackupRecoveryKeyException('Could not build the verification challenge.');
+		try {
+			return base64_encode(SealedBox::sealV2(self::expected_proof_string(), self::parse_public_key(), self::BROWSER_INFO));
+		} catch (RuntimeException $e) {
+			throw new BackupRecoveryKeyException('Could not build the verification challenge: ' . $e->getMessage());
 		}
-		return base64_encode($eph_pk . $iv . $ct . $tag);
 	}
 
 	/**
@@ -238,9 +258,10 @@ class BackupRecoveryKey {
 			return $out;
 		}
 		$raw = base64_decode($b64, true);
-		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+		$why = self::key_shape_error($raw);
+		if ($why !== null) {
 			$out['state'] = 'invalid';
-			$out['error'] = self::PUBLIC_KEY_SETTING . ' is not a valid base64 box public key.';
+			$out['error'] = $why;
 			return $out;
 		}
 		$out['fingerprint'] = substr(hash('sha256', $raw), 0, 16);
@@ -266,7 +287,12 @@ class BackupRecoveryKey {
 				'Paste the recovery public key printed by "escrow_keypair.php generate", or generate one here.');
 		}
 		$raw = base64_decode($b64, true);
-		if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			throw new BackupRecoveryKeyException(
+				'That is an old X25519 recovery key. Backups seal to post-quantum keys only: generate a new key here, '
+				. 'or with "escrow_keypair.php generate" on a machine with OpenSSL 3.5 or later.');
+		}
+		if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
 			throw new BackupRecoveryKeyException(
 				'That is not a recovery public key. Paste the single base64 line that "escrow_keypair.php '
 				. 'generate" prints — not the private key, and not the path to a file.');

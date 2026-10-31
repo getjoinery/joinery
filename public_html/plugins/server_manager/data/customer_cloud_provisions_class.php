@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.27 - cvp_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
  * @version 1.26 - install password state 'kept': the root password sealed to the holder's vault
  *                (cvp_root_pass_vault_sealed and the four sealing columns), cvp_root_access_offered;
  *                the write path never seals to the buyer (spec beta_break_glass_root_access 3.3)
@@ -269,7 +270,7 @@ class CustomerCloudProvision extends SystemBase {
 		// Whose recovery key an encrypted data root is sealed to, when not this
 		// management node's own (base64 public key): a server in its owner's
 		// account is sealed to its site's proven key (D2).
-		'cvp_recovery_public_key'    => array('type'=>'varchar(64)'),
+		'cvp_recovery_public_key'    => array('type'=>'text'),
 		// What the provider says about its own disk encryption on the instance:
 		// enabled, disabled, or unknown when it did not say. NULL: never read.
 		'cvp_provider_disk_encryption' => array('type'=>'varchar(20)', 'allowed_values'=>array('enabled', 'disabled', 'unknown')),

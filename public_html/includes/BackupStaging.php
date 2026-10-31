@@ -25,6 +25,7 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.8 - recovery_box() carries the recipient's alg, so its opener knows the seal version
  * @version 1.7 - fetch_manifest() records the artifacts a matched manifest names that the ledger lacks, so a chain
  *                the site's previous server handed over stages here (B20); stage_key() stages a chain this
  *                machine's key does not open for its recovery key, which the restore's approval opens
@@ -405,13 +406,15 @@ class BackupStaging {
 
 	/**
 	 * The chain key's box sealed to the recovery key, as the manifest's
-	 * envelope carries it: ['sealed' => base64, 'fingerprint' => hex], or null.
+	 * envelope carries it: ['sealed' => base64, 'fingerprint' => hex,
+	 * 'alg' => 'xwing' for a v2 box or '' for a v1 sealed box], or null.
 	 */
 	public static function recovery_box(array $manifest) {
 		foreach ((array)($manifest['envelope']['recipients'] ?? array()) as $r) {
 			if (is_array($r) && ($r['kind'] ?? '') === 'recovery' && !empty($r['sealed'])
 				&& preg_match('/^[0-9a-f]{64}$/', (string)($r['fingerprint'] ?? ''))) {
-				return array('sealed' => (string)$r['sealed'], 'fingerprint' => (string)$r['fingerprint']);
+				return array('sealed' => (string)$r['sealed'], 'fingerprint' => (string)$r['fingerprint'],
+					'alg' => (string)($r['alg'] ?? ''));
 			}
 		}
 		return null;

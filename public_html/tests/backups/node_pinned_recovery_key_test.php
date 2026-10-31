@@ -47,7 +47,7 @@ check(!method_exists('BackupRecoveryKey', 'accept_proven_fingerprint'),
 // ── A run carrying key material is refused ──────────────────────────────────
 section('A manager-profile run that carries a key is refused, not ignored');
 
-$pub = base64_encode(sodium_crypto_box_publickey(sodium_crypto_box_keypair()));
+$pub = base64_encode((new XWing())->publicKey(random_bytes(32)));
 
 $carrying = array(
 	'recovery_public_key' => $pub,

@@ -176,7 +176,7 @@ $late->save();
 harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', (int)$late->key);
 $late_raw = $db->query('SELECT imc_sealed_key, imc_key_generation FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ' . (int)$late->key)->fetch(PDO::FETCH_ASSOC);
 check((int)$late_raw['imc_key_generation'] === 2, 'a row the server seals now is stamped with the pending generation');
-check($box->openEdge(substr($late_raw['imc_sealed_key'], strlen('v1.edgeseal.drive.')), $new_pair['secret'], $new_pub) !== '',
+check($box->openEdge(substr($late_raw['imc_sealed_key'], strlen('v2.edgeseal.drive.')), $new_pair['secret'], $new_pub) !== '',
 	'and its key opens with the new secret');
 
 $shell = new ClientResealContactProbe(NULL);
@@ -221,10 +221,10 @@ check(VaultClientRotation::resealPage($owner_id, 'drive', '', 0, 200)['remaining
 // A scope name may hold '_', which SQL LIKE reads as any one character. A row
 // sealed to a sibling scope whose name differs only there must not be listed.
 $insert_aik->execute(array(bin2hex(random_bytes(32)), 'user:' . $owner_id, bin2hex(random_bytes(32)),
-	'v1.edgeseal.acmeXnotes.' . base64_encode(random_bytes(80)), $owner_id));
+	'v2.edgeseal.acmeXnotes.' . base64_encode(random_bytes(80)), $owner_id));
 harness_register_row('aik_api_idempotency_keys', 'aik_api_idempotency_key_id', (int)$insert_aik->fetchColumn());
 $insert_aik->execute(array(bin2hex(random_bytes(32)), 'user:' . $owner_id, bin2hex(random_bytes(32)),
-	'v1.edgeseal.acme_notes.' . base64_encode(random_bytes(80)), $owner_id));
+	'v2.edgeseal.acme_notes.' . base64_encode(random_bytes(80)), $owner_id));
 $acme_id = (int)$insert_aik->fetchColumn();
 harness_register_row('aik_api_idempotency_keys', 'aik_api_idempotency_key_id', $acme_id);
 $acme_page = ClientResealIdempotencyProbe::browserResealPage($owner_id, 'acme_notes', 1, 0, 50);
@@ -236,7 +236,7 @@ section('a re-seal writes only the caller\'s row, only to its own scope');
 // ---------------------------------------------------------------------------
 $reseal = function (array $r) use ($box, $crypto, $old_pair, $old_pub, $new_pub) {
 	$scope = VaultCrypto::parseEdgeScope($r['sealed_dek']);
-	$dek = $box->openEdge(substr($r['sealed_dek'], strlen('v1.edgeseal.' . $scope . '.')), $old_pair['secret'], $old_pub);
+	$dek = $box->openEdge(substr($r['sealed_dek'], strlen('v2.edgeseal.' . $scope . '.')), $old_pair['secret'], $old_pub);
 	return array('model' => $r['model'], 'id' => $r['id'], 'sealed_dek' => $crypto->sealItemDekToBrowserKey($dek, $new_pub, 'drive'));
 };
 $first = $reseal($listed[0]);
@@ -287,7 +287,7 @@ check($dev->vault_scopes() === array('passwords'), 'the linked computer no longe
 
 $reread = new ClientResealContactProbe($contact_ids[1], true);
 $api = $reread->export_for_api();
-$dek = $box->openEdge(substr($api['sealed_dek'], strlen('v1.edgeseal.drive.')), $new_pair['secret'], $new_pub);
+$dek = $box->openEdge(substr($api['sealed_dek'], strlen('v2.edgeseal.drive.')), $new_pair['secret'], $new_pub);
 check($box->aeadDecryptGcm(substr($api['imc_display_name'], strlen('v1.edge.')), $dek, $api['sealed_ad_prefix'] . $contact_ids[1] . ':imc_display_name') === 'Person B',
 	'a moved row opens with the new key and reads the same');
 check($box->openEdge(FileKeyGrant::wrapped_key_for((int)$file->key, $owner_id), $new_pair['secret'], $new_pub) !== '',

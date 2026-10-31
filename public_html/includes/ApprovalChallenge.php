@@ -59,6 +59,9 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.5 - a key box in either seal version (specs/post_quantum_sealing.md R2): v2 carries the X-Wing
+ *                ciphertext and its answer the 1216-byte public key; v1 (a backup sealed to an old recovery
+ *                key) keeps its ephemeral key
  * @version 1.4 - a restore of a backup another server made carries its key box: pending() shows it and answer()
  *                takes what the browser worked out with the same pasted key, which the agent opens it with (B20)
  * @version 1.3 - pending() says whether the waiting request has been answered, and a second answer to
@@ -288,7 +291,9 @@ class ApprovalChallenge {
 	 *   @type string expires_time     UTC 'Y-m-d H:i:s'
 	 *   @type int    seconds_left     How long the administrator has
 	 *   @type array|null key_box      A backup's key the same pasted key opens:
-	 *                                 ['ephemeral_public' => base64, 'recovery_fingerprint' => hex]
+	 *                                 ['version' => 2, 'ciphertext' => base64 X-Wing ciphertext, 'recovery_fingerprint' => hex]
+	 *                                 or, for a backup sealed to an old recovery key,
+	 *                                 ['version' => 1, 'ephemeral_public' => base64, 'recovery_fingerprint' => hex]
 	 * }
 	 */
 	public static function pending(string $scope) {
@@ -342,12 +347,22 @@ class ApprovalChallenge {
 		if (!is_array($box)) {
 			return null;
 		}
-		$eph = base64_decode((string)($box['ephemeral_public'] ?? ''), true);
 		$fpr = (string)($box['recovery_fingerprint'] ?? '');
-		if ($eph === false || strlen($eph) !== 32 || !preg_match('/^[0-9a-f]{64}$/', $fpr)) {
+		if (!preg_match('/^[0-9a-f]{64}$/', $fpr)) {
 			return null;
 		}
-		return array('ephemeral_public' => (string)$box['ephemeral_public'], 'recovery_fingerprint' => $fpr);
+		if (isset($box['ciphertext'])) {
+			$ct = base64_decode((string)$box['ciphertext'], true);
+			if ($ct === false || strlen($ct) !== XWing::CIPHERTEXT_BYTES) {
+				return null;
+			}
+			return array('version' => SealedBox::V2, 'ciphertext' => (string)$box['ciphertext'], 'recovery_fingerprint' => $fpr);
+		}
+		$eph = base64_decode((string)($box['ephemeral_public'] ?? ''), true);
+		if ($eph === false || strlen($eph) !== 32) {
+			return null;
+		}
+		return array('version' => SealedBox::V1, 'ephemeral_public' => (string)$box['ephemeral_public'], 'recovery_fingerprint' => $fpr);
 	}
 
 	/**
@@ -391,9 +406,14 @@ class ApprovalChallenge {
 		// box, by shape only. The agent checks the key's fingerprint and opens
 		// the box, and refuses the restore if it does not open.
 		if ($pending['key_box'] !== null) {
-			foreach (array('shared' => $shared, 'public_key' => $public_key) as $what => $value) {
+			// `shared` is 32 bytes in both versions (v1: the X25519 shared
+			// secret; v2: the dek-scope AES key, never the X-Wing shared secret,
+			// which would open any scope's box, SealedBox::v2Key()); the public
+			// key is the one the box was sealed to: 1216 bytes for v2, 32 for v1.
+			$public_bytes = $pending['key_box']['version'] === SealedBox::V2 ? XWing::PUBLIC_KEY_BYTES : 32;
+			foreach (array('shared' => array($shared, 32), 'public_key' => array($public_key, $public_bytes)) as $what => [$value, $bytes]) {
 				$raw = base64_decode(trim((string)$value), true);
-				if ($raw === false || strlen($raw) !== 32) {
+				if ($raw === false || strlen($raw) !== $bytes) {
 					throw new ApprovalChallengeException('This backup\'s key opens with your recovery key too, and '
 						. 'this page did not work it out. Reload the page and approve again.');
 				}

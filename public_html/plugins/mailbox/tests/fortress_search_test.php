@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_search
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - device_search without a term; the search key refuses writes through the model
  * @version 1.0
  */
@@ -142,13 +143,13 @@ try {
 	section('the search key: create-only, the mail vault\'s');
 
 	$raw = random_bytes(32);
-	$blob = 'v1.edgeseal.mail.' . $fx['box']->sealEdge($raw, $fx['pub']);
+	$blob = 'v2.edgeseal.mail.' . $fx['box']->sealEdge($raw, $fx['pub']);
 	$refused = function (callable $fn): ?string {
 		try { $fn(); } catch (MailboxSearchKeyException $e) { return $e->getMessage(); }
 		return null;
 	};
 	check($refused(function () use ($owner, $fx) {
-		MailboxSearchKey::acceptBrowserKey($owner, 'v1.edgeseal.drive.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']), $fx['pub']);
+		MailboxSearchKey::acceptBrowserKey($owner, 'v2.edgeseal.drive.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']), $fx['pub']);
 	}) !== null, 'a key sealed to another scope is refused');
 	check($refused(function () use ($owner, $blob) {
 		MailboxSearchKey::acceptBrowserKey($owner, $blob, base64_encode(random_bytes(32)));
@@ -157,7 +158,7 @@ try {
 	MailboxSearchKey::acceptBrowserKey($owner, $blob, $fx['pub']);
 	check(MailboxSearchKey::sealedKeyFor($owner) === $blob, 'the owner\'s browser stores its key once');
 	check($refused(function () use ($owner, $fx) {
-		MailboxSearchKey::acceptBrowserKey($owner, 'v1.edgeseal.mail.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']), $fx['pub']);
+		MailboxSearchKey::acceptBrowserKey($owner, 'v2.edgeseal.mail.' . $fx['box']->sealEdge(random_bytes(32), $fx['pub']), $fx['pub']);
 	}) !== null && MailboxSearchKey::sealedKeyFor($owner) === $blob, 'a second key is refused and the first stays');
 	check(fortress_open_dek($fx, (string)MailboxSearchKey::sealedKeyFor($owner)) === $raw, 'the owner\'s key opens it');
 	$krow = MailboxSearchKey::loadForUser($owner);

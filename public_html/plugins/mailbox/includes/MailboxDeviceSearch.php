@@ -43,8 +43,8 @@ class MailboxDeviceSearch {
 	/** The most message ids one search may name. */
 	const MAX_HITS = 500000;
 
-	/** A Fortress row's key column starts with this ('mail' holds no LIKE wildcard). */
-	const MAIL_KEY_PREFIX = InboundEmailMessage::MAIL_KEY_PREFIX;
+	/** LIKE prefix a Fortress row's key column matches, in either seal version. */
+	const MAIL_KEY_LIKE = InboundEmailMessage::MAIL_KEY_LIKE;
 
 	/**
 	 * One page of $user_id's Fortress messages with their sealed search text.
@@ -78,7 +78,7 @@ class MailboxDeviceSearch {
 			AND iem_sealed_key LIKE ?
 			AND iem_search_written_time IS NOT NULL
 			AND iem_direction IS DISTINCT FROM \'draft\'';
-		$base_params = array($user_id, self::MAIL_KEY_PREFIX . '%');
+		$base_params = array($user_id, self::MAIL_KEY_LIKE . '%');
 
 		$where = $base;
 		$params = $base_params;

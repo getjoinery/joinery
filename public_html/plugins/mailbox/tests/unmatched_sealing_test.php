@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php db --filter=unmatched_sealing
  *
+ * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
 
@@ -41,10 +42,10 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grants_class.php'));
 
 function um_vault(int $user_id): UserEncryptionVault {
-	$kp = sodium_crypto_box_keypair();
+	$kp = (new SealedBox())->generateKeypair();
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', $user_id);
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$vault->set('uev_public_key', $kp['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->save();
 	$vault->load();

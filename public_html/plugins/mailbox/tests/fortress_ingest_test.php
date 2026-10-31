@@ -12,7 +12,7 @@
  * the owner's `mail` vault in the browser's format — and the test proves it by
  * opening them the way the browser does, with a keypair only the test holds:
  *
- *  - the DEK is `v1.edgeseal.mail.`, every content column `v1.edge.` under it
+ *  - the DEK is `v2.edgeseal.mail.`, every content column `v1.edge.` under it
  *    with the row's AD, and every one opens to the plaintext;
  *  - attachments (two, plus an inline HTML image) are File bytes in the
  *    `v1.edge.` format under the same DEK and the MIME-part AD; nothing about a
@@ -41,6 +41,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_ingest
  *
+ * @version 1.3 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.2 - carries the reader-API checks (fortress_reader_api folded in)
  * @version 1.1 - builds on fortress_fixture(), whose teardown also takes the Sent copy's Files
  * @version 1.0
@@ -88,8 +89,7 @@ $row_of = function (int $id) use ($db): array {
 };
 /** Open the row's DEK as the browser would, with the test's secret. */
 $dek_of = function (array $row) use ($box, $pair, $pub): string {
-	$prefix = 'v1.edgeseal.mail.';
-	return $box->openEdge(substr((string)$row['iem_sealed_key'], strlen($prefix)), $pair['secret'], $pub);
+	return $box->openEdge(VaultCrypto::edgeFrame((string)$row['iem_sealed_key'])['body'], $pair['secret'], $pub);
 };
 /** Open one `v1.edge.` value under $dek with $ad. */
 $open = function (string $value, string $dek, string $ad) use ($box): string {
@@ -179,7 +179,7 @@ try {
 	check($mid > 0, 'it is stored');
 	$row = $row_of($mid);
 
-	check(strncmp((string)$row['iem_sealed_key'], 'v1.edgeseal.mail.', 17) === 0, 'its DEK is sealed to the mail scope');
+	check(strncmp((string)$row['iem_sealed_key'], 'v2.edgeseal.mail.', 17) === 0, 'its DEK is sealed to the mail scope');
 	check(intval($row['iem_sealed_owner_user_id']) === $owner_id, 'to the owner');
 	$bad = $all_edge($row);
 	check(empty($bad), 'every content column holds v1.edge. ciphertext', implode(', ', $bad));
@@ -302,7 +302,7 @@ try {
 		array('regular' => array(array('bytes' => "step one\nstep two\n", 'name' => 'plan-notes.txt')), 'inline' => array()),
 		$address, 'Outbound plan', $email);
 	$out = $row_of(intval($stored_out['id']));
-	check(strncmp((string)$out['iem_sealed_key'], 'v1.edgeseal.mail.', 17) === 0, 'the Sent row seals to the mail scope');
+	check(strncmp((string)$out['iem_sealed_key'], 'v2.edgeseal.mail.', 17) === 0, 'the Sent row seals to the mail scope');
 	$bad = $all_edge($out);
 	check(empty($bad) && strncmp((string)$out['iem_recipient'], 'v1.edge.', 8) === 0,
 		'every content column, the recipients included, is v1.edge.', implode(', ', $bad));

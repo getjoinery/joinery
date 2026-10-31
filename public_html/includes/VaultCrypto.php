@@ -25,12 +25,20 @@
  * unwrapped once per request however many times the window is fetched.
  *
  * Two formats, told apart by prefix at the row layer. Server custody writes
- * libsodium (`v1.seal.` DEK, `v1.aead.` field). A client-custody scope writes
- * the browser's format (`v1.edgeseal.{scope}.` DEK, `v1.edge.` field), because
+ * `v2.seal.` DEKs and `v1.aead.` fields. A client-custody scope writes the
+ * browser's format (`v2.edgeseal.{scope}.` DEK, `v1.edge.` field), because
  * only the browser holds that scope's secret and it opens what it can read.
  * Writers emit the format their custody dictates; readers here open whichever
  * prefix they find.
  *
+ * A DEK frame's `v1`/`v2` is the seal version (specs/post_quantum_sealing.md
+ * R2): v2 is X-Wing and is all that is written; a v1 key (X25519) is opened
+ * only, by a v1 vault key, until its holder rotates. A blob whose version is
+ * not its key's is refused naming both, never handed to the wrong opener.
+ *
+ * @version 1.9 - v2 frames: `v2.seal.` and `v2.edgeseal.{scope}.` written,
+ *   both versions parsed; edgeFrame(); openers refuse a blob of another
+ *   version than the key; edgeVersionMatchesKey() for browser writes
  * @version 1.8 - sealFieldFile()/openFieldFile() write SealedFileContainer, the platform's one chunked format
  * @version 1.7 - clientCustodyScope(): a `v1.edgeseal.` key is the browser's
  *   alone when its scope is client custody; one sealed in that format to a
@@ -52,8 +60,11 @@ class VaultCrypto {
 
 	const DEK_BYTES = 32;
 
-	/** The browser-format DEK frame: `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct). */
-	const EDGE_SEAL_PREFIX = 'v1.edgeseal.';
+	/** The browser-format DEK frame: `v2.edgeseal.{scope}.` + base64(the v2 raw seal). */
+	const EDGE_SEAL_PREFIX = 'v2.edgeseal.';
+
+	/** The v1 frame, opened only: `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct). */
+	const EDGE_SEAL_PREFIX_V1 = 'v1.edgeseal.';
 
 	/** The browser-format field frame: `v1.edge.` + base64(IV ‖ ct ‖ tag). */
 	const EDGE_FIELD_PREFIX = 'v1.edge.';
@@ -99,9 +110,22 @@ class VaultCrypto {
 		return self::EDGE_FIELD_PREFIX . $this->box->aeadEncryptGcm($plaintext, $dek, $ad);
 	}
 
-	/** The scope a `v1.edgeseal.` blob names, or null for anything else. */
+	/** The scope a `v1.edgeseal.` or `v2.edgeseal.` blob names, or null for anything else. */
 	public static function parseEdgeScope(string $sealed): ?string {
-		if (strncmp($sealed, self::EDGE_SEAL_PREFIX, strlen(self::EDGE_SEAL_PREFIX)) !== 0) {
+		$frame = self::edgeFrame($sealed);
+		return $frame === null ? null : $frame['scope'];
+	}
+
+	/**
+	 * A browser-format DEK split into its parts, or null when it is not one:
+	 * ['version' => 1|2, 'scope' => string, 'body' => base64 of the raw seal].
+	 */
+	public static function edgeFrame(string $sealed): ?array {
+		if (strncmp($sealed, self::EDGE_SEAL_PREFIX, strlen(self::EDGE_SEAL_PREFIX)) === 0) {
+			$version = SealedBox::V2;
+		} elseif (strncmp($sealed, self::EDGE_SEAL_PREFIX_V1, strlen(self::EDGE_SEAL_PREFIX_V1)) === 0) {
+			$version = SealedBox::V1;
+		} else {
 			return null;
 		}
 		$rest = substr($sealed, strlen(self::EDGE_SEAL_PREFIX));
@@ -110,16 +134,45 @@ class VaultCrypto {
 			return null;
 		}
 		$scope = substr($rest, 0, $dot);
-		return preg_match('/^[a-z0-9_]{1,32}$/', $scope) ? $scope : null;
+		if (!preg_match('/^[a-z0-9_]{1,32}$/', $scope)) {
+			return null;
+		}
+		return array('version' => $version, 'scope' => $scope, 'body' => substr($rest, $dot + 1));
 	}
+
+	/**
+	 * Does a browser-format DEK's frame version match the key it says it is
+	 * sealed to? A 32-byte public key takes v1, a 1216-byte one v2; a blob of
+	 * the other version could never be opened by that key's holder, so a
+	 * browser write naming it is refused rather than stored (a stale page
+	 * posting v1 for a v2 vault). False also for a blob or key that is not one.
+	 */
+	public static function edgeVersionMatchesKey(string $sealed, string $public_key): bool {
+		$frame = self::edgeFrame($sealed);
+		$raw = SealedBox::b64url_decode($public_key);
+		if ($frame === null || $raw === false) {
+			return false;
+		}
+		try {
+			return SealedBox::publicKeyVersion($raw) === $frame['version'];
+		} catch (RuntimeException $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * A LIKE pattern prefix (ESCAPE '\\') matching both versions' browser-format
+	 * DEKs: `_` is LIKE's one-character wildcard, so `v_.edgeseal.` matches a
+	 * v1 row not yet re-sealed as well as a v2 one.
+	 */
+	const EDGE_SEAL_LIKE_PREFIX = 'v_.edgeseal.';
 
 	/**
 	 * The client-custody scope a key is sealed to, or null when a server key
 	 * opens it. This, not the frame, is what makes a row the browser's alone:
 	 * a row moved back off end-to-end keeps its DEK sealed in the browser's
-	 * format to the server-custody `user` scope (`v1.edgeseal.user.`, the
-	 * browser cannot write libsodium's), and openItemDek() opens that in the
-	 * window like any `v1.seal.` key. A scope nothing declares (its plugin
+	 * format to the server-custody `user` scope (`v2.edgeseal.user.`), and
+	 * openItemDek() opens that in the window like any `v2.seal.` key. A scope nothing declares (its plugin
 	 * inactive) counts as the browser's: the server holds no key for it.
 	 */
 	public static function clientCustodyScope(string $sealed): ?string {
@@ -178,7 +231,8 @@ class VaultCrypto {
 	 * resealer, a deferred-work drain) uses this so the per-row opens that
 	 * follow all hit the memo.
 	 *
-	 * @param string[] $sealed `v1.seal.` or `v1.edgeseal.` blobs under any keys
+	 * @param string[] $sealed `v1.seal.`/`v2.seal.` or `v1.edgeseal.`/`v2.edgeseal.` blobs
+	 *   under any keys
 	 * @return string[] the DEKs under the same keys
 	 * @throws RuntimeException when any blob is malformed or does not open
 	 */
@@ -193,12 +247,14 @@ class VaultCrypto {
 				$out[$slot] = self::$dek_memo[$ck];
 				continue;
 			}
-			$scope = self::parseEdgeScope($blob);
-			if ($scope !== null) {
-				$pending[$slot] = array('ck' => $ck, 'edge' => true,
-					'raw' => substr($blob, strlen(self::EDGE_SEAL_PREFIX) + strlen($scope) + 1));
+			$frame = self::edgeFrame($blob);
+			if ($frame !== null) {
+				self::assertKeyVersion($frame['version'], $key);
+				$pending[$slot] = array('ck' => $ck, 'edge' => true, 'raw' => $frame['body']);
 			} else {
-				$pending[$slot] = array('ck' => $ck, 'edge' => false, 'raw' => SealedBox::unframeSeal($blob));
+				[$version, $raw] = SealedBox::unframeSeal($blob);
+				self::assertKeyVersion($version, $key);
+				$pending[$slot] = array('ck' => $ck, 'edge' => false, 'raw' => $raw);
 			}
 		}
 		if ($pending) {
@@ -332,7 +388,21 @@ class VaultCrypto {
 	 * which arms.
 	 */
 	public function openHeldDeliveryBlob(string $sealed, VaultKey $key): string {
-		return $key->unseal(array(SealedBox::unframeSeal($sealed)))[0];
+		[$version, $raw] = SealedBox::unframeSeal($sealed);
+		self::assertKeyVersion($version, $key);
+		return $key->unseal(array($raw))[0];
+	}
+
+	/**
+	 * Refuse a blob sealed in one version handed to a key of the other, naming
+	 * both: a v2 box under a v1 key (or the reverse) can never open, and the
+	 * tag failure it would otherwise produce says nothing useful.
+	 */
+	private static function assertKeyVersion(int $blob_version, VaultKey $key): void {
+		if ($blob_version !== $key->version()) {
+			throw new RuntimeException('VaultCrypto: this key is sealed in format v' . $blob_version
+				. ' and the vault key that should open it is v' . $key->version() . '.');
+		}
 	}
 
 	/** Open content sealed by sealField() or sealFieldForBrowser(). Throws on tamper or an AD mismatch. */

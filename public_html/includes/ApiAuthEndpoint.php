@@ -22,6 +22,7 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
+ * @version 1.10.0 - device_pubkey is a 1216-byte X-Wing key (specs/post_quantum_sealing.md R3)
  * @version 1.9.0
  * @changelog 1.9.0 - auth/login refuses a machine account with 403 (machine_accounts.md)
  * @changelog 1.8.0 - login and device_link write as the server (server_initiated_write): the proved credential is the authority
@@ -237,8 +238,8 @@ class ApiAuthEndpoint {
 		// stored, so the browser can seal to it without checking first.
 		if ($pubkey !== '') {
 			$raw = base64_decode($pubkey, true);
-			if ($raw === false || strlen($raw) !== 32) {
-				api_error('device_pubkey must be standard base64 of a 32-byte X25519 public key', 'ActionError', 400);
+			if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
+				api_error('device_pubkey must be standard base64 of a ' . XWing::PUBLIC_KEY_BYTES . '-byte X-Wing public key', 'ActionError', 400);
 			}
 		}
 

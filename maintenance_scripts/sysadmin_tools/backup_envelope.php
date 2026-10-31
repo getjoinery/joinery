@@ -11,7 +11,7 @@
  *              settings. The private half lives in a password manager and opens
  *              every backup from every site given the same public key. Always
  *              sealed to; a site with no proven key of its own refuses to mint.
- *   site     - a keypair the site holds (config/backup_site_key) so it can open
+ *   site     - a key the site holds (config/backup_site_key) so it can open
  *              its own backups unattended. Disposable: lose it and recovery
  *              still opens everything.
  *
@@ -25,10 +25,18 @@
  * row. Nothing on the node stays precious: losing the node loses no ability to
  * read any backup it made.
  *
- * `open`, `relabel` and `site-key` run on any machine with PHP + libsodium and NO
- * platform bootstrap, so they work during disaster recovery when the site is
- * gone — which is the moment that matters, and none of them needs to know whose
- * key anything seals to. `mint` runs only on a live site, and bootstraps.
+ * Keys are X-Wing (specs/post_quantum_sealing.md): a private key is a 32-byte
+ * seed, a public key 1216 bytes, and an envelope is version 2 with each
+ * recipient marked `"alg": "xwing"`. A version-1 envelope (libsodium sealed
+ * boxes to 32-byte X25519 keys) still opens, with the old key.
+ *
+ * `open`, `relabel` and `site-key` run with NO platform bootstrap, so they work
+ * during disaster recovery when the site is gone — which is the moment that
+ * matters, and none of them needs to know whose key anything seals to. They
+ * need PHP's sodium and FFI extensions, OpenSSL 3.5 or later (Ubuntu 26.04
+ * ships it), and a copy of the Joinery tree, whose includes/MlKem768.php,
+ * XWing.php and SealedBox.php they load; opening a version-1 envelope needs
+ * libsodium alone. `mint` runs only on a live site, and bootstraps.
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
@@ -62,11 +70,13 @@
  *              has settled on a filename. Moves only the label.
  *
  *   site-key:  php backup_envelope.php site-key --site-key PATH
- *              Prints the site's PUBLIC key, minting the keypair if absent.
+ *              Prints the site's PUBLIC key, minting the key if absent.
  *
  * The envelope format written here is the same one includes/BackupEnvelope.php
  * reads; backup_envelope_cli_test.php holds both to that contract.
  *
+ * @version 1.4 - envelope version 2: X-Wing recipients with `alg`, the site key a 32-byte seed; open
+ *                reads versions 1 and 2, choosing each recipient by the fingerprint of the key supplied
  * @version 1.3 - open refuses a chain manifest without its expected sha256 (--manifest-sha256) or an
  *                explicit --trust-bucket-manifest (specs/storage_targets.md §6)
  * @version 1.2 - mint seals to the site's own proven recovery key, read on this machine, and
@@ -82,7 +92,28 @@ if (!extension_loaded('sodium')) {
     exit(1);
 }
 
-const BE_VERSION = 1;
+const BE_VERSION = 2;
+const BE_READABLE_VERSIONS = [1, 2];
+const BE_ALG_XWING = 'xwing';
+
+/**
+ * Load the tree's X-Wing classes and fail plainly when ML-KEM cannot run here.
+ * Called only where a post-quantum key is needed, so a version-1 envelope
+ * still opens on a machine without OpenSSL 3.5.
+ */
+function be_require_pq() {
+    $inc = dirname(__DIR__, 2) . '/public_html/includes/';
+    foreach (['MlKem768.php', 'XWing.php', 'SealedBox.php'] as $f) {
+        if (!is_file($inc . $f)) {
+            be_fail("{$inc}{$f} is not here: run this tool from a copy of the Joinery tree.");
+        }
+        require_once $inc . $f;
+    }
+    $why = MlKem768::unavailableReason();
+    if ($why !== null) {
+        be_fail('post-quantum keys cannot be used on this machine: ' . $why . ' ' . MlKem768::FLOOR_MESSAGE);
+    }
+}
 const BE_CIPHER  = 'aes-256-cbc-pbkdf2';
 
 function be_usage($stream = STDERR) {
@@ -148,7 +179,7 @@ function be_write_private($path, $contents, $mode = 0600) {
  * exists, which is the atomic "only if absent" that rename() does not give us;
  * the loser re-reads the winner's file.
  */
-function be_site_keypair($path) {
+function be_site_secret($path) {
     if (is_file($path)) {
         $raw = @file_get_contents($path);
         // Existing-but-unreadable is not the same as absent: falling through to
@@ -162,12 +193,16 @@ function be_site_keypair($path) {
                 . ". Run fix_permissions.sh, or omit --site-key to seal to recovery alone.");
         }
         if (trim($raw) !== '') {
-            $kp = base64_decode(trim($raw), true);
-            if ($kp === false || strlen($kp) !== SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-                be_fail("the site key at {$path} is not a valid keypair. Move it aside to have a new one minted; "
+            $seed = base64_decode(trim($raw), true);
+            if ($seed !== false && strlen($seed) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
+                be_fail("the site key at {$path} is an old X25519 keypair. The host converger replaces it with a "
+                    . "post-quantum key on its next run; backups already made stay openable with the recovery key.");
+            }
+            if ($seed === false || strlen($seed) !== 32) {
+                be_fail("the site key at {$path} is not a valid key. Move it aside to have a new one minted; "
                     . "backups already made stay openable with the recovery key.");
             }
-            return $kp;
+            return $seed;
         }
     }
 
@@ -176,31 +211,31 @@ function be_site_keypair($path) {
         be_fail("the site key directory {$dir} does not exist.");
     }
 
-    $kp  = sodium_crypto_box_keypair();
-    $tmp = $path . '.' . getmypid() . '.tmp';
-    be_write_private($tmp, base64_encode($kp), 0640);
+    $seed = random_bytes(32);
+    $tmp  = $path . '.' . getmypid() . '.tmp';
+    be_write_private($tmp, base64_encode($seed), 0640);
 
     if (@link($tmp, $path)) {
         @unlink($tmp);
-        return $kp;
+        return $seed;
     }
     @unlink($tmp);
 
     $raw = @file_get_contents($path);
     $won = ($raw === false) ? false : base64_decode(trim($raw), true);
-    if ($won === false || strlen($won) !== SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
+    if ($won === false || strlen($won) !== 32) {
         be_fail("could not create the site key at {$path}.");
     }
     return $won;
 }
 
-/** Coerce a supplied secret into a sodium keypair (raw or base64, keypair or secret key). */
-function be_identity($secret) {
+/** A supplied secret as raw bytes (raw or base64): a 32-byte secret or a 64-byte old keypair. */
+function be_secret_bytes($secret) {
     $raw = trim((string)$secret);
     if ($raw === '') {
         be_fail('no key supplied.');
     }
-    if (!in_array(strlen($secret), [SODIUM_CRYPTO_BOX_KEYPAIRBYTES, SODIUM_CRYPTO_BOX_SECRETKEYBYTES], true)) {
+    if (!in_array(strlen($secret), [SODIUM_CRYPTO_BOX_KEYPAIRBYTES, 32], true)) {
         $decoded = base64_decode($raw, true);
         if ($decoded !== false && $decoded !== '') {
             $raw = $decoded;
@@ -208,14 +243,10 @@ function be_identity($secret) {
     } else {
         $raw = $secret;
     }
-    if (strlen($raw) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-        return $raw;
+    if (strlen($raw) !== SODIUM_CRYPTO_BOX_KEYPAIRBYTES && strlen($raw) !== 32) {
+        be_fail('that is not a recovery key. Expected the base64 secret key, not a file path.');
     }
-    if (strlen($raw) === SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
-        return sodium_crypto_box_keypair_from_secretkey_and_publickey(
-            $raw, sodium_crypto_box_publickey_from_secretkey($raw));
-    }
-    be_fail('that is not a recovery key. Expected the base64 secret key or keypair, not a file path.');
+    return $raw;
 }
 
 /**
@@ -282,10 +313,10 @@ if ($mode === 'mint') {
     // The site recipient is what lets the site restore itself unattended. It is
     // optional only because a bare archive job may run somewhere with no site
     // config directory; recovery alone still opens the result.
+    be_require_pq();
     $site_key_path = $opts['site-key'] ?? null;
     if (is_string($site_key_path) && $site_key_path !== '') {
-        $site_kp = be_site_keypair($site_key_path);
-        $recipients[] = ['kind' => 'site', 'pub' => sodium_crypto_box_publickey($site_kp)];
+        $recipients[] = ['kind' => 'site', 'pub' => (new XWing())->publicKey(be_site_secret($site_key_path))];
     }
 
     $data_key = base64_encode(random_bytes(32));
@@ -294,8 +325,9 @@ if ($mode === 'mint') {
     foreach ($recipients as $r) {
         $sealed[] = [
             'kind'        => $r['kind'],
+            'alg'         => BE_ALG_XWING,
             'fingerprint' => hash('sha256', $r['pub']),
-            'sealed'      => base64_encode(sodium_crypto_box_seal($data_key, $r['pub'])),
+            'sealed'      => base64_encode(SealedBox::sealV2($data_key, $r['pub'])),
         ];
     }
 
@@ -371,9 +403,9 @@ if ($mode === 'open') {
         $envelope = $envelope['envelope'];
     }
 
-    if ((int)($envelope['version'] ?? 0) !== BE_VERSION) {
+    if (!in_array((int)($envelope['version'] ?? 0), BE_READABLE_VERSIONS, true)) {
         be_fail('unsupported backup envelope version ' . (int)($envelope['version'] ?? 0)
-            . '; this build reads version ' . BE_VERSION . '.');
+            . '; this build reads versions ' . implode(' and ', BE_READABLE_VERSIONS) . '.');
     }
     $recipients = $envelope['recipients'] ?? null;
     if (!is_array($recipients) || !$recipients) {
@@ -394,10 +426,10 @@ if ($mode === 'open') {
         be_fail('no key supplied (use --private PATH or pipe the key on stdin).');
     }
 
-    // A public key is the same 32 bytes as a secret key, so only the envelope
-    // can tell them apart — and the two mistakes need opposite fixes.
+    // An old public key is the same 32 bytes as a secret key, so only the
+    // envelope can tell them apart — and the two mistakes need opposite fixes.
     $probe = base64_decode($secret, true);
-    if ($probe !== false && strlen($probe) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+    if ($probe !== false && in_array(strlen($probe), [SODIUM_CRYPTO_BOX_PUBLICKEYBYTES, 1216], true)) {
         foreach ($recipients as $r) {
             if (hash_equals((string)($r['fingerprint'] ?? ''), hash('sha256', $probe))) {
                 be_fail('that is the PUBLIC half of the ' . (string)($r['kind'] ?? 'recovery') . ' key — it seals '
@@ -406,7 +438,28 @@ if ($mode === 'open') {
         }
     }
 
-    $keypair = be_identity($secret);
+    // 32 bytes do not say whether they are an X-Wing seed or an old X25519
+    // key, so derive the public key each would be and open the recipient whose
+    // recorded fingerprint matches.
+    $raw_secret = be_secret_bytes($secret);
+    $wants_xwing = false;
+    foreach ($recipients as $r) {
+        $wants_xwing = $wants_xwing || ($r['alg'] ?? '') === BE_ALG_XWING;
+    }
+    if (strlen($raw_secret) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
+        $v1_keypair = $raw_secret;
+        $v1_fpr = hash('sha256', sodium_crypto_box_publickey($raw_secret));
+        $v2_fpr = null;
+    } else {
+        $v1_pub = sodium_crypto_box_publickey_from_secretkey($raw_secret);
+        $v1_keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($raw_secret, $v1_pub);
+        $v1_fpr = hash('sha256', $v1_pub);
+        $v2_fpr = null;
+        if ($wants_xwing) {
+            be_require_pq();
+            $v2_fpr = hash('sha256', (new XWing())->publicKey($raw_secret));
+        }
+    }
 
     $data_key = false;
     foreach ($recipients as $r) {
@@ -414,12 +467,28 @@ if ($mode === 'open') {
         if ($blob === false || $blob === '') {
             continue;
         }
-        $opened = @sodium_crypto_box_seal_open($blob, $keypair);
+        $fpr = (string)($r['fingerprint'] ?? '');
+        if (($r['alg'] ?? '') === BE_ALG_XWING) {
+            if ($v2_fpr === null || ($fpr !== '' && !hash_equals($fpr, $v2_fpr))) {
+                continue;
+            }
+            try {
+                $data_key = SealedBox::openV2($blob, $raw_secret);
+                break;
+            } catch (RuntimeException $e) {
+                continue;
+            }
+        }
+        if ($fpr !== '' && !hash_equals($fpr, $v1_fpr)) {
+            continue;
+        }
+        $opened = @sodium_crypto_box_seal_open($blob, $v1_keypair);
         if ($opened !== false) {
             $data_key = $opened;
             break;
         }
     }
+    sodium_memzero($v1_keypair);
 
     if ($data_key === false) {
         be_fail('that key does not open this backup. The envelope is sealed to: '
@@ -477,8 +546,8 @@ if ($mode === 'relabel') {
 if ($mode === 'site-key') {
     $opts = be_opts($argv);
     $path = be_require_opt($opts, 'site-key');
-    $kp   = be_site_keypair($path);
-    fwrite(STDOUT, base64_encode(sodium_crypto_box_publickey($kp)) . "\n");
+    be_require_pq();
+    fwrite(STDOUT, base64_encode((new XWing())->publicKey(be_site_secret($path))) . "\n");
     exit(0);
 }
 

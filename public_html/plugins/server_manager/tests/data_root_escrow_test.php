@@ -196,6 +196,10 @@ $rec = sodium_crypto_box_keypair();
 $recpub = sodium_crypto_box_publickey($rec);
 $row->note_box(json_encode(array('fingerprint' => hash('sha256', $recpub), 'sealed' => base64_encode(sodium_crypto_box_seal(random_bytes(64), $recpub)))));
 $row->save();
+$parts = $row->box_parts();
+check(($parts['version'] ?? 0) === 1 && $parts['fingerprint'] === hash('sha256', $recpub)
+		&& strlen((string)base64_decode((string)($parts['ephemeral'] ?? ''), true)) === 32,
+	'A v1 box (what the agent seals today) gives the page its ephemeral public key', json_encode($parts));
 $shared = random_bytes(32);
 $row->accept_unlock_value(base64_encode($shared), base64_encode($recpub));
 $escrow_page = escrow_call(escrow_req($a, 'unlock', array('boot_id' => 'p1')), '192.0.2.10');
@@ -210,6 +214,39 @@ check(escrow_row($a)->get('dre_box_changed_time') !== null, 'A box that differs 
 // the same second.
 check(isset(escrow_call(escrow_req($a, 'report', array('state' => 'unlocked', 'boot_id' => 'p1'), true), '192.0.2.10')['data']),
 	'Opened by that value, it reports unlocked');
+
+section('The holder\'s unlock page, X-Wing box');
+// A v2 box: one X-Wing recipient, as the backup envelope writes it. The page
+// gets the KEM ciphertext, and the value is accepted for a 1216-byte key only.
+$xseed = random_bytes(32);
+$xpub  = (new XWing())->publicKey($xseed);
+$row = escrow_row($a);
+$row->note_box(json_encode(array('kind' => 'recovery', 'alg' => BackupEnvelope::ALG_XWING,
+	'fingerprint' => hash('sha256', $xpub), 'sealed' => base64_encode(SealedBox::sealV2(random_bytes(64), $xpub)))));
+$row->save();
+$parts = escrow_row($a)->box_parts();
+check(($parts['version'] ?? 0) === 2 && ($parts['fingerprint'] ?? '') === hash('sha256', $xpub)
+		&& strlen((string)base64_decode((string)($parts['ciphertext'] ?? ''), true)) === XWing::CIPHERTEXT_BYTES,
+	'A v2 box is recorded and gives the page its X-Wing ciphertext', json_encode($parts));
+$x_sealed = base64_encode(SealedBox::sealV2(random_bytes(64), $xpub));
+$from_report = DataRootEscrow::canonical_box(json_encode(array('fingerprint' => hash('sha256', $xpub), 'sealed' => $x_sealed)));
+$from_machine = DataRootEscrow::canonical_box(json_encode(array('recipients' => array(array('kind' => 'recovery',
+	'alg' => BackupEnvelope::ALG_XWING, 'fingerprint' => hash('sha256', $xpub), 'sealed' => $x_sealed)))));
+check($from_report !== '' && $from_report === $from_machine && strpos($from_report, '"alg":"xwing"') !== false,
+	'A v2 box arriving by host report (no alg) is stored exactly as the machine\'s own envelope is, alg included');
+if (($parts['version'] ?? 0) === 2) {
+	$threw = false;
+	try { escrow_row($a)->accept_unlock_value(base64_encode(random_bytes(32)), base64_encode(random_bytes(32))); }
+	catch (DataRootEscrowException $e) { $threw = true; }
+	check($threw, 'A 32-byte public key is refused for a v2 box');
+	$shared2 = random_bytes(32);
+	escrow_row($a)->accept_unlock_value(base64_encode($shared2), base64_encode($xpub));
+	$p2 = escrow_call(escrow_req($a, 'unlock', array('boot_id' => 'p2')), '192.0.2.10');
+	check(base64_decode((string)($p2['data']['shared'] ?? ''), true) === $shared2,
+		'The value for the X-Wing key is what the machine\'s next ask gets');
+	check(isset(escrow_call(escrow_req($a, 'report', array('state' => 'unlocked', 'boot_id' => 'p2'), true), '192.0.2.10')['data']),
+		'Opened by that value, it reports unlocked');
+}
 
 section('A new volume key (D8): proven with the old one, a new secret for the new slot');
 $old_rk = $a['rk'];

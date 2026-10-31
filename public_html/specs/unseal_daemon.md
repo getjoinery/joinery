@@ -145,6 +145,13 @@ operations.
 | `close` | handle, or user id | closed, counters | `lock()` by handle; `lockAll()` by user id, so a credential event ends every window even one the APCu sweep cannot see |
 | `status` | nothing, or a user id | version, window count, uptime; or whether that user has any window | the health check, and `hasAnyOpenWindow()`; never a list of who is open |
 
+**Post-quantum keys (specs/post_quantum_sealing.md R2, built 2026-10-31).** A
+wrapped secret's plaintext names its version: `v2.` + base64url(seed) is an
+X-Wing key, a bare base64url secret an old X25519 one
+(`PoolVaultKey::wrappedForm()`). `open` must read that tag, mint v2, and hand
+the version back beside the public key; `unwrap` opens raw boxes of the key's
+own version (X-Wing then AES-256-GCM, `SealedBox::openV2()`).
+
 **B1, found in review 2026-09-12: a standalone wrap operation is a key-export
 door.** The first draft had `wrap(handle, KEK, AD)`, which hands back the
 long-term secret wrapped under any KEK the caller names. An attacker resident

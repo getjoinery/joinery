@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php db --filter=mailbox_level_scope
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - fixtures carry the harnesstest label so a killed run's leftovers reclaim at the next db boot
  * @version 1.0
  */
@@ -72,15 +73,15 @@ function mls_alias(InboundEmailDomain $domain, string $local, ?string $level = n
 /** A user with a Sealed Vault. Returns [user, secret_key_b64]. */
 function mls_vault_user(string $name): array {
 	$user = make_user($name);
-	$keys = sodium_crypto_box_keypair();
+	$keys = (new SealedBox())->generateKeypair();
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', intval($user->key));
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
+	$vault->set('uev_public_key', $keys['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->save();
 	$vault->load();
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($vault->key));
-	return array($user, SealedBox::b64url(sodium_crypto_box_secretkey($keys)));
+	return array($user, $keys['secret']);
 }
 
 /** Grant $alias to $user_ids without going through the invariant (fixture setup). */

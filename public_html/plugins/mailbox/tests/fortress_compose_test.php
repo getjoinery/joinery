@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_compose
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - review of 2026-09-27: a plaintext draft on a Fortress mailbox stays one (B2, B9)
  * @version 1.0
  */
@@ -114,7 +115,7 @@ try {
 		'parts' => array(), 'keep' => array()));
 	check(intval($saved['draft_id']) === $id && $saved['parts'] === array(), 'the save answers the draft and its parts');
 	$row = fortress_row($id);
-	check(strncmp((string)$row['iem_sealed_key'], 'v1.edgeseal.mail.', 17) === 0
+	check(strncmp((string)$row['iem_sealed_key'], 'v2.edgeseal.mail.', 17) === 0
 		&& intval($row['iem_sealed_owner_user_id']) === $owner, 'the row is sealed to the owner\'s mail key');
 	$opened = fortress_open_dek($fx, (string)$row['iem_sealed_key']);
 	check($opened === $dek, 'its DEK opens with the owner\'s key and is the browser\'s');

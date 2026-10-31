@@ -82,9 +82,10 @@ check(BackupProfile::path_segment(BackupProfile::SITE) !== BackupProfile::path_s
 // ── Key separation ──────────────────────────────────────────────────────────
 section('Both profiles seal to the machine\'s own key, and only that one');
 
-$here_recovery  = sodium_crypto_box_keypair();   // this machine's own recovery key
-$other_recovery = sodium_crypto_box_keypair();   // a management node's, or anyone else's
-$site_key       = sodium_crypto_box_keypair();   // this machine's disposable site key
+$here_recovery  = random_bytes(32);   // this machine's own recovery key (an X-Wing seed)
+$other_recovery = random_bytes(32);   // a management node's, or anyone else's
+$site_key       = random_bytes(32);   // this machine's disposable site key
+$xwing = new XWing();
 
 $data_key = base64_encode(random_bytes(32));
 
@@ -92,19 +93,19 @@ $data_key = base64_encode(random_bytes(32));
 // has proven, plus its own site key so it can restore itself unattended. The
 // profile decides where the archive goes and who prunes it, never who reads it.
 $envelope = BackupEnvelope::build($data_key, 'files-0000.tar.gz.enc', array(
-	array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($here_recovery)),
-	array('kind' => 'site',     'pub' => sodium_crypto_box_publickey($site_key)),
+	array('kind' => 'recovery', 'pub' => $xwing->publicKey($here_recovery)),
+	array('kind' => 'site',     'pub' => $xwing->publicKey($site_key)),
 ));
 
-check(BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($here_recovery)) === $data_key,
+check(BackupEnvelope::open($envelope, $here_recovery) === $data_key,
 	'this machine\'s own recovery key opens a backup taken here, whoever asked for it');
-check(BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($site_key)) === $data_key,
+check(BackupEnvelope::open($envelope, $site_key) === $data_key,
 	'and so does the machine itself, unattended, with its own site key');
 
 // The property the whole arrangement exists for: whoever scheduled the run does
 // not thereby become able to read it.
 $opened = null;
-try { $opened = BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($other_recovery)); }
+try { $opened = BackupEnvelope::open($envelope, $other_recovery); }
 catch (Throwable $e) { $opened = false; }
 check($opened === false || $opened === null,
 	'a management node\'s own recovery key does NOT open a backup taken on this machine');

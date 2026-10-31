@@ -1,15 +1,22 @@
 # Post-quantum sealing: every key the platform wraps is wrapped with X-Wing
 
 **Status:** spec, draft 4, 2026-10-31 (reviewer1 final review applied; Q1-Q8 decided). Building.
-WP0 built 2026-10-31 (uncommitted): `includes/MlKem768.php`, `tests/vault/mlkem768_test.php` with
-the NIST ACVP ML-KEM-768 vectors (`ikme` proven: deterministic encapsulation works, so R9's
-fallback is not needed), `SealedBox::pqReady()`, the `post_quantum` health row, setup step and
-Recovery Readiness line, the install.sh 26.04 version gate (3.40), `ffi.enable = On` in
-`_host_files.sh` (1.6) and its per-converge re-assert in `host_housekeeping.sh` (1.37), and
-`docs/installation.md`. localdev's FPM went to On on its own converge and reports ready.
-Reviewed by reviewer2 (B1-B8, C1-C3 fixed, closed). WP0 acceptance still owed on boxes (in the
-live verification queue): a fresh 26.04 bare-metal and Docker install reports ready; a 24.04
-box is refused at install. Next: WP1.
+WP0 built and committed 2026-10-31 (`f8ff4393a`): `MlKem768`, the NIST ML-KEM vectors, `pqReady()`
+and its surfaces, the 26.04 install gate, `ffi.enable = On`; reviewed by reviewer2 (closed); box
+checks owed in the live verification queue.
+WP1 built 2026-10-31, reviewed by reviewer2 (B1-B5 fixed, re-check closed): `includes/XWing.php` (all three draft-11 Appendix C vectors
+pass), SealedBox 2.0 (v2 seal, v1 open-only), PoolVaultKey/VaultKey/VaultCrypto versions and
+frames, BackupEnvelope v2 with the seed site key, BackupRecoveryKey, decoys, the size ceiling,
+the approval/copy-key/break-glass shape checks, the 1216-byte caps and columns, SiteCopyLiveRun,
+`backup_envelope.php` and `escrow_keypair.php`, `_config_secrets.sh` 1.1, the vector file and
+`tests/vault/xwing_vector_test.php`. Two changes from the text below: the version travels in the
+wrapped secret, not from the vault row (R2, "Where a vault key's version comes from"); and WP7's
+converger replacement of an old site key was pulled into WP1 (`.retired`), because every backup
+suite that uses the machine's own key fails without it. Until WP3 the relay suites that push a
+v2 transport key to the Go applier fail (it refuses 1216 bytes); until WP2 the browser cannot
+make a v2 key, so no client-custody vault can be created or rotated on a WP1-only tree. WP1 must
+not be published alone. Ten backup suites wait on localdev's own recovery key becoming X-Wing (live
+verification queue). Next: WP2.
 **Decided by the owner, 2026-10-31:** Joinery requires Ubuntu 26.04 or later.
 There is no 24.04 path for this feature and no pure-PHP fallback.
 **Decided by the owner, 2026-10-31:** no transition period. The upgrade forces
@@ -360,11 +367,17 @@ recovery proof's `BROWSER_INFO`. So a restore approval's answer still cannot
 open a decommission box (`approval.go:137`).
 
 A box the browser only half-opens (a backup's data key, the break-glass key;
-F1) is a v2 `dek` box like any other. The browser decapsulates in full and
-posts the 32-byte X-Wing shared secret. The agent's opener applies HKDF with
-`joinery-seal:v2:dek` and opens the GCM. So `openRecoverySealed` gains a v2
-sibling, chosen by the box's version, for its four callers. The posted public
-key is then only matched against the box's fingerprint.
+F1) is a v2 `dek` box like any other. The browser decapsulates in full,
+applies HKDF with `joinery-seal:v2:dek` itself, and posts that 32-byte AES
+key, never the X-Wing shared secret (reviewer2 WP1 B1): the shared secret
+depends only on the ciphertext and the seed, so whoever staged the box could
+substitute a pending approval challenge's ciphertext and turn the posted
+secret into that scope's key. The dek-scope key opens only dek boxes. The
+agent's opener opens the GCM with it (`SealedBox::openV2WithKey()` is the PHP
+twin). So `openRecoverySealed` gains a v2 sibling, chosen by the box's
+version, for its four callers. The posted public key is then only matched
+against the box's fingerprint. The answer fields keep their names (`shared`);
+for a v2 box the value is the dek-scope key.
 
 v1's HKDF info carried `ephPub ‖ recipientPub`; v2's does not need them.
 X-Wing's combiner already binds `ct_X` and `pk_X`, and ML-KEM's shared secret
@@ -414,7 +427,16 @@ same rule. A `VaultKey` carries it: `PoolVaultKey::open()` takes the vault
 row's public key, derives the candidate public half for that key's version
 (32 bytes: X25519; 1216 bytes: X-Wing keygen), and refuses when it does not
 match. The window slot stores the version with the secret, so `unseal()` and
-`unsealEdge()` never guess. Backup and sidecar openers match by fingerprint
+`unsealEdge()` never guess.
+
+**Where a vault key's version comes from (as built).** Deriving it from the vault
+row's public key fails in one case the rotation hits: after a crash between the
+flip and the retire, the old generation's public key is no longer on the row,
+and `completePendingRotation()` must still open it. So the version travels with
+the secret itself: the plaintext a wrapping holds, and the window slot, is
+`v2.` + base64url(seed) for a v2 key and the bare base64url secret for a v1
+key, which is every wrapping written before v2 (`PoolVaultKey::wrappedForm()`).
+No vault-row lookup is needed and an old slot still reads as v1. Backup and sidecar openers match by fingerprint
 (R3).
 
 ### R3. Keys and their text forms
@@ -664,6 +686,11 @@ re-adds and recovery codes (`docs/sealed_vault.md:1074-1079`).
   already in the spool (a v1 blob is a `crypto_box_seal`; R2 openers tell them
   apart). It drops the old secret at the first pull that finds no v1 blob.
 - **Direct identities and every other consumer**: through the vault resealers.
+- **Direct between an upgraded and an older instance**: an upgraded sender
+  handed an older receiver's 32-byte key refuses to seal and reports the
+  delivery failed with V1_KEY_REFUSAL's reason; an older sender cannot seal to
+  a 1216-byte key and fails the same way on its side. Mail between them waits
+  until both run the release (reviewer2 WP1 N2).
 - **Decoys**: v2 from the release (R3).
 
 ### R8. The floor: Ubuntu 26.04 or later
@@ -858,7 +885,8 @@ a decommission-scope box; a fresh site's converger mints a 32-byte seed.
 bare-seed client secret in place of PKCS#8 (keypair, import,
 `publicKeyFromSecret()`, wrapping); the device handoff vector re-cut with
 `vault.seed_hex`;
-`joinery-sealed.js` frames; the three challenge pages; `device-link.js`;
+`joinery-sealed.js` frames; the three challenge pages, whose half-open of a
+v2 key box posts the dek-scope key, not the X-Wing shared secret (R2); `device-link.js`;
 node gates. Acceptance: the node gate reproduces the vector; the recovery key
 ceremony, an approval, and a copy-key handoff each complete end to end on
 localdev with a v2 key; `selfCheck()` passes in Chrome, Firefox and Safari.
@@ -866,7 +894,7 @@ localdev with a v2 key; `selfCheck()` passes in Chrome, Firefox and Safari.
 **WP3. Go.** Relay sealer at Go 1.24, sealing either format by key length
 (Q8), its map parser accepting 1216-byte keys, the v2 size ceiling in
 `direct_protocol.go`, and a new `RELAY_VERSION`; `openRecoverySealed`'s v2
-sibling for its four callers; agent sidecar version 2, `data-root unseal` and `reseal`
+sibling for its four callers, taking the dek-scope key (R2); agent sidecar version 2, `data-root unseal` and `reseal`
 for both; approval challenge v2 with each scope's info; the agent KEM key
 (minted at join and on the first run of an already-joined agent, reported by
 join or check-in), `mgn_agent_kem_public_key`, `copy_seal.go`;

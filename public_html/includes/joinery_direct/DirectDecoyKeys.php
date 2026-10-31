@@ -14,11 +14,11 @@
  *
  * Two properties make a decoy hold up:
  *
- *   - **It must be a valid curve point**, or a malformed-key error at the sender
- *     would identify it. So the derived value is used as an X25519 scalar and
- *     the published decoy is its base point multiple: a genuine public key,
- *     indistinguishable from a real one. The scalar is discarded the instant the
- *     point is computed and is never stored anywhere, so nothing on this box —
+ *   - **It must be a genuine key**, or a malformed-key error at the sender
+ *     would identify it. So the derived value is used as an X-Wing seed and the
+ *     published decoy is the 1216-byte key it generates: a real public key,
+ *     indistinguishable from a real one. The seed is discarded the instant the
+ *     key is computed and is never stored anywhere, so nothing on this box —
  *     or anywhere else — can open a message sealed to a decoy.
  *
  *   - **It must be deterministic**, since a key that changed between probes of
@@ -46,6 +46,7 @@
  * recipient's contacts — who knows the address exists. There is no oracle to
  * close at Standard, and a decoy path there would be dead code.
  *
+ * @version 1.1 - a decoy is an X-Wing key (specs/post_quantum_sealing.md R3)
  * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
@@ -75,13 +76,9 @@ class DirectDecoyKeys {
 	 * `uev_public_key` is, so the two are the same shape on the wire.
 	 */
 	public static function publicKeyFor(string $address): string {
-		$scalar = hash_hmac('sha256', strtolower(trim($address)), DirectSettings::decoySecret(), true);
-		// Clamped the way X25519 clamps a scalar, so the point is on the curve
-		// and in the right subgroup — a real key in every observable respect.
-		$scalar[0]  = chr(ord($scalar[0]) & 248);
-		$scalar[31] = chr((ord($scalar[31]) & 127) | 64);
-		$public = sodium_crypto_scalarmult_base($scalar);
-		sodium_memzero($scalar);
+		$seed = hash_hmac('sha256', strtolower(trim($address)), DirectSettings::decoySecret(), true);
+		$public = (new XWing())->publicKey($seed);
+		sodium_memzero($seed);
 		return SealedBox::b64url($public);
 	}
 }

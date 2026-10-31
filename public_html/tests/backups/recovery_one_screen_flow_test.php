@@ -10,9 +10,9 @@
  * drives through backup_recovery_save / backup_recovery_prove. The key is
  * stored unproven, the challenge is sealed to what was STORED, only the
  * matching private key opens it, and the recovered sentence — nothing else —
- * flips the key to proven. PHP stands in for WebCrypto here with the same
- * X25519 + HKDF-SHA256 + AES-256-GCM steps, so a drift in the challenge
- * layout fails in this file rather than in every operator's browser.
+ * flips the key to proven. The challenge is an X-Wing v2 seal under the
+ * browser proof's own scope (BackupRecoveryKey::BROWSER_INFO), opened here
+ * with SealedBox::openV2, so a drift in the challenge layout fails in this file.
  *
  * It carries the consequence too: the key proven here is what every backup of
  * this machine seals to, a management node's copies included, and withdrawing the
@@ -35,25 +35,20 @@ function rof_put_setting($name, $value) {
 	}
 }
 
-/** Open a browser_challenge blob exactly as recovery-readiness.js does. */
-function rof_open_browser_challenge($challenge_b64, $priv_raw, $pub_raw) {
-	$blob   = base64_decode($challenge_b64, true);
-	$eph_pk = substr($blob, 0, 32);
-	$iv     = substr($blob, 32, 12);
-	$ct     = substr($blob, 44, strlen($blob) - 44 - 16);
-	$tag    = substr($blob, -16);
-
-	$shared  = sodium_crypto_scalarmult($priv_raw, $eph_pk);
-	$aes_key = hash_hkdf('sha256', $shared, 32, BackupRecoveryKey::BROWSER_INFO . $eph_pk . $pub_raw, '');
-	return openssl_decrypt($ct, 'aes-256-gcm', $aes_key, OPENSSL_RAW_DATA, $iv, $tag);
+/** Open a browser_challenge blob: a v2 seal under the browser scope. False when the seed does not open it. */
+function rof_open_browser_challenge($challenge_b64, $seed) {
+	try {
+		return SealedBox::openV2(base64_decode($challenge_b64, true), $seed, BackupRecoveryKey::BROWSER_INFO);
+	} catch (RuntimeException $e) {
+		return false;
+	}
 }
 
 rof_put_setting('backup_recovery_public_key', '');
 rof_put_setting('backup_recovery_public_key_proven_fpr', '');
 
-$keypair  = sodium_crypto_box_keypair();
-$priv_raw = sodium_crypto_box_secretkey($keypair);
-$pub_raw  = sodium_crypto_box_publickey($keypair);
+$priv_raw = random_bytes(32);   // an X-Wing seed
+$pub_raw  = (new XWing())->publicKey($priv_raw);
 
 // ── Save ────────────────────────────────────────────────────────────────
 section('Saving stores the key unproven');
@@ -66,16 +61,38 @@ check(BackupRecoveryKey::is_ready() === false, 'nothing may be sealed to it yet'
 $stored_pub = BackupRecoveryKey::parse_public_key();
 check($stored_pub === $pub_raw, 'what was stored is byte-identical to what was sent');
 
+rof_put_setting('backup_recovery_public_key', '');
+$message = '';
+try { BackupRecoveryKey::set_public_key(base64_encode(sodium_crypto_box_publickey(sodium_crypto_box_keypair()))); }
+catch (BackupRecoveryKeyException $e) { $message = $e->getMessage(); }
+check(strpos($message, 'old X25519') !== false, 'an old 32-byte X25519 key is refused, naming it as old', $message);
+BackupRecoveryKey::set_public_key(base64_encode($pub_raw));
+
 // ── The challenge round trip ────────────────────────────────────────────
 section('The challenge opens only with the matching private key');
 
 $challenge = BackupRecoveryKey::browser_challenge();
 
-$wrong = sodium_crypto_box_keypair();
-$bad = rof_open_browser_challenge($challenge, sodium_crypto_box_secretkey($wrong), $pub_raw);
+$bad = rof_open_browser_challenge($challenge, random_bytes(32));
 check($bad === false, 'a different private key does not open it');
 
-$recovered = rof_open_browser_challenge($challenge, $priv_raw, $pub_raw);
+$cli_challenge = BackupRecoveryKey::possession_challenge();
+check(rof_open_browser_challenge($cli_challenge, $priv_raw) === false
+		&& SealedBox::openV2(base64_decode($cli_challenge), $priv_raw, BackupRecoveryKey::CLI_INFO) === BackupRecoveryKey::expected_proof_string(),
+	'the CLI challenge opens under its own scope only, never as the browser one');
+$as_dek = null;
+try { $as_dek = SealedBox::openV2(base64_decode($cli_challenge), $priv_raw); } catch (RuntimeException $e) { $as_dek = false; }
+check($as_dek === false, 'nor as a key seal (dek): a page cannot pass a backup\'s data key off as the challenge');
+
+// The command the page prints, run as the operator runs it.
+$kf = tempnam(sys_get_temp_dir(), 'rof');
+file_put_contents($kf, base64_encode($priv_raw));
+$cmd = BackupRecoveryKey::cli_unseal_command($kf);
+$printed = trim((string)shell_exec($cmd . ' 2>/dev/null'));
+@unlink($kf);
+check($printed === BackupRecoveryKey::expected_proof_string(), 'the printed command, with the key file, prints the proof sentence', $printed);
+
+$recovered = rof_open_browser_challenge($challenge, $priv_raw);
 check($recovered === BackupRecoveryKey::expected_proof_string(),
 	'the right key recovers the exact proof sentence');
 
@@ -134,8 +151,7 @@ check($plan['recipients'][0]['kind'] === 'recovery'
 // ── Only a deliberate rotation replaces a proven key ────────────────────
 section('Replacing a proven key is refused unless marked as rotation');
 
-$pair_b = sodium_crypto_box_keypair();
-$pub_b  = sodium_crypto_box_publickey($pair_b);
+$pub_b  = (new XWing())->publicKey(random_bytes(32));
 
 $message = '';
 try { BackupRecoveryKey::set_public_key(base64_encode($pub_b)); }

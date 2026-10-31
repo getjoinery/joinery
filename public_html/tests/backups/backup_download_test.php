@@ -35,8 +35,8 @@ harness_defer(function () use ($work) { exec('rm -rf ' . escapeshellarg($work));
 $dir = $work . '/download';
 $capture = $work . '/engine_key';
 
-$kp = sodium_crypto_box_keypair();
-$recovery_pub = sodium_crypto_box_publickey($kp);
+$kp = random_bytes(32);   // an X-Wing seed
+$recovery_pub = (new XWing())->publicKey($kp);
 $alive = true;
 $t0 = 1800000000;
 
@@ -99,8 +99,8 @@ check(is_file($archive) && filesize($archive) === 3000 && $s['bytes'] === 3000, 
 check($s['expires'] === $t0 + BackupDownload::KEEP_SECONDS, 'it is kept a day');
 check(!glob($dir . '/.key-*'), 'the run key is gone');
 $envelope = BackupEnvelope::read_sidecar($archive . BackupEnvelope::SIDECAR_SUFFIX);
-$opened = sodium_crypto_box_seal_open(base64_decode($envelope['recipients'][0]['sealed']), $kp);
-check($opened !== false && $opened === file_get_contents($capture),
+$opened = BackupEnvelope::open($envelope, $kp);
+check($envelope['version'] === BackupEnvelope::VERSION && $opened === file_get_contents($capture),
 	'the envelope opens with the recovery key, to the key the engine encrypted with');
 check(strpos(BackupDownload::download_name($s), BackupDownload::DOWNLOAD_SUFFIX) !== false, 'it downloads as one tar');
 

@@ -17,6 +17,7 @@
  * [{mime_part, size, inline}] for the sealed uploads, each file named by its part) and
  * `keep` (JSON: every part the draft still has). No plaintext reaches the server.
  *
+ * @version 1.3 - public_key holds an X-Wing key (2048 characters)
  * @version 1.2 - the Fortress two-call save
  * @version 1.1.1
  */
@@ -124,8 +125,8 @@ function draft_save_logic_descriptor() {
 			'body_html' => ['type' => 'text', 'required' => false, 'label' => 'HTML body'],
 			'inline_manifest' => ['type' => 'string', 'required' => false, 'label' => 'Inline image manifest (local-id => filename)'],
 			'fortress' => ['type' => 'bool', 'required' => false, 'label' => 'An end-to-end mailbox\'s draft, sealed in the browser'],
-			'sealed_dek' => ['type' => 'string', 'required' => false, 'max_length' => 4096, 'label' => 'The draft DEK sealed to the owner\'s mail key (v1.edgeseal.mail.)'],
-			'public_key' => ['type' => 'string', 'required' => false, 'max_length' => 512, 'label' => 'The mail key the DEK is sealed to'],
+			'sealed_dek' => ['type' => 'string', 'required' => false, 'max_length' => 4096, 'label' => 'The draft DEK sealed to the owner\'s mail key (v2.edgeseal.mail.)'],
+			'public_key' => ['type' => 'string', 'required' => false, 'max_length' => 2048, 'label' => 'The mail key the DEK is sealed to'],
 			'fields' => ['type' => 'text', 'required' => false, 'label' => 'JSON: sealed column => v1.edge. ciphertext'],
 			'parts' => ['type' => 'text', 'required' => false, 'max_length' => 20000, 'label' => 'JSON: [{mime_part, size, inline}] for the sealed uploads'],
 			'keep' => ['type' => 'text', 'required' => false, 'max_length' => 20000, 'label' => 'JSON: every part the draft still has'],

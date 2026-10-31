@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php db --only=tests/backups/services_shelf_target_test.php
  *
+ * @version 1.4 - the fixture recovery key is an X-Wing key (post-quantum sealing WP1)
  * @version 1.3 - the reconcile asks per point and never lists the offloaded-file store (round-3 V1)
  * @version 1.2 - every call passes the action's real input descriptor; the object store lists the active space only,
  *                a moved key's read finds its space, a partial listing and a moved place prune no record (re-review)
@@ -185,8 +186,7 @@ ServicesShelfBroker::$client_for_tests = $client;
 harness_defer(function () { ServicesShelfBroker::$client_for_tests = null; });
 
 // A proven recovery key of the site's own: nothing is sealed without one.
-$pair = sodium_crypto_box_keypair();
-BackupRecoveryKey::set_public_key(base64_encode(sodium_crypto_box_publickey($pair)), true);
+BackupRecoveryKey::set_public_key(base64_encode((new XWing())->publicKey(random_bytes(32))), true);
 BackupRecoveryKey::record_possession_proof(BackupRecoveryKey::expected_proof_string());
 
 // ---------------------------------------------------------------------------

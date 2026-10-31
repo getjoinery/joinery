@@ -20,10 +20,10 @@ $box = new SealedBox();
 
 section('Keypair sealing');
 $kp = $box->generateKeypair();
-check(strlen(SealedBox::b64url_decode($kp['public'])) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES, 'public key is 32 raw bytes');
+check(strlen(SealedBox::b64url_decode($kp['public'])) === XWing::PUBLIC_KEY_BYTES, 'public key is a 1216-byte X-Wing key');
 $dek = random_bytes(32);
 $sealed = $box->sealDek($dek, $kp['public']);
-check(strpos($sealed, 'v1.seal.') === 0, 'sealed blob carries the v1.seal prefix');
+check(strpos($sealed, 'v2.seal.') === 0, 'sealed blob carries the v2.seal prefix');
 check($box->openDek($sealed, $kp['secret']) === $dek, 'seal/open round trip returns the exact bytes');
 $other = $box->generateKeypair();
 $threw = false;
