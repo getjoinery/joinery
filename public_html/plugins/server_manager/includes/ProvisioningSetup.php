@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.13 - hostedStatus() carries smtp2go_check_error: why the master key's permissions could not be read
  * @version 1.12 - hostedStatus() reads the SMTP2GO master key's missing permissions; a key missing one is not ready (B179)
  * @version 1.11 - the service user is a machine account: made with usr_is_machine, and an existing or adopted
  *                 one is marked by setupApiCredentials() (machine_accounts.md)
@@ -543,7 +544,15 @@ class ProvisioningSetup {
 		$smtp2go = trim(self::readSecret('server_manager_smtp2go_api_key')) !== '';
 		$missing = $usable ? $account->missing_scopes() : null;
 		$client = $smtp2go ? Smtp2GoClient::fromSettings() : null;
-		$smtp2go_missing = $client !== null ? $client->missingPermissions() : null;
+		$smtp2go_missing = null;
+		$smtp2go_check_error = '';
+		if ($client !== null) {
+			try {
+				$smtp2go_missing = $client->missingPermissions();
+			} catch (Smtp2GoException $e) {
+				$smtp2go_check_error = $e->getMessage();
+			}
+		}
 		return array(
 			// The default account, where hosted orders go: its name, '' when none is set.
 			'account_label'         => $account !== null ? $account->label() : '',
@@ -554,6 +563,8 @@ class ProvisioningSetup {
 			'smtp2go_present'       => $smtp2go,
 			// null: not told (no key, or the provider did not say); otherwise path => [what for, group].
 			'smtp2go_missing'       => $smtp2go_missing,
+			// Why the permissions could not be read: SMTP2GO's refusal; '' when the call answered.
+			'smtp2go_check_error'   => $smtp2go_check_error,
 			'smtp2go_sandbox_users' => in_array(trim(self::readSetting('server_manager_smtp2go_sandbox_users')), array('', '0'), true) === false,
 			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
 			'send_allowance'        => self::readSetting('server_manager_hosted_send_allowance'),
