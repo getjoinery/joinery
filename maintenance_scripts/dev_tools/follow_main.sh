@@ -21,6 +21,9 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.2 - A difference in a file's mode alone is not a local edit: the host converger, not a
+#               person, sets every mode in the tree (.sh 755, the rest 644). Scripts git recorded at
+#               644 read as edited after every converge, and every pull was refused from 10-31.
 # @version 1.1 - Pulls under umask 022. user1's umask on dev is 0002, so every file a
 #               fast-forward rewrote came out group-writable, and the host converger,
 #               which runs installers as root, refuses one writable by anyone but its
@@ -52,7 +55,8 @@ old="$(git rev-parse HEAD)"
 new="$(git rev-parse "origin/${BRANCH}")"
 [ "$old" = "$new" ] && exit 0
 
-if [ -n "$(git status --porcelain)" ]; then
+# Modes are the converger's (see 1.2), so only content and untracked files count.
+if [ -n "$(git -c core.fileMode=false status --porcelain)" ]; then
     say "NOT pulled $(git rev-parse --short "$new"): the checkout has local changes (dev is never edited; see git status)"
     exit 1
 fi
@@ -67,7 +71,7 @@ if [ "${building:-0}" != "0" ] || pgrep -f 'publish_upgrade\.php' >/dev/null 2>&
     exit 0   # a publish is reading this tree; the next minute tries again
 fi
 
-if ! git merge -q --ff-only "$new" 2>&1; then
+if ! git -c core.fileMode=false merge -q --ff-only "$new" 2>&1; then
     say "fast-forward to $(git rev-parse --short "$new") failed"
     exit 1
 fi
