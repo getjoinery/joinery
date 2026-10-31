@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.3.1 - a page asked for a row that is not there (SystemRowNotFoundError) is a 404, not a fault, so it is never reported automatically
  * @version 1.3.0 - an error in a command-line script kept outside the site (an ad-hoc script in /tmp) is never reported automatically (fromOutsideScript())
  * @version 1.2.0 - an error a test caused is never reported automatically (fromTest())
  * @version 1.1.1 - no save() override: an update writes only the columns it set, so a recurrence counted meanwhile is never put back
@@ -332,7 +333,8 @@ class ProblemReport extends SystemBase {
 				|| $e instanceof \SystemAuthenticationError
 				|| $e instanceof \AuthenticationException
 				|| $e instanceof \AuthorizationException
-				|| $e instanceof \ValidationException) {
+				|| $e instanceof \ValidationException
+				|| $e instanceof \SystemRowNotFoundError) {
 			return false;
 		}
 		return !($e instanceof \BaseException && $e->shouldDisplay());
