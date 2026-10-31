@@ -36,6 +36,9 @@
 # container whose Postfix never started), the run creates it, so sendmail
 # accepts mail instead of waiting forever; with the queue in place, or no
 # Postfix configuration, it says nothing.
+#
+# A logrotate file an OS upgrade left obsolete (a fake dpkg status): removed
+# when still as its package shipped it, kept and named when someone edited it.
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -677,6 +680,48 @@ STUB
 touch "$DT/site/config/agent_signing_key"
 chk "the publishing box is one by its signing key, whatever its record says" "$(STUB_OWNER=root dev_tree)" "developer"
 rm -rf "$DT"
+
+echo "== A logrotate file an OS upgrade left obsolete =="
+if command -v dpkg-query >/dev/null 2>&1; then
+    RL="$T/fs_logrotate"; mkdir -p "$RL/etc/logrotate.d" "$RL/var/lib/dpkg"
+    printf '/var/log/cloud-init.log {\n  rotate 6\n}\n' > "$RL/etc/logrotate.d/cloud-init"
+    cp "$RL/etc/logrotate.d/cloud-init" "$RL/etc/logrotate.d/cloud-init-base"
+    printf '/var/log/old.log {\n  rotate 2\n}\n' > "$RL/etc/logrotate.d/oldpkg"
+    shipped="$(md5sum < "$RL/etc/logrotate.d/cloud-init" | cut -c1-32)"
+    echo "# mine" >> "$RL/etc/logrotate.d/oldpkg"
+    cat > "$RL/var/lib/dpkg/status" <<EOF
+Package: cloud-init
+Status: install ok installed
+Version: 26.1
+Architecture: all
+Conffiles:
+ /etc/logrotate.d/cloud-init $shipped obsolete
+
+Package: cloud-init-base
+Status: install ok installed
+Version: 26.1
+Architecture: all
+Conffiles:
+ /etc/logrotate.d/cloud-init-base $shipped
+
+Package: oldpkg
+Status: install ok installed
+Version: 1.0
+Architecture: all
+Conffiles:
+ /etc/logrotate.d/oldpkg $shipped obsolete
+EOF
+    out="$(JOINERY_HOUSEKEEPING_ROOT="$RL" bash "$SCRIPT" 2>&1)"
+    chk "the unedited obsolete file is removed, and said" \
+        "$([ -e "$RL/etc/logrotate.d/cloud-init" ] && echo present || echo gone)/$(grep -c 'removed /etc/logrotate.d/cloud-init:' <<<"$out")" "gone/1"
+    chk "the file its package ships now stays" "$([ -f "$RL/etc/logrotate.d/cloud-init-base" ] && echo kept)" "kept"
+    chk "an obsolete file someone edited stays, and is named" \
+        "$(grep -c '# mine' "$RL/etc/logrotate.d/oldpkg")/$(grep -c 'oldpkg is an obsolete logrotate file someone edited' <<<"$out")" "1/1"
+    out="$(JOINERY_HOUSEKEEPING_ROOT="$RL" bash "$SCRIPT" 2>&1)"
+    chk "a second run removes nothing" "$(grep -c 'removed /etc/logrotate.d/' <<<"$out")" "0"
+else
+    echo "  SKIP: no dpkg-query on this machine"
+fi
 
 echo
 echo "host_housekeeping gate: $passed passed, $failed failed"

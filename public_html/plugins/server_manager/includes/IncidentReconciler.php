@@ -46,6 +46,7 @@
  * whose alerts are off (ManagedNode::sends_alerts()) sends neither: its
  * incidents open and wait in the inbox.
  *
+ * @version 1.10 - the notification carries the incident's evidence (detail), so the email says what was seen
  * @version 1.9 - a node whose alerts are off (ManagedNode::sends_alerts(): a test cloud box unless turned on)
  *                opens its incidents and tells nobody
  * @version 1.8 - the signals declare their audience (superadmins); the payload names no recipients
@@ -416,6 +417,19 @@ class IncidentReconciler {
 		return $out;
 	}
 
+	/** The incident's evidence as "Label: text" lines, for the notification body; empty when it has none. */
+	public static function detail_lines(IncidentRecord $inc): string {
+		$detail = $inc->get('inc_detail');
+		if (is_string($detail)) {
+			$detail = json_decode($detail, true);
+		}
+		$lines = array();
+		foreach ((array)$detail as $k => $v) {
+			$lines[] = $k . ': ' . $v;
+		}
+		return implode("\n", $lines);
+	}
+
 	private static function node_label(ManagedNode $node): string {
 		return '#' . (int)$node->key . ' ' . (string)$node->get('mgn_name');
 	}
@@ -436,6 +450,7 @@ class IncidentReconciler {
 			'title'       => $inc->title(),
 			'severity'    => (string)$inc->get('inc_severity'),
 			'summary'     => $summary,
+			'detail'      => self::detail_lines($inc),
 			'link'        => IncidentViews::url((int)$inc->key),
 		);
 		$signal = $inc->is_critical() ? self::SIGNAL_CRITICAL : self::SIGNAL_WARNING;

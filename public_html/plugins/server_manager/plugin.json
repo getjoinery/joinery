@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.125",
+  "version": "1.30.126",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -764,6 +764,7 @@
         "title": "What the incident is, in plain words",
         "severity": "warning",
         "summary": "When and where it started or came back, or that it is still happening a day after it was resolved",
+        "detail": "The incident's evidence, one 'Label: text' line each",
         "link": "The incident's page"
       },
       "notify": {
@@ -772,7 +773,7 @@
         "audience": "superadmins",
         "default_email": false,
         "title_template": "{node_name}: {title}",
-        "body_template": "{summary}",
+        "body_template": "{summary}\n\n{detail}",
         "link_template": "{link}"
       }
     },
@@ -787,6 +788,7 @@
         "title": "What the incident is, in plain words",
         "severity": "critical",
         "summary": "When and where it started or came back, or that it is still happening a day after it was resolved",
+        "detail": "The incident's evidence, one 'Label: text' line each",
         "link": "The incident's page"
       },
       "notify": {
@@ -795,7 +797,7 @@
         "audience": "superadmins",
         "default_email": true,
         "title_template": "Critical, {node_name}: {title}",
-        "body_template": "{summary}",
+        "body_template": "{summary}\n\n{detail}",
         "link_template": "{link}"
       }
     },

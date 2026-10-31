@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.36 - A logrotate file an OS upgrade left obsolete and nobody edited is removed: 26.04's
+#                cloud-init-base beside 24.04's cloud-init made logrotate refuse every night
 # Version: 1.35 - A machine run from the bundle is never a developer's box, and reads nothing to say so:
 #                a host's restrictions file with no reader in the bundle printed a line every run (reviewer2 N1);
 #                a directory stat cannot read no longer passes for the publishing box's
@@ -1255,6 +1257,35 @@ if [[ "${IN_CONTAINER}" == 0 && "${HAVE_SYSTEMD}" == 1 ]] && command -v systemd-
         fi
     fi
     systemctl reset-failed fwupd-refresh.service >/dev/null 2>&1 || true
+fi
+
+# --- 10f. A log-trimming file an OS upgrade left behind is removed --------------
+# A release upgrade that moves a package's logrotate file to a new name leaves
+# the old one in place, marked obsolete: Ubuntu 26.04's cloud-init-base ships
+# /etc/logrotate.d/cloud-init-base and leaves 24.04's cloud-init beside it.
+# logrotate refuses a log two files name, so every nightly run fails and opens
+# 'A service on the machine failed'. An obsolete file still as its package
+# shipped it is removed; one someone edited is theirs, kept and named. When one
+# went, a failure logrotate left is cleared and it runs once.
+DPKG_ADMINDIR="${FS_ROOT}/var/lib/dpkg"
+if [[ -f "${DPKG_ADMINDIR}/status" ]] && command -v dpkg-query >/dev/null 2>&1; then
+    LOGROTATE_REMOVED=0
+    while read -r path sum flag _; do
+        [[ "${flag}" == obsolete && "${path}" == /etc/logrotate.d/* && -f "${FS_ROOT}${path}" ]] || continue
+        if [[ "$(md5sum < "${FS_ROOT}${path}" | cut -c1-32)" == "${sum}" ]]; then
+            rm -f "${FS_ROOT}${path}"
+            say "removed ${path}: an earlier release's logrotate file, left obsolete by an upgrade and never edited"
+            LOGROTATE_REMOVED=1
+        else
+            warn "${path} is an obsolete logrotate file someone edited - left in place; if logrotate fails naming a duplicate log, it is the cause"
+        fi
+    done < <(dpkg-query --admindir="${DPKG_ADMINDIR}" -W -f='${Conffiles}\n' 2>/dev/null)
+    if [[ "${LOGROTATE_REMOVED}" == 1 && "${HAVE_SYSTEMD}" == 1 ]] \
+            && [[ "$(systemctl is-failed logrotate.service 2>/dev/null || true)" == failed ]]; then
+        systemctl reset-failed logrotate.service >/dev/null 2>&1 || true
+        systemctl start --no-block logrotate.service >/dev/null 2>&1 || true
+        say "logrotate's failure cleared and a run started"
+    fi
 fi
 
 # --- 11. The kernel loads nothing a site can ask for and no machine uses -------
