@@ -136,6 +136,9 @@ if ($inc !== null) {
 		&& (SignalBus::signals()[IncidentReconciler::SIGNAL_CRITICAL]['notify']['audience'] ?? '') === 'superadmins'
 		&& $signals[0][1]['link'] === '/admin/server_manager/incident?id=' . (int)$inc->key,
 		'One incident.opened_critical, to the superadmins, linking the incident', json_encode($signals));
+	check(strpos((string)($signals[0][1]['detail'] ?? ''), 'What the check saw: HTTP 502 from https://reconciler.example') !== false
+		&& strpos((string)(SignalBus::signals()[IncidentReconciler::SIGNAL_CRITICAL]['notify']['body_template'] ?? ''), '{detail}') !== false,
+		'The notification carries the evidence', json_encode($signals[0][1]['detail'] ?? null));
 }
 $signals = array();
 $c = $pass();
