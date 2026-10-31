@@ -126,8 +126,26 @@ impl Health {
             + self.entries.get("ignored").copied().unwrap_or(0)
     }
 
+    /// Every entry this device holds a record for, whatever its state. The
+    /// soak rig's memory check divides by this, so it counts system files too:
+    /// each one costs a record like any other.
     pub fn tracked(&self) -> usize {
         self.entries.values().sum()
+    }
+
+    /// System and temporary files sync never sends or brings
+    /// (`.DS_Store`, `Thumbs.db`, `.fseventsd`, ...): mostly made here and
+    /// kept here, sometimes held by the server (an older client, a web
+    /// upload) and never brought here. Settled either way, and not synced.
+    pub fn system_files(&self) -> usize {
+        self.entries.get("ignored").copied().unwrap_or(0)
+    }
+
+    /// The items sync keeps in step: what a person can compare with another
+    /// device. Two devices holding the same files say the same number, however
+    /// many system files each one keeps for itself.
+    pub fn in_drive(&self) -> usize {
+        self.tracked() - self.system_files()
     }
 
     /// Encrypted entries this device has no key for.
@@ -161,10 +179,10 @@ impl Health {
         }
         match self.indicator {
             Indicator::Green => match self.waiting_for_keys() {
-                0 => format!("Up to date — {} items", self.tracked()),
+                0 => format!("Up to date — {} items", self.in_drive()),
                 n => format!(
                     "Up to date — {} items ({n} waiting for a key)",
-                    self.tracked()
+                    self.in_drive()
                 ),
             },
             Indicator::Working => format!("Syncing — {} to go", self.pending_ops),
@@ -506,6 +524,28 @@ mod tests {
         let h = health(&[("synced", 3), ("pending_key", 1000)], 0, 0);
         assert_ne!(h.indicator, Indicator::Attention);
         assert!(h.issues.is_empty());
+    }
+
+    #[test]
+    fn system_files_kept_on_this_computer_are_not_counted_as_items_in_drive() {
+        // A Mac that holds the same files as a PC also holds .DS_Store and
+        // .fseventsd records the PC never sees. "Up to date — 140 items" on one
+        // and "128 items" on the other, for the same Drive, reads as a sync
+        // fault. The headline counts what is in Drive; the system files are
+        // still settled and still tracked.
+        let h = health(&[("synced", 121), ("ignored", 19)], 0, 0);
+        assert_eq!(h.indicator, Indicator::Green);
+        assert_eq!(h.summary(), "Up to date — 121 items");
+        assert_eq!(h.in_drive(), 121);
+        assert_eq!(h.system_files(), 19);
+        assert_eq!(h.tracked(), 140);
+        assert_eq!(h.settled(), 140);
+
+        let keys = health(&[("synced", 10), ("ignored", 5), ("pending_key", 2)], 0, 0);
+        assert_eq!(
+            keys.summary(),
+            "Up to date — 12 items (2 waiting for a key)"
+        );
     }
 
     #[test]
