@@ -7,11 +7,12 @@
  */
 /**
  * Git records every file in the trees the host converger keeps at the mode
- * the converger gives it: a .sh at 755 and anything else at 644, under
- * public_html/, maintenance_scripts/ and vendor/ (_plugin_installers_start.sh,
- * the ownership walk). A file recorded otherwise reads as edited on every box
- * after each converge, and dev's follow_main.sh stopped pulling over 29
- * scripts committed at 644.
+ * the converger gives it: a .sh at 755 and anything else at 644, under the
+ * roots its ownership walk names (EXEC_ROOTS in _plugin_installers_start.sh,
+ * read from there, as work --prepare-commit reads them when it sets a
+ * prepared commit's modes). A file recorded otherwise reads as edited on
+ * every box after each converge, and dev's follow_main.sh stopped pulling
+ * over 29 scripts committed at 644.
  *
  * Reads the last commit, so a file fixed in the working tree passes once it
  * is committed. Skips, saying so, where the site is not a git checkout.
@@ -29,9 +30,13 @@ if (!is_dir($root . '/.git')) {
 	harness_finish();
 	return;
 }
+$walk = (string)@file_get_contents($root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+$roots = preg_match('/^EXEC_ROOTS=\(\)\nfor _d in ([^;]+); do/m', $walk, $m) ? preg_split('/\s+/', trim($m[1])) : array();
+check(in_array('public_html', $roots, true) && in_array('maintenance_scripts', $roots, true),
+	'the converger\'s walk names its roots where this test and work read them', implode(' ', $roots));
 $out = array();
 $rc = 0;
-exec('git -C ' . escapeshellarg($root) . ' ls-tree -r HEAD -- public_html maintenance_scripts vendor 2>&1', $out, $rc);
+exec('git -C ' . escapeshellarg($root) . ' ls-tree -r HEAD -- ' . implode(' ', array_map('escapeshellarg', $roots ?: array('public_html'))) . ' 2>&1', $out, $rc);
 check($rc === 0 && count($out) > 0, 'git lists the last commit\'s files', implode(' | ', array_slice($out, 0, 3)));
 $wrong = array();
 foreach ($out as $line) {

@@ -61,6 +61,9 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.12 - every git call ignores file modes (core.fileMode=false): the host converger sets them on every
+ *               box, so a mode that differs from git is never a local change, never left out of a release,
+ *               and never stops a catch-up
  * @version 1.11 - restoreWrites() and fastForward(), so a publish that refuses leaves the checkout as it
  *               found it and can catch up with the remote; commitRelease() flags a moved remote
  * @version 1.10 - commitRelease() refuses when the remote branch moved during the publish, and undoes its
@@ -125,7 +128,9 @@ class ReleaseCommit {
 
 	/** The shell command git() runs, for a caller that pipes its output instead of reading lines. */
 	private static function gitCommand($repo_root, array $args) {
-		$cmd = 'git -c ' . escapeshellarg('safe.directory=' . $repo_root) . ' -C ' . escapeshellarg($repo_root);
+		// Modes are the host converger's on every box (.sh 755, the rest 644),
+		// so a mode that differs from git is not a change anyone made.
+		$cmd = 'git -c ' . escapeshellarg('safe.directory=' . $repo_root) . ' -c core.fileMode=false -C ' . escapeshellarg($repo_root);
 		foreach ($args as $arg) {
 			$cmd .= ' ' . escapeshellarg($arg);
 		}

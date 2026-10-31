@@ -420,6 +420,16 @@ four steps:
    `HEAD`, and writes nothing to the shared index. It refuses a message that
    breaks the rules above and drops an agent's attribution lines from the end.
 
+**File modes.** The host converger sets the mode of every file under the roots
+its ownership walk names (`EXEC_ROOTS` in `_plugin_installers_start.sh`:
+`public_html/`, `maintenance_scripts/`, `vendor/`): a `*.sh` at 755, anything
+else at 644, on every box, every run. Git records the same modes.
+`work --prepare-commit` reads those roots from the converger and records each
+prepared file at its mode, whatever it had on disk, naming any it set; the
+`script_modes` test fails a commit that disagrees. A mode is never a change
+anyone made, so dev's `follow_main.sh` and every git call a publish makes
+(`ReleaseCommit`) ignore modes (`core.fileMode=false`).
+
 When no agent can run those steps, `work NAME --prepare [--all | PATH...]
 [--message-file FILE]` does all four from a terminal. Its files are the PATHs named, or those NAME edited directly;
 `--all` adds every file no other running session appears in. A shell command
