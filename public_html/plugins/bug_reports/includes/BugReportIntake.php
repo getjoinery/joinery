@@ -14,9 +14,11 @@
  *      already sent UNVERIFIED_PER_HOUR unverified reports in the hour;
  *   4. an automatic report (bundle scope "automatic") of a fault already
  *      stored as an automatic report for the same site and version is not
- *      stored again: its count is added to that report, which reopens if it
- *      was closed (specs/implemented/bug_reports.md, Part 2, D12);
- *      A report of a muted fault is filed muted: counted, never reopened, no email;
+ *      stored again: its count is added to that report, which is new again if
+ *      it was resolved (specs/implemented/bug_reports.md, Part 2, D12);
+ *      a new automatic report of a snoozed fault is filed snoozed, and of an
+ *      ignored one ignored, with no email, unless it comes from a version
+ *      newer than the ignore covers, which makes the whole fault new;
  *   5. keep the image when it passes the same checks a member upload does,
  *      and note why when it does not (a bad image never refuses the report);
  *   6. save the row, and email the operator about a new error when asked to.
@@ -26,6 +28,7 @@
  * claimed host is used for exactly one thing, the callback, and that goes
  * through SafeHttpClient, which refuses private and internal addresses.
  *
+ * @version 1.5.0 - a report of a snoozed or ignored fault is filed as the fault stands (ReceivedBugReport 1.4.0)
  * @version 1.4.0 - the report and its image save past the model check: the sender has no account here, and the rate buckets admitted it
  * @version 1.3.0 - a new automatic report of a muted fault is filed muted, with no email
  * @version 1.2.0 - FILE_SOURCE: the bug_report_image origin tag lives here, declared
@@ -148,10 +151,16 @@ class BugReportIntake {
 		$report->set('rbr_bundle', $bundle_json);
 		$report->set('rbr_fil_file_id', $file ? (int)$file->key : null);
 		$report->set('rbr_image_note', $image_note);
-		// A person's report of a muted fault still arrives new: their words
-		// are worth reading. One the site sent on its own stays muted.
-		$muted = $automatic && ReceivedBugReport::is_muted((string)($fingerprint ?: ($hash ?: '')));
-		$report->set('rbr_status', $muted ? ReceivedBugReport::STATUS_MUTED : ReceivedBugReport::STATUS_NEW);
+		// As the fault stands: snoozed or ignored, or new. A newer version
+		// than an ignore covers makes the whole fault new. A person's report
+		// always arrives new: their words are worth reading.
+		$standing = ReceivedBugReport::arriving_status((string)($fingerprint ?: ($hash ?: '')), $version);
+		if (!$automatic) {
+			$standing = array('status' => ReceivedBugReport::STATUS_NEW, 'snooze_until' => null, 'ignored_through' => null);
+		}
+		$report->set('rbr_status', $standing['status']);
+		$report->set('rbr_snooze_until', $standing['snooze_until']);
+		$report->set('rbr_ignored_through', $standing['ignored_through']);
 		$report->set('rbr_fingerprint', $fingerprint);
 		$report->set('rbr_automatic', $automatic);
 		$report->set('rbr_occurrences', $automatic ? $occurrences : 1);
@@ -160,7 +169,7 @@ class BugReportIntake {
 		// buckets (report_submit_logic, unverifiedFrom above) and the bundle's checks.
 		SystemBase::rule_checked_write(function () use ($report) { $report->save(); });
 
-		if (!$muted) {
+		if ($standing['status'] === ReceivedBugReport::STATUS_NEW) {
 			self::notify($report);
 		}
 		return $report;
@@ -177,7 +186,7 @@ class BugReportIntake {
 
 	/**
 	 * Add $occurrences to the stored automatic report of this fault from this
-	 * site and version, and reopen it if it was closed (a muted one stays muted). One UPDATE, so two
+	 * site and version, and make it new if it was resolved (snoozed and ignored stay). One UPDATE, so two
 	 * count updates arriving together both land. NULL when there is none.
 	 */
 	public static function addToStored(string $fingerprint, string $host, string $version, int $occurrences): ?ReceivedBugReport {
@@ -185,9 +194,9 @@ class BugReportIntake {
 			"UPDATE rbr_received_bug_reports
 			    SET rbr_occurrences = LEAST(rbr_occurrences::int8 + :n, 2147483647),
 			        rbr_last_seen_time = now(),
-			        rbr_status = CASE WHEN rbr_status = 'closed' THEN 'new' ELSE rbr_status END,
-			        rbr_closed_usr_user_id = CASE WHEN rbr_status = 'closed' THEN NULL ELSE rbr_closed_usr_user_id END,
-			        rbr_closed_time = CASE WHEN rbr_status = 'closed' THEN NULL ELSE rbr_closed_time END
+			        rbr_status = CASE WHEN rbr_status = 'resolved' THEN 'new' ELSE rbr_status END,
+			        rbr_closed_usr_user_id = CASE WHEN rbr_status = 'resolved' THEN NULL ELSE rbr_closed_usr_user_id END,
+			        rbr_closed_time = CASE WHEN rbr_status = 'resolved' THEN NULL ELSE rbr_closed_time END
 			  WHERE rbr_received_bug_report_id = (
 			        SELECT rbr_received_bug_report_id FROM rbr_received_bug_reports
 			         WHERE rbr_automatic AND rbr_fingerprint = :fp AND rbr_claimed_host = :host AND rbr_claimed_version = :version

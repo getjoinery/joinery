@@ -51,15 +51,19 @@ In order, `BugReportIntake::receive()`:
    was thrown in, and the files and functions of its stack frames, line numbers dropped).
    An automatic report whose fingerprint, host and version match a stored automatic
    report is not stored again: its `occurrences` (1 to 1,000,000; 1 when missing) are
-   added to that report in one UPDATE, last-seen moves, a closed report reopens as `new`
-   (a muted one stays muted), and the answer is that report's id. No email. A member's
-   report is always stored. A new automatic report of a muted fault is stored `muted`.
+   added to that report in one UPDATE, last-seen moves, a resolved report becomes `new`
+   (snoozed and ignored ones stay as they are), and the answer is that report's id. No
+   email. A member's report is always stored, and always `new`. A new automatic report
+   of a snoozed fault is stored `snoozed` until the same time, and of an ignored fault
+   `ignored`, unless it comes from a version newer than the ignore covers: then every
+   report of the fault becomes `new`, this one too.
 5. **Image.** Kept privately (`BugReportIntake::FILE_SOURCE`, declared under `fileSources` in `plugin.json`) when it passes the size
    and type checks. A refused image never refuses the report; the row says why it was
    not kept.
-6. **Save and notify.** The row is saved as `new`, or `muted` as above. When
-   `bug_reports_notify_email` is set, one email goes out for a fault not reported in the
-   last day and not muted, carrying only the host, version, error kind and place.
+6. **Save and notify.** The row is saved with the status above. When
+   `bug_reports_notify_email` is set, one email goes out for a report saved `new` whose
+   fault was not reported in the last day, carrying only the host, version, error kind
+   and place.
 
 Everything in a report came from another machine. It is stored as text, escaped on
 display, and never executed, resolved or used as a path. The claimed host is used for
@@ -70,37 +74,44 @@ the callback only.
 - **Bug Reports** (`/plugins/bug_reports/admin/admin_bug_reports`, permission 9). Grouped
   by fingerprint by default (reports filed before fingerprints group by their error
   hash): how many sites and reports, **times seen** (the sum of the counts), how many
-  open, the newest version seen, and when first and last seen. **Every report** lists
-  them singly with their counts and filters by host, version, verdict, status and group. **Mark all seen** clears the
-  notice.
-- **Mute** on a group, for a fault the operator has decided to live with: every report
-  of it is marked `muted`, from every site and version. It keeps counting, never
-  reopens, sends no email, and sorts last; the retention sweep keeps it, since only
-  closed reports are deleted. A member's own report of a muted fault still arrives as
-  `new`. **Unmute** marks its muted reports `seen`, and the next one arrives `new`.
+  need you, the newest version seen, when first and last seen, and how the fault stands.
+  Its tabs are an incident list's: **Needs you**, **Snoozed**, **Resolved**, **Ignored**
+  and **All**. Tick faults and apply one choice to every report of each:
+  - **Resolve**: dealt with. A recurrence needs you again.
+  - **Ignore**: a fault to live with. Its reports keep counting but stay quiet while it
+    recurs on the versions already reported (the newest of them is kept as
+    `rbr_ignored_through`); the first report from a newer version makes it `new`.
+  - **Snooze** for 4 hours, 1 day, 3 days or 1 week: back in Needs you when it ends.
+  - **Reopen**: back in Needs you now.
+
+  Reports with no recorded error are each their own and are triaged on their pages.
+  **Every report** lists them singly with their counts and filters by host, version,
+  verdict, status and group.
 - **One report** (`admin_bug_report`). Who sent it (a member, or the site
   automatically), times seen and when last, the member's words, the image, the verdict
-  and its reason, and every bundle section. **Mark seen**, **Mark closed**, **Reopen**
-  and, on a muted report, **Unmute this error** are POST buttons.
+  and its reason, and every bundle section. **Resolve**, **Ignore**, **Reopen** and
+  **Snooze** apply to every report of its fault (to this report alone when it recorded
+  no error).
 
-A notice above every admin page says how many reports are `new`, for admins at
-permission 9.
+A notice above every admin page says how many reports need you (`new`, or out of a
+snooze), for admins at permission 9.
 
 ## Data
 
 `rbr_received_bug_reports` (`ReceivedBugReport`): received time, sender address (the one
 personal datum kept, for abuse handling), claimed host and version, verdict and reason,
 error hash, fingerprint, kind, place and message, comment, bundle, image, whether it
-came automatically, times seen and when last, and status (`new | seen | closed | muted`) with
-who closed it and when.
+came automatically, times seen and when last, and status (`new | snoozed | resolved |
+ignored`) with who resolved it and when, the end of a snooze, and the version an ignore
+covers.
 
-Closed reports older than `bug_reports_retention_days` (default 365) are deleted with
-their images by the daily retention sweep. Open reports are kept.
+Resolved reports older than `bug_reports_retention_days` (default 365) are deleted with
+their images by the daily retention sweep. Others are kept.
 
 ## Settings
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `bug_reports_rate_limit_requests` | 20 | Reports accepted per hour from one address. |
-| `bug_reports_notify_email` | empty | Address for the daily new-error email; empty sends none. |
-| `bug_reports_retention_days` | 365 | Days to keep closed reports; 0 keeps them. |
+| `bug_reports_notify_email` | empty | Address for the new-error email; empty sends none. |
+| `bug_reports_retention_days` | 365 | Days to keep resolved reports; 0 keeps them. |

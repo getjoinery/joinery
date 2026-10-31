@@ -3,7 +3,7 @@
  * IncidentNotice — the one header line on every admin page that says what
  * needs a person (incident_triage.md, Noticing):
  *
- *   "3 incidents need you, 1 still happening. 2 new problem reports."
+ *   "3 incidents need you, 1 still happening. 2 problem reports from sites need you."
  *
  * Red when a critical incident that needs you is still happening, amber when
  * any incident needs you, blue when only problem reports wait, and absent
@@ -16,6 +16,7 @@
  *
  * Reads STORED facts only, in one query per source, superadmin only.
  *
+ * @version 1.1 - problem reports are counted as needing you (new, or out of a snooze), not as new
  * @version 1.0
  */
 class IncidentNotice {
@@ -28,7 +29,7 @@ class IncidentNotice {
 		$reports = 0;
 		if (class_exists('ReceivedBugReport')) {
 			try {
-				$reports = count(new MultiReceivedBugReport(array('status' => ReceivedBugReport::STATUS_NEW)));
+				$reports = ReceivedBugReport::needs_you_count();
 			} catch (Throwable $e) {
 				$reports = 0; // its table is not built yet
 			}
@@ -46,7 +47,7 @@ class IncidentNotice {
 
 	/**
 	 * The line for a set of counts (IncidentRecord::needs_you_counts) and a
-	 * number of new problem reports. Public and pure so the wording and the
+	 * number of problem reports that need you. Public and pure so the wording and the
 	 * colour can be tested.
 	 */
 	public static function line_for(array $counts, int $reports): string {
@@ -64,7 +65,7 @@ class IncidentNotice {
 			$links[] = '<a href="' . IncidentViews::LIST_URL . '" class="alert-link">Review</a>';
 		}
 		if ($reports > 0) {
-			$parts[] = $reports . ' new problem report' . ($reports === 1 ? '' : 's') . ' from sites.';
+			$parts[] = $reports . ' problem report' . ($reports === 1 ? ' from sites needs' : 's from sites need') . ' you.';
 			$links[] = '<a href="/plugins/bug_reports/admin/admin_bug_reports" class="alert-link">Read ' . ($reports === 1 ? 'it' : 'them') . '</a>';
 		}
 		$cls = $critical > 0 ? 'alert-danger' : ($need > 0 ? 'alert-warning' : 'alert-info');

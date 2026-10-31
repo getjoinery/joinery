@@ -296,11 +296,11 @@ check(strpos(IncidentNotice::line_for(['needs_you' => 3, 'active' => 0, 'critica
 	&& strpos(IncidentNotice::line_for(['needs_you' => 3, 'active' => 0, 'critical' => 0], 0), '3 incidents need you.') !== false,
 	'Amber when incidents need you and none is critical; no "still happening" when all cleared');
 $only_reports = IncidentNotice::line_for(['needs_you' => 0, 'active' => 0, 'critical' => 0], 2);
-check(strpos($only_reports, 'alert-info') !== false && strpos($only_reports, '2 new problem reports from sites.') !== false
+check(strpos($only_reports, 'alert-info') !== false && strpos($only_reports, '2 problem reports from sites need you.') !== false
 	&& strpos($only_reports, 'href="/plugins/bug_reports/admin/admin_bug_reports"') !== false,
 	'Blue with only problem reports waiting, linked to their own page');
 $one = IncidentNotice::line_for(['needs_you' => 1, 'active' => 1, 'critical' => 0], 1);
-check(strpos($one, '1 incident needs you, 1 still happening. 1 new problem report from sites.') !== false, 'Singulars read right', $one);
+check(strpos($one, '1 incident needs you, 1 still happening. 1 problem report from sites needs you.') !== false, 'Singulars read right', $one);
 check(IncidentNotice::line_for(['needs_you' => 0, 'active' => 0, 'critical' => 0], 0) === '', 'Absent when nothing needs you');
 
 // ---------------------------------------------------------------------------
