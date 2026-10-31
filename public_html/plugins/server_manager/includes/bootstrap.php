@@ -7,7 +7,7 @@
  * signed-in user.
  *
  * Registers the one admin-header line that says what needs a person
- * (IncidentNotice: how many incidents need you, and new problem reports from
+ * (IncidentNotice: how many incidents need you, and problem reports that need you, from
  * sites), the same count beside the Incidents menu entry (AdminMenuCounts),
  * and the conditions this management node watches on every node as incident
  * sources (IncidentSources), which the Reconcile Incidents task turns into

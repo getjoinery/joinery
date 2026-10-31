@@ -192,14 +192,14 @@ section('Notice');
 
 $reader = make_user('bri_reader', 9);
 $session->set_api_user($reader->key);
-check(strpos(ReceivedBugReport::admin_notice(), 'new problem report') !== false, 'an admin is told new reports are waiting');
+check(strpos(ReceivedBugReport::admin_notice(), 'need you') !== false, 'an admin is told reports need them');
 $session->clear_api_user();
 $session->set_api_user($admin->key);
 if (class_exists('IncidentNotice')) {
 	// A management node's incident line counts them for its superadmins.
 	check(ReceivedBugReport::admin_notice() === '', 'a superadmin on a management node reads the count in the incident line instead');
 } else {
-	check(strpos(ReceivedBugReport::admin_notice(), 'new problem report') !== false, 'a superadmin is told new reports are waiting');
+	check(strpos(ReceivedBugReport::admin_notice(), 'need you') !== false, 'a superadmin is told reports need them');
 }
 $session->clear_api_user();
 check(ReceivedBugReport::admin_notice() === '', 'no one below permission 9 is told');
@@ -235,12 +235,15 @@ check((int)$again->key === (int)$first->key && (int)$first->get('rbr_occurrences
 $rows_for_host = count(new MultiReceivedBugReport(array('host' => $auto_host)));
 check($rows_for_host === 1, 'still one row for the site', $rows_for_host . ' rows');
 
-$first->close(1);
+$first->triage(ReceivedBugReport::STATUS_RESOLVED, 1);
+$first = new ReceivedBugReport($first->key, TRUE);
+check($first->status() === ReceivedBugReport::STATUS_RESOLVED && $first->get('rbr_closed_time') !== null,
+	'Resolve resolves it, saying when', $first->get('rbr_status'));
 $auto_receive($auto_bundle(1));
 $first = new ReceivedBugReport($first->key, TRUE);
 check($first->get('rbr_status') === ReceivedBugReport::STATUS_NEW && $first->get('rbr_closed_time') === null
 		&& (int)$first->get('rbr_occurrences') === 9,
-	'a closed report that recurs reopens', $first->get('rbr_status'));
+	'a resolved report that recurs needs you again', $first->get('rbr_status'));
 
 $bogus = $auto_receive(str_replace('"occurrences":1', '"occurrences":"lots"', $auto_bundle(1)));
 $first = new ReceivedBugReport($first->key, TRUE);
@@ -275,32 +278,87 @@ check($group !== null && (int)$group['reports'] === 3 && (int)$group['occurrence
 check(count(new MultiReceivedBugReport(array('group' => (string)$first->get('rbr_fingerprint')))) === 3,
 	'the group filter finds every report in the group');
 
-section('A muted fault counts, but never reopens');
+section('Ignore: quiet on the versions already reported, news on a newer one');
 
 $fp = (string)$first->get('rbr_fingerprint');
-check(!ReceivedBugReport::is_muted($fp), 'not muted to begin with');
-check(ReceivedBugReport::mute_group($fp) === 3 && ReceivedBugReport::is_muted($fp), 'Mute mutes every report of the fault');
-check(ReceivedBugReport::mute_group('') === 0 && !ReceivedBugReport::is_muted(''), 'reports with no recorded error cannot be muted');
+$state_of = function (string $fp) {
+	foreach (ReceivedBugReport::groups('all', 500) as $g) {
+		if ($g['hash'] === $fp) { return $g; }
+	}
+	return null;
+};
+check(ReceivedBugReport::newest_version(array('0.8.99', '0.8.550', '0.8.436')) === '0.8.550', 'the newest version is by version, not by text');
+check(ReceivedBugReport::triage_group($fp, ReceivedBugReport::STATUS_IGNORED, 1) === 3, 'Ignore reaches every report of the fault');
+check(ReceivedBugReport::triage_group('', ReceivedBugReport::STATUS_IGNORED, 1) === 0, 'reports with no recorded error are not a fault to triage');
+$first = new ReceivedBugReport($first->key, TRUE);
+check($first->status() === ReceivedBugReport::STATUS_IGNORED && $first->get('rbr_ignored_through') === '0.8.436',
+	'it is ignored through the newest version reported', (string)$first->get('rbr_ignored_through'));
 $auto_receive($auto_bundle(4));
 $first = new ReceivedBugReport($first->key, TRUE);
-check($first->get('rbr_status') === ReceivedBugReport::STATUS_MUTED && (int)$first->get('rbr_occurrences') === 14,
-	'a recurrence adds to the count and the report stays muted', $first->get('rbr_status'));
-$client->version = '0.8.437';
-$muted_new = $auto_receive($auto_bundle(1, '0.8.437'));
-check($muted_new->get('rbr_status') === ReceivedBugReport::STATUS_MUTED, 'a new version of a muted fault arrives muted', $muted_new->get('rbr_status'));
-$client->version = '0.8.435';
+check($first->status() === ReceivedBugReport::STATUS_IGNORED && (int)$first->get('rbr_occurrences') === 14,
+	'a recurrence adds to the count and the report stays ignored', $first->get('rbr_status'));
+$other_host = BugReportIntake::receive(str_replace($auto_host, 'other-' . $auto_host, $auto_bundle(1)), '', null, '198.51.100.40');
+harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $other_host->key);
+check($other_host->status() === ReceivedBugReport::STATUS_IGNORED && $other_host->get('rbr_ignored_through') === '0.8.436',
+	'another site on a version already reported arrives ignored', $other_host->get('rbr_status'));
 $member_again = BugReportIntake::receive(json_encode(array('format' => 1, 'site' => array('host' => $auto_host, 'version' => '0.8.435'),
 	'error' => $auto_error)), 'Still broken for me.', null, '198.51.100.40');
 harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $member_again->key);
-check($member_again->get('rbr_status') === ReceivedBugReport::STATUS_NEW, 'a member\'s report of a muted fault still arrives new');
-$group = null;
-foreach (ReceivedBugReport::groups(500) as $g) {
-	if ($g['hash'] === $fp) { $group = $g; }
-}
-check($group !== null && $group['muted'] && (int)$group['open'] === 1, 'the grouped view shows it muted, with only the member\'s report open', json_encode($group));
-check(ReceivedBugReport::unmute_group($fp) === 4 && !ReceivedBugReport::is_muted($fp), 'Unmute unmutes the reports it muted');
+check($member_again->status() === ReceivedBugReport::STATUS_NEW, 'a member\'s report of an ignored fault still arrives needing you');
+$g = $state_of($fp);
+check($g !== null && $g['state'] === 'needs_you' && (int)$g['needs_you'] === 1, 'so the fault needs you, for that one report', json_encode($g));
+$member_again->triage(ReceivedBugReport::STATUS_IGNORED, 1);
+$g = $state_of($fp);
+check($g !== null && $g['state'] === 'ignored' && (int)$g['needs_you'] === 0, 'ignoring it again quiets every report', json_encode($g));
+$client->version = '0.8.437';
+$newer_release = $auto_receive($auto_bundle(1, '0.8.437'));
+$client->version = '0.8.435';
 $first = new ReceivedBugReport($first->key, TRUE);
-check($first->get('rbr_status') === ReceivedBugReport::STATUS_SEEN, 'an unmuted report is seen', $first->get('rbr_status'));
+check($newer_release->status() === ReceivedBugReport::STATUS_NEW && $first->status() === ReceivedBugReport::STATUS_NEW
+		&& $first->get('rbr_ignored_through') === null,
+	'the first report from a newer version makes the whole fault new', $newer_release->get('rbr_status') . '/' . $first->get('rbr_status'));
+
+section('Snooze and Reopen');
+
+check(ReceivedBugReport::triage_group($fp, 'snooze_24', 1) > 0, 'Snooze reaches every report of the fault');
+$g = $state_of($fp);
+check($g !== null && $g['state'] === 'snoozed' && (int)$g['needs_you'] === 0, 'it stands snoozed and needs no one', json_encode($g));
+$while_snoozed = $auto_receive($auto_bundle(1, '0.8.435', '9'));
+$snoozed_new = BugReportIntake::receive(str_replace($auto_host, 'third-' . $auto_host, $auto_bundle(1)), '', null, '198.51.100.40');
+harness_register_row('rbr_received_bug_reports', 'rbr_received_bug_report_id', $snoozed_new->key);
+check($snoozed_new->status() === ReceivedBugReport::STATUS_SNOOZED, 'a new site\'s report during the snooze arrives snoozed', $snoozed_new->get('rbr_status'));
+DbConnector::get_instance()->get_db_link()->prepare("UPDATE rbr_received_bug_reports SET rbr_snooze_until = now() AT TIME ZONE 'UTC' - INTERVAL '1 minute'
+	WHERE " . ReceivedBugReport::GROUP_KEY . " = ?")->execute(array($fp));
+$first = new ReceivedBugReport($first->key, TRUE);
+$g = $state_of($fp);
+check($first->status() === ReceivedBugReport::STATUS_NEW && $g['state'] === 'needs_you'
+		&& count(new MultiReceivedBugReport(array('needs_you' => true, 'group' => $fp))) === (int)$g['reports'],
+	'a snooze that ended reads as needing you, in the report, the group and the count', json_encode($g));
+check(ReceivedBugReport::triage_group($fp, ReceivedBugReport::STATUS_RESOLVED, 1) > 0
+		&& ReceivedBugReport::triage_group($fp, ReceivedBugReport::STATUS_NEW, 1) > 0 && $state_of($fp)['state'] === 'needs_you',
+	'Reopen puts a resolved fault back in Needs you');
+try {
+	ReceivedBugReport::triage_group($fp, 'snooze_5', 1);
+	check(false, 'a snooze that is not offered is refused');
+} catch (ReceivedBugReportException $e) {
+	check(true, 'a snooze that is not offered is refused');
+}
+
+section('The pages offer an incident\'s choices');
+
+$session->set_api_user($admin->key);
+$_GET = array('rbr_received_bug_report_id' => (string)$first->key);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$html = bri_render('plugins/bug_reports/admin/admin_bug_report.php');
+$_GET = array('view' => 'grouped', 'state' => 'needs_you');
+$list_html = bri_render('plugins/bug_reports/admin/admin_bug_reports.php');
+$session->clear_api_user();
+check(strpos($html, 'RENDER FAILED') === false && strpos($html, '>Resolve<') !== false && strpos($html, '>Ignore<') !== false
+		&& strpos($html, 'Snooze for') !== false && strpos($html, '>Reopen<') === false,
+	'the report page offers Resolve, Ignore and Snooze, and not Reopen while it needs you', substr(strip_tags($html), 0, 300));
+check(strpos($list_html, 'RENDER FAILED') === false && strpos($list_html, 'With the selected') !== false
+		&& strpos($list_html, 'value="' . $fp . '"') !== false && strpos($list_html, 'Mute') === false,
+	'the list ticks faults for one choice, and says nothing of Mute');
 
 BugReportIntake::useClient(null);
 harness_finish();

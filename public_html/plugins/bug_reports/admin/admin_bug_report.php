@@ -2,11 +2,12 @@
 /** @joinery-admin level=9 */
 /**
  * Admin: one received bug report — what the member wrote, the image, the
- * callback's verdict and reason, and every section of the bundle. Mark seen,
- * Mark closed and Reopen are POST buttons; a muted report offers Unmute, which
- * unmutes its whole fault. Everything shown came from another
- * machine and is escaped.
+ * callback's verdict and reason, and every section of the bundle. Resolve,
+ * Ignore, Reopen and Snooze are an incident's choices, and apply to every
+ * report of its fault (this report alone when it recorded no error).
+ * Everything shown came from another machine and is escaped.
  *
+ * @version 1.3.0 - Resolve, Ignore, Snooze and Reopen on the fault; Mark seen, Mark closed and Unmute are gone
  * @version 1.2.1 - a missing report answers 404 through assert_found(), not a raw status line
  *                  the error page then tried to set again (a warning on PHP 8.5)
  * @version 1.2.0 - muted reports: Unmute
@@ -20,21 +21,13 @@ $id = (int)($_GET['rbr_received_bug_report_id'] ?? $_POST['rbr_received_bug_repo
 $report = new ReceivedBugReport($id, TRUE);
 $report->assert_found();
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-	switch ($_POST['action'] ?? '') {
-		case 'seen':
-			$report->set('rbr_status', ReceivedBugReport::STATUS_SEEN);
-			$report->save();
-			break;
-		case 'close':
-			$report->close((int)$session->get_user_id());
-			break;
-		case 'reopen':
-			$report->reopen();
-			break;
-		case 'unmute':
-			ReceivedBugReport::unmute_group($report->group_key());
-			break;
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'triage') {
+	// One UPDATE across every report of the fault: the reports' own write level.
+	Access::demand(ReceivedBugReport::access_level('write'), $session);
+	try {
+		$report->triage((string)($_POST['do'] ?? ''), (int)$session->get_user_id());
+	} catch (ReceivedBugReportException $e) {
+		// A value the page never offers: nothing changed.
 	}
 	header('Location: /plugins/bug_reports/admin/admin_bug_report?rbr_received_bug_report_id=' . (int)$report->key);
 	exit;
@@ -61,8 +54,9 @@ $hidden = array('rbr_received_bug_report_id' => (int)$report->key);
 $page->begin_box(array('title' => 'Report ' . (int)$report->key));
 echo '<table class="data"><tbody>';
 $rows = array(
-	'Status'   => htmlspecialchars(ucfirst((string)$report->get('rbr_status')))
-		. ($report->get('rbr_closed_time') ? ', ' . htmlspecialchars(LibraryFunctions::convert_time($report->get('rbr_closed_time'), 'UTC', $tz, 'M j, Y')) : ''),
+	'Status'   => htmlspecialchars(ReceivedBugReport::state_words($report->status(), $report->get('rbr_snooze_until'), $report->get('rbr_ignored_through'), $tz))
+		. ($report->status() === ReceivedBugReport::STATUS_RESOLVED && $report->get('rbr_closed_time')
+			? ', ' . htmlspecialchars(LibraryFunctions::convert_time($report->get('rbr_closed_time'), 'UTC', $tz, 'M j, Y')) : ''),
 	'Received' => htmlspecialchars(LibraryFunctions::convert_time($report->get('rbr_received_time'), 'UTC', $tz, 'M j, Y g:i A')),
 	'Site'     => htmlspecialchars((string)$report->get('rbr_claimed_host')),
 	'Version'  => htmlspecialchars((string)$report->get('rbr_claimed_version')),
@@ -78,21 +72,36 @@ $rows = array(
 foreach ($rows as $label => $value) {
 	echo '<tr><th scope="row" style="width: 25%">' . $label . '</th><td>' . $value . '</td></tr>';
 }
-echo '</tbody></table><p>';
-if ($report->get('rbr_status') === ReceivedBugReport::STATUS_NEW) {
-	echo AdminPage::action_button('Mark seen', $base, array('hidden' => $hidden + array('action' => 'seen'))) . ' ';
+echo '</tbody></table>';
+echo '<div class="d-flex flex-wrap align-items-end gap-2 mb-2">';
+foreach (ReceivedBugReport::VERBS as $state => $verb) {
+	if ($state === $report->status()) {
+		continue;
+	}
+	echo AdminPage::action_button($verb, $base, array('hidden' => $hidden + array('action' => 'triage', 'do' => $state)));
 }
-if ($report->get('rbr_status') === ReceivedBugReport::STATUS_MUTED) {
-	echo AdminPage::action_button('Unmute this error', $base, array('hidden' => $hidden + array('action' => 'unmute')));
-} elseif ($report->get('rbr_status') === ReceivedBugReport::STATUS_CLOSED) {
-	echo AdminPage::action_button('Reopen', $base, array('hidden' => $hidden + array('action' => 'reopen')));
-} else {
-	echo AdminPage::action_button('Mark closed', $base, array('hidden' => $hidden + array('action' => 'close')));
+$snoozes = array();
+foreach (ReceivedBugReport::do_options() as $value => $words) {
+	if (strpos($value, 'snooze_') === 0) {
+		$snoozes[$value] = $words;
+	}
 }
-if ($report->group_key() !== '') {
-	echo ' <a href="/plugins/bug_reports/admin/admin_bug_reports?view=all&group=' . urlencode($report->group_key()) . '">Other reports with this error</a>';
-}
-echo '</p>';
+$fw = new FormWriterV2HTML5('report_snooze', array('action' => $base, 'id' => 'report_snooze'));
+$fw->begin_form();
+$fw->hiddeninput('action', '', array('value' => 'triage'));
+$fw->hiddeninput('rbr_received_bug_report_id', '', array('value' => (string)(int)$report->key));
+$fw->dropinput('do', 'Snooze for', array('options' => $snoozes, 'value' => 'snooze_24'));
+$fw->submitbutton('btn_report_snooze', 'Snooze', array('class' => 'btn btn-sm btn-outline-primary'));
+$fw->end_form();
+echo '</div>';
+$in_group = ReceivedBugReport::is_group_key($report->group_key())
+	? count(new MultiReceivedBugReport(array('group' => $report->group_key()))) : 1;
+echo '<p class="small text-muted">' . ($in_group > 1
+	? 'Each applies to all ' . $in_group . ' reports of this error, from every site. '
+		. '<a href="/plugins/bug_reports/admin/admin_bug_reports?view=all&amp;group=' . urlencode($report->group_key()) . '">See them</a>.'
+	: 'Each applies to this report.')
+	. ' Resolve: if it happens again it needs you again. Ignore: quiet while it happens on the versions already reported. '
+	. 'Snooze: back in Needs you when it ends. Reopen: back now.</p>';
 $page->end_box();
 
 $page->begin_box(array('title' => (bool)$report->get('rbr_automatic') ? 'Description' : 'What the member wrote'));
