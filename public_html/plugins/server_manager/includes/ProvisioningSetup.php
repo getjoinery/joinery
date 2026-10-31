@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.12 - hostedStatus() reads the SMTP2GO master key's missing permissions; a key missing one is not ready (B179)
  * @version 1.11 - the service user is a machine account: made with usr_is_machine, and an existing or adopted
  *                 one is marked by setupApiCredentials() (machine_accounts.md)
  * @version 1.10 - the API probe asks for one row with numperpage, a parameter the API has, and says why it failed
@@ -541,6 +542,8 @@ class ProvisioningSetup {
 		$usable  = $account !== null && $account->usable();
 		$smtp2go = trim(self::readSecret('server_manager_smtp2go_api_key')) !== '';
 		$missing = $usable ? $account->missing_scopes() : null;
+		$client = $smtp2go ? Smtp2GoClient::fromSettings() : null;
+		$smtp2go_missing = $client !== null ? $client->missingPermissions() : null;
 		return array(
 			// The default account, where hosted orders go: its name, '' when none is set.
 			'account_label'         => $account !== null ? $account->label() : '',
@@ -549,6 +552,8 @@ class ProvisioningSetup {
 			// null: not checked; otherwise scope => what it is for.
 			'account_missing_scopes' => $missing,
 			'smtp2go_present'       => $smtp2go,
+			// null: not told (no key, or the provider did not say); otherwise path => [what for, group].
+			'smtp2go_missing'       => $smtp2go_missing,
 			'smtp2go_sandbox_users' => in_array(trim(self::readSetting('server_manager_smtp2go_sandbox_users')), array('', '0'), true) === false,
 			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
 			'send_allowance'        => self::readSetting('server_manager_hosted_send_allowance'),
@@ -559,7 +564,8 @@ class ProvisioningSetup {
 			'manage_url'            => self::readSetting('server_manager_hosted_manage_url'),
 			'smtp2go_referral_url'  => self::readSetting('server_manager_smtp2go_referral_url'),
 			'storage_referral_url'  => self::readSetting('server_manager_storage_referral_url'),
-			'ready'                 => $usable && $smtp2go && is_array($missing) && !isset($missing[OperatorCloudAccount::CREATE_SCOPE]),
+			'ready'                 => $usable && $smtp2go && empty($smtp2go_missing)
+				&& is_array($missing) && !isset($missing[OperatorCloudAccount::CREATE_SCOPE]),
 		);
 	}
 

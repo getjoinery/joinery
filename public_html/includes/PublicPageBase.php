@@ -934,6 +934,9 @@ abstract class PublicPageBase {
 		if (($options['consent_banner'] ?? true) !== false) {
 			echo $this->renderConsentBanner();
 		}
+
+		// A session in test mode says so on every page, with the way out.
+		echo TestMode::banner_html();
 	}
 
 	/** @var array<string,bool> vault scripts already emitted on this page */

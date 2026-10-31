@@ -133,7 +133,7 @@ check($main->get('oca_account_name') === 'Main Co (user main)' && $main->get('oc
 	&& !$main->get('oca_is_test') && (int)$main->get('oca_added_by_usr_user_id') === $uid,
 	'the provider\'s name and company are recorded, it is not the test account, and who added it');
 $missing = $main->missing_scopes();
-check(is_array($missing) && array_keys($missing) === array('account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write', 'events:read_only')
+check(is_array($missing) && array_keys($missing) === array('account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write', 'events:read_only', 'domains:read_only')
 	&& strpos($missing['ips:read_write'], 'swapping') !== false && strpos($missing['events:read_only'], 'Tier 2') !== false,
 	'the scopes it lacks are named, each with what needs it', json_encode($missing));
 check($main->can_create(), 'it can create servers');

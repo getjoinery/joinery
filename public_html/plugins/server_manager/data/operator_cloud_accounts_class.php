@@ -29,6 +29,7 @@
  * record (cvp_oca_operator_cloud_account_id), and everything done to it later
  * is done with that account's credential (HeldCloudAccounts).
  *
+ * @version 1.4 - domains:read_only: the handover note reads the account's DNS Manager (InstanceTransferFinish), so it is declared
  * @version 1.3 - The driver is its provider's (ComputeDriverRegistry): driver_for() takes the provider, add_key() records
  *               the one chosen, scopes are checked only for a provider whose tokens carry them, and a provider whose API
  *               names no account keeps the name typed when it was added (specs/site_copy_anything_to_anything.md D2)
@@ -78,13 +79,14 @@ class OperatorCloudAccount extends SystemBase {
 		'volumes:read_only'  => 'the check before a handover',
 		'ips:read_write'     => 'a site copy\'s switch-over by swapping two servers\' addresses',
 		'events:read_only'   => 'reading a server\'s activity log before its encrypted data root is opened, to refuse a boot after a rescue boot or a root-password reset (Tier 2)',
+		'domains:read_only'  => 'listing a domain\'s records from this account\'s DNS Manager in the note a customer gets when their server is handed to their own account',
 	);
 	/** The scope without which no server can be created on the account. */
 	const CREATE_SCOPE = 'linodes:read_write';
 
 	/** What a Connect with Linode asks for: everything above. */
 	const CONNECT_SCOPES = array('linodes:read_write', 'account:read_write', 'firewall:read_only',
-		'volumes:read_only', 'ips:read_write', 'events:read_only');
+		'volumes:read_only', 'ips:read_write', 'events:read_only', 'domains:read_only');
 
 	protected static $foreign_key_actions = array(
 		// A record of who added it, never an owner: the account stays.

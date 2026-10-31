@@ -364,6 +364,13 @@
             "parent": "system"
         },
         {
+            "slug": "system-test-mode",
+            "title": "Test Mode",
+            "url": "/test_mode",
+            "order": 14,
+            "parent": "system"
+        },
+        {
             "slug": "cloud-storage",
             "title": "Cloud Storage",
             "url": "admin_cloud_storage",

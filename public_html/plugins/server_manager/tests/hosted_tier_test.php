@@ -622,6 +622,22 @@ harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '1');
 check(ProvisionHostedMail::sandbox_users(), 'and on when the hosted card sets it');
 harness_set_setting_mem('server_manager_smtp2go_sandbox_users', '0');
 
+section('The master key\'s missing permissions are named before a purchase finds them (B179)');
+$perm_client = function (array $body) {
+	$mock = new \GuzzleHttp\Handler\MockHandler(array(new \GuzzleHttp\Psr7\Response(200, array(), json_encode($body))));
+	return new Smtp2GoClient('test-key', new \GuzzleHttp\Client(array('handler' => \GuzzleHttp\HandlerStack::create($mock))));
+};
+$all = array_map(function ($p) { return '/' . $p; }, array_keys(Smtp2GoClient::ENDPOINTS_USED));
+check($perm_client(array('data' => $all))->missingPermissions() === array(), 'a key with every endpoint lacks nothing');
+$narrow = array_values(array_filter($all, function ($p) { return strpos($p, '/subaccount') !== 0; }));
+$missing = $perm_client(array('data' => array('permissions' => $narrow)))->missingPermissions();
+check(is_array($missing) && array_keys($missing) === array('subaccount/add', 'subaccount/edit', 'subaccount/close', 'subaccount/reopen', 'subaccounts/search')
+	&& $missing['subaccount/add'][1] === 'Subaccounts', 'a key without Subaccounts is named, wherever the list sits', var_export($missing, true));
+check($perm_client(array('data' => array()))->missingPermissions() === null, 'an empty answer is not checked, never every permission missing');
+$fail = new \GuzzleHttp\Handler\MockHandler(array(new \GuzzleHttp\Psr7\Response(401, array(), '{}')));
+$fail_client = new Smtp2GoClient('bad', new \GuzzleHttp\Client(array('handler' => \GuzzleHttp\HandlerStack::create($fail))));
+check($fail_client->missingPermissions() === null, 'a refused key reads as not checked');
+
 // ---------------------------------------------------------------------------
 section('Only a sold site is billed: a copy on our account never gets a trial');
 

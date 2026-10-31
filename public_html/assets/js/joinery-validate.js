@@ -1,6 +1,7 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.7 - the load banner prints only with window.JOINERY_VALIDATE_DEBUG
  * @version 1.2.6 - an empty field nobody has typed in is not judged as it
  *   loses focus: the error line it drew moved whatever was being pressed, so a
  *   first click on a button below an autofocused field (Use a passkey on
@@ -37,7 +38,7 @@
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.2.6 ===', 'color: blue; font-weight: bold');
+if (window.JOINERY_VALIDATE_DEBUG) console.log('%c=== JOINERY VALIDATION v1.2.7 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
