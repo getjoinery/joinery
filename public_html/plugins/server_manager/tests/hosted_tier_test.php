@@ -634,9 +634,11 @@ $missing = $perm_client(array('data' => array('permissions' => $narrow)))->missi
 check(is_array($missing) && array_keys($missing) === array('subaccount/add', 'subaccount/edit', 'subaccount/close', 'subaccount/reopen', 'subaccounts/search')
 	&& $missing['subaccount/add'][1] === 'Subaccounts', 'a key without Subaccounts is named, wherever the list sits', var_export($missing, true));
 check($perm_client(array('data' => array()))->missingPermissions() === null, 'an empty answer is not checked, never every permission missing');
-$fail = new \GuzzleHttp\Handler\MockHandler(array(new \GuzzleHttp\Psr7\Response(401, array(), '{}')));
+$fail = new \GuzzleHttp\Handler\MockHandler(array(new \GuzzleHttp\Psr7\Response(401, array(), json_encode(array('data' => array('error' => 'Invalid API key'))))));
 $fail_client = new Smtp2GoClient('bad', new \GuzzleHttp\Client(array('handler' => \GuzzleHttp\HandlerStack::create($fail))));
-check($fail_client->missingPermissions() === null, 'a refused key reads as not checked');
+$why = '';
+try { $fail_client->missingPermissions(); } catch (Smtp2GoException $e) { $why = $e->getMessage(); }
+check(strpos($why, 'Invalid API key') !== false, 'a refused key throws, carrying the provider\'s reason for the tab', $why);
 
 // ---------------------------------------------------------------------------
 section('Only a sold site is billed: a copy on our account never gets a trial');

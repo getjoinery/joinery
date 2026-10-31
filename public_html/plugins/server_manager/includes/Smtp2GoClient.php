@@ -33,6 +33,8 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.9 - missingPermissions() lets a failed call's Smtp2GoException through, so the Hosted
+ *   tier tab says why it could not check instead of only that it could not
  * @version 1.8 - missingPermissions(): the endpoints below that the master key may not call, read from
  *   api_keys/permissions, so the Hosted tier tab names a key too narrow before a purchase finds it (B179)
  * @version 1.7 - monthToDateSends() reads the subaccount's plan_used from subaccounts/search: the
@@ -108,16 +110,15 @@ class Smtp2GoClient {
 
 	/**
 	 * The endpoints in ENDPOINTS_USED this key may not call, as path =>
-	 * [what for, permission group]. Null when that cannot be told: the call
-	 * failed, or the provider listed nothing (a list it did not give is not a
-	 * key that can do nothing). api_keys/permissions answers for every key.
+	 * [what for, permission group]. Null when the provider listed nothing (a
+	 * list it did not give is not a key that can do nothing). A failed call
+	 * throws Smtp2GoException, whose message says why. api_keys/permissions
+	 * answers for every key.
+	 *
+	 * @throws Smtp2GoException
 	 */
 	public function missingPermissions(): ?array {
-		try {
-			$data = $this->post('api_keys/permissions', array());
-		} catch (Smtp2GoException $e) {
-			return null;
-		}
+		$data = $this->post('api_keys/permissions', array());
 		$allowed = array();
 		array_walk_recursive($data, function ($value) use (&$allowed) {
 			if (is_string($value) && strpos($value, '/') !== false) {

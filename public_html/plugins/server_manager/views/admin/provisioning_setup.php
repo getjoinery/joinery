@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.7 - the SMTP2GO master key row says why its permissions could not be read
  * @version 2.6 - the Hosted tier tab names the SMTP2GO master key's missing permissions (B179)
  * @version 2.5 - API not responding says why (the HTTP status and the API's own error, or the connection's) (B21)
  * @version 2.4 - The Cleanup tab lists the address records a run removed with its servers (fleet_security_patching WP10)
@@ -446,6 +447,9 @@ product simply cannot be fulfilled — the bring-your-own-cloud product is unaff
 		<td>
 			<?php if (!$hosted['smtp2go_present']): ?>
 				<?= smps_badge(false, '', 'Not set', 'warning') ?> Enter it below.
+			<?php elseif ($hosted['smtp2go_check_error'] !== ''): ?>
+				<?= smps_badge(false, '', 'Permissions not checked', 'warning') ?> Asking SMTP2GO what this key may do failed:
+				<?= htmlspecialchars($hosted['smtp2go_check_error']) ?>
 			<?php elseif ($hosted['smtp2go_missing'] === null): ?>
 				<?= smps_badge(false, '', 'Permissions not checked', 'secondary') ?> SMTP2GO did not say what this key may do.
 			<?php elseif ($hosted['smtp2go_missing']): ?>
