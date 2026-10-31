@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php db --filter=idempotency_sealed
  *
+ * @version 1.1 - X-Wing test vault
  * @version 1.0
  */
 
@@ -110,11 +111,11 @@ try {
 
 	$owner = make_user('IdsOwner');
 	$owner_id = (int)$owner->key;
-	$kp = sodium_crypto_box_keypair();
-	$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
+	$kp = (new SealedBox())->generateKeypair();
+	$secret = $kp['secret'];
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', $owner_id);
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$vault->set('uev_public_key', $kp['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->save();
 	$vault->load();

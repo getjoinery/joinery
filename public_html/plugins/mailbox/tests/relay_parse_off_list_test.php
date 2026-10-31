@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php db --filter=relay_parse_off_list
  *
+ * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
 
@@ -60,9 +61,9 @@ try {
 
 	$owner = make_user('RpOwner');
 	$owner_id = intval($owner->key);
-	$kp = sodium_crypto_box_keypair();
-	$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
-	$public = SealedBox::b64url(sodium_crypto_box_publickey($kp));
+	$kp = (new SealedBox())->generateKeypair();
+	$secret = $kp['secret'];
+	$public = $kp['public'];
 
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', $owner_id);

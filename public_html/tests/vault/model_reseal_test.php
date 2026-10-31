@@ -31,10 +31,10 @@ $crypto = new VaultCrypto();
 /** A vault row plus the keypair behind it, so the test can play both ends. */
 function mr_vault(string $suffix): array {
 	$user = make_user('Reseal' . $suffix);
-	$keypair = sodium_crypto_box_keypair();
+	$keypair = (new SealedBox())->generateKeypair();
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', (int)$user->key);
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keypair)));
+	$vault->set('uev_public_key', $keypair['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->set('uev_key_generation', 1);
 	$vault->save();
@@ -43,9 +43,9 @@ function mr_vault(string $suffix): array {
 	return array(
 		'user_id' => (int)$user->key,
 		'vault'   => $vault,
-		'public'  => SealedBox::b64url(sodium_crypto_box_publickey($keypair)),
-		'secret'  => SealedBox::b64url(sodium_crypto_box_secretkey($keypair)),
-		'key'     => vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($keypair))),
+		'public'  => $keypair['public'],
+		'secret'  => $keypair['secret'],
+		'key'     => vault_fixture_key($keypair['secret']),
 	);
 }
 
@@ -74,9 +74,9 @@ function mr_raw(int $id): array {
 
 $owner   = mr_vault('Owner');
 $other   = mr_vault('Other');
-$new_keypair  = sodium_crypto_box_keypair();
-$new_public   = SealedBox::b64url(sodium_crypto_box_publickey($new_keypair));
-$new_secret   = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($new_keypair)));
+$new_keypair  = (new SealedBox())->generateKeypair();
+$new_public   = $new_keypair['public'];
+$new_secret   = vault_fixture_key($new_keypair['secret']);
 
 $draining  = mr_contact($owner, 'draining@example.com', 1);
 $already   = mr_contact($owner, 'already@example.com', 2);

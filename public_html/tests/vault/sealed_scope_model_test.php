@@ -94,7 +94,7 @@ function ssm_throws(callable $fn): ?Throwable {
 function ssm_browser_open(array $api_row, string $secret_b64url, string $public_b64, int $id, string $field): string {
 	$box = new SealedBox();
 	$scope = VaultCrypto::parseEdgeScope($api_row['sealed_dek']);
-	$dek = $box->openEdge(substr($api_row['sealed_dek'], strlen('v1.edgeseal.' . $scope . '.')), $secret_b64url, $public_b64);
+	$dek = $box->openEdge(substr($api_row['sealed_dek'], strlen('v2.edgeseal.' . $scope . '.')), $secret_b64url, $public_b64);
 	$blob = substr((string)$api_row[$field], strlen('v1.edge.'));
 	return $box->aeadDecryptGcm($blob, $dek, $api_row['sealed_ad_prefix'] . $id . ':' . $field);
 }
@@ -128,7 +128,7 @@ section('A server write to a client-scope row seals in the browser format');
 $fort = ssm_new('SealedScopeProbe', $owner_id, 'fort@example.com', 'Fortress Friend', 'fortress');
 $fid = (int)$fort->key;
 $raw = ssm_raw($fid);
-check(strpos((string)$raw['imc_sealed_key'], 'v1.edgeseal.drive.') === 0, 'the key is sealed to the drive scope, framed v1.edgeseal.drive.');
+check(strpos((string)$raw['imc_sealed_key'], 'v2.edgeseal.drive.') === 0, 'the key is sealed to the drive scope, framed v2.edgeseal.drive.');
 check(strpos((string)$raw['imc_address'], 'v1.edge.') === 0 && strpos((string)$raw['imc_display_name'], 'v1.edge.') === 0,
 	'every sealed field is framed v1.edge.');
 check(strpos((string)$raw['imc_address'], 'fort@example.com') === false, 'and no plaintext survives in the column');
@@ -178,7 +178,7 @@ $full->set('imc_address', 'fort2@example.com');
 $full->set('imc_display_name', 'Fortress Renamed');
 $full->save();
 $raw2 = ssm_raw($fid);
-check((string)$raw2['imc_sealed_key'] !== (string)$raw['imc_sealed_key'] && strpos((string)$raw2['imc_sealed_key'], 'v1.edgeseal.drive.') === 0,
+check((string)$raw2['imc_sealed_key'] !== (string)$raw['imc_sealed_key'] && strpos((string)$raw2['imc_sealed_key'], 'v2.edgeseal.drive.') === 0,
 	'a full server update re-seals every field under a NEW DEK');
 $api2 = (new SealedScopeProbe($fid, TRUE))->export_for_api();
 check(ssm_browser_open($api2, $client_pair['secret'], $client_public, $fid, 'imc_address') === 'fort2@example.com'
@@ -219,6 +219,8 @@ $refusals = array(
 	'a field that is not declared sealed' => array($sealed_dek, $fields + array('imc_source' => 'v1.edge.AAAA')),
 	'a field that is not v1.edge. ciphertext' => array($sealed_dek, array('imc_address' => 'browser@example.com') + $fields),
 	'a post that leaves a populated field behind' => array($sealed_dek, array('imc_address' => $fields['imc_address'])),
+	// A stale page posting the old frame for this v2 vault: nothing could open it (reviewer2 WP1 B4).
+	'a v1-framed key for a v2 vault' => array('v1.edgeseal.drive.' . (string)VaultCrypto::edgeFrame($sealed_dek)['body'], $fields),
 );
 foreach ($refusals as $what => $args) {
 	// The last case needs a populated field to leave behind; give the shell one.
@@ -270,7 +272,7 @@ check($e instanceof RuntimeException, 'a row whose scope is the server scope ref
 section('A server-scope row on the same model is exactly server custody');
 // ---------------------------------------------------------------------------
 $raw_srv = ssm_raw((int)$srv_row->key);
-check(strpos((string)$raw_srv['imc_sealed_key'], 'v1.seal.') === 0 && strpos((string)$raw_srv['imc_address'], 'v1.aead.') === 0,
+check(strpos((string)$raw_srv['imc_sealed_key'], 'v2.seal.') === 0 && strpos((string)$raw_srv['imc_address'], 'v1.aead.') === 0,
 	'it seals to libsodium formats');
 $srv = new SealedScopeProbe((int)$srv_row->key, TRUE);
 check($srv->get('imc_address') === 'srv@example.com', 'reads back in-window');

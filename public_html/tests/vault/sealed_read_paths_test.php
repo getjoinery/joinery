@@ -57,6 +57,8 @@
  *
  * @version 1.4 - VaultSealedForBrowserException is caught only by the API export
  * @version 1.3 - the browser-format opens (openEdge, aeadDecryptGcm) join both pins
+ * @version 1.3 - the v2 openers (openV2, openV2WithKey) join the decrypt pin; the backup envelope and
+ *                the copy live test's own recovery key are their only callers outside SealedBox
  * @version 1.2 - the vault-secret pin (openDek/openBinary/unwrapKey/wrapKey/generateKeypair)
  * @version 1.1
  */
@@ -66,7 +68,7 @@ harness_boot();
 
 /** Call-shaped uses only: `->openDek(` / `::aeadDecrypt(` etc. A mention in
  *  prose or a docblock without the call parenthesis does not count. */
-const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|openEdge|aeadDecrypt|aeadDecryptGcm)\s*\(/';
+const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|openEdge|openV2|openV2WithKey|aeadDecrypt|aeadDecryptGcm)\s*\(/';
 
 /** The closed set, relative to public_html. */
 $allowed = array(
@@ -74,6 +76,8 @@ $allowed = array(
 	'includes/SealedBox.php',
 	'includes/VaultCrypto.php',
 	'plugins/mailbox/includes/RelaySpoolConsumer.php',
+	'includes/BackupEnvelope.php',                        // a backup's data key, with the site or recovery key: no vault key
+	'plugins/server_manager/includes/SiteCopyLiveRun.php', // the live test's own throwaway recovery key
 );
 
 /** Instance calls only (`->openDek(`): every SealedBox primitive is an instance

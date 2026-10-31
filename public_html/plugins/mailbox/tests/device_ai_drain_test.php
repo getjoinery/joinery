@@ -19,6 +19,7 @@
  *     with the same words (they are what the retry feeds back);
  *   - the panel grades a model name as AiEndpointRegistry does.
  *
+ * @version 1.3 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.2 - the call carries the reasoning control
  * @version 1.1 - on demand: the message-to-entry adapter and the button labels
  * @version 1.0
@@ -90,7 +91,7 @@ file_put_contents($runner, "globalThis.window = globalThis;\n" . $req
 	. "  out.parsed = input.answers.map(a => window.VerdictCheck.parse(a[1], input.descriptors[a[0]], input.jobs[a[0]]));\n"
 	. "  out.grades = input.models.map(m => window.MailboxDeviceAi.logic.gradeModel(m, input.reference));\n"
 	. "  const L = window.MailboxDeviceAi.logic;\n"
-	. "  out.entry = L.entryFromMessage({ id: 9, received_time: 't', dkim_result: 'pass', spf_result: 'fail', dmarc_result: 'none', auth_source: 'local', recipient: 'r@x', sealed: { key: 9, sealed_dek: 'v1.edgeseal.mail.q', iem_subject: 'v1.edge.s' }, body_plain: 'OPENED' });\n"
+	. "  out.entry = L.entryFromMessage({ id: 9, received_time: 't', dkim_result: 'pass', spf_result: 'fail', dmarc_result: 'none', auth_source: 'local', recipient: 'r@x', sealed: { key: 9, sealed_dek: 'v2.edgeseal.mail.q', iem_subject: 'v1.edge.s' }, body_plain: 'OPENED' });\n"
 	. "  out.labels = [L.actionLabel('email_triage'), L.actionLabel('email_security_scan')];\n"
 	. "  out.onDemand = typeof window.MailboxDeviceAi.messageActions;\n"
 	. "  process.stdout.write(JSON.stringify(out));\n"
@@ -131,7 +132,7 @@ foreach ($answers as $i => $a) {
 
 section('On demand: an opened message becomes a queue entry');
 $en = $js['entry'];
-check($en['id'] === 9 && $en['sealed']['sealed_dek'] === 'v1.edgeseal.mail.q' && $en['spf_result'] === 'fail' && $en['recipient'] === 'r@x',
+check($en['id'] === 9 && $en['sealed']['sealed_dek'] === 'v2.edgeseal.mail.q' && $en['spf_result'] === 'fail' && $en['recipient'] === 'r@x',
 	'the thread message\'s sealed columns and clear results are what judgeEntry gets');
 check(!isset($en['body_plain']), 'nothing opened rides along: judgeEntry opens the sealed columns itself');
 check($js['labels'] === array('Summarize', 'Scan now') && $js['onDemand'] === 'function', 'the buttons are Summarize and Scan now');

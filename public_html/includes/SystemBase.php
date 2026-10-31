@@ -1613,7 +1613,7 @@ abstract class SystemBase {
 
 		$scope = VaultCrypto::parseEdgeScope($sealed_dek);
 		if ($scope === null) {
-			throw new RuntimeException($cls . ': refused browser ciphertext: the key is not a browser-sealed key (v1.edgeseal.{scope}.).');
+			throw new RuntimeException($cls . ': refused browser ciphertext: the key is not a browser-sealed key (v2.edgeseal.{scope}.).');
 		}
 		$row_scope = static::resolveSealScope($row);
 		if ($scope !== $row_scope) {
@@ -1658,12 +1658,17 @@ abstract class SystemBase {
 
 		if ($public_key === null || $public_key === '') {
 			$generation = $vault->sealingKeyGeneration();
+			$public_key = $vault->sealingPublicKey();
 		} elseif ($public_key === (string)$vault->get('uev_public_key')) {
 			$generation = (int)$vault->get('uev_key_generation');
 		} elseif ($vault->get('uev_pending_key_generation') !== null && $public_key === (string)$vault->get('uev_pending_public_key')) {
 			$generation = (int)$vault->get('uev_pending_key_generation');
 		} else {
 			throw new RuntimeException($cls . ': refused browser ciphertext: it is sealed to a key this vault does not have.');
+		}
+		if (!VaultCrypto::edgeVersionMatchesKey($sealed_dek, (string)$public_key)) {
+			throw new RuntimeException($cls . ': refused browser ciphertext: its key is sealed in another format than the vault key it names '
+				. '(a page from before the vault\'s last rotation). Reload the page and save again.');
 		}
 
 		$sets = array();
@@ -1979,7 +1984,7 @@ abstract class SystemBase {
 	 * a sibling scope's rows would match. It is escaped (and '%', and the escape).
 	 */
 	protected static function clientCustodyKeyLike(string $scope): string {
-		return VaultCrypto::EDGE_SEAL_PREFIX . str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $scope) . '.%';
+		return VaultCrypto::EDGE_SEAL_LIKE_PREFIX . str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $scope) . '.%';
 	}
 
 	/**

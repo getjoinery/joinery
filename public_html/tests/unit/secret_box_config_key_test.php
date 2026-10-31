@@ -23,6 +23,7 @@
  *
  * Run: php tests/unit/secret_box_config_key_test.php
  *
+ * @version 1.1 - the backup site key: a seed is minted, an old X25519 keypair moved to .retired
  * @version 1.0
  */
 
@@ -138,7 +139,41 @@ check(sbck_key(file_get_contents($c4)) === null,
 	'an unprivileged caller mints nothing',
 	'config/ belongs to the tree owner; a non-root mint would mean the pool could write it');
 
-array_map('unlink', glob($dir . '/*'));
-rmdir($dir);
+section('The backup site key is an X-Wing seed, and an old keypair is moved aside');
+
+$kd = $dir . '/keys';
+mkdir($kd, 0700);
+sbck_shell('joinery_mint_backup_site_key', $kd);
+$seed = base64_decode(trim((string)@file_get_contents($kd . '/backup_site_key')), true);
+check($seed !== false && strlen($seed) === 32, 'a fresh site key is base64 of a 32-byte seed');
+$minted = file_get_contents($kd . '/backup_site_key');
+sbck_shell('joinery_mint_site_secrets', $dir);   // config_dir = $dir/config, absent: mints nothing there
+sbck_shell('joinery_retire_old_backup_site_key', $kd);
+check(file_get_contents($kd . '/backup_site_key') === $minted && !file_exists($kd . '/backup_site_key.retired'),
+	'a seed is left exactly where it is');
+
+$old = base64_encode(sodium_crypto_box_keypair());
+file_put_contents($kd . '/backup_site_key', $old);
+$site = $dir . '/site';
+mkdir($site . '/config', 0700, true);
+copy($kd . '/backup_site_key', $site . '/config/backup_site_key');
+$out = sbck_shell('joinery_mint_site_secrets', $site);
+check(file_get_contents($site . '/config/backup_site_key.retired') === $old,
+	'an old 64-byte keypair is renamed to backup_site_key.retired, unchanged', $out);
+$new = base64_decode(trim((string)@file_get_contents($site . '/config/backup_site_key')), true);
+check($new !== false && strlen($new) === 32, 'and a seed is minted in its place on the same converge');
+check(strpos($out, 'moved the old X25519 backup_site_key aside') !== false, 'the converge says so');
+
+file_put_contents($site . '/config/backup_site_key', $old);
+sbck_shell('joinery_mint_site_secrets', $site);
+check(file_get_contents($site . '/config/backup_site_key.retired') === $old
+	&& count(glob($site . '/config/backup_site_key.retired.*')) === 1,
+	'a second old key never overwrites the first .retired file');
+
+file_put_contents($kd . '/backup_site_key', $old);
+sbck_shell('joinery_retire_old_backup_site_key', $kd, false);
+check(file_get_contents($kd . '/backup_site_key') === $old, 'moving a key aside is root-only too');
+
+exec('rm -rf ' . escapeshellarg($dir));
 
 harness_finish();

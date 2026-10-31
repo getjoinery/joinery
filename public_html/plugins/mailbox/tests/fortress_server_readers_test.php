@@ -20,6 +20,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_server_readers
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - the calendar tool's source() states a line and a field value
  */
 
@@ -59,14 +60,14 @@ try {
 
 	// A server window open for the owner: the readers below would open a Private
 	// row now, so whatever keeps them off this one is the Fortress guard.
-	$keys = sodium_crypto_box_keypair();
+	$keys = (new SealedBox())->generateKeypair();
 	$uv = new UserEncryptionVault(NULL);
 	$uv->set('uev_usr_user_id', $owner_id);
-	$uv->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
+	$uv->set('uev_public_key', $keys['public']);
 	$uv->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$uv->save();
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($uv->key));
-	vault_fixture_open_window($owner_id, SealedBox::b64url(sodium_crypto_box_secretkey($keys)));
+	vault_fixture_open_window($owner_id, $keys['secret']);
 	harness_defer(function () use ($owner_id) { try { VaultUnlock::lock($owner_id); } catch (\Throwable $e) {} });
 
 	// ---------------------------------------------------------------- AI

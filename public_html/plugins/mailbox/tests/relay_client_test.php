@@ -153,14 +153,14 @@ harness_register_model('InboundEmailDomain', $domain->key);
 $held_id = '1700000001-' . bin2hex(random_bytes(4));
 $probe->spoolWrite('main', $held_id, 'meta', json_encode(array('spool_id' => $held_id, 'recipient' => 'x@rct-off-' . $suffix . '.example',
 	'key_kind' => 'transport', 'received_utc' => gmdate('c'))));
-$probe->spoolWrite('main', $held_id, 'seal', 'v1.seal.HELD');
+$probe->spoolWrite('main', $held_id, 'seal', 'v2.seal.HELD');
 $bad_id = '1700000002-' . bin2hex(random_bytes(4));
 $probe->spoolWrite('main', $bad_id, 'meta', json_encode(array('spool_id' => $bad_id, 'recipient' => 'no-at-sign', 'key_kind' => 'transport')));
-$probe->spoolWrite('main', $bad_id, 'seal', 'v1.seal.BAD');
+$probe->spoolWrite('main', $bad_id, 'seal', 'v2.seal.BAD');
 $torn_id = '1700000003-' . bin2hex(random_bytes(4));
-$probe->spoolWrite('main', $torn_id, 'seal', 'v1.seal.TORN'); // no .meta: not listed, not touched
+$probe->spoolWrite('main', $torn_id, 'seal', 'v2.seal.TORN'); // no .meta: not listed, not touched
 $probe->spoolWrite('other', '1700000004-aaaaaaaa', 'meta', '{}');
-$probe->spoolWrite('other', '1700000004-aaaaaaaa', 'seal', 'v1.seal.OTHER');
+$probe->spoolWrite('other', '1700000004-aaaaaaaa', 'seal', 'v2.seal.OTHER');
 
 $result = (new RelaySpoolConsumer($relay))->pull();
 check($result['status'] === 'success', 'the pull completes over the API', json_encode($result));

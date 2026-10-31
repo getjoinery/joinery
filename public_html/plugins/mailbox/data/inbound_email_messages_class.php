@@ -1024,8 +1024,16 @@ class InboundEmailMessage extends SystemBase {
 	/** The client-custody vault scope Fortress mail seals to (plugin.json vaultScopes). */
 	const SEAL_SCOPE_FORTRESS = 'mail';
 
-	/** How a message key sealed to the mail key begins. */
+	/** How a message key sealed to the mail key begins when written (v2). */
 	const MAIL_KEY_PREFIX = VaultCrypto::EDGE_SEAL_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
+
+	/** LIKE prefix for a key sealed to the mail key in either seal version ('mail' holds no wildcard). */
+	const MAIL_KEY_LIKE = VaultCrypto::EDGE_SEAL_LIKE_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
+
+	/** Is $key sealed to the mail key (a Fortress message), in either seal version? */
+	public static function isMailKey(?string $key): bool {
+		return $key !== null && VaultCrypto::parseEdgeScope($key) === self::SEAL_SCOPE_FORTRESS;
+	}
 
 	/**
 	 * The generation a relay-sealed row records when no vault holding its
@@ -1111,7 +1119,7 @@ class InboundEmailMessage extends SystemBase {
 
 	/** SQL: $col holds a key sealed to the mail key (a Fortress message). */
 	public static function mailKeySql(string $col = 'iem_sealed_key'): string {
-		return $col . " LIKE '" . self::MAIL_KEY_PREFIX . "%'";
+		return $col . " LIKE '" . self::MAIL_KEY_LIKE . "%'";
 	}
 
 	/**

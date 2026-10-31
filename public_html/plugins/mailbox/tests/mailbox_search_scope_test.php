@@ -29,6 +29,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mailbox/tests/mailbox_search_scope_test.php
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - list rows: senders across the thread, snippet from the newest body, HTML only without a plain part
  * @version 1.0
  */
@@ -117,18 +118,18 @@ $make_msg = function ($alias_id, $thread_key, $subject, $body) use ($domain_id) 
 };
 
 // The owner's vault, with a real keypair so content seals and the window opens.
-$owner_kp = sodium_crypto_box_keypair();
+$owner_kp = (new SealedBox())->generateKeypair();
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $owner_id);
 $vault->set('uev_scope', UserEncryptionVault::SCOPE_USER);
 $vault->set('uev_custody', UserEncryptionVault::CUSTODY_SERVER);
-$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($owner_kp)));
+$vault->set('uev_public_key', $owner_kp['public']);
 $vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 $vault->set('uev_key_generation', 1);
 $vault->save();
 $vault->load();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$vault->key);
-$secret_b64 = SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp));
+$secret_b64 = $owner_kp['secret'];
 
 // One sealed message whose only searchable copy is inside the index, and one
 // plain message in the other mailbox that Postgres can see.

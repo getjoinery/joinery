@@ -82,11 +82,11 @@ function sos_new(string $class, int $user_id, string $address, string $name, str
 // A vault whose secret this test holds, so it can open and close the window at will.
 $owner = make_user('SealOnSave');
 $owner_id = (int)$owner->key;
-$keypair = sodium_crypto_box_keypair();
-$secret = SealedBox::b64url(sodium_crypto_box_secretkey($keypair));
+$keypair = (new SealedBox())->generateKeypair();
+$secret = $keypair['secret'];
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $owner_id);
-$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keypair)));
+$vault->set('uev_public_key', $keypair['public']);
 $vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 $vault->save();
 harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$vault->key);

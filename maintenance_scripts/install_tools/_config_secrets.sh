@@ -3,6 +3,8 @@
 # _config_secrets.sh - the per-site secrets that live in {site}/config, and the
 # one definition of how each is minted.
 #
+# Version: 1.1 - the backup site key is a 32-byte X-Wing seed; an old 64-byte X25519 keypair is
+#                renamed to backup_site_key.retired and a seed minted (specs/post_quantum_sealing.md R7)
 # Version: 1.0 - Extracted so the install and the root moments mint identically
 #                (specs/read_only_tree.md). config/ belongs to the tree owner
 #                now: the PHP pool reads what it needs and creates nothing
@@ -81,9 +83,10 @@ joinery_mint_secret_box_key() {
     mv -f "${tmp}" "${config_file}"
 }
 
-# This site's disposable backup keypair. Minted on first use by whatever ran a
-# backup, which was the web user; it lands in config/, which the pool no longer
-# writes. sodium via php -r, not a platform class: this must not boot settings.
+# This site's disposable backup key: base64 of a 32-byte X-Wing seed, which is
+# 32 random bytes, so minting needs nothing but PHP (the public key is derived
+# from it when a backup seals). It lands in config/, which the pool does not
+# write. php -r, not a platform class: this must not boot settings.
 joinery_mint_backup_site_key() {
     local config_dir="$1"
     local key_file="${config_dir}/backup_site_key"
@@ -93,7 +96,7 @@ joinery_mint_backup_site_key() {
     command -v php >/dev/null 2>&1 || return 1
 
     local tmp="${key_file}.mint.$$"
-    if ! php -r 'echo base64_encode(sodium_crypto_box_keypair());' > "${tmp}" 2>/dev/null \
+    if ! php -r 'echo base64_encode(random_bytes(32));' > "${tmp}" 2>/dev/null \
        || [[ ! -s "${tmp}" ]]; then
         rm -f "${tmp}"
         return 1
@@ -103,6 +106,31 @@ joinery_mint_backup_site_key() {
     chown www-data:www-data "${tmp}" 2>/dev/null || true
     chmod 640 "${tmp}"
     mv -f "${tmp}" "${key_file}"
+}
+
+# An old backup site key (base64 of a 64-byte X25519 keypair) is moved aside so
+# a seed can be minted in its place: nothing seals to an X25519 key any more,
+# and the site would otherwise never back up again. Nothing reads the
+# .retired file; it is kept for an operator to pass by hand to
+# backup_envelope.php open --private, for a backup the old key sealed. An
+# existing .retired is never overwritten. Prints nothing; returns 0 when the
+# key was moved, 1 when there was nothing to move or it could not be moved.
+joinery_retire_old_backup_site_key() {
+    local config_dir="$1"
+    local key_file="${config_dir}/backup_site_key"
+    [[ -f "${key_file}" ]] || return 1
+    [[ "$(id -u)" == "0" ]] || return 1
+    local bytes
+    bytes="$(tr -d '[:space:]' < "${key_file}" | base64 -d 2>/dev/null | wc -c)"
+    [[ "${bytes}" == "64" ]] || return 1
+    local retired="${config_dir}/backup_site_key.retired"
+    if [[ -e "${retired}" ]]; then
+        retired="${retired}.$(date -u +%Y%m%d%H%M%S)"
+        [[ -e "${retired}" ]] && return 1
+    fi
+    mv -n "${key_file}" "${retired}" || return 1
+    [[ -e "${key_file}" ]] && return 1
+    return 0
 }
 
 # The ledger a restore consults before it loads bytes over live data. Created on
@@ -136,6 +164,9 @@ joinery_mint_site_secrets() {
         fi
     fi
 
+    if joinery_retire_old_backup_site_key "${config_dir}"; then
+        echo "config secrets: moved the old X25519 backup_site_key aside (backup_site_key.retired)"
+    fi
     if [[ ! -e "${config_dir}/backup_site_key" ]]; then
         if joinery_mint_backup_site_key "${config_dir}"; then
             echo "config secrets: minted backup_site_key"

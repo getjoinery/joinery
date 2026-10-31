@@ -17,6 +17,7 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.6 - a v2 (X-Wing) copy key request: ciphertext shown, 1216-byte public key answered
  * @version 1.5 - an old container's stop its host never takes up is owed, not waited for: the switch-over ends, and
  *               the stop is recorded when the host runs it (B103)
  * @version 1.4 - holds the copy lock for the run, so the live tick never refuses one of its actions
@@ -534,6 +535,24 @@ Setting::put(CopyKeyHandoff::ANSWER_SETTING, '');
 CopyKeyHandoff::decline(5);
 $ans = json_decode((string)DbConnector::get_instance()->get_db_link()->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'copy_key_answer'")->fetchColumn(), true);
 check(!empty($ans['declined']), 'a decline is handed to the agent');
+
+// A backup sealed to an X-Wing recovery key: the request carries the KEM
+// ciphertext, and the answer names the 1216-byte public key it was sealed to.
+$x_pub = (new XWing())->publicKey(random_bytes(32));
+Setting::put(CopyKeyHandoff::ANSWER_SETTING, '');
+Setting::put(CopyKeyHandoff::REQUEST_SETTING, json_encode(array('job_id' => 7, 'chain_id' => $chain_id, 'site' => 'scb.example.org',
+	'manifest_sha256' => str_repeat('ab', 32), 'recovery_fingerprint' => hash('sha256', $x_pub),
+	'ciphertext' => base64_encode(random_bytes(XWing::CIPHERTEXT_BYTES)), 'issued_time' => gmdate('Y-m-d H:i:s'),
+	'expires_time' => gmdate('Y-m-d H:i:s', time() + 3600))));
+$p = CopyKeyHandoff::pending();
+check($p && $p['version'] === SealedBox::V2 && strlen(base64_decode($p['ciphertext'])) === XWing::CIPHERTEXT_BYTES,
+	'a request carrying a ciphertext is a v2 request, and the page is given the ciphertext', json_encode($p));
+$threw = '';
+try { CopyKeyHandoff::answer(7, base64_encode(random_bytes(32)), base64_encode(random_bytes(32))); } catch (Exception $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'a v2 answer naming a 32-byte public key is refused');
+CopyKeyHandoff::answer(7, base64_encode(random_bytes(32)), base64_encode($x_pub));
+$ans = json_decode((string)DbConnector::get_instance()->get_db_link()->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'copy_key_answer'")->fetchColumn(), true);
+check((int)$ans['job_id'] === 7 && $ans['public_key'] === base64_encode($x_pub), 'and one naming the 1216-byte key is handed to the agent');
 foreach ($keep as $name => $value) {
 	Setting::put($name, $value);
 }

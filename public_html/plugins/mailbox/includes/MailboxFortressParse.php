@@ -291,7 +291,7 @@ class MailboxFortressParse {
 			return array('id' => $id, 'stored' => false);
 		}
 		$key = (string)$row['iem_sealed_key'];
-		if (strncmp($key, InboundEmailMessage::MAIL_KEY_PREFIX, strlen(InboundEmailMessage::MAIL_KEY_PREFIX)) !== 0
+		if (!InboundEmailMessage::isMailKey($key)
 				|| intval($row['iem_key_generation']) === InboundEmailMessage::RELAY_UNOPENABLE_GENERATION
 				|| $row['iem_relay_sealed_raw'] === null) {
 			throw self::refuse($id, self::REFUSAL);

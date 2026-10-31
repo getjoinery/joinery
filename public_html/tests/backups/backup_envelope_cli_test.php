@@ -37,9 +37,11 @@ register_shutdown_function(function () use ($work) {
 	@rmdir($work);
 });
 
-$recovery = sodium_crypto_box_keypair();
-$rec_pub  = base64_encode(sodium_crypto_box_publickey($recovery));
-$rec_sec  = base64_encode(sodium_crypto_box_secretkey($recovery));
+// An X-Wing seed and its 1216-byte public key.
+$recovery     = random_bytes(32);
+$rec_pub_raw  = (new XWing())->publicKey($recovery);
+$rec_pub      = base64_encode($rec_pub_raw);
+$rec_sec      = base64_encode($recovery);
 
 $key_file     = $work . '/run.key';
 $sidecar_file = $work . '/demo.tar.gz.enc' . BackupEnvelope::SIDECAR_SUFFIX;
@@ -73,6 +75,7 @@ check(strpos(implode("\n", $out), $minted_key) === false,
 
 $env = BackupEnvelope::read_sidecar($sidecar_file);
 check($env['cipher'] === BackupEnvelope::CIPHER, 'core accepts the CLI cipher name', (string)$env['cipher']);
+check((int)$env['version'] === BackupEnvelope::VERSION, 'the CLI writes the same envelope version as core', (string)$env['version']);
 check($env['artifact'] === 'demo.tar.gz.enc', 'core reads the CLI artifact name');
 $env_recovery = null;
 foreach ($env['recipients'] as $r) {
@@ -94,6 +97,7 @@ check(!is_file($work . '/nope.key') && !is_file($work . '/nope.json'),
 	'and nothing is written when it refuses');
 
 $site_kp = base64_decode(trim((string)@file_get_contents($site_file)), true);
+check(is_string($site_kp) && strlen($site_kp) === 32, 'the CLI-minted site key is a 32-byte X-Wing seed');
 check(BackupEnvelope::open($env, $site_kp) === $minted_key,
 	'core opens a CLI-minted envelope with the CLI-minted site key');
 
@@ -102,7 +106,7 @@ section('Core mints, CLI opens');
 
 $core_key = base64_encode(random_bytes(32));
 $core_env = BackupEnvelope::build($core_key, 'core.tar.gz.enc',
-	[['kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($recovery)]]);
+	[['kind' => 'recovery', 'pub' => $rec_pub_raw]]);
 $core_sidecar = $work . '/core.tar.gz.enc' . BackupEnvelope::SIDECAR_SUFFIX;
 BackupEnvelope::write_sidecar($core_sidecar, $core_env);
 
@@ -130,9 +134,8 @@ check($rc !== 0, 'CLI refuses the public key');
 check(strpos(implode(' ', $out), 'PUBLIC half') !== false,
 	'CLI names the public-key mistake, matching core', implode(' | ', $out));
 
-$stranger = sodium_crypto_box_keypair();
 $str_file = $work . '/stranger.key';
-file_put_contents($str_file, base64_encode(sodium_crypto_box_secretkey($stranger)));
+file_put_contents($str_file, base64_encode(random_bytes(32)));
 $out = [];
 $rc = 0;
 exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($core_sidecar)
@@ -237,14 +240,37 @@ exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($fn_fil
 	. ' --trust-bucket-manifest --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
 check($rc !== 0, 'but a nested envelope from the future is still refused');
 
+// ── Version 1 still opens ───────────────────────────────────────────────────
+section('An old v1 envelope still opens in the CLI');
+
+// v1 sealing is gone; archives sealed before the switch must still open with
+// the X25519 key their owner saved. Built by hand with sodium.
+$v1_kp   = sodium_crypto_box_keypair();
+$v1_pub  = sodium_crypto_box_publickey($v1_kp);
+$v1_key  = base64_encode(random_bytes(32));
+$v1_side = $work . '/v1.tar.gz.enc' . BackupEnvelope::SIDECAR_SUFFIX;
+file_put_contents($v1_side, json_encode(['version' => 1, 'artifact' => 'v1.tar.gz.enc',
+	'cipher' => BackupEnvelope::CIPHER, 'created' => '2026-01-01T00:00:00Z',
+	'recipients' => [['kind' => 'recovery', 'fingerprint' => hash('sha256', $v1_pub),
+		'sealed' => base64_encode(sodium_crypto_box_seal($v1_key, $v1_pub))]]]));
+foreach (['32-byte secret' => sodium_crypto_box_secretkey($v1_kp), '64-byte keypair' => $v1_kp] as $label => $secret) {
+	$v1_file = $work . '/v1.key';
+	file_put_contents($v1_file, base64_encode($secret));
+	$out = [];
+	$rc  = 0;
+	exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($v1_side)
+		. ' --private ' . escapeshellarg($v1_file) . ' 2>&1', $out, $rc);
+	check($rc === 0 && trim(implode('', $out)) === $v1_key, "CLI opens a v1 envelope with its {$label}", implode(' | ', $out));
+}
+
 // ── Site key stability ──────────────────────────────────────────────────────
 section('Site key is minted once');
 
 $out = [];
 exec('php ' . escapeshellarg($cli) . ' site-key --site-key ' . escapeshellarg($site_file) . ' 2>&1', $out);
 $reported = trim(implode('', $out));
-check($reported === base64_encode(sodium_crypto_box_publickey($site_kp)),
-	'site-key reports the public half of the existing keypair, never a new one', $reported);
+check($reported === base64_encode((new XWing())->publicKey($site_kp)),
+	'site-key reports the X-Wing public key of the existing seed, never a new one', $reported);
 
 // Backups run as more than one account (the web user for scheduled runs, the
 // deploy user over SSH), so "exists but I cannot read it" is a real state. It

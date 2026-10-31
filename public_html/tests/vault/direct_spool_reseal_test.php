@@ -32,12 +32,12 @@ $user = make_user('SpoolReseal');
 $user_id = (int)$user->key;
 
 // Generation 1 (draining) and generation 2 (target) keypairs.
-$old_pair = sodium_crypto_box_keypair();
-$old_public = SealedBox::b64url(sodium_crypto_box_publickey($old_pair));
-$old_secret = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($old_pair)));
-$new_pair = sodium_crypto_box_keypair();
-$new_public = SealedBox::b64url(sodium_crypto_box_publickey($new_pair));
-$new_secret = vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($new_pair)));
+$old_pair = (new SealedBox())->generateKeypair();
+$old_public = $old_pair['public'];
+$old_secret = vault_fixture_key($old_pair['secret']);
+$new_pair = (new SealedBox())->generateKeypair();
+$new_public = $new_pair['public'];
+$new_secret = vault_fixture_key($new_pair['secret']);
 
 $crypto = new VaultCrypto();
 

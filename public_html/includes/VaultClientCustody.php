@@ -23,6 +23,8 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.5 - a new client-custody key (setup, rotation) must be a 1216-byte X-Wing key
+ *   (specs/post_quantum_sealing.md R3); assertNewPublicKey()
  * @version 1.4 - holds VaultClientRotation, VaultCustodyChange and VaultClientResume too:
  *   one file for client custody, four classes
  * @version 1.3 - opensThroughRoot(), throughRootVaults(): a content vault that opens
@@ -198,6 +200,23 @@ class VaultClientCustody {
 	}
 
 	/**
+	 * Refuse a browser-made public key that is not a 1216-byte X-Wing key
+	 * (standard base64). A 32-byte X25519 key is the old form, and nothing
+	 * seals to one any more, so a vault minted with it could never be written to.
+	 *
+	 * @throws VaultClientCustodyException with $malformed, or the old-key reason
+	 */
+	public static function assertNewPublicKey(string $public_key, string $malformed): void {
+		$raw = base64_decode($public_key, true);
+		if ($raw !== false && strlen($raw) === 32) {
+			throw new VaultClientCustodyException('That is an old X25519 key; vaults take post-quantum keys only. Reload the page to get the current version and try again.');
+		}
+		if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
+			throw new VaultClientCustodyException($malformed);
+		}
+	}
+
+	/**
 	 * Create a client-custody vault from what the browser made: the public key,
 	 * the salt and KDF params, and the opaque wrappings. Runs inside the
 	 * caller's transaction when one is open (the account setup and the code
@@ -222,6 +241,7 @@ class VaultClientCustody {
 		if ($public_key === '' || $salt === '') {
 			throw new VaultClientCustodyException('Missing vault key material.');
 		}
+		self::assertNewPublicKey($public_key, 'The vault public key is malformed.');
 
 		$primary = 0; $root = 0; $indices = array(); $sets = array();
 		foreach ($wrappings as $w) {
@@ -691,10 +711,7 @@ class VaultClientRotation {
 	public static function begin(int $user_id, string $scope, string $public_key, array $wrappings): array {
 		$vault = self::assertCanBegin($user_id, $scope);
 
-		$raw = base64_decode($public_key, true);
-		if ($raw === false || strlen($raw) !== 32) {
-			throw new VaultClientCustodyException('The new public key is malformed.');
-		}
+		VaultClientCustody::assertNewPublicKey($public_key, 'The new public key is malformed.');
 		if ($public_key === (string)$vault->get('uev_public_key')) {
 			throw new VaultClientCustodyException('The new key is the key already in use.');
 		}

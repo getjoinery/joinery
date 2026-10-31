@@ -125,9 +125,9 @@ $kp = (new SealedBox())->generateKeypair();
 $plain = str_repeat('payload bytes ', 5000);            // ~70 KB, well past a DEK
 $sealed = (new VaultCrypto())->sealBulkDelivery($plain, $kp['public']);
 
-check(strlen($sealed) === strlen($plain) + SODIUM_CRYPTO_BOX_SEALBYTES,
+check(strlen($sealed) === strlen($plain) + SealedBox::V2_OVERHEAD,
 	'a sealed part is exactly plaintext + seal overhead — no base64 inflation', (string)strlen($sealed));
-check(strpos($sealed, 'v1.seal.') !== 0,
+check(strpos($sealed, 'v2.seal.') !== 0,
 	'and carries none of the DEK text wrapping');
 check(DirectProtocol::sealedSizeCeiling(strlen($plain)) === strlen($sealed),
 	'the ceiling the receiver computes from the declared size matches the sealed bytes exactly');
@@ -218,8 +218,8 @@ check($decoy_a !== DirectDecoyKeys::publicKeyFor('someone-else@example.com'),
 	'different addresses get different decoys');
 
 $raw = SealedBox::b64url_decode($decoy_a);
-check($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES,
-	'a decoy is a full-length X25519 public key');
+check($raw !== false && strlen($raw) === XWing::PUBLIC_KEY_BYTES,
+	'a decoy is a full-length X-Wing public key');
 
 // The load-bearing property: a sender must be able to SEAL to it without error,
 // or a malformed-key failure would identify the decoy immediately.

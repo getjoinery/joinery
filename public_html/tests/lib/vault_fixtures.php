@@ -124,7 +124,8 @@ function vault_fixture_root(string $root_salt, array $code_set, ?Passkey $passke
 		$wrappings[] = array('unlocker_type' => 'passphrase', 'salt' => $root_salt,
 			'wrapped_secret_key' => vault_fixture_wrap($secret, $phrase_root_kek, 'vault:root:passphrase'));
 	}
-	$public = base64_encode(random_bytes(32));
+	// The root vault's public key is an X-Wing key (1216 bytes); nothing in a suite opens with it.
+	$public = base64_encode(SealedBox::b64url_decode((new SealedBox())->generateKeypair()['public']));
 	return array(
 		'payload'  => array('public_key' => $public, 'salt' => $root_salt, 'kdf_params' => array('alg' => 'argon2id'),
 			'wrappings' => $wrappings),
@@ -215,7 +216,11 @@ function vault_fixture_client_vault(int $user_id, string $public_key, string $sc
 	$q = $dblink->prepare(
 		"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
 		 VALUES (?, ?, 'client', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
-	$q->execute(array($user_id, $scope, $public_key, base64_encode(random_bytes(16))));
+	// A vault is minted by its own request, never by one that read sealed
+	// content; an X-Wing public key is long enough for the egress guard to weigh.
+	SealedEgressGuard::isolate(function () use ($q, $user_id, $scope, $public_key) {
+		$q->execute(array($user_id, $scope, $public_key, base64_encode(random_bytes(16))));
+	});
 	$id = (int)$q->fetchColumn();
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $id);
 	return $id;
@@ -236,23 +241,25 @@ function vault_fixture_server_vault(int $user_id): array {
 	$q = $dblink->prepare(
 		"INSERT INTO uev_user_encryption_vaults (uev_usr_user_id, uev_scope, uev_custody, uev_public_key, uev_salt, uev_key_generation)
 		 VALUES (?, 'user', 'server', ?, ?, 1) RETURNING uev_user_encryption_vault_id");
-	$q->execute(array($user_id, $kp['public'], (new SealedBox())->generateSalt()));
+	SealedEgressGuard::isolate(function () use ($q, $user_id, $kp) {   // see vault_fixture_client_vault()
+		$q->execute(array($user_id, $kp['public'], (new SealedBox())->generateSalt()));
+	});
 	$id = (int)$q->fetchColumn();
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', $id);
 	return array('id' => $id, 'public' => $kp['public'], 'secret' => $kp['secret']);
 }
 
 /**
- * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair()):
- * the secret is wrapped under a throwaway KEK and opened exactly the way the
+ * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair(),
+ * v2; pass SealedBox::V1 for an old X25519 secret): the secret is wrapped under a throwaway KEK and opened exactly the way the
  * platform opens one — VaultUnlock::openKey() — so the test never needs a
  * constructor for the bytes and exercises the real seam.
  */
-function vault_fixture_key(string $secret_b64): VaultKey {
+function vault_fixture_key(string $secret_b64, int $version = SealedBox::V2): VaultKey {
 	$box = new SealedBox();
 	$kek = random_bytes(32);
 	$ad = 'vault-test:' . bin2hex(random_bytes(4));
-	$unlocker = ['wrapped' => $box->wrapKey($secret_b64, $kek, $ad), 'kek' => $kek, 'ad' => $ad];
+	$unlocker = ['wrapped' => $box->wrapKey(PoolVaultKey::wrappedForm($secret_b64, $version), $kek, $ad), 'kek' => $kek, 'ad' => $ad];
 	return VaultUnlock::openKey(0, $unlocker, [], UserEncryptionVault::SCOPE_USER)['key'];
 }
 

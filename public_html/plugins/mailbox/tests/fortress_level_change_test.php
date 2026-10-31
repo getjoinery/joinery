@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_level_change
  *
+ * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - B22, B24, B25 (review 2026-09-28)
  * @version 1.0
  */
@@ -76,11 +77,11 @@ try {
 	$domain = $fx['domain'];
 
 	// The owner's server vault, from a keypair the test holds, and its window.
-	$kp = sodium_crypto_box_keypair();
-	$server_secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
+	$kp = (new SealedBox())->generateKeypair();
+	$server_secret = $kp['secret'];
 	$sv = new UserEncryptionVault(NULL);
 	$sv->set('uev_usr_user_id', $owner_id);
-	$sv->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$sv->set('uev_public_key', $kp['public']);
 	$sv->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$sv->save();
 	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$sv->key);
@@ -106,7 +107,7 @@ try {
 	$domain = flc_level($domain, InboundEmailDomain::LEVEL_PRIVATE);
 	$priv = fortress_ingest($fx, 'Private quarterly numbers', 'zebracorn');
 	$prow = fortress_row($priv);
-	check($priv > 0 && strpos((string)$prow['iem_sealed_key'], 'v1.seal.') === 0 && strpos((string)$prow['iem_subject'], 'v1.aead.') === 0,
+	check($priv > 0 && strpos((string)$prow['iem_sealed_key'], 'v2.seal.') === 0 && strpos((string)$prow['iem_subject'], 'v1.aead.') === 0,
 		'the Private message is sealed to the server key');
 	$pparts = flc_parts($priv);
 	check(count($pparts) === 3, 'with three parts');
@@ -145,7 +146,7 @@ try {
 	// B24: a row that cannot move is stamped and passed by; a row sealed to
 	// someone else's key is not this owner's to move at all.
 	$bad = fortress_ingest($fx, 'Unmovable', 'wombatine');
-	$db->prepare("UPDATE iem_inbound_email_messages SET iem_sealed_key = 'v1.seal.not-a-key', iem_content_sealed = true,
+	$db->prepare("UPDATE iem_inbound_email_messages SET iem_sealed_key = 'v2.seal.not-a-key', iem_content_sealed = true,
 		iem_sealed_owner_user_id = ? WHERE iem_inbound_email_message_id = ?")->execute(array($owner_id, $bad));
 	check(MailboxFortressLevel::backlogCount($owner_id) === 3 && MailboxFortressLevel::backlogCount($owner_id, 0, true) === 3,
 		'three wait, all ready');
@@ -171,7 +172,7 @@ try {
 	foreach (array('Private' => array($priv, 'Private quarterly numbers', 'zebracorn'), 'Standard' => array($std, 'Standard lemonade', 'quokkafig')) as $label => $want) {
 		list($mid, $subject, $word) = $want;
 		$row = fortress_row($mid);
-		check(strpos((string)$row['iem_sealed_key'], 'v1.edgeseal.mail.') === 0 && InboundEmailMessage::isBrowserSealed($row),
+		check(strpos((string)$row['iem_sealed_key'], 'v2.edgeseal.mail.') === 0 && InboundEmailMessage::isBrowserSealed($row),
 			$label . ': the key is sealed to the mail vault');
 		$dek = fortress_open_dek($fx, (string)$row['iem_sealed_key']);
 		check(fortress_open_field($fx, (string)$row['iem_subject'], $dek, 'mail:' . $mid . ':iem_subject') === $subject,
@@ -245,7 +246,7 @@ try {
 	$std_dek = $crypto->openItemDek((string)fortress_row($std)['iem_sealed_key'], $key);
 	$db->prepare('UPDATE iem_inbound_email_messages SET iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?')
 		->execute(array($crypto->sealItemDek($std_dek, (string)$sv->get('uev_public_key')), $std));
-	check(strpos((string)fortress_row($std)['iem_sealed_key'], 'v1.seal.') === 0, 'a rotation re-sealed one lowered key into v1.seal.');
+	check(strpos((string)fortress_row($std)['iem_sealed_key'], 'v2.seal.') === 0, 'a rotation re-sealed one lowered key into v2.seal.');
 	check(MailboxFortressLevel::drainSettle($owner_id, $key, microtime(true) + 30) === 2, 'which settles both, the rotated one too');
 	$settled = fortress_row($std);
 	check($settled['iem_attachment_manifest'] === null && $settled['iem_search_text'] === null && $settled['iem_snippet'] === null,

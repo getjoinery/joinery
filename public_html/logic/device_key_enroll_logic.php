@@ -20,6 +20,7 @@
  * App session key only: a browser has nothing to enroll, and a machine key is
  * not a person's device.
  *
+ * @version 1.1 - the device key is a 1216-byte X-Wing key (specs/post_quantum_sealing.md R3)
  * @version 1.0 - specs/fortress_mobile_apps.md § R2
  */
 
@@ -59,8 +60,8 @@ function device_key_enroll_logic(array $input): LogicResult {
 		return LogicResult::error('Platform must be one of: ' . implode(', ', SyncDevice::platforms()) . '.');
 	}
 	$raw = base64_decode($pubkey, true);
-	if ($raw === false || strlen($raw) !== 32) {
-		return LogicResult::error('device_pubkey must be standard base64 of a 32-byte X25519 public key.');
+	if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
+		return LogicResult::error('device_pubkey must be standard base64 of a ' . XWing::PUBLIC_KEY_BYTES . '-byte X-Wing public key.');
 	}
 
 	$code = DeviceLink::generate_code();
@@ -105,7 +106,7 @@ function device_key_enroll_logic_descriptor(): array {
 		'mutates'          => true,
 		'auth'             => array('min_user_permission' => 0, 'requires_person_credential' => true, 'capability' => 'write'),
 		'input'            => array(
-			'device_pubkey' => array('type' => 'string', 'required' => true, 'max_length' => 64, 'label' => 'Device X25519 public key (standard base64, 32 bytes)'),
+			'device_pubkey' => array('type' => 'string', 'required' => true, 'max_length' => 2048, 'label' => 'Device X-Wing public key (standard base64, 1216 bytes)'),
 			'platform'      => array('type' => 'string', 'required' => true, 'max_length' => 16, 'label' => 'Platform (ios, android, macos, windows, linux)'),
 			'device_name'   => array('type' => 'string', 'required' => true, 'max_length' => 64, 'label' => 'Device name'),
 		),

@@ -243,7 +243,8 @@ if (is_array($dre_enc) || $dre_row) {
 			. '<input type="hidden" name="shared" value=""><input type="hidden" name="public_key" value="">' . SmAdminCsrf::field()
 			. '<button type="button" class="btn btn-sm btn-warning" id="copy_key_open">Unlock</button>'
 			. '<div id="copy_key_status" class="small mt-2"></div></form>';
-		echo '<script>window.copyKeyCeremony = ' . json_encode(array('fingerprint' => $parts['fingerprint'], 'ephemeralPublic' => $parts['ephemeral'])) . ';</script>';
+		echo '<script>window.copyKeyCeremony = ' . json_encode(array('fingerprint' => $parts['fingerprint'], 'version' => $parts['version'],
+			'ephemeralPublic' => $parts['ephemeral'] ?? '', 'ciphertext' => $parts['ciphertext'] ?? '')) . ';</script>';
 		echo '<script src="/assets/js/copy-key.js?v=' . filemtime(PathHelper::getIncludePath('assets/js/copy-key.js')) . '"></script>';
 		echo '</div>';
 	}

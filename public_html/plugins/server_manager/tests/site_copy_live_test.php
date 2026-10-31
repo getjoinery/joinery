@@ -82,7 +82,7 @@ $site = str_replace('-', '', SiteCopyLiveRun::LABEL_PREFIX) . $hex;
 $domain = $label . '.' . SiteCopyLiveRun::ZONE;
 $server = null;
 $node = null;
-$keypair = sodium_crypto_box_keypair();
+$keypair = random_bytes(XWing::SEED_BYTES);   // the run's recovery key: an X-Wing seed
 harness_defer(function () use (&$node, &$server, $domain, &$keypair) {
 	sodium_memzero($keypair);
 	if (getenv('SITE_COPY_LIVE_KEEP_ON_FAILURE') === '1' && !empty($GLOBALS['__harness']['failed']) && $server) {

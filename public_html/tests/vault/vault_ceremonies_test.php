@@ -78,7 +78,9 @@ foreach ($kf['wrappings'] as $row) {
 	} catch (Exception $e) { continue; }
 }
 check($recovered !== null, 'a recovery code + the key file reconstruct the secret key');
-check($recovered !== null && SealedBox::b64url(sodium_crypto_box_publickey_from_secretkey(SealedBox::b64url_decode($recovered))) === $kf['public_key'],
+$recovered_v2 = $recovered !== null && strpos($recovered, PoolVaultKey::V2_TAG) === 0;
+check($recovered_v2, 'the reconstructed secret is tagged v2 (X-Wing)');
+check($recovered_v2 && SealedBox::publicKeyFor(substr($recovered, strlen(PoolVaultKey::V2_TAG)), SealedBox::V2) === $kf['public_key'],
 	'the reconstructed secret matches the advertised public key');
 
 section('Setup refusals');

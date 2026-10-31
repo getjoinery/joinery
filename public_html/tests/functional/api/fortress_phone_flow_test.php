@@ -96,9 +96,9 @@ check($thread && $thread['subject'] === '' && !empty($thread['sealed']['iem_subj
 // ---------------------------------------------------------------------------
 section('enrollment hands the phone the mail key');
 
-$device = sodium_crypto_box_keypair();
-$device_secret = sodium_crypto_box_secretkey($device);
-$device_pub = base64_encode(sodium_crypto_box_publickey($device));
+$device = (new SealedBox())->generateKeypair();
+$device_secret = $device['secret'];
+$device_pub = base64_encode(SealedBox::b64url_decode($device['public']));
 $r = api_request('POST', '/api/v1/action/device_key_enroll', $h,
 	array('device_pubkey' => $device_pub, 'platform' => 'ios', 'device_name' => 'Test iPhone'));
 $enroll = $r['json']['data'] ?? array();
@@ -116,7 +116,7 @@ check(!$approved->error, 'the owner approves', (string)$approved->error);
 
 $r = api_request('POST', '/api/v1/auth/device_link/' . ($enroll['poll_token'] ?? ''));
 $blob = (string)($r['json']['data']['sealed_vault_keys']['mail'] ?? '');
-$opened = $blob !== '' ? $fx['box']->openEdge($blob, SealedBox::b64url($device_secret), $device_pub) : '';
+$opened = $blob !== '' ? $fx['box']->openEdge($blob, $device_secret, $device_pub) : '';
 check($opened === $pkcs8, 'the poll\'s sealed key opens with the device secret to the vault\'s PKCS#8');
 check(substr($opened, 16) === $mail_secret, 'whose last 32 bytes are the mail secret');
 

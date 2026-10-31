@@ -6,17 +6,18 @@
  * env: any
  * needs: []
  *
- * The browser format, sealed and opened on the server, byte for byte.
+ * The browser format on the server.
  *
- * A client-custody row is sealed with the format vault-crypto.js speaks:
- * `v1.edgeseal.{scope}.` + base64(ephPub[32] ‖ IV[12] ‖ AES-GCM ct) for the
- * DEK, and `v1.edge.` + base64(IV[12] ‖ ct ‖ tag) for a field
- * (docs/sealed_vault.md § Client-custody scopes). The server writes both when
- * it seals for a Fortress owner, and opens both when a DEK is sealed to its
- * own key. Nothing checks that agreement at run time, so this suite pins it:
- * tests/vault/fixtures/edge_vector.json was produced by WebCrypto, PHP must
- * reproduce exactly those bytes from the same inputs and open them, and
- * vault-crypto.js selfCheck() must open the same vector in a JS engine.
+ * A client-custody row's DEK is `v2.edgeseal.{scope}.` + base64 of the v2 seal
+ * (tests/vault/xwing_vector_test.php holds those bytes), and a field is
+ * `v1.edge.` + base64(IV[12] ‖ ct ‖ tag) (docs/sealed_vault.md § Client-custody
+ * scopes). The server writes both when it seals for a Fortress owner, and opens
+ * both when a DEK is sealed to its own key.
+ *
+ * tests/vault/fixtures/edge_vector.json was produced by WebCrypto in the v1
+ * format (X25519 ECIES: ephPub[32] ‖ IV[12] ‖ AES-GCM ct). Nothing seals in it
+ * any more, but a holder rotating off a v1 key still has rows in it, so PHP must
+ * open it; its field, a format v2 did not change, PHP must reproduce exactly.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -48,15 +49,14 @@ $recipient_secret_b64url = SealedBox::b64url($recipient_secret);
 $recipient_public_b64 = $vector['recipient_public_b64'];
 $dek = hex2bin($vector['dek_hex']);
 
-section('the sealed DEK: PHP reproduces what WebCrypto produced');
+section('the v1 sealed DEK: PHP opens what WebCrypto produced');
 
 check(SealedBox::b64url(sodium_crypto_box_publickey_from_secretkey($recipient_secret)) === rtrim(strtr($recipient_public_b64, '+/', '-_'), '='),
 	'the browser-generated recipient keypair is an ordinary X25519 pair to libsodium');
+check(SealedBox::publicKeyFor($recipient_secret_b64url, SealedBox::V1) === rtrim(strtr($recipient_public_b64, '+/', '-_'), '='),
+	'publicKeyFor(v1) derives it');
 
-$sealed = ef_private('sealEdgeWith', array($dek, $recipient_public_b64, hex2bin($vector['eph_secret_hex']), hex2bin($vector['seal_iv_hex'])));
-check($sealed === $vector['sealed_dek_b64'], 'sealing the vector DEK with the vector ephemeral and IV gives the WebCrypto bytes exactly');
-
-$raw = base64_decode($sealed, true);
+$raw = base64_decode($vector['sealed_dek_b64'], true);
 check($raw !== false && strlen($raw) === 32 + 12 + 32 + 16, 'the blob is standard base64 of ephPub[32] ‖ IV[12] ‖ ct[32] ‖ tag[16]');
 check(bin2hex(substr($raw, 0, 32)) === $vector['eph_public_hex'], 'bytes 0-31 are the ephemeral public key');
 check(bin2hex(substr($raw, 32, 12)) === $vector['seal_iv_hex'], 'bytes 32-43 are the IV');
@@ -76,9 +76,11 @@ check(ef_throws(function () use ($box, $other, $vector, $recipient_public_b64) {
 }), 'another secret key refuses to open');
 
 check(ef_throws(function () use ($box, $dek) { $box->sealEdge($dek, base64_encode(random_bytes(31))); }),
-	'a public key that does not decode to 32 bytes is refused');
+	'a public key that is neither 32 nor 1216 bytes is refused');
+check(ef_throws(function () use ($box, $dek, $recipient_public_b64) { $box->sealEdge($dek, $recipient_public_b64); }),
+	'nothing seals to the v1 recipient any more');
 
-section('a fresh seal round-trips, with either base64 alphabet for the public key');
+section('a fresh v2 seal round-trips, with either base64 alphabet for the public key');
 
 $pair = $box->generateKeypair();
 $public_std = base64_encode(SealedBox::b64url_decode($pair['public']));
@@ -87,7 +89,10 @@ $fresh = $box->sealEdge($fresh_dek, $public_std);
 check($box->openEdge($fresh, $pair['secret'], $public_std) === $fresh_dek, 'sealEdge → openEdge (standard base64 public key, as the browser stores it)');
 check($box->openEdge($box->sealEdge($fresh_dek, $pair['public']), $pair['secret'], $pair['public']) === $fresh_dek,
 	'sealEdge → openEdge (base64url public key, as a server vault stores it)');
-check($box->sealEdge($fresh_dek, $public_std) !== $fresh, 'two seals of the same DEK differ (fresh ephemeral and IV each time)');
+check($box->sealEdge($fresh_dek, $public_std) !== $fresh, 'two seals of the same DEK differ (fresh encapsulation and IV each time)');
+check(strlen(base64_decode($fresh)) === SealedBox::V2_OVERHEAD + 32, 'the blob is the v2 raw seal: X-Wing ciphertext, IV, ct, tag');
+check(ef_throws(function () use ($box, $fresh, $pair) { $box->openEdge($fresh, $pair['secret'], base64_encode(random_bytes(1216))); }),
+	'a public key that is not the secret\'s is refused');
 
 section('a field: AES-256-GCM with the row AD');
 
@@ -104,7 +109,8 @@ section('VaultCrypto frames the row layer and opens whichever prefix it finds');
 
 $key = PoolVaultKey::open(null)['key'];
 $edge_to_server = $crypto->sealItemDekToBrowserKey($fresh_dek, $key->publicKey(), 'drive');
-check(strpos($edge_to_server, 'v1.edgeseal.drive.') === 0, 'sealItemDekToBrowserKey frames the blob as v1.edgeseal.{scope}.');
+check(strpos($edge_to_server, 'v2.edgeseal.drive.') === 0, 'sealItemDekToBrowserKey frames the blob as v2.edgeseal.{scope}.');
+check(VaultCrypto::parseEdgeScope('v1.edgeseal.mail.' . $vector['sealed_dek_b64']) === 'mail', 'parseEdgeScope reads a v1 frame too');
 check(VaultCrypto::parseEdgeScope($edge_to_server) === 'drive', 'parseEdgeScope reads the scope back');
 check(VaultCrypto::parseEdgeScope('v1.seal.abc') === null && VaultCrypto::parseEdgeScope('') === null,
 	'parseEdgeScope is null for a server-custody blob and for nothing');
@@ -112,9 +118,9 @@ check(VaultCrypto::parseEdgeScope('v1.edgeseal.Bad.Scope.x') === null, 'parseEdg
 check(ef_throws(function () use ($crypto, $fresh_dek, $key) { $crypto->sealItemDekToBrowserKey($fresh_dek, $key->publicKey(), 'no.dots'); }),
 	'sealItemDekToBrowserKey refuses a scope name that could not be parsed back');
 
-check($crypto->openItemDek($edge_to_server, $key) === $fresh_dek, 'openItemDek opens a v1.edgeseal. blob sealed to the key it holds');
+check($crypto->openItemDek($edge_to_server, $key) === $fresh_dek, 'openItemDek opens a v2.edgeseal. blob sealed to the key it holds');
 $classic = $crypto->sealItemDek($fresh_dek, $key->publicKey());
-check($crypto->openItemDek($classic, $key) === $fresh_dek, 'openItemDek still opens a v1.seal. blob');
+check($crypto->openItemDek($classic, $key) === $fresh_dek, 'openItemDek opens a v2.seal. blob');
 
 $dek2 = random_bytes(32);
 $batch = $crypto->openItemDeks(array(

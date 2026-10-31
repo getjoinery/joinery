@@ -55,6 +55,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_relay_pull
  *
+ * @version 1.5 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.4 - mail rules run by the parsing device
  * @version 1.3 - carries the relay pin checks (fortress_relay_pin folded in)
  * @version 1.2 - B46: the waiting row is counted after a lowering
@@ -123,7 +124,7 @@ $client_entry = function (string $recipient, string $raw, array $over = array())
 		'date' => '', 'size' => strlen($raw), 'authentication_results' => array(),
 		'key_kind' => 'client', 'public_key' => $pub, 'map_version' => 3,
 		'received_utc' => gmdate('Y-m-d\TH:i:s\Z'),
-		'sealed_dek' => 'v1.edgeseal.mail.' . $box->sealEdge($dek, $pub),
+		'sealed_dek' => 'v2.edgeseal.mail.' . $box->sealEdge($dek, $pub),
 		'key_scope' => 'mail', 'key_generation' => 1,
 	), $over);
 	$body = $over['__body'] ?? ('v1.edge.' . $box->aeadEncryptGcm($raw, $dek, 'mail:relay:' . $spool_id));
@@ -212,9 +213,9 @@ try {
 		return intval($db->query('SELECT count(*) FROM iem_inbound_email_messages WHERE iem_iea_inbound_email_alias_id = ' . intval($alias->key))->fetchColumn());
 	};
 	$before = $count_rows();
-	check($pull($client_entry($address, $raw, array('__body' => 'v1.seal.' . str_repeat('A', 80)))) === 'hold',
+	check($pull($client_entry($address, $raw, array('__body' => 'v2.seal.' . str_repeat('A', 80)))) === 'hold',
 		'a server-format body under a client label is held');
-	check($pull($client_entry($address, $raw, array('sealed_dek' => 'v1.edgeseal.user.' . $box->sealEdge(random_bytes(32), $pub)))) === 'hold',
+	check($pull($client_entry($address, $raw, array('sealed_dek' => 'v2.edgeseal.user.' . $box->sealEdge(random_bytes(32), $pub)))) === 'hold',
 		'a DEK framed for another scope is held');
 	check($count_rows() === $before, 'and neither stored a row');
 
@@ -266,7 +267,7 @@ try {
 	check($small['remaining'] === 1 && ($small['too_large'] ?? null) === 1, 'and is told one waits that is too large for it');
 
 	// The browser's half, with the test's secret.
-	$dek = $box->openEdge(substr($next['item']['sealed_dek'], strlen('v1.edgeseal.mail.')), $pair['secret'], $pub);
+	$dek = $box->openEdge(VaultCrypto::edgeFrame($next['item']['sealed_dek'])['body'], $pair['secret'], $pub);
 	check($dek === $entry[3], 'the DEK opens with the owner\'s secret');
 	$opened = $box->aeadDecryptGcm(substr($next['item']['sealed_raw'], 8), $dek, $next['item']['raw_ad']);
 	check($opened === $raw, 'and the body opens to the message');
@@ -296,7 +297,7 @@ try {
 		try { $fn(); return false; } catch (MailboxFortressParseException $e) { return true; }
 	};
 	check(MailboxFortressParse::storeParts($owner_id, array_merge($params,
-			array('sealed_dek' => 'v1.edgeseal.mail.' . $box->sealEdge(random_bytes(32), $pub))), array($part))
+			array('sealed_dek' => 'v2.edgeseal.mail.' . $box->sealEdge(random_bytes(32), $pub))), array($part))
 		=== array('id' => $id, 'stored' => false, 'stale' => true), 'fields under another key are answered stale (B44)');
 	check($refused(function () use ($owner_id, $params, $unopenable_id) {
 		MailboxFortressParse::storeParts($owner_id, array_merge($params, array('id' => $unopenable_id)), array());
@@ -406,7 +407,7 @@ try {
 	$q->execute(array($entry2[2]));
 	$id2 = intval($q->fetchColumn());
 	$next2 = MailboxFortressParse::next($owner_id);
-	$dek2 = $box->openEdge(substr($next2['item']['sealed_dek'], strlen('v1.edgeseal.mail.')), $pair['secret'], $pub);
+	$dek2 = $box->openEdge(VaultCrypto::edgeFrame($next2['item']['sealed_dek'])['body'], $pair['secret'], $pub);
 	$prefix2 = $next2['item']['sealed_ad_prefix'] . $id2;
 	$params2 = array('id' => $id2, 'sealed_dek' => $next2['item']['sealed_dek'], 'fields' => array(
 		'iem_sender' => 'v1.edge.' . $box->aeadEncryptGcm('Billing <billing@example.com>', $dek2, $prefix2 . ':iem_sender'),

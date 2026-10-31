@@ -27,6 +27,7 @@
  *
  * Run: php tests/backups/backup_restore_objects_test.php
  *
+ * @version 1.4 - a foreign recovery key is an X-Wing key (post-quantum sealing WP1)
  * @version 1.3 - the placement seam takes the row a profile names for an object (specs/storage_targets.md WP6)
  * @version 1.2 - the run dumps a scratch database, not the site's
  * @version 1.1 - one file store: the cloud rows are private blobs, the store seam takes no argument
@@ -346,7 +347,7 @@ BackupEnvelope::write_sidecar($wrong, $env);
 $threw = '';
 try { BackupObjectRestore::open_envelope($epoch, $wrong); } catch (BackupObjectRestoreException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'was minted for epoch-20000101_000000') !== false, 'an envelope minted for another epoch is refused', $threw);
-$foreign = BackupEnvelope::build(random_bytes(32), $epoch, array(array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey(sodium_crypto_box_keypair()))));
+$foreign = BackupEnvelope::build(random_bytes(32), $epoch, array(array('kind' => 'recovery', 'pub' => (new XWing())->publicKey(random_bytes(32)))));
 BackupEnvelope::write_sidecar($wrong, $foreign);
 $threw = '';
 try { BackupObjectRestore::open_envelope($epoch, $wrong, 2); } catch (BackupObjectRestoreException $e) { $threw = $e->getMessage(); }

@@ -21,6 +21,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_scope
  *
+ * @version 1.5 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.4 - Seal at the relay with Fortress is not refused (WP7, B38)
  * @version 1.3 - Seal at the relay is refused with Fortress (WP5, until WP7)
  * @version 1.2 - the Setup page's mail-vault step
@@ -106,10 +107,10 @@ function fsc_mail_vault(int $user_id): int {
 
 /** A server-custody `user` vault for $user_id. */
 function fsc_user_vault(int $user_id): void {
-	$keys = sodium_crypto_box_keypair();
+	$keys = (new SealedBox())->generateKeypair();
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', $user_id);
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keys)));
+	$vault->set('uev_public_key', $keys['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->save();
 	$vault->load();

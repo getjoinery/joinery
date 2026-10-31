@@ -47,8 +47,8 @@ class MailboxDeviceAi {
 	 *  summary) fits well inside it, with headroom for a model that reasons. */
 	const MAX_TOKENS = 4096;
 
-	/** The key prefix of a row the member's browser holds the key to. */
-	const MAIL_KEY_PREFIX = InboundEmailMessage::MAIL_KEY_PREFIX;
+	/** LIKE prefix of a row the member's browser holds the key to, in either seal version. */
+	const MAIL_KEY_LIKE = InboundEmailMessage::MAIL_KEY_LIKE;
 
 	/** Columns one judgement needs, sealed, per entry. */
 	const ENTRY_COLUMNS = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html',
@@ -159,7 +159,7 @@ class MailboxDeviceAi {
 	private static function queueWhere(int $user_id, Recipe $recipe, array $alias_ids, int $before_id, array &$params): string {
 		$params[':owner'] = $user_id;
 		$params[':aip_recipe_id'] = (int)$recipe->key;
-		$params[':mail_key'] = self::MAIL_KEY_PREFIX . '%';
+		$params[':mail_key'] = self::MAIL_KEY_LIKE . '%';
 		$in = array();
 		foreach (array_values($alias_ids) as $i => $id) {
 			$in[] = ':alias_' . $i;
@@ -283,7 +283,7 @@ class MailboxDeviceAi {
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		if (!$row || $row['iem_delete_time'] !== null
 				|| intval($row['iem_sealed_owner_user_id'] ?? 0) !== $user_id
-				|| strncmp((string)$row['iem_sealed_key'], self::MAIL_KEY_PREFIX, strlen(self::MAIL_KEY_PREFIX)) !== 0) {
+				|| !InboundEmailMessage::isMailKey((string)$row['iem_sealed_key'])) {
 			throw new MailboxDeviceAiException('That is not one of your end-to-end encrypted messages.');
 		}
 		if (!in_array(intval($row['iem_iea_inbound_email_alias_id']), $alias_ids, true)) {

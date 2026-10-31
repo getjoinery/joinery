@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_device_ai
  *
+ * @version 1.6 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.5 - an https tailnet name is the person's own network
  * @version 1.4 - the panel's numbers: pendingCount, deviceQueues, lastJudgedOnDevice
  * @version 1.3 - each recipe carries the reasoning control a server run would send
@@ -93,7 +94,7 @@ try {
 	$db->prepare('UPDATE iem_inbound_email_messages SET iem_is_read = true WHERE iem_inbound_email_message_id = ?')->execute(array($m4));
 	$r5 = fortress_row($m5);
 	$db->prepare('UPDATE iem_inbound_email_messages SET iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?')
-		->execute(array('v1.edgeseal.user.' . substr((string)$r5['iem_sealed_key'], 17), $m5));
+		->execute(array('v2.edgeseal.user.' . substr((string)$r5['iem_sealed_key'], 17), $m5));
 
 	// Each owner has a model registered on their own machine, and their Fortress
 	// domain has AI turned on: the queue honours the domain's consent (R5).
@@ -125,10 +126,10 @@ try {
 	$ids = array_column($page['entries'], 'id');
 	check($ids === array($m3, $m2, $m1), 'the owner\'s unread, unjudged Fortress messages, newest first', json_encode($ids));
 	check(!in_array($m4, $ids, true), 'a read message is not offered (unread only, as the server does for Private)');
-	check(!in_array($m5, $ids, true), 'a row sealed to anything but the mail vault (v1.edgeseal.user.) is not offered');
+	check(!in_array($m5, $ids, true), 'a row sealed to anything but the mail vault (v2.edgeseal.user.) is not offered');
 	check(!in_array($mb, $ids, true), 'another member\'s message never appears');
 	$e0 = $page['entries'][0];
-	check(strncmp($e0['sealed']['sealed_dek'], 'v1.edgeseal.mail.', 17) === 0 && $e0['sealed']['sealed_scope'] === 'mail'
+	check(strncmp($e0['sealed']['sealed_dek'], 'v2.edgeseal.mail.', 17) === 0 && $e0['sealed']['sealed_scope'] === 'mail'
 		&& isset($e0['sealed']['iem_subject'], $e0['sealed']['iem_body_plain'], $e0['sealed']['iem_sender']),
 		'each entry carries the sealed columns one judgement needs');
 	$opened = fortress_open_field($a, $e0['sealed']['iem_subject'], fortress_open_dek($a, $e0['sealed']['sealed_dek']),

@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.6 - v2.seal. and v2.edgeseal. (the post-quantum seal) are sealed blobs
  * @version 1.5 - an owner-sealed UPDATE may end in RETURNING plain columns
  * @version 1.4 - consentToValues() for an owner-approved action's literal arguments;
  *                contentFree() for metadata-only writes at a declared site
@@ -109,11 +110,12 @@ class SealedEgressGuard {
 	/**
 	 * The blob prefixes SealedBox stamps: content sealed under a per-item DEK,
 	 * and the DEK itself sealed to a vault public key, in the server's format
-	 * and in the browser's (v1.edge. content, v1.edgeseal.{scope}. key). All
+	 * and in the browser's (v1.edge. content, v2.edgeseal.{scope}. key), each
+	 * DEK frame in both seal versions. All
 	 * are already protected, so all pass — writing a sealed DEK is what
 	 * sealColumns() does on every seal, and it is longer than the threshold.
 	 */
-	const SEALED_PREFIXES = array('v1.aead.', 'v1.seal.', 'v1.edge.', 'v1.edgeseal.');
+	const SEALED_PREFIXES = array('v1.aead.', 'v1.seal.', 'v2.seal.', 'v1.edge.', 'v1.edgeseal.', 'v2.edgeseal.');
 
 	/** How many distinct source descriptions an exception message reports. */
 	const SOURCES_REPORTED = 5;

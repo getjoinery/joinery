@@ -99,9 +99,9 @@ check($r['status'] === 403, 'vault_client_status (unlock material) still refuses
 // ---------------------------------------------------------------------------
 section('enrollment binds to the calling app\'s key');
 
-$mail_pair = sodium_crypto_box_keypair();
-vault_fixture_client_vault((int)$owner->key, base64_encode(sodium_crypto_box_publickey($mail_pair)), 'mail');
-$device_pub = base64_encode(random_bytes(32));
+$mail_pair = (new SealedBox())->generateKeypair();
+vault_fixture_client_vault((int)$owner->key, base64_encode(SealedBox::b64url_decode($mail_pair['public'])), 'mail');
+$device_pub = base64_encode(SealedBox::b64url_decode((new SealedBox())->generateKeypair()['public']));
 
 $r = api_request('POST', '/api/v1/action/device_key_enroll', $machine_h,
 	array('device_pubkey' => $device_pub, 'platform' => 'ios', 'device_name' => 'Test iPhone'));
@@ -126,7 +126,7 @@ check($link && $link->is_bound() && (int)$link->get('dlk_apk_api_key_id') === (i
 
 // Browser side, as another account: the code names nothing for them.
 $session->set_api_user((int)$other->key);
-vault_fixture_client_vault((int)$other->key, base64_encode(random_bytes(32)), 'mail');
+vault_fixture_client_vault((int)$other->key, base64_encode(SealedBox::b64url_decode((new SealedBox())->generateKeypair()['public'])), 'mail');
 $info = drive_device_link_info_logic(array('code' => $enroll['link_code']));
 check($info->error !== null, 'another account cannot see a bound ceremony');
 $stolen = drive_device_link_approve_logic(array('code' => $enroll['link_code'], 'sealed_vault_keys' => array('mail' => 'x')));

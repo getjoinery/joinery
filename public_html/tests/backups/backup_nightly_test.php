@@ -54,8 +54,7 @@ check(bn_active_task_count() === 0, 'and no task row appears');
 bn_put_setting('backup_target_id', '123');
 check(BackupNightly::maybe_activate() === false, 'target alone: refuses');
 
-$keypair = sodium_crypto_box_keypair();
-$pub_raw = sodium_crypto_box_publickey($keypair);
+$pub_raw = (new XWing())->publicKey(random_bytes(32));   // a 1216-byte X-Wing public key
 bn_put_setting('backup_recovery_public_key', base64_encode($pub_raw));
 check(BackupNightly::maybe_activate() === false, 'target + UNPROVEN key: refuses');
 check(bn_active_task_count() === 0, 'still no task row');

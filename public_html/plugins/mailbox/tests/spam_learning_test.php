@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php test-db --filter=spam_learning
  *
+ * @version 2.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 2.1 - status(): the counts spam_learning_status carries, by what became of each correction
  * @version 2.0 - the in-core corpus; replaces the rspamd stub test
  */
@@ -346,11 +347,11 @@ try {
 	} else {
 		$owner = make_user('SlOwner');
 		$owner_id = intval($owner->key);
-		$kp = sodium_crypto_box_keypair();
-		$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
+		$kp = (new SealedBox())->generateKeypair();
+		$secret = $kp['secret'];
 		$vault = new UserEncryptionVault(NULL);
 		$vault->set('uev_usr_user_id', $owner_id);
-		$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+		$vault->set('uev_public_key', $kp['public']);
 		$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 		$vault->save();
 		$vault->load();

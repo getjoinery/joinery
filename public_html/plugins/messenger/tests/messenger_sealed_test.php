@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=messenger_sealed
  *
+ * @version 1.3 - X-Wing test vaults
  * @version 1.2 - Nothing leaves unsealed add-on, picker add-ons, fold migration
  * @version 1.1 - permanent delete of a room removes its key grants (the FK rule, exercised)
  * @version 1.0
@@ -69,10 +70,10 @@ $suffix = strtoupper(LibraryFunctions::random_string(6));
  */
 function sealed_member(string $label): array {
 	$user = make_user($label);
-	$kp = sodium_crypto_box_keypair();
+	$kp = (new SealedBox())->generateKeypair();
 	$vault = new UserEncryptionVault(NULL);
 	$vault->set('uev_usr_user_id', (int)$user->key);
-	$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$vault->set('uev_public_key', $kp['public']);
 	$vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault->save();
 	$vault->load();
@@ -80,8 +81,8 @@ function sealed_member(string $label): array {
 	return array(
 		'user'   => $user,
 		'id'     => (int)$user->key,
-		'secret' => SealedBox::b64url(sodium_crypto_box_secretkey($kp)),
-		'public' => SealedBox::b64url(sodium_crypto_box_publickey($kp)),
+		'secret' => $kp['secret'],
+		'public' => $kp['public'],
 		'vault'  => $vault,
 	);
 }
@@ -277,9 +278,9 @@ check(!$room->has_participant((int)$novault->key),
 // =====================================================================
 section('a key rotation re-wraps the grants and every message still opens');
 
-$new_kp = sodium_crypto_box_keypair();
-$new_public = SealedBox::b64url(sodium_crypto_box_publickey($new_kp));
-$new_secret = SealedBox::b64url(sodium_crypto_box_secretkey($new_kp));
+$new_kp = (new SealedBox())->generateKeypair();
+$new_public = $new_kp['public'];
+$new_secret = $new_kp['secret'];
 
 $before = ConversationKeyGrant::forMember((int)$room->key, $alice['id']);
 $before_wrapped = (string)$before->get('ckg_wrapped_key');

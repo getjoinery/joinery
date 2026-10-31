@@ -7,10 +7,15 @@
  * on the management node — can UNSEAL it. That is the whole security property:
  * a stolen B2 bucket or a dumped management-node database yields only sealed blobs.
  *
- * Runs on any machine with PHP + libsodium. It is intentionally standalone (no
- * platform bootstrap) so it works during disaster recovery when the platform is
- * gone. Validate with `php -l` only — never the file validator (this is a CLI
- * with a run-on-include body).
+ * Keys are X-Wing (specs/post_quantum_sealing.md): the private key is a 32-byte
+ * seed, the public key 1216 bytes. Runs on any machine with PHP's sodium and FFI
+ * extensions and OpenSSL 3.5 or later (Ubuntu 26.04 ships it), from a copy of
+ * the Joinery tree: it loads includes/MlKem768.php, XWing.php and SealedBox.php
+ * from it, three classes with no platform bootstrap, so it works during
+ * disaster recovery when the platform is gone. `unseal` also opens a blob made
+ * for an old X25519 key, with that key, on libsodium alone. Validate with
+ * `php -l` only — never the file validator (this is a CLI with a run-on-include
+ * body).
  *
  * Usage:
  *   generate:  php escrow_keypair.php generate --private-out /secure/recovery.key
@@ -19,11 +24,13 @@
  *              into the server_manager_escrow_public_key setting, then move the
  *              private key into your password manager and delete the local file.
  *
- *   unseal:    php escrow_keypair.php unseal --private /secure/recovery.key [--in blob.b64]
+ *   unseal:    php escrow_keypair.php unseal --private /secure/recovery.key [--in blob.b64] [--scope SCOPE]
  *              Reads a sealed blob (base64) from --in or stdin, decrypts it with the
  *              private key, and prints the recovered backup key to stdout. This is
  *              the DR tool; run it on your own machine, never on the management node.
  *
+ * @version 1.1 - X-Wing keys and v2 seals; unseal opens both versions; --scope names a v2 box's
+ *                scope (the recovery key's command-line proof has its own; the default is a key seal's, dek)
  * @version 1.0
  */
 
@@ -32,10 +39,26 @@ if (!extension_loaded('sodium')) {
     exit(1);
 }
 
+/**
+ * Load the tree's X-Wing classes; null when they load and ML-KEM works here,
+ * otherwise why not (what is missing, and the floor).
+ */
+function ek_load_pq(): ?string {
+    $inc = dirname(__DIR__, 2) . '/public_html/includes/';
+    foreach (['MlKem768.php', 'XWing.php', 'SealedBox.php'] as $f) {
+        if (!is_file($inc . $f)) {
+            return "{$inc}{$f} is not here: run this tool from a copy of the Joinery tree.";
+        }
+        require_once $inc . $f;
+    }
+    $why = MlKem768::unavailableReason();
+    return $why === null ? null : $why . ' ' . MlKem768::FLOOR_MESSAGE;
+}
+
 function ek_usage($stream = STDERR) {
     fwrite($stream, "Usage:\n");
     fwrite($stream, "  php escrow_keypair.php generate --private-out PATH\n");
-    fwrite($stream, "  php escrow_keypair.php unseal   --private PATH [--in BLOB_FILE]\n");
+    fwrite($stream, "  php escrow_keypair.php unseal   --private PATH [--in BLOB_FILE] [--scope SCOPE]\n");
 }
 
 /** Minimal --flag value parser. */
@@ -67,9 +90,13 @@ if ($mode === 'generate') {
         exit(2);
     }
 
-    $keypair = sodium_crypto_box_keypair();
-    $secret  = sodium_crypto_box_secretkey($keypair);
-    $public  = sodium_crypto_box_publickey($keypair);
+    $why = ek_load_pq();
+    if ($why !== null) {
+        fwrite(STDERR, "ERROR: cannot make a post-quantum key on this machine: {$why}\n");
+        exit(1);
+    }
+    $secret = random_bytes(XWing::SEED_BYTES);
+    $public = (new XWing())->publicKey($secret);
 
     // Create the file with 0600 BEFORE writing any key material into it, so the
     // secret is never briefly world-readable.
@@ -96,7 +123,6 @@ if ($mode === 'generate') {
     fwrite(STDERR, "Paste the public key above into server_manager_escrow_public_key,\n");
     fwrite(STDERR, "then move {$out} into your password manager and delete the local file.\n");
     sodium_memzero($secret);
-    sodium_memzero($keypair);
     exit(0);
 }
 
@@ -111,8 +137,8 @@ if ($mode === 'unseal') {
 
     $priv_b64 = trim((string)file_get_contents($priv_path));
     $secret   = base64_decode($priv_b64, true);
-    if ($secret === false || strlen($secret) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
-        fwrite(STDERR, "ERROR: private key file is not a valid base64 box secret key.\n");
+    if ($secret === false || strlen($secret) !== 32) {
+        fwrite(STDERR, "ERROR: private key file is not a valid base64 recovery private key.\n");
         exit(1);
     }
 
@@ -128,14 +154,29 @@ if ($mode === 'unseal') {
         exit(1);
     }
 
-    $public  = sodium_crypto_box_publickey_from_secretkey($secret);
-    $keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret, $public);
-
-    $plain = sodium_crypto_box_seal_open($cipher, $keypair);
-    sodium_memzero($secret);
-    sodium_memzero($keypair);
+    // The 32 bytes do not say whether they are an X-Wing seed or an old
+    // X25519 key, and the blob carries no frame. Both opens are authenticated,
+    // so trying each is safe: a wrong guess fails its tag and opens nothing.
+    $plain = false;
+    $why = ek_load_pq();
+    if ($why === null) {
+        try {
+            $scope = (isset($opts['scope']) && is_string($opts['scope']) && $opts['scope'] !== '') ? $opts['scope'] : 'dek';
+            $plain = SealedBox::openV2($cipher, $secret, $scope);
+        } catch (RuntimeException $e) {
+            $plain = false;
+        }
+    }
     if ($plain === false) {
-        fwrite(STDERR, "ERROR: unseal failed — wrong recovery key for this blob, or corrupt blob.\n");
+        $public  = sodium_crypto_box_publickey_from_secretkey($secret);
+        $keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret, $public);
+        $plain = sodium_crypto_box_seal_open($cipher, $keypair);
+        sodium_memzero($keypair);
+    }
+    sodium_memzero($secret);
+    if ($plain === false) {
+        fwrite(STDERR, "ERROR: unseal failed — wrong recovery key for this blob, or corrupt blob."
+            . ($why !== null ? " A post-quantum blob cannot be opened on this machine: {$why}" : '') . "\n");
         exit(1);
     }
 

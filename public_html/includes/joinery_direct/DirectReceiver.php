@@ -31,6 +31,7 @@
  * signature over the ordered hashes of the SEALED bytes before anything is
  * ingested.
  *
+ * @version 1.3 - a vault on an old X25519 key is answered with its decoy key
  * @version 1.2.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.2
  * @changelog 1.2 - the spool cap check carries the verified sending domain, so
@@ -219,12 +220,16 @@ class DirectReceiver {
 			// this mailbox stores them in anyway. Ingest runs live at commit.
 			$key = '';
 			$key_generation = 0;
-		} elseif (!$resolved['exists']) {
+		} elseif (!$resolved['exists'] || self::isOldVaultKey($resolved['vault_public_key'] ?? null)) {
 			// An address that does not exist gets a key too, or a real key coming
 			// back would tell a prober which addresses are real. It is
 			// indistinguishable from a real one; the sender seals to it, the
 			// delivery arrives, and nobody can ever open it — which costs nothing,
 			// because mail to a nonexistent address was going nowhere anyway.
+			// A vault still on an old X25519 key answers the same way: nothing
+			// seals to that key, and a refusal would show the address is real.
+			// Its mail goes where decoy mail goes until its owner rotates
+			// (specs/post_quantum_sealing.md R3).
 			$key = DirectDecoyKeys::publicKeyFor($recipient);
 			$key_generation = DirectDecoyKeys::DECOY_GENERATION;
 			$is_decoy = true;
@@ -531,5 +536,14 @@ class DirectReceiver {
 		RequestLogger::log(DirectProtocol::LOG_FEATURE, 'refused', false,
 			array('status_code' => $status, 'error_type' => 'request_refused', 'note' => $reason));
 		return array('answer' => 'refused', 'status' => $status, 'error' => $reason);
+	}
+
+	/** Is $public_key (base64url) a 32-byte X25519 vault key, which nothing seals to any more? */
+	private static function isOldVaultKey(?string $public_key): bool {
+		if ($public_key === null || $public_key === '') {
+			return false;
+		}
+		$raw = SealedBox::b64url_decode($public_key);
+		return $raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES;
 	}
 }

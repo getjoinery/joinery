@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php db --filter=protection_ceremony
  *
+ * @version 1.5 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.4
  * @changelog 1.4 - neither add-on raises a second-factor row
  * @changelog 1.3 - the relay rows belong to the add-ons, not a level
@@ -191,10 +192,10 @@ try {
 		'one member with no vault is refused — there is nothing to seal to');
 
 	$member = make_user('PcMember');
-	$member_keys = sodium_crypto_box_keypair();
+	$member_keys = (new SealedBox())->generateKeypair();
 	$member_vault = new UserEncryptionVault(NULL);
 	$member_vault->set('uev_usr_user_id', intval($member->key));
-	$member_vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($member_keys)));
+	$member_vault->set('uev_public_key', $member_keys['public']);
 	$member_vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$member_vault->save();
 	$member_vault->load();
@@ -216,10 +217,10 @@ try {
 	section('backlog sealing: a raise converges history');
 
 	$owner = make_user('PcOwner');
-	$keypair = sodium_crypto_box_keypair();
+	$keypair = (new SealedBox())->generateKeypair();
 	$vault_row = new UserEncryptionVault(NULL);
 	$vault_row->set('uev_usr_user_id', intval($owner->key));
-	$vault_row->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($keypair)));
+	$vault_row->set('uev_public_key', $keypair['public']);
 	$vault_row->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 	$vault_row->save();
 	$vault_row->load();
@@ -306,7 +307,7 @@ try {
 	require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 	$crypto = new VaultCrypto();
 	$dek = $crypto->openItemDek((string)$sealed_row['iem_sealed_key'],
-		vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($keypair))));
+		vault_fixture_key($keypair['secret']));
 	check(is_string($dek) && $dek !== '', 'the holder\'s secret key opens the row DEK');
 
 	// A mailbox with no vault-holding owner is skipped, never half-sealed.

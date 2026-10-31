@@ -91,6 +91,17 @@ foreach (['restore_database.sh', 'backup_envelope.php'] as $f) {
 }
 $engine = $tools . '/restore_database.sh';
 
+// backup_envelope.php opens an X-Wing envelope with the tree's own post-quantum
+// classes (public_html/includes/MlKem768.php, XWing.php, SealedBox.php), so the
+// throwaway tree carries them where a real tree does.
+$inc = $tmp . '/tree/public_html/includes';
+if (!mkdir($inc, 0777, true)) { throw new Exception("could not create {$inc}"); }
+foreach (['MlKem768.php', 'XWing.php', 'SealedBox.php'] as $f) {
+	if (!copy(PathHelper::getIncludePath('includes/' . $f), $inc . '/' . $f)) {
+		throw new Exception("could not copy includes/{$f} into the test tree");
+	}
+}
+
 // ── A scratch database, dropped again whatever happens ────────────────────────
 
 $scratch = 'jy_rde_' . bin2hex(random_bytes(4));
@@ -130,15 +141,15 @@ function rde_sentinel_survives($scratch, $user, $pass) {
 
 // ── The archive, its data key, and the envelope beside it ─────────────────────
 
-// A site keypair in the tree the copied script will look in. Written in the
-// format BackupEnvelope writes: base64 of the sodium keypair.
-$site_keypair = sodium_crypto_box_keypair();
-file_put_contents($conf . '/backup_site_key', base64_encode($site_keypair));
+// A site key in the tree the copied script will look in. Written in the
+// format BackupEnvelope writes: base64 of a 32-byte X-Wing seed.
+$site_seed = random_bytes(32);
+file_put_contents($conf . '/backup_site_key', base64_encode($site_seed));
 chmod($conf . '/backup_site_key', 0640);
-$site_pub = sodium_crypto_box_publickey($site_keypair);
+$site_pub = (new XWing())->publicKey($site_seed);
 
 // Somebody else's key, for the archive this machine must NOT be able to open.
-$stranger_pub = sodium_crypto_box_publickey(sodium_crypto_box_keypair());
+$stranger_pub = (new XWing())->publicKey(random_bytes(32));
 
 // The data key, minted the way a real backup mints one: base64 text, because
 // openssl consumes it as a PBKDF2 passphrase on a pipe.

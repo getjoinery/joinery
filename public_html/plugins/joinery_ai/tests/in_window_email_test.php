@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=in_window_email
  *
+ * @version 1.4 - X-Wing test vault
  * @version 1.3
  */
 
@@ -152,9 +153,9 @@ try {
 
 	$owner = make_user('IwOwner');
 	$owner_id = intval($owner->key);
-	$kp = sodium_crypto_box_keypair();
-	$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
-	$owner_vault = iw_vault($owner_id, SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$kp = (new SealedBox())->generateKeypair();
+	$secret = $kp['secret'];
+	$owner_vault = iw_vault($owner_id, $kp['public']);
 
 	$sealed_domain = iw_domain(InboundEmailDomain::LEVEL_PRIVATE, true);
 	$alias = iw_alias(intval($sealed_domain->key), 'me', $owner_id);

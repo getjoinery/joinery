@@ -38,6 +38,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_hot_turn_egress_test.php
  *
+ * @version 1.3 - X-Wing test vault
  * @version 1.2
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -286,10 +287,10 @@ check(stripos((string)$resolved->get('aqa_result'), 'blocked') !== false,
 // -----------------------------------------------------------------------------
 section('Hot chat turn: the injection shape queues sealed and touches no network');
 
-$kp = sodium_crypto_box_keypair();
+$kp = (new SealedBox())->generateKeypair();
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $owner_id);
-$vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+$vault->set('uev_public_key', $kp['public']);
 $vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
 $vault->save();
 $vault->load();

@@ -59,7 +59,7 @@ function fortress_parse_store_logic_descriptor() {
 		'description' => 'Store an end-to-end message the caller\'s browser parsed from its relay-sealed form: the fields and attachments as ciphertext under the row\'s own key',
 		'input' => [
 			'id' => ['type' => 'int', 'required' => true, 'label' => 'Message ID'],
-			'sealed_dek' => ['type' => 'string', 'required' => true, 'max_length' => 4096, 'label' => 'The row\'s key (v1.edgeseal.mail.)'],
+			'sealed_dek' => ['type' => 'string', 'required' => true, 'max_length' => 4096, 'label' => 'The row\'s key (v2.edgeseal.mail.)'],
 			'fields' => ['type' => 'text', 'required' => true, 'label' => 'JSON: sealed column => v1.edge. ciphertext'],
 			'parts' => ['type' => 'text', 'required' => false, 'max_length' => 100000, 'label' => 'JSON: [{mime_part, size, inline, offset, length}] placing each sealed part in the bundle upload'],
 			'spam_headers' => ['type' => 'text', 'required' => false, 'max_length' => 4000, 'label' => 'JSON: the X-Spam* header values read from the message'],

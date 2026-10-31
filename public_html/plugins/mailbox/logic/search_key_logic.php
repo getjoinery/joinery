@@ -10,6 +10,7 @@
  * refused when one exists ({already_set_up: true}), so a second browser racing
  * the first fetches the winner's. The server never opens it.
  *
+ * @version 1.1 - room for an X-Wing key and its v2 seal (specs/post_quantum_sealing.md R3)
  * @version 1.0
  */
 
@@ -37,8 +38,8 @@ function search_key_logic_descriptor() {
 		'description' => 'Get, or create once, the caller\'s search key sealed to their mail vault (an opaque blob the server never opens)',
 		'input' => [
 			'op'         => ['type' => 'string', 'required' => false, 'enum' => ['get', 'create'], 'label' => 'get (default) or create'],
-			'sealed_key' => ['type' => 'string', 'required' => false, 'max_length' => 1024, 'label' => 'The key sealed to the mail vault (create)'],
-			'public_key' => ['type' => 'string', 'required' => false, 'max_length' => 512, 'label' => 'The vault key it was sealed to (create)'],
+			'sealed_key' => ['type' => 'string', 'required' => false, 'max_length' => 4096, 'label' => 'The key sealed to the mail vault (create)'],
+			'public_key' => ['type' => 'string', 'required' => false, 'max_length' => 2048, 'label' => 'The vault key it was sealed to (create)'],
 		],
 	);
 }

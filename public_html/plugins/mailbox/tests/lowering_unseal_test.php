@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php db --filter=lowering_unseal
  *
+ * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
 
@@ -101,13 +102,13 @@ try {
 
 	$owner = make_user('LuOwner');
 	$owner_id = intval($owner->key);
-	$owner_kp = sodium_crypto_box_keypair();
-	lu_vault($owner_id, SealedBox::b64url(sodium_crypto_box_publickey($owner_kp)));
+	$owner_kp = (new SealedBox())->generateKeypair();
+	lu_vault($owner_id, $owner_kp['public']);
 
 	$other = make_user('LuOther');
 	$other_id = intval($other->key);
-	$other_kp = sodium_crypto_box_keypair();
-	lu_vault($other_id, SealedBox::b64url(sodium_crypto_box_publickey($other_kp)));
+	$other_kp = (new SealedBox())->generateKeypair();
+	lu_vault($other_id, $other_kp['public']);
 
 	$dom = new InboundEmailDomain(NULL);
 	$dom->set('ied_domain', 'lu-' . bin2hex(random_bytes(3)) . '.example');
@@ -137,7 +138,7 @@ try {
 	harness_register_model('File', intval($file->key));
 	$crypto = new VaultCrypto();
 	$m1_dek = $crypto->openItemDek((string)lu_row($m1)['iem_sealed_key'],
-		vault_fixture_key(SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp))));
+		vault_fixture_key($owner_kp['secret']));
 	$file->replace_bytes($crypto->sealField($att_plain, $m1_dek, InboundEmailMessage::attachmentAd($m1, '2')));
 	$att = new InboundMessageAttachment(NULL);
 	$att->set('ima_iem_inbound_email_message_id', $m1);
@@ -185,7 +186,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('window open: history converges, caller-scoped, bounded');
 
-	vault_fixture_open_window($owner_id, SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp)));
+	vault_fixture_open_window($owner_id, $owner_kp['secret']);
 	harness_defer(function () use ($owner_id) { VaultUnlock::lockAll($owner_id); });
 
 	$res = mailbox_protection_unseal_batch($dom, $owner_id, 2);
