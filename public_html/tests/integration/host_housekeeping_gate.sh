@@ -270,7 +270,10 @@ chk "mpm_event.conf absent: written" "$(grep -c '^MaxRequestWorkers       50$' "
 chk "the journal cap absent: written" "$(grep -c '^SystemMaxUse=100M$' "$RH/etc/systemd/journald.conf.d/size-limit.conf" 2>/dev/null)" "1"
 chk "php.ini absent: rebuilt from php.ini-production and tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC)$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "2"
 chk "the tuning leaves the PostgreSQL extensions to conf.d" "$(grep -c '^;extension=pdo_pgsql$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "1"
-chk "a php.ini that exists is never touched" "$(cat "$RH/etc/php/8.1/fpm/php.ini")" "memory_limit = 999M"
+chk "a php.ini that exists keeps its own settings" "$(grep -c '^memory_limit = 999M$' "$RH/etc/php/8.1/fpm/php.ini")" "1"
+chk "and gains only ffi.enable = On (post-quantum sealing)" "$(grep -vcE '^(memory_limit = 999M|\[ffi\]|ffi\.enable = On|)$' "$RH/etc/php/8.1/fpm/php.ini"):$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.1/fpm/php.ini")" "0:1"
+chk "and says so" "$(printf '%s\n' "$out" | grep -c '8.1/fpm/php.ini: ffi.enable = On')" "1"
+chk "the rebuilt php.ini has ffi.enable = On from the tuning" "$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
 # A new PHP version arrives with its php.ini an untouched copy of the template.
 mkdir -p "$RH/etc/php/8.5/fpm" "$RH/usr/lib/php/8.5"
 printf 'upload_max_filesize = 2M\nmemory_limit = 128M\n;date.timezone =\n;extension=pdo_pgsql\n' > "$RH/usr/lib/php/8.5/php.ini-production"
@@ -287,7 +290,26 @@ chk "a second converge changes no php.ini and says nothing about one" "$( [ "$(t
 printf 'nothing the tuning names\n' > "$RH/usr/lib/php/8.5/php.ini-production"
 cp "$RH/usr/lib/php/8.5/php.ini-production" "$RH/etc/php/8.5/fpm/php.ini"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
-chk "a template the tuning cannot change is not announced as tuned (no restart a minute)" "$(printf '%s\n' "$out" | grep -c 'tuned .*8.5')" "0"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "a template with nothing else to tune is tuned once and then left alone (no restart a minute)" "$(printf '%s\n' "$out" | grep -c '8.5/fpm/php.ini')" "0"
+# A php.ini an owner set to preload, PHP's default: held at On on every converge.
+printf 'upload_max_filesize = 64M\n[ffi]\nffi.enable = preload\n' > "$RH/etc/php/8.3/fpm/php.ini"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chk "ffi.enable = preload is rewritten to On in place" "$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.3/fpm/php.ini"):$(grep -c 'preload' "$RH/etc/php/8.3/fpm/php.ini"):$(grep -c '^upload_max_filesize = 64M$' "$RH/etc/php/8.3/fpm/php.ini")" "1:0:1"
+# A php.ini that cannot be written: one warning, no claim it is On, and no
+# restart a minute for a change that never landed.
+printf 'upload_max_filesize = 64M\n[ffi]\nffi.enable = preload\n' > "$RH/etc/php/8.3/fpm/php.ini"
+chmod 444 "$RH/etc/php/8.3/fpm/php.ini"; chmod 555 "$RH/etc/php/8.3/fpm"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" 2>&1)"
+chmod 755 "$RH/etc/php/8.3/fpm"; chmod 644 "$RH/etc/php/8.3/fpm/php.ini"
+chk "an unwritable php.ini warns once and is not announced as On" "$(printf '%s\n' "$out" | grep -c 'could not set ffi.enable = On'):$(printf '%s\n' "$out" | grep -c '8.3/fpm/php.ini: ffi.enable = On')" "1:0"
+# A symlinked php.ini is written through, and stays a symlink.
+printf 'upload_max_filesize = 64M\n' > "$RH/etc/php/8.3/fpm/real.ini"
+rm -f "$RH/etc/php/8.3/fpm/php.ini"; ln -s real.ini "$RH/etc/php/8.3/fpm/php.ini"
+JOINERY_HOUSEKEEPING_ROOT="$RH" bash "$SCRIPT" >/dev/null 2>&1
+chk "a symlinked php.ini stays a symlink and its target gains ffi.enable = On" "$( [ -L "$RH/etc/php/8.3/fpm/php.ini" ] && echo link):$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.3/fpm/real.ini")" "link:1"
+rm -f "$RH/etc/php/8.3/fpm/php.ini" "$RH/etc/php/8.3/fpm/real.ini"
+printf 'upload_max_filesize = 64M\nffi.enable = On\n' > "$RH/etc/php/8.3/fpm/php.ini"
 rm -rf "${RH:?}/etc/php/8.5" "${RH:?}/usr/lib/php/8.5"
 # The extension lines the tuning used to write: commented back out only where
 # conf.d loads the same module, and nothing else in the file moves.

@@ -2402,11 +2402,14 @@ check(strpos($install_exec, 'Could not determine which PHP version to install') 
 check(preg_match('/Expected PHP configuration at.*?exit 1/s', $install_exec) === 1,
     'and so does an fpm ini that is not where the tuning writes');
 
-// The gate is the reason the parameterization had to come first: widening it
-// while paths were pinned would have admitted a release the script could not
-// configure.
-check(preg_match('/grep -qE "Ubuntu \(24\|26\)\\\\\.04"/', $install_src) === 1,
-    'the OS gate admits both tested releases');
+// The floor is Ubuntu 26.04 (OpenSSL 3.5 carries the ML-KEM post-quantum
+// sealing needs; specs/post_quantum_sealing.md R8), compared as a version so a
+// later release passes and an older one is refused.
+check(strpos($install_exec, 'dpkg --compare-versions "$os_version_id" ge 26.04') !== false
+    && strpos($install_exec, '[ "$os_id" != "ubuntu" ]') !== false,
+    'the OS gate admits Ubuntu 26.04 and every later release, compared as a version');
+check(preg_match('/Ubuntu \(24\|26\)/', $install_exec) === 0,
+    'and no fixed list of releases remains');
 
 // The mail host provisioner names its own package. It runs on a box that
 // already has PHP, so it reads the version off the interpreter it resolved.

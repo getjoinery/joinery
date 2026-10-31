@@ -2181,7 +2181,9 @@ the appendix's ranges; anything worse is reported before WP3 ships.
   in place, getjoinery and dev first, then joinerydemo, jeremytunnell-vps and
   docker-prod.
 
-- **O7 — Post-quantum (owner, 2026-10-11: record both; confirmed).** The symmetric
+- **O7 — Post-quantum (owner, 2026-10-11: record both; confirmed). Specified
+  2026-10-31 as `specs/post_quantum_sealing.md` (X-Wing on every seal, Ubuntu
+  26.04 floor).** The symmetric
   parts are already safe against a quantum computer: AES-256 and the hash
   inside PBKDF2 keep about 128 bits of strength against Grover's search. The
   public-key parts are not, and both can be copied today and opened later:

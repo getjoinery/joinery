@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.40 - server requires Ubuntu 26.04 or later, compared as a version (spec post_quantum_sealing R8);
+#               the FPM php.ini gets ffi.enable=On
 #VERSION 3.39 - site --help names every backup provider, with the region or endpoint it asks for
 #VERSION 3.38 - the admin login summary, its credentials file and the email first-task line name https
 #               once a CA-signed certificate is in place (B145)
@@ -3702,28 +3704,33 @@ do_server_setup() {
         exit 1
     fi
 
-    # The releases this is exercised on. Nothing below hardcodes a PHP version -
-    # it is detected and every path derives from it - so the gate is about what
-    # has been tested end to end, not about what the script can express. On an
-    # untested release the likely failure is a package or service name the
-    # distro arranges differently, which leaves a half-configured server that
-    # looks installed and fails much later and much less clearly.
+    # The floor is Ubuntu 26.04, compared as a version so every later release
+    # passes. Post-quantum key sealing (X-Wing) needs ML-KEM, which PHP reaches
+    # only through OpenSSL 3.5, and 26.04 is the first LTS to ship it
+    # (specs/post_quantum_sealing.md R8). Nothing below hardcodes a PHP
+    # version - it is detected and every path derives from it. On another
+    # distribution the likely failure is a package or service name arranged
+    # differently, which leaves a half-configured server that looks installed
+    # and fails much later and much less clearly.
     #
     # `site` deliberately does not repeat this check. It presupposes `server`
     # ran, so this is the one place it can fire on a real path, and nothing
     # persists the override for a second command to find.
-    if ! grep -qE "Ubuntu (24|26)\.04" /etc/os-release; then
+    local os_id os_version_id
+    os_id=$(. /etc/os-release 2>/dev/null; echo "${ID:-}")
+    os_version_id=$(. /etc/os-release 2>/dev/null; echo "${VERSION_ID:-}")
+    if [ "$os_id" != "ubuntu" ] || [ -z "$os_version_id" ] \
+        || ! dpkg --compare-versions "$os_version_id" ge 26.04 2>/dev/null; then
         local detected
         detected=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
         if [ "$ALLOW_UNSUPPORTED_OS" -eq 1 ]; then
             print_warning "Unsupported OS: ${detected:-unknown}. Proceeding because --allow-unsupported-os was given."
-            print_warning "Package and service layout is only verified on Ubuntu 24.04 and 26.04. Expect to finish the setup by hand."
+            print_warning "Joinery requires Ubuntu 26.04 or later. Sealing needs OpenSSL 3.5; expect to finish the setup by hand."
         else
             print_error "Unsupported OS: ${detected:-unknown}"
             echo ""
-            echo "Joinery server setup targets Ubuntu 24.04 and 26.04 LTS. Package and service"
-            echo "layout is not verified on any other release, so it could configure a server"
-            echo "that does not work."
+            echo "Joinery requires Ubuntu 26.04 LTS or later. The sealed vault and encrypted"
+            echo "backups need OpenSSL 3.5, which earlier releases do not ship."
             echo ""
             echo "To proceed anyway and finish the setup by hand:"
             echo -e "  ${BLUE}sudo ./install.sh server --allow-unsupported-os${NC}"
@@ -6592,7 +6599,7 @@ show_help() {
     echo "  list         List existing Joinery sites (Docker and bare-metal)"
     echo ""
     echo "Server Command Options:"
-    echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 24.04/26.04 LTS"
+    echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 26.04 LTS or later"
     echo "  --password-file=FILE   Read the postgres role password from FILE"
     echo "                         (else POSTGRES_PASSWORD=, else auto-generated"
     echo "                         into /root/.joinery_postgres_password)"

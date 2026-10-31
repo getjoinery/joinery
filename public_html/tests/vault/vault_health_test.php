@@ -32,8 +32,8 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 9 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
-	'runAll reports the nine host facts, and the data root\'s break-glass copy where it is encrypted');
+check(count($checks) === 10 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
+	'runAll reports the ten host facts, and the data root\'s break-glass copy where it is encrypted');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -43,6 +43,30 @@ foreach ($checks as $c) {
 }
 check($all_valid, 'every check reports verified, unmet, or unknown - never a bare pass');
 check($has_fields, 'every check carries key, label, and reason');
+
+section('Post-quantum sealing');
+$pqf = function ($reason, $cause, $fpm) { return VaultHealth::checkPostQuantum(['reason' => $reason, 'cause' => $cause, 'fpm' => $fpm]); };
+$fpm_on = ['ffi_loaded' => true, 'enable' => 'On'];
+check($pqf(null, null, null)['state'] === 'verified', 'a web process that reaches ML-KEM is verified');
+check($pqf(null, null, $fpm_on)['state'] === 'verified', 'the CLI reaching ML-KEM, with PHP-FPM at On, is verified');
+$pq = $pqf(null, null, ['ffi_loaded' => true, 'enable' => 'preload']);
+check($pq['state'] === 'unmet' && strpos($pq['reason'], '"preload"') !== false && strpos($pq['reason'], 'ffi.enable = On') !== false,
+	'the CLI at preload is not taken for PHP-FPM: PHP-FPM at preload is unmet, and names the converger');
+$pq = $pqf(null, null, ['ffi_loaded' => false, 'enable' => '']);
+check($pq['state'] === 'unmet' && strpos($pq['reason'], 'does not load the FFI extension') !== false, 'PHP-FPM without the FFI extension is unmet');
+check($pqf(null, null, false)['state'] === 'unknown', 'PHP-FPM\'s settings unreadable from the CLI is unknown, never verified');
+$pq = $pqf('This server is not ready (ffi.enable is "preload" in the fpm-fcgi SAPI).', MlKem768::CAUSE_SETTING, null);
+check($pq['state'] === 'unmet' && strpos($pq['reason'], 'host converger') !== false, 'a setting cause names the converger');
+$pq = $pqf('This server is not ready (libcrypto is 0x30000020, older than 3.5).', MlKem768::CAUSE_OPENSSL, null);
+check($pq['state'] === 'unmet' && strpos($pq['reason'], 'Ubuntu 26.04') !== false && strpos($pq['reason'], 'host converger') === false,
+	'old OpenSSL names a newer OS, not the converger, which cannot fix it');
+check($pqf('This server is not ready (ffi.enable is "0" in the cli SAPI).', MlKem768::CAUSE_SETTING, $fpm_on)['state'] === 'verified',
+	'the CLI\'s own FFI setting off does not blame PHP-FPM: PHP-FPM\'s facts answer');
+$pq = $pqf('This server is not ready (libcrypto is 0x30000020, older than 3.5).', MlKem768::CAUSE_OPENSSL, $fpm_on);
+check($pq['state'] === 'unmet', 'old OpenSSL is host-wide: unmet even with PHP-FPM at On');
+check(VaultHealth::parseFpmFfi(['FFI', 'FFI support => enabled', 'ffi.enable => On => On']) === $fpm_on, 'php-fpm -i is read for the local ffi.enable value');
+check(VaultHealth::parseFpmFfi([]) === false, 'no php-fpm -i output reads as unreadable');
+check(VaultHealth::checkPostQuantum()['state'] === 'verified', 'this box: the CLI reaches ML-KEM and PHP-FPM is at ffi.enable = On');
 
 section('Never a false pass');
 // An unverifiable fact must be unknown, not verified: every unmet/unknown

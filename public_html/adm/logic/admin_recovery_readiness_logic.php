@@ -10,6 +10,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * rate-limited: a verify tool must never be a better guessing oracle than the
  * real recovery flow it mirrors.
  *
+ * @version 1.1.0 - pq_reason: whether this server can seal with post-quantum keys
+ *                 (specs/post_quantum_sealing.md R4)
  * @version 1.0.0
  */
 function admin_recovery_readiness_logic(array $input): LogicResult {
@@ -25,6 +27,7 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 	$page_vars = array();
 	$page_vars['settings'] = $settings;
 	$page_vars['session'] = $session;
+	$page_vars['pq_reason'] = SealedBox::pqReadyReason();
 
 	$page_regex = '/\/admin\/admin_recovery_readiness/';
 

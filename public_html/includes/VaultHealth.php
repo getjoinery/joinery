@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.14 - a row for post-quantum sealing: PHP-FPM reaches ML-KEM through FFI to OpenSSL 3.5,
+ *                 read from php-fpm -i when run from the CLI; advice by cause (specs/post_quantum_sealing.md R4)
  * @version 1.13 - a failed or refused installer names the plugin and the Plugins page, or, for a core
  *                 installer, logs/host_converger.log (plugin_installer_from_the_browser.md D5)
  * @version 1.12 - the converger row reads HostConvergerNotice::runState(): one installed minutes ago that has
@@ -74,6 +76,7 @@ class VaultHealth {
 			self::checkCertificates(),
 			self::checkReleaseVerifyKeys(),
 			self::checkUnsignedExtensions(),
+			self::checkPostQuantum(),
 		];
 		// Only on a server whose data root is encrypted: elsewhere there is
 		// no break-glass copy to have.
@@ -82,6 +85,107 @@ class VaultHealth {
 			$checks[] = self::checkDataRootBreakGlass($data_root);
 		}
 		return $checks;
+	}
+
+	/**
+	 * Post-quantum key protection (specs/post_quantum_sealing.md R4): PHP-FPM,
+	 * the process that seals for web requests, reaches ML-KEM-768 through FFI
+	 * to OpenSSL 3.5. A web request answers for itself. The CLI (the only
+	 * caller today, check_vault_health.php) accepts ffi.enable = preload for
+	 * itself, so it also reads PHP-FPM's own effective settings with
+	 * `php-fpmX.Y -i`, which sees a conf.d override as well as php.ini.
+	 *
+	 * The advice follows the cause: an FFI setting is the host converger's to
+	 * fix; OpenSSL older than 3.5 (or no libcrypto 3) only a newer OS fixes.
+	 *
+	 * @param array|null $facts Injected for tests: ['reason' => ?string,
+	 *   'cause' => ?string, 'fpm' => null|false|['ffi_loaded' => bool, 'enable' => string]]
+	 *   where fpm null means "this is the web process", false "could not read".
+	 */
+	public static function checkPostQuantum(?array $facts = null): array {
+		$key = 'post_quantum';
+		$label = 'PHP-FPM can protect keys with post-quantum sealing (ML-KEM through OpenSSL 3.5)';
+		if ($facts === null) {
+			$facts = [
+				'reason' => SealedBox::pqReadyReason(),
+				'cause'  => SealedBox::pqReadyCause(),
+				'fpm'    => (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') ? self::fpmFfiFacts() : null,
+			];
+		}
+		$converger = ' The host converger sets ffi.enable = On for PHP-FPM on its next run: '
+			. HostConvergerNotice::installCommand();
+		$os_bound = in_array($facts['cause'], [MlKem768::CAUSE_OPENSSL, MlKem768::CAUSE_LIBCRYPTO], true);
+		// An FFI setting or extension missing in the CLI says nothing about
+		// PHP-FPM, which has its own ini: when PHP-FPM's facts are at hand,
+		// they answer. Only libcrypto is shared by every SAPI on the host.
+		if ($facts['reason'] !== null && !$os_bound && $facts['fpm'] !== null) {
+			$facts['reason'] = null;
+		}
+		if ($facts['reason'] !== null) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => $facts['reason'] . ($os_bound
+					? ' This cannot be fixed in place: the site has to move to a server running Ubuntu 26.04 or later.'
+					: $converger)];
+		}
+		$fpm = $facts['fpm'];
+		if ($fpm === false) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+				'reason' => 'PHP-FPM\'s own settings could not be read (php-fpm -i gave no answer). Open Recovery Readiness '
+					. 'in the browser, which answers for PHP-FPM itself.'];
+		}
+		if (is_array($fpm)) {
+			$on = in_array(strtolower($fpm['enable']), ['1', 'on', 'true', 'yes'], true);
+			if (!$fpm['ffi_loaded'] || !$on) {
+				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+					'reason' => 'PHP-FPM ' . ($fpm['ffi_loaded']
+						? 'has ffi.enable = "' . $fpm['enable'] . '", so web requests cannot reach ML-KEM.'
+						: 'does not load the FFI extension, so web requests cannot reach ML-KEM.')
+						. $converger];
+			}
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+	}
+
+	/**
+	 * PHP-FPM's FFI settings, read from `php-fpmX.Y -i` for the version Apache
+	 * hands PHP to (conf-enabled/phpX.Y-fpm.conf, as host_housekeeping.sh
+	 * finds it; the CLI's own version when there is none): ['ffi_loaded' =>
+	 * bool, 'enable' => string], or false when the binary is absent or gave
+	 * no answer. `-i` reads the ini on disk, not the running workers; the
+	 * converger restarts PHP-FPM after every change it writes, so the two
+	 * differ for at most one converge.
+	 */
+	public static function fpmFfiFacts() {
+		$version = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+		$enabled = glob('/etc/apache2/conf-enabled/php*-fpm.conf') ?: [];
+		if (count($enabled) === 1 && preg_match('/php(\d+\.\d+)-fpm\.conf$/', $enabled[0], $m)) {
+			$version = $m[1];
+		}
+		$bin = '/usr/sbin/php-fpm' . $version;
+		if (!is_executable($bin) || !function_exists('exec')) {
+			return false;
+		}
+		$out = [];
+		$rc = 1;
+		@exec(escapeshellarg($bin) . ' -i 2>/dev/null', $out, $rc);
+		return self::parseFpmFfi($rc === 0 ? $out : []);
+	}
+
+	/** The FFI lines of a `php-fpm -i` listing; false when it has none. */
+	public static function parseFpmFfi(array $lines) {
+		$loaded = false;
+		$enable = null;
+		foreach ($lines as $line) {
+			if (preg_match('/^FFI support\s*=>\s*enabled/i', $line)) {
+				$loaded = true;
+			} elseif (preg_match('/^ffi\.enable\s*=>\s*(\S+)/', $line, $m)) {
+				$enable = $m[1];
+			}
+		}
+		if (!$loaded && $enable === null) {
+			return count($lines) ? ['ffi_loaded' => false, 'enable' => ''] : false;
+		}
+		return ['ffi_loaded' => $loaded, 'enable' => (string)$enable];
 	}
 
 	/**

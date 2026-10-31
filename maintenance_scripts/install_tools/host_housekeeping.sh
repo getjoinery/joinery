@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.37 - Every FPM php.ini is held at ffi.enable = On on every converge, not only an untouched one
+#                (specs/post_quantum_sealing.md R4); a php.ini change restarts FPM through restart_php_fpm():
+#                systemd try-restart (a stopped PHP stays stopped), or USR2 in a site container
 # Version: 1.36 - A logrotate file an OS upgrade left obsolete and nobody edited is removed: 26.04's
 #                cloud-init-base beside 24.04's cloud-init made logrotate refuse every night
 # Version: 1.35 - A machine run from the bundle is never a developer's box, and reads nothing to say so:
@@ -217,6 +220,23 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 say()  { echo "housekeeping: $*"; }
 warn() { echo "housekeeping: WARNING - $*" >&2; }
+
+# A PHP version's php.ini changed: make its FPM read it. Under systemd,
+# try-restart, so a version installed but stopped (an older PHP left behind by an
+# OS upgrade) stays stopped. In a site container there is no systemd and the
+# supervisor runs PHP-FPM: USR2 to its master is PHP-FPM's own graceful reload,
+# which re-reads php.ini. $1 the PHP version, $2 what waits for the next start.
+restart_php_fpm() {
+    local ver="$1" what="$2"
+    [[ "${RUN_SYSTEM}" == 1 ]] || return 0
+    if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+        systemctl try-restart "php${ver}-fpm" >/dev/null 2>&1 \
+            || warn "php${ver}-fpm could not be restarted - ${what} at its next start"
+    elif [[ -s "/run/php/php${ver}-fpm.pid" ]]; then
+        kill -USR2 "$(cat "/run/php/php${ver}-fpm.pid")" 2>/dev/null \
+            || warn "php${ver}-fpm could not be reloaded - ${what} at its next start"
+    fi
+}
 
 MACHINE=0
 if [[ "${1:-}" == "--machine" ]]; then
@@ -688,9 +708,7 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
             done
             if [[ "${repaired}" == 1 ]]; then
                 say "${php_ini}: stopped loading pdo_pgsql/pgsql a second time (conf.d loads them)"
-                if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
-                    systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the change applies at its next start"
-                fi
+                restart_php_fpm "${php_ver}" "the change applies"
             fi
         fi
         if [[ -e "${php_ini}" ]]; then
@@ -701,9 +719,24 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
                 # would be a restart a minute for nothing.
                 if ! cmp -s "${php_ini}" "${production}"; then
                     say "tuned ${php_ini}: it was the packaged php.ini-production, untouched"
-                    if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
-                        systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the settings apply at its next start"
-                    fi
+                    restart_php_fpm "${php_ver}" "the settings apply"
+                fi
+            fi
+            # ffi.enable = On on every converge, not only on an untouched
+            # php.ini: a server tuned before the setting existed keeps PHP's
+            # default (preload), and the web could then seal nothing
+            # (specs/post_quantum_sealing.md R4). Written once; a php.ini that
+            # already says On is left alone and FPM is not restarted.
+            # Checked again after the write: a php.ini that cannot be written
+            # (full disk, read-only mount) warns, and FPM is not restarted
+            # every minute for a change that never landed.
+            if [[ -f "${php_ini}" ]] && ! host_files_ffi_enabled "${php_ini}"; then
+                host_files_ensure_ffi_enable "${php_ini}"
+                if host_files_ffi_enabled "${php_ini}"; then
+                    say "${php_ini}: ffi.enable = On (post-quantum sealing reaches OpenSSL through FFI)"
+                    restart_php_fpm "${php_ver}" "ffi.enable applies"
+                else
+                    warn "${php_ini}: could not set ffi.enable = On - PHP-FPM cannot seal with post-quantum keys"
                 fi
             fi
             continue
@@ -719,9 +752,7 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
         chmod 644 "${php_ini}"
         host_files_tune_php_ini "${php_ini}"
         say "rebuilt ${php_ini} from php.ini-production with the platform's settings"
-        if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
-            systemctl restart "php${php_ver}-fpm" >/dev/null 2>&1 || warn "php${php_ver}-fpm could not be restarted - the settings apply at its next start"
-        fi
+        restart_php_fpm "${php_ver}" "the settings apply"
     done
 
     # certbot's renewal configs: every lineage renewed through Apache writes its

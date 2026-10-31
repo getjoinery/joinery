@@ -3,6 +3,8 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.6 - host_files_tune_php_ini() sets ffi.enable = On, and host_files_ensure_ffi_enable() is the
+#                idempotent step housekeeping re-asserts on every converge (specs/post_quantum_sealing.md R4)
 # Version: 1.5 - host_files_write_release_verify_keys() leaves the release and statement keys alone on a node
 #                that holds config/release_trust: the set is then changed only by a verdict
 #                (specs/release_key_rotation.md R1, F3)
@@ -64,6 +66,34 @@ host_files_tune_php_ini() {
     sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$ini"
     sed -i 's/memory_limit = .*/memory_limit = 128M/' "$ini"
     sed -i 's/;date.timezone =/date.timezone = UTC/' "$ini"
+    host_files_ensure_ffi_enable "$ini"
+}
+
+# True when the php.ini at $1 states ffi.enable = On.
+host_files_ffi_enabled() {
+    grep -qiE '^[[:space:]]*ffi\.enable[[:space:]]*=[[:space:]]*"?(on|1|true|yes)"?[[:space:]]*$' "$1"
+}
+
+# ffi.enable = On, so a web request may use FFI. Post-quantum key sealing
+# goes through ML-KEM, which PHP reaches only through FFI to OpenSSL 3.5
+# (MlKem768); at PHP's default, `preload`, only the CLI could. Idempotent: a
+# php.ini that already says On is not written. An existing ffi.enable line is
+# rewritten in place; otherwise the line goes under the commented default, or
+# under an [ffi] section appended at the end. A symlinked php.ini is written
+# through, never replaced by a copy. A write that fails is not an error here:
+# the caller checks host_files_ffi_enabled() afterwards.
+host_files_ensure_ffi_enable() {
+    local ini="$1"
+    [[ -f "${ini}" ]] || return 0
+    host_files_ffi_enabled "${ini}" && return 0
+    if grep -qE '^[[:space:]]*ffi\.enable[[:space:]]*=' "${ini}"; then
+        sed -i --follow-symlinks -E 's/^[[:space:]]*ffi\.enable[[:space:]]*=.*$/ffi.enable = On/' "${ini}" 2>/dev/null || true
+    elif grep -qE '^;[[:space:]]*ffi\.enable[[:space:]]*=' "${ini}"; then
+        sed -i --follow-symlinks -E '0,/^;[[:space:]]*ffi\.enable[[:space:]]*=.*$/s//&\nffi.enable = On/' "${ini}" 2>/dev/null || true
+    else
+        printf '\n[ffi]\nffi.enable = On\n' >> "${ini}" 2>/dev/null || true
+    fi
+    return 0
 }
 
 # certbot's Apache installer edits the vhosts the platform renders: on every

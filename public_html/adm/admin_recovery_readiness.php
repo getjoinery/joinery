@@ -34,6 +34,16 @@ $label_fill = function ($label) use ($settings, $account_email) {
 	);
 };
 
+// Whether this server is ready for post-quantum key protection: ML-KEM, which
+// it reaches through OpenSSL 3.5 (specs/post_quantum_sealing.md R4). Said
+// once, above the cards, either way.
+if (($page_vars['pq_reason'] ?? null) !== null) {
+	echo '<div class="alert alert-warning mb-3"><strong>Post-quantum key protection is unavailable on this server.</strong> '
+		. htmlspecialchars($page_vars['pq_reason']) . '</div>';
+} else {
+	echo '<p class="text-muted small mb-3">This server is ready for post-quantum key protection (ML-KEM through OpenSSL 3.5).</p>';
+}
+
 $ceremony_configs = array();
 $client_configs = array();
 foreach ($items as $item) {
