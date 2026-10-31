@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.2 - Logs: Read site converger, for one of the machine's site containers (site_converger, agent 1.98.0)
  * @version 1.1 - Logs: the host converger's journal (unit_journal joinery-host-converger, agent 1.97.0), the
  *                record of which installer failed a converge on a host with a data root
  * @version 1.0 - Reports, the machine's questions, Logs, Diagnose and repair
@@ -201,6 +202,30 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 				 'helptext' => 'Which installer failed the last runs, and why: each run says which installers ran and which did not.']);
 			$fw_hc->submitbutton('btn_converger_journal', 'Read converger journal', ['class' => 'btn btn-sm btn-outline-secondary']);
 			$fw_hc->end_form();
+			echo '</div>';
+		}
+		// A site container's own converger, read from this machine: a site with
+		// no agent of its own has no other way to say its converger stopped.
+		$sc_sites = array();
+		foreach ((is_array($diag_hr['containers'] ?? null) ? $diag_hr['containers'] : array()) as $sc_c) {
+			$sc_name = is_array($sc_c) ? (string)($sc_c['name'] ?? '') : '';
+			if (preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $sc_name)) { $sc_sites[$sc_name] = $sc_name; }
+		}
+		if (JobCommandBuilder::has_primitive($node, 'site_converger') && count($sc_sites) > 0) {
+			echo '<div>';
+			$fw_sc = $page->getFormWriter('site_converger_form', [
+				'action' => $base_url . '&tab=diagnostics',
+				'values' => ['site' => array_key_first($sc_sites), 'lines' => '100'],
+			]);
+			$fw_sc->begin_form();
+			$fw_sc->hiddeninput('action', '', ['id' => 'site_converger_action', 'value' => 'site_converger']);
+			$fw_sc->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_converger_csrf', 'value' => SmAdminCsrf::token()]);
+			$fw_sc->dropinput('site', 'Site container', ['options' => $sc_sites]);
+			$fw_sc->numberinput('lines', 'Lines of its converger log (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')',
+				['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT,
+				 'helptext' => 'Whether the site\'s converger is running: when it last ran, its cron entry and cron, its code check, and its log.']);
+			$fw_sc->submitbutton('btn_site_converger', 'Read site converger', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_sc->end_form();
 			echo '</div>';
 		}
 		// Host configuration, from the compiled readable list: the node

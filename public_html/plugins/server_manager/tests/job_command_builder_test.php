@@ -3183,4 +3183,46 @@ section('net_health, web_workers and the access log (specs/slow_request_diagnosi
 		'the access log travels as the enum value, like any other file');
 }
 
+section('site_converger: a machine reads whether one of its site containers\' converger is running (agent 1.98.0)');
+
+{
+	$sc_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,site_converger',
+		'mgn_agent_log_access' => 'on',
+	));
+	$built = JobCommandBuilder::build_site_converger($sc_node, 'sa', '50');
+	check($built === array('primitive' => 'site_converger', 'params' => array('site' => 'sa', 'lines' => 50)),
+		'site_converger travels as the name, a site container name and a bounded count', var_export($built, true));
+	foreach (array('', '../sa', '/var/www/html/sa', 'Sa', '-sa', 'sa;id', 'sa logs', str_repeat('a', 51)) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_site_converger($sc_node, $bad, 10); } catch (Exception $e) { $threw = true; }
+		check($threw, 'site_converger refuses a name that is not a container name: ' . var_export($bad, true));
+	}
+	foreach (array(0, 201) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_site_converger($sc_node, 'sa', $bad); } catch (Exception $e) { $threw = true; }
+		check($threw, 'site_converger refuses a line count outside 1..200: ' . $bad);
+	}
+	$off = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0d", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,site_converger',
+		'mgn_agent_log_access' => 'off',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_site_converger($off, 'sa', 10); } catch (Exception $e) { $threw = true; }
+	check($threw, 'site_converger is refused on the plane while the owner has log access off');
+	$older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal',
+		'mgn_agent_log_access' => 'on',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_site_converger($older, 'sa', 10); } catch (Exception $e) { $threw = true; }
+	check($threw, 'an agent that does not name the word is not sent it');
+}
+
 harness_finish();

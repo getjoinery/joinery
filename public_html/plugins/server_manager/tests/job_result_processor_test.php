@@ -2604,4 +2604,57 @@ check(JobResultProcessor::sanitise_host_report(array())['php_workers'] === null
 	&& JobResultProcessor::sanitise_host_report(array('php_workers' => 'x'))['php_workers'] === null,
 	'an older node, or no PHP-FPM: null');
 
+section('site_converger: a site container\'s converger facts land bounded');
+
+{
+	$sc_node = jrp_node();
+	$sc_env = function ($object) {
+		return "=== [Step 1/1] word ===\n" . json_encode(array(
+			'api_version' => '1.0',
+			'data' => array('output' => json_encode($object), 'output_bytes' => 1),
+		));
+	};
+	$sc_job = jrp_job($sc_node, 'site_converger', $sc_env(array(
+		'site' => 'sa', 'state' => 'running', 'now_unix' => 1793470657,
+		'last_run' => array('present' => true, 'at_unix' => 1793065577, 'outcome' => 'converged'),
+		'stamp_present' => true,
+		'code_check' => array('state' => 'ok', 'at' => '2026-10-27T01:46:30Z'),
+		'cron' => array('entry_present' => true, 'entry_runs_this_site' => true, 'entry_mtime_unix' => 1793065584,
+			'folder_mtime_unix' => 1793065584, 'cron_running' => true),
+		'log' => array('present' => true, 'size_bytes' => 997214, 'mtime_unix' => 1793470623, 'lines_requested' => 2,
+			'lines_returned' => 2, 'lines' => array('permissions: applied --production (tree owner root)', 'host converger: ok')),
+	)));
+	JobResultProcessor::process($sc_job);
+	$r = json_decode((string)$sc_job->get('mjb_result'), true);
+	check(is_array($r) && $r['read'] === true && $r['site'] === 'sa' && $r['last_run']['at_unix'] === 1793065577
+		&& $r['last_run']['outcome'] === 'converged' && $r['cron']['cron_running'] === true
+		&& $r['cron']['entry_runs_this_site'] === true && $r['code_check']['state'] === 'ok'
+		&& $r['log']['lines_returned'] === 2,
+		'the facts survive as their own kinds', var_export($r, true));
+
+	$hostile = jrp_job($sc_node, 'site_converger', $sc_env(array(
+		'site' => '<b>sa</b>', 'state' => array('x'), 'now_unix' => -1,
+		'last_run' => 'yesterday', 'stamp_present' => 'yes',
+		'code_check' => array('state' => 'fine', 'at' => '<i>'),
+		'cron' => array('entry_present' => 1, 'cron_running' => 'maybe'),
+		'log' => array('present' => true, 'lines' => array_merge(array(str_repeat('y', 5000), array('n')), array_fill(0, 300, 'l'))),
+		'surprise' => 'key',
+	)));
+	JobResultProcessor::process($hostile);
+	$h = json_decode((string)$hostile->get('mjb_result'), true);
+	check(is_array($h) && !isset($h['surprise']) && $h['site'] === 'bsab' && $h['state'] === 'unknown'
+		&& $h['now_unix'] === 'unknown' && $h['last_run']['present'] === false && $h['stamp_present'] === false
+		&& $h['code_check']['state'] === 'unknown' && $h['cron']['entry_present'] === false
+		&& $h['cron']['cron_running'] === 'unknown',
+		'unknown keys go, a name is reduced, a fact of the wrong kind is unknown or false', var_export($h, true));
+	check(is_array($h) && count($h['log']['lines']) === JobCommandBuilder::LOG_MAX_COUNT - 1
+		&& strlen($h['log']['lines'][0]) === JobResultProcessor::UNIT_JOURNAL_MAX_LINE,
+		'the log is capped at the plane\'s bound, each line capped, a non-scalar dropped');
+
+	$unread = jrp_job($sc_node, 'site_converger', "=== [Step 1/1] word ===\nsite_converger: sb is not a site container on this host\n");
+	JobResultProcessor::process($unread);
+	check(json_decode((string)$unread->get('mjb_result'), true) === array('read' => false),
+		'a refusal records read=false');
+}
+
 harness_finish();

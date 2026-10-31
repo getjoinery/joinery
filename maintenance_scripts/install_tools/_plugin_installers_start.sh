@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.49 - A run that changed /etc/cron.d touches the folder in a later second before
+#                it exits, so cron reloads it: cron sees a change only by whole-second mtime,
+#                and a container's converger entry written in the second cron loaded was never
+#                read (se1's sa ran no converge for four days, incident 10975).
 # Version: 2.48 - The converge stamp covers who owns each script and its mode, which decide
 #                whether it is trusted. A refused run wrote the stamp, so mending the
 #                refused file changed nothing the stamp saw, and the refusal stood until
@@ -591,6 +595,36 @@ fi
 # is on this inode, and a rename would leave every later run locking a file
 # nobody holds. flock is independent of content, so truncating is safe.
 printf '%s\n%s\n' "$$" "$(date -u +%s)" > "${LOCK_FILE}" 2>/dev/null || true
+
+# --- cron sees what this run wrote to /etc/cron.d -----------------------------
+# cron reloads /etc/cron.d only when the folder's mtime, in whole seconds,
+# differs from the one it saw at its last load; past that it re-reads only the
+# files it already holds (cron's database.c). A file written in the same second
+# as the folder's last change before a load is never read. A container's start
+# writes its scheduled-task entry, starts cron, then converges, and the
+# converge's own entry landed in that second: on se1 the site sa never ran its
+# converger again for four days while its scheduled tasks ran on. So a run
+# that changed anything there waits until the clock has passed the newest
+# change and touches the folder, a later second than any load could have seen:
+# cron reloads every file at its next minute. A run that changed nothing
+# touches nothing. (JOINERY_CRON_D_DIR names a fixture's folder when not root.)
+RUN_STARTED="$(date +%s)"
+CRON_D_DIR="/etc/cron.d"
+[[ "$(id -u)" != "0" && -n "${JOINERY_CRON_D_DIR:-}" ]] && CRON_D_DIR="${JOINERY_CRON_D_DIR}"
+cron_d_settle() {
+    [[ -d "${CRON_D_DIR}" ]] || return 0
+    local newest now
+    newest="$(find "${CRON_D_DIR}" -maxdepth 1 -newermt "@$((RUN_STARTED - 1))" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)"
+    [[ -n "${newest}" ]] || return 0
+    newest="${newest%%.*}"
+    now="$(date +%s)"
+    while (( now <= newest )); do
+        sleep 0.2
+        now="$(date +%s)"
+    done
+    touch "${CRON_D_DIR}" 2>/dev/null || true
+}
+trap 'cron_d_settle' EXIT
 
 # --- Still a site ------------------------------------------------------------
 # A run that found the site and then waited for the lock may have waited out
@@ -1573,7 +1607,7 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
     printf '%s\n' "${CONVERGE_NOW_HASH}" > "${STAMP_FILE}" 2>/dev/null || true
     record_last "running"
     CONVERGE_OUTCOME="converged"
-    trap 'record_last "${CONVERGE_OUTCOME}"' EXIT
+    trap 'record_last "${CONVERGE_OUTCOME}"; cron_d_settle' EXIT
 fi
 
 # --- Core host installers ----------------------------------------------------

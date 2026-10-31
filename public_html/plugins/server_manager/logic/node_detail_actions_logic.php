@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.81 - site_converger: a machine reads whether one of its site containers' converger is running (Diagnostics)
  * @version 1.80 - refresh_status: one Refresh on the node page queues the check_status and the host_report the node
  *                 offers, and returns to the page
  * @version 1.79 - copy_new_server no longer reads a copy_data_root_encrypted field: the Copy tab decides the layer
@@ -200,6 +201,7 @@ class NodeDetailActions {
 		'site_log_count'           => 'diagnostics',
 		'log_table_tail'           => 'diagnostics',
 		'unit_journal'             => 'overview',
+		'site_converger'           => 'diagnostics',
 		'disk_usage'               => 'diagnostics',
 		'listening_sockets'        => 'diagnostics',
 		'site_state_report'        => 'diagnostics',
@@ -383,6 +385,13 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_unit_journal($node,
 					(string)($_POST['unit'] ?? ''), (int)($_POST['lines'] ?? 100));
 				$job = ManagementJob::createFromBuild($node->key, 'unit_journal', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'site_converger': {
+				$built = JobCommandBuilder::build_site_converger($node,
+					(string)($_POST['site'] ?? ''), (int)($_POST['lines'] ?? 100));
+				$job = ManagementJob::createFromBuild($node->key, 'site_converger', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

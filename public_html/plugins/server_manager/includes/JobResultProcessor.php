@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.111 - process_site_converger: a site container's converger facts and log lines, each held to its kind
+ * @version 1.110 - a recovery key report's pub= takes a 1216-byte X-Wing key, and only that is kept on the node
+ *                 (specs/post_quantum_sealing.md WP1, reviewer2 B2)
  * @version 1.109 - a host report's data_root_provider_layer (host_report 1.41) is kept, and the machine is told
  *                 the provider's layer this side knows when it differs (DataRootLayers::push_provider_layer);
  *                 data_root_provider_layer asks for the next host report as it ends (B114)
@@ -856,7 +859,7 @@ class JobResultProcessor {
 	 * @return array{backup_recovery_state:string, backup_recovery_fpr?:string, backup_recovery_public_key?:string}|null
 	 */
 	private static function parse_recovery_key_token($output) {
-		if (!preg_match('/^RECOVERY_KEY=(\w+)(?:\s+fpr=([0-9a-f]{64}))?(?:\s+proven=([01]))?(?:\s+pub=([A-Za-z0-9+\/]{43}=))?/m',
+		if (!preg_match('/^RECOVERY_KEY=(\w+)(?:\s+fpr=([0-9a-f]{64}))?(?:\s+proven=([01]))?(?:\s+pub=([A-Za-z0-9+\/]{1622}==|[A-Za-z0-9+\/]{43}=))?/m',
 				(string)$output, $m)) {
 			return null;
 		}
@@ -881,12 +884,14 @@ class JobResultProcessor {
 
 	/**
 	 * A proven recovery key's public half from a report, or null: kept only
-	 * when the report says proven and the key is the one its fingerprint names.
+	 * when the report says proven, the key is the one its fingerprint names,
+	 * and it is an X-Wing key (1216 bytes). An old 32-byte X25519 key is parsed
+	 * but not kept: nothing can be sealed to it (specs/post_quantum_sealing.md R3).
 	 */
 	private static function recovery_public_key_of(array $report): ?string {
 		$pub = (string)($report['backup_recovery_public_key'] ?? '');
 		$raw = $pub !== '' ? base64_decode($pub, true) : false;
-		return (($report['backup_recovery_state'] ?? '') === 'proven' && $raw !== false && strlen($raw) === 32
+		return (($report['backup_recovery_state'] ?? '') === 'proven' && $raw !== false && strlen($raw) === XWing::PUBLIC_KEY_BYTES
 			&& hash_equals((string)($report['backup_recovery_fpr'] ?? ''), hash('sha256', $raw))) ? $pub : null;
 	}
 
@@ -2866,6 +2871,73 @@ HTML;
 	private static function unit_journal_word($v) {
 		$name = self::host_report_name($v);
 		return ($name !== '') ? $name : 'unknown';
+	}
+
+	/**
+	 * A site_converger job's result: whether one site container's host
+	 * converger is running (site_converger.sh). Rebuilt from the keys the plane
+	 * knows, each held to its kind, the log as a capped list of capped strings;
+	 * a hostile machine can lie about its site, not put anything else here.
+	 */
+	private static function process_site_converger($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !isset($decoded['site'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$job->set('mjb_result', json_encode(self::site_converger_result($decoded)));
+		$job->save();
+	}
+
+	/** The bounded result of site_converger.sh's object (public for its test). */
+	public static function site_converger_result(array $o) {
+		$obj = function ($v) { return is_array($v) ? $v : []; };
+		$bool = function ($v) { return $v === true; };
+		$last = $obj($o['last_run'] ?? null);
+		$code = $obj($o['code_check'] ?? null);
+		$cron = $obj($o['cron'] ?? null);
+		$log  = $obj($o['log'] ?? null);
+		$lines = [];
+		if (isset($log['lines']) && is_array($log['lines'])) {
+			foreach (array_slice(array_values($log['lines']), 0, JobCommandBuilder::LOG_MAX_COUNT) as $line) {
+				if (!is_scalar($line)) { continue; }
+				$lines[] = substr((string)$line, 0, self::UNIT_JOURNAL_MAX_LINE);
+			}
+		}
+		$running = $cron['cron_running'] ?? null;
+		return [
+			'read'          => true,
+			'site'          => self::host_report_name($o['site'] ?? ''),
+			'state'         => self::unit_journal_word($o['state'] ?? ''),
+			'now_unix'      => self::host_report_count($o['now_unix'] ?? null),
+			'last_run'      => [
+				'present' => $bool($last['present'] ?? null),
+				'at_unix' => self::host_report_count($last['at_unix'] ?? null),
+				'outcome' => self::unit_journal_word($last['outcome'] ?? ''),
+			],
+			'stamp_present' => $bool($o['stamp_present'] ?? null),
+			'code_check'    => [
+				'state' => in_array($code['state'] ?? null, ['ok', 'failed', 'none'], true) ? $code['state'] : 'unknown',
+				'at'    => self::unit_journal_word($code['at'] ?? ''),
+			],
+			'cron'          => [
+				'entry_present'        => $bool($cron['entry_present'] ?? null),
+				'entry_runs_this_site' => $bool($cron['entry_runs_this_site'] ?? null),
+				'entry_mtime_unix'     => self::host_report_count($cron['entry_mtime_unix'] ?? null),
+				'folder_mtime_unix'    => self::host_report_count($cron['folder_mtime_unix'] ?? null),
+				'cron_running'         => is_bool($running) ? $running : 'unknown',
+			],
+			'log'           => [
+				'present'        => $bool($log['present'] ?? null),
+				'size_bytes'     => self::host_report_count($log['size_bytes'] ?? null),
+				'mtime_unix'     => self::host_report_count($log['mtime_unix'] ?? null),
+				'lines_returned' => count($lines),
+				'lines'          => $lines,
+			],
+		];
 	}
 
 	/**

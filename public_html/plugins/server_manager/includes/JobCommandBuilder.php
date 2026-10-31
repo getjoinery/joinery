@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.150 - build_site_converger (agent 1.98.0): whether one site container's converger is running, read by its machine
  * @version 1.149 - unit_journal and reset_failed_unit take joinery-host-converger, per value from agent 1.97.0
  *                  (UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION, unit_journal_units_for): its journal is the only record of
  *                  which installer failed a run on a host with a data root
@@ -2148,6 +2149,38 @@ class JobCommandBuilder {
 		}
 		return ['primitive' => 'unit_journal', 'params' => [
 			'unit'  => $unit,
+			'lines' => self::bounded_log_count($lines, 'lines'),
+		]];
+	}
+
+	/**
+	 * Whether one site container's host converger is running, read by the
+	 * machine it runs on: its last run and outcome, its stamp, the code check,
+	 * its cron entry and cron, and the last lines of its log, redacted there
+	 * (agent 1.98.0). PRIMITIVE ONLY. Behind the same owner switch as
+	 * unit_journal, because it reads a log.
+	 *
+	 * @param string $site  the site container's name; the machine refuses one
+	 *                      that is not a site container on it
+	 * @param int    $lines 1..LOG_MAX_COUNT
+	 */
+	public static function build_site_converger($node, $site, $lines = 100) {
+		if (!self::has_primitive($node, 'site_converger')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot read a site container's converger. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['site_converger']));
+		}
+		self::assert_log_access($node);
+		return self::build_site_converger_primitive($node, $site, $lines);
+	}
+
+	public static function build_site_converger_primitive($node, $site, $lines = 100) {
+		$site = (string)$site;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $site)) {
+			throw new Exception("'" . mb_substr($site, 0, 60) . "' is not a site container name.");
+		}
+		return ['primitive' => 'site_converger', 'params' => [
+			'site'  => $site,
 			'lines' => self::bounded_log_count($lines, 'lines'),
 		]];
 	}
