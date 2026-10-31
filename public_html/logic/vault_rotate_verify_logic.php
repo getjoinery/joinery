@@ -13,6 +13,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * the browser's: only the account halves of their KEKs arrive
  * (specs/one_vault_experience.md § R6).
  *
+ * @version 1.3 - root_unlockers.key: the root vault's new key, moved with the account's (post_quantum_sealing R7)
  * @version 1.2 - root_unlockers: the root vault's code (and phrase) twins, replaced with the account's
  * @version 1.1
  */
@@ -95,7 +96,7 @@ function vault_rotate_verify_logic_descriptor() {
 			'credential' => ['type' => 'object', 'required' => true, 'label' => 'WebAuthn credential response'],
 			'code_set' => ['type' => 'object', 'required' => true, 'label' => 'Browser-made code set for the new generation (account halves only)'],
 			'passphrase_kek' => ['type' => 'password', 'required' => false, 'label' => 'Account half of the passphrase KEK, to carry the passphrase forward'],
-			'root_unlockers' => ['type' => 'object', 'required' => true, 'label' => 'The root vault\'s side: {recovery: [the new set\'s wrappings], passphrase: [the phrase\'s wrapping]}'],
+			'root_unlockers' => ['type' => 'object', 'required' => true, 'label' => 'The root vault\'s side: {recovery: [the new set\'s wrappings], passphrase: [the phrase\'s wrapping], key: {public_key, passkey: [wrapping], content: {scope: wrapped}} when the root moves to a new key}'],
 		],
 	];
 }

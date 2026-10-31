@@ -33,6 +33,8 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.41 - plan_for_run() plans on the run's own target, so a run is read (verified, restored) where it
+ *                 went even when today's target is disabled or deleted
  * @version 1.40 - the reconcile asks one small listing per point (a chain's folder, a standalone run's archives)
  *                instead of listing the whole site, so the offloaded-file store is never listed for it (round-3 V1)
  * @version 1.39 - the reconcile changes nothing when a storage space did not answer, and compares keys below the
@@ -450,10 +452,16 @@ class BackupRunner {
 		$type = isset($config['backup_type']) ? (string)$config['backup_type'] : self::site_backup_type();
 		if ($type !== 'database') { $type = 'project'; }
 
-		try {
-			$target = self::site_target();
-		} catch (\Throwable $e) {
-			throw new BackupRunnerException('The configured backup target could not be loaded.');
+		// A plan for reading a run already made is handed the target that run
+		// went to (plan_for_run): it must not depend on today's target being
+		// usable, or a site that turned its backups off could read none of them.
+		$target = ($config['target'] ?? null) instanceof BackupTarget ? $config['target'] : null;
+		if (!$target) {
+			try {
+				$target = self::site_target();
+			} catch (\Throwable $e) {
+				throw new BackupRunnerException('The configured backup target could not be loaded.');
+			}
 		}
 
 		if (!$target) {
@@ -968,7 +976,6 @@ class BackupRunner {
 				throw new BackupRunnerException('This site has no record of that backup.');
 			}
 		}
-		$plan = self::plan(array('profile' => BackupProfile::SITE));
 		try {
 			$target = $run->stored_target();
 		} catch (BackupHistoryException $e) {
@@ -977,6 +984,7 @@ class BackupRunner {
 		if (!$target) {
 			throw new BackupRunnerException('That backup was not sent to one of this site\'s own targets.');
 		}
+		$plan = self::plan(array('profile' => BackupProfile::SITE, 'target' => $target));
 		return self::plan_for_target($plan, $target);
 	}
 

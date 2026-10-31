@@ -201,13 +201,14 @@ try {
 	// ---------------------------------------------------------------------
 	section('The relay pull forwards through this site, once');
 	$kp = (new SealedBox())->generateKeypair();
-	$consumer = new RelaySpoolConsumer(new MailboxRelay(NULL));
+	// The relay row holds the transport key, as a real one does; the consumer
+	// opens each blob with the secret its version names.
+	$pull_relay = new MailboxRelay(NULL);
+	$pull_relay->set('mrl_transport_public_key', $kp['public']);
+	$pull_relay->set('mrl_transport_secret_sealed', (new SecretBox())->seal('mrl_mailbox_relays.mrl_transport_secret_sealed', $kp['secret']));
+	$consumer = new RelaySpoolConsumer($pull_relay);
 	$pull_router = new RofRouter();
-	foreach (array('router' => $pull_router, 'transport_secret' => $kp['secret']) as $prop => $val) {
-		$p = new ReflectionProperty(RelaySpoolConsumer::class, $prop);
-		$p->setAccessible(true);
-		$p->setValue($consumer, $val);
-	}
+	(new ReflectionProperty(RelaySpoolConsumer::class, 'router'))->setValue($consumer, $pull_router);
 	$ingest = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestOne');
 	$ingest->setAccessible(true);
 	$stage_entry = function (string $recipient, string $raw) use ($stage, $kp): array {

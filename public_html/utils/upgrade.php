@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.33 - a site whose mail relay is older than 3.16 refuses the upgrade before anything is staged
+	 *                (upgrade_relay_ready; specs/post_quantum_sealing.md Q8)
 	 * @version 1.32 - the static page cache flush keeps the cache's index, which holds whether the cache is on:
 	 *                deleting it turned a cache its operator had turned off back on at every upgrade
 	 * @version 1.31 - the re-run after a self-update knows where its parent downloaded the core archive, so a
@@ -498,6 +500,36 @@
 		// Highest version wins when a host carries more than one.
 		usort($found, 'version_compare');
 		return (string) end($found);
+	}
+
+	// Every enabled relay of this site seals to X-Wing keys (relay 3.16,
+	// RelayVersion::SEALS_POST_QUANTUM), or the upgrade is refused before
+	// anything is staged, naming the rebuild. The installed release's classes
+	// are loaded here, so the version is compared directly. A relay whose
+	// version is not known (never answered) is refused too: nothing says it can
+	// take the new keys.
+	function upgrade_relay_ready() {
+		if (!class_exists('MultiMailboxRelay') || !method_exists('MailboxRelay', 'provisionedVersion')) {
+			return;   // no mailbox plugin, or one from before relays reported a version
+		}
+		$behind = array();
+		try {
+			foreach (new MultiMailboxRelay(array('enabled' => true)) as $relay) {
+				$running = trim((string)$relay->provisionedVersion());
+				if (preg_match('/^\d+(\.\d+)*$/', $running) !== 1 || version_compare($running, '3.16', '<')) {
+					$behind[] = trim((string)$relay->get('mrl_name')) . ' (' . ($running !== '' ? 'relay ' . $running : 'version not known') . ')';
+				}
+			}
+		} catch (\Throwable $e) {
+			return;   // the relay table is not readable here; the map sync guards the key itself
+		}
+		if ($behind) {
+			upgrade_abort('Upgrade refused: this site\'s mail relay must be rebuilt first',
+				'This release seals mail to post-quantum keys, which relay 3.16 and newer accept; '
+				. implode(', ', $behind) . ' would reject them and the site\'s mail would stop. Rebuild the relay '
+				. '(Mail relay page: drain and rebuild), or, if it was already rebuilt, run Test Relay Health there so '
+				. 'it reports its version; then run the upgrade again. Nothing has been deployed.');
+		}
 	}
 
 	// Abort the upgrade with a styled error message; clears staging unless told not to.
@@ -1492,6 +1524,12 @@
 				upgrade_echo('Self-update check: all deployment files are current.<br>');
 			}
 		}
+
+		// A relay older than 3.16 cannot seal to the X-Wing keys this release
+		// makes, and rejects the routing map that carries them: the site's mail
+		// would stop. The relay is rebuilt first (Q8). Runs on the self-updated
+		// upgrade.php, so it is this release's rule, before anything is staged.
+		upgrade_relay_ready();
 
 		// From here staging stops being the core archive alone: the theme and
 		// plugin archives go into it, then the live ones this deploy keeps. A

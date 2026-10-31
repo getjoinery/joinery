@@ -20,6 +20,27 @@
     <div class="jy-container">
         <div class="jy-settings-shell">
 
+            <?php
+            // Vaults still on an old X25519 key: they do not open until rotated
+            // (specs/post_quantum_sealing.md R7). An unlock elsewhere sends the
+            // person here (VaultRotationOwedException::ROTATE_URL).
+            $pq_old_scopes = UserEncryptionVault::oldKeyScopesFor((int)SessionControl::get_instance()->get_user_id());
+            if ($pq_old_scopes): ?>
+            <div class="jy-alert jy-alert-warning" id="vault-rotation-owed">
+                <strong>Your vault needs new keys.</strong>
+                <?php echo htmlspecialchars(implode(', ', $pq_old_scopes)); ?>
+                <?php echo count($pq_old_scopes) === 1 ? 'has a key' : 'have keys'; ?> from before post-quantum protection, so
+                <?php echo count($pq_old_scopes) === 1 ? 'it does' : 'they do'; ?> not open, and mail and files sealed for you wait until
+                <?php echo count($pq_old_scopes) === 1 ? 'it moves' : 'they move'; ?> to a new key.
+                <?php if (isset($pq_old_scopes[UserEncryptionVault::SCOPE_USER]) || isset($pq_old_scopes[VaultScopes::ROOT_SCOPE])): ?>
+                    Start with <em>Encrypted Vault, Actions, Rotate Vault Key</em> below: it takes your passkey and gives you new recovery codes.
+                <?php endif; ?>
+                <?php if (count(array_diff_key($pq_old_scopes, array(UserEncryptionVault::SCOPE_USER => 1, VaultScopes::ROOT_SCOPE => 1)))): ?>
+                    Then use each part's <em>Rotate</em> button further down.
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+
             <div class="jy-page-header">
                 <div class="jy-page-header-bar">
                     <h1>Security Settings</h1>
@@ -1082,18 +1103,47 @@ $pac_writer->end_form();
                     }
                     try {
                         var root = await rootOpen();
-                        var options = await apiFetch('/api/v1/action/vault_rotate_options', { method: 'POST', body: '{}' });
-                        var derived = await JoineryPasskeys.derive(options.data.options);
                         var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
-                        var fresh = await VaultKeyring.replacementCodes(st.root, root);
+                        // A root still on an old X25519 key moves to a new key with
+                        // this rotation (specs/post_quantum_sealing.md R7): the same
+                        // touch gives the root's passkey output for its new wrapping.
+                        var rootOld = !!(st.root && st.root.public_key && String(st.root.public_key).length < 100);
+                        var options = await apiFetch('/api/v1/action/vault_rotate_options', { method: 'POST',
+                            body: JSON.stringify(rootOld ? { with_root: 1 } : {}) });
+                        var derived = await JoineryPasskeys.derive(options.data.options);
+                        var newRoot = null;
+                        if (rootOld) {
+                            newRoot = await VaultKeyring.rootKeyReplacement(st, root,
+                                derived.response.rawId || derived.response.id, derived.secondOutput);
+                        }
+                        var rootFor = newRoot ? newRoot.session : root;
+                        var fresh = await VaultKeyring.replacementCodes(st.root, rootFor);
                         var body = { credential: derived.response, acknowledged: true, code_set: fresh.code_set,
                             root_unlockers: { recovery: fresh.root_wrappings } };
+                        if (newRoot) {
+                            body.root_unlockers.key = newRoot.key;
+                        }
                         if (passphrase) {
-                            var halves = await VaultKeyring.passphraseEnrolment(st.root, root, passphrase);
+                            var halves = await VaultKeyring.passphraseEnrolment(st.root, rootFor, passphrase);
                             body.passphrase_kek = halves.passphrase_kek;
                             body.root_unlockers.passphrase = [halves.root_passphrase];
                         }
-                        var result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
+                        var result;
+                        try {
+                            result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
+                        } catch (e) {
+                            if (newRoot) newRoot.session.lock();
+                            throw e;
+                        }
+                        if (newRoot) {
+                            if (result.data.completed_pending) {
+                                newRoot.session.lock();   // that request finished an old rotation; the root did not move
+                            } else if (window.JoinerySealed) {
+                                // The root now opens under its new key: this tab holds it, not the old one.
+                                JoinerySealed.lock('root');
+                                JoinerySealed.adopt('root', newRoot.session);
+                            }
+                        }
                         if (result.data.completed_pending) {
                             // This finished a rotation that had stopped: the codes made
                             // here were not used, and the ones the stopped attempt made

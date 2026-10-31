@@ -102,6 +102,10 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 		}
 	} catch (VaultClientCustodyException $e) {
 		return LogicResult::error($e->getMessage());
+	} catch (VaultRotationOwedException $e) {
+		// An old X25519 vault key: the unlock goes to the rotation instead (R7).
+		return LogicResult::error($e->getMessage(),
+			array('rotation_required' => true, 'rotate_url' => VaultRotationOwedException::ROTATE_URL));
 	} catch (Exception $e) {
 		return LogicResult::error('Could not unlock your vault with this passkey.');
 	}
@@ -141,6 +145,7 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 	]);
 }
 
+// @version 1.2 - a vault on an old X25519 key answers rotation_required with the rotation link (post_quantum_sealing R7)
 // @version 1.1 - one-vault: no second PRF output, code set adoption with the root vault, R8 phrase removal
 function vault_unlock_passkey_logic_descriptor() {
 	return [

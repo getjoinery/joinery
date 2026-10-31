@@ -23,6 +23,9 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.6 - a content vault's new key (rotation, creation) is never wrapped under an old root;
+ *   replaceRootKey(): the root vault's key replaced with the account vault's rotation, every content
+ *   vault's `root` wrapping moved under the new one (specs/post_quantum_sealing.md R7, reviewer2 WP7 B1)
  * @version 1.5 - a new client-custody key (setup, rotation) must be a 1216-byte X-Wing key
  *   (specs/post_quantum_sealing.md R3); assertNewPublicKey()
  * @version 1.4 - holds VaultClientRotation, VaultCustodyChange and VaultClientResume too:
@@ -167,7 +170,15 @@ class VaultClientCustody {
 			}
 
 			if ($type === UserEncryptionWrapping::TYPE_ROOT) {
-				// no salt, no credential: the key comes from the root's secret
+				// no salt, no credential: the key comes from the root's secret.
+				// Never under a root still on an old X25519 key: its public key
+				// gives the root's secret, and with it this key, to a quantum
+				// attacker (R7, reviewer2 WP7 B8, B10). Every path that writes a
+				// `root` wrapping comes here; replaceRootKey() saves the root's new
+				// key before it writes the content vaults' wrappings under it.
+				if (self::rootKeyIsOld($user_id)) {
+					throw new VaultClientCustodyException(self::ROOT_FIRST);
+				}
 			} elseif ($type === UserEncryptionWrapping::TYPE_PASSKEY) {
 				$cred_b64 = isset($w['credential_id']) ? (string)$w['credential_id'] : '';
 				if ($cred_b64 === '') {
@@ -277,6 +288,10 @@ class VaultClientCustody {
 			}
 		} elseif ($root < 1 || $root !== count($wrappings)) {
 			throw new VaultClientCustodyException('This vault opens through your vault. Open your vault first.');
+		} elseif (self::rootKeyIsOld($user_id)) {
+			// Its key would be wrapped under a root whose public key gives the
+			// root's secret up to a quantum attacker (R7, reviewer2 WP7 B8).
+			throw new VaultClientCustodyException(self::ROOT_FIRST);
 		}
 
 		if (self::loadVault($user_id, $scope)) {
@@ -310,6 +325,103 @@ class VaultClientCustody {
 				$db->rollBack();
 			}
 			throw $e;
+		}
+	}
+
+	/**
+	 * Replace the root vault's KEY, inside the caller's transaction: the account
+	 * vault's rotation (VaultCeremonies::rotate) does it in the same request, so
+	 * the root never lags the account (specs/post_quantum_sealing.md R7). An old
+	 * X25519 root gives itself up from its public key alone to a quantum
+	 * attacker, and its secret derives every content vault's key; so a new
+	 * secret, not a new wrapping of the old one.
+	 *
+	 * $input, all browser-made under the NEW root secret:
+	 *   public_key - its X-Wing public key
+	 *   passkey    - its passkey wrapping(s): the rotating passkey's (other
+	 *                passkeys are re-added, as the account vault's are)
+	 *   content    - [scope => wrapped_secret_key]: every content vault that
+	 *                opens through the root, its secret wrapped under the new
+	 *                root's key for that scope
+	 * The root's recovery and passphrase wrappings come after this, from
+	 * VaultCeremonies::replaceRootTwins(). The salt does not change: the codes'
+	 * and the phrase's account halves are derived from it.
+	 *
+	 * @throws VaultClientCustodyException
+	 */
+	/** Why a content vault's new key waits for the root's rotation. */
+	const ROOT_FIRST = 'Your vault\'s root key is from before post-quantum protection, so nothing new is wrapped under it. '
+		. 'Rotate your vault first (Security page, Encrypted Vault, Rotate Vault Key): the root moves with it, and then this.';
+
+	/** Is $user_id's root vault still on an old 32-byte X25519 key? False with no root. */
+	public static function rootKeyIsOld(int $user_id): bool {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$root = self::loadVault($user_id, VaultScopes::ROOT_SCOPE);
+		$key = $root ? trim((string)$root->get('uev_public_key')) : '';
+		return $key !== '' && strlen($key) < 100;
+	}
+
+	public static function replaceRootKey(int $user_id, array $input): void {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$root = self::loadVault($user_id, VaultScopes::ROOT_SCOPE);
+		if (!$root) {
+			throw new VaultClientCustodyException('Your vault is not set up.');
+		}
+		self::assertNoPendingRotation($root);
+		$public_key = (string)($input['public_key'] ?? '');
+		self::assertNewPublicKey($public_key, 'Your vault\'s new key is malformed. Reload the page and try again.');
+		$passkey = array_values((array)($input['passkey'] ?? array()));
+		if (!$passkey) {
+			throw new VaultClientCustodyException('Your vault\'s new key did not come with your passkey. Reload the page and try again.');
+		}
+		foreach ($passkey as $w) {
+			if (($w['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_PASSKEY) {
+				throw new VaultClientCustodyException('A wrapping for your vault was not the kind expected.');
+			}
+		}
+		$content = (array)($input['content'] ?? array());
+		// Every content vault that opens through the root moves with it, and
+		// none is mid-rotation (its pending key has a root wrapping too).
+		foreach (VaultScopes::contentScopes() as $scope) {
+			$vault = self::loadVault($user_id, $scope);
+			if (!$vault || !self::opensThroughRoot($vault)) {
+				if (isset($content[$scope])) {
+					throw new VaultClientCustodyException('A part of your vault that does not open through it was sent with it.');
+				}
+				continue;
+			}
+			if ($vault->get('uev_pending_key_generation') !== null) {
+				throw new VaultClientCustodyException('Finish rotating the key of your ' . VaultScopes::labelFor($scope)
+					. ' first (Security page), then rotate your vault.');
+			}
+			if (!is_string($content[$scope] ?? null) || $content[$scope] === '') {
+				throw new VaultClientCustodyException('Your ' . VaultScopes::labelFor($scope)
+					. ' did not move with your vault. Reload the page and try again.');
+			}
+		}
+		foreach ($content as $scope => $blob) {
+			if (!in_array($scope, VaultScopes::contentScopes(), true)) {
+				throw new VaultClientCustodyException('A part of your vault that does not exist was sent with it.');
+			}
+		}
+
+		foreach (new MultiUserEncryptionWrapping(array('vault_id' => (int)$root->key)) as $row) {
+			$row->soft_delete();
+		}
+		$root->set('uev_public_key', $public_key);
+		$root->set('uev_key_generation', (int)$root->get('uev_key_generation') + 1);
+		$root->set('uev_update_time', gmdate('Y-m-d H:i:s'));
+		$root->save();
+		self::persistWrappings($user_id, $root, $passkey);
+
+		foreach ($content as $scope => $blob) {
+			$vault = self::loadVault($user_id, $scope);
+			foreach (new MultiUserEncryptionWrapping(array('vault_id' => (int)$vault->key,
+					'unlocker_type' => UserEncryptionWrapping::TYPE_ROOT)) as $row) {
+				$row->soft_delete();
+			}
+			self::persistWrappings($user_id, $vault, array(array('unlocker_type' => UserEncryptionWrapping::TYPE_ROOT,
+				'wrapped_secret_key' => (string)$blob)));
 		}
 	}
 
@@ -686,7 +798,9 @@ class VaultClientRotation {
 		// The root vault's key is not rotated here: every content vault's `root`
 		// wrapping is under a key derived from the root's secret, not sealed to
 		// its public key, so no reseal would move them and a committed rotation
-		// would orphan them all (specs/one_vault_experience.md § As built).
+		// would orphan them all (specs/one_vault_experience.md § As built). It
+		// moves with the account vault's rotation instead, every content vault's
+		// wrapping re-made beside it (VaultClientCustody::replaceRootKey).
 		if ($scope === VaultScopes::ROOT_SCOPE) {
 			throw new VaultClientCustodyException('Your vault\'s own key cannot be rotated here.');
 		}
@@ -716,6 +830,13 @@ class VaultClientRotation {
 			throw new VaultClientCustodyException('The new key is the key already in use.');
 		}
 		if (VaultClientCustody::opensThroughRoot($vault)) {
+			// A new key is wrapped under the root: never under one still on an old
+			// X25519 key, whose public key gives its secret up (and with it this
+			// new key) to a quantum attacker. The root moves first, with the
+			// account vault (specs/post_quantum_sealing.md R7, reviewer2 WP7 B8).
+			if (VaultClientCustody::rootKeyIsOld($user_id)) {
+				throw new VaultClientCustodyException(VaultClientCustody::ROOT_FIRST);
+			}
 			// The root opens it, and the root's own passkeys, phrase and codes
 			// are the way back in: the new key takes its `root` wrapping alone.
 			if (count($wrappings) !== 1 || (string)($wrappings[0]['unlocker_type'] ?? '') !== UserEncryptionWrapping::TYPE_ROOT) {

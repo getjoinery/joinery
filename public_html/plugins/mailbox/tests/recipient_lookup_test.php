@@ -200,8 +200,11 @@ section('Behind a relay: postmaster carried in is filed if a report, dropped oth
 // way the router does, never store it as mail.
 $box = new SealedBox();
 $kp = $box->generateKeypair();
-$consumer = new RelaySpoolConsumer(new MailboxRelay(NULL));
-(new ReflectionProperty(RelaySpoolConsumer::class, 'transport_secret'))->setValue($consumer, $kp['secret']);
+// The relay row holds the transport key, as a real one does.
+$lookup_relay = new MailboxRelay(NULL);
+$lookup_relay->set('mrl_transport_public_key', $kp['public']);
+$lookup_relay->set('mrl_transport_secret_sealed', (new SecretBox())->seal('mrl_mailbox_relays.mrl_transport_secret_sealed', $kp['secret']));
+$consumer = new RelaySpoolConsumer($lookup_relay);
 $ingest = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestOne');
 $stage = sys_get_temp_dir() . '/rlk-' . $suffix;
 @mkdir($stage, 0700, true);

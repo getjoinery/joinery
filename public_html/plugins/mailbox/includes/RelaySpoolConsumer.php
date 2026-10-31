@@ -29,6 +29,8 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.18 - a transport blob is opened with the secret its seal version names; a drained pull that met
+ *                 no v1 blob forgets the replaced transport secret (specs/post_quantum_sealing.md R7)
  * @version 1.17 - transport-sealed mail is routed by processEmail, forwards included: the relay
  *                only receives (specs/relay_receive_only_forwarding.md). An entry whose routing
  *                logged lines is marked on them (iel_relay_spool_id), so a lost ack never routes
@@ -95,7 +97,8 @@ class RelaySpoolConsumer {
 	/** @var InboundEmailRouter */
 	private $router;
 	/** @var string|null lazily-opened ambient transport secret */
-	private $transport_secret = null;
+	/** A v1 transport blob was met this pull: the retired secret is still needed. */
+	private $saw_v1_transport = false;
 
 	public function __construct(MailboxRelay $relay) {
 		$this->relay = $relay;
@@ -138,6 +141,8 @@ class RelaySpoolConsumer {
 	}
 
 	private function pullLocked(int $max): array {
+		$this->saw_v1_transport = false;
+		$pull_started = time();
 		$stage = $this->stageDir();
 		if ($stage === null) {
 			return array('status' => 'error', 'message' => 'could not create local staging dir');
@@ -212,6 +217,13 @@ class RelaySpoolConsumer {
 			// stored, acked or held — none left unread behind a cap or an error.
 			if ($exhausted && $errors === 0 && $processed === count($seals)) {
 				$this->relay->set('mrl_last_pull_drained_time', gmdate('Y-m-d H:i:s'));
+				// The old transport secret opened what the relay sealed before
+				// the key was replaced. Once the relay has installed the new key
+				// and a pull begun after that drained the spool meeting none, the
+				// spool holds none: it is forgotten (post_quantum_sealing R7).
+				if (!$this->saw_v1_transport && $this->relay->retiredTransportSecretMayGo($pull_started)) {
+					$this->relay->set('mrl_transport_secret_retired_sealed', null);
+				}
 			}
 			$this->relay->set('mrl_last_pull_held', $held);
 			$this->relay->save();
@@ -387,7 +399,15 @@ class RelaySpoolConsumer {
 	 * a lost ack finds them and routes nothing twice.
 	 */
 	private function routeTransport(string $sealed_raw, string $recipient_raw, array $meta, string $spool_id): string {
-		$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
+		[$version] = SealedBox::unframeSeal($sealed_raw);
+		if ($version === SealedBox::V1) {
+			$this->saw_v1_transport = true;
+		}
+		$secret = $this->relay->transportSecretFor($version);
+		if ($secret === null) {
+			throw new \RuntimeException('a v' . $version . ' transport blob, and this site holds no transport secret of that version');
+		}
+		$raw = (new SealedBox())->openDek($sealed_raw, $secret);
 		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());
 
 		$this->router->takeLoggedIds();
@@ -519,12 +539,6 @@ class RelaySpoolConsumer {
 		return (count($owners) === 1) ? UserEncryptionVault::loadForUser(intval($owners[0]), $scope) : null;
 	}
 
-	private function transportSecret(): string {
-		if ($this->transport_secret === null) {
-			$this->transport_secret = $this->relay->transportSecretKey();
-		}
-		return $this->transport_secret;
-	}
 
 	/**
 	 * The authserv-id whose Authentication-Results stamps we trust on a pulled

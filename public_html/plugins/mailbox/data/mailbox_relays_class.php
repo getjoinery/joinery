@@ -35,6 +35,9 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.10 - an old 32-byte transport key is replaced by an X-Wing one once the relay seals to it
+ *                 (RelayVersion::sealsPostQuantum); mrl_transport_secret_retired_sealed keeps the old secret for
+ *                 mail already in the spool (specs/post_quantum_sealing.md R7); transportSecretFor()
  * @version 1.9 - mrl_last_test_time: when Test Relay Health last ran
  * @version 1.8 - mrl_last_pull_drained_time: the last pull that emptied the relay's listing
  * @version 1.7.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
@@ -113,6 +116,15 @@ class MailboxRelay extends SystemBase {
 		'mrl_transport_public_key'   => array('type'=>'text'),
 		'mrl_transport_secret_sealed'=> array('type'=>'text'),
 		'mrl_transport_key_generation'=> array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
+		// The replaced old (32-byte X25519) transport secret, sealed like the
+		// current one: kept only to open mail the relay sealed to it before the
+		// replacement reached it, and cleared at the first drained pull that met
+		// none (RelaySpoolConsumer).
+		'mrl_transport_secret_retired_sealed' => array('type'=>'text'),
+		// When the transport key was replaced: the retired secret is kept until
+		// a map pushed after this has been installed on the relay and a pull
+		// started after that push drained the spool meeting no old blob.
+		'mrl_transport_replaced_time' => array('type'=>'timestamp(6)'),
 		// Relay-fronted mode active. When true, the MTA-stack decommission and the
 		// health retargeting apply.
 		'mrl_is_enabled'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
@@ -190,21 +202,65 @@ class MailboxRelay extends SystemBase {
 
 	/**
 	 * Generate the ambient transport keypair if this relay has none yet, sealing
-	 * the secret under SecretBox. Idempotent — returns the public key either way.
+	 * the secret under SecretBox, and replace an old 32-byte X25519 one with an
+	 * X-Wing one once the relay seals to X-Wing keys (specs/post_quantum_sealing.md
+	 * R7, Q8). Returns the public key the map should carry.
+	 *
+	 * An older relay rejects a 1216-byte transport key, which would stop every
+	 * message it fronts, so the old key stays until the relay reports 3.16
+	 * (the site's upgrade refuses before that; this is the second guard). The
+	 * replaced secret moves to mrl_transport_secret_retired_sealed: mail already
+	 * in the spool was sealed to it.
 	 */
 	public function ensureTransportKeypair(): string {
 		$existing = (string)$this->get('mrl_transport_public_key');
-		if ($existing !== '') {
+		if ($existing !== '' && !$this->transportKeyIsOld()) {
+			return $existing;
+		}
+		if ($existing !== '' && !RelayVersion::sealsPostQuantum($this->provisionedVersion())) {
 			return $existing;
 		}
 		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 		$kp = (new SealedBox())->generateKeypair();
 		$sealed_secret = (new SecretBox())->seal('mrl_mailbox_relays.mrl_transport_secret_sealed', $kp['secret']);
+		if ($existing !== '') {
+			$this->set('mrl_transport_secret_retired_sealed', (string)$this->get('mrl_transport_secret_sealed'));
+			$this->set('mrl_transport_key_generation', (int)$this->get('mrl_transport_key_generation') + 1);
+			$this->set('mrl_transport_replaced_time', gmdate('Y-m-d H:i:s'));
+		}
 		$this->set('mrl_transport_public_key', $kp['public']);
 		$this->set('mrl_transport_secret_sealed', $sealed_secret);
 		$this->save();
 		return $kp['public'];
+	}
+
+	/**
+	 * May the retired transport secret be forgotten after a drained pull that
+	 * began at $pull_started (unix time) and met no old blob? Only once the
+	 * relay installed a map pushed after the key was replaced (so it seals to
+	 * the new key) and that pull began after the push (so the spool it drained
+	 * holds nothing the relay sealed before). A failed or lagging push keeps
+	 * the secret: the relay may still be sealing to the old key.
+	 */
+	public function retiredTransportSecretMayGo(int $pull_started): bool {
+		if ((string)$this->get('mrl_transport_secret_retired_sealed') === '' || $this->transportKeyIsOld()) {
+			return false;
+		}
+		$at = function (string $col) {
+			$v = trim((string)$this->get($col));
+			return $v === '' ? false : strtotime($v . ' UTC');
+		};
+		$replaced = $at('mrl_transport_replaced_time');
+		$pushed = $at('mrl_last_push_time');
+		return $replaced !== false && $pushed !== false && $pushed >= $replaced && $pull_started > $pushed;
+	}
+
+	/** Is the transport key an old 32-byte X25519 one? */
+	public function transportKeyIsOld(): bool {
+		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
+		$raw = SealedBox::b64url_decode((string)$this->get('mrl_transport_public_key'));
+		return $raw !== false && strlen($raw) === 32;
 	}
 
 	/** This deployment's tenant identity on the relay ('main' when unset). */
@@ -591,7 +647,27 @@ class MailboxRelay extends SystemBase {
 	 * can run today's ingest immediately. Never logged.
 	 */
 	public function transportSecretKey(): string {
-		$sealed = (string)$this->get('mrl_transport_secret_sealed');
+		return $this->openTransportSecret((string)$this->get('mrl_transport_secret_sealed'));
+	}
+
+	/**
+	 * The transport secret that opens a blob of seal version $version (1 or 2,
+	 * SealedBox::unframeSeal): the current one, or for a v1 blob after the key
+	 * was replaced, the retired one. Null when neither is of that version.
+	 */
+	public function transportSecretFor(int $version): ?string {
+		$current_old = $this->transportKeyIsOld();
+		if ($version === SealedBox::V2) {
+			return $current_old ? null : $this->transportSecretKey();
+		}
+		if ($current_old) {
+			return $this->transportSecretKey();
+		}
+		$retired = (string)$this->get('mrl_transport_secret_retired_sealed');
+		return $retired === '' ? null : $this->openTransportSecret($retired);
+	}
+
+	private function openTransportSecret(string $sealed): string {
 		if ($sealed === '') {
 			throw new MailboxRelayException('MailboxRelay: transport keypair not initialised');
 		}

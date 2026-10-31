@@ -44,6 +44,27 @@ if (($page_vars['pq_reason'] ?? null) !== null) {
 	echo '<p class="text-muted small mb-3">This server is ready for post-quantum key protection (ML-KEM through OpenSSL 3.5).</p>';
 }
 
+// The vaults still on old X25519 keys, by scope (specs/post_quantum_sealing.md
+// R7): each opens and takes new content only once its owner rotates it, so
+// what is sealed to it waits, and mail waits on a clock.
+$pq_old = $page_vars['pq_old_vaults'] ?? array();
+if ($pq_old) {
+	$parts = array();
+	foreach ($pq_old as $scope => $count) {
+		$parts[] = $count . ' ' . htmlspecialchars($scope === UserEncryptionVault::SCOPE_USER ? 'account vault'
+			: ($scope === VaultScopes::ROOT_SCOPE ? 'root key (moves with the account vault)' : VaultScopes::labelFor($scope)));
+	}
+	$mail_waiting = (int)($pq_old[UserEncryptionVault::SCOPE_USER] ?? 0) + (int)($pq_old['mail'] ?? 0);
+	echo '<div class="alert alert-warning mb-3"><strong>' . array_sum($pq_old) . ' vault' . (array_sum($pq_old) === 1 ? ' is' : 's are')
+		. ' still on keys from before post-quantum protection</strong> (' . implode(', ', $parts) . '). Each opens again, and takes '
+		. 'new content, once its owner rotates it: their next unlock takes them to the rotation on their Security page.'
+		. (($mail_waiting > 0 && class_exists('InboundEmailMessage'))
+			? ' ' . $mail_waiting . ' of them can hold their owners\' mail, which is refused until they rotate: senders retry, '
+			. 'and start bouncing after their retry window (a few days).'
+			: '')
+		. '</div>';
+}
+
 $ceremony_configs = array();
 $client_configs = array();
 foreach ($items as $item) {
