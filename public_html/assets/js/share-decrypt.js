@@ -40,7 +40,7 @@
 		var CFG = window.SHARE_ENC || {};
 		var DC = window.DriveCrypto;
 		if (!DC) { fail('Encryption is unavailable in this browser.'); return; }
-		var supported = await DC.isSupported();
+		var supported = await DC.contentSupported();
 		if (!supported) { fail('This browser cannot decrypt the file (needs modern WebCrypto).'); return; }
 
 		var frag = (window.location.hash || '').replace(/^#/, '');

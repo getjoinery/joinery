@@ -2,15 +2,16 @@
  * Recovery Readiness — in-page verify tools.
  *
  * Ceremony: the operator pastes a recovery private key; the challenge the
- * server sealed to the configured public key is opened right here with
- * WebCrypto (X25519 + HKDF-SHA256 + AES-256-GCM, the BackupRecoveryKey
- * browser-challenge layout). The key never leaves the page: no fetch, no form
+ * server sealed to the configured public key is opened right here (an X-Wing
+ * v2 seal under the challenge's own scope, BackupRecoveryKey::browser_challenge,
+ * through VaultCrypto). The key never leaves the page: no fetch, no form
  * field, cleared the moment it is used. Only the recovered proof string —
  * public by construction — goes into the form.
  *
- * Generation: the same primitives make the keypair in the first place, so
- * setting up backup recovery needs no shell. The private half is shown once,
- * copied or downloaded by the operator, and never sent anywhere. Setup is one
+ * Generation: the same code makes the keypair in the first place, so
+ * setting up backup recovery needs no shell. The private half (a 32-byte
+ * X-Wing seed) is shown once, copied or downloaded by the operator, and never
+ * sent anywhere. Setup is one
  * screen: the operator pastes the key back from wherever they saved it, and
  * one button saves the public half (backup_recovery_save) and proves the
  * pasted copy against the challenge the server sealed to what it actually
@@ -27,10 +28,16 @@
  * Backup key box: a restore of a backup another server made carries the box
  * its key is sealed in to the recovery key. The approval works out, from the
  * same pasted key (or the earlier key the backup was sealed to, pasted in a
- * box of its own), the X25519 of that key with the box's ephemeral key: the
- * one value that opens that box, which the agent finishes opening. That value
- * and the key's public half go into the form; the key does not.
+ * box of its own), the one value that opens that box, which the agent
+ * finishes opening (VaultCrypto.halfOpenKeyBox: the dek-scope key of a v2 box,
+ * the X25519 of a v1 one). That value and the key's public half go into the
+ * form; the key does not.
  *
+ * Needs assets/js/vault-crypto.js on the page before it (every emitter puts
+ * it there).
+ *
+ * @version 2.0.0 - X-Wing (specs/post_quantum_sealing.md WP2): the keypair, the challenge and the key box
+ *                  go through VaultCrypto; this file has no crypto of its own
  * @version 1.4.0 - the approval opens a backup's key box with the pasted key (openKeyBox)
  * @version 1.3.1 - a comment names ApprovalChallengePanel, the one approval screen for every scope
  * @version 1.3.0 - the save call carries the generator config's rotate flag, so the
@@ -46,98 +53,46 @@
 window.recoveryReadiness = (function () {
 	'use strict';
 
-	var subtle = window.crypto && window.crypto.subtle;
-
-	// DER prefix that turns a raw 32-byte X25519 secret into the PKCS#8 form
-	// WebCrypto insists on for private keys (OID 1.3.101.110).
-	var PKCS8_PREFIX = new Uint8Array([
-		0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
-		0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20
-	]);
-
-	function b64decode(s) {
-		var bin = atob(String(s).replace(/\s+/g, ''));
-		var out = new Uint8Array(bin.length);
-		for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-		return out;
+	function VC() {
+		if (!window.VaultCrypto) {
+			throw new Error('The page\'s encryption script did not load. Reload the page and try again.');
+		}
+		return window.VaultCrypto;
 	}
-
-	function concat() {
-		var parts = Array.prototype.slice.call(arguments);
-		var total = parts.reduce(function (n, p) { return n + p.length; }, 0);
-		var out = new Uint8Array(total), at = 0;
-		parts.forEach(function (p) { out.set(p, at); at += p.length; });
-		return out;
-	}
-
-	function b64encode(bytes) {
-		var s = '';
-		for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-		return btoa(s);
-	}
-
-	function utf8(s) { return new TextEncoder().encode(s); }
-
-	function zero(bytes) { if (bytes && bytes.fill) bytes.fill(0); }
 
 	/**
-	 * Mint an X25519 recovery keypair in this page.
+	 * Mint an X-Wing recovery keypair in this page.
 	 *
 	 * The encoding is the contract with everything else that touches this key —
-	 * the ceremony below, escrow_keypair.php, libsodium on the server — so both
-	 * halves come out exactly as the CLI writes them: one line of base64 over
-	 * the raw 32 bytes. The private key is the raw scalar, which WebCrypto will
-	 * only export wrapped in PKCS#8, so the fixed 16-byte header comes back off.
-	 * That header is asserted rather than assumed: a scalar taken from the wrong
-	 * offset would look like a perfectly good key and open nothing.
+	 * the ceremony below, escrow_keypair.php, BackupEnvelope on the server — so
+	 * both halves come out exactly as the CLI writes them: one line of standard
+	 * base64 each, the private key the raw 32-byte seed, the public key the
+	 * 1216-byte X-Wing key derived from it.
 	 *
 	 * @returns {Promise<{privateKeyB64: string, publicKeyB64: string}>}
 	 */
 	async function generateKeypair() {
-		if (!subtle) {
-			throw new Error('This browser has no WebCrypto — use the command shown below instead.');
+		var vc = VC();
+		if (!(await vc.isSupported())) {
+			throw new Error('This browser cannot make a recovery key — use the command shown below instead.');
 		}
-
-		var pair;
-		try {
-			pair = await subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
-		} catch (e) {
-			throw new Error('This browser cannot make an X25519 key — use the command shown below instead.');
-		}
-
-		var pkcs8 = new Uint8Array(await subtle.exportKey('pkcs8', pair.privateKey));
-		if (pkcs8.length !== PKCS8_PREFIX.length + 32) {
-			zero(pkcs8);
-			throw new Error('This browser exported the key in an unexpected format — use the command shown below instead.');
-		}
-		for (var i = 0; i < PKCS8_PREFIX.length; i++) {
-			if (pkcs8[i] !== PKCS8_PREFIX[i]) {
-				zero(pkcs8);
-				throw new Error('This browser exported the key in an unexpected format — use the command shown below instead.');
-			}
-		}
-
-		var priv = pkcs8.slice(PKCS8_PREFIX.length);
-		var pub = new Uint8Array(await subtle.exportKey('raw', pair.publicKey));
-		var out = { privateKeyB64: b64encode(priv), publicKeyB64: b64encode(pub) };
-		zero(priv);
-		zero(pkcs8);
+		var pair = await vc.generateVaultKeypair();
+		var out = { privateKeyB64: vc.b64encode(pair.secretKeyBytes), publicKeyB64: pair.publicKeyB64 };
+		pair.secretKeyBytes.fill(0);
 		return out;
 	}
 
 	/**
-	 * Open a sealed challenge with a pasted private key.
-	 * Layout: base64( ephemeralPub[32] || iv[12] || ciphertext+tag ).
+	 * Open a sealed challenge with a pasted private key: a v2 seal to the
+	 * 1216-byte public key under `scope` (the challenge's own label, e.g.
+	 * BackupRecoveryKey::BROWSER_INFO or an approval's scope).
 	 * @returns {Promise<string>} the recovered proof string
 	 */
-	async function openChallenge(challengeB64, privateKeyB64, publicKeyB64, infoPrefix) {
-		if (!subtle) {
-			throw new Error('This browser has no WebCrypto — use the command shown below instead.');
-		}
-
+	async function openChallenge(challengeB64, privateKeyB64, publicKeyB64, scope) {
+		var vc = VC();
 		var priv;
 		try {
-			priv = b64decode(privateKeyB64);
+			priv = vc.b64decode(String(privateKeyB64).replace(/\s+/g, ''));
 		} catch (e) {
 			throw new Error('That is not a recovery key — it should be one line of base64.');
 		}
@@ -145,87 +100,31 @@ window.recoveryReadiness = (function () {
 			throw new Error('That is not a recovery key: expected 32 bytes, got ' + priv.length +
 				'. Paste the private key exactly as your password manager holds it.');
 		}
-
-		var blob = b64decode(challengeB64);
-		var ephPub = blob.slice(0, 32);
-		var iv = blob.slice(32, 44);
-		var ct = blob.slice(44);
-		var recipientPub = b64decode(publicKeyB64);
-
-		var pkcs8 = concat(PKCS8_PREFIX, priv);
-		zero(priv);
-
-		var privKey;
-		try {
-			privKey = await subtle.importKey('pkcs8', pkcs8, { name: 'X25519' }, false, ['deriveBits']);
-		} catch (e) {
-			throw new Error('This browser cannot do X25519 in JavaScript — use the command shown below instead.');
-		} finally {
-			zero(pkcs8);
+		if (vc.b64decode(publicKeyB64).length !== vc.XWING_PUBLIC_BYTES) {
+			priv.fill(0);
+			throw new Error('The recovery key saved here is an old X25519 key, which nothing opens with any more. ' +
+				'Set up a new recovery key first.');
 		}
-
-		var ephKey = await subtle.importKey('raw', ephPub, { name: 'X25519' }, false, []);
-		var shared = await subtle.deriveBits({ name: 'X25519', public: ephKey }, privKey, 256);
-
-		var hkdfKey = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
-		zero(new Uint8Array(shared));
-
-		var info = concat(utf8(infoPrefix || 'joinery-backup-recovery-possession:'), ephPub, recipientPub);
-		var bits = await subtle.deriveBits(
-			{ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: info }, hkdfKey, 256);
-
-		var aesKey = await subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['decrypt']);
-		zero(new Uint8Array(bits));
-
 		var plain;
 		try {
-			plain = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, aesKey, ct);
+			plain = await vc.openChallenge(challengeB64, priv, publicKeyB64, scope || 'joinery-backup-recovery-possession:');
 		} catch (e) {
 			throw new Error('That key does not open this challenge. It is not the private half of the ' +
 				'public key saved here — check you copied the right entry.');
+		} finally {
+			priv.fill(0);
 		}
 		return new TextDecoder().decode(plain);
 	}
 
 	/**
-	 * Work out what opens a sealed box with a pasted recovery key: the X25519
-	 * of the key with the box's ephemeral public key, and the key's public
-	 * half, after checking that half is the one the box is sealed to.
+	 * Work out what opens a backup's key box with a pasted recovery key, after
+	 * checking the key is the one the box is sealed to.
+	 * `box` is { version, ciphertext (v2), ephemeralPublic (v1), fingerprint }.
 	 * @returns {Promise<{shared: string, pub: string}>} both base64
 	 */
-	async function openKeyBox(privateKeyB64, ephemeralB64, fingerprint) {
-		if (!subtle) {
-			throw new Error('This browser has no WebCrypto — use a current Chrome, Firefox or Safari.');
-		}
-		var priv;
-		try { priv = b64decode(privateKeyB64); } catch (e) { throw new Error('That is not a recovery key — it should be one line of base64.'); }
-		if (priv.length !== 32) {
-			throw new Error('That is not a recovery key: expected 32 bytes, got ' + priv.length + '.');
-		}
-		var pkcs8 = concat(PKCS8_PREFIX, priv);
-		zero(priv);
-		var key;
-		try {
-			// Extractable only so its public half can be read back below.
-			key = await subtle.importKey('pkcs8', pkcs8, { name: 'X25519' }, true, ['deriveBits']);
-		} catch (e) {
-			throw new Error('This browser cannot do X25519 in JavaScript.');
-		} finally {
-			zero(pkcs8);
-		}
-		var jwk = await subtle.exportKey('jwk', key);
-		var pub = b64decode(jwk.x.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - jwk.x.length % 4) % 4));
-		jwk.d = '';
-		var fp = Array.prototype.map.call(new Uint8Array(await subtle.digest('SHA-256', pub)), function (b) {
-			return ('0' + b.toString(16)).slice(-2);
-		}).join('');
-		if (fp !== fingerprint) {
-			throw new Error('That recovery key has fingerprint ' + fp.slice(0, 16) + ', and this backup is sealed to ' +
-				fingerprint.slice(0, 16) + '. Check you copied the right entry.');
-		}
-		var eph = await subtle.importKey('raw', b64decode(ephemeralB64), { name: 'X25519' }, false, []);
-		var shared = await subtle.deriveBits({ name: 'X25519', public: eph }, key, 256);
-		return { shared: b64encode(new Uint8Array(shared)), pub: b64encode(pub) };
+	async function openKeyBox(privateKeyB64, box) {
+		return VC().halfOpenKeyBox(box, privateKeyB64, box.fingerprint);
 	}
 
 	function attachCeremony(c) {
@@ -253,7 +152,7 @@ window.recoveryReadiness = (function () {
 			say('Checking in this browser…', true);
 			// The backup's key box first, when there is one: its value goes into
 			// the form beside the answer, and the answer submits the form.
-			var opened = box ? openKeyBox(boxKey, box.ephemeralPublic, box.fingerprint).then(function (r) {
+			var opened = box ? openKeyBox(boxKey, box).then(function (r) {
 				document.getElementById(box.sharedId).value = r.shared;
 				document.getElementById(box.publicId).value = r.pub;
 				if (boxInput) { boxInput.value = ''; }
@@ -282,10 +181,9 @@ window.recoveryReadiness = (function () {
 	 * real, paste it back, one button saves and verifies.
 	 *
 	 * The Generate button is hidden in the markup and revealed only once a
-	 * throwaway keypair has actually been made here — support for X25519 in
-	 * WebCrypto is recent enough that offering a button which fails on click
-	 * would be worse than not offering it, on the one page whose job is making
-	 * sure recovery works.
+	 * throwaway keypair has actually been made here — offering a button which
+	 * fails on click would be worse than not offering it, on the one page whose
+	 * job is making sure recovery works.
 	 *
 	 * The paste-back IS the save confirmation: it must match the generated key
 	 * before anything is sent, and the possession proof is then computed from
@@ -322,7 +220,7 @@ window.recoveryReadiness = (function () {
 		}
 
 		// Probe before offering. A key made and thrown away here proves the
-		// whole path works, including the PKCS#8 export shape.
+		// whole path works, the X-Wing module included.
 		generateKeypair().then(function () {
 			box.hidden = false;
 		}).catch(function () {

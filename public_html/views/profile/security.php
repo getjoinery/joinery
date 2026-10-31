@@ -1361,6 +1361,7 @@ $pac_writer->end_form();
                 <?php endforeach; ?>
             </div>
             <?php endif; ?>
+            <?php echo VaultCrypto::browserScriptTag(); ?>
             <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
             <script>
             window.rrClientConfigs = <?php echo json_encode($rr_client_configs); ?>;

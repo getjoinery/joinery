@@ -16,7 +16,22 @@ suite that uses the machine's own key fails without it. Until WP3 the relay suit
 v2 transport key to the Go applier fail (it refuses 1216 bytes); until WP2 the browser cannot
 make a v2 key, so no client-custody vault can be created or rotated on a WP1-only tree. WP1 must
 not be published alone. Ten backup suites wait on localdev's own recovery key becoming X-Wing (live
-verification queue). Next: WP2.
+verification queue).
+WP2 built 2026-10-31: `assets/vendor/noble/` (@noble/post-quantum 0.7.1, its own `ml_kem768_x25519`,
+which reproduces all three Appendix C vectors, so X-Wing is not rewritten in `vault-crypto.js`;
+loaded on demand with its Subresource Integrity hash as the pin); `vault-crypto.js` 2.0 (seed
+secret, v2 seal with scope, v1 open-only, `halfOpenKeyBox()` for the boxes an agent finishes,
+`selfCheck()` on the v2 and v1 vectors); `joinery-sealed.js` and the two mailbox scripts write
+`v2.edgeseal.`; `recovery-readiness.js` and `copy-key.js` carry no crypto of their own and load
+`vault-crypto.js` (`VaultCrypto::browserScriptTag()`); `views/copy-key.php` passes the box's
+version and ciphertext; the device handoff vector re-cut with `vault.seed_hex` and reproduced byte
+for byte by SealedBox; `tests/vault/xwing_browser_gate.sh` (`xwing_vector.mjs`); the captured
+browser recovery keypair re-captured in Chrome. Changes from the text: `backup_key_verify.js`
+was loaded by no page and is deleted rather than ported; `device-link.js` needed no change (it
+seals through the keyring session). `selfCheck()` passed in headless Chrome on localdev; Firefox
+and Safari, and the three ceremonies end to end, are in the live verification queue. Until WP4,
+`sync_crypto_parity` fails its node-to-Rust direction (Rust cannot open a v2 seal), and its vector
+field names still say `pkcs8`. Next: WP3.
 **Decided by the owner, 2026-10-31:** Joinery requires Ubuntu 26.04 or later.
 There is no 24.04 path for this feature and no pure-PHP fallback.
 **Decided by the owner, 2026-10-31:** no transition period. The upgrade forces
@@ -379,6 +394,18 @@ version, for its four callers. The posted public key is then only matched
 against the box's fingerprint. The answer fields keep their names (`shared`);
 for a v2 box the value is the dek-scope key.
 
+**One format means a challenge page could open any box (reviewer2 WP2 B1).** v1's
+browser challenge and libsodium's sealed box were different constructions, so a
+challenge opener could never open a data key. A v2 challenge and a v2 key seal
+differ only by scope, so the scope a page opens under must never come from data
+the page is handed: `ApprovalChallenge::pending()` uses its own scope's label and
+refuses a request row that names another, and the browser opens a challenge only
+through `VaultCrypto.openChallenge()`, which takes the four challenge labels and
+never `dek`. Residual, unchanged from v1: whoever can write the request row can
+swap the key box for another dek box sealed to the same recovery key; the
+fingerprint check binds the key, not the box. The agent finishes that open and
+checks what it gets.
+
 v1's HKDF info carried `ephPub ‖ recipientPub`; v2's does not need them.
 X-Wing's combiner already binds `ct_X` and `pk_X`, and ML-KEM's shared secret
 binds its own ciphertext and encapsulation key.
@@ -531,11 +558,11 @@ mailbox self-checks (F1) keep working; `isSupported()` also reports whether the
 bundle loaded, and a page that cannot
 says so plainly, as it does for a browser without X25519 (`:452-460`).
 
-The three challenge pages (`recovery-readiness.js`, `backup_key_verify.js`,
-`copy-key.js`) open a v2 challenge by decapsulating in full and, where the
-agent finishes the open, post the 32-byte X-Wing shared secret and the
-1216-byte public key. The agent's box carries `kem_ciphertext` (1120 bytes)
-in place of `ephemeral_public`. The server-side shape checks
+The challenge pages (`recovery-readiness.js`, `copy-key.js`) open a v2
+challenge by decapsulating in full and, where the agent finishes the open,
+post the 32-byte dek-scope AES key (never the X-Wing shared secret, R2) and
+the 1216-byte public key, through `VaultCrypto.halfOpenKeyBox()`. The box
+carries `ciphertext` (1120 bytes, base64) in place of `ephemeral_public`. The server-side shape checks
 (`ApprovalChallenge:347`, `:394-397`, `CopyKeyHandoff:77`,
 `DataRootEscrow::accept_unlock_value()`) accept 32 for the secret and 1216
 for the key. The live-test harness's openers (`SiteCopyLiveRun.php:308-343`)
@@ -942,6 +969,8 @@ and `escrow_keypair.php unseal`, both naming OpenSSL 3.5, and its description
 of `config/backup_site_key` as "the base64 of the raw sodium keypair",
 `:1000-1003`, becomes the seed form; recovery key setup),
 `docs/installation.md`, `plugins/vault/docs/overview.md:57`,
+`plugins/server_manager/docs/overview.md` (the in-page recovery proof, which names the deleted
+`backup_key_verify.js` and the v1 challenge layout),
 `docs/drive_sync.md`, `docs/mobile_apps.md:774-785`, `docs/joinery_direct.md`.
 Each reads as the end state (CLAUDE.md documentation rule).
 

@@ -7,23 +7,26 @@
  * needs: []
  */
 /**
- * The recovery keypair is made in the browser and used by libsodium on the
- * server, so its encoding is a contract between two engines that never see each
- * other. One private key has to work in three places for the rest of its life:
- * the in-page possession ceremony, escrow_keypair.php unseal during a disaster,
- * and any future recovery tooling.
+ * The recovery keypair is made in the browser and used by the server's
+ * X-Wing (includes/XWing.php, SealedBox), so its encoding is a contract between
+ * two engines that never see each other. One private key has to work in three
+ * places for the rest of its life: the in-page possession ceremony,
+ * escrow_keypair.php unseal during a disaster, and any future recovery tooling.
  *
- * A drift here — a base64 variant, a stray newline, the scalar taken from the
- * wrong offset of the PKCS#8 wrapper — produces a keypair that looks entirely
- * healthy. The page accepts it, the setting stores it, backups seal to it and
- * report success. It is discovered at the only moment it cannot be fixed.
+ * A drift here — a base64 variant, a stray newline, a public key derived from
+ * the seed some other way — produces a keypair that looks entirely healthy.
+ * The page accepts it, the setting stores it, backups seal to it and report
+ * success. It is discovered at the only moment it cannot be fixed.
  *
  * Two checks, deliberately different in kind:
  *   1. A keypair a REAL browser emitted, captured once as a fixture, is held to
  *      the contract. This is the one that proves a browser can do it at all.
- *   2. The shipped JS is executed against WebCrypto and its output is verified
- *      the same way, so a change to the export handling fails here rather than
- *      in someone's archive. Skipped where node cannot supply X25519.
+ *   2. The shipped JS (recovery-readiness.js on vault-crypto.js and the
+ *      vendored X-Wing) is executed and its output is verified the same way,
+ *      so a change to the generation fails here rather than in someone's
+ *      archive.
+ *
+ * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): a 32-byte seed and a 1216-byte public key
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -31,38 +34,35 @@ harness_boot();
 
 /**
  * Everything a recovery keypair must satisfy, whatever produced it.
- * @param string $priv_b64 raw 32-byte X25519 scalar, base64
- * @param string $pub_b64  raw 32 bytes, base64
+ * @param string $priv_b64 the 32-byte X-Wing seed, base64
+ * @param string $pub_b64  the 1216-byte X-Wing public key, base64
  */
 function rk_check_pair($priv_b64, $pub_b64, $label) {
 	$priv = base64_decode((string)$priv_b64, true);
 	$pub  = base64_decode((string)$pub_b64, true);
 
-	check($priv !== false && strlen($priv) === SODIUM_CRYPTO_BOX_SECRETKEYBYTES,
-		"{$label}: private key is 32 raw bytes in standard base64",
+	check($priv !== false && strlen($priv) === XWing::SEED_BYTES,
+		"{$label}: private key is a 32-byte seed in standard base64",
 		'got ' . ($priv === false ? 'invalid base64' : strlen($priv) . ' bytes'));
-	check($pub !== false && strlen($pub) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES,
-		"{$label}: public key is 32 raw bytes in standard base64",
+	check($pub !== false && strlen($pub) === XWing::PUBLIC_KEY_BYTES,
+		"{$label}: public key is 1216 raw bytes in standard base64",
 		'got ' . ($pub === false ? 'invalid base64' : strlen($pub) . ' bytes'));
 	if ($priv === false || $pub === false
-			|| strlen($priv) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES
-			|| strlen($pub) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			|| strlen($priv) !== XWing::SEED_BYTES
+			|| strlen($pub) !== XWing::PUBLIC_KEY_BYTES) {
 		return; // nothing below can mean anything
 	}
 
-	// The halves must belong to each other. libsodium clamps the scalar inside
-	// crypto_scalarmult_base and WebCrypto clamps during X25519, so a scalar
-	// generated on either side must derive the same public key on the other —
-	// this is the assertion that says so rather than assuming it.
-	check(sodium_crypto_box_publickey_from_secretkey($priv) === $pub,
-		"{$label}: the public key is what libsodium derives from the private key");
+	// The halves must belong to each other: the server's X-Wing derives the
+	// same public key from the seed the browser's did.
+	check((new XWing())->publicKey($priv) === $pub,
+		"{$label}: the public key is what the server's X-Wing derives from the private key");
 
 	// The platform seals to it, exactly as BackupEnvelope does for every backup.
-	$secret  = 'Your recovery key opened this message.';
-	$sealed  = sodium_crypto_box_seal($secret, $pub);
-	$keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($priv, $pub);
-	check(sodium_crypto_box_seal_open($sealed, $keypair) === $secret,
-		"{$label}: a sealed box for this public key opens with this private key");
+	$secret = 'Your recovery key opened this message.';
+	$sealed = SealedBox::sealV2($secret, $pub);
+	check(SealedBox::openV2($sealed, $priv) === $secret,
+		"{$label}: a v2 seal to this public key opens with this private key");
 
 	// And the disaster-recovery tool opens it, reading the private key from a
 	// file written exactly as the operator would save it.
@@ -137,6 +137,10 @@ sandbox.window.document = doc;
 sandbox.window.crypto = webcrypto;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
+// As a page loads them: the vendored X-Wing, vault-crypto.js, then the panel's script.
+vm.runInContext(fs.readFileSync(process.argv[3], 'utf8'), sandbox);
+sandbox.window.JoineryPQ = sandbox.JoineryPQ;
+vm.runInContext(fs.readFileSync(process.argv[4], 'utf8'), sandbox);
 vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), sandbox);
 
 sandbox.window.recoveryReadiness.generateKeypair()
@@ -149,16 +153,17 @@ JS;
 	$out = [];
 	$rc  = 0;
 	exec(escapeshellarg($node) . ' ' . escapeshellarg($runner_file) . ' '
-		. escapeshellarg($js) . ' 2>&1', $out, $rc);
+		. escapeshellarg($js) . ' '
+		. escapeshellarg(PathHelper::getIncludePath('assets/vendor/noble/noble-post-quantum-xwing.min.js')) . ' '
+		. escapeshellarg(PathHelper::getIncludePath('assets/js/vault-crypto.js')) . ' 2>&1', $out, $rc);
 	@unlink($runner_file);
 
 	$generated = json_decode(trim(implode('', $out)), true);
-	if (!is_array($generated) || isset($generated['error'])) {
-		// No X25519 in this runtime is a fact about the machine, not a failure
-		// of the contract — a browser that cannot generate falls back to the CLI.
-		harness_skip('this node runtime cannot generate an X25519 keypair',
-			is_array($generated) ? (string)$generated['error'] : implode(' | ', $out));
-	} else {
+	// The generator needs nothing of the engine but SHA-256, HKDF and random
+	// bytes (X-Wing is the vendored module), so failing to generate is a failure.
+	check(is_array($generated) && !isset($generated['error']), 'the shipped generator makes a keypair',
+		is_array($generated) ? (string)($generated['error'] ?? '') : implode(' | ', $out));
+	if (is_array($generated) && !isset($generated['error'])) {
 		rk_check_pair($generated['privateKeyB64'] ?? '', $generated['publicKeyB64'] ?? '',
 			'shipped generator');
 	}

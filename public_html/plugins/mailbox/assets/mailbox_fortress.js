@@ -41,6 +41,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.14 - a draft's key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.13.2 - a failed device_rules fetch is not cached for the drain (review F6); the rule
  *   backlog walk moves past a row it cannot open (F7)
  * @version 1.13.1 - the pin self-check derives from the PKCS#8 secret, as session.mac() does
@@ -82,7 +83,7 @@ window.MailboxFortress = (function () {
 	'use strict';
 
 	var SCOPE = 'mail';
-	var EDGE_SEAL = 'v1.edgeseal.';
+	var EDGE_SEAL = 'v2.edgeseal.';   // X-Wing; nothing here parses the frame
 	var EDGE_FIELD = 'v1.edge.';
 	var PENDING_NOTE = 'Waiting to be opened on this device.';
 	var LOCKED_NOTE = 'End-to-end encrypted. Unlock your vault to read it.';
@@ -1499,7 +1500,7 @@ window.MailboxFortress = (function () {
 			d.dekBytes.fill(0);
 			var entry = { id: 42, received_time: '2026-09-24 10:00:00', spf_result: 'pass', dkim_result: 'pass',
 				dmarc_result: 'pass', recipient: 'you@example.test',
-				sealed: { key: 42, sealed_scope: 'mail', sealed_dek: 'v1.edgeseal.mail.stub', sealed_ad_prefix: 'mail:' } };
+				sealed: { key: 42, sealed_scope: 'mail', sealed_dek: 'v2.edgeseal.mail.stub', sealed_ad_prefix: 'mail:' } };
 			var opened = { iem_raw_headers: 'From: Shop <s@shop.example>\nSubject: Your order', iem_sender: 'Shop <s@shop.example>',
 				iem_subject: 'Your order', iem_body_plain: 'It shipped. https://track.example/1', iem_body_html: '',
 				iem_attachment_manifest: '[{"filename":"label.pdf","content_type":"application/pdf","size":10}]' };

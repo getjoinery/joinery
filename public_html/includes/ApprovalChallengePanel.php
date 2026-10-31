@@ -22,6 +22,7 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.4 - loads vault-crypto.js, which opens the challenge and the key box (post_quantum_sealing WP2)
  * @version 1.3 - the key box carries its seal version and, for v2, the X-Wing ciphertext
  * @version 1.2 - a restore of a backup another server made opens that backup's key with the pasted key too, and
  *                asks for the earlier recovery key when the backup was sealed to one (B20)
@@ -158,6 +159,7 @@ class ApprovalChallengePanel {
 		// assignment silently replace the first. A page renders one approval
 		// at a time (ApprovalChallenge::PRECEDENCE), so one global serves every
 		// scope.
+		echo VaultCrypto::browserScriptTag();
 		echo '<script defer src="/assets/js/recovery-readiness.js?v='
 		   . (@filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1') . '"></script>';
 		echo '<script>window.rrApproval = ' . json_encode(array(

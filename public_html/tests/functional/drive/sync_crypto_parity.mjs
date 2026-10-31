@@ -43,6 +43,9 @@ globalThis.document = { createElement: () => ({ getContext: () => ({ drawImage()
 }
 
 function load(file) { (0, eval)(fs.readFileSync(path.join(ASSETS, file), 'utf8')); }
+// The vendored X-Wing first, so VaultCrypto finds window.JoineryPQ and never
+// reaches for its script-tag loader (which cannot run here).
+(0, eval)(fs.readFileSync(path.resolve(__dirname, '../../../assets/vendor/noble/noble-post-quantum-xwing.min.js'), 'utf8'));
 load('vault-crypto.js');
 load('drive-crypto.js');
 

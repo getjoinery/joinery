@@ -44,7 +44,7 @@ const descArg = process.argv.find((a) => a.startsWith('--descriptors='));
 // Decode windows-1252 as a browser does (see the shim) before any module loads.
 require(join(here, 'lib', 'whatwg_text_decoder.js'));
 globalThis.window = globalThis;
-for (const f of ['assets/js/vault-crypto.js', 'assets/js/html-entities.js', 'assets/js/email-digest.js',
+for (const f of ['assets/vendor/noble/noble-post-quantum-xwing.min.js', 'assets/js/vault-crypto.js', 'assets/js/html-entities.js', 'assets/js/email-digest.js',
 	'assets/js/verdict-check.js', 'plugins/mailbox/assets/mailbox_mime.js', 'plugins/mailbox/assets/mailbox_fortress.js']) {
 	new Function(readFileSync(join(root, f), 'utf8'))();
 }

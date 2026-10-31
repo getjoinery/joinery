@@ -21,6 +21,7 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.5 - loads vault-crypto.js, whose X-Wing the ceremony runs on (post_quantum_sealing WP2)
  * @version 2.4 - the command-line proof command comes from BackupRecoveryKey::cli_unseal_command()
  * @version 2.3 - Rotate key asks whether the current key could have been seen, where an encrypted data
  *                root is sealed to it (here, or on the servers a management node hosts), and says what to
@@ -258,6 +259,7 @@ class RecoveryKeySetupPanel {
 	 * present on DOMContentLoaded.
 	 */
 	private static function emitScript(array $config): void {
+		echo VaultCrypto::browserScriptTag();
 		echo '<script defer src="/assets/js/recovery-readiness.js?v='
 		   . (@filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1') . '"></script>';
 		echo '<script>window.rrPanel = ' . json_encode($config,

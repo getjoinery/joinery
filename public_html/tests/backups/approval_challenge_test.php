@@ -149,6 +149,17 @@ foreach (array_keys(ApprovalChallenge::SCOPES) as $scope) {
 	check(($pending['seconds_left'] ?? 0) > 0 && ($pending['seconds_left'] ?? 0) <= 900,
 		'the operator is told how long they have', (string)($pending['seconds_left'] ?? 0));
 
+	// The scope is this scope's, never the row's: a row naming another label
+	// (a key seal's 'dek', another approval's) is not the agent's request, and
+	// using it would let the row's writer have the pasted key open any box
+	// sealed to it into the answer field (reviewer2 WP2 B1).
+	foreach (array('dek', 'joinery-backup-recovery-possession:') as $foreign) {
+		ac_stage($scope, 4250, 900, array('info' => $foreign));
+		check(ApprovalChallenge::pending($scope) === null, "a request naming the scope '$foreign' is not offered");
+	}
+	ac_stage($scope, 4251, 900, array('info' => null));
+	check((ApprovalChallenge::pending($scope)['info'] ?? '') === $s['info'], 'a request naming none gets this scope\'s own');
+
 	// ── Expiry ──────────────────────────────────────────────────────────────
 	section("[$scope] An expired challenge stops being offered");
 

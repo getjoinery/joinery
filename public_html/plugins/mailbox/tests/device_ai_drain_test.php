@@ -75,7 +75,7 @@ $in_file = tempnam(sys_get_temp_dir(), 'drain');
 file_put_contents($in_file, json_encode($in));
 $runner = tempnam(sys_get_temp_dir(), 'drain') . '.js';
 $req = '';
-foreach (array('assets/js/vault-crypto.js', 'assets/js/html-entities.js', 'assets/js/email-digest.js', 'assets/js/verdict-check.js',
+foreach (array('assets/vendor/noble/noble-post-quantum-xwing.min.js', 'assets/js/vault-crypto.js', 'assets/js/html-entities.js', 'assets/js/email-digest.js', 'assets/js/verdict-check.js',
 		'plugins/mailbox/assets/mailbox_filter_match.js',
 		'plugins/mailbox/assets/mailbox_fortress.js', 'plugins/mailbox/assets/mailbox_device_ai.js') as $f) {
 	$req .= 'require(' . json_encode($root . '/' . $f) . ");\n";

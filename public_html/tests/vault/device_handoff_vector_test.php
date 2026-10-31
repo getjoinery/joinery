@@ -11,19 +11,16 @@
  * tests/vault/fixtures/device_handoff_vector.json is built by the browser's
  * vault-crypto.js (device_handoff_vector_gate.sh holds it to that) and is what
  * the phone apps test their crypto against (specs/fortress_mobile_apps.md WP1).
- * Its key seals are the v1 format (X25519 ECIES), which the server no longer
- * writes but still opens for a holder rotating off a v1 key: here SealedBox
- * opens each one, and reproduces each field (a format v2 did not change)
- * exactly from its recorded IV. The vector is re-cut in the v2 format with the
- * browser's (specs/post_quantum_sealing.md WP2).
+ * Every key is X-Wing and every key seal the v2 format
+ * (specs/post_quantum_sealing.md R2, WP2): here XWing derives each public key
+ * from its seed, SealedBox reproduces both seals byte for byte from the
+ * recorded encapsulation seeds and IVs and opens them, and each field (a
+ * format v2 did not change) is reproduced exactly from its recorded IV.
+ *
+ * @version 2.0 - X-Wing: seeds, v2 seals reproduced and opened
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
-
-if (!extension_loaded('sodium')) {
-	harness_skip('sodium extension unavailable');
-	harness_finish();
-}
 
 $v = json_decode((string)file_get_contents(__DIR__ . '/fixtures/device_handoff_vector.json'), true);
 check(is_array($v), 'the vector file parses');
@@ -34,32 +31,35 @@ $box = new SealedBox();
 
 /** Call a private SealedBox helper that takes fixed randomness (the vector's only use for it). */
 function dhv_private(string $method, array $args) {
-	$m = new ReflectionMethod('SealedBox', $method);
-	$m->setAccessible(true);
-	return $m->invokeArgs(null, $args);
+	return (new ReflectionMethod('SealedBox', $method))->invokeArgs(null, $args);
 }
 
 section('Key pairs');
-$device_secret = hex2bin($v['device']['secret_hex']);
-$vault_secret = hex2bin($v['vault']['secret_hex']);
-check(base64_encode(sodium_crypto_box_publickey_from_secretkey($device_secret)) === $v['device']['public_b64'],
-	'the device public key is the device secret\'s X25519 public key');
-check(base64_encode(sodium_crypto_box_publickey_from_secretkey($vault_secret)) === $v['vault']['public_b64'],
-	'the vault public key is the vault secret\'s X25519 public key');
-check($v['vault']['pkcs8_hex'] === '302e020100300506032b656e04220420' . $v['vault']['secret_hex'],
-	'the handed-over secret is PKCS#8: the fixed 16-byte prefix and the raw scalar');
+$device_seed = hex2bin($v['device']['seed_hex']);
+$vault_seed = hex2bin($v['vault']['seed_hex']);
+$xwing = new XWing();
+check(base64_encode($xwing->publicKey($device_seed)) === $v['device']['public_b64'],
+	'the device public key is the device seed\'s X-Wing public key');
+check(base64_encode($xwing->publicKey($vault_seed)) === $v['vault']['public_b64'],
+	'the vault public key is the vault seed\'s X-Wing public key');
 
 section('The handoff');
-$pkcs8 = hex2bin($v['vault']['pkcs8_hex']);
-check($box->openEdge($v['handoff']['blob'], SealedBox::b64url($device_secret), $v['device']['public_b64']) === $pkcs8,
-	'and opens the browser\'s blob with the device secret');
+$handoff = dhv_private('sealV2With', array($vault_seed, base64_decode($v['device']['public_b64']), SealedBox::SCOPE_DEK,
+	hex2bin($v['handoff']['eseed_hex']), hex2bin($v['handoff']['iv_hex'])));
+check(base64_encode($handoff) === $v['handoff']['blob'], 'the server seals exactly the browser\'s handoff bytes');
+check($box->openEdge($v['handoff']['blob'], SealedBox::b64url($device_seed), $v['device']['public_b64']) === $vault_seed,
+	'and opens the browser\'s blob with the device seed to the vault seed');
 
 section('The row');
 $row = $v['row'];
 $dek = hex2bin($row['dek_hex']);
-check(VaultCrypto::parseEdgeScope($row['sealed_dek']) === 'mail', 'the sealed DEK names the mail scope');
-check($box->openEdge(substr($row['sealed_dek'], strlen('v1.edgeseal.mail.')), SealedBox::b64url($vault_secret), $v['vault']['public_b64']) === $dek,
-	'and opens with the mail secret');
+check(VaultCrypto::parseEdgeScope($row['sealed_dek']) === 'mail' && strpos($row['sealed_dek'], 'v2.edgeseal.mail.') === 0,
+	'the sealed DEK is framed v2 and names the mail scope');
+$sealed_dek = dhv_private('sealV2With', array($dek, base64_decode($v['vault']['public_b64']), SealedBox::SCOPE_DEK,
+	hex2bin($row['dek_eseed_hex']), hex2bin($row['dek_iv_hex'])));
+check('v2.edgeseal.mail.' . base64_encode($sealed_dek) === $row['sealed_dek'], 'the server seals exactly the browser\'s row key');
+check($box->openEdge(substr($row['sealed_dek'], strlen('v2.edgeseal.mail.')), SealedBox::b64url($vault_seed), $v['vault']['public_b64']) === $dek,
+	'and opens with the mail seed');
 check(InboundEmailMessage::sealedAdPrefix() === $row['ad_prefix'], 'the AD prefix is the one the server hands a reader (sealedAdPrefix)');
 check(InboundEmailMessage::attachmentAd($row['id'], $row['part']['mime_part']) === $row['part']['ad'], 'the part AD is attachmentAd()');
 

@@ -36,6 +36,8 @@
  * only, by a v1 vault key, until its holder rotates. A blob whose version is
  * not its key's is refused naming both, never handed to the wrong opener.
  *
+ * @version 1.10 - browserScriptTag(): the one tag that puts assets/js/vault-crypto.js on a page
+ *   whose own script (a challenge or key-box ceremony) calls it
  * @version 1.9 - v2 frames: `v2.seal.` and `v2.edgeseal.{scope}.` written,
  *   both versions parsed; edgeFrame(); openers refuse a blob of another
  *   version than the key; edgeVersionMatchesKey() for browser writes
@@ -68,6 +70,19 @@ class VaultCrypto {
 
 	/** The browser-format field frame: `v1.edge.` + base64(IV ‖ ct ‖ tag). */
 	const EDGE_FIELD_PREFIX = 'v1.edge.';
+
+	/**
+	 * The script tag for assets/js/vault-crypto.js, the browser twin of this
+	 * class, cache-busted by its file time. For a page script that calls it
+	 * (recovery-readiness.js, copy-key.js) and is emitted outside a page's
+	 * needs_vault_client() set; emit it before that script, with the same
+	 * $defer, so it has run first. Loading it twice on one page is harmless.
+	 */
+	public static function browserScriptTag(bool $defer = true): string {
+		$path = 'assets/js/vault-crypto.js';
+		return '<script' . ($defer ? ' defer' : '') . ' src="/' . $path . '?v='
+			. (@filemtime(PathHelper::getIncludePath($path)) ?: '1') . '"></script>';
+	}
 
 	/** Cap on the memo below — see openItemDek(). */
 	const DEK_MEMO_MAX = 2000;
