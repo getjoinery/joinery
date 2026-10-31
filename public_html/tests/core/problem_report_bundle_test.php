@@ -258,6 +258,7 @@ section('Which errors are sent automatically');
 check(ProblemReport::isUnexpected(new RuntimeException('boom')), 'an ordinary exception is unexpected');
 check(!ProblemReport::isUnexpected(new SystemDisplayableError('Enter a date.')), 'a message marked safe to show is not');
 check(!ProblemReport::isUnexpected(new SystemAuthenticationError('No permission.')), 'a permission refusal is not');
+check(!ProblemReport::isUnexpected(new SystemRowNotFoundError('No such entry in usr_users.')), 'a page asked for a row that is not there is not');
 $site_root = dirname(PathHelper::getIncludePath(''), 1);
 $outside = tempnam(sys_get_temp_dir(), 'prr_scratch_');
 check(ProblemReport::fromOutsideScript('cli', $outside, $site_root), 'a command-line script outside the site is not reported');

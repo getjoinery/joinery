@@ -511,7 +511,10 @@ abstract class SystemBase {
 			throw new SystemBaseException('This object has no primary key.');
 		}
 
-		if ($and_load) {
+		// No key means the request named no id (a page opened without one).
+		// Nothing to load: the caller's assert_found() gives the not-found
+		// answer, rather than load() refusing with a different message.
+		if ($and_load && $key !== NULL) {
 			$this->load();
 		}
 	}
