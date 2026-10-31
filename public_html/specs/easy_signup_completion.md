@@ -673,8 +673,44 @@ getjoinery has no shell, so its store and pages change through content packs
   site.
 - B178 (fixed 10-28): every form printed its validation rules to the browser console
   ("=== FormWriterV2 DEBUG ==="), whatever the `debug` option said. They print only with it
-  (`FormWriterV2Base.php` 2.31.1), and the uploader's leftover debug logs are gone. Missed
-  0.8.546; reaches getjoinery with the next release.
+  (`FormWriterV2Base.php` 2.31.1), and the uploader's leftover debug logs are gone. Live in
+  0.8.547. The validator's own logs ('=== FORM SUBMIT ATTEMPT ===') were on too: FormWriter
+  passed it `debug: true` always. It follows the option (2.31.2, `joinery-validate.js` 1.2.7).
+
+**Applied on getjoinery 10-28** (0.8.547, through `/admin/admin_content_packs`):
+
+- Domain pack: the product, its one-year version, and the store's domain product setting.
+  Active.
+- Hosted pack: the product and its $12.99 monthly version, inactive. Provisioning Setup's
+  Hosted tier tab says it cannot fulfil a hosted order: no SMTP2GO master key, and the
+  default Linode token lacks `events:read_only`. Turn the product on once that reads yes.
+- Pages pack: 35 blocks on getjoinery hold the owner's own copy (none of it in
+  `getjoinery_pages.php`), so they were left alone, as was the pack's new home newsletter
+  block (the home page has its own). Applied: 58 block-label renames, and the two quick-start
+  blocks, whose only differences were B135, F4 and F5. Both live quick starts verified.
+  The 33 owner-written blocks were then copied back into `getjoinery_pages.php` 3.7, so the
+  source matches the live site. getjoinery's own newsletter block has an empty internal label,
+  so the pack still offers to create a second one; leave it unticked.
+**Hosted tier ready 10-31:** the owner entered the SMTP2GO master key, webhook secret (and the
+SMTP2GO webhook) and a new Linode token; the manage URL was set to `/profile/server_manager`.
+The Hosted tier tab reads 'can fulfil: yes'. Domain registration (Namecheap) is not set up, so
+buyers bring a domain they own.
+
+- Token permissions: Linodes, Account, IPs read/write; Firewalls, Volumes, Events, Domains read
+  only. Domains (read) was in use but undeclared: the handover note reads the account's DNS
+  Manager (`InstanceTransferFinish.php`). Declared (`operator_cloud_accounts_class.php` 1.4).
+- B179: the Hosted tier tab never checked the master key's permissions, so a narrow key failed
+  only at a purchase. It names what is missing (`Smtp2GoClient.php` 1.8 `missingPermissions()`,
+  `ProvisioningSetup.php` 1.12, tab 2.6, `hosted_tier_test`). Needs Subaccounts, SMTP Users and
+  Sender Domains; not Emails.
+- B180: a live site had no way to take one test purchase. Stripe's test keys were used only
+  with the site-wide `debug` setting, or a session flag only the retired store testers ever
+  set. Built test mode, a core switch (`TestMode.php` 1.0): a superadmin turns it on for their
+  own browser at `/test_mode` (Admin, System, Test Mode; the `test_mode` API action), every page
+  shows a banner with Turn off while it is on, sign-out ends it. Every reader goes through it
+  (`StripeHelper::isTestMode()`, the two settings pages, ScrollDaddy's cart and checkout).
+  `test_mode_test` 16/16. Store doc § Test mode.
+
 - Owner accounts (§7). Then the phase 1 live gate (`managed_hosting_phase1_purchase.md` §11):
   one test-mode order, then one real order, on getjoinery.
 

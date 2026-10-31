@@ -150,6 +150,19 @@ action refuses a cart changed since, before PayPal is asked for anything. A
 PayPal payment is captured in the buyer's browser, and only the return
 completes it: no PayPal webhook completes a one-time order.
 
+## Test mode
+
+Every test-or-live choice the store makes (the Stripe and PayPal keys, the
+webhook ids, the coupon list and test-card notice on cart and checkout)
+asks `StripeHelper::isTestMode()`, which is the core `TestMode::active()`.
+Two things turn it on: the site's `debug` setting, for every visitor, and
+a superadmin's own browser session, from **Admin → System → Test Mode**
+(`/test_mode`). The session switch lets a live site take a test purchase
+while every other visitor pays for real; a banner on every page shows it
+is on, with a Turn off button, and it ends at sign-out. An order paid in
+test mode carries `ord_test_mode`, and a hosted site bought in it is named
+with `test_` at the cloud and mail providers.
+
 ## Activation
 
 `activate.php` is idempotent and self-guarded. It backfills `stc_stripe_customers` from the pre-extraction user columns and product fulfillment columns where those still exist, claims the plugin's scheduled-task rows, and drops the superseded columns. On upgrade, `update_database` runs a one-time auto-activation: the store activates when the install shows store evidence (product/order rows, or a Stripe/PayPal key configured); a store-less install stays inactive.

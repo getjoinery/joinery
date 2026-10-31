@@ -33,6 +33,8 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.8 - missingPermissions(): the endpoints below that the master key may not call, read from
+ *   api_keys/permissions, so the Hosted tier tab names a key too narrow before a purchase finds it (B179)
  * @version 1.7 - monthToDateSends() reads the subaccount's plan_used from subaccounts/search: the
  *   provider refuses stats/email_summary for a subaccount to a master key (403, live 2026-10-27; B162)
  * @version 1.6 - subaccountName(): the provider refuses some characters in a subaccount name (live
@@ -86,6 +88,54 @@ class Smtp2GoClient {
 	 * no SMTP2GO account, and the mail leg reads that as "not configured" and
 	 * says so on the row instead of failing a provision.
 	 */
+	/**
+	 * Every endpoint this class calls, with what it is for and the permission
+	 * group SMTP2GO's API key screen grants it under.
+	 */
+	const ENDPOINTS_USED = array(
+		'subaccount/add'     => array('create a customer\'s subaccount', 'Subaccounts'),
+		'subaccount/edit'    => array('set a subaccount\'s monthly limit', 'Subaccounts'),
+		'subaccount/close'   => array('close a subaccount on non-payment', 'Subaccounts'),
+		'subaccount/reopen'  => array('reopen a subaccount', 'Subaccounts'),
+		'subaccounts/search' => array('read a subaccount\'s sends this month', 'Subaccounts'),
+		'users/smtp/add'     => array('create the SMTP user a customer\'s site sends with', 'SMTP Users'),
+		'users/smtp/remove'  => array('remove a customer\'s SMTP user', 'SMTP Users'),
+		'domain/add'         => array('register a customer\'s sending domain', 'Sender Domains'),
+		'domain/view'        => array('read the domain\'s DNS records', 'Sender Domains'),
+		'domain/verify'      => array('ask SMTP2GO to re-check DNS', 'Sender Domains'),
+		'domain/remove'      => array('release a domain a customer moved away from', 'Sender Domains'),
+	);
+
+	/**
+	 * The endpoints in ENDPOINTS_USED this key may not call, as path =>
+	 * [what for, permission group]. Null when that cannot be told: the call
+	 * failed, or the provider listed nothing (a list it did not give is not a
+	 * key that can do nothing). api_keys/permissions answers for every key.
+	 */
+	public function missingPermissions(): ?array {
+		try {
+			$data = $this->post('api_keys/permissions', array());
+		} catch (Smtp2GoException $e) {
+			return null;
+		}
+		$allowed = array();
+		array_walk_recursive($data, function ($value) use (&$allowed) {
+			if (is_string($value) && strpos($value, '/') !== false) {
+				$allowed[ltrim($value, '/')] = true;
+			}
+		});
+		if (!$allowed) {
+			return null;
+		}
+		$missing = array();
+		foreach (self::ENDPOINTS_USED as $path => $spec) {
+			if (!isset($allowed[$path])) {
+				$missing[$path] = $spec;
+			}
+		}
+		return $missing;
+	}
+
 	public static function fromSettings(): ?Smtp2GoClient {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
 		$key = trim(ProvisioningSetup::readSecret('server_manager_smtp2go_api_key'));

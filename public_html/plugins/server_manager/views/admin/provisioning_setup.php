@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.6 - the Hosted tier tab names the SMTP2GO master key's missing permissions (B179)
  * @version 2.5 - API not responding says why (the HTTP status and the API's own error, or the connection's) (B21)
  * @version 2.4 - The Cleanup tab lists the address records a run removed with its servers (fleet_security_patching WP10)
  * @version 2.3 - Add an account asks its provider, and a Hetzner project's name (specs/site_copy_anything_to_anything.md D2)
@@ -437,6 +438,31 @@ product simply cannot be fulfilled — the bring-your-own-cloud product is unaff
 					<br><?= smps_badge(false, '', 'Missing scopes', 'warning') ?> The provider will refuse these, and what needs them fails:
 					<?= smps_missing_scopes($hosted['account_missing_scopes']) ?>
 				<?php endif; ?>
+			<?php endif; ?>
+		</td>
+	</tr>
+	<tr>
+		<th>SMTP2GO master key</th>
+		<td>
+			<?php if (!$hosted['smtp2go_present']): ?>
+				<?= smps_badge(false, '', 'Not set', 'warning') ?> Enter it below.
+			<?php elseif ($hosted['smtp2go_missing'] === null): ?>
+				<?= smps_badge(false, '', 'Permissions not checked', 'secondary') ?> SMTP2GO did not say what this key may do.
+			<?php elseif ($hosted['smtp2go_missing']): ?>
+				<?php
+				$groups = array();
+				foreach ($hosted['smtp2go_missing'] as $spec) { $groups[$spec[1]] = $spec[1]; }
+				?>
+				<?= smps_badge(false, '', 'Missing permissions', 'danger') ?> SMTP2GO will refuse these, and a hosted
+				order fails at that step. In SMTP2GO under Sending, then API Keys, give the master key the
+				<?= htmlspecialchars(implode(', ', $groups)) ?> permission.
+				<ul class="mb-0">
+				<?php foreach ($hosted['smtp2go_missing'] as $path => $spec): ?>
+					<li><code><?= htmlspecialchars($path) ?></code>: <?= htmlspecialchars($spec[0]) ?></li>
+				<?php endforeach; ?>
+				</ul>
+			<?php else: ?>
+				<?= smps_badge(true, 'Every permission a hosted order uses', '') ?>
 			<?php endif; ?>
 		</td>
 	</tr>

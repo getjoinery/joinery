@@ -18,12 +18,12 @@ class StripeHelper {
 	private $stripe_checkout_session;
 
 	/**
-	 * Centralized test mode detection
+	 * Whether to use Stripe's (and PayPal's) test accounts: the site-wide
+	 * TestMode, which the debug setting or a superadmin's session turns on.
 	 * @return bool True if test mode should be used
 	 */
 	public static function isTestMode() {
-		return (isset($_SESSION['test_mode']) && $_SESSION['test_mode']) || 
-		       Globalvars::get_instance()->get_setting('debug');
+		return TestMode::active();
 	}
 
 	/**
