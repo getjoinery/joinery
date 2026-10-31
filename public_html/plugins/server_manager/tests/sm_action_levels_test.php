@@ -36,7 +36,7 @@ $unplaced = array_diff(array_keys($tabs), array_keys(SmActionLevels::PAGES['node
 check($unplaced === array(), 'every node detail action has a level', implode(', ', $unplaced));
 $stale = array_diff(array_keys(SmActionLevels::PAGES['node_detail']), array_keys($tabs));
 check($stale === array(), 'and every level names an action that exists', implode(', ', $stale));
-foreach (array('check_status', 'site_log', 'log_table_tail', 'unit_journal', 'file_head', 'page_probe', 'disk_usage', 'schema_probe') as $look) {
+foreach (array('check_status', 'site_log', 'log_table_tail', 'unit_journal', 'site_converger', 'file_head', 'page_probe', 'disk_usage', 'schema_probe') as $look) {
 	check(SmActionLevels::level('node_detail', $look) === 7, "$look is a look: 7 (Q1)");
 }
 foreach (array('restore_database', 'restore_chain', 'delete_node', 'purge_node', 'approve_join', 'save_api_credential',

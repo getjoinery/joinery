@@ -750,3 +750,12 @@ does not carry `joinery-host-converger`.
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
 | The host converger's last run: its outcome, and the warn lines of the installer that failed (`joinery-host-converger`'s journal, or the converger keeping its own last transcript under `cache/`) | Read the installers' code: housekeeping's security check refuses a tree not root's alone and fails the run; proven when the fix made the next converge read `converged` | Add `joinery-host-converger` to `unit_journal`'s compiled list (and `UNIT_JOURNAL_UNITS` on the plane), or have the converger keep its last run's transcript where `host_report` can carry its last failure — **BUILT 2026-10-30, the first:** all three copies of the list (agent 1.97.0, `unit_journal.sh` 1.3 and `reset_failed_unit.sh` 1.2, `JobCommandBuilder` 1.149), a per-value floor on the plane (`UNIT_JOURNAL_CONVERGER_MIN_AGENT_VERSION`, `unit_journal_units_for`), and **Read converger journal** in the node's Diagnostics → Logs box. The converger exits 0 when an installer fails, so it never shows among failed units; the button is the way in. Asked for again on 2026-10-29, when localdev read `installer-failed` and its journal was root's |
+
+**2026-10-31, incident 10975 on se1 (the Podman machine, node 153812).** The machine raised "a
+site's code has not been checked" for its container site `sa`, which has no agent of its own.
+The host report showed the stale code check and nothing that said why. Reaching it took a root
+password reset through the test Linode account and the Linode serial console.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Whether one site container's converger is running: its last run and outcome, its stamp, its code check, whether the container carries the converger's cron entry and has cron running, and its converger log | Root password reset, serial console, `podman exec` into `sa` | **BUILT 2026-10-31:** `site_converger` (agent 1.98.0), a machine observe word: `site` (a site container on this host) and `lines`; reads the site's own volumes and its running root's `/etc/cron.d`, never a link or a bind mount; behind log access and redacted. Diagnostics tab, Read site converger. The answer here: cron in `sa` never loaded the converger's entry, written in the second cron loaded its folder; the converger now touches the folder in a later second after any run that changed it (`_plugin_installers_start.sh` 2.49). |

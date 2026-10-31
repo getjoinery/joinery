@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.29 - site_converger results: whether the site's converger is running, which part says why, then its log
  * @version 1.28 - disable_root_login results (agent 1.95.0): what sshd reads before and after, the reload, Match blocks
  * @version 1.27 - net_health and web_workers results (agent 1.93.0): a verdict line, then the counts
  * @version 1.26 - starting a deploy-all rollout on a page view is the server's own write (server_initiated_write)
@@ -539,6 +540,56 @@ if ($result) {
 			echo '</tr>';
 		}
 		echo '</tbody></table></div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'site_converger' && !empty($result_data['read'])) {
+		// The verdict first, in plain words: is this site's converger running,
+		// and if not, which of its parts says why. The facts and the log below.
+		$sc_tz = SessionControl::get_instance()->get_timezone();
+		$sc_when = function ($t) use ($sc_tz) {
+			return (is_int($t) && $t > 0)
+				? LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $t), 'UTC', $sc_tz, 'M j, Y g:i A') : 'unknown';
+		};
+		$sc_now = is_int($result_data['now_unix'] ?? null) ? $result_data['now_unix'] : time();
+		$sc_last = is_array($result_data['last_run'] ?? null) ? $result_data['last_run'] : array();
+		$sc_cron = is_array($result_data['cron'] ?? null) ? $result_data['cron'] : array();
+		$sc_code = is_array($result_data['code_check'] ?? null) ? $result_data['code_check'] : array();
+		$sc_log = is_array($result_data['log'] ?? null) ? $result_data['log'] : array();
+		$sc_at = $sc_last['at_unix'] ?? null;
+		$sc_age_h = is_int($sc_at) ? intdiv(max(0, $sc_now - $sc_at), 3600) : null;
+		if (empty($sc_last['present']) || !is_int($sc_at)) {
+			$sc_verdict = 'The site has no record of a converger run.';
+		} elseif ($sc_age_h < 25) {
+			$sc_verdict = 'The converger ran ' . ($sc_age_h === 0 ? 'within the hour' : $sc_age_h . ' h ago') . ' (' . htmlspecialchars((string)($sc_last['outcome'] ?? 'unknown')) . ').';
+		} else {
+			$sc_verdict = 'The converger has not run for ' . intdiv($sc_age_h, 24) . ' day(s): a converge is due every day and the code check every hour.';
+			if (empty($sc_cron['entry_present']) || empty($sc_cron['entry_runs_this_site'])) {
+				$sc_verdict .= ' The container has no cron entry that runs it.';
+			} elseif (($sc_cron['cron_running'] ?? null) === false) {
+				$sc_verdict .= ' cron is not running in the container.';
+			} elseif (($sc_cron['cron_running'] ?? null) === true) {
+				$sc_verdict .= ' Its cron entry is there and cron is running, so cron has not loaded the entry:'
+					. ' cron reloads its folder only when the folder\'s time changes, in whole seconds. Restarting the container makes cron load it.';
+			}
+		}
+		echo '<div class="card mb-3"><div class="card-header"><strong>' . htmlspecialchars((string)($result_data['site'] ?? '')) . '\'s converger</strong>'
+			. ' <small class="text-muted">— container ' . htmlspecialchars((string)($result_data['state'] ?? 'unknown')) . '</small></div>'
+			. '<div class="card-body"><p class="mb-2">' . $sc_verdict . '</p><ul class="mb-0">'
+			. '<li>Last run: ' . htmlspecialchars($sc_when($sc_at)) . ', ' . htmlspecialchars((string)($sc_last['outcome'] ?? 'unknown'))
+			. (empty($result_data['stamp_present']) ? '; no converge stamp' : '') . '</li>'
+			. '<li>Code check: ' . htmlspecialchars((string)($sc_code['state'] ?? 'unknown'))
+			. ((string)($sc_code['at'] ?? 'unknown') !== 'unknown' ? ' at ' . htmlspecialchars((string)$sc_code['at']) : '') . '</li>'
+			. '<li>Cron entry: ' . (empty($sc_cron['entry_present']) ? 'not there'
+				: (empty($sc_cron['entry_runs_this_site']) ? 'there, but it does not run this site\'s converger' : 'there, written ' . htmlspecialchars($sc_when($sc_cron['entry_mtime_unix'] ?? null))))
+			. '; cron folder last changed ' . htmlspecialchars($sc_when($sc_cron['folder_mtime_unix'] ?? null))
+			. '; cron ' . (($sc_cron['cron_running'] ?? null) === true ? 'running' : (($sc_cron['cron_running'] ?? null) === false ? 'not running' : 'unknown')) . '</li>'
+			. '<li>Log: ' . (empty($sc_log['present']) ? 'not there'
+				: htmlspecialchars((string)($sc_log['size_bytes'] ?? 'unknown')) . ' bytes, last written ' . htmlspecialchars($sc_when($sc_log['mtime_unix'] ?? null))) . '</li>'
+			. '</ul></div>';
+		$lines = is_array($sc_log['lines'] ?? null) ? $sc_log['lines'] : array();
+		if (count($lines) > 0) {
+			echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact(implode("\n", $lines))) . '</pre>';
+		}
+		echo '</div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'unit_journal' && !empty($result_data['read'])) {
 		// The verdict first, because it is usually the whole answer: Result

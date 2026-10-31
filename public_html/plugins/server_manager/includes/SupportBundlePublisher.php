@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.37 - carries site_converger.sh, the machine word of agent 1.98.0 that reads whether a site
+ *                container's converger is running
  * @version 1.36 - carries _host_restrictions.sh, which host_housekeeping.sh reads before it treats a tree that
  *                is not root's as a developer's box
  * @version 1.35 - carries disable_root_login.sh, the machine word of agent 1.95.0 that turns root SSH login off
@@ -244,6 +246,9 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
 		'maintenance_scripts/sysadmin_tools/hold_container.sh',
+		// site_converger (agent 1.98.0): whether a site container's converger is
+		// running, read from its host. Sources _site_engine.sh, as hold_container does.
+		'maintenance_scripts/sysadmin_tools/site_converger.sh',
 		// The site container engine and the filter every site runs under:
 		// host_housekeeping.sh runs install_site_engine.sh converge on a host
 		// that has the engine, which installs ENGINE's engine when it is not
