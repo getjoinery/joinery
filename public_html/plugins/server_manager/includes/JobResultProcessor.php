@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.114 - an apply_update's target is the release this management node serves (DeploymentHelper::servedVersion);
+ *                 a node whose source offered its own version is told the release is unpublished, not that it failed
  * @version 1.113 - process_largest_files: a site's biggest files, each a root, a path, a size and a day, capped
  * @version 1.112 - parse_backup_keys_tokens(): the backup keys' kinds from set_recovery_key.php 2.2 ride the status blob
  * @version 1.111 - process_site_converger: a site container's converger facts and log lines, each held to its kind
@@ -1579,7 +1581,9 @@ class JobResultProcessor {
 		}
 
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-		$target = LibraryFunctions::get_joinery_version();
+		// What the node was offered: the release this management node serves,
+		// which a release applied here but not yet published here is not.
+		$target = DeploymentHelper::servedVersion() ?: LibraryFunctions::get_joinery_version();
 
 		$result = [
 			'probed'         => true,
@@ -1636,6 +1640,18 @@ class JobResultProcessor {
 				'reason' => 'The node reported ' . $node_outcome . ' and is still on '
 					. $version . ', not ' . $target . '.',
 				'node_outcome'    => $node_outcome,
+				'rewrite_message' => true,
+			];
+		}
+
+		// The node's source offered the version it already runs: it reinstalled
+		// that, and nothing failed on the node. The release asked for is not
+		// published where the node upgrades from.
+		if (strpos($output, 'SAME VERSION') !== false) {
+			return [
+				'reason' => 'The node\'s upgrade source offered ' . $version . ', the version it already runs, so it '
+					. 'reinstalled that. ' . $target . ' is not published there yet: publish it, then apply again.',
+				'node_outcome'    => '',
 				'rewrite_message' => true,
 			];
 		}

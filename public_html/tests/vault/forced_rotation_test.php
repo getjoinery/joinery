@@ -233,12 +233,4 @@ check($drive_root !== null && vault_fixture_unwrap($drive_root, VaultUnlockerKdf
 	&& vault_fixture_unwrap($drive_root, VaultUnlockerKdf::scopeKek($fx['root_secret'], 'drive'), 'vault:drive:root') === null,
 	'the Drive vault opens through the new root, and no longer through the old one');
 
-section('An upgrade refuses before a relay older than 3.16');
-$upgrade = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
-$call = strpos($upgrade, "\t\tupgrade_relay_ready();");
-check($call !== false && $call < strpos($upgrade, "out_step('Deploying Upgrade')")
-	&& strpos($upgrade, "version_compare(\$running, '3.16', '<')") !== false,
-	'upgrade.php refuses before anything is deployed when a relay is older than 3.16, or reports no version');
-check(RelayVersion::SEALS_POST_QUANTUM === '3.16' || !class_exists('RelayVersion'), 'the same version RelayVersion names');
-
 harness_finish();

@@ -1908,6 +1908,12 @@ to the old key is left behind.
 
 **Seal at the relay, at Fortress.** Offered once the relay reports version 3.2
 (`RelayVersion::SEALS_FOR_BROWSERS`); an older relay keeps the transport key.
+A post-quantum (1216-byte X-Wing) key goes into the map only once the relay reports
+3.16 (`RelayVersion::SEALS_POST_QUANTUM`): an older relay refuses the whole fragment
+over one such key, so `RelayMapExporter::relayTakes()` leaves that mailbox on the
+transport key until then, for the vault key of Seal at the relay too. The relay is
+rebuilt from the support bundle the site's own release carries, so a site upgrades
+first and its relay's Update follows.
 
 - The map names the mail vault's key (`key_kind: client`, `key_scope: mail`, its
   generation). The relay seals the whole message for the browser (`sealEdge`: a

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.13 - a node is compared with the release this management node OFFERS (DeploymentHelper::servedVersion),
+ *                not the one it runs: applied here but not yet published here, a release reaches no node
  * @version 1.12 - this site's own node offers no Publish of a version it has already published (the publisher
  *                refuses it), only Apply and publish while its upgrade source offers a newer one
  * @version 1.11 - Deploy to all managed nodes is described by StagedRolloutRunner::deploy_all_description (its two stages)
@@ -44,7 +46,11 @@
 	}
 
 	// A node takes its releases from this management node, so it is current
-	// when it runs this node's version. This node's own row is compared with
+	// when it runs the release this node OFFERS: the one its ?serve-upgrade
+	// answers with. A release applied here is not offered until it is also
+	// published here, so the running version is the wrong yardstick; a plane
+	// that serves no releases keeps it (its nodes upgrade from elsewhere).
+	// This node's own row is compared with
 	// where this node takes ITS releases from: compared with itself it would
 	// always read current. The origin takes releases from nowhere; it publishes.
 	$settings = Globalvars::get_instance();
@@ -60,9 +66,22 @@
 		$up_to_date = $offered['version'] !== '' ? ($node_version === $offered['version']) : null;
 	} else {
 		$node_version = $node->get('mgn_joinery_version') ?: 'Unknown';
-		$compare_label = 'Management Node Version';
-		$compare_version = $local_version;
-		$up_to_date = ($node_version === $local_version);
+		$served = DeploymentHelper::servedVersion();
+		if ($served !== '') {
+			$compare_label = 'This management node offers';
+			$compare_version = $served;
+			if ($local_version !== '-' && version_compare($local_version, $served) > 0) {
+				$offer_error = 'This management node runs ' . $local_version . ' but offers its nodes ' . $served
+					. ': ' . $local_version . ' has been applied here and not published here. An update now installs '
+					. $served . '. Publish ' . $local_version . ' first: on the management node that manages this one, '
+					. 'open this site\'s row, Updates tab, Publish Release on This Node.';
+			}
+		} else {
+			$compare_label = 'Management Node Version';
+			$compare_version = $local_version;
+		}
+		$up_to_date = ($node_version === $compare_version)
+			|| (preg_match('/^\d+\.\d+\.\d+$/', $node_version) && version_compare($node_version, $compare_version) >= 0);
 	}
 
 	$pageoptions = ['title' => 'Version Status'];

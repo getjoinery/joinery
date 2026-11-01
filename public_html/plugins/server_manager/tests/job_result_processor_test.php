@@ -325,6 +325,21 @@ $v = jrp_call('behind_verdict',
 check(strpos($v['reason'], 'second pass') !== false,
 	'a two-pass halt still says a second pass is needed', $v['reason']);
 
+// The source offered the node its own version (job 13942: getjoinery ran
+// 0.8.556 and served 0.8.552): a reinstall, and the release is unpublished.
+$v = jrp_call('behind_verdict', array('completed', '',
+	"[INFO] SAME VERSION\n  Current version (0.8.552) is the same as server version.\n", '0.8.552', '0.8.556'));
+check(strpos($v['reason'], 'offered 0.8.552') !== false && strpos($v['reason'], '0.8.556 is not published') !== false,
+	'a same-version run says the release asked for is not published where the node upgrades from', $v['reason']);
+
+// What a node is offered is the newest published row, the one ?serve-upgrade
+// answers with (utils/upgrade.php), never merely the version running here.
+$want = '';
+foreach (new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1) as $newest) {
+	$want = $newest->get('upg_major_version') . '.' . $newest->get('upg_minor_version') . '.' . $newest->get('upg_patch_version');
+}
+check(DeploymentHelper::servedVersion() === $want, 'servedVersion() is the release ?serve-upgrade offers', DeploymentHelper::servedVersion() . ' vs ' . $want);
+
 // ---------------------------------------------------------------------------
 section('End to end');
 

@@ -639,11 +639,28 @@ try {
 	$relay_prop = new ReflectionProperty('RelayMapExporter', 'relay');
 	$target = new ReflectionMethod('RelayMapExporter', 'clientSealTarget');
 	$alias = new InboundEmailAlias(intval($alias->key), TRUE);
-	$relay_prop->setValue($exporter, $relay_at('3.2'));
-	check($target->invoke($exporter, $alias, $domain) === array($pub, 1), 'a 3.2 relay is given the mail key and its generation');
+	$relay_prop->setValue($exporter, $relay_at('3.16'));
+	check($target->invoke($exporter, $alias, $domain) === array($pub, 1), 'a 3.16 relay is given the mail key and its generation');
 	$relay_prop->setValue($exporter, $relay_at('3.1'));
 	check($target->invoke($exporter, $alias, $domain) === null, 'a 3.1 relay is not');
-	$relay_prop->setValue($exporter, $relay_at('3.2'));
+
+	section('Q8: an X-Wing key goes into the map only for a relay that seals to one');
+	$relay_prop->setValue($exporter, $relay_at('3.15'));
+	check($target->invoke($exporter, $alias, $domain) === null,
+		'a 3.15 relay (it seals for browsers, but refuses a 1216-byte key) is not given the X-Wing mail key: the transport key carries it');
+	$takes = new ReflectionMethod('RelayMapExporter', 'relayTakes');
+	$old_key = base64_encode(random_bytes(SODIUM_CRYPTO_BOX_PUBLICKEYBYTES));
+	check($takes->invoke($exporter, $old_key) === true, 'a 32-byte key still goes to a 3.15 relay');
+	check(strlen(base64_decode($pub)) === XWing::PUBLIC_KEY_BYTES && $takes->invoke($exporter, $pub) === false,
+		'a 1216-byte key does not');
+	$relay_prop->setValue($exporter, $relay_at(''));
+	check($takes->invoke($exporter, $pub) === false, 'nor to a relay that has not said its version');
+	$relay_prop->setValue($exporter, $relay_at('3.16'));
+	check($takes->invoke($exporter, $pub) === true && $takes->invoke($exporter, $old_key) === true, 'a 3.16 relay takes both');
+	$upgrade_src = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
+	check(strpos($upgrade_src, 'upgrade_relay_ready();') === false,
+		'an upgrade is not refused for its relay: the relay is rebuilt from the bundle the upgraded site carries');
+	$relay_prop->setValue($exporter, $relay_at('3.16'));
 	$off = new InboundEmailDomain(intval($domain->key), TRUE);
 	$off->set('ied_relay_seals_to_owner', false);
 	check($target->invoke($exporter, $alias, $off) === null,

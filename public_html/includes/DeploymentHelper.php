@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.14 - servedVersion(): the release this site's ?serve-upgrade offers, which is what its nodes
+ *                install; it can be older than the release the site itself runs
  * @version 1.13 - swapLiveTree(): the staged tree moves in behind a holding serve.php that answers 503, and the
  *                 release's serve.php replaces it by rename(), so public_html is never without its entry script;
  *                 performRollback() refuses a backup with no real serve.php (backupIsRelease())
@@ -112,6 +114,27 @@ class DeploymentHelper {
             return $q !== false && $q->fetchColumn() !== false;
         } catch (Throwable $e) {
             return false;
+        }
+    }
+
+    /**
+     * The release this site offers the sites that upgrade from it: the newest
+     * row in upg_upgrades, the one its ?serve-upgrade answers with. '' when it
+     * serves none.
+     *
+     * A release is applied here and published from here as two separate steps,
+     * so this can be older than the version the site itself runs. A node that
+     * upgrades from here installs THIS, not the running version.
+     */
+    public static function servedVersion(): string {
+        if (!self::isUpgradeServer()) return '';
+        try {
+            $q = DbConnector::get_instance()->get_db_link()->query(
+                'SELECT upg_major_version, upg_minor_version, upg_patch_version FROM upg_upgrades ORDER BY upg_upgrade_id DESC LIMIT 1');
+            $row = $q ? $q->fetch(PDO::FETCH_NUM) : false;
+            return $row ? implode('.', array_map('strval', $row)) : '';
+        } catch (Throwable $e) {
+            return '';
         }
     }
 

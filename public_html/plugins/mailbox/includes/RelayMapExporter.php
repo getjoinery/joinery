@@ -29,6 +29,9 @@
  * no SRS secret. The forwarding domains stay: bounces of the forwards this site
  * sends return to them, and the relay spools those too.
  *
+ * @version 2.8 - a key the relay cannot take (an X-Wing key, to a relay older than 3.16) is never put
+ *                in the map: that mailbox takes the transport key until the relay reports 3.16
+ *                (relayTakes(); specs/post_quantum_sealing.md Q8)
  * @version 2.7 - mail_apps_origins: this server's addresses while mail apps reach it through the relay (relay 3.11)
  * @version 2.6 - a handler alias (iea_handler) is marked accepts_tag, so the relay takes its +tag sub-addresses
  * @version 2.5 - no forward instructions: every recipient and a forwarding catch-all are
@@ -301,7 +304,28 @@ class RelayMapExporter {
 			return null;
 		}
 		$public_key = $vault->sealingPublicKey();
-		return ($public_key === '') ? null : array($public_key, max(1, $vault->sealingKeyGeneration()));
+		if ($public_key === '' || !$this->relayTakes($public_key)) {
+			return null;
+		}
+		return array($public_key, max(1, $vault->sealingKeyGeneration()));
+	}
+
+	/**
+	 * Will this relay accept $public_key as a seal target? A relay older than
+	 * 3.16 refuses any key that is not 32 bytes, and refuses the WHOLE fragment
+	 * with it: one rotated vault would freeze every mailbox's routing on the last
+	 * accepted map. So an X-Wing key goes in only once the relay reports 3.16
+	 * (RelayVersion::sealsPostQuantum); until then its mailbox takes the
+	 * transport key and the pull seals the message to the owner's key, as for a
+	 * relay that cannot write the browser's format. A site upgrades before its
+	 * relay can be rebuilt, because the rebuild ships with the site's release.
+	 */
+	private function relayTakes(string $public_key): bool {
+		$raw = base64_decode(trim($public_key), true);
+		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			return true;
+		}
+		return RelayVersion::sealsPostQuantum($this->relay->provisionedVersion());
 	}
 
 	/**
@@ -327,7 +351,7 @@ class RelayMapExporter {
 			$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
 			if ($owner_id !== null) {
 				$vault_pk = $this->vaultPublicKey($owner_id);
-				if ($vault_pk !== null) {
+				if ($vault_pk !== null && $this->relayTakes($vault_pk)) {
 					return array($vault_pk, 'user');
 				}
 			}

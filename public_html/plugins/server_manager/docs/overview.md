@@ -648,6 +648,10 @@ The verdicts:
 
 An account that cannot be read is named at the top, since its servers are missing until it can be.
 
+## Applying a release to one node
+
+A node installs the release this management node **offers**: the newest published row, the one its `?serve-upgrade` answers with (`DeploymentHelper::servedVersion()`). Applying a release here and publishing it from here are separate steps, so the offered release can be older than the one this management node runs. The node's Updates tab compares the node with the offered release, and when this management node runs a newer one than it offers, it says so and names the publish owed. The apply job's result is judged against the same offered release. A node whose upgrade source offered the version it already runs reinstalls it; its transcript ends "Reinstall Complete", and a job that expected a newer release says that release is not published where the node upgrades from.
+
 ## Staged rollout
 
 `/admin/server_manager/rollouts` applies the release this management node serves across chosen nodes, **one node at a time, in the order given**, and moves on only when a node's structured apply result (the `apply` in its `apply_update` job's result) says: the job completed, the deploy tier passed, the release's version is reported, and nothing rolled back. The first node that misses any of the four **halts** the rollout, which names the node and the reason; the nodes after it are never started. Put the node you would least mind breaking first.
