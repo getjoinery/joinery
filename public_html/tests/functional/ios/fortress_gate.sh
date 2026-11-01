@@ -8,7 +8,7 @@
 #
 # End-to-end (Fortress) mail in the iOS app — specs/fortress_mobile_apps.md
 # WP3, WP5, WP7, WP8. Drives FortressMailUITests in the Simulator on the Mac
-# mini against dev.getjoinery.com:
+# mini against this site (its webDir, passed as JOINERY_BASE_URL):
 #   1. walk_fixture.php makes a Fortress fixture with a known mail key (no
 #      browser), one message, and one relay-sealed arrival (pending parse);
 #   2. the suite signs in, sees the end-to-end banner (B1), shows an enroll
@@ -31,7 +31,7 @@
 # Own build area and simulator on the mini (~/dev/fma-ios, "FMA iPhone"), so
 # it never collides with the phase gates' ~/dev/joinery-ios.
 #
-# Version: 1.2
+# Version: 1.3 (the app talks to this site, not dev.getjoinery.com; sends go to a local sink)
 
 set -u
 cd "$(dirname "$0")"
@@ -43,6 +43,14 @@ KEYFILE="/tmp/joinery-app-fortress-$PURPOSE.json"
 DEST='platform=iOS Simulator,name=FMA iPhone'
 CODE_FILE="/Users/jeremytunnell/dev/fma-enroll-code.txt"
 PSQL="psql -U postgres -d joinerytest -tAc"
+# The site the fixture is made on and the psql checks read: this one.
+SETTING_CTL="php $PUBLIC_HTML/tests/functional/ios/setting_ctl.php"
+BASE_URL="https://$($SETTING_CTL get webDir)"
+# Sends go to a local sink for the run (phone_mail_sink.sh): nothing leaves the box.
+source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
+trap mail_sink_off EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 STAMP=$(date +%s)
 FAILS=0
 
@@ -110,9 +118,11 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
 ssh macmini "rm -f /tmp/fma_standin_calls.log; nohup python3 ~/dev/fma_standin_model.py $AI_PORT > /dev/null 2>&1 &" && sleep 1
 
+mail_sink_on || exit 1
 echo "== suite =="
 ssh macmini "cd dev/fma-ios/joinery-member-ios && \
     TEST_RUNNER_JOINERY_TEST_EMAIL='$EMAIL' TEST_RUNNER_JOINERY_TEST_PASSWORD='$PASSWORD' \
+    TEST_RUNNER_JOINERY_BASE_URL='$BASE_URL' \
     TEST_RUNNER_JOINERY_FMA_WORD='$WORD' TEST_RUNNER_JOINERY_FMA_RELAY_WORD='$RELAY_WORD' \
     TEST_RUNNER_JOINERY_FMA_CODE_FILE='$CODE_FILE' TEST_RUNNER_JOINERY_FMA_REPLY_TEXT='$REPLY_TEXT' \
     TEST_RUNNER_JOINERY_FMA_DRAFT_SUBJECT='$DRAFT_SUBJECT' TEST_RUNNER_JOINERY_FMA_ADDRESS='$ADDRESS' \
@@ -154,6 +164,7 @@ POLL_FILE="/Users/jeremytunnell/dev/fma-poll.txt"
 ssh macmini "rm -f '$POLL_FILE'"
 ssh macmini "cd dev/fma-ios/joinery-member-ios && \
     TEST_RUNNER_JOINERY_TEST_EMAIL='$EMAIL' TEST_RUNNER_JOINERY_TEST_PASSWORD='$PASSWORD' \
+    TEST_RUNNER_JOINERY_BASE_URL='$BASE_URL' \
     TEST_RUNNER_JOINERY_FMA_POLL_FILE='$POLL_FILE' TEST_RUNNER_JOINERY_FMA_ADDRESS='$ADDRESS' \
     xcodebuild test-without-building -scheme JoineryMember -destination '$DEST' -derivedDataPath ~/dev/fma-dd-app \
     -resultBundlePath ~/dev/fma-results/poll-$STAMP.xcresult \

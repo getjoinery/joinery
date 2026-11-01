@@ -8,9 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/** VaultCrypto against the shared edge vector
- *  (`public_html/tests/vault/fixtures/edge_vector.json`), the bytes the
- *  browser, PHP and the Rust client already open. */
+/** VaultCrypto against the shared vectors the browser, PHP and the Rust client
+ *  are held to: `xwing_vector.json` (X-Wing and the v2 seal),
+ *  `device_handoff_vector.json` (a handoff and one Fortress row) and
+ *  `edge_vector.json` (a field under a DEK). */
 class VaultCryptoTest {
 
     private fun vector(name: String): JsonValue {
@@ -22,12 +23,50 @@ class VaultCryptoTest {
     private fun JsonValue.str(key: String): String = this[key]?.stringValue ?: error("missing $key")
 
     @Test
-    fun edgeVectorOpensSealedDekAndField() {
+    fun xwingDraftVectorsReproduce() {
+        val list = vector("xwing_vector.json")["xwing"]!!.arrayValue!!
+        assertEquals(3, list.size)
+        list.forEachIndexed { i, v ->
+            val seed = VaultCrypto.hex(v.str("seed"))
+            val pk = VaultCrypto.hex(v.str("pk"))
+            assertArrayEquals("vector $i: public key", pk, XWing.publicKey(seed))
+            val enc = XWing.encapsulateWith(pk, VaultCrypto.hex(v.str("eseed")))
+            assertArrayEquals("vector $i: ciphertext", VaultCrypto.hex(v.str("ct")), enc.ciphertext)
+            assertArrayEquals("vector $i: shared secret", VaultCrypto.hex(v.str("ss")), enc.sharedSecret)
+            assertArrayEquals("vector $i: decapsulate", VaultCrypto.hex(v.str("ss")), XWing.decapsulate(seed, enc.ciphertext))
+        }
+    }
+
+    @Test
+    fun sealVectorsReproduceAndOpenOnlyUnderTheirScope() {
+        val list = vector("xwing_vector.json")["seal"]!!.arrayValue!!
+        assertTrue(list.any { it.str("scope") == "dek" })
+        for (s in list) {
+            val scope = s.str("scope")
+            val seed = VaultCrypto.hex(s.str("seed_hex"))
+            val public = VaultCrypto.b64decode(s.str("public_b64"))
+            val plain = VaultCrypto.hex(s.str("plaintext_hex"))
+            val sealed = VaultCrypto.b64decode(s.str("sealed_b64"))
+            assertArrayEquals("$scope: public key", public, XWing.publicKey(seed))
+            assertArrayEquals("$scope: seal", sealed,
+                VaultCrypto.sealWith(plain, public, scope, VaultCrypto.hex(s.str("eseed_hex")), VaultCrypto.hex(s.str("iv_hex"))))
+            assertArrayEquals("$scope: open", plain, VaultCrypto.openRaw(sealed, seed, scope))
+            val other = if (scope == "dek") "joinery-restore-approval:" else "dek"
+            try {
+                VaultCrypto.openRaw(sealed, seed, other)
+                fail("$scope: opened under $other")
+            } catch (e: VaultCryptoException) {
+            }
+            // The public opener takes the dek scope only.
+            val opened = try { VaultCrypto.openWithSecret(s.str("sealed_b64"), seed); true } catch (e: VaultCryptoException) { false }
+            assertEquals(scope == "dek", opened)
+        }
+    }
+
+    @Test
+    fun edgeVectorFieldOpensUnderItsDek() {
         val v = vector("edge_vector.json")
-        val pkcs8 = VaultCrypto.pkcs8Encode(VaultCrypto.hex(v.str("recipient_secret_hex")))
-        assertEquals(v.str("recipient_public_b64"), VaultCrypto.publicKeyFromSecret(pkcs8))
-        val dek = VaultCrypto.openWithSecret(v.str("sealed_dek_b64"), pkcs8)
-        assertArrayEquals(VaultCrypto.hex(v.str("dek_hex")), dek)
+        val dek = VaultCrypto.hex(v.str("dek_hex"))
         assertEquals(v.str("field_plaintext"), VaultCrypto.decryptString(v.str("field_blob_b64"), dek, v.str("field_ad")))
     }
 
@@ -43,23 +82,41 @@ class VaultCryptoTest {
     }
 
     @Test
-    fun wrongRecipientIsRefused() {
-        val v = vector("edge_vector.json")
-        val other = VaultCrypto.generateKeypair()
+    fun sealRoundTripsToAFreshKeyAndNoOther() {
+        val pair = VaultCrypto.generateKeypair()
+        assertEquals(32, pair.secret.size)
+        assertEquals(1216, pair.publicKey.size)
+        assertEquals(pair.publicKeyB64, VaultCrypto.publicKeyFromSecret(pair.secret))
+        val data = VaultCrypto.randomBytes(48)
+        val sealed = VaultCrypto.sealToPublicKey(data, pair.publicKeyB64)
+        assertEquals(1120 + 12 + 48 + 16, VaultCrypto.b64decode(sealed).size)
+        assertArrayEquals(data, VaultCrypto.openWithSecret(sealed, pair.secret))
         try {
-            VaultCrypto.openWithScalar(v.str("sealed_dek_b64"), other.secret)
+            VaultCrypto.openWithSecret(sealed, VaultCrypto.generateKeypair().secret)
             fail("another key must not open the seal")
         } catch (e: VaultCryptoException) {
         }
     }
 
     @Test
-    fun sealRoundTripsToAFreshKey() {
-        val pair = VaultCrypto.generateKeypair()
-        val data = VaultCrypto.randomBytes(48)
-        val sealed = VaultCrypto.sealToPublicKey(data, pair.publicKeyB64)
-        assertArrayEquals(data, VaultCrypto.openWithScalar(sealed, pair.secret))
-        assertArrayEquals(data, VaultCrypto.openWithSecret(sealed, VaultCrypto.pkcs8Encode(pair.secret)))
+    fun sealingToAnOldKeyIsRefusedAndNamesTheRotation() {
+        val old = VaultCrypto.b64encode(ByteArray(32) { 9 })
+        assertTrue(VaultCrypto.isOldPublicKey(old))
+        try {
+            VaultCrypto.sealToPublicKey(byteArrayOf(1), old)
+            fail("a 32-byte key must be refused")
+        } catch (e: VaultCryptoException) {
+            assertTrue(e.message!!.contains("rotate"))
+        }
+    }
+
+    @Test
+    fun aSecretThatIsNotASeedIsRefused() {
+        try {
+            VaultCrypto.publicKeyFromSecret(ByteArray(48))
+            fail("a 48-byte secret is not an X-Wing seed")
+        } catch (e: VaultCryptoException) {
+        }
     }
 
     @Test
@@ -67,15 +124,6 @@ class VaultCryptoTest {
         val key = VaultCrypto.randomBytes(32)
         val blob = VaultCrypto.encryptString("hello ✓", key, "mail:7:iem_subject")
         assertEquals("hello ✓", VaultCrypto.decryptString(blob, key, "mail:7:iem_subject"))
-    }
-
-    @Test
-    fun pkcs8RefusesOtherShapes() {
-        try {
-            VaultCrypto.pkcs8Decode(ByteArray(48))
-            fail("a zero prefix is not X25519 PKCS#8")
-        } catch (e: VaultCryptoException) {
-        }
     }
 
     @Test
@@ -91,16 +139,21 @@ class VaultCryptoTest {
         val v = vector("device_handoff_vector.json")
         val device = v["device"]!!
         val vault = v["vault"]!!
-        val deviceScalar = VaultCrypto.hex(device.str("secret_hex"))
-        assertEquals(device.str("public_b64"), VaultCrypto.b64encode(VaultCrypto.publicFromScalar(deviceScalar)))
+        val handoff = v["handoff"]!!
+        val deviceSeed = VaultCrypto.hex(device.str("seed_hex"))
+        val vaultSeed = VaultCrypto.hex(vault.str("seed_hex"))
+        assertEquals(device.str("public_b64"), VaultCrypto.publicKeyFromSecret(deviceSeed))
+        assertEquals(vault.str("public_b64"), VaultCrypto.publicKeyFromSecret(vaultSeed))
 
-        val pkcs8 = VaultCrypto.openWithScalar(v["handoff"]!!.str("blob"), deviceScalar)
-        assertArrayEquals(VaultCrypto.hex(vault.str("pkcs8_hex")), pkcs8)
-        assertEquals(vault.str("public_b64"), VaultCrypto.publicKeyFromSecret(pkcs8))
+        // The handoff reproduces byte for byte, and opens to the vault's seed.
+        assertEquals(handoff.str("blob"), VaultCrypto.b64encode(VaultCrypto.sealWith(vaultSeed,
+            VaultCrypto.b64decode(device.str("public_b64")), VaultCrypto.SCOPE_DEK,
+            VaultCrypto.hex(handoff.str("eseed_hex")), VaultCrypto.hex(handoff.str("iv_hex")))))
+        assertArrayEquals(vaultSeed, VaultCrypto.openWithSecret(handoff.str("blob"), deviceSeed))
 
         val row = v["row"]!!
-        val sealedDek = row.str("sealed_dek").removePrefix("v1.edgeseal.mail.")
-        val dek = VaultCrypto.openWithSecret(sealedDek, pkcs8)
+        assertTrue(row.str("sealed_dek").startsWith("v2.edgeseal.mail."))
+        val dek = VaultCrypto.openWithSecret(row.str("sealed_dek").removePrefix("v2.edgeseal.mail."), vaultSeed)
         assertArrayEquals(VaultCrypto.hex(row.str("dek_hex")), dek)
 
         row["fields"]!!.arrayValue!!.forEach { f ->
@@ -120,16 +173,17 @@ class VaultCryptoTest {
 
         // Another device's key opens nothing.
         var refused = false
-        try { VaultCrypto.openWithScalar(v["handoff"]!!.str("blob"), VaultCrypto.generateKeypair().secret) } catch (e: VaultCryptoException) { refused = true }
+        try { VaultCrypto.openWithSecret(handoff.str("blob"), VaultCrypto.generateKeypair().secret) } catch (e: VaultCryptoException) { refused = true }
         assertTrue(refused)
     }
 
     @Test
     fun relayPinVectorMacAndSignature() {
         // plugins/mailbox/tests/fixtures/relay_pin_vector.json: the pin MAC (under
-        // the vault secret as PKCS#8, what session.mac() holds) and the statement.
+        // the vault secret's bytes as the keyring holds them) and the statement.
+        // The vector's secret is a pre-X-Wing PKCS#8; the MAC takes any bytes.
         val v = vector("relay_pin_vector.json")
-        val pkcs8 = VaultCrypto.pkcs8Encode(VaultCrypto.hex(v.str("vault_secret_hex")))
+        val pkcs8 = VaultCrypto.hex("302e020100300506032b656e04220420" + v.str("vault_secret_hex"))
         val message = "joinery-relay-pin:v1\n${v["alias_id"]!!.stringValue}\n${v.str("relay_identity_public_key")}".toByteArray()
         assertEquals(v.str("pin_mac"), VaultCrypto.b64encode(VaultCrypto.macFromSecret(pkcs8, "sealed-vault:pin", message)))
         val signed = ("joinery-relay:seal-target:v1\n" + v.str("statement")).toByteArray()

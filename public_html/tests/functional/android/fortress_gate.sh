@@ -9,9 +9,9 @@
 # Android end-to-end (Fortress) mail gate — specs/fortress_mobile_apps.md.
 #
 # Drives FortressGateTest leg by leg on the Android emulator (AVD
-# `joinery_test`, which needs a screen-lock PIN and an enrolled fingerprint:
+# `joinery_test`, which needs screen-lock PIN AVD_PIN and an enrolled fingerprint:
 # the Keystore key the mail secret is wrapped under opens only to a strong
-# biometric) against dev.getjoinery.com, with a walk fixture made for the
+# biometric) against this site (its webDir), with a walk fixture made for the
 # purpose (walk_fixture.php create android-fma --fortress). One app sign-in
 # runs through every leg: the key a phone holds is bound to the session key it
 # enrolled with.
@@ -39,7 +39,7 @@
 # approves each new enrollment code the test logs (tag FmaGate). After each
 # leg it checks the server's side in psql (reads only).
 #
-# Version: 2.0.0
+# Version: 2.2.0 (this site, not dev.getjoinery.com; sends to a local sink; unlock a cold boot with the PIN; stale AVD locks; bounded boot wait)
 
 set -u
 cd "$(dirname "$0")"
@@ -55,12 +55,16 @@ MAILBOX="box@claude-walk-$PURPOSE.example"
 MINI_BUILD="dev/fma"
 GRADLE="~/gradle-8.9/bin/gradle"
 AVD="joinery_test"
+# The test emulator's screen-lock PIN (a throwaway: the AVD holds test data
+# only). Its fingerprint is enrolled as finger 1 (adb emu finger touch 1).
+AVD_PIN="1111"
 APP_PKG="com.getjoinery.member"
 APP_APK="$MINI_BUILD/android/joinery-member-android/build/outputs/apk/debug/joinery-member-android-debug.apk"
 TEST_APK="$MINI_BUILD/android/joinery-member-android/build/outputs/apk/androidTest/debug/joinery-member-android-debug-androidTest.apk"
 TEST_PKG="com.getjoinery.member.test"
 RUNNER="androidx.test.runner.AndroidJUnitRunner"
-BASE_URL="https://dev.getjoinery.com"
+# The site the fixture is made on and the psql checks read: this one.
+BASE_URL="https://$($SETTING_CTL get webDir)"
 DEVICE_CREDS="/data/local/tmp/joinery_member_gate.creds"
 STANDIN_PORT=18431
 AI_SUMMARY="Walk stand-in summary"
@@ -76,33 +80,15 @@ check() { if [ "$2" = "1" ]; then record_pass "$1"; else record_fail "$1"; fi; }
 q() { $PSQL "$1" | tr -d '[:space:]'; }
 mini() { ssh macmini "source ~/.android-env; $1"; }
 
-SMTP_SAVED_SERVICE=""
-flip_smtp_local() {
-    SMTP_SAVED_SERVICE=$($SETTING_CTL get email_service)
-    SMTP_SAVED_HOST=$($SETTING_CTL get smtp_host)
-    SMTP_SAVED_PORT=$($SETTING_CTL get smtp_port)
-    SMTP_SAVED_AUTH=$($SETTING_CTL get smtp_auth)
-    $SETTING_CTL set email_service smtp
-    $SETTING_CTL set smtp_host localhost
-    $SETTING_CTL set smtp_port 25
-    $SETTING_CTL set smtp_auth 0
-}
-restore_smtp() {
-    if [ -n "$SMTP_SAVED_SERVICE" ]; then
-        $SETTING_CTL set email_service "$SMTP_SAVED_SERVICE"
-        $SETTING_CTL set smtp_host "$SMTP_SAVED_HOST"
-        $SETTING_CTL set smtp_port "$SMTP_SAVED_PORT"
-        $SETTING_CTL set smtp_auth "$SMTP_SAVED_AUTH"
-        SMTP_SAVED_SERVICE=""
-    fi
-}
+# Sends go to a local sink for the run (phone_mail_sink.sh): nothing leaves the box.
+source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
 
 HELPER_PID=""
 cleanup() {
     [ -n "$HELPER_PID" ] && kill "$HELPER_PID" 2>/dev/null
-    restore_smtp
+    mail_sink_off
     mini "adb shell rm -f $DEVICE_CREDS /sdcard/Download/$ATTACH_NAME; pkill -f 'ai_standin.py $STANDIN_PORT'" 2>/dev/null
-    echo "restored: smtp; device creds, picker file and stand-in model removed"
+    echo "restored: mail settings; device creds, picker file and stand-in model removed"
 }
 trap cleanup EXIT
 trap 'exit 143' TERM
@@ -145,11 +131,21 @@ rsync -a --delete "$PUBLIC_HTML/plugins/mailbox/tests/fixtures/" macmini:"$MINI_
 rsync -a "$PUBLIC_HTML/tests/functional/android/ai_standin.py" macmini:"$MINI_BUILD/"
 mini "cd $MINI_BUILD/android && echo sdk.dir=\$ANDROID_HOME > local.properties && $GRADLE \
     :joinery-member-android:assembleDebug :joinery-member-android:assembleDebugAndroidTest --console=plain -q 2>&1 | grep -v '^w: ' | tail -5" || exit 1
-mini "(adb devices | grep -q emulator) || (nohup ~/android-sdk/emulator/emulator @$AVD -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >~/emulator.log 2>&1 &); \
-    adb wait-for-device; \
-    until [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ]; do sleep 3; done; \
+# Boot the emulator if none is up. An emulator that died leaves its AVD's lock
+# files behind and the next start refuses ("multiple emulators"), so they go
+# when no emulator is running; the wait gives up after five minutes rather
+# than hanging the gate. A cold boot leaves the user locked (no app starts,
+# "Activity class does not exist") until the screen-lock PIN is entered.
+mini "(adb devices | grep -q emulator) || { rm -f ~/.android/avd/$AVD.avd/*.lock; \
+      (nohup ~/android-sdk/emulator/emulator @$AVD -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >~/emulator.log 2>&1 &); }; \
+    for i in \$(seq 1 100); do [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ] && break; sleep 3; done; \
+    [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ] || { tail -3 ~/emulator.log; exit 1; }; \
     adb shell input keyevent KEYCODE_WAKEUP; \
-    adb install -r -t $APP_APK >/dev/null && adb install -r -t $TEST_APK >/dev/null && echo installed" || { echo "FATAL: install"; exit 1; }
+    if adb shell dumpsys user | grep -q RUNNING_LOCKED; then \
+        adb shell wm dismiss-keyguard; sleep 1; adb shell input swipe 540 2000 540 500 300; sleep 2; adb shell input text $AVD_PIN; adb shell input keyevent KEYCODE_ENTER; sleep 3; \
+        adb shell dumpsys user | grep -q RUNNING_LOCKED && { echo 'the emulator stays locked: is its PIN $AVD_PIN?'; exit 1; }; \
+    fi; \
+    adb install -r -t $APP_APK >/dev/null && adb install -r -t $TEST_APK >/dev/null && echo installed" || { echo "FATAL: boot or install"; exit 1; }
 # A fresh phone: nothing held from an earlier run.
 mini "adb shell pm clear $APP_PKG >/dev/null; adb logcat -c; adb shell pm grant $APP_PKG android.permission.POST_NOTIFICATIONS"
 
@@ -161,7 +157,7 @@ print("email=" + k["email"])
 print("password=" + k["password"])
 PYEOF
 
-flip_smtp_local
+mail_sink_on || exit 1
 STAMP=$(date +%s)
 
 # The helper: the finger every two seconds, and each new enrollment code approved.

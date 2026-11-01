@@ -96,7 +96,7 @@ final class FortressMailUITests: XCTestCase {
         let share = app.otherElements["ActivityListView"].firstMatch
         if share.waitForExistence(timeout: 20) {
             shot(app, "05-part-opened")
-            if app.buttons["Close"].exists { app.buttons["Close"].tap() } else { share.swipeDown(velocity: .fast) }
+            app.dismissShareSheet(share)
         } else {
             XCTFail("the opened part did not reach the share sheet")
         }
@@ -138,9 +138,13 @@ final class FortressMailUITests: XCTestCase {
         search.typeText("\(word)\n")
         app.expect(text(app, containing: word), timeout: 60, "a device-search hit")
         shot(app, "07-search")
-        // Leave search mode so the toolbar is back.
-        let cancelSearch = app.navigationBars.buttons["Cancel"].firstMatch
-        if cancelSearch.exists { cancelSearch.tap() }
+        // Leave search mode so the toolbar is back: "Cancel" in the navigation
+        // bar before iOS 26, an ✕ beside the field since.
+        for label in ["Cancel", "Close", "xmark"] {
+            let leave = app.buttons[label].firstMatch
+            if leave.exists && leave.isHittable { leave.tap(); break }
+        }
+        app.expect(app.buttons["mail_new_message"], timeout: 10, "the toolbar back after search")
 
         // WP8: a sealed draft, saved on leaving, reopened, sent.
         app.buttons["mail_new_message"].tap()

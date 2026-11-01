@@ -35,7 +35,7 @@ final class FortressFlowTests: XCTestCase {
         XCTAssertTrue(box.isFortress)
         XCTAssertTrue(box.locked)
         XCTAssertTrue(box.own)
-        XCTAssertEqual(box.newestUnreadID, 111270)
+        XCTAssertEqual(box.newestUnreadID, try keys()["message_id"]?.intValue)
     }
 
     func testTheListOpensWithTheKeyAndShowsPlaceholdersWithout() throws {
@@ -75,7 +75,7 @@ final class FortressFlowTests: XCTestCase {
         let pdf = try XCTUnwrap(m.attachments.first { $0.mimePart == k["pdf_mime_part"]?.stringValue })
         XCTAssertTrue(pdf.sealed)
         XCTAssertNotEqual(pdf.filename, "attachment", "named from the sealed manifest")
-        XCTAssertEqual(pdf.ad, "mail:111270:att:2")
+        XCTAssertEqual(pdf.ad, "mail:\(k["message_id"]?.intValue ?? 0):att:2")
         // The stored bytes open under the row key with the part's AD.
         let key = try f.rowKey(messageID: m.id, sealedDek: m.sealed!.sealedDek)
         let plain = try VaultCrypto.openEdgeBytes(k["pdf_stored"]?.stringValue ?? "", key: key, ad: pdf.ad)
@@ -179,7 +179,8 @@ final class FortressFlowTests: XCTestCase {
 
     func testRelayPinJudgementMatchesTheBrowser() throws {
         let v = try PortVectorTests.vector("relay_pin_vector.json")
-        let secret = VaultCrypto.pkcs8(fromScalar: Data(hex: v["vault_secret_hex"]?.stringValue ?? ""))
+        // The vector's secret is a pre-X-Wing PKCS#8; the MAC takes the bytes held.
+        let secret = Data(hex: "302e020100300506032b656e04220420" + (v["vault_secret_hex"]?.stringValue ?? ""))
         let id = v["relay_identity_public_key"]?.stringValue ?? ""
         let relay = JSONValue.object([(key: "statement", value: v["statement"]!), (key: "signature", value: v["signature"]!)])
         func answer(pin: JSONValue, statement: String? = nil) -> JSONValue {
@@ -381,9 +382,7 @@ final class ReviewFixTests: XCTestCase {
     }
 
     func testADraftWithAColumnThatWillNotOpenFailsTheOpen() async throws {
-        let priv = Curve25519.KeyAgreement.PrivateKey()
-        let secret = VaultCrypto.pkcs8(fromScalar: priv.rawRepresentation)
-        let pub = VaultCrypto.b64(priv.publicKey.rawRepresentation)
+        let (secret, pub) = try VaultCrypto.newKeypair()
         let dek = VaultCrypto.newDek()
         let client = APIClient(config: JoineryConfig(baseURL: URL(string: "https://example.invalid")!,
                                                      clientApp: "t", clientVersion: "0", appName: "T"))
@@ -535,9 +534,8 @@ final class ReviewFinalTests: XCTestCase {
         let backend = FlakyBackend()
         let store = DeviceKeyStore(service: "final-x3", protection: .plain, items: backend)
         let devicePub = try store.devicePublicKey()
-        let vaultPriv = Curve25519.KeyAgreement.PrivateKey()
-        let vaultPub = VaultCrypto.b64(vaultPriv.publicKey.rawRepresentation)
-        let blob = try VaultCrypto.seal(VaultCrypto.pkcs8(fromScalar: vaultPriv.rawRepresentation), toPublicKey: devicePub)
+        let (vaultSeed, vaultPub) = try VaultCrypto.newKeypair()
+        let blob = try VaultCrypto.seal(vaultSeed, toPublicKey: devicePub)
         ProbeStub.body = JSONValue.object([(key: "data", value: .object([
             (key: "set_up", value: .bool(true)), (key: "public_key", value: .string(vaultPub)),
             (key: "held_by_this_device", value: .bool(true)), (key: "device_linked", value: .bool(true)),
@@ -560,8 +558,8 @@ final class ReviewFinalTests: XCTestCase {
         backend.flaky = false
         // L3: a handover sealed to another key never opens; it is dropped, so
         // Try again starts a new ceremony instead of retrying it forever.
-        let stranger = try VaultCrypto.seal(Data(repeating: 1, count: 48),
-                                            toPublicKey: VaultCrypto.b64(Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation))
+        let stranger = try VaultCrypto.seal(Data(repeating: 1, count: 32),
+                                            toPublicKey: try VaultCrypto.newKeypair().publicKey)
         vault.pendingHandoverForTest(stranger)
         do { try await vault.retryHandover(); XCTFail("a stale handover cannot open") } catch {}
         XCTAssertNil(vault.pendingHandover, "a handover that can never open is dropped")

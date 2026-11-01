@@ -20,7 +20,7 @@ targets:
   JoineryMember:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "26.0"
     sources: [Sources]
     # Keys GENERATE_INFOPLIST_FILE cannot express (arrays), merged with the
     # generated ones: the mail poll's background task and Face ID's reason
@@ -63,7 +63,7 @@ targets:
   JoineryMemberUITests:
     type: bundle.ui-testing
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "26.0"
     sources: [UITests]
     dependencies:
       - target: JoineryMember

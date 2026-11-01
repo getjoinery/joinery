@@ -2,29 +2,36 @@ import Foundation
 import CryptoKit
 
 /// The platform's client-custody formats, over CryptoKit (specs/fortress_mobile_apps.md
-/// § F1). Byte-for-byte the browser's `vault-crypto.js` and `joinery-sealed.js`
-/// framing, pinned by the shared vectors in `tests/vault/fixtures/`:
+/// § F1, specs/post_quantum_sealing.md R2). Byte-for-byte the browser's
+/// `vault-crypto.js` and `joinery-sealed.js` framing, pinned by the shared
+/// vectors in `tests/vault/fixtures/`:
 ///
-///   - a SEAL (a key handed to a public key): `base64(ephPub[32] ‖ IV[12] ‖ ct‖tag)`,
-///     AES-256-GCM under `HKDF-SHA256(X25519(eph, recipient), salt '', info
-///     'sealed-vault:dek' ‖ ephPub ‖ recipientPub)`, no AAD. A row's DEK carries it
-///     behind `v1.edgeseal.{scope}.`; a device handoff carries it bare.
+///   - a SEAL (a key handed to a public key): `base64(ct[1120] ‖ IV[12] ‖ ct‖tag)`,
+///     X-Wing (`XWingMLKEM768X25519`) to the recipient's 1216-byte public key,
+///     AES-256-GCM under `HKDF-SHA256(shared secret, salt '', info
+///     'joinery-seal:v2:dek')`, no AAD. A row's DEK carries it behind
+///     `v2.edgeseal.{scope}.`; a device handoff carries it bare.
 ///   - a FIELD: `v1.edge.` + `base64(IV[12] ‖ ct ‖ tag[16])`, AES-256-GCM under the
 ///     row's DEK, AAD `{ad_prefix}{id}:{column}`. Attachment bytes use the same
 ///     shape with AAD `{ad_prefix}{id}:att:{mime_part}`.
 ///
-/// A vault secret travels as PKCS#8 (48 bytes); the X25519 scalar is its last 32.
-/// Everything the browser MACs or derives from "the secret" uses the PKCS#8 bytes,
-/// so this module keeps them in that form.
+/// A vault secret, and this phone's device secret, is a 32-byte X-Wing seed; its
+/// public key is worked out from it. Everything the browser MACs or derives from
+/// "the secret" uses the seed's bytes.
 public enum VaultCrypto {
-    public static let edgeSeal = "v1.edgeseal."
+    public static let edgeSeal = "v2.edgeseal."
     public static let edgeField = "v1.edge."
-    static let pkcs8Prefix: [UInt8] = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
-                                       0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20]
+    static let sealInfo = "joinery-seal:v2:"
+    static let scopeDek = "dek"
+    static let seedBytes = 32
+    static let publicKeyBytes = 1216
+    static let ciphertextBytes = 1120
 
     public enum Failure: Error, Equatable {
         case malformed(String)
         case openFailed
+        /// A 32-byte (pre-X-Wing) public key: nothing seals to it.
+        case oldKey
     }
 
     // MARK: Base64
@@ -36,65 +43,69 @@ public enum VaultCrypto {
         return data
     }
 
-    // MARK: PKCS#8
+    // MARK: Keys
 
-    /// The raw 32-byte scalar inside an X25519 PKCS#8 secret (or a bare 32-byte one).
-    public static func scalar(fromPKCS8 secret: Data) throws -> Data {
-        if secret.count == 32 { return secret }
-        guard secret.count == 48, Array(secret.prefix(16)) == pkcs8Prefix else {
-            throw Failure.malformed("not an X25519 PKCS#8 secret")
+    static func xwingKey(seed: Data) throws -> XWingMLKEM768X25519.PrivateKey {
+        guard seed.count == seedBytes else { throw Failure.malformed("an X-Wing secret is a 32-byte seed") }
+        do {
+            return try XWingMLKEM768X25519.PrivateKey(seedRepresentation: seed, publicKey: nil)
+        } catch {
+            throw Failure.malformed("an X-Wing secret is a 32-byte seed")
         }
-        return secret.suffix(32)
     }
 
-    public static func pkcs8(fromScalar scalar: Data) -> Data {
-        Data(pkcs8Prefix) + scalar
+    /// A fresh keypair: the 32-byte seed and the base64 1216-byte public key.
+    public static func newKeypair() throws -> (seed: Data, publicKey: String) {
+        let key = try XWingMLKEM768X25519.PrivateKey()
+        return (key.seedRepresentation, b64(key.publicKey.rawRepresentation))
     }
 
-    /// A vault's public key worked out from its own secret (never the server's
-    /// report of it): base64 of the raw 32 bytes.
-    public static func publicKey(fromSecret secret: Data) throws -> String {
-        let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: scalar(fromPKCS8: secret))
-        return b64(key.publicKey.rawRepresentation)
+    /// A key's public half worked out from its own seed (never the server's
+    /// report of it): base64 of the 1216 bytes.
+    public static func publicKey(fromSecret seed: Data) throws -> String {
+        b64(try xwingKey(seed: seed).publicKey.rawRepresentation)
+    }
+
+    /// True for a public key from before X-Wing (32 bytes).
+    public static func isOldPublicKey(_ b64: String?) -> Bool {
+        guard let b64, let d = Data(base64Encoded: b64) else { return false }
+        return d.count == 32
     }
 
     // MARK: Seal / open (key handoff and row DEKs)
 
-    static func sealKey(shared: SharedSecret, ephPub: Data, recipientPub: Data) -> SymmetricKey {
-        shared.hkdfDerivedSymmetricKey(
-            using: SHA256.self, salt: Data(),
-            sharedInfo: Data("sealed-vault:dek".utf8) + ephPub + recipientPub,
-            outputByteCount: 32)
+    static func sealKey(_ shared: SymmetricKey, scope: String) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(inputKeyMaterial: shared, salt: Data(),
+                               info: Data((sealInfo + scope).utf8), outputByteCount: 32)
     }
 
-    /// Seal `data` to a base64 X25519 public key. `ephemeral` and `iv` are test seams.
-    public static func seal(_ data: Data, toPublicKey recipientB64: String,
-                            ephemeral: Curve25519.KeyAgreement.PrivateKey? = nil,
-                            iv: Data? = nil) throws -> String {
+    /// Seal `data` to a base64 1216-byte X-Wing public key. A 32-byte key is
+    /// from before X-Wing and is refused: its owner rotates it first. `iv` is a
+    /// test seam.
+    public static func seal(_ data: Data, toPublicKey recipientB64: String, iv: Data? = nil) throws -> String {
         let recipientBytes = try unb64(recipientB64)
-        let recipient = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: recipientBytes)
-        let eph = ephemeral ?? Curve25519.KeyAgreement.PrivateKey()
-        let ephPub = eph.publicKey.rawRepresentation
-        let shared = try eph.sharedSecretFromKeyAgreement(with: recipient)
-        let key = sealKey(shared: shared, ephPub: ephPub, recipientPub: recipientBytes)
+        if recipientBytes.count == 32 { throw Failure.oldKey }
+        guard recipientBytes.count == publicKeyBytes else { throw Failure.malformed("a public key is 1216 bytes") }
+        let recipient = try XWingMLKEM768X25519.PublicKey(rawRepresentation: recipientBytes)
+        let enc = try recipient.encapsulate()
+        let key = sealKey(enc.sharedSecret, scope: scopeDek)
         let nonce = try iv.map { try AES.GCM.Nonce(data: $0) } ?? AES.GCM.Nonce()
         let box = try AES.GCM.seal(data, using: key, nonce: nonce)
-        return b64(ephPub + Data(nonce) + box.ciphertext + box.tag)
+        return b64(enc.encapsulated + Data(nonce) + box.ciphertext + box.tag)
     }
 
-    /// Open a seal with the recipient's secret (PKCS#8 or raw scalar).
-    public static func open(sealed blob: String, secret: Data) throws -> Data {
-        let raw = try unb64(blob)
-        guard raw.count >= 32 + 12 + 16 else { throw Failure.malformed("sealed blob too short") }
-        let ephPub = raw.prefix(32)
-        let iv = raw.subdata(in: raw.startIndex + 32 ..< raw.startIndex + 44)
-        let body = raw.suffix(from: raw.startIndex + 44)
+    /// Open raw seal bytes with a seed under `scope` (the vector tests name
+    /// other scopes; everything else opens 'dek').
+    static func openRaw(_ raw: Data, seed: Data, scope: String) throws -> Data {
+        guard raw.count >= ciphertextBytes + 12 + 16 else { throw Failure.malformed("sealed blob too short") }
+        let start = raw.startIndex
+        let ct = raw.subdata(in: start ..< start + ciphertextBytes)
+        let iv = raw.subdata(in: start + ciphertextBytes ..< start + ciphertextBytes + 12)
+        let body = raw.subdata(in: start + ciphertextBytes + 12 ..< raw.endIndex)
+        let priv = try xwingKey(seed: seed)
         do {
-            let priv = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: scalar(fromPKCS8: secret))
-            let eph = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephPub)
-            let shared = try priv.sharedSecretFromKeyAgreement(with: eph)
-            let key = sealKey(shared: shared, ephPub: Data(ephPub), recipientPub: priv.publicKey.rawRepresentation)
-            return try gcmOpen(Data(body), iv: iv, key: key, ad: nil)
+            let shared = try priv.decapsulate(ct)
+            return try gcmOpen(body, iv: iv, key: sealKey(shared, scope: scope), ad: nil)
         } catch let error as Failure {
             throw error
         } catch {
@@ -102,7 +113,12 @@ public enum VaultCrypto {
         }
     }
 
-    /// `v1.edgeseal.{scope}.` → (scope, blob), nil when not that shape.
+    /// Open a seal with the recipient's 32-byte seed.
+    public static func open(sealed blob: String, secret: Data) throws -> Data {
+        try openRaw(try unb64(blob), seed: secret, scope: scopeDek)
+    }
+
+    /// `v2.edgeseal.{scope}.` → (scope, blob), nil when not that shape.
     public static func parseSealedDek(_ sealed: String) -> (scope: String, blob: String)? {
         guard sealed.hasPrefix(edgeSeal) else { return nil }
         let rest = sealed.dropFirst(edgeSeal.count)
@@ -231,6 +247,17 @@ public enum VaultCrypto {
         var b = [UInt8](repeating: 0, count: bytes)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes, &b)
         return b.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+extension VaultCrypto.Failure: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .oldKey:
+            return "That vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it."
+        default:
+            return nil
+        }
     }
 }
 

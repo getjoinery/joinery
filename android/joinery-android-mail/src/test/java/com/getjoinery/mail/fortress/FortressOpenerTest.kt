@@ -35,8 +35,8 @@ class FortressOpenerTest {
     private fun phone(holdKey: Boolean = true, open: Boolean = true): Pair<DeviceKeys, FortressOpener> {
         val k = DeviceKeys(MemorySecretStore(), MemoryKeyValueStore(), HeldKeys())
         if (holdKey) {
-            val pkcs8 = VaultCrypto.pkcs8Encode(VaultCrypto.b64decode(keys.str("mail_secret_b64")))
-            val sealed = VaultCrypto.sealToPublicKey(pkcs8, k.ensureDeviceKey())
+            val seed = VaultCrypto.b64decode(keys.str("mail_secret_b64"))
+            val sealed = VaultCrypto.sealToPublicKey(seed, k.ensureDeviceKey())
             assertEquals(keys.str("mail_public_b64"), k.acceptHandoff("mail", sealed, listOf(keys.str("mail_public_b64"))))
             if (!open) k.held.dropAll()
         }
@@ -126,9 +126,9 @@ class FortressOpenerTest {
 
     @Test
     fun edgeSealScopeIsChecked() {
-        assertEquals("abc", FortressOpener.stripEdgeSeal("v1.edgeseal.mail.abc", "mail"))
+        assertEquals("abc", FortressOpener.stripEdgeSeal("v2.edgeseal.mail.abc", "mail"))
         var refused = false
-        try { FortressOpener.stripEdgeSeal("v1.edgeseal.drive.abc", "mail") } catch (e: Exception) { refused = true }
+        try { FortressOpener.stripEdgeSeal("v2.edgeseal.drive.abc", "mail") } catch (e: Exception) { refused = true }
         assertTrue(refused)
     }
 
@@ -142,9 +142,10 @@ class FortressOpenerTest {
     @Test
     fun relayPinVector() {
         val v = Vectors.json("relay_pin_vector.json")
-        // The pin MAC is under the secret as the browser's session and the
-        // phone both hold it: PKCS#8.
-        val pkcs8 = VaultCrypto.pkcs8Encode(VaultCrypto.hex(v.str("vault_secret_hex")))
+        // The pin MAC is under the secret's bytes as the browser's session and
+        // the phone both hold them. The vector's secret is a pre-X-Wing PKCS#8;
+        // the MAC takes any bytes.
+        val pkcs8 = VaultCrypto.hex("302e020100300506032b656e04220420" + v.str("vault_secret_hex"))
         val alias = v["alias_id"]!!.intValue!!
         val identity = v.str("relay_identity_public_key")
         val mac = VaultCrypto.macFromSecret(pkcs8, "sealed-vault:pin", RelayPinCheck.pinMessage(alias, identity))

@@ -22,8 +22,7 @@ class DeviceKeysTest {
     /** A vault keypair as the browser holds it, and its secret sealed to [devicePub]. */
     private fun handoff(devicePub: String): Pair<String, String> {
         val vault = VaultCrypto.generateKeypair()
-        val pkcs8 = VaultCrypto.pkcs8Encode(vault.secret)
-        return VaultCrypto.sealToPublicKey(pkcs8, devicePub) to vault.publicKeyB64
+        return VaultCrypto.sealToPublicKey(vault.secret, devicePub) to vault.publicKeyB64
     }
 
     @Test
@@ -46,6 +45,27 @@ class DeviceKeysTest {
         // A DEK sealed to the vault opens through the held secret.
         val dek = VaultCrypto.randomBytes(32)
         assertArrayEquals(dek, k.openSealed("mail", VaultCrypto.sealToPublicKey(dek, vaultPub)))
+    }
+
+    @Test
+    fun theDeviceKeyIsXWing() {
+        val (k, _, _) = keys()
+        assertEquals(1216, VaultCrypto.b64decode(k.ensureDeviceKey()).size)
+    }
+
+    @Test
+    fun anInstallHoldingPreXWingKeysStartsOver() {
+        val (k, store, prefs) = keys()
+        val (sealed, pub) = handoff(k.ensureDeviceKey())
+        k.acceptHandoff("mail", sealed, listOf(pub))
+        // An X-Wing install is left alone.
+        assertFalse(DeviceKeys.resetPreXWing(store, prefs))
+        assertTrue(k.holds("mail"))
+        // A device key recorded before X-Wing (32 bytes) wipes everything.
+        prefs.put("fortress.device.pub", VaultCrypto.b64encode(ByteArray(32) { 3 }))
+        assertTrue(DeviceKeys.resetPreXWing(store, prefs))
+        assertTrue(store.names().isEmpty())
+        assertTrue(prefs.keys().none { it.startsWith("fortress.") })
     }
 
     @Test

@@ -11,6 +11,7 @@ MAIL="$HERE/JoineryMailKitTests/Fixtures/vectors"
 mkdir -p "$MAIL/mime"
 pairs=(
   "$PH/tests/vault/fixtures/edge_vector.json|$KIT/edge_vector.json"
+  "$PH/tests/vault/fixtures/xwing_vector.json|$KIT/xwing_vector.json"
   "$PH/tests/vault/fixtures/device_handoff_vector.json|$KIT/device_handoff_vector.json"
   "$PH/plugins/mailbox/tests/fixtures/relay_pin_vector.json|$KIT/relay_pin_vector.json"
   "$PH/tests/vault/fixtures/device_handoff_vector.json|$MAIL/device_handoff_vector.json"

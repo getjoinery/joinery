@@ -2,7 +2,6 @@ package com.getjoinery.android.vault
 
 import com.google.crypto.tink.subtle.Ed25519Verify
 import com.google.crypto.tink.subtle.Hkdf
-import com.google.crypto.tink.subtle.X25519
 import okio.ByteString.Companion.decodeBase64
 import okio.ByteString.Companion.toByteString
 import java.io.ByteArrayInputStream
@@ -23,23 +22,26 @@ class VaultCryptoException(message: String, cause: Throwable? = null) : Exceptio
 /**
  * The Sealed Vault's client-custody primitives on Android — the same bytes as
  * `assets/js/vault-crypto.js` and `sync/jd-crypto/src/vault.rs`, pinned by
- * `tests/vault/fixtures/edge_vector.json`.
+ * `tests/vault/fixtures/xwing_vector.json`, `device_handoff_vector.json` and
+ * `edge_vector.json`.
  *
- *   sealed blob  : base64( ephPub[32] ‖ IV[12] ‖ AES-GCM ct )
- *                  AES key = HKDF-SHA256(X25519(eph, recipient), salt '',
- *                  info 'sealed-vault:dek' ‖ ephPub ‖ recipientPub), no AAD
+ *   sealed blob  : base64( ct[1120] ‖ IV[12] ‖ AES-GCM ct )
+ *                  X-Wing to the vault's 1216-byte public key; AES key =
+ *                  HKDF-SHA256(shared secret, salt '', info 'joinery-seal:v2:dek'),
+ *                  no AAD (specs/post_quantum_sealing.md R2)
  *   content blob : base64( IV[12] ‖ AES-GCM ct ‖ tag[16] ), AAD = caller's string
  *
- * A vault secret travels as PKCS#8 (48 bytes: the fixed X25519 prefix and the
- * 32-byte scalar), which is what the browser exports and seals to a device.
+ * A vault secret, and this phone's device secret, is a 32-byte X-Wing seed
+ * ([XWing]); its public key is worked out from it.
  *
- * Tink supplies X25519, HKDF and Ed25519 (java.security has no X25519 before
- * API 33); AES-GCM and HMAC are the platform's own. Everything here is pure —
- * no Android types — so it runs under JVM unit tests against the shared vectors.
+ * Bouncy Castle supplies ML-KEM and SHA-3, Tink X25519, HKDF and Ed25519
+ * (java.security has no X25519 before API 33); AES-GCM and HMAC are the
+ * platform's own. Everything here is pure — no Android types — so it runs
+ * under JVM unit tests against the shared vectors.
  */
 object VaultCrypto {
-    private val PKCS8_PREFIX = hex("302e020100300506032b656e04220420")
-    private const val SEAL_INFO = "sealed-vault:dek"
+    private const val SEAL_INFO = "joinery-seal:v2:"
+    const val SCOPE_DEK = "dek"
     private val random = SecureRandom()
 
     // MARK: Bytes
@@ -65,101 +67,70 @@ object VaultCrypto {
         bytes?.fill(0)
     }
 
-    // MARK: X25519 keys
+    // MARK: Keys
 
-    /** A fresh X25519 keypair: raw 32-byte scalar and raw 32-byte public key. */
+    /** A fresh keypair: the 32-byte seed and the 1216-byte public key. */
     class Keypair(val secret: ByteArray, val publicKey: ByteArray) {
         val publicKeyB64: String get() = b64encode(publicKey)
     }
 
     fun generateKeypair(): Keypair {
-        val secret = X25519.generatePrivateKey()
-        return Keypair(secret, X25519.publicFromPrivate(secret))
+        val seed = randomBytes(XWing.SEED_BYTES)
+        return Keypair(seed, XWing.publicKey(seed))
     }
 
-    fun publicFromScalar(scalar: ByteArray): ByteArray = X25519.publicFromPrivate(scalar)
+    /** The public key (std base64) of a seed — derived, never stored beside
+     *  it, so the two can never be out of step. */
+    fun publicKeyFromSecret(seed: ByteArray): String = b64encode(XWing.publicKey(seed))
 
-    /** PKCS#8 → the raw 32-byte scalar. Refuses anything but the X25519 shape. */
-    fun pkcs8Decode(der: ByteArray): ByteArray {
-        if (der.size != PKCS8_PREFIX.size + 32 ||
-            !der.copyOfRange(0, PKCS8_PREFIX.size).contentEquals(PKCS8_PREFIX)
-        ) {
-            throw VaultCryptoException("Not an X25519 PKCS#8 secret key.")
-        }
-        return der.copyOfRange(PKCS8_PREFIX.size, der.size)
-    }
-
-    fun pkcs8Encode(scalar: ByteArray): ByteArray {
-        require(scalar.size == 32) { "An X25519 scalar is 32 bytes." }
-        return PKCS8_PREFIX + scalar
-    }
-
-    /** The public key (std base64) of a PKCS#8 vault secret — derived, never
-     *  stored beside it, so the two can never be out of step. */
-    fun publicKeyFromSecret(pkcs8: ByteArray): String {
-        val scalar = pkcs8Decode(pkcs8)
-        try {
-            return b64encode(X25519.publicFromPrivate(scalar))
-        } finally {
-            wipe(scalar)
-        }
-    }
+    /** True for a public key from before X-Wing (32 bytes): nothing seals to it. */
+    fun isOldPublicKey(publicB64: String?): Boolean =
+        publicB64 != null && (publicB64.trim().decodeBase64()?.size ?: 0) == 32
 
     // MARK: Sealing
 
-    private fun sealKey(shared: ByteArray, ephPub: ByteArray, recipientPub: ByteArray): ByteArray {
-        val info = SEAL_INFO.toByteArray(Charsets.UTF_8) + ephPub + recipientPub
-        return Hkdf.computeHkdf("HMACSHA256", shared, ByteArray(0), info, 32)
+    private fun sealKey(sharedSecret: ByteArray, scope: String): ByteArray =
+        Hkdf.computeHkdf("HMACSHA256", sharedSecret, ByteArray(0), (SEAL_INFO + scope).toByteArray(Charsets.UTF_8), 32)
+
+    /** The seal with its randomness supplied (the vector tests), raw bytes. */
+    internal fun sealWith(data: ByteArray, recipient: ByteArray, scope: String, eseed: ByteArray?, iv: ByteArray): ByteArray {
+        val enc = if (eseed != null) XWing.encapsulateWith(recipient, eseed) else XWing.encapsulate(recipient)
+        val key = sealKey(enc.sharedSecret, scope)
+        try {
+            return enc.ciphertext + iv + gcm(Cipher.ENCRYPT_MODE, key, iv, null, data)
+        } finally {
+            wipe(enc.sharedSecret); wipe(key)
+        }
     }
 
-    /** Seal [data] to an X25519 public key (std base64). */
+    /** Seal [data] to a 1216-byte X-Wing public key (std base64). A 32-byte
+     *  key is from before X-Wing and is refused: its owner rotates it first. */
     fun sealToPublicKey(data: ByteArray, recipientPublicB64: String): String {
         val recipient = b64decode(recipientPublicB64)
-        if (recipient.size != 32) throw VaultCryptoException("A public key is 32 bytes.")
-        val eph = generateKeypair()
-        val shared = X25519.computeSharedSecret(eph.secret, recipient)
-        val key = sealKey(shared, eph.publicKey, recipient)
+        if (recipient.size == 32) {
+            throw VaultCryptoException("That vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it.")
+        }
+        if (recipient.size != XWing.PUBLIC_KEY_BYTES) throw VaultCryptoException("A public key is 1216 bytes.")
+        return b64encode(sealWith(data, recipient, SCOPE_DEK, null, randomBytes(12)))
+    }
+
+    /** Open raw seal bytes with a seed under [scope]. */
+    internal fun openRaw(raw: ByteArray, seed: ByteArray, scope: String): ByteArray {
+        val head = XWing.CIPHERTEXT_BYTES
+        if (raw.size < head + 12 + 16) throw VaultCryptoException("Sealed blob too short.")
+        val ss = XWing.decapsulate(seed, raw.copyOfRange(0, head))
+        val key = sealKey(ss, scope)
         try {
-            val iv = randomBytes(12)
-            val ct = gcm(Cipher.ENCRYPT_MODE, key, iv, null, data)
-            return b64encode(eph.publicKey + iv + ct)
+            return gcm(Cipher.DECRYPT_MODE, key, raw.copyOfRange(head, head + 12), null, raw.copyOfRange(head + 12, raw.size))
         } finally {
-            wipe(shared); wipe(key); wipe(eph.secret)
+            wipe(ss); wipe(key)
         }
     }
 
-    /** Open a sealed blob with the recipient's raw scalar. The recipient's
-     *  public key is derived from it (the KDF mixes it in). */
-    fun openWithScalar(sealedB64: String, scalar: ByteArray): ByteArray {
-        val raw = b64decode(sealedB64)
-        if (raw.size < 32 + 12 + 16) throw VaultCryptoException("Sealed blob too short.")
-        val ephPub = raw.copyOfRange(0, 32)
-        val iv = raw.copyOfRange(32, 44)
-        val ct = raw.copyOfRange(44, raw.size)
-        val recipientPub = X25519.publicFromPrivate(scalar)
-        val shared = try {
-            X25519.computeSharedSecret(scalar, ephPub)
-        } catch (e: Exception) {
-            throw VaultCryptoException("Sealed blob has a bad key.", e)
-        }
-        val key = sealKey(shared, ephPub, recipientPub)
-        try {
-            return gcm(Cipher.DECRYPT_MODE, key, iv, null, ct)
-        } finally {
-            wipe(shared); wipe(key)
-        }
-    }
-
-    /** Open a sealed blob with a PKCS#8 vault secret (the browser's
-     *  `openFromSecretKey`). */
-    fun openWithSecret(sealedB64: String, pkcs8: ByteArray): ByteArray {
-        val scalar = pkcs8Decode(pkcs8)
-        try {
-            return openWithScalar(sealedB64, scalar)
-        } finally {
-            wipe(scalar)
-        }
-    }
+    /** Open a sealed blob with the recipient's seed (the browser's
+     *  `openFromSecretKey`, scope 'dek'). */
+    fun openWithSecret(sealedB64: String, seed: ByteArray): ByteArray =
+        openRaw(b64decode(sealedB64), seed, SCOPE_DEK)
 
     // MARK: Content blobs
 
@@ -211,7 +182,7 @@ object VaultCrypto {
     }
 
     /** `HMAC(HKDF(secret, info), message)` — the browser's `macFromSecret`,
-     *  used for the relay pin. [secret] is the PKCS#8 bytes, as in the browser. */
+     *  used for the relay pin. [secret] is the vault's seed, as the keyring holds it. */
     fun macFromSecret(secret: ByteArray, info: String, message: ByteArray): ByteArray {
         val key = hkdf(secret, null, info)
         try {

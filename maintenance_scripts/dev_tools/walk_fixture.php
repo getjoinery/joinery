@@ -59,6 +59,8 @@
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.5 - approve-device hands over the X-Wing seed itself, as the browser does; deliver-relay
+ *   stands in a relay at SEALS_POST_QUANTUM (post_quantum_sealing WP5/WP6)
  * @version 1.4 - add-rule, retire-key, ai-on: the phone gates' rule, rotation and AI legs
  * @version 1.3 - --fortress (a known-key mail vault, no browser) and approve-device, for the phone apps' gates
  * @version 1.2 - deliver-relay: through the relay program and the pull's ingest step
@@ -158,7 +160,7 @@ function walk_deliver(string $address, int $n, string $tag): void {
 /**
  * Deliver through the relay program: seal with the binary built from the tree,
  * store with the pull's ingest step. The recipient entry is the exporter's
- * answer for a relay reporting the version that seals for browsers.
+ * answer for a relay reporting the version that seals to X-Wing keys.
  */
 function walk_deliver_relay(InboundEmailDomain $domain, string $address, int $n, string $tag, int $extra = 0): void {
 	// A relay-fronted Fortress mailbox seals at the relay only under the add-on.
@@ -176,7 +178,8 @@ function walk_deliver_relay(InboundEmailDomain $domain, string $address, int $n,
 		walk_fail('the fixture has no mailbox');
 	}
 	$relay = new MailboxRelay(NULL);
-	$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => RelayVersion::SEALS_FOR_BROWSERS)));
+	// A relay that seals to an X-Wing key: the map leaves a 1216-byte key out for an older one.
+	$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => RelayVersion::SEALS_POST_QUANTUM)));
 	$exporter = (new ReflectionClass('RelayMapExporter'))->newInstanceWithoutConstructor();
 	(new ReflectionProperty('RelayMapExporter', 'relay'))->setValue($exporter, $relay);
 	$target = (new ReflectionMethod('RelayMapExporter', 'clientSealTarget'))->invoke($exporter, $alias, $domain);
@@ -268,8 +271,8 @@ function walk_make_fortress(User $user, InboundEmailDomain $domain, string $purp
 
 /**
  * Approve a signed-in app's enrollment the way the link page does: the mail
- * secret (PKCS#8, as the browser's keyring hands it over) sealed to the
- * device key, then the approval as the fixture user.
+ * secret (the vault's 32-byte X-Wing seed, as the browser's keyring hands it
+ * over) sealed to the device key, then the approval as the fixture user.
  */
 function walk_approve_device(array $names, string $purpose, string $code): void {
 	$file = sprintf(APP_KEYFILE, $purpose);
@@ -282,8 +285,7 @@ function walk_approve_device(array $names, string $purpose, string $code): void 
 		walk_fail('no open enrollment of this fixture\'s app under that code');
 	}
 	$secret = SealedBox::b64url_decode($keys['mail_secret']);
-	$pkcs8 = hex2bin('302e020100300506032b656e04220420') . $secret;
-	$blob = (new SealedBox())->sealEdge($pkcs8, (string)$link->get('dlk_device_pubkey'));
+	$blob = (new SealedBox())->sealEdge($secret, (string)$link->get('dlk_device_pubkey'));
 	require_once(PathHelper::getIncludePath('logic/drive_device_link_approve_logic.php'));
 	$session = SessionControl::get_instance();
 	$session->set_api_user(intval($keys['user_id']));

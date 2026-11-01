@@ -7,11 +7,11 @@ import android.content.Context
  * What this phone holds for end-to-end encrypted content
  * (specs/fortress_mobile_apps.md § R2–R3, R9):
  *
- *  - **the device key**: an X25519 keypair generated once, at first
+ *  - **the device key**: an X-Wing keypair (a 32-byte seed) generated once, at first
  *    enrollment. Its public half is posted to the server so the browser can
  *    seal a vault's secret to it. Kept across sign-out and across a retired
  *    vault key, so the next enrollment approves the same public key;
- *  - **each vault secret** the phone was handed (`mail`), as PKCS#8, and the
+ *  - **each vault secret** the phone was handed (`mail`), its 32-byte seed, and the
  *    public key derived from it (plain, so the retired-key check needs no
  *    prompt);
  *  - **per-scope extras** the mail features keep beside the secret (the
@@ -80,7 +80,7 @@ class DeviceKeys(
 
     // MARK: The device key
 
-    /** The device's X25519 public key (std base64), or null before the first
+    /** The device's 1216-byte X-Wing public key (std base64), or null before the first
      *  enrollment made one. Public — readable without a prompt. */
     val devicePublicKey: String?
         get() = prefs.get(PREF_DEVICE_PUB)
@@ -144,24 +144,24 @@ class DeviceKeys(
      * is non-empty. Returns the derived public key.
      */
     fun acceptHandoff(scope: String, sealedB64: String, expectedPublicKeys: List<String> = emptyList()): String {
-        val scalar = held.get(DEVICE_SECRET) ?: store.read(DEVICE_SECRET)
+        val deviceSeed = held.get(DEVICE_SECRET) ?: store.read(DEVICE_SECRET)
             ?: throw IllegalStateException("This phone has no device key to open the handoff with.")
         try {
-            val pkcs8 = VaultCrypto.openWithScalar(sealedB64, scalar)
+            val seed = VaultCrypto.openWithSecret(sealedB64, deviceSeed)
             try {
-                val pub = VaultCrypto.publicKeyFromSecret(pkcs8)
+                val pub = VaultCrypto.publicKeyFromSecret(seed)
                 if (expectedPublicKeys.isNotEmpty() && pub !in expectedPublicKeys) {
                     throw VaultCryptoException("The key handed to this phone is not your vault's key.")
                 }
-                store.write(scopeSecret(scope), pkcs8)
+                store.write(scopeSecret(scope), seed)
                 prefs.put(prefScopePub(scope), pub)
-                held.hold(scopeSecret(scope), pkcs8)
+                held.hold(scopeSecret(scope), seed)
                 return pub
             } finally {
-                VaultCrypto.wipe(pkcs8)
+                VaultCrypto.wipe(seed)
             }
         } finally {
-            VaultCrypto.wipe(scalar)
+            VaultCrypto.wipe(deviceSeed)
         }
     }
 
@@ -266,7 +266,7 @@ class DeviceKeys(
     }
 
     companion object {
-        const val DEVICE_SECRET = "device.x25519"
+        const val DEVICE_SECRET = "device.secret"
         private const val PREF_DEVICE_PUB = "fortress.device.pub"
 
         fun scopeSecret(scope: String) = "scope.$scope"
@@ -284,11 +284,10 @@ class DeviceKeys(
                 val app = context.applicationContext
                 val prefs = PrefsKeyValueStore(app.getSharedPreferences("joinery.fortress", Context.MODE_PRIVATE))
                 resetV1(app, prefs)
-                val keys = DeviceKeys(
-                    store = WrappedSecretStore(java.io.File(app.noBackupFilesDir, "joinery_fortress_v2"),
-                        KeystoreMasterGuard("joinery.fortress.master.v2")),
-                    prefs = prefs,
-                )
+                val store = WrappedSecretStore(java.io.File(app.noBackupFilesDir, "joinery_fortress_v2"),
+                    KeystoreMasterGuard("joinery.fortress.master.v2"))
+                resetPreXWing(store, prefs)
+                val keys = DeviceKeys(store = store, prefs = prefs)
                 shared = keys
                 HeldKeysLifecycle.install(keys.held)
                 return keys
@@ -316,6 +315,21 @@ class DeviceKeys(
             if (!v1Dir.exists() && !hasV1Key) return false
             v1Dir.deleteRecursively()
             deleteV1Key()
+            prefs.keys().filter { it.startsWith("fortress.") }.forEach { prefs.put(it, null) }
+            return true
+        }
+
+        /**
+         * Keys from before X-Wing (a 32-byte device or vault public key) open
+         * nothing any vault now seals: an install that holds them starts over,
+         * as a v1 install does, and the next enrollment mints an X-Wing device
+         * key (specs/post_quantum_sealing.md WP6). True when there was one.
+         */
+        internal fun resetPreXWing(store: SecretStore, prefs: KeyValueStore): Boolean {
+            val old = prefs.keys().filter { it.startsWith("fortress.") && it.endsWith(".pub") }
+                .any { VaultCrypto.isOldPublicKey(prefs.get(it)) }
+            if (!old) return false
+            store.deleteAll()
             prefs.keys().filter { it.startsWith("fortress.") }.forEach { prefs.put(it, null) }
             return true
         }

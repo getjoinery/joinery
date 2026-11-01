@@ -79,6 +79,9 @@ dependencies {
     // the device and mail secrets (BiometricPrompt needs a FragmentActivity);
     // WorkManager for the new-mail check.
     api "com.google.crypto.tink:tink-android:1.13.0"
+    // ML-KEM-768, SHAKE256 and SHA3-256 for X-Wing (specs/post_quantum_sealing.md R6),
+    // the lightweight API only, so Android's own repackaged provider is untouched.
+    implementation "org.bouncycastle:bcprov-jdk18on:1.84"
     api "androidx.biometric:biometric:1.1.0"
     api "androidx.fragment:fragment-ktx:1.8.1"
     api "androidx.work:work-runtime-ktx:2.9.0"

@@ -27,7 +27,7 @@ targets:
   ScrollDaddy:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "26.0"
     sources: [Sources]
     dependencies:
       - package: JoineryKit
@@ -52,7 +52,7 @@ targets:
   ScrollDaddyTunnel:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "26.0"
     sources: [PacketTunnel]
     dependencies:
       - package: JoineryKit
@@ -68,7 +68,7 @@ targets:
   ScrollDaddyUITests:
     type: bundle.ui-testing
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "26.0"
     sources: [UITests]
     dependencies:
       - target: ScrollDaddy

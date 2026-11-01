@@ -25,6 +25,10 @@ extension XCUIApplication {
     /// the app process.
     func launchJoinery(env: [String: String] = [:]) {
         launchArguments += ["--reset-auth"]
+        // The site the gate made its fixture on (TEST_RUNNER_JOINERY_BASE_URL).
+        if let base = TestEnv.optional("JOINERY_BASE_URL"), !base.isEmpty {
+            launchEnvironment["JOINERY_BASE_URL"] = base
+        }
         for (key, value) in env { launchEnvironment[key] = value }
         launch()
     }
@@ -39,6 +43,63 @@ extension XCUIApplication {
         passwordField.tap()
         passwordField.typeText(password)
         buttons["login_submit"].tap()
+        dismissSavePasswordPrompt()
+    }
+
+    /// Close the system share sheet. Since iOS 26 it opens full height with an
+    /// ✕ that appears once it has finished presenting; a swipe down no longer
+    /// closes it. Wait for the ✕, tap it, and wait for the sheet to go; swipe
+    /// only when no ✕ ever shows.
+    func dismissShareSheet(_ share: XCUIElement, timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline && share.exists {
+            for label in ["Close", "xmark", "Done"] {
+                let b = buttons[label].firstMatch
+                if b.exists && b.isHittable {
+                    b.tap()
+                    if share.waitForNonExistence(timeout: 5) { return }
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        if share.exists {
+            share.swipeDown(velocity: .fast)
+            _ = share.waitForNonExistence(timeout: 5)
+        }
+    }
+
+    /// iOS 26+ offers "Save Password?" after a sign-in. The sheet covers the
+    /// screen and takes the next tap, so a test answers it "Not Now". It may
+    /// belong to the app or to SpringBoard; neither appearing is fine.
+    func dismissSavePasswordPrompt(timeout: TimeInterval = 20) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(timeout)
+        var seen = false
+        var clearChecks = 0
+        while Date() < deadline {
+            var shown = false
+            for owner in [springboard, self] {
+                let notNow = owner.buttons["Not Now"]
+                if notNow.exists {
+                    shown = true
+                    seen = true
+                    // A tap by position: the sheet's own element can refuse a
+                    // plain tap while it is still presenting.
+                    notNow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    break
+                }
+            }
+            if shown {
+                clearChecks = 0
+            } else {
+                clearChecks += 1
+                // Never seen within a few seconds: no sheet this time. Seen:
+                // gone on two checks in a row, so its dismissal has finished.
+                if (!seen && clearChecks >= 8) || (seen && clearChecks >= 2) { break }
+            }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        if seen { Thread.sleep(forTimeInterval: 1) }
     }
 
     /// Wait for any element to exist, with a clearer failure message.

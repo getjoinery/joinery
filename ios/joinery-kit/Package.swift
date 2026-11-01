@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.2
 // JoineryKit — the shared native core for Joinery platform apps.
 // JoineryMailKit — the native mail surface (specs/mobile_native_email.md),
 // a layered module any Joinery app adds for native email.
@@ -16,13 +16,14 @@
 // JoineryBillingKit — the native in-app purchase surface (StoreKit 2 purchase,
 // plan change, restore, server-authoritative status), registered as the
 // `billing` screen; same layering as mail.
-// Version: 0.8.0 (end-to-end Fortress mail on the phone: specs/fortress_mobile_apps.md)
+// Version: 0.9.0 (X-Wing seals, iOS 26 the floor: specs/post_quantum_sealing.md WP5;
+// tools 6.2 for .v26, the code kept in the Swift 5 language mode)
 import PackageDescription
 
 let package = Package(
     name: "JoineryKit",
     platforms: [
-        .iOS(.v16),
+        .iOS(.v26),
     ],
     products: [
         .library(name: "JoineryKit", targets: ["JoineryKit"]),
@@ -124,5 +125,6 @@ let package = Package(
                 .copy("Fixtures"),
             ]
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

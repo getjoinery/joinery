@@ -279,7 +279,7 @@ class FortressOpener(
 
     companion object {
         const val SCOPE = "mail"
-        const val EDGE_SEAL = "v1.edgeseal."
+        const val EDGE_SEAL = "v2.edgeseal."
         const val EDGE_FIELD = "v1.edge."
 
         const val PENDING_NOTE = "Waiting to be opened on one of your devices."
@@ -294,7 +294,7 @@ class FortressOpener(
         val INLINE_IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp")
         const val INLINE_MAX_BYTES = 5 * 1024 * 1024
 
-        /** The raw blob of a `v1.edgeseal.{scope}.` key; refuses another scope. */
+        /** The raw blob of a `v2.edgeseal.{scope}.` key; refuses another scope. */
         fun stripEdgeSeal(sealed: String, scope: String): String {
             if (!sealed.startsWith(EDGE_SEAL)) throw VaultCryptoException("This row carries no device-sealed key.")
             val rest = sealed.removePrefix(EDGE_SEAL)

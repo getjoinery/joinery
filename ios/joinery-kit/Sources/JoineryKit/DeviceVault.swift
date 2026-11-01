@@ -305,10 +305,13 @@ public final class DeviceVault: ObservableObject {
             pendingHandover = nil
             throw Failure.message("This handover cannot be opened on this phone. Start again.")
         }
-        // Kept as the keyring holds it — PKCS#8 — since the pin MAC and every
-        // other derivation from "the secret" take those bytes, not the scalar.
-        let secret = opened.count == 32 ? VaultCrypto.pkcs8(fromScalar: opened) : opened
-        let derived = try VaultCrypto.publicKey(fromSecret: secret)
+        // The vault's 32-byte seed, kept as the keyring holds it: the pin MAC
+        // and every other derivation from "the secret" take these bytes.
+        let secret = opened
+        guard let derived = try? VaultCrypto.publicKey(fromSecret: secret) else {
+            pendingHandover = nil
+            throw Failure.wrongKey
+        }
         // The key must be the vault's own (current or, mid-rotation, pending):
         // worked out from the secret, checked against what the server reports.
         guard p.setUp == true, p.vaultKeys.contains(derived) else { pendingHandover = nil; throw Failure.wrongKey }
@@ -338,6 +341,13 @@ public final class DeviceVault: ObservableObject {
     public func checkStillHeld() async -> Bool {
         // A new face or finger invalidated the stored key: it is gone.
         if keys.biometryChanged {
+            forget()
+            retired = true
+            return false
+        }
+        // A key from before X-Wing opens nothing a vault now seals: it goes,
+        // and the banner asks for the rotated key to be handed over.
+        if VaultCrypto.isOldPublicKey(storedPublicKey) {
             forget()
             retired = true
             return false

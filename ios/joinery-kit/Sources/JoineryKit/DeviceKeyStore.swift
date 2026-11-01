@@ -5,7 +5,7 @@ import CryptoKit
 
 /// Where a device's own keys live (specs/fortress_mobile_apps.md § R3, F5).
 ///
-/// The Secure Enclave holds P-256 keys only, so the X25519 device key and the
+/// The Secure Enclave holds P-256 keys only, so the X-Wing device key and the
 /// vault secrets it receives cannot live in the chip. They live in the Keychain
 /// as `WhenPasscodeSetThisDeviceOnly` items whose access control is
 /// `.biometryCurrentSet`: the item's class key is held by the Secure Enclave and
@@ -14,9 +14,10 @@ import CryptoKit
 /// is no weaker gate: with no biometry enrolled the key is not kept at all.
 ///
 /// What is stored:
-///   - the device X25519 key (secret gated; its public half ungated, since the
-///     enrollment call sends it and a public key protects nothing);
-///   - each client-custody scope's secret, as the PKCS#8 bytes the handoff
+///   - the device X-Wing key, a 32-byte seed (gated; its 1216-byte public half
+///     ungated, since the enrollment call sends it and a public key protects
+///     nothing);
+///   - each client-custody scope's secret, the 32-byte seed the handoff
 ///     delivers (`vault.{scope}`);
 ///   - small per-device secrets beside them (the AI endpoint's key).
 ///
@@ -87,6 +88,8 @@ public final class DeviceKeyStore: @unchecked Sendable {
 
     // MARK: Accounts
 
+    // The account names predate X-Wing; a key stored under them from before
+    // it is told apart by its public half's size (devicePublicKey()).
     static let devicePublic = "device.x25519.public"
     static let deviceSecret = "device.x25519.secret"
     static let domainState = "device.biometry.domainstate"
@@ -159,12 +162,15 @@ public final class DeviceKeyStore: @unchecked Sendable {
 
     // MARK: The device key
 
-    /// The device's public key, creating the pair on first use and again when
-    /// the old one's secret can no longer be opened (a new face or finger).
-    /// Kept across sign-out so a re-enrollment approves the same key; wiped on unlink.
+    /// The device's public key, creating the pair on first use, again when
+    /// the old one's secret can no longer be opened (a new face or finger), and
+    /// again when the stored pair is from before X-Wing (a 32-byte public key,
+    /// which nothing seals to). Kept across sign-out so a re-enrollment approves
+    /// the same key; wiped on unlink.
     public func devicePublicKey() throws -> String {
         if let existing = read(Self.devicePublic, context: nil, gated: false).data, !deviceSecretGone {
-            return String(decoding: existing, as: UTF8.self)
+            let pub = String(decoding: existing, as: UTF8.self)
+            if !VaultCrypto.isOldPublicKey(pub) { return pub }
         }
         // A pair is minted only with the enrollment's state in hand, so a later
         // change can always be told from an unknown (X2).
@@ -173,9 +179,10 @@ public final class DeviceKeyStore: @unchecked Sendable {
             throw Failure.unavailable("Face ID is not available right now. Make sure it is on for this app, then try again.")
         }
         forgetAllGated()
-        let pair = Curve25519.KeyAgreement.PrivateKey()
-        let pub = VaultCrypto.b64(pair.publicKey.rawRepresentation)
-        try write(pair.rawRepresentation, account: Self.deviceSecret, gated: true)
+        var pair = try VaultCrypto.newKeypair()
+        defer { pair.seed.wipe() }
+        let pub = pair.publicKey
+        try write(pair.seed, account: Self.deviceSecret, gated: true)
         try write(Data(pub.utf8), account: Self.devicePublic, gated: false)
         if let state {
             try write(state, account: Self.domainState, gated: false)
@@ -201,7 +208,7 @@ public final class DeviceKeyStore: @unchecked Sendable {
         read(Self.devicePublic, context: nil, gated: false).data != nil && !deviceSecretGone
     }
 
-    /// The device secret (raw scalar), behind the gate.
+    /// The device secret (a 32-byte X-Wing seed), behind the gate.
     public func deviceSecret(context: LAContext?) -> Read {
         read(Self.deviceSecret, context: context, gated: true)
     }
