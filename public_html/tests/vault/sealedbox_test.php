@@ -100,6 +100,18 @@ check($box->kekFromRecoveryCode($typo_l, $salt) === $kek_clean, 'lowercase l-for
 check($box->kekFromRecoveryCode($box->generateRecoveryCode(), $salt) !== $kek_clean, 'a different code derives a different KEK');
 check($box->kekFromRecoveryCode($code, $box->generateSalt()) !== $kek_clean, 'a different salt derives a different KEK');
 
+section('Recovery code shape');
+// Both generators' codes pass in any case and grouping; other text does not.
+check(SealedBox::isRecoveryCodeShaped($box->generateRecoveryCode()), 'a server-made code (groups of five)');
+check(SealedBox::isRecoveryCodeShaped('ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-23'), 'a browser-made code (groups of four)');
+check(SealedBox::isRecoveryCodeShaped('abcd efgh jkmn pqrs tvwx yz01 23'), 'lower case with spaces');
+check(SealedBox::isRecoveryCodeShaped('OILD-EFGH-JKMN-PQRS-TVWX-YZ01-23'), 'O, I and L, which read as 0, 1 and 1');
+check(!SealedBox::isRecoveryCodeShaped('UBCD-EFGH-JKMN-PQRS-TVWX-YZ01-23'), 'refused: U is not in the alphabet');
+check(!SealedBox::isRecoveryCodeShaped('ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2'), 'refused: 25 characters');
+check(!SealedBox::isRecoveryCodeShaped('ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-234'), 'refused: 27 characters');
+check(!SealedBox::isRecoveryCodeShaped('the quick brown fox jumps over the lazy dog'), 'refused: a sentence');
+check(!SealedBox::isRecoveryCodeShaped(''), 'refused: empty');
+
 section('Salt');
 check(strlen(SealedBox::b64url_decode($salt)) === 16, 'a generated salt is 16 bytes');
 check(!method_exists('SealedBox', 'kekFromPassphrase'), 'the server derives no passphrase KEK (the browser does)');

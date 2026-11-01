@@ -62,7 +62,14 @@ function security_logic(array $input): LogicResult{
 		// Recovery-code dry run (specs/recovery_readiness.md): checked, never
 		// consumed. Sensitive enough to demand a fresh second factor, and
 		// rate-limited so the check is no better a guessing oracle than the
-		// real recovery flow.
+		// real recovery flow. Text that is not shaped like a code is refused
+		// first: no step-up for a paste of the wrong thing.
+		if ($action === 'vault_code_check' && !SealedBox::isRecoveryCodeShaped((string)($input['code'] ?? ''))) {
+			$session->save_message(new DisplayMessage(SealedBox::RECOVERY_CODE_SHAPE_MESSAGE, 'Recovery code check',
+				'/\/profile\/security.*/', DisplayMessage::MESSAGE_WARNING,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE));
+			return LogicResult::redirect('/profile/security');
+		}
 		$stepup = $session->require_recent_second_factor('/profile/security');
 		if ($stepup !== null) {
 			return $stepup;

@@ -36,6 +36,7 @@
  * Needs assets/js/vault-crypto.js on the page before it (every emitter puts
  * it there).
  *
+ * @version 2.2.0 - a client check refuses text that is not shaped like a recovery code, before it runs
  * @version 2.1.0 - attachStepUp hands the data-stepup forms to JoineryPasskeys.confirmForms: it
  *                  matched action names this page's forms no longer all used, so a check lost its post
  * @version 2.0.0 - X-Wing (specs/post_quantum_sealing.md WP2): the keypair, the challenge and the key box
@@ -327,6 +328,11 @@ window.recoveryReadiness = (function () {
 			button.addEventListener('click', async function () {
 				var code = codeInput.value.trim();
 				if (!code) { say('Enter a recovery code first.', false); return; }
+				// A paste of the wrong thing is said so here, before anything is
+				// derived or recorded, and before a step-up is asked for.
+				var shape = window.VaultCrypto && window.VaultCrypto.recoveryCodeProblem
+					? window.VaultCrypto.recoveryCodeProblem(code) : null;
+				if (shape) { say(shape, false); return; }
 
 				var cfg = (window.rrClientConfigs || {})[scope];
 				if (!cfg || !window.VaultCrypto) {

@@ -29,6 +29,7 @@
  * server key. These are raw primitives like the rest; the `v1.edgeseal.` /
  * `v1.edge.` framing belongs to the row layer (VaultCrypto).
  *
+ * @version 2.1 - RECOVERY_CODE_PATTERN / isRecoveryCodeShaped(): what a typed recovery code looks like
  * @version 2.0 - v2 seals (specs/post_quantum_sealing.md R2): generateKeypair() mints an X-Wing
  *                seed and 1216-byte key; sealDek()/sealBinary()/sealEdge() write v2 only and refuse
  *                a 32-byte key; openers choose by frame, public key or the caller's version;
@@ -55,6 +56,14 @@ class SealedBox {
 
 	const RECOVERY_CODE_BYTES = 16;   // 128 bits, encoded to 26 Crockford-base32 chars
 	const CROCKFORD_ALPHABET  = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+	// What a typed recovery code looks like: 26 Crockford base32 characters,
+	// any case, in any grouping (codes are grouped in fives here, in fours by
+	// vault-keyring.js). I, L and O are allowed: they read as 1, 1 and 0. U is
+	// not in the alphabet. Pasted text of another shape is refused before
+	// any step-up or check runs. VaultCrypto.recoveryCodeProblem mirrors it.
+	const RECOVERY_CODE_PATTERN = '/^[\s-]*(?:[0-9A-TV-Za-tv-z][\s-]*){26}$/';
+	const RECOVERY_CODE_SHAPE_MESSAGE = 'That is not a recovery code. A code is 26 letters and numbers, in groups split by dashes. Check what you pasted.';
 
 	// Minimum length for a vault passphrase, enforced by EVERY enrollment path
 	// (setup, enroll, rotation resupply). The vault is exactly as strong as its
@@ -603,6 +612,11 @@ class SealedBox {
 	 * letters, so the mapping only converts a mistranscribed code into the
 	 * one that was actually printed.
 	 */
+	/** Whether $code has a recovery code's shape (RECOVERY_CODE_PATTERN). */
+	public static function isRecoveryCodeShaped(string $code): bool {
+		return preg_match(self::RECOVERY_CODE_PATTERN, $code) === 1;
+	}
+
 	public static function normalizeRecoveryCode(string $code): string {
 		$stripped = strtoupper(preg_replace('/[^0-9A-Za-z]/', '', $code));
 		return strtr($stripped, array('O' => '0', 'I' => '1', 'L' => '1'));

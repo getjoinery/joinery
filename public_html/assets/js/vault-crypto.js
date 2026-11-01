@@ -47,6 +47,7 @@
  * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
  * shared vectors in tests/vault/fixtures/xwing_vector.json and edge_vector.json.
  *
+ * @version 2.1 - recoveryCodeProblem(): a typed recovery code's shape, checked before anything runs
  * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): a vault key is a 32-byte seed and a
  *   1216-byte public key; seals are v2, a 32-byte key is refused; v1 opens only; scoped seals for the
  *   operator challenges (openChallenge, which opens only the four challenge labels, never 'dek') and
@@ -246,6 +247,15 @@ window.VaultCrypto = (function () {
 	}
 
 	// Crockford read-side leniency, as VaultUnlockerKdf::normalizeCode applies it.
+	// What a typed recovery code looks like (SealedBox::RECOVERY_CODE_PATTERN,
+	// which this mirrors): 26 Crockford base32 characters in any case and
+	// grouping. Answers the reason to show, or null when the shape is right.
+	var RECOVERY_CODE_SHAPE = /^[\s-]*(?:[0-9A-TV-Za-tv-z][\s-]*){26}$/;
+	function recoveryCodeProblem(code) {
+		return RECOVERY_CODE_SHAPE.test(String(code)) ? null
+			: 'That is not a recovery code. A code is 26 letters and numbers, in groups split by dashes. Check what you pasted.';
+	}
+
 	function normalizeCode(code) {
 		return String(code).toUpperCase()
 			.replace(/O/g, '0').replace(/[IL]/g, '1')
@@ -719,6 +729,7 @@ window.VaultCrypto = (function () {
 		b64urlEncode: b64urlEncode,
 		b64urlDecode: b64urlDecode,
 		normalizeCode: normalizeCode,
+		recoveryCodeProblem: recoveryCodeProblem,
 		hkdf: hkdf,
 		macFromSecret: macFromSecret,
 		publicKeyFromSecret: publicKeyFromSecret,

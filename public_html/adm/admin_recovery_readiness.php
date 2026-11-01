@@ -219,7 +219,9 @@ foreach ($items as $i => $item) {
 				$fw->begin_form();
 				echo '<input type="hidden" name="action" value="verify_item">';
 				echo '<input type="hidden" name="item_key" value="' . htmlspecialchars($item['key'], ENT_QUOTES) . '">';
-				$fw->textinput('code', 'Enter one recovery code (checked, not used up)', array('autocomplete' => 'off'));
+				$fw->textinput('code', 'Enter one recovery code (checked, not used up)', array('autocomplete' => 'off',
+					'validation' => array('required' => true, 'pattern' => SealedBox::RECOVERY_CODE_PATTERN,
+						'messages' => array('pattern' => SealedBox::RECOVERY_CODE_SHAPE_MESSAGE))));
 				$fw->submitbutton('btn_check_' . $i, 'Check code');
 				$fw->end_form();
 			}

@@ -1400,7 +1400,9 @@ $pac_writer->end_form();
                         $rr_fw->begin_form();
                         $rr_fw->hiddeninput('action', '', ['value' => 'vault_code_check']);
                         $rr_fw->hiddeninput('scope', '', ['value' => $rr_item['scope']]);
-                        $rr_fw->passwordinput('code', 'Enter one code (checked, not used up)', ['autocomplete' => 'off', 'required' => true]);
+                        $rr_fw->passwordinput('code', 'Enter one code (checked, not used up)', ['autocomplete' => 'off',
+                            'validation' => ['required' => true, 'pattern' => SealedBox::RECOVERY_CODE_PATTERN,
+                                'messages' => ['pattern' => SealedBox::RECOVERY_CODE_SHAPE_MESSAGE]]]);
                         $rr_fw->submitbutton('btn_rr_check_' . $rr_i, 'Check code', ['class' => 'btn btn-primary']);
                         $rr_fw->end_form();
                         ?>

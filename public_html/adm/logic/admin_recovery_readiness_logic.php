@@ -10,6 +10,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * rate-limited: a verify tool must never be a better guessing oracle than the
  * real recovery flow it mirrors.
  *
+ * @version 1.3.0 - a typed code not shaped like a recovery code is refused before the step-up
  * @version 1.2.0 - pq_old_vaults: the vaults still on old X25519 keys, by scope (post_quantum_sealing R7)
  * @version 1.1.0 - pq_reason: whether this server can seal with post-quantum keys
  *                 (specs/post_quantum_sealing.md R4)
@@ -34,6 +35,13 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 	$page_regex = '/\/admin\/admin_recovery_readiness/';
 
 	if (LibraryFunctions::isFormSubmission() && isset($input['action'])) {
+		// A typed recovery code that is not shaped like one is refused first:
+		// no step-up for a paste of the wrong thing.
+		if (isset($input['code']) && !SealedBox::isRecoveryCodeShaped((string)$input['code'])) {
+			$session->save_message(new DisplayMessage(SealedBox::RECOVERY_CODE_SHAPE_MESSAGE, 'Recovery code check',
+				$page_regex, DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect('/admin/admin_recovery_readiness');
+		}
 		$stepup = $session->require_recent_second_factor('/admin/admin_recovery_readiness');
 		if ($stepup) {
 			return $stepup;
