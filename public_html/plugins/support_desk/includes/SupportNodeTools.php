@@ -27,6 +27,7 @@
  * is off, in the node's words, and the node refuses them anyway); the
  * thread's live-read consent; and the per-thread daily allowance.
  *
+ * @version 0.2.0 - relay_status: the site's view of its mail relay (agent 1.101.0)
  * @version 0.1.0
  */
 class SupportNodeTools {
@@ -34,7 +35,7 @@ class SupportNodeTools {
 	/** The observe words a support turn may use. */
 	const WORDS = array(
 		'host_report', 'site_log', 'log_table_tail', 'unit_journal', 'file_head', 'disk_usage',
-		'schema_probe', 'page_probe', 'container_inventory', 'listening_sockets', 'spam_learning_status',
+		'schema_probe', 'page_probe', 'container_inventory', 'listening_sockets', 'spam_learning_status', 'relay_status',
 	);
 
 	/** How long one read waits for the node. */
@@ -90,6 +91,7 @@ class SupportNodeTools {
 			'container_inventory'  => "List the containers on the site's host: image, state, mounts and run settings.",
 			'listening_sockets'    => "List the addresses and ports the site's machine listens on, with the program holding each.",
 			'spam_learning_status' => "Report whether members' spam corrections reach the site's spam filter: counts only.",
+			'relay_status'         => "Report the site's view of its mail relay: the relay's version and last health answer, when the routing map was pushed, when mail was last picked up and how much is held, the transport key's kind, and how much mail arrived in the last hour and day. No addresses or keys.",
 		);
 		return ($d[$word] ?? 'Read one fact about the site.')
 			. ' Each call is one job on the site\'s own job list, visible to its owner.';
@@ -172,6 +174,8 @@ class SupportNodeTools {
 				return JobCommandBuilder::build_listening_sockets($node);
 			case 'spam_learning_status':
 				return JobCommandBuilder::build_spam_learning_status($node);
+			case 'relay_status':
+				return JobCommandBuilder::build_relay_status($node);
 		}
 		throw new Exception("'$word' is not a word the support desk reads.");
 	}

@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.153 - relay_status (agent 1.101.0): this site's view of its mail relay, no parameters
  * @version 1.152 - build_largest_files (agent 1.100.0): a site's biggest files by name, behind the log switch
  * @version 1.151 - data_root_recipient and install_node take an X-Wing recovery key (1216 bytes); a copy_take_key request carries a v2 box;
  *                 copy_export carries the copy's X-Wing key and its agent key's signature, and refuses without them (post_quantum_sealing WP3)
@@ -3587,6 +3588,24 @@ class JobCommandBuilder {
 
 	public static function build_spam_learning_status_primitive($node) {
 		return ['primitive' => 'spam_learning_status', 'params' => []];
+	}
+
+	/**
+	 * This site's view of its mail relay: versions, health, map push, pickup,
+	 * the transport key's kind, mail arriving (agent 1.101.0). PRIMITIVE ONLY,
+	 * and it takes nothing; a site word. The relay itself has no agent.
+	 */
+	public static function build_relay_status($node) {
+		if (!self::has_primitive($node, 'relay_status')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its mail relay. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['relay_status']));
+		}
+		return self::build_relay_status_primitive($node);
+	}
+
+	public static function build_relay_status_primitive($node) {
+		return ['primitive' => 'relay_status', 'params' => []];
 	}
 
 	/**

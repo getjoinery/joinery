@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.115 - relay_status (agent 1.101.0): sanitise_relay_status holds each field to its shape
  * @version 1.114 - an apply_update's target is the release this management node serves (DeploymentHelper::servedVersion);
  *                 a node whose source offered its own version is told the release is unpublished, not that it failed
  * @version 1.113 - process_largest_files: a site's biggest files, each a root, a path, a size and a day, capped
@@ -4013,6 +4014,94 @@ HTML;
 
 	private static function process_spam_learning_status($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_spam_learning_status(self::script_json($job))));
+		$job->save();
+	}
+
+	/**
+	 * A relay_status job's result (agent 1.101.0): this site's view of its mail
+	 * relay. Every field is held to its shape (a version, a time, a count, a
+	 * boolean or a short state word) and anything else the node sent is
+	 * dropped. Pure; the processor test drives it.
+	 */
+	public static function sanitise_relay_status($d) {
+		if (!is_array($d) || !in_array($d['mailbox'] ?? null, ['active', 'inactive'], true)) {
+			return ['read' => false];
+		}
+		if ($d['mailbox'] === 'inactive') {
+			return ['read' => true, 'mailbox' => 'inactive'];
+		}
+		$version = function ($v) { $v = (string)$v; return preg_match('/^\d+(\.\d+){0,3}$/', $v) ? $v : ''; };
+		$time = function ($v) { $v = (string)$v; return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $v) ? $v : ''; };
+		$word = function ($v) { $v = (string)$v; return preg_match('/^[a-z0-9_-]{1,40}$/', $v) ? $v : ''; };
+		$bool = function ($v) { return $v === true; };
+		$nbool = function ($v) { return is_bool($v) ? $v : null; };
+		$count = function ($v) { return self::host_report_count($v); };
+		$part = function ($v) { return is_array($v) ? $v : []; };
+		$inbound = $part($d['inbound'] ?? null);
+		$out = [
+			'read'           => true,
+			'mailbox'        => 'active',
+			'relays_enabled' => $count($d['relays_enabled'] ?? null),
+			'inbound'        => [
+				'last_hour'   => $count($inbound['last_hour'] ?? null),
+				'last_day'    => $count($inbound['last_day'] ?? null),
+				'newest_time' => $time($inbound['newest_time'] ?? ''),
+			],
+		];
+		if (($d['relay'] ?? null) !== 'active') {
+			return $out + ['relay' => 'none'];
+		}
+		$v = $part($d['version'] ?? null);
+		$h = $part($d['health'] ?? null);
+		$t = $part($d['last_test'] ?? null);
+		$m = $part($d['map'] ?? null);
+		$p = $part($d['pickup'] ?? null);
+		$k = $part($d['transport_key'] ?? null);
+		return $out + [
+			'relay'         => 'active',
+			'relay_id'      => $count($d['relay_id'] ?? null),
+			'route'         => in_array($d['route'] ?? null, ['hosted', 'cloud', 'hand'], true) ? $d['route'] : '',
+			'version'       => [
+				'running'            => $version($v['running'] ?? ''),
+				'shipped'            => $version($v['shipped'] ?? ''),
+				'standing'           => in_array($v['standing'] ?? null, ['current', 'behind', 'ahead', 'unknown'], true) ? $v['standing'] : '',
+				'seals_for_browsers' => $bool($v['seals_for_browsers'] ?? null),
+				'seals_post_quantum' => $bool($v['seals_post_quantum'] ?? null),
+			],
+			'health'        => [
+				'state'        => $word($h['state'] ?? ''),
+				'reason'       => $word($h['reason'] ?? ''),
+				'failure'      => $word($h['failure'] ?? ''),
+				'queue'        => $count($h['queue'] ?? null),
+				'sole_tenant'  => $nbool($h['sole_tenant'] ?? null),
+				'checked_time' => $time($h['checked_time'] ?? ''),
+			],
+			'last_test'     => [
+				'tested_time' => $time($t['tested_time'] ?? ''),
+				'probe_state' => $word($t['probe_state'] ?? ''),
+				'probe_time'  => $time($t['probe_time'] ?? ''),
+			],
+			'map'           => [
+				'version'        => $count($m['version'] ?? null),
+				'last_push_time' => $time($m['last_push_time'] ?? ''),
+			],
+			'pickup'        => [
+				'last_pull_time'    => $time($p['last_pull_time'] ?? ''),
+				'last_drained_time' => $time($p['last_drained_time'] ?? ''),
+				'held'              => $count($p['held'] ?? null),
+				'alarm_time'        => $time($p['alarm_time'] ?? ''),
+			],
+			'transport_key' => [
+				'kind'          => in_array($k['kind'] ?? null, ['xwing', 'x25519', 'none'], true) ? $k['kind'] : '',
+				'generation'    => $count($k['generation'] ?? null),
+				'retired_kept'  => $bool($k['retired_kept'] ?? null),
+				'replaced_time' => $time($k['replaced_time'] ?? ''),
+			],
+		];
+	}
+
+	private static function process_relay_status($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_relay_status(self::script_json($job))));
 		$job->save();
 	}
 

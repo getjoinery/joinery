@@ -15,6 +15,7 @@
  * None of them writes to a site. escalate and file_bug_report write on this
  * node only (the thread's state; a bug_reports row), which is what they are for.
  *
+ * @version 0.2.0 - relay_status's progress line
  * @version 0.1.0
  */
 class SupportTools {
@@ -68,6 +69,7 @@ class SupportTools {
 			case 'container_inventory': return "Listing your site's containers…";
 			case 'listening_sockets':   return "Listing what your site listens on…";
 			case 'spam_learning_status': return "Reading your site's spam learning…";
+			case 'relay_status':        return "Reading your site's mail relay…";
 		}
 		return $name !== '' ? 'Working…' : '';
 	}

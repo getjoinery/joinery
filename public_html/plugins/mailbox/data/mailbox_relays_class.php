@@ -208,7 +208,7 @@ class MailboxRelay extends SystemBase {
 	 *
 	 * An older relay rejects a 1216-byte transport key, which would stop every
 	 * message it fronts, so the old key stays until the relay reports 3.16
-	 * (the site's upgrade refuses before that; this is the second guard). The
+	 * (RelayMapExporter::relayTakes holds back the mailbox keys the same way). The
 	 * replaced secret moves to mrl_transport_secret_retired_sealed: mail already
 	 * in the spool was sealed to it.
 	 */

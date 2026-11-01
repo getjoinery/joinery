@@ -13,6 +13,7 @@
  * Text that came from another machine (a node's notes, its error messages)
  * reaches the model inside the thread's envelope.
  *
+ * @version 0.2.0 - SupportRelayStatusTool
  * @version 0.1.0
  */
 
@@ -382,3 +383,4 @@ class SupportPageProbeTool extends SupportNodeWordTool implements RecipeToolInte
 class SupportContainerInventoryTool extends SupportNodeWordTool implements RecipeToolInterface { const WORD = 'container_inventory'; }
 class SupportListeningSocketsTool extends SupportNodeWordTool implements RecipeToolInterface { const WORD = 'listening_sockets'; }
 class SupportSpamLearningStatusTool extends SupportNodeWordTool implements RecipeToolInterface { const WORD = 'spam_learning_status'; }
+class SupportRelayStatusTool extends SupportNodeWordTool implements RecipeToolInterface { const WORD = 'relay_status'; }

@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.31 - relay_status results: this site's view of its mail relay
  * @version 1.30 - largest_files results: the site's biggest files, each with its folder, size and day
  * @version 1.29 - site_converger results: whether the site's converger is running, which part says why, then its log
  * @version 1.28 - disable_root_login results (agent 1.95.0): what sshd reads before and after, the reload, Match blocks
@@ -891,6 +892,50 @@ if ($result) {
 				. (!empty($k['newest_token']) ? '; it last learned something on ' . htmlspecialchars(LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), $k['newest_token']), 'UTC', $session->get_timezone(), 'M j, Y g:i A')) : '')
 				. '.</div>';
 		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'relay_status' && !empty($result_data['read'])) {
+		// This site's view of its mail relay (agent 1.101.0): no addresses, no keys.
+		$rs_when = function ($t) use ($session) {
+			return ($t === '' || $t === null) ? 'never'
+				: htmlspecialchars(LibraryFunctions::convert_time((string)$t, 'UTC', $session->get_timezone(), 'M j, g:i A'));
+		};
+		$rs_n = function ($v) { return is_int($v) ? number_format($v) : 'unknown'; };
+		echo '<div class="card mb-3"><div class="card-header"><strong>Mail relay</strong></div><div class="card-body">';
+		if (($result_data['mailbox'] ?? '') !== 'active') {
+			echo '<div class="text-muted">The Mailbox plugin is not active on this site.</div>';
+		} elseif (($result_data['relay'] ?? '') !== 'active') {
+			echo '<div>This site has no enabled mail relay; mail is received here directly.</div>';
+		} else {
+			$v = $result_data['version']; $h = $result_data['health']; $t = $result_data['last_test'];
+			$m = $result_data['map']; $p = $result_data['pickup']; $k = $result_data['transport_key'];
+			$standing = array('current' => 'what this site ships', 'behind' => 'older than this site ships: Update it from the site\'s Relay section',
+				'ahead' => 'newer than this site ships', 'unknown' => 'not known');
+			echo '<div><strong>Relay version:</strong> ' . htmlspecialchars($v['running'] !== '' ? $v['running'] : 'not reported')
+				. ' (' . htmlspecialchars($standing[$v['standing']] ?? 'not known') . ($v['shipped'] !== '' ? ', ' . htmlspecialchars($v['shipped']) : '') . ')'
+				. '; seals to post-quantum keys: <strong>' . ($v['seals_post_quantum'] ? 'yes' : 'no') . '</strong>'
+				. ' (' . htmlspecialchars((string)$result_data['route']) . ' relay)</div>';
+			echo '<div><strong>Last health answer:</strong> ' . htmlspecialchars($h['state'] !== '' ? $h['state'] : 'none')
+				. ($h['reason'] !== '' ? ' (' . htmlspecialchars($h['reason']) . ')' : '')
+				. ($h['failure'] !== '' ? ', last failure ' . htmlspecialchars($h['failure']) : '')
+				. ', ' . $rs_when($h['checked_time'])
+				. (is_int($h['queue']) ? '; ' . $rs_n($h['queue']) . ' in the relay\'s mail queue' : '') . '</div>';
+			$probe = array('passed' => 'came back clean', 'failed' => 'came back and FAILED', 'none' => 'none delivered recently');
+			echo '<div><strong>Last Test Relay Health:</strong> ' . $rs_when($t['tested_time'])
+				. '; leak test message ' . htmlspecialchars($probe[$t['probe_state']] ?? 'not known')
+				. ($t['probe_time'] !== '' ? ' (' . $rs_when($t['probe_time']) . ')' : '') . '</div>';
+			echo '<div class="mt-2"><strong>Map:</strong> push ' . $rs_n($m['version']) . ', ' . $rs_when($m['last_push_time']) . '</div>';
+			echo '<div><strong>Pickup:</strong> last pull ' . $rs_when($p['last_pull_time']) . '; last pull that emptied the relay ' . $rs_when($p['last_drained_time'])
+				. '; held on the relay: ' . $rs_n($p['held'])
+				. ($p['alarm_time'] !== '' ? '; <span class="text-danger">pickup stopped, announced ' . $rs_when($p['alarm_time']) . '</span>' : '') . '</div>';
+			$kinds = array('xwing' => 'post-quantum (X-Wing)', 'x25519' => 'old (X25519)', 'none' => 'none yet');
+			echo '<div><strong>Transport key:</strong> ' . htmlspecialchars($kinds[$k['kind']] ?? 'not known') . ', generation ' . $rs_n($k['generation'])
+				. ($k['replaced_time'] !== '' ? ', replaced ' . $rs_when($k['replaced_time']) : '')
+				. ($k['retired_kept'] ? '; the old secret is still kept for mail sealed before the switch' : '') . '</div>';
+		}
+		$in = $result_data['inbound'] ?? array();
+		echo '<div class="mt-2"><strong>Mail stored:</strong> ' . $rs_n($in['last_hour'] ?? null) . ' in the last hour, ' . $rs_n($in['last_day'] ?? null)
+			. ' in the last day; newest ' . $rs_when($in['newest_time'] ?? '') . '</div>';
 		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'reboot_machine' && !empty($result_data['read'])) {

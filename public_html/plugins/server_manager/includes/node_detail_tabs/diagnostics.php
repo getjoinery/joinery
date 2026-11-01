@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.4 - The machine: Mail relay (relay_status, agent 1.101.0), where the Mailbox plugin is on
  * @version 1.3 - The machine: Biggest files (largest_files, agent 1.100.0), offered where the owner allows log access
  * @version 1.2 - Logs: Read site converger, for one of the machine's site containers (site_converger, agent 1.98.0)
  * @version 1.1 - Logs: the host converger's journal (unit_journal joinery-host-converger, agent 1.97.0), the
@@ -28,7 +29,7 @@
 <?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionLargestFiles' => 'largest_files', 'nodeActionListeningSockets' => 'listening_sockets',
-	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status',
+	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRelayStatus' => 'relay_status',
 	'nodeActionSiteStateReport' => 'site_state_report', 'nodeActionNetHealth' => 'net_health',
 	'nodeActionWebWorkers' => 'web_workers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -108,6 +109,9 @@ foreach ((is_array($diag_status['plugins'] ?? null) ? $diag_status['plugins'] : 
 }
 if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'spam_learning_status')) {
 	$machine_qs[] = array('nodeActionSpamLearning', 'Spam learning', 'Whether what members mark as spam or not spam reaches the spam filter: counts only.');
+}
+if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'relay_status')) {
+	$machine_qs[] = array('nodeActionRelayStatus', 'Mail relay', 'This site\'s view of its mail relay: the version and health it last reported, the map push, pickup and held mail, the transport key\'s kind, and mail arriving. No addresses.');
 }
 if ($machine_qs) {
 	$page->begin_box(['title' => 'The machine']);
