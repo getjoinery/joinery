@@ -55,7 +55,7 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 // How mail reaches this server is a deployment fact, not a question every page
 // has to have answered first: an undecided deployment receives directly and
-// works. The choice lives in the Setup tab's Advanced section
+// works. The choice lives in the Server tab's Relay section
 // (specs/mailbox_relay_surface_simplification.md).
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 

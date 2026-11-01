@@ -23,6 +23,7 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.8 - node notes name the mailbox Server tab for Update and Delete
  * @version 2.7 - uptimeCheckFor() clears the port with 0, not null: the column is NOT NULL, so null
  *                failed the node save and left an updated relay on the port 25 check
  * @version 2.6 - a relay that answers GET /health (3.7) is watched there over HTTPS, not by dialling
@@ -675,7 +676,7 @@ class RelayCloudProvisioner {
 			'name'        => 'Relay ',
 			'slug'        => 'relay-',
 			'notes'       => 'Disposable relay (specs/relay_without_a_shell.md): no shell, no agent. '
-				. 'Its only acts are Update and Delete on the mailbox Setup tab.',
+				. 'Its only acts are Update and Delete on the mailbox Server tab.',
 		));
 	}
 

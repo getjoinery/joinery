@@ -307,7 +307,7 @@ function pa_render_picker(bool $relay_offered, bool $send): string {
 	$relay = array('checked' => false, 'disabled' => !$relay_offered);
 	if (!$relay_offered) {
 		$relay['note'] = 'It needs a relay in front of this server first.';
-		$relay['link'] = array('/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section', 'Set up a relay');
+		$relay['link'] = array('/plugins/mailbox/admin/admin_mailbox_server#relay-section', 'Set up a relay');
 	}
 	ob_start();
 	ProtectionLevelPicker::render($fw, 'ied_security_level', array(
@@ -337,7 +337,7 @@ check(strpos($html, 'role="switch" name="ied_security_level_relay_seals_to_owner
 		&& strpos($html, 'role="switch" name="ied_security_level_send_lock"') !== false,
 	'both add-ons are switches');
 check(preg_match('/name="ied_security_level_relay_seals_to_owner"[^>]*disabled/', $html) === 1
-		&& strpos($html, 'href="/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section"') !== false,
+		&& strpos($html, 'href="/plugins/mailbox/admin/admin_mailbox_server#relay-section"') !== false,
 	'with no relay, Seal at the relay is a disabled switch with a link to set one up');
 check(strpos($html, 'Your emails are encrypted in the database.') !== false, 'the Private card carries the mail copy');
 check(strpos($html, '"standard":{"hide":["ied_security_level_addons","ied_ai_processing_enabled"]') !== false

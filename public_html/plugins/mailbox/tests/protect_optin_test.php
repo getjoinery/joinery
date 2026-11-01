@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.2 - the sending-identity panel sits at the foot of Setup; no Advanced disclosure
  * @version 1.1 - the send-protection row and the finishing step follow the
  *   sending-lock add-on (asked for, then finished), not a level
  */
@@ -539,22 +540,28 @@ class ProtectOptinTest {
 				}
 			}
 		}
-		check($callers === array('admin_mailbox_setup_logic.php'),
-			'the only caller is the Setup tab action a human presses',
+		check($callers === array('setup_fix_actions.php'),
+			'the only caller is the one-click fix a human presses',
 			'callers: ' . implode(', ', $callers));
 
 		// And that caller gates it on the two facts that make it safe.
-		$logic = (string)file_get_contents(PathHelper::getIncludePath(
-			'plugins/mailbox/logic/admin_mailbox_setup_logic.php'));
-		check(strpos($logic, '!$model->is_protected_identity()') !== false,
+		$fixes = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/setup_fix_actions.php'));
+		check(strpos($fixes, '!$model->is_protected_identity()') !== false,
 			'the action refuses while send protection is off');
-		check(strpos($logic, 'protectedDomainChecks($model)') !== false,
+		check(strpos($fixes, 'protectedDomainChecks($model)') !== false,
 			'the action refuses until the protected DNS shape verifies');
-		// The page merges the query string into its input: a link carrying
-		// action=destroy_local_key must reach no action handler.
-		check(strpos($logic, '$posted = LibraryFunctions::isFormSubmission() ? $input : array();') !== false
-				&& strpos($logic, "\$input['action']") === false,
-			'every Setup tab action runs only on a POST');
+		// Both pages merge the query string into their input: a link carrying
+		// action=destroy_local_key must reach no action handler. Each hands the
+		// fix only the POST.
+		foreach (array('setup', 'server') as $tab) {
+			$logic = (string)file_get_contents(PathHelper::getIncludePath(
+				'plugins/mailbox/logic/admin_mailbox_' . $tab . '_logic.php'));
+			check(strpos($logic, '$posted = LibraryFunctions::isFormSubmission() ? $input : array();') !== false
+					&& strpos($logic, 'mailbox_setup_fix_action($posted,') !== false
+					&& strpos($logic, "\$input['action']") === false,
+				'every ' . ucfirst($tab) . ' tab action runs only on a POST');
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -568,7 +575,7 @@ class ProtectOptinTest {
 			'plugins/mailbox/admin/admin_mailbox_setup.php'));
 
 		// SCOPED BY STRUCTURE, NOT BY POSITION IN THE FILE. An earlier version of
-		// this split the source at the Advanced heading and asserted the ceremony
+		// this split the source at a section heading and asserted the ceremony
 		// markup fell below it — which broke the moment the panel was made to
 		// render at the top of the page while it is open, even though the rule it
 		// was protecting had not changed at all.
@@ -631,16 +638,16 @@ class ProtectOptinTest {
 			'the panel is written once, not duplicated per position');
 
 		// WHATEVER IS BEING WORKED ON GOES TO THE TOP. The panel renders in one of
-		// two places and never both: at the top while the ceremony is open, under
-		// Advanced otherwise. A reload that dumps the operator at the top of a long
+		// two places and never both: at the top while the ceremony is open, at the
+		// foot of the domain's setup otherwise. A reload that dumps the operator at the top of a long
 		// page, with the thing they just pressed still buried, is the jank this
 		// exists to remove.
 		check(substr_count($view, '$render_sending_identity();') === 2,
 			'the panel is called from exactly two places');
 		check(strpos($view, "if (\$setup_open) {\n\t\$render_sending_identity();") !== false,
 			'rendered at the top of the page while the ceremony is open');
-		check(strpos($view, "if (!\$setup_open) {\n\t\t\$render_sending_identity();") !== false,
-			'and under Advanced when it is not');
+		check(strpos($view, "if (!\$setup_open) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
+			'and at the foot of the domain\'s setup when it is not');
 
 		// ONE PUBLISH BOX AT A TIME. The ceremony renders its own, for the
 		// signing-stage records; the page's own renders the shape for whatever
@@ -655,11 +662,11 @@ class ProtectOptinTest {
 		check(strpos($box, 'string $title = \'\'') !== false,
 			'the renderer takes a heading override so two boxes can never read alike');
 
-		// Opening the ceremony must not also expand Advanced — that would bury the
-		// task under every server-wide box the operator did not ask about.
+		// Server-wide work is the Server tab: nothing on Setup hides behind a
+		// disclosure that has to be opened first.
 		check(strpos($view, "'protect_setup=1';") !== false
-			&& strpos($view, "'advanced=1&protect_setup=1';") === false,
-			'opening the ceremony does not turn Advanced on as well');
+			&& strpos($view, 'advanced=1') === false,
+			'opening the ceremony is a link of its own, and Setup has no Advanced disclosure');
 	}
 
 	private function assertNoReceiveModeGate() {

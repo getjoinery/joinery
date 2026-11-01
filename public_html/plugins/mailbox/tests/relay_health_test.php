@@ -187,7 +187,7 @@ class RelayHealthTest {
 		$this->assertPingShape();
 
 		// --- Where the finding lands on the page -------------------------------
-		section('a broken scanner comes up front; a working one stays in Advanced');
+		section('a broken scanner comes up front; a working one stays on the Server tab');
 		$this->assertCardPromotion();
 
 		// --- The regression guard ---------------------------------------------
@@ -275,7 +275,7 @@ class RelayHealthTest {
 	 * A scanner fault is a Receiving card; a healthy scanner is not.
 	 *
 	 * The row is produced either way — this is only about whether it waits behind
-	 * the Advanced disclosure, which nobody opens until mail already looks wrong.
+	 * the Server tab, which nobody opens until mail already looks wrong.
 	 * That is the same discovery problem the notification exists to solve, so the
 	 * two must not disagree about what counts as news.
 	 */
@@ -291,12 +291,12 @@ class RelayHealthTest {
 
 		foreach (array(InboundEmailSetupCheck::WARN, InboundEmailSetupCheck::FAIL) as $status) {
 			check(_setup_is_receiving_row($row($status), 'example.com', true) === true,
-				'a ' . $status . ' scanner is a Receiving card, not an Advanced row');
+				'a ' . $status . ' scanner is a Receiving card, not a Server-tab row');
 		}
 		foreach (array(InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO,
 			InboundEmailSetupCheck::UNKNOWN) as $status) {
 			check(_setup_is_receiving_row($row($status), 'example.com', true) === false,
-				'a ' . $status . ' scanner stays in Advanced — a working component is not a checklist item');
+				'a ' . $status . ' scanner stays on the Server tab — a working component is not a checklist item');
 		}
 
 		// ...but only for a mailbox whose domain needs a relay. A relay is only

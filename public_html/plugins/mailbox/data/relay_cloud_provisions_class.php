@@ -16,7 +16,7 @@
  *               (specs/mailbox_relay_upgrade_without_server_manager.md)
  *
  * Status flow:
- *   awaiting_grant - run created from the Setup tab form; waiting for the
+ *   awaiting_grant - run created from the Server tab form; waiting for the
  *                    just-in-time credential step (a short-lived provider
  *                    token the customer mints for this one act)
  *   ready          - credential received (token sealed on the row); instance

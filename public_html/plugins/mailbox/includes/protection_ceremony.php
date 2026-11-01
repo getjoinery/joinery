@@ -30,6 +30,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.10 - the no-relay step points at the Relay section on the Server tab
  * @version 2.9 - the raise and lowering receipts name the contact rows still to converge
  *   (MailboxContactConvergence::backlogCount), which move in each adding user's window
  * @version 2.8 - the three receipts share mailbox_receipt_open/_row/_dot
@@ -344,7 +345,7 @@ function mailbox_protection_addon_rows(array $facts, array $addons): array {
 			: array('id' => 'relay_fronted', 'severity' => 'required', 'status' => 'fail',
 				'label' => 'Relay in front',
 				'summary' => 'Sealing at the relay needs a relay in front of this server. Set one up in the '
-					. 'Setup tab\'s Relay section first.',
+					. 'Relay section on the Server tab first.',
 				'actions' => array());
 	}
 	if ($send) {

@@ -6,18 +6,17 @@
  * Pick a registered mailbox; the page checks its setup, grouped into Receiving
  * (always) plus Forwarding (when the mailbox forwards) or Sending (relay and
  * DKIM signing, when it stores only — composed replies still leave the
- * server). Server-wide
- * diagnostics — the inbound provider, this server's mail hostname/IP, and the
- * full Postfix/relay health run — live behind the Advanced disclosure so they
- * don't clutter the per-mailbox view.
+ * server). Everything that belongs to the whole server — the relay, this
+ * server's mail hostname/IP, the full health run — is on the Server tab
+ * (admin_mailbox_server.php), so nothing here waits on a picker it does not need.
  *
  * The picker also lists any domain that has no mailbox yet. Its setup is
  * domain-level, so that state renders the guided steps, the publish box and the
  * domain-level checks, and skips the per-address ones.
  *
  * This tab is also the whole surface for outbound send protection — there is no
- * separate ceremony page — but ALL of it lives under Advanced, in the Sending
- * identity box: the offer, the cost, the publish step, the switch, and the
+ * separate ceremony page — ALL of it lives in the Sending identity box, at the
+ * foot of the focused domain's setup: the offer, the cost, the publish step, the switch, and the
  * lifecycle afterwards. Send protection is the "Only send while I'm signed in"
  * add-on, switched on in the domain editor: a Private domain that never asked
  * for it is finished as it is, and this box appears only once it has been asked
@@ -27,6 +26,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.19 - no Advanced section: server-wide work is the Server tab; the Sending identity
+ *                box and a finished domain's publish box sit at the foot of the domain's setup
  * @version 3.18 - a site container has no mail identity box (it has no mail server)
  * @version 3.17 - the full health run groups Domain DNS by domain; a domain with nothing to
  *                act on folds to one line
@@ -72,6 +73,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/setup_check_render.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_setup_logic.php'));
 
 $page_vars = process_logic(admin_mailbox_setup_logic(array_merge($_GET, $_POST, $params ?? [])));
@@ -89,134 +91,20 @@ $page->admin_header(array(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Setup');
 
-// How mail reaches this server is a deployment fact, not a question every page
-// has to have answered first: an undecided deployment receives directly and
-// works. The choice lives in the Setup tab's Advanced section
-// (specs/mailbox_relay_surface_simplification.md).
+// How mail reaches this server — direct or through a relay — is a deployment
+// fact that lives on the Server tab. An undecided deployment receives directly
+// and works. The relay's STATE still reads as a card in Receiving, so the
+// common path sees the relay where it matters.
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-
-// The relay's setup and lifecycle machinery lives in Advanced, with the rest of
-// the server-wide plumbing. Its STATE reads as a card in Receiving and one in
-// Sending, so the common path sees the relay where the relay matters instead of
-// a provisioning panel above every page.
 
 // The per-check "Details & how to fix" disclosure reads as a link, not a field.
 
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
 
-// --- Shared check-row renderers (used by scoped sections and Advanced) ---
-$status_badge = function ($status) {
-	switch ($status) {
-		case InboundEmailSetupCheck::PASS:    return '<span class="badge bg-success">PASS</span>';
-		case InboundEmailSetupCheck::FAIL:    return '<span class="badge bg-danger">FAIL</span>';
-		case InboundEmailSetupCheck::WARN:    return '<span class="badge bg-warning text-dark">WARN</span>';
-		// badge-info / badge-secondary, not bg-*: the admin theme colours badges
-		// through .badge-{variant} and defines no .bg-info or .bg-secondary, so
-		// those two rendered as unstyled text.
-		case InboundEmailSetupCheck::INFO:    return '<span class="badge badge-info">INFO</span>';
-		// Grey, because nothing is wrong: a capability nobody turned on.
-		case InboundEmailSetupCheck::OPTIONAL: return '<span class="badge badge-secondary">OPTIONAL</span>';
-		default:                              return '<span class="badge badge-secondary">UNKNOWN</span>';
-	}
-};
-
-$render_fix = function ($fix) use ($address) {
-	if (!$fix) { return; }
-	if (!empty($fix['text'])) {
-		echo '<p class="mb-2">' . htmlspecialchars($fix['text']) . '</p>';
-	}
-	if (!empty($fix['command'])) {
-		echo '<pre class="bg-light p-2 mb-2"><code>' . htmlspecialchars($fix['command']) . '</code></pre>';
-	}
-	// One record or several — the same table either way. Columns appear when
-	// any row carries the field: MX brings Priority; SRV brings Priority,
-	// Weight and Port, with its target in the Value column — one input per
-	// field the DNS provider's form asks for, never a crammed value string.
-	$fix_records = !empty($fix['dns_records']) ? $fix['dns_records']
-		: (!empty($fix['dns_record']) ? array($fix['dns_record']) : array());
-	if (!empty($fix_records)) {
-		$numeric_columns = array('priority' => 'Priority', 'weight' => 'Weight', 'port' => 'Port');
-		$present = array();
-		foreach ($numeric_columns as $key => $label) {
-			foreach ($fix_records as $rec) {
-				if (array_key_exists($key, $rec)) { $present[$key] = $label; break; }
-			}
-		}
-		echo '<table class="table table-sm table-bordered mb-2 iem-table-760">';
-		echo '<thead><tr><th>Type</th><th>Name</th>';
-		foreach ($present as $label) {
-			echo '<th>' . $label . '</th>';
-		}
-		echo '<th>Value</th></tr></thead><tbody>';
-		foreach ($fix_records as $rec) {
-			echo '<tr>';
-			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
-			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-			foreach (array_keys($present) as $key) {
-				echo '<td>' . (array_key_exists($key, $rec)
-					? '<code>' . htmlspecialchars((string)$rec[$key]) . '</code>' : '') . '</td>';
-			}
-			echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
-			echo '</tr>';
-		}
-		echo '</tbody></table>';
-	}
-	if (!empty($fix['link'])) {
-		echo '<p class="mb-2"><a class="btn btn-sm btn-outline-secondary" href="'
-			. htmlspecialchars($fix['link']['url']) . '">'
-			. htmlspecialchars($fix['link']['label']) . '</a></p>';
-	}
-	if (!empty($fix['action'])) {
-		$act = $fix['action'];
-		echo '<form method="post" class="mb-1">';
-		echo '<input type="hidden" name="action" value="' . htmlspecialchars($act['action']) . '">';
-		if (!empty($act['domain'])) {
-			echo '<input type="hidden" name="domain" value="' . htmlspecialchars($act['domain']) . '">';
-		}
-		echo '<input type="hidden" name="address" value="' . htmlspecialchars($address) . '">';
-		$label = !empty($act['label']) ? $act['label']
-			: ($act['action'] === 'enable_plugin' ? 'Enable inbound email'
-			: ($act['action'] === 'add_domain' ? 'Add this domain' : 'Apply fix'));
-		echo '<button type="submit" class="btn btn-sm btn-primary">' . htmlspecialchars($label) . '</button>';
-		echo '</form>';
-	}
-};
-
-// Every check row this page has actually put on screen, so the full health run
-// under Advanced can render what is left rather than everything again. Recorded
-// at the point of rendering rather than derived from the row lists, so it can
-// never drift from what the operator is looking at.
-$rendered_checks = array();
-
-$render_check = function ($c) use ($status_badge, $render_fix, &$rendered_checks) {
-	// id alone is not unique — mailhost rows repeat per hostname — so the scope
-	// is part of the identity.
-	$rendered_checks[($c['id'] ?? '') . '|' . ($c['scope'] ?? '')] = true;
-	$border = $c['status'] === InboundEmailSetupCheck::FAIL ? 'border-danger'
-		: ($c['status'] === InboundEmailSetupCheck::WARN ? 'border-warning'
-		: ($c['status'] === InboundEmailSetupCheck::PASS ? 'border-success'
-		: ($c['status'] === InboundEmailSetupCheck::INFO ? 'border-info' : 'border-secondary')));
-	echo '<div class="card mb-2 ' . $border . '"><div class="card-body py-2">';
-	echo '<div>' . $status_badge($c['status']) . ' <strong>' . htmlspecialchars($c['label']) . '</strong>';
-	// "OPTIONAL recommended" contradicts itself — the grey badge already says
-	// there is nothing to do here.
-	if ($c['severity'] === InboundEmailSetupCheck::RECOMMENDED
-			&& $c['status'] !== InboundEmailSetupCheck::OPTIONAL) {
-		echo ' <span class="badge badge-subtle-secondary">recommended</span>';
-	}
-	echo '</div>';
-	echo '<div class="mt-1">' . htmlspecialchars($c['summary']) . '</div>';
-	if (!empty($c['detail']) || !empty($c['fix'])) {
-		echo '<details class="mt-1"><summary class="fix-toggle small">Details &amp; how to fix</summary>';
-		echo '<div class="mt-2">';
-		if (!empty($c['detail'])) {
-			echo '<p class="text-muted small mb-2">' . htmlspecialchars($c['detail']) . '</p>';
-		}
-		$render_fix($c['fix']);
-		echo '</div></details>';
-	}
-	echo '</div></div>';
+// Check rows render through setup_check_render.php, shared with the Server tab.
+$render_check = function ($c) use ($address) {
+	mailbox_setup_render_check($c, $address);
 };
 
 // =====================================================================
@@ -245,27 +133,25 @@ if (empty($focus_options)) {
 $page->end_box();
 
 // --- Sending identity (the sending-lock add-on) -----------------------------
-// WHATEVER YOU ARE DOING BELONGS AT THE TOP OF THE PAGE. The ceremony normally
-// lives under Advanced, which is right for a control you have gone looking for
-// — but the moment an operator opens it, it is the task, and leaving it buried
-// meant every press reloaded the page to the top and sent them scrolling back
-// down to find where they were. So the same box renders in one of two places:
-// at the top while the ceremony is open, and under Advanced otherwise.
+// WHATEVER YOU ARE DOING BELONGS AT THE TOP OF THE PAGE. The box normally sits
+// at the foot of the domain's setup, which is right for a control you have gone
+// looking for — but the moment an operator opens the ceremony, it is the task,
+// and leaving it at the foot meant every press reloaded the page to the top and
+// sent them scrolling back down to find where they were. So the same box
+// renders in one of two places: at the top while the ceremony is open, and at
+// the foot otherwise.
 //
 // Defined once as a closure rather than written twice, because two copies of a
 // 170-line panel is how they drift apart.
 $prot_hidden = array('ied_inbound_email_domain_id' => (int)($focus_domain_id ?? 0));
 $setup_open  = !empty($protect_setup) && !empty($protect)
 	&& empty($protect['is_protected']) && !empty($protect['has_key']);
-$adv_focus_qs = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
+$focus_qs    = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
 	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
-$adv_base    = $base . $adv_focus_qs;
-// Opening the ceremony does NOT open Advanced: the panel moves to the top of the
-// page instead, so expanding the server-wide section as well would bury the task
-// under everything the operator was not asking about.
-$setup_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'protect_setup=1';
-// Leaving puts it back where it lives, with Advanced open around it.
-$leave_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'advanced=1';
+$focus_base  = $base . $focus_qs;
+$setup_url   = $focus_base . ($focus_qs !== '' ? '&' : '?') . 'protect_setup=1';
+// Leaving puts the box back at the foot of the page, and lands on it.
+$leave_url   = $focus_base . '#sending-identity';
 
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
@@ -479,7 +365,7 @@ if ($setup_open) {
 // Automated mail identity card; like the protect ceremony, the open task
 // renders at the top of the page.
 if (!empty($machine_setup) && $focus_domain !== '') {
-	$machine_leave_url = $adv_base;
+	$machine_leave_url = $focus_base;
 	$page->begin_box(array(
 		'title'   => 'Automated mail identity — ' . $focus_domain,
 		'variant' => 'focus',
@@ -594,7 +480,7 @@ if ($dom_id && $level === 'private') {
 	// that DO need action with it.
 	//
 	// Completed state is not lost by omission: it reads as a card in Receiving
-	// and Sending, and the lifecycle controls live under Advanced.
+	// and Sending, and the relay's lifecycle controls live on the Server tab.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
@@ -623,11 +509,11 @@ if ($dom_id && $level === 'private') {
 				// having done it, and a different fix.
 				echo '<li class="mb-2"><strong>Your relay is not enabled.</strong> Until it is, mail reaches '
 					. 'Joinery without being sealed at the door. '
-					. '<a class="btn btn-sm btn-outline-secondary" href="#relay-section">Relay setup</a></li>';
+					. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_server#relay-section">Relay setup</a></li>';
 			} else {
 				echo '<li class="mb-2"><strong>The relay</strong> seals fresh mail before it reaches Joinery, for '
 					. 'every domain with Seal at the relay on. Provision it once. '
-					. '<a class="btn btn-sm btn-outline-secondary" href="#relay-section">Relay setup</a></li>';
+					. '<a class="btn btn-sm btn-outline-secondary" href="/plugins/mailbox/admin/admin_mailbox_server#relay-section">Relay setup</a></li>';
 			}
 		};
 	}
@@ -724,14 +610,14 @@ function _setup_has_standard_subdomain(string $domain): bool {
 
 // The DNS publish box: everything below this point is a check, and this is
 // the one control that can make those checks pass without leaving the page.
-// Once there is no DNS left to fix it moves to Advanced — a finished domain
-// should not be led with an offer to configure it.
+// Once there is no DNS left to fix it moves to the foot of the page — a
+// finished domain should not be led with an offer to configure it.
 // NOT WHILE THE CEREMONY IS OPEN. The ceremony renders its own publish box, for
 // the protected shape, and this one renders the ordinary shape — two panels with
 // the same heading showing records that contradict each other, which is the exact
 // failure the provider-supplied table was removed for. Mid-ceremony there is one
 // correct set of records to publish, and it is the ceremony's.
-if (!$setup_open && ($selected || $domain_selected) && !empty($dns_box) && empty($dns_box_in_advanced)) {
+if (!$setup_open && ($selected || $domain_selected) && !empty($dns_box) && empty($dns_box_last)) {
 	require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
 	dns_publish_box_render($page, $dns_box);
 }
@@ -787,193 +673,20 @@ if ($selected) {
 }
 
 // =====================================================================
-// Advanced — server-wide setup & diagnostics
+// The foot of the domain's setup: optional undertakings and finished business
 // =====================================================================
-// Links only — every form and button on the page posts to $self_url, which
-// already carries the focus and the advanced state. $adv_base and $adv_focus_qs
-// are built once, above, where the sending-identity closure also needs them.
-if (!$advanced) {
-	$sep = $adv_focus_qs !== '' ? '&' : '?';
-	echo '<p class="mt-3"><a href="' . htmlspecialchars($adv_base . $sep . 'advanced=1') . '">Advanced server setup &amp; diagnostics &rarr;</a></p>';
-} else {
-	echo '<hr class="my-4">';
-	echo '<h4 class="mb-1">Advanced server setup</h4>';
-	echo '<p class="text-muted small mb-3">Server-wide settings and the full inbound health run — shared by every hosted mailbox. '
-		. '<a href="' . htmlspecialchars($adv_base) . '">Hide advanced</a></p>';
-
-	// Rendered at the top instead while the ceremony is open — see the closure.
-	if (!$setup_open) {
-		$render_sending_identity();
-	}
-
-	// --- Relay ---
-	// Server-wide: whether a relay takes this server's mail in, its health, its
-	// update, and where one is set up, enabled or removed. The relay-or-direct
-	// choice lives in it too (receive_mode.php), a sensible default rather than
-	// a question in the way.
-	if (!empty($relay_section)) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
-		mailbox_relay_section_render($page, $relay_section);
-	}
-
-	// THE INBOUND PROVIDER LIVES ON THE SETTINGS TAB, with how sent mail leaves.
-	// It was always a declared setting — group `inbound`, options resolved from
-	// InboundProviderRegistry — and this tab hand-rendered it anyway. Setup is
-	// where you come to see whether things work; changing which stack receives
-	// your mail is not that. The webhook URL moved with it, because it is useless
-	// without the control that produces it.
-
-	// --- Server mail identity ---
-	// Two values that are set once: shown as values, with an Edit link to the
-	// form. The form opens by itself when auto-detection found a private
-	// address, which is the one case that needs a value typed in.
-	// A site container has no mail server, so it has no mail identity to show
-	// or set: its mail arrives through a relay (multi_tenant_docker_hosts WP9).
-	if (mailbox_site_has_mail_server()) {
-	$identity_edit = !empty($_GET['edit_identity']) || $public_ip_private || $mail_hostname === '';
-	echo '<div id="mail-identity">';
-	$page->begin_box(array('title' => "This server's mail identity"));
-	if (!$identity_edit) {
-		$edit_url = $self_url . (strpos($self_url, '?') === false ? '?' : '&') . 'edit_identity=1#mail-identity';
-		echo '<table class="table" style="max-width:640px;"><tbody>'
-			. '<tr><th style="width:40%;">Mail server hostname</th><td>' . htmlspecialchars($mail_hostname) . '</td></tr>'
-			. '<tr><th>Public IP</th><td>' . htmlspecialchars($configured_public_ip !== '' ? $configured_public_ip
-				: ($public_ip !== '' ? $public_ip . ' (detected)' : 'detected automatically')) . '</td></tr>'
-			. '</tbody></table>'
-			. '<a href="' . htmlspecialchars($edit_url) . '">Edit</a>';
-		$page->end_box();
-		echo '</div>';
-	} else {
-	$formwriter = $page->getFormWriter('setup_form', array('action' => $self_url));
-	echo $formwriter->begin_form();
-	$formwriter->textinput('mail_hostname', 'Mail server hostname', array(
-		'value'       => $mail_hostname,
-		'placeholder' => 'mail.example.com',
-		'helptext'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name.',
-	));
-	if ($public_ip_private) {
-		$formwriter->addError('public_ip',
-			'Auto-detection found ' . $public_ip . ', a private address. Enter this server\'s public IP here.');
-	}
-	$formwriter->textinput('public_ip', 'Mail server public IP', array(
-		'value'       => $configured_public_ip,
-		'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
-		'helptext'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
-	));
-	$formwriter->submitbutton('btn_save', 'Save & Run Checks');
-	echo $formwriter->end_form();
-	$page->end_box();
+// Rendered at the top instead while the ceremony is open — see the closure.
+if (!$setup_open) {
+	echo '<div id="sending-identity">';
+	$render_sending_identity();
 	echo '</div>';
-	}
-	} // mail identity: a server with its own mail stack
+}
 
-	// --- DNS publish box, once there is nothing left to fix ---
-	// Above the copy-paste table, which is the manual version of the same thing.
-	if (!$setup_open && !empty($dns_box) && !empty($dns_box_in_advanced)) {
-		require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
-		dns_publish_box_render($page, $dns_box);
-	}
-
-	// THE PROVIDER-SUPPLIED RECORDS TABLE IS GONE, and must not come back.
-	//
-	// It rendered $active_provider_class::getDnsRecords(), a fixed list that
-	// predates both the relay and the security levels and reads neither. On a
-	// relay-fronted, relay-sealed domain it prescribed the colocated shape — MX at
-	// mail.<domain>, SPF publishing this server's own IP, DMARC p=none — under
-	// the heading "DNS records to publish". Copying those three records moves the
-	// MX off the relay so mail arrives unsealed, publishes the address the relay
-	// exists to hide, and drops the domain's impersonation protection. It sat
-	// directly beneath the publish box, which was showing the correct records at
-	// the same time.
-	//
-	// Everything it offered, dnsPlan() already produces correctly: the publish box
-	// renders each value in a copy field, and where no driver covers the domain's
-	// DNS host the check rows carry the same records in their fix. One source of
-	// truth for what to publish, which is what docs/dns_management.md has always
-	// said it must be.
-
-	// --- Full server-wide diagnostic ---
-	//
-	// WHAT IS LEFT, NOT EVERYTHING AGAIN. The sections above are a filter over
-	// this same battery, so rendering the unfiltered run here repeated almost all
-	// of them: on a focused mailbox, 14 of the 15 cards above came back a second
-	// time and the page ran to 40 cards for 26 facts. A page that says everything
-	// twice is one an operator learns to skim, which is how the row that mattered
-	// gets missed.
-	//
-	// The subtraction is against what was actually rendered, not a fixed list, so
-	// a focus that shows nothing above (a domain with no mailbox, no selection at
-	// all) still gets the complete run here.
-	// One heading per domain. Unfocused, the run covers every hosted domain,
-	// and the same eight or so checks listed flat for six domains read as one
-	// list full of duplicates. A domain with nothing to act on folds to one
-	// line; one with a failure or warning stays open.
-	$render_domain_groups = function ($rows) use ($render_check) {
-		$groups = array();
-		foreach ($rows as $r) { $groups[$r['for_domain'] ?? $r['scope'] ?? ''][] = $r; }
-		foreach ($groups as $group_domain => $group_rows) {
-			$counts = array();
-			foreach ($group_rows as $r) { $counts[$r['status']] = ($counts[$r['status']] ?? 0) + 1; }
-			$needs_action = count($group_rows) > (($counts[InboundEmailSetupCheck::PASS] ?? 0)
-				+ ($counts[InboundEmailSetupCheck::INFO] ?? 0) + ($counts[InboundEmailSetupCheck::OPTIONAL] ?? 0));
-			$tally = array();
-			foreach (array(InboundEmailSetupCheck::FAIL => 'failing', InboundEmailSetupCheck::WARN => 'warning',
-					InboundEmailSetupCheck::UNKNOWN => 'could not be checked', InboundEmailSetupCheck::PASS => 'passing',
-					InboundEmailSetupCheck::INFO => 'info', InboundEmailSetupCheck::OPTIONAL => 'optional') as $status => $word) {
-				if (!empty($counts[$status])) { $tally[] = $counts[$status] . ' ' . $word; }
-			}
-			echo '<details class="mb-2"' . ($needs_action ? ' open' : '') . '><summary>'
-				. '<strong>' . htmlspecialchars($group_domain) . '</strong>'
-				. ' <span class="text-muted small">&mdash; ' . htmlspecialchars(implode(', ', $tally)) . '</span>'
-				. '</summary><div class="mt-2">';
-			foreach ($group_rows as $r) { $render_check($r); }
-			echo '</div></details>';
-		}
-	};
-
-	$remaining = array();
-	foreach ($results as $r) {
-		if (empty($rendered_checks[($r['id'] ?? '') . '|' . ($r['scope'] ?? '')])) {
-			$remaining[] = $r;
-		}
-	}
-	$page->begin_box(array('title' => 'Full inbound health run'
-		. ($focus_domain !== '' ? ' (' . $focus_domain . ')' : '')));
-	if (empty($results)) {
-		echo '<p class="text-muted mb-0">No checks returned.</p>';
-	} elseif (empty($remaining)) {
-		echo '<p class="text-muted mb-0">Every check for this mailbox is already shown above &mdash; '
-			. 'there is nothing server-wide left to report.</p>';
-	} else {
-		if (count($remaining) < count($results)) {
-			echo '<p class="text-muted small mb-3">The server-wide checks. '
-				. (count($results) - count($remaining))
-				. ' more are shown above, scoped to this mailbox, and are not repeated here.</p>';
-		}
-		$by_layer = array();
-		foreach ($remaining as $r) { $by_layer[$r['layer']][] = $r; }
-		$layer_titles = array(
-			'host'     => 'Mail server software',
-			'mailhost' => "This server's mail identity",
-			'domain'   => 'Domain DNS',
-			'plugin'   => 'Plugin configuration',
-			'address'  => 'Delivery target',
-			'e2e'      => 'End-to-end',
-		);
-		foreach ($layer_titles as $layer => $title) {
-			if (empty($by_layer[$layer])) { continue; }
-			echo '<h6 class="text-muted mt-3">' . htmlspecialchars($title) . '</h6>';
-			if ($layer === 'domain') { $render_domain_groups($by_layer[$layer]); continue; }
-			foreach ($by_layer[$layer] as $r) { $render_check($r); }
-		}
-		// Any layers not in the title map (defensive).
-		foreach ($by_layer as $layer => $rows) {
-			if (isset($layer_titles[$layer])) { continue; }
-			echo '<h6 class="text-muted mt-3">' . htmlspecialchars($layer) . '</h6>';
-			foreach ($rows as $r) { $render_check($r); }
-		}
-	}
-	$page->end_box();
+// A finished domain's publish box: nothing to fix, so it does not lead the page,
+// but it stays reachable for re-publishing or checking the records.
+if (!$setup_open && ($selected || $domain_selected) && !empty($dns_box) && !empty($dns_box_last)) {
+	require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+	dns_publish_box_render($page, $dns_box);
 }
 
 $page->admin_footer();

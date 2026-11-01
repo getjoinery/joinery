@@ -4,8 +4,8 @@
  *
  * Server-wide CHOICES — which stack receives mail, which route sends it, spam
  * filtering, forwarding limits, the forwarded-From display, and retention and
- * storage caps. Distinct from the Setup tab, which owns provisioning, server
- * identity and the health run: Setup is where you check whether things work.
+ * storage caps. Distinct from the Server tab, which owns provisioning, server
+ * identity and the health run: Server is where you check whether things work.
  * One POST saves the whole form; values are read back fresh on the redirect.
  *
  * @version 1.8 - a site container with no relay yet says it receives through one

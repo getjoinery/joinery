@@ -4,7 +4,7 @@
  * (specs/mailbox_relay_cloud_provisioning.md).
  *
  * The one-click branch of the just-in-time credential step: when a Linode
- * OAuth client is configured, the Setup tab's grant step offers "Approve at
+ * OAuth client is configured, the Server tab's grant step offers "Approve at
  * Linode" (grant=oauth -> admin_mailbox_relay_take_grant() ->
  * OAuth2Client::beginConsent(..., 'relay_cloud', ['run_id' => N], ...)) instead
  * of the token-paste floor.
@@ -17,6 +17,7 @@
  *
  * Discovered by interface from this plugin's includes/oauth_consumers/.
  *
+ * @version 1.2 - returns to the Relay section on the Server tab
  * @version 1.1
  */
 
@@ -25,7 +26,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provis
 
 class RelayCloudConsumer implements OAuth2Consumer {
 
-	const RETURN_URL = '/plugins/mailbox/admin/admin_mailbox_setup';
+	const RETURN_URL = '/plugins/mailbox/admin/admin_mailbox_server#relay-section';
 
 	public static function getPurpose(): string {
 		return 'relay_cloud';

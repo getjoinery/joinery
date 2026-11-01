@@ -9,6 +9,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.7 - the Relay section link opens the Server tab
  * @version 1.6 - per-shard Retire: the shard and its managed node leave together
  * @version 1.5 - the shard region defaults to us-east
  * @version 1.4 - the fleet product box is Relay Hosting
@@ -140,7 +141,7 @@ if (!empty($fleet_service_on)) {
 
 	if (!empty($shard_run) && $shard_run->isLive()) {
 		echo '<p>⏳ A shard is being born (run #' . intval($shard_run->key) . ', ' . htmlspecialchars((string)$shard_run->get('rcl_status'))
-			. '). Approve or watch it in the <a href="/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section">Relay section</a>.</p>';
+			. '). Approve or watch it in the <a href="/plugins/mailbox/admin/admin_mailbox_server#relay-section">Relay section</a>.</p>';
 	} else {
 		// A shard is born like any relay: a skeleton-only run in the operator's
 		// own cloud account, the operator identity's public key in its registry.
@@ -183,7 +184,7 @@ if (!empty($fleet_service_on)) {
 			echo '</tr>';
 		}
 		echo '</tbody></table>';
-		echo '<p class="text-muted small">A paid order for a customer-cloud product on a fleet-slot tier builds the buyer\'s server and pre-seeds its relay enrollment — the owner\'s Setup tab lands on one-click Enroll.</p>';
+		echo '<p class="text-muted small">A paid order for a customer-cloud product on a fleet-slot tier builds the buyer\'s server and pre-seeds its relay enrollment — the owner\'s mailbox Server tab lands on one-click Enroll.</p>';
 	} else {
 		echo '<form method="post">';
 		echo '<input type="hidden" name="action" value="fleet_create_product">';

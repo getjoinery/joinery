@@ -28,6 +28,7 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.7 - the pickup-stopped fix text opens the Server tab, matching its link
  * @version 1.6 - phase 5 settles each shard's version from its ping before the walk
  * @version 1.5 - phase 5 re-adds an active slot whose shard keeps mail names (3.13) but not yet its own
  * @version 1.4 - phase 3 reports the relay's scanner on its own; its signals carry no coverage line
@@ -169,7 +170,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 					'reason'     => 'This server could not collect mail from ' . $name
 						. ($message !== '' ? ': ' . substr($message, 0, 300) : '.'),
 					'since'      => $since,
-					'fix'        => 'Open the mail Setup tab: the Relay card names what is wrong and what to do. '
+					'fix'        => 'Open the mail Server tab: the Relay section names what is wrong and what to do. '
 						. 'Mail sent to you is waiting on the relay in the meantime.',
 				));
 			} else {
@@ -191,7 +192,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	 * Why the poll lives here: this pass already holds an SSH session to the relay,
 	 * so the health question costs one extra ping and no new connection. Why it is
 	 * raised rather than merely recorded: a warning that only ever appears on the
-	 * Setup tab is discovered by opening the Setup tab, which nobody does until
+	 * Server tab is discovered by opening the Server tab, which nobody does until
 	 * mail already looks wrong — the exact failure this check exists to catch.
 	 *
 	 * Dispatch is on TRANSITION only, comparing against the answer cached on the

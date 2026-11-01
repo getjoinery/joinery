@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.94 - Update/Delete relay open the Relay section on the mailbox Server tab
  * @version 1.93 - a machine with no site says whose logs it reads; its mail gateway offers no Why? (unit_journal_readable_units_for)
  * @version 1.92 - Why? and Clear are offered for a unit this node's agent accepts (unit_journal_units_for)
  * @version 1.91 - a Backups row (IncidentBackupVerdict); one Refresh button (refresh_status) in place of Check Status and Host Report; the page under the gauges is two lists of one-line rows that open to the full account: Status
@@ -440,8 +441,8 @@
 			}
 			if ($disposable_relay !== null): ?>
 				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">Disposable relay: no shell, no agent. It is updated by re-imaging and removed by deleting its row; the machine itself is deleted at the provider by hand.</span></li>
-				<li><a class="dropdown-item" href="/plugins/mailbox/admin/admin_mailbox_setup#relay-section">Update relay&hellip;</a></li>
-				<li><a class="dropdown-item text-danger" href="/plugins/mailbox/admin/admin_mailbox_setup#relay-section">Delete relay&hellip;</a></li>
+				<li><a class="dropdown-item" href="/plugins/mailbox/admin/admin_mailbox_server#relay-section">Update relay&hellip;</a></li>
+				<li><a class="dropdown-item text-danger" href="/plugins/mailbox/admin/admin_mailbox_server#relay-section">Delete relay&hellip;</a></li>
 				<li><hr class="dropdown-divider"></li>
 			<?php endif; ?>
 			<li><hr class="dropdown-divider"></li>

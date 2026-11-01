@@ -9,14 +9,16 @@
  * "Mailboxes" (the Gmail-style reader) is first and the default landing tab.
  * "Accounts" is the consolidated config tree (domains + mailboxes + forwarding
  * + IMAP feeds); the per-object editor pages all highlight the Accounts tab.
- * "Setup" (DNS/host diagnostics) is last.
+ * "Setup" checks one mailbox or domain; "Server" holds what belongs to the
+ * whole mail server (the relay, the mail identity, the full health run);
+ * "Settings" holds the server-wide choices.
  *
  * Usage in a page (after admin_header):
  *   require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
  *   echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
  *
  * "Filters" (Gmail-parity inbound rules) sits between Accounts and Logs.
- * Relay surfaces are split across the tabs — setup/status on Setup,
+ * Relay surfaces are split across the tabs — setup/status on Server,
  * configuration on Settings; the operator fleet console hangs off the Server
  * Manager dashboard — so there is no Relay tab.
  *
@@ -29,7 +31,7 @@
  * (A future declarative-tabs core enhancement — specs/declarative_admin_tabs.md
  * — would replace this helper with adminMenu children; kept self-contained for now.)
  *
- * @version 2.3
+ * @version 2.4 - the Server tab
  */
 
 if (!function_exists('mailbox_admin_tabs')) {
@@ -44,6 +46,7 @@ if (!function_exists('mailbox_admin_tabs')) {
 			'Filters'   => $base . 'admin_mailbox_filters',
 			'Logs'      => $base . 'admin_mailbox_logs',
 			'Setup'     => $base . 'admin_mailbox_setup',
+			'Server'    => $base . 'admin_mailbox_server',
 			'Settings'  => $base . 'admin_mailbox_settings',
 		);
 	}

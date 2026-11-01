@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.144.17",
+    "version": "1.144.18",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -742,7 +742,7 @@
                 "default_email": true,
                 "title_template": "{relay_name} stopped scanning mail for spam",
                 "body_template": "{detail} Until it is fixed, incoming mail is not checked against the scanner's rules; this server's own filter still runs.",
-                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_server#relay-section"
             }
         },
         "mailbox.imap_feed_broken": {
@@ -799,7 +799,7 @@
                 "default_email": true,
                 "title_template": "{relay_name} is scanning mail for spam again",
                 "body_template": "{detail}",
-                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_server#relay-section"
             }
         },
         "mailbox.relay_pickup_stopped": {
@@ -818,7 +818,7 @@
                 "default_email": true,
                 "title_template": "Mail is not arriving: this server cannot collect from {relay_name}",
                 "body_template": "{reason} {since} {fix}",
-                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_server#relay-section"
             }
         },
         "mailbox.relay_pickup_recovered": {
@@ -835,7 +835,7 @@
                 "default_email": true,
                 "title_template": "Mail is arriving again from {relay_name}",
                 "body_template": "{detail}",
-                "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_server#relay-section"
             }
         }
     },

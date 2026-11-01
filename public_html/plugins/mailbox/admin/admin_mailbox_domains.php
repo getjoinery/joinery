@@ -13,6 +13,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.11 - Set up a relay opens the Server tab
  * @version 4.10 - the catch-all address says it must confirm (and that a sealed level keeps the mail
  *   instead), with its confirmation state and Resend under the form
  * @version 4.9 - Reject Unmatched says what it does: refused during the SMTP conversation, or accepted and dropped
@@ -77,7 +78,7 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 // How mail reaches this server is a deployment fact, not a question every page
 // has to have answered first: an undecided deployment receives directly and
-// works. The choice lives in the Setup tab's Advanced section
+// works. The choice lives in the Server tab's Relay section
 // (specs/mailbox_relay_surface_simplification.md).
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 
@@ -238,7 +239,7 @@ if ($show_form) {
 	$relay_addon = ['checked' => $relay_value && $relay_offered, 'disabled' => !$relay_offered];
 	if (!$relay_offered) {
 		$relay_addon['note'] = 'It needs a relay in front of this server first.';
-		$relay_addon['link'] = ['/plugins/mailbox/admin/admin_mailbox_setup?advanced=1#relay-section', 'Set up a relay'];
+		$relay_addon['link'] = ['/plugins/mailbox/admin/admin_mailbox_server#relay-section', 'Set up a relay'];
 	}
 	// What only this page knows about Fortress, under its card (R12): whether
 	// mail is seen as it arrives (it is, unless the relay seals it for your

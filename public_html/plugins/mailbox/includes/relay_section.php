@@ -1,6 +1,6 @@
 <?php
 /**
- * Mailbox - the Setup tab's Relay section (tenant side).
+ * Mailbox - the Server tab's Relay section (tenant side).
  *
  * Renders the deployment's relay state and every action that moves it toward
  * fronting mail: the relay rows with health, the hosted-slot lifecycle
@@ -8,7 +8,7 @@
  * provision-your-own path. Configuration (the relay service connection and
  * outbound mode) lives on the Settings tab; this section points there when
  * the connection is missing. Vars come from admin_mailbox_relay_tenant_vars()
- * and actions post back to the Setup tab
+ * and actions post back to the Server tab
  * (admin_mailbox_relay_tenant_actions()).
  *
  * @version 2.13 - a site container (no mail server of its own) is never told to receive directly

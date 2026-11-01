@@ -4,7 +4,7 @@
  * specs/mailbox_relay_shared_fleet.md).
  *
  * There is no Relay page: tenant relay setup (status, health, provisioning,
- * hosted-slot enrollment) renders as the Setup tab's Relay section
+ * hosted-slot enrollment) renders as the Server tab's Relay section
  * (relay_section.php), relay configuration (service connection, outbound
  * mode) lives on the Settings tab, and the operator fleet console is its own
  * page (admin_mailbox_fleet) reached from the Server Manager dashboard. This
@@ -13,6 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.13 - the relay card's setup link always points at the Server tab
  * @version 2.12 - a run being created (creating) is never dismissed
  * @version 2.11 - starting a cloud relay create or update with a token leaves no "started" notice:
  *   the section's progress line reports the run, and the notice contradicted a create refused on landing
@@ -83,7 +84,7 @@ function admin_mailbox_relay_nothing_under_way(): bool {
 }
 
 /**
- * Tenant-side relay actions (Setup tab's Relay section): relay lifecycle,
+ * Tenant-side relay actions (Server tab's Relay section): relay lifecycle,
  * provisioning jobs, the origin-leak probe, and hosted-slot enrollment.
  * Returns a redirect when the input was one of these actions, null otherwise.
  */
@@ -413,7 +414,7 @@ function admin_mailbox_relay_take_grant(RelayCloudProvision $run, array $input, 
 }
 
 /**
- * Tenant-side view vars for the Setup tab's Relay section: the relay rows
+ * Tenant-side view vars for the Server tab's Relay section: the relay rows
  * (health attached to the active one, MX hostname reconciled), provisionable
  * nodes, and live hosted-slot state.
  */
@@ -473,9 +474,6 @@ function admin_mailbox_relay_tenant_vars(): array {
 	$active_health = ($active !== null) ? admin_mailbox_relay_health() : null;
 	$relays = array();
 	foreach ($relays_multi as $relay) {
-		// Reconcile the relay's MX hostname from its provision job when the
-		// row predates the hostname being persisted — the topology-aware
-		// setup checks prescribe against it.
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
 			'model'   => $relay,
@@ -618,7 +616,7 @@ function admin_mailbox_relay_health(bool $fresh = false): array {
  * The relay's Setup-tab card, in Receiving.
  *
  * A relay is optional, so with none set up the Receiving card is a grey
- * "optional" line pointing at the setup that lives under Advanced — present
+ * "optional" line pointing at the setup on the Server tab — present
  * enough to be discoverable, quiet enough not to read as a to-do. Once a relay
  * exists the card carries its health: green when every check for that side
  * passes, red when any does not, naming which.
@@ -628,7 +626,7 @@ function admin_mailbox_relay_health(bool $fresh = false): array {
  * "healthy" about a component that is not in the path — green because it
  * is unused, which is the wrong thing to tell someone reading a checklist. The
  * outbound origin-leak checks still run; they surface as health dots in the
- * Relay section under Advanced, where they read as facts about the relay rather
+ * Relay section on the Server tab, where they read as facts about the relay rather
  * than as a verdict on sending.
  *
  * Cost note: the battery (TCP probe, map build, DNS) runs only when a relay
@@ -636,16 +634,15 @@ function admin_mailbox_relay_health(bool $fresh = false): array {
  *
  * @return array{receiving:?array} A row in InboundEmailSetupCheck's shape.
  */
-function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
+function admin_mailbox_relay_check_rows(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
 
 	$setup_link = array(
-		'text' => 'Relay setup lives under Advanced server setup, at the bottom of this page.',
+		'text' => 'Relay setup is on the Server tab.',
+		'link' => array('url' => '/plugins/mailbox/admin/admin_mailbox_server#relay-section',
+			'label' => 'Go to relay setup'),
 	);
-	if ($advanced_url !== '') {
-		$setup_link['link'] = array('url' => $advanced_url, 'label' => 'Go to relay setup');
-	}
 
 	$row = function ($id, $label, $status, $summary, $detail = '', $fix = null) {
 		return array(

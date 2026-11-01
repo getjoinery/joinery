@@ -20,6 +20,7 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.29 - relay fixes point at the Relay section on the Server tab
  * @version 1.28 - the spam scanner checks point at Run setup again on the Plugins page, not a command to
  *                 type on the host (plugin_installer_from_the_browser.md D3)
  * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
@@ -95,7 +96,7 @@ class InboundEmailHealth {
             if (self::activeRelay() === null && mailbox_receiving_domain_exists()) {
                 throw new ProvisioningCheckFailed(
                     'No relay is enabled, so no mail reaches this site: it runs in a container and has no '
-                    . 'mail server of its own. Set up or enable a relay on the Setup tab.');
+                    . 'mail server of its own. Set up or enable a relay on the Server tab.');
             }
             return;
         }
@@ -108,7 +109,7 @@ class InboundEmailHealth {
             // world sends mail - but the check says so in one sentence.
             throw new ProvisioningCheckFailed(
                 'Mail is addressed to a relay this deployment no longer has: the cutover is recorded '
-                . 'complete, but no relay is enabled. Create a relay on the Setup tab, or repoint every '
+                . 'complete, but no relay is enabled. Create a relay on the Server tab, or repoint every '
                 . 'hosted domain\'s MX at this server and turn its mail listener on.');
         }
         if (self::activeRelay() !== null) {
@@ -119,7 +120,7 @@ class InboundEmailHealth {
                     @fclose($sock);
                     throw new ProvisioningCheckFailed(
                         'The local mail listener is recorded as decommissioned, but port 25 answers on this box — '
-                        . 'decommission again (or Restore) from the Setup tab\'s Relay section.'
+                        . 'decommission again (or Restore) from the Relay section on the Server tab.'
                     );
                 }
             }
@@ -849,7 +850,7 @@ class InboundEmailHealth {
             : 'no origin-leak probe has round-tripped clean in the last ' . self::ORIGIN_PROBE_FRESH_DAYS . ' days';
         return array('allowed' => false, 'probe' => $probe,
             'reason' => 'Sent mail cannot leave through ' . $label . ' without proof it hides this server\'s address: '
-                . $why . '. Run the origin-leak probe from the Setup tab\'s Relay section, or use a provider that '
+                . $why . '. Run the origin-leak probe from the Relay section on the Server tab, or use a provider that '
                 . 'submits over an API (Mailgun or Amazon SES).');
     }
 

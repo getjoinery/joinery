@@ -8,7 +8,7 @@ require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
  * the forwarded-From display, and retention/storage caps. One form, grouped into
  * boxes, saved in a single POST.
  *
- * Provisioning and server identity stay on the Setup tab: the relay, the mail
+ * Provisioning and server identity are on the Server tab: the relay, the mail
  * hostname and the public IP are verified by the checks standing next to them,
  * and a field beside the check that grades it is worth more than tidiness. What
  * belongs here is the choices — which stack receives mail, which route sends it.

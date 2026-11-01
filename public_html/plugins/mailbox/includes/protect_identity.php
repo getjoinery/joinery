@@ -23,7 +23,7 @@
  *
  * THIS FILE OWNS THE STATE TRANSITIONS, NOT A PAGE. Every surface that drives
  * protection posts an action here and is redirected back to itself; the Setup
- * tab's Advanced section is that surface. Nothing renders the DNS records or the
+ * tab's Sending identity box is that surface. Nothing renders the DNS records or the
  * verification from here — InboundEmailSetupCheck produces both, and a second
  * rendering could only ever drift from it.
  *

@@ -8,7 +8,7 @@
  * guardrail evaluation, the narrow sudo-helper runner
  * (/usr/local/sbin/joinery-mail-listener, installed by
  * provision_relay_main.sh), the POST action handlers, and the "Local mail
- * listener" box the Setup tab's Relay section renders. State is recorded in
+ * listener" box the Server tab's Relay section renders. State is recorded in
  * the mailbox_local_listener setting ('active' | 'decommissioned') so the
  * setup and health checks can compare expectation with reality.
  *
@@ -195,7 +195,7 @@ function mailbox_listener_run(string $verb): array {
 }
 
 /**
- * The listener POST actions (Setup tab's Relay section). Returns a redirect
+ * The listener POST actions (Server tab's Relay section). Returns a redirect
  * when the input was one of them, null otherwise. Decommission re-evaluates
  * the guardrails server-side — the button's absence is not the enforcement.
  */
@@ -248,7 +248,7 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
 }
 
 /**
- * The local-mail block (Setup tab's Relay section). Shown only when there is
+ * The local-mail block (Server tab's Relay section). Shown only when there is
  * something actionable: the amber uninstall offer once every guardrail passes
  * (a refusal renders NOTHING — the Setup rows already walk the missing
  * pieces), and, after an uninstall, the reinstall offer only once no relay is

@@ -14,6 +14,7 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.9 - takes no relay URL: the relay card links to the Server tab itself
  * @version 1.8 - the signing program's row is host.checker (rspamd)
  * @version 1.7 - a mailbox needs the relay when its domain has the Seal at the
  *   relay add-on on
@@ -45,15 +46,12 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accou
  * Run the checks for one mailbox and return them grouped the way the Setup tab
  * shows them.
  *
- * @param int    $alias_id           The mailbox (alias) to check.
- * @param string $relay_advanced_url Where the relay cards' "Go to relay setup"
- *                                   should point; omit for callers with no such
- *                                   destination.
+ * @param int $alias_id The mailbox (alias) to check.
  * @return array|null Null when the alias does not resolve. Otherwise:
  *   address, domain, mode, forwards (bool), arrival ('imap'|'webhook'|'postfix'),
  *   imap (InboundImapAccount|null), receiving (rows), forwarding (rows).
  */
-function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = ''): ?array {
+function mailbox_setup_scoped_rows(int $alias_id): ?array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_admin.php'));
 
 	if ($alias_id <= 0) {
@@ -79,7 +77,7 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 	// (specs/mailbox_relay_surface_simplification.md). The relay is what seals
 	// arriving mail to the owner, and only that add-on requires it. A deployment may run one
 	// for its own reasons at any level — that stays possible, and it stays
-	// visible in the Setup tab's Relay section — but it must not surface as a
+	// visible in the Server tab's Relay section — but it must not surface as a
 	// card, a warning or a verdict on a mailbox whose domain does not need it.
 	$needs_relay = $domain->relay_seals_to_owner();
 
@@ -134,7 +132,7 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 	// where a relay is this mailbox's business at all. The relay is inbound
 	// only, so it has no Sending card.
 	if ($needs_relay && $arrival !== 'imap') {
-		$relay_cards = admin_mailbox_relay_check_rows($relay_advanced_url);
+		$relay_cards = admin_mailbox_relay_check_rows();
 		if ($relay_cards['receiving'] !== null) {
 			$receiving_rows[] = $relay_cards['receiving'];
 		}
@@ -223,7 +221,7 @@ function _setup_is_sending_row(array $r): bool {
  * fleet ownership proof), the inbound-auth verifier, that the plugin is on,
  * the relay cutover-completion row, that the alias resolves, and the
  * end-to-end proof. Server-internal host/mailhost rows are otherwise excluded —
- * they live in the Advanced server view.
+ * they live on the Server tab.
  *
  * The exception is the mail host's own A record. When the mail hostname sits
  * inside the focused domain (mail.example.com under example.com), that record is
@@ -234,10 +232,10 @@ function _setup_is_sending_row(array $r): bool {
  * hiding it would be the silent-wrong-answer this page exists to prevent.
  *
  * A mail host outside the domain (a shared devmail.example.net, a relay in the
- * operator's zone) stays in Advanced: it is not this domain owner's record.
+ * operator's zone) stays on the Server tab: it is not this domain owner's record.
  *
  * The relay's spam scanning is the one row whose PRESENCE depends on its status:
- * it comes up front when it is a problem and stays in Advanced when it is not.
+ * it comes up front when it is a problem and stays on the Server tab when it is not.
  * That is the opposite of the mailhost rule two paragraphs up, deliberately,
  * because the two rows are different kinds of thing. A mailhost record is a TASK
  * — it must remain visible after it goes green, or the page appears to forget
@@ -276,7 +274,7 @@ function _setup_is_receiving_row(array $r, string $focus_domain = '', bool $need
 	// moved yet, so inside "Receiving — info@example.com" it reads as a verdict
 	// on that mailbox while actually describing a different domain entirely.
 	// The per-domain question it looks like it answers is already answered
-	// properly one row above by 'domain.mx'. The roll-up lives in Advanced with
+	// properly one row above by 'domain.mx'. The roll-up lives on the Server tab with
 	// the other server-wide facts.
 	return in_array($r['id'], array('plugin.enabled', 'host.inbound_verification'), true);
 }

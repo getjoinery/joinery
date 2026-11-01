@@ -52,7 +52,7 @@ straight to this server, or does a relay front it so the server's address stays
 hidden?
 
 **It is a setting, not a gate.** An undecided deployment receives directly and
-works. The relay itself decides it: **Enable relay** in the Setup tab's Relay
+works. The relay itself decides it: **Enable relay** in the Server tab's Relay
 section sets `relay`, **Disable relay** sets `direct`, and either can be changed
 at any time. A relay provisioned as part of setup does not decide it on its own.
 
@@ -86,6 +86,11 @@ check, along with one-click actions to enable the plugin or register a domain.
 The tab cannot create DNS records or set reverse DNS for you (those live with
 your registrar / VPS provider) — it detects, instructs, and verifies.
 
+Below a focused domain's checks sit the things it does not lead with: the
+**Sending identity** box (send protection, once asked for) and, once nothing is
+left to fix, the domain's DNS publish box. Opening the send-protection ceremony
+lifts the Sending identity box to the top of the page until it is left.
+
 #### The automated mail identity (machine sender)
 
 The site's automated mail — reminders, receipts, notifications, everything
@@ -105,7 +110,7 @@ owns this:
   the system sender can never send (a protected identity, typically), the card
   is a REQUIRED FAIL — mail is being dropped and nobody chose that. An empty
   or invalid `defaultemail` matches no domain view, so that blocker surfaces
-  as a `plugin.system_mail` row under Advanced instead.
+  as a `plugin.system_mail` row in the Server tab's health checks instead.
 - **On**: the sub-checks are REQUIRED — provider registration in a *usable*
   state (registered-but-unverified fails), the provider's DKIM records live in
   DNS, SPF on the machine domain with the provider mechanism and a strict
@@ -180,16 +185,19 @@ Fleet state (slot + ownership proofs) is read live from the fleet service once
 per check run — never cached; if the service is unreachable, the ownership row
 renders one UNKNOWN naming the error and the rest of the page is unaffected.
 
-#### Advanced server setup
+#### The Server tab
 
-Settings and diagnostics that are server-wide rather than per-mailbox live
-behind the **Advanced server setup** disclosure: the inbound **provider** picker
-(`mailbox_provider`), this server's **mail identity** — the FQDN
-(`mailbox_mail_hostname`, used as the MX target, HELO name, and PTR name)
-and public IP — the provider's DNS records to publish, and the **full inbound
-health run** (every layer: Postfix/pipe transport/domain map/rspamd/Spamhaus/port 25,
-mail identity, domain DNS, plugin config, and end-to-end). Set the mail hostname
-here once; everything else is autodetected.
+What belongs to the whole mail server rather than one mailbox lives on the
+**Server** tab (`admin_mailbox_server`), which needs nothing chosen first: the
+**Relay** section, this server's **mail identity** — the FQDN
+(`mailbox_mail_hostname`, used as the MX target, HELO name, and PTR name) and
+public IP — and the **health checks**: every layer (Postfix/pipe transport/domain
+map/rspamd/Spamhaus/port 25, mail identity, plugin config, end-to-end), then
+Domain DNS grouped by domain, a domain with nothing to act on folded to one line.
+Set the mail hostname here once; everything else is autodetected. The inbound
+**provider** picker (`mailbox_provider`) is on the Settings tab. A check row's
+one-click fix works the same on either tab (`includes/setup_fix_actions.php`),
+and both tabs draw rows through `includes/setup_check_render.php`.
 
 ### The Accounts tree
 
@@ -634,7 +642,7 @@ Each list name is followed by the answers that mean "listed" (zen
 refuses a sender on **any** answer, and Spamhaus answers `127.255.255.x` to a
 DNS resolver it will not serve (a public resolver, or one over its free quota)
 — every sender would be refused. With the filter such an answer refuses
-nobody, and the Setup tab's **Spamhaus blocklist answering** row
+nobody, and the Server tab's **Spamhaus blocklist answering** row
 (`host.spamhaus`) warns "Spamhaus is not answering this box": it asks
 Spamhaus's permanent test entry, `2.0.0.127.zen.spamhaus.org`, which always
 answers `127.0.0.2`. A relay reports the same thing as `spamhaus` in its
@@ -765,7 +773,7 @@ box), and needs nothing at all when they send with their own return-path domain
 (SMTP2GO, Joinery services); no provider is refused for compose; Joinery Direct
 is served from the site's own web host; and `checkOriginHidden` does not run.
 
-On the Setup tab, for a container whose mail arrives by SMTP:
+On the Server tab, for a container whose mail arrives by SMTP:
 
 - the receive mode is relay whenever it would otherwise be direct;
 - the host layer is one row, **How mail reaches this site**: red with no relay
@@ -787,14 +795,14 @@ and rspamd restart on boot.
 ## Settings
 
 Delivery-policy settings — spam filtering, forwarding limits, the forwarded-From
-display, and retention/storage caps — are edited on the **Settings** tab. Server
-identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on the
-**Setup** tab.
+display, and retention/storage caps — are edited on the **Settings** tab, along
+with the inbound provider. This server's mail identity (hostname/IP) and the relay
+live on the **Server** tab.
 
 | Setting | Default | Description |
 |---|---|---|
 | `mailbox_enabled` | `0` | Master switch |
-| `mailbox_mail_hostname` | (empty) | FQDN of this mail server — MX target, HELO, PTR (set on the Setup tab) |
+| `mailbox_mail_hostname` | (empty) | FQDN of this mail server — MX target, HELO, PTR (set on the Server tab) |
 | `mailbox_public_ip` | (empty) | Optional public-IP override; empty = autodetect |
 | `mailbox_srs_enabled` | `0` | SRS envelope rewriting (recommended) |
 | `mailbox_srs_secret` | (empty) | Required before SRS can be enabled |
@@ -2649,11 +2657,11 @@ The cost is real and is stated where the offer is made: every interactive send
 needs an unlock, and automated mail must move to a Standard subdomain. Those are
 reasons not to switch the add-on on, not reasons to leave it half-on.
 
-**Send protection has no page of its own — the Setup tab's Advanced section is
-its whole surface.** `includes/protect_identity.php` owns the state transitions
+**Send protection has no page of its own — the Setup tab's Sending identity box
+is its whole surface.** `includes/protect_identity.php` owns the state transitions
 and nothing else; `mailbox_protect_handle_action()` runs any `protect_*` action
 posted to Setup and redirects back to the focused domain with a flash. The
-*Sending identity* box under Advanced holds the entire arc: what send protection
+*Sending identity* box, at the foot of the focused domain's setup, holds the entire arc: what send protection
 buys and what it costs, the owner question when the raise could not guess, the
 publish step, the pre-flight verification, the switch, and afterwards the
 lifecycle (replace the key, switch over, cancel, turn off, and the return address
@@ -3089,8 +3097,7 @@ deployment): it installs two narrow root helpers with their sudoers rule —
 `joinery-dkim-remove`. Nothing about a relay lives on the main box's disk: the
 relay client identity and the relay's pin are rows in the database.
 
-The **Setup tab's Relay section** (under Advanced, and wherever the receive
-mode is relay or a relay row exists) is the dashboard. It shows the relay's
+The **Server tab's Relay section** is the dashboard. It shows the relay's
 name, address and state; one sentence on what that means; its health in one
 line ("The relay is healthy", or a list of the checks that are not: reachable,
 mail pickup, nothing held, address list current, origin hidden, the sending
@@ -3144,7 +3151,7 @@ can parse, which is why service liveness alone is not the question. The
 remaining groups are everything else a person would have learned from a shell —
 build, identity, listeners, certificate, clock, machine, firewall rule set,
 Postfix counts, spool, Direct, signature failures, the relay's own journal — and
-the Setup tab renders them behind a disclosure, because health is the only
+the Server tab's Relay section renders them behind a disclosure, because health is the only
 window into a relay.
 
 **Service liveness only, per tenant where it is the asker's.** A shared fleet
@@ -3180,7 +3187,7 @@ this relay predates the current relay — so the scanner row names the same
 **Update relay** control rather than offering a parallel fix.
 
 **Relay findings reach only mailboxes whose domain needs a relay.** A WARN or FAIL
-scanner is promoted from Advanced to a Receiving card, and the relay's two state
+scanner is promoted from the Server tab to a Receiving card, and the relay's two state
 cards render, only for a mailbox on a domain with **Seal at the relay** on — the
 add-on the relay is load-bearing for. A deployment may run a relay at any level, and
 the Relay section stays available to set one up, but on a domain without the add-on
@@ -3192,7 +3199,7 @@ The reconcile pass also raises the change on the signal bus —
 `mailbox.relay_scanner_down` and `mailbox.relay_scanner_recovered`, both
 topic-subscribable — **on transition only**, comparing against the cached state,
 so a relay that stays broken is announced once rather than every pass. A finding
-that lives only on the Setup tab is found by opening the Setup tab, which nobody
+that lives only on the Server tab is found by opening the Server tab, which nobody
 does until mail already looks wrong.
 
 **Provisioning paths**, primary first:
@@ -3374,7 +3381,7 @@ deployment-wide origin-hidden check (`checkOriginHidden`) that fails if the main
 box IP appears in any hosted domain's mail DNS.
 
 **Decommission is a guarded platform action, never manual host surgery**
-(`includes/listener_admin.php`). The Setup tab's Relay section shows the offer
+(`includes/listener_admin.php`). The Server tab's Relay section shows the offer
 only when it is actually possible: once every guardrail passes, an amber
 **Uninstall local mail** block appears (one sentence — the relay makes the
 local mail software unnecessary and a security risk — plus the button); while
@@ -3419,7 +3426,7 @@ the domains' next home (a new slot here or another fleet) can claim them
 before the old slot finishes evicting.
 
 **Tenant side** (any deployment): every tenant-facing hosted-relay surface —
-the Setup Relay section's Hosted relay block, the Settings connection box, and
+the Server tab Relay section's Hosted relay block, the Settings connection box, and
 the live fleet-status fetch — is gated behind
 `mailbox_hosted_relay_offered()` (`includes/receive_mode.php`), which is off:
 the hosted offering is not customer-facing yet, and the choice card/Relay
@@ -3430,7 +3437,7 @@ account's API key
 (`mailbox_fleet_service_url` / `mailbox_fleet_api_public_key` /
 `mailbox_fleet_api_secret_key`, a declared sealed secret stored encrypted
 wherever the box has a `secret_box_key`); enrollment itself is a button in the
-Setup tab's Relay section. `FleetClient` is the core `ServiceClient` — the one
+Server tab's Relay section. `FleetClient` is the core `ServiceClient` — the one
 tenant-side shape for any service another deployment runs (an API key pair in
 `public-key` / `secret-key` headers, a JSON POST to
 `/api/v1/action/{plugin}/{action}`, the remote `error` text on refusal) — with
@@ -3498,7 +3505,7 @@ previous one) and dispatches ONE `fleet_enroll` job on the site's own agent
 carrying the three values — the setting names are compiled into
 `utils/fleet_enroll.php` on the site, the secret rides the job row redacted
 and is blanked once the node answers, and nothing opens a shell. The
-owner's Setup tab then lands on one-click Enroll; the DNS TXT ownership
+owner's Server tab then lands on one-click Enroll; the DNS TXT ownership
 proofs and the MX edit stay manual by nature (the customer proving domain
 control at their own DNS provider). Seeding is best-effort: a failure alerts
 the ops address and leaves the provision done — the owner can always enter
@@ -5682,8 +5689,8 @@ functions — register a domain, create a store-mode mailbox on it, and grant it
 to a user, with no page or session plumbing:
 
 - `mailbox_provision_domain($domain_name)` — ensures the domain row exists
-  (files fleet domain claims on creation, exactly like the Setup tab's
-  add-domain action).
+  (files fleet domain claims on creation, exactly like a check row's
+  add-domain fix).
 - `mailbox_provision_mailbox($domain_name, $local_part, $user_id)` — domain +
   store alias + access grant in one call.
 

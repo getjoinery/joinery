@@ -25,6 +25,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.60 - relay and send-protection fixes name the Server tab and the Sending identity box;
+ *                 a missing relay MX hostname says where it is recorded
  * @version 1.59 - a box with its own Postfix says whether its mail leaves over IPv4 (host.outbound_ipv4)
  * @version 1.58 - a site container has no mail server (specs/multi_tenant_docker_hosts.md WP9): one
  *   whose mail arrives by SMTP and has no relay is 'relay_needed' (no MX, no box records); its host
@@ -1126,7 +1128,7 @@ class InboundEmailSetupCheck {
 			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::RECOMMENDED, self::INFO,
 				'The relay is this deployment\'s public MX; this box\'s own mail listener is pending decommission.',
 				'Port 25 ' . ($listening ? 'is' : 'is not') . ' listening locally. Once every domain\'s MX points '
-				. 'at the relay, decommission the listener from the Setup tab\'s Relay section.');
+				. 'at the relay, decommission the listener from the Relay section on the Server tab.');
 		} elseif ($listening) {
 			$out[] = $this->r('host.port25', '', 'host', 'SMTP port 25 listening', self::REQUIRED, self::PASS,
 				'Port 25 is listening locally.',
@@ -1496,7 +1498,7 @@ class InboundEmailSetupCheck {
 				self::RECOMMENDED, self::INFO,
 				'Haven\'t asked ' . $name . ' about its spam scanner yet.',
 				'The relay is asked once per reconcile pass. Use Check scanner now in the Relay section '
-				. 'under Advanced to ask immediately.', null, true);
+				. 'on the Server tab to ask immediately.', null, true);
 		}
 
 		return self::relayScannerResult($health, $name, self::healthAge($health));
@@ -1593,7 +1595,7 @@ class InboundEmailSetupCheck {
 		};
 		$state  = (string)($health['state'] ?? '');
 		$detail = trim((string)($health['detail'] ?? ''));
-		$rebuild = array('text' => 'Rebuild the relay from the Relay section under Advanced — provisioning '
+		$rebuild = array('text' => 'Rebuild the relay from the Relay section on the Server tab — provisioning '
 			. 'rewrites the scanner configuration and puts it back in the mail path.');
 
 		if ($state === MailboxRelay::HEALTH_OK) {
@@ -1612,9 +1614,9 @@ class InboundEmailSetupCheck {
 			// this row names that button rather than inventing a parallel fix.
 			return $row(self::INFO,
 				$name . ' predates the current relay software, so it cannot say whether it is scanning for spam.',
-				$detail . ' Nothing is known to be wrong. Upgrading it from the Relay section under Advanced '
+				$detail . ' Nothing is known to be wrong. Upgrading it from the Relay section on the Server tab '
 				. 'replaces the relay with current software and enables the check.' . $age_note,
-				array('text' => 'Use Upgrade relay in the Relay section under Advanced. This is the same '
+				array('text' => 'Use Upgrade relay in the Relay section on the Server tab. This is the same '
 					. 'finding as the relay version reading unknown, and the same fix.'));
 		}
 
@@ -1695,7 +1697,7 @@ class InboundEmailSetupCheck {
 		// A record for the mail host. The SCOPE carries the hostname these rows
 		// are about, so a caller can tell whether the record falls inside a
 		// given domain's own zone — the Setup tab uses it to show the row
-		// alongside that domain's other DNS instead of burying it in Advanced.
+		// alongside that domain's other DNS instead of leaving it on the Server tab.
 		if ($canonical === '') {
 			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Mail host A record', self::REQUIRED, self::UNKNOWN,
 				'Cannot check — no mail hostname is configured yet.');
@@ -1793,7 +1795,7 @@ class InboundEmailSetupCheck {
 		if ($host === '') {
 			$out[] = $this->r('mailhost.a_record', '', 'mailhost', 'Relay MX hostname A record', self::REQUIRED, self::UNKNOWN,
 				'The relay\'s MX hostname is not recorded yet.',
-				'Reload the Setup tab once — its Relay section records the hostname from the relay\'s provisioning job — then re-check.');
+				'The hostname is recorded when the relay is provisioned or enrolled. Update the relay from the Relay section on the Server tab, then re-check.');
 			return $out;
 		}
 
@@ -1865,7 +1867,7 @@ class InboundEmailSetupCheck {
 		// of its own to be wrong: this deployment prescribes nothing for it — no
 		// MX/SPF grading, no Direct plan, no machine-sender offer
 		// (specs/imap_source_domain_boundaries.md § 3). Every enumerating caller
-		// (the Setup tab's advanced run, InboundEmailHealth::checkDomainDns) funnels
+		// (the Server tab's health run, InboundEmailHealth::checkDomainDns) funnels
 		// through here, so this one gate is the skip for all of them — the same
 		// verdict CheckDomainSetup reaches in its own loop.
 		if ($model && $model->is_imap_source()) {
@@ -1900,7 +1902,7 @@ class InboundEmailSetupCheck {
 		} elseif ($fronted && $mx_prescribed === '') {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'The relay\'s MX hostname is not recorded yet, so there is no target to verify against.',
-				'Reload the Setup tab once — its Relay section records the hostname from the relay\'s provisioning job — then re-check.');
+				'The hostname is recorded when the relay is provisioned or enrolled. Update the relay from the Relay section on the Server tab, then re-check.');
 		} elseif (!$mxOk) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for ' . $domain . ' MX failed — try again.');
@@ -2621,8 +2623,8 @@ class InboundEmailSetupCheck {
 
 		// Blockers with no domain to appear on (specs/mailbox_machine_sender_card.md):
 		// an empty or invalid defaultemail matches no focused domain, so its red
-		// card would render nowhere. It surfaces here — the Advanced server-wide
-		// view — so a blocked site always has at least one red surface. The
+		// card would render nowhere. It surfaces here — the Server tab's health
+		// run — so a blocked site always has at least one red surface. The
 		// protected-domain blocker is NOT emitted here: it has a domain home.
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		$sys_from = trim((string)$this->settings->get_setting('defaultemail'));
@@ -3223,7 +3225,7 @@ class InboundEmailSetupCheck {
 		if (!$state['enrolled']) {
 			return $this->r('domain.ownership', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
 				'This deployment no longer holds a fleet slot, so the relay accepts no mail for ' . $domain . '.',
-				'', array('text' => 'Re-enroll in the Setup tab\'s Relay section.'));
+				'', array('text' => 'Re-enroll in the Relay section on the Server tab.'));
 		}
 		$claim = $this->fleetClaimFor($domain);
 		if ($claim === null || (string)($claim['status'] ?? '') === 'error') {
@@ -3434,8 +3436,8 @@ class InboundEmailSetupCheck {
 				. 'sealed key did not sign — but send protection is off, so nothing is signing with that key. '
 				. 'Mail leaving this domain is being accepted by your provider and then discarded by the '
 				. 'recipient, usually with no bounce you would see.',
-				array('text' => 'Two ways out, and either is fine: finish turning send protection on (Sending '
-					. 'identity, under Advanced), which makes the published records correct — or restore the '
+				array('text' => 'Two ways out, and either is fine: finish turning send protection on (the Sending '
+					. 'identity box at the foot of this domain\'s Setup page), which makes the published records correct — or restore the '
 					. 'ordinary records so mail flows the normal way. Do one of them now; this state sends nothing.'));
 		}
 
@@ -3445,7 +3447,7 @@ class InboundEmailSetupCheck {
 					. ' — anyone can still send as this domain.',
 				'You asked for nobody to be able to send mail claiming to be you — including someone who has '
 				. 'broken into this server. That is send protection, and it is not on yet.',
-				array('text' => 'Finish it under Sending identity in Advanced. Nothing changes for your mail '
+				array('text' => 'Finish it in the Sending identity box at the foot of this domain\'s Setup page. Nothing changes for your mail '
 					. 'until the last step, and you can stop at any point.'));
 		}
 

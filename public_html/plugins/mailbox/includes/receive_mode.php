@@ -9,7 +9,7 @@
  * IT IS A SETTING, NOT A GATE (specs/mailbox_relay_surface_simplification.md).
  * An undecided deployment receives directly and works; the choice is made by
  * the relay itself — enabling it sets relay, disabling it sets direct — on the
- * Setup tab's Relay section, and can be changed at any time. A relay is only
+ * Server tab's Relay section, and can be changed at any time. A relay is only
  * load-bearing under the Seal at the relay add-on, so demanding the answer
  * before any domain has asked for it asked the operator to decide about infrastructure they
  * may never need, in front of every mailbox page.

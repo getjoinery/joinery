@@ -5,7 +5,7 @@
  * A relay-fronted deployment's mail arrives only if this server can collect it
  * from the relay. When it cannot, the relay keeps accepting — senders are told
  * their mail was delivered — while nothing brings it here. Every surface that
- * knows this is one an operator has to open: the Setup tab, the reader's
+ * knows this is one an operator has to open: the Server tab, the reader's
  * per-mailbox banner, the task log. This notice is the one that comes to them,
  * rendered through the admin-header registry (AdminNotices) on every page.
  *
@@ -14,15 +14,15 @@
  *   - mrl_pickup_alarm_time — the reconcile pass found pickup stopped and said
  *     so once (MailboxRelay::pickupTransition); cleared when pickup resumes.
  *   - mrl_last_health_failure — the last ping's failure class, stamped by every
- *     health poll (the reconcile pass and the Setup tab alike), '' when the
+ *     health poll (the reconcile pass and the Server tab alike), '' when the
  *     last ping answered.
  *
  * Nothing here pings, resolves or probes. A relay that is fine renders ''.
  *
- * @version 1.0
+ * @version 1.1 - the link opens the Relay section on the Server tab
  */
 class MailboxAttentionNotice {
-	const SETUP_URL = '/plugins/mailbox/admin/admin_mailbox_setup';
+	const SETUP_URL = '/plugins/mailbox/admin/admin_mailbox_server#relay-section';
 
 	/** The notice for this deployment's active relay, or '' when there is nothing to say. */
 	public static function render(): string {
