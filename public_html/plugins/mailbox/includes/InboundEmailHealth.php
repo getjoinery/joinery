@@ -20,6 +20,7 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.30 - forwardingInUse(): the sending route is checked only while something forwards
  * @version 1.29 - relay fixes point at the Relay section on the Server tab
  * @version 1.28 - the spam scanner checks point at Run setup again on the Plugins page, not a command to
  *                 type on the host (plugin_installer_from_the_browser.md D3)
@@ -263,6 +264,30 @@ class InboundEmailHealth {
     const RELAY_TIMEOUT = 5;
 
     /**
+     * Whether anything on this server forwards mail, and so takes the sending
+     * route: an enabled mailbox that forwards, an enabled domain whose
+     * catch-all forwards to an address, or an enabled filter with a Forward
+     * to action. Mail the site writes itself (receipts, notifications) leaves
+     * through EmailSender and never takes this route.
+     */
+    public static function forwardingInUse(): bool {
+        $db = DbConnector::get_instance()->get_db_link();
+        $sql = "SELECT
+            EXISTS (SELECT 1 FROM iea_inbound_email_aliases a
+                JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
+                WHERE a.iea_delete_time IS NULL AND a.iea_is_enabled
+                  AND d.ied_delete_time IS NULL AND d.ied_is_enabled
+                  AND a.iea_delivery_mode IN ('forward', 'forward_and_store'))
+            OR EXISTS (SELECT 1 FROM ied_inbound_email_domains d
+                WHERE d.ied_delete_time IS NULL AND d.ied_is_enabled
+                  AND d.ied_catch_all_mode = 'forward' AND COALESCE(TRIM(d.ied_catch_all_address), '') <> '')
+            OR EXISTS (SELECT 1 FROM ief_inbound_email_filters f
+                WHERE f.ief_delete_time IS NULL AND f.ief_is_enabled
+                  AND COALESCE(TRIM(f.ief_action_forward_to), '') <> '')";
+        return (bool)$db->query($sql)->fetchColumn();
+    }
+
+    /**
      * Verify the relay used to forward mail. The router resolves one of two
      * paths (resolveRelayProvider):
      *
@@ -276,6 +301,11 @@ class InboundEmailHealth {
      * @throws ProvisioningCheckFailed if the resolved relay cannot be verified.
      */
     public static function checkForwardingRelay() {
+        // Nothing forwards, so nothing takes this route: an unreachable SMTP
+        // host is not a fault until a mailbox, catch-all or filter would use it.
+        if (!self::forwardingInUse()) {
+            return;
+        }
         $router = new InboundEmailRouter();
 
         // Provider raw-MIME relay active: verify the provider credential.

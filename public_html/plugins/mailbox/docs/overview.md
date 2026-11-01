@@ -1158,14 +1158,14 @@ bounces, so the SRS envelope is best-effort there and SRS bounce-decoding does
 not apply — the From-header rewrite to the verified address is what carries
 deliverability either way.
 
-The **Sending route** check on the Setup tab verifies the *resolved* outbound
-path: when provider relay is active it confirms the provider's own credential is
+The **Sending route** check verifies the *resolved* path forwarded mail takes:
+when provider relay is active it confirms the provider's own credential is
 configured (so a healthy API key reads PASS even with empty `smtp_*`); on the
-SMTP fallback path it connects to the SMTP host and closes. It is named for what
-it is — the route outgoing mail takes — and has nothing to do with the ingest
-relay described under [The receive-mode choice](#the-receive-mode-choice-relay-or-direct); the two are unrelated, and
-sharing the word *relay* between them left no way to tell which a row was
-about.
+SMTP fallback path it connects to the SMTP host and closes. Only forwarded mail
+takes this route (a mailbox that forwards, a catch-all forward, a filter's
+Forward to action), so while nothing forwards the row is INFO and nothing is
+probed. It has nothing to do with the ingest relay described under
+[The receive-mode choice](#the-receive-mode-choice-relay-or-direct).
 
 ## Knowing a mailbox is unfinished
 

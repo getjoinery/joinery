@@ -74,6 +74,45 @@ $suffix = substr(md5(uniqid('abc', true)), 0, 8);
 $user = make_user('MbCustody');
 $uid = (int)$user->key;
 
+$alias_id = 0;
+$domain_id = 0;
+$vault = null;
+$grant = null;
+$file_ids = array();
+$message_ids = array();
+
+// Registered before any fixture row exists, so a run that fails partway
+// through the fixtures still removes what it made, and after make_user so it
+// runs BEFORE make_user's own teardown (LIFO) — the user row cannot go until
+// everything pointing at it has.
+harness_defer(function () use (&$file_ids, &$message_ids, &$alias_id, &$domain_id, &$vault, &$grant, $db) {
+	foreach ($message_ids as $mid) {
+		try {
+			$db->prepare('DELETE FROM ima_inbound_message_attachments
+				WHERE ima_iem_inbound_email_message_id = ?')->execute(array($mid));
+		} catch (\Throwable $e) {}
+	}
+	$db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_iea_inbound_email_alias_id = ?')
+		->execute(array($alias_id));
+	foreach (array_unique($file_ids) as $fid) {
+		try {
+			$f = new File((int)$fid, TRUE);
+			if ($f->key) { $f->permanent_delete(); }
+		} catch (\Throwable $e) {}
+	}
+	try { $db->prepare('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id IN
+			(SELECT mir_mail_import_run_id FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?)')
+		->execute(array($alias_id)); } catch (\Throwable $e) {}
+	try { $db->prepare('DELETE FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?')
+		->execute(array($alias_id)); } catch (\Throwable $e) {}
+	if ($grant) { try { $grant->permanent_delete(); } catch (\Throwable $e) {} }
+	$db->prepare('DELETE FROM iea_inbound_email_aliases WHERE iea_inbound_email_alias_id = ?')
+		->execute(array($alias_id));
+	$db->prepare('DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = ?')
+		->execute(array($domain_id));
+	if ($vault) { try { $vault->permanent_delete(); } catch (\Throwable $e) {} }
+});
+
 $kp1 = $box->generateKeypair();
 $kp2 = $box->generateKeypair(); // the generation the rotation moves to
 
@@ -110,38 +149,6 @@ $grant->set('ieg_iea_inbound_email_alias_id', $alias_id);
 $grant->set('ieg_usr_user_id', $uid);
 $grant->save();
 
-$file_ids = array();
-$message_ids = array();
-
-// Registered here so it runs BEFORE make_user's own teardown (LIFO) — the user
-// row cannot go until everything pointing at it has.
-harness_defer(function () use (&$file_ids, &$message_ids, $alias_id, $domain_id, $vault, $grant, $db) {
-	foreach ($message_ids as $mid) {
-		try {
-			$db->prepare('DELETE FROM ima_inbound_message_attachments
-				WHERE ima_iem_inbound_email_message_id = ?')->execute(array($mid));
-		} catch (\Throwable $e) {}
-	}
-	$db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_iea_inbound_email_alias_id = ?')
-		->execute(array($alias_id));
-	foreach (array_unique($file_ids) as $fid) {
-		try {
-			$f = new File((int)$fid, TRUE);
-			if ($f->key) { $f->permanent_delete(); }
-		} catch (\Throwable $e) {}
-	}
-	try { $db->prepare('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id IN
-			(SELECT mir_mail_import_run_id FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?)')
-		->execute(array($alias_id)); } catch (\Throwable $e) {}
-	try { $db->prepare('DELETE FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?')
-		->execute(array($alias_id)); } catch (\Throwable $e) {}
-	try { $grant->permanent_delete(); } catch (\Throwable $e) {}
-	$db->prepare('DELETE FROM iea_inbound_email_aliases WHERE iea_inbound_email_alias_id = ?')
-		->execute(array($alias_id));
-	$db->prepare('DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = ?')
-		->execute(array($domain_id));
-	try { $vault->permanent_delete(); } catch (\Throwable $e) {}
-});
 harness_defer(function () use ($uid) { VaultUnlock::lockAll($uid); });
 
 $png = harness_unique_png(); // its own bytes: a fixed picture dedups onto the box's leftovers

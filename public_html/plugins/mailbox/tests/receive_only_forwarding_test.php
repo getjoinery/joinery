@@ -108,6 +108,42 @@ function rof_logs(int $domain_id, string $status): array {
 }
 
 try {
+	// ---------------------------------------------------------------------
+	section('The sending route is checked only while something forwards');
+	// Run first, before this suite makes any forwarding mailbox. The test
+	// database carries no content, so nothing forwards yet; if a leftover row
+	// does, the flips below cannot be observed and the section says so.
+	if (InboundEmailHealth::forwardingInUse()) {
+		harness_skip('forwarding already in use in this database', 'a leftover forwarding row');
+	} else {
+		$route = rof_domain('route', $suffix, array(), $domain_ids);
+		$stored = rof_alias($route, 'kept', 'store');
+		check(!InboundEmailHealth::forwardingInUse(), 'a store-only mailbox does not use the route');
+		$row = null;
+		foreach ((new InboundEmailSetupCheck())->run(null, null) as $r) { if ($r['id'] === 'plugin.relay') { $row = $r; } }
+		check($row && $row['status'] === InboundEmailSetupCheck::INFO, 'and the Sending route row is INFO, not a failure',
+			$row ? $row['status'] : 'no row');
+		$fwd_route = rof_alias($route, 'passon', 'forward', 'route-dest@example.test');
+		check(InboundEmailHealth::forwardingInUse(), 'a forwarding mailbox does');
+		$fwd_route->set('iea_is_enabled', false);
+		$fwd_route->save();
+		check(!InboundEmailHealth::forwardingInUse(), 'a disabled one does not');
+		$route->set('ied_catch_all_mode', InboundEmailDomain::CATCHALL_FORWARD);
+		$route->set('ied_catch_all_address', 'route-catch@example.test');
+		$route->save();
+		check(InboundEmailHealth::forwardingInUse(), 'a catch-all that forwards does');
+		$route->set('ied_catch_all_address', '');
+		$route->save();
+		check(!InboundEmailHealth::forwardingInUse(), 'a forward catch-all with no address does not');
+		$f = new InboundEmailFilter(NULL);
+		$f->set('ief_ied_inbound_email_domain_id', (int)$route->key);
+		$f->set('ief_iea_inbound_email_alias_id', (int)$stored->key);
+		$f->set('ief_action_forward_to', 'route-filter@example.test');
+		$f->save();
+		check(InboundEmailHealth::forwardingInUse(), 'a filter with a Forward to action does');
+		$db->exec('DELETE FROM ief_inbound_email_filters WHERE ief_inbound_email_filter_id = ' . (int)$f->key);
+	}
+
 	$std = rof_domain('std', $suffix, array('ied_reject_unmatched' => true), $domain_ids);
 
 	// ---------------------------------------------------------------------

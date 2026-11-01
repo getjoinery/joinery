@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.144.18",
+    "version": "1.144.19",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -86,7 +86,7 @@
         {
             "key": "outbound_forwarding_relay",
             "label": "Sending route",
-            "details": "The route outgoing mail takes: the active provider's credential, or an SMTP host. Unrelated to the ingest relay.",
+            "details": "The route forwarded mail takes: the active provider's credential, or an SMTP host. Passes while nothing forwards. Unrelated to the ingest relay.",
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkForwardingRelay"

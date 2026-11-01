@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.61 - the Sending route row is INFO while nothing forwards: only forwarded mail takes it
  * @version 1.60 - relay and send-protection fixes name the Server tab and the Sending identity box;
  *                 a missing relay MX hostname says where it is recorded
  * @version 1.59 - a box with its own Postfix says whether its mail leaves over IPv4 (host.outbound_ipv4)
@@ -2673,19 +2674,27 @@ class InboundEmailSetupCheck {
 		// has nothing whatever to do with the ingest relay the Relay section is
 		// about. Both were called "relay", one row apart, and no reader could tell
 		// which was which (specs/mailbox_relay_surface_simplification.md).
-		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
-			InboundEmailHealth::checkForwardingRelay();
-			$relay = (new InboundEmailRouter())->describeRelay();
-			$summary = ($relay['mode'] === 'provider')
-				? 'Outgoing mail leaves through ' . $relay['label'] . ', reusing its credential.'
-				: 'Outgoing mail leaves through an SMTP host, and it is reachable.';
-			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::PASS,
-				$summary);
-		} catch (\Throwable $e) {
-			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::FAIL,
-				'The route outgoing mail takes could not be verified.', $e->getMessage(),
-				array('text' => 'Check the active email provider credential, or the outgoing SMTP settings, on the Settings page.'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+		if (!InboundEmailHealth::forwardingInUse()) {
+			// Only forwarded mail takes this route; the site's own mail leaves
+			// through EmailSender. Nothing to verify until something forwards.
+			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::INFO,
+				'Nothing on this server forwards mail, so the route forwarded mail takes is not checked. '
+				. 'It is checked as soon as a mailbox, catch-all or filter forwards.');
+		} else {
+			try {
+				InboundEmailHealth::checkForwardingRelay();
+				$relay = (new InboundEmailRouter())->describeRelay();
+				$summary = ($relay['mode'] === 'provider')
+					? 'Outgoing mail leaves through ' . $relay['label'] . ', reusing its credential.'
+					: 'Outgoing mail leaves through an SMTP host, and it is reachable.';
+				$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::PASS,
+					$summary);
+			} catch (\Throwable $e) {
+				$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::FAIL,
+					'The route forwarded mail takes could not be verified.', $e->getMessage(),
+					array('text' => 'Check the active email provider credential, or the outgoing SMTP settings, on the Settings page.'));
+			}
 		}
 
 		// A protected mailbox that cannot be sealed to is HELD mail: store time
