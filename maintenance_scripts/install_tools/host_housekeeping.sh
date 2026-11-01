@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.39 - In a container, a standalone server's listen pin (conf.d/99-joinery-local-only.conf) an
+#                earlier run left is removed and PostgreSQL restarted: housekeeping before 1.19 took a Podman
+#                container for a standalone server, and its host could not reach the site's database.
 # Version: 1.38 - kexec stays locked on every machine; where root wrote /etc/joinery/kdump_allowed (localdev only,
 #                to catch its freezes) boot leaves it open until kdump-tools loads the crash kernel, then
 #                joinery-kexec-lock.service locks it. Without the file nothing changes and the unit is removed
@@ -973,6 +976,24 @@ for pg_dir in "${FS_ROOT}"/etc/postgresql/*/main; do
         fi
     fi
     rm -f "${kept}"
+
+    # listen_addresses: a container listens on its own interface, the way its
+    # host reaches it. A pin this script wrote before it knew a Podman
+    # container for one (1.19) left that container answering only itself
+    # from its next PostgreSQL start; it is removed and PostgreSQL restarted
+    # on the address postgresql.conf names.
+    if [[ "${IN_CONTAINER}" == 1 && -f "${pg_dir}/conf.d/99-joinery-local-only.conf" ]] \
+            && grep -qF "# Managed by host_housekeeping.sh" "${pg_dir}/conf.d/99-joinery-local-only.conf"; then
+        rm -f "${pg_dir}/conf.d/99-joinery-local-only.conf"
+        say "PostgreSQL ${pg_ver}: removed ${pg_dir}/conf.d/99-joinery-local-only.conf, a standalone server's pin, from this container"
+        if [[ "${RUN_SYSTEM}" == 1 ]]; then
+            if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+                systemctl restart postgresql >/dev/null 2>&1 || { warn "PostgreSQL could not be restarted"; FAILED=1; }
+            else
+                service postgresql restart >/dev/null 2>&1 || { warn "PostgreSQL could not be restarted"; FAILED=1; }
+            fi
+        fi
+    fi
 
     # listen_addresses: a standalone server listens on localhost only.
     if [[ "${IN_CONTAINER}" == 0 ]]; then

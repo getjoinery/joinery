@@ -575,6 +575,18 @@ chk "the container keeps listening on its interface (how the host reaches it)" "
 before="$(tree_sum "$PG")"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
 chk "a second start changes nothing" "$( [ "$(tree_sum "$PG")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c 'answers only locally now')" "same:0"
+# A Podman container an earlier run took for a standalone server: its pin goes.
+PP="$T/pg-podman"; mkpg "$PP" '*' 'local   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\n'
+mkdir -p "$PP/run" "$PP/proc/net" "$T/pg-podman-site/config"; touch "$PP/run/.containerenv"
+cp "$PG/proc/net/route" "$PP/proc/net/route"
+printf '# Managed by host_housekeeping.sh: PostgreSQL answers only locally.\nlisten_addresses = '"'"'localhost'"'"'\n' > "$PP/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PP" bash "$SCRIPT" x "$T/pg-podman-site" 2>&1)"
+chk "a container's leftover listen pin is removed, and said" "$([ -e "$PP/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo pinned || echo gone):$(printf '%s\n' "$out" | grep -c "a standalone server's pin, from this container")" "gone:1"
+chk "and its gateway is admitted" "$(grep -cE '^host +all +all +172\.17\.0\.1/32 +md5$' "$PP/etc/postgresql/16/main/pg_hba.conf")" "1"
+printf 'listen_addresses = '"'"'localhost'"'"'\n' > "$PP/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PP" bash "$SCRIPT" x "$T/pg-podman-site" 2>&1)"
+chk "a file of that name this script did not write is left alone" "$([ -e "$PP/etc/postgresql/16/main/conf.d/99-joinery-local-only.conf" ] && echo kept || echo gone)" "kept"
+
 rm -f "$PG/proc/net/route"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-ctr-site" 2>&1)"
 chk "no default route: the host is not admitted, and says so" "$(grep -c '172\.17\.0\.1' "$HBA"):$(printf '%s\n' "$out" | grep -c 'so the Docker host is not admitted')" "0:1"
