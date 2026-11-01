@@ -1110,9 +1110,10 @@ Not yet built: encrypted thumbnails.
 
 ### The vault key
 
-The key that opens encrypted content is the Drive vault's X25519 secret key. It
-reaches the device once, during the browser link ceremony, sealed to a keypair
-the device generated for that purpose, and goes straight into the operating
+The key that opens encrypted content is the Drive vault's secret key: the
+32-byte seed of its X-Wing (ML-KEM-768 + X25519) keypair. It reaches the device
+once, during the browser link ceremony, sealed to an X-Wing keypair the device
+generated for that purpose, and goes straight into the operating
 system's credential store — or, on a computer with no store the client can use
 (Linux in the default build), a mode-0600 file in the state directory. A session
 that cannot open a credential store the computer has is not given it at all
@@ -1120,11 +1121,14 @@ that cannot open a credential store the computer has is not given it at all
 holds it for the life of the process — reading it per file would mean a
 keychain prompt per file on macOS.
 
-Only the secret half is stored. The public half — which is what file-key grants
-are sealed to, because the sealing scheme mixes it into its key derivation — is
+Only the secret half is stored. The public half — what file-key grants are
+sealed to, and what the opener checks a grant's named key against — is
 recomputed from the secret on every start. A pair carried as two stored fields
 can be got out of step by one bad write, and the symptom is every unwrap failing
-with an error that names nothing.
+with an error that names nothing. A grant sealed to a vault key of the older
+X25519 kind (a vault its owner has not rotated) still opens; the client never
+seals to one, and an upload into a folder with such a reader waits until they
+rotate.
 
 A device with no vault key is an ordinary, supported state, not a degraded one:
 an account with no encrypted folders never needs one. So none of its failure
@@ -1539,7 +1543,7 @@ Authentication happens in the browser, not the terminal. A passkey-first account
 has no password to type, a step-up challenge cannot be answered at a prompt, and
 the vault key can only be unlocked where WebAuthn works.
 
-1. The client generates an X25519 keypair — **before** the request, because its
+1. The client generates an X-Wing keypair — **before** the request, because its
    public half is what an enabled vault key comes back sealed to. A session that
    cannot keep a vault key ([Credentials](#credentials)) generates none and
    sends no public key, so the approval page does not offer encrypted folders.
@@ -1589,7 +1593,7 @@ holding another — which reads as mass corruption on the very next pass.
 
 ### Credentials
 
-Three secrets: the API secret, the device X25519 key, and (when enabled) the
+Three secrets: the API secret, the device X-Wing key, and (when enabled) the
 Drive vault key.
 
 - **macOS** — the login Keychain. **Windows** — the Credential Manager.

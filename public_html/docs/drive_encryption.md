@@ -22,7 +22,7 @@ Both are consumers of the [Sealed Vault](sealed_vault.md), each using the scope
 that matches its custody: Fortress uses the `drive` scope (client custody — the
 secret key is unwrapped only in the browser), Private uses the server-custody
 `user` scope, the same vault mail and chat seal to. The per-user encryption
-identity — one X25519 keypair per scope, its passkey / recovery-key / passphrase
+identity — one X-Wing (ML-KEM-768 + X25519) keypair per scope, its passkey / recovery-key / passphrase
 unlockers, and the enrollment and recovery ceremonies — comes from the vault.
 Drive adds only the file-content encryption on top.
 
@@ -58,11 +58,11 @@ zero-knowledge encryption, said out loud.
 The identity and unlock come from the vault's `drive` scope — its **own**
 client-custody keypair, separate from the password manager's `passwords` scope (a
 deliberate decision: unlocking Drive must not open the password vault) and from
-the server-custody `user` scope. Each scope has its own X25519 keypair and its
+the server-custody `user` scope. Each scope has its own X-Wing keypair and its
 own WebAuthn PRF context (`vault-drive-kek`), so a KEK derived for one scope can
 never open another's key.
 
-1. **Account keypair** — the `drive` client-custody vault keypair (X25519). The
+1. **Account keypair** — the `drive` client-custody vault keypair (X-Wing; the secret is a 32-byte seed). The
    public key is cleartext at rest; the secret key is unwrapped **only in the
    browser**, via the vault's shared unlockers (passkey PRF, recovery key, or
    optional passphrase). Enrollment and recovery are the vault's shared keyring
@@ -72,7 +72,7 @@ never open another's key.
    IV; the AAD binds a per-file random **content id** and the chunk index, so a
    chunk can neither be reordered within a file nor transplanted to another).
 3. **Key grants** — `FileKeyGrant` (`fkg_file_key_grants`): the FK sealed to a
-   user's `drive` vault public key (X25519 sealed box, produced in the owner's
+   user's `drive` vault public key (an X-Wing seal, produced in the owner's
    browser), one row per (file, user), unique on (file, user). The owner always
    holds a row. **This table is the multi-user story**: sharing an encrypted file
    is the owner's browser unwrapping the FK and re-wrapping it to the recipient's
@@ -85,9 +85,10 @@ never open another's key.
    the root vault, but it opens neither the password vault's key nor the
    server-custody account vault's (Private mail and chat).
 
-WebCrypto provides AES-GCM and X25519 natively; the only dependency is the
-Argon2id WASM module for the passphrase KDF, which is the **vault's shared
-browser module**, not a drive-local copy.
+WebCrypto provides AES-GCM and HKDF natively. X-Wing comes from the vault's
+pinned post-quantum module (`assets/vendor/noble/`), and the passphrase KDF from
+its Argon2id WASM module; both are the **vault's shared browser modules**, not
+drive-local copies.
 
 ## Access and readability — the two-table model
 
@@ -276,7 +277,7 @@ A desktop client that only ever received ciphertext could sync encrypted
 folders but never open one. So the vault key is handed to a named device, once,
 during the device-link ceremony (`docs/drive.md` § Device linking).
 
-When it starts linking, the device generates an X25519 keypair and sends only
+When it starts linking, the device generates an X-Wing keypair and sends only
 the public half. In the approving browser — the one place the vault can be unlocked — the
 drive session (`JoinerySealed.session('drive')`, through the core unlock
 ceremony) seals the vault **secret** key to that public key

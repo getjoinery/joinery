@@ -1,6 +1,6 @@
 [package]
 name = "jd-crypto"
-description = "Native reimplementation of VaultCrypto + DriveCrypto (client-custody browser crypto). Must byte-match assets/js/vault-crypto.js and drive-crypto.js — parity enforced by tests/functional/drive/sync_crypto_parity_gate.sh."
+description = "Native reimplementation (X-Wing seals, specs/post_quantum_sealing.md WP4) of VaultCrypto + DriveCrypto (client-custody browser crypto). Must byte-match assets/js/vault-crypto.js and drive-crypto.js — parity enforced by tests/functional/drive/sync_crypto_parity_gate.sh."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
@@ -10,6 +10,9 @@ publish.workspace = true
 [dependencies]
 aes-gcm = { version = "0.10", features = ["std"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+ml-kem = { version = "0.3.4", features = ["zeroize"] }
+sha3 = "0.12"
+shake = "0.1"
 hkdf = "0.12"
 sha2 = "0.10"
 argon2 = { version = "0.5", features = ["std"] }

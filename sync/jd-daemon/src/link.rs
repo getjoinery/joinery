@@ -89,10 +89,21 @@ pub struct Pending {
 }
 
 /// The keypair a device offers the vault key to be sealed to.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DeviceKey {
     pub public_key: String,
-    pub secret_pkcs8: Vec<u8>,
+    pub secret_key: Vec<u8>,
+}
+
+impl std::fmt::Debug for DeviceKey {
+    /// Prints the public key and says the secret exists, so formatting a
+    /// `Pending` never writes the device secret into a log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceKey")
+            .field("public_key", &self.public_key)
+            .field("secret_key", &"<held>")
+            .finish()
+    }
 }
 
 /// What the user decided.
@@ -131,7 +142,7 @@ pub fn begin(
         let keypair = jd_crypto::vault::generate_vault_keypair();
         DeviceKey {
             public_key: keypair.public_key_b64.clone(),
-            secret_pkcs8: keypair.secret_key_pkcs8.clone(),
+            secret_key: keypair.secret_key.clone(),
         }
     });
     let offered = device_key.as_ref().map_or("", |k| k.public_key.as_str());
@@ -212,15 +223,14 @@ pub fn instructions(base_url: &str, pending: &Pending, opened: bool) -> String {
 
 /// Open the sealed vault key with this device's secret key.
 ///
-/// The recipient public key is required by the sealing scheme itself — it is
-/// mixed into the key derivation — which is what makes a blob sealed to one
-/// device unopenable by another even if that other device somehow had the
-/// secret.
+/// The recipient public key names the seal's version and must be the secret's
+/// own; the device's secret is what opens it, so a blob sealed to one device
+/// never opens on another.
 pub fn open_vault_key(pending: &Pending, sealed: &str) -> Result<Vec<u8>, LinkError> {
     let key = pending.device_key.as_ref().ok_or_else(|| {
         LinkError::Crypto("this computer offered no key for it to be sealed to".into())
     })?;
-    jd_crypto::vault::open_from_secret_key(sealed, &key.secret_pkcs8, &key.public_key)
+    jd_crypto::vault::open_from_secret_key(sealed, &key.secret_key, &key.public_key)
         .map_err(|e| LinkError::Crypto(e.to_string()))
 }
 
@@ -293,7 +303,7 @@ pub fn store_approved(
         Some(key) => secrets
             .set(
                 Secret::DeviceKey,
-                &jd_crypto::b64::encode(&key.secret_pkcs8),
+                &jd_crypto::b64::encode(&key.secret_key),
             )
             .map_err(|e| format!("cannot store the device key: {e}"))?,
         // Not fatal if it cannot be removed: nothing reads a device key once
@@ -643,7 +653,7 @@ mod tests {
             expires_time: "2026-07-31 12:00:00".into(),
             device_key: Some(DeviceKey {
                 public_key: kp.public_key_b64.clone(),
-                secret_pkcs8: kp.secret_key_pkcs8.clone(),
+                secret_key: kp.secret_key.clone(),
             }),
         }
     }
@@ -765,7 +775,7 @@ mod tests {
     #[test]
     fn a_vault_key_sealed_to_this_device_opens_with_this_devices_key() {
         let p = pending();
-        let vault_secret = b"the drive vault secret key, pkcs8-shaped";
+        let vault_secret = b"the drive vault secret key, a 32-byte seed";
         let sealed = jd_crypto::vault::seal_to_public_key(vault_secret, public_key(&p)).unwrap();
         assert_eq!(open_vault_key(&p, &sealed).unwrap(), vault_secret);
     }
@@ -965,7 +975,7 @@ mod tests {
         // an earlier client left under the shared name -- would have the daemon
         // open and seal encrypted files with a key that is not this account's.
         let earlier = jd_sim::SimVault::new(5);
-        let earlier_b64 = jd_crypto::b64::encode(&earlier.secret_key_pkcs8);
+        let earlier_b64 = jd_crypto::b64::encode(&earlier.secret_key);
         for (case, sealed) in [
             ("box not ticked", None),
             (
@@ -1035,7 +1045,7 @@ mod tests {
         secrets
             .set(
                 Secret::VaultKey,
-                &jd_crypto::b64::encode(&key.secret_key_pkcs8),
+                &jd_crypto::b64::encode(&key.secret_key),
             )
             .unwrap();
         let mut config = config("https://drive.example.org");

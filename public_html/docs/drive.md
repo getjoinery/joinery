@@ -965,7 +965,7 @@ password at all. So it does not try. It opens a ceremony, shows a code, and the
 user approves in the browser they are already signed into.
 
 1. The client calls `POST /api/v1/auth/device_link` with its name, platform, and
-   (optionally) an X25519 public key, and gets a code plus a poll token.
+   (optionally) an X-Wing public key (1216 bytes, base64), and gets a code plus a poll token.
 2. The user opens `/profile/devices/link?code=…`, which requires a signed-in
    session and a recent step-up, and shows what is asking — name, platform, and
    the address the request came from. If they have encrypted folders they may

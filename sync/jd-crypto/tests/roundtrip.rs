@@ -147,20 +147,25 @@ fn sealed_box_round_trips_and_refuses_other_keypairs() {
     let fk = FileKey::generate();
     let wrapped = drive::wrap_file_key_to(&fk, &kp.public_key_b64).unwrap();
     let opened =
-        drive::open_wrapped_file_key(&wrapped, &kp.secret_key_pkcs8, &kp.public_key_b64).unwrap();
+        drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &kp.public_key_b64).unwrap();
     assert_eq!(opened.0, fk.0);
 
     let other = vault::generate_vault_keypair();
     assert!(
-        drive::open_wrapped_file_key(&wrapped, &other.secret_key_pkcs8, &other.public_key_b64)
+        drive::open_wrapped_file_key(&wrapped, &other.secret_key, &other.public_key_b64)
             .is_err()
     );
-    // the recipient public key is bound into the KDF: right secret key with the
-    // wrong claimed public key must also refuse
-    assert!(
-        drive::open_wrapped_file_key(&wrapped, &kp.secret_key_pkcs8, &other.public_key_b64)
-            .is_err()
-    );
+    // The right secret with another key named as its public half refuses,
+    // and says the pair is out of step rather than failing to decrypt.
+    let err = match drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &other.public_key_b64) {
+        Err(e) => e,
+        Ok(_) => panic!("opened with another key named as its public half"),
+    };
+    assert!(err.to_string().contains("not this secret key's"), "{err}");
+    // A claimed public key of the other version sends it down the v1 opener,
+    // which refuses.
+    let old_public = vault::public_key_from_secret_key(&jd_crypto::pkcs8::encode(&[3u8; 32])).unwrap();
+    assert!(drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &old_public).is_err());
 }
 
 #[test]
@@ -169,13 +174,13 @@ fn a_public_key_derived_from_a_secret_key_is_the_one_it_was_generated_with() {
     // public key has to be byte-identical, because it is mixed into the KDF and
     // a near-miss fails every unwrap with an error that names nothing.
     let kp = vault::generate_vault_keypair();
-    let derived = vault::public_key_from_secret_key(&kp.secret_key_pkcs8).unwrap();
+    let derived = vault::public_key_from_secret_key(&kp.secret_key).unwrap();
     assert_eq!(derived, kp.public_key_b64);
 
     let fk = FileKey::generate();
     let wrapped = drive::wrap_file_key_to(&fk, &kp.public_key_b64).unwrap();
     assert_eq!(
-        drive::open_wrapped_file_key(&wrapped, &kp.secret_key_pkcs8, &derived)
+        drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &derived)
             .unwrap()
             .0,
         fk.0
@@ -184,19 +189,19 @@ fn a_public_key_derived_from_a_secret_key_is_the_one_it_was_generated_with() {
 
 #[test]
 fn deriving_a_public_key_from_something_that_is_not_a_secret_key_fails() {
-    assert!(vault::public_key_from_secret_key(b"not pkcs8").is_err());
-    // The raw 32-byte scalar is the near-miss worth refusing by name: it is
-    // what a caller reaches for when they forget the PKCS8 envelope.
-    assert!(vault::public_key_from_secret_key(&[7u8; 32]).is_err());
+    assert!(vault::public_key_from_secret_key(b"not a key").is_err());
+    // 31 and 47 bytes: a seed and an old PKCS#8 secret, each one short.
+    assert!(vault::public_key_from_secret_key(&[7u8; 31]).is_err());
+    assert!(vault::public_key_from_secret_key(&[7u8; 47]).is_err());
 }
 
 #[test]
 fn wrapped_secret_key_binds_its_ad() {
     let kp = vault::generate_vault_keypair();
     let kek = vault::kek_from_recovery_code("ABCD-2345-EFGH-6789", "c2FsdHNhbHQ=").unwrap();
-    let blob = vault::wrap_secret_key(&kp.secret_key_pkcs8, &kek, "vault:drive:recovery").unwrap();
+    let blob = vault::wrap_secret_key(&kp.secret_key, &kek, "vault:drive:recovery").unwrap();
     let opened = vault::unwrap_secret_key(&blob, &kek, "vault:drive:recovery").unwrap();
-    assert_eq!(opened, kp.secret_key_pkcs8);
+    assert_eq!(opened, kp.secret_key);
     assert!(vault::unwrap_secret_key(&blob, &kek, "vault:passwords:recovery").is_err());
 }
 

@@ -53,7 +53,7 @@ pub struct Device {
 /// always opened would test the one thing that cannot be allowed to be a stub.
 #[derive(Debug, Clone)]
 pub struct SimVault {
-    pub secret_key_pkcs8: Vec<u8>,
+    pub secret_key: Vec<u8>,
     pub public_key_b64: String,
 }
 
@@ -65,11 +65,12 @@ impl SimVault {
             let word = rng.next_u64().to_le_bytes();
             slot.copy_from_slice(&word[..slot.len()]);
         }
-        let secret_key_pkcs8 = jd_crypto::pkcs8::encode(&scalar);
-        let public_key_b64 = jd_crypto::vault::public_key_from_secret_key(&secret_key_pkcs8)
-            .expect("a key just built in the PKCS8 shape");
+        // The 32 bytes are the vault's X-Wing seed, the form a device holds.
+        let secret_key = scalar.to_vec();
+        let public_key_b64 = jd_crypto::vault::public_key_from_secret_key(&secret_key)
+            .expect("a 32-byte seed is an X-Wing secret");
         SimVault {
-            secret_key_pkcs8,
+            secret_key,
             public_key_b64,
         }
     }
@@ -115,7 +116,7 @@ impl Device {
     /// The same thing, on a device a scenario is already holding.
     pub fn set_vault(&mut self, vault: &SimVault) {
         self.vault = Some(
-            Vault::from_secret_key(&vault.secret_key_pkcs8).expect("a well-formed simulated vault"),
+            Vault::from_secret_key(&vault.secret_key).expect("a well-formed simulated vault"),
         );
     }
 

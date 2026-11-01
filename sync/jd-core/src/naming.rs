@@ -1426,7 +1426,7 @@ mod tests {
         let kp = jd_crypto::vault::generate_vault_keypair();
         let public = kp.public_key_b64.clone();
         (
-            crate::vault::Vault::from_secret_key(&kp.secret_key_pkcs8).unwrap(),
+            crate::vault::Vault::from_secret_key(&kp.secret_key).unwrap(),
             public,
         )
     }

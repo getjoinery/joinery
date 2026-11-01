@@ -79,7 +79,7 @@ struct ThumbVec {
 struct SealedVec {
     label: String,
     recipient_public_key_b64: String,
-    recipient_secret_pkcs8_b64: String,
+    recipient_secret_b64: String,
     plaintext_b64: String,
     sealed_b64: String,
 }
@@ -146,7 +146,7 @@ struct Refusal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sealed_b64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    secret_pkcs8_b64: Option<String>,
+    secret_key_b64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     public_key_b64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,7 +165,7 @@ fn refusal(kind: &str, reason: &str) -> Refusal {
         content_id: None,
         cipher_b64: None,
         sealed_b64: None,
-        secret_pkcs8_b64: None,
+        secret_key_b64: None,
         public_key_b64: None,
         blob: None,
         kek: None,
@@ -289,13 +289,13 @@ fn emit(path: &str) -> ExitCode {
         });
     }
 
-    // sealed boxes: a 32-byte file key and a 48-byte PKCS8 secret (the
+    // sealed boxes: a 32-byte file key and a 32-byte vault seed (the
     // device-link vault handoff shape)
     for (label, payload) in [
         ("file-key", vault::random_bytes::<32>().to_vec()),
         (
-            "pkcs8-handoff",
-            vault::generate_vault_keypair().secret_key_pkcs8.clone(),
+            "seed-handoff",
+            vault::generate_vault_keypair().secret_key.clone(),
         ),
     ] {
         let kp = vault::generate_vault_keypair();
@@ -304,14 +304,14 @@ fn emit(path: &str) -> ExitCode {
             sealed_b64: vault::seal_to_public_key(&payload, &kp.public_key_b64)
                 .expect("seal succeeds"),
             recipient_public_key_b64: kp.public_key_b64.clone(),
-            recipient_secret_pkcs8_b64: b64::encode(&kp.secret_key_pkcs8),
+            recipient_secret_b64: b64::encode(&kp.secret_key),
             plaintext_b64: b64::encode(&payload),
         });
     }
 
     // wrapped secret keys under both CLI-recovery unlockers
     {
-        let secret = vault::generate_vault_keypair().secret_key_pkcs8.clone();
+        let secret = vault::generate_vault_keypair().secret_key.clone();
         let salt = b64::encode(&vault::random_bytes::<16>());
         // messy Crockford entry on purpose: verifier must normalize identically
         let kek_src = KekSource::Recovery {
@@ -389,7 +389,7 @@ fn emit(path: &str) -> ExitCode {
         let mut r = refusal("sealed", "wrong_keypair");
         r.sealed_b64 =
             Some(vault::seal_to_public_key(&fk.0, &kp.public_key_b64).expect("seal succeeds"));
-        r.secret_pkcs8_b64 = Some(b64::encode(&other.secret_key_pkcs8));
+        r.secret_key_b64 = Some(b64::encode(&other.secret_key));
         r.public_key_b64 = Some(other.public_key_b64.clone());
         v.refusals.push(r);
 
@@ -507,7 +507,7 @@ fn verify(path: &str) -> ExitCode {
 
     for s in &v.sealed {
         let ok = (|| {
-            let secret = b64::decode(&s.recipient_secret_pkcs8_b64).ok()?;
+            let secret = b64::decode(&s.recipient_secret_b64).ok()?;
             let opened =
                 vault::open_from_secret_key(&s.sealed_b64, &secret, &s.recipient_public_key_b64)
                     .ok()?;
@@ -524,7 +524,7 @@ fn verify(path: &str) -> ExitCode {
         // grant would be sealed somewhere this device cannot open, and the only
         // symptom would be a decryption error naming nothing.
         let ok = (|| {
-            let secret = b64::decode(&s.recipient_secret_pkcs8_b64).ok()?;
+            let secret = b64::decode(&s.recipient_secret_b64).ok()?;
             Some(vault::public_key_from_secret_key(&secret).ok()? == s.recipient_public_key_b64)
         })()
         .unwrap_or(false);
@@ -560,7 +560,7 @@ fn verify(path: &str) -> ExitCode {
             })()
             .unwrap_or(false),
             "sealed" => (|| {
-                let secret = b64::decode(r.secret_pkcs8_b64.as_ref()?).ok()?;
+                let secret = b64::decode(r.secret_key_b64.as_ref()?).ok()?;
                 Some(
                     vault::open_from_secret_key(
                         r.sealed_b64.as_ref()?,

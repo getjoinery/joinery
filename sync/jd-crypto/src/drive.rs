@@ -445,13 +445,13 @@ pub fn wrap_file_key_to(fk: &FileKey, recipient_public_key_b64: &str) -> Result<
     vault::seal_to_public_key(&fk.0, recipient_public_key_b64)
 }
 
-/// Open a wrapped file key with the vault secret key (PKCS8).
+/// Open a wrapped file key with the vault secret key (the 32-byte seed).
 pub fn open_wrapped_file_key(
     wrapped_b64: &str,
-    secret_key_pkcs8: &[u8],
+    secret_key: &[u8],
     vault_public_key_b64: &str,
 ) -> Result<FileKey> {
-    let bytes = vault::open_from_secret_key(wrapped_b64, secret_key_pkcs8, vault_public_key_b64)?;
+    let bytes = vault::open_from_secret_key(wrapped_b64, secret_key, vault_public_key_b64)?;
     FileKey::from_bytes(&bytes)
 }
 

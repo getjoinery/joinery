@@ -1827,7 +1827,7 @@ pub fn what_the_vault_really_holds(
     for vault in &world.vaults {
         let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
             wrapped,
-            &vault.secret_key_pkcs8,
+            &vault.secret_key,
             &vault.public_key_b64,
         ) else {
             continue;
@@ -1864,7 +1864,7 @@ pub fn vault_content_that_will_not_open(world: &World) -> Vec<String> {
             world.vaults.iter().find_map(|vault| {
                 let key = jd_crypto::drive::open_wrapped_file_key(
                     wrapped,
-                    &vault.secret_key_pkcs8,
+                    &vault.secret_key,
                     &vault.public_key_b64,
                 )
                 .ok()?;
@@ -1933,7 +1933,7 @@ pub fn open_as_the_owner(
     for vault in &world.vaults {
         let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
             wrapped,
-            &vault.secret_key_pkcs8,
+            &vault.secret_key,
             &vault.public_key_b64,
         ) else {
             continue;
@@ -3028,7 +3028,7 @@ pub fn locate(world: &World, hash: &str) -> Option<FoundIn> {
         for held in world.server.encrypted_contents() {
             let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
                 &held.wrapped_file_key,
-                &vault.secret_key_pkcs8,
+                &vault.secret_key,
                 &vault.public_key_b64,
             ) else {
                 continue;

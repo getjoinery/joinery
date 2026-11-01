@@ -46,10 +46,11 @@ pub type VaultResult<T> = Result<T, VaultError>;
 
 /// This device's copy of the Drive vault identity.
 pub struct Vault {
-    /// PKCS8 DER, as WebCrypto exports it and as the ceremony hands it over.
+    /// The 32-byte X-Wing seed, as the browser wraps it and the ceremony hands
+    /// it over (48-byte X25519 PKCS#8 for a vault its owner has not rotated).
     /// Wrapped so it is wiped when the daemon stops rather than left in a freed
     /// page.
-    secret_key_pkcs8: Zeroizing<Vec<u8>>,
+    secret_key: Zeroizing<Vec<u8>>,
     public_key_b64: String,
 }
 
@@ -59,11 +60,11 @@ impl Vault {
     /// Fails rather than storing something unusable, because the alternative is
     /// a daemon that starts, reports encrypted folders as enabled, and refuses
     /// every file for a reason that points at the files.
-    pub fn from_secret_key(secret_key_pkcs8: &[u8]) -> VaultResult<Vault> {
-        let public_key_b64 = jd_crypto::vault::public_key_from_secret_key(secret_key_pkcs8)
+    pub fn from_secret_key(secret_key: &[u8]) -> VaultResult<Vault> {
+        let public_key_b64 = jd_crypto::vault::public_key_from_secret_key(secret_key)
             .map_err(|e| VaultError::Unusable(e.to_string()))?;
         Ok(Vault {
-            secret_key_pkcs8: Zeroizing::new(secret_key_pkcs8.to_vec()),
+            secret_key: Zeroizing::new(secret_key.to_vec()),
             public_key_b64,
         })
     }
@@ -79,7 +80,7 @@ impl Vault {
     pub fn open_file_key(&self, wrapped_file_key: &str) -> VaultResult<FileKey> {
         jd_crypto::drive::open_wrapped_file_key(
             wrapped_file_key,
-            &self.secret_key_pkcs8,
+            &self.secret_key,
             &self.public_key_b64,
         )
         .map_err(|_| VaultError::NotForThisVault)
@@ -92,7 +93,7 @@ impl std::fmt::Debug for Vault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Vault")
             .field("public_key_b64", &self.public_key_b64)
-            .field("secret_key_pkcs8", &"<held>")
+            .field("secret_key", &"<held>")
             .finish()
     }
 }
@@ -133,7 +134,7 @@ mod tests {
         let kp = vc::generate_vault_keypair();
         let public = kp.public_key_b64.clone();
         (
-            Vault::from_secret_key(&kp.secret_key_pkcs8).unwrap(),
+            Vault::from_secret_key(&kp.secret_key).unwrap(),
             public,
         )
     }
@@ -198,10 +199,10 @@ mod tests {
         // An ExecEnv is formatted in error paths; the vault key must not ride
         // along into a log file.
         let kp = vc::generate_vault_keypair();
-        let v = Vault::from_secret_key(&kp.secret_key_pkcs8).unwrap();
+        let v = Vault::from_secret_key(&kp.secret_key).unwrap();
         let shown = format!("{v:?}");
         assert!(shown.contains(&kp.public_key_b64));
-        for byte in kp.secret_key_pkcs8.iter() {
+        for byte in kp.secret_key.iter() {
             assert!(!shown.contains(&format!("{byte}, ")));
         }
     }

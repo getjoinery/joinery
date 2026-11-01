@@ -827,7 +827,7 @@ impl MockServer {
             };
             let key = jd_crypto::drive::open_wrapped_file_key(
                 wrapped,
-                &from.secret_key_pkcs8,
+                &from.secret_key,
                 &from.public_key_b64,
             )
             .expect("rotate_vault: a grant the old vault key does not open");
@@ -3861,10 +3861,10 @@ mod tests {
         assert_eq!(after["held_by_this_device"], json!(false), "a rotation takes the scope off every device");
         assert!(kinds_after(&s, at).is_empty(), "the reseal writes nothing to the feed");
         let grant = s.vault_files()[0].wrapped_file_key.clone().unwrap();
-        let opened = jd_crypto::drive::open_wrapped_file_key(&grant, &new.secret_key_pkcs8, &new.public_key_b64);
+        let opened = jd_crypto::drive::open_wrapped_file_key(&grant, &new.secret_key, &new.public_key_b64);
         assert!(opened.is_ok(), "the grant is sealed to the new key");
         assert!(
-            jd_crypto::drive::open_wrapped_file_key(&grant, &old.secret_key_pkcs8, &old.public_key_b64).is_err(),
+            jd_crypto::drive::open_wrapped_file_key(&grant, &old.secret_key, &old.public_key_b64).is_err(),
             "and no longer to the old one"
         );
         assert_eq!(s.vault_files()[0].id, id);

@@ -2,7 +2,7 @@
 //! Scope-agnostic, exactly like the JS — callers pass scopes/AD strings in.
 //!
 //! Key hierarchy (mirrors assets/js/vault-crypto.js):
-//!   unlocker --KEK--> vault X25519 secret key --seals--> a data key (DEK)
+//!   unlocker --KEK--> vault X-Wing seed (32 bytes) --seals--> a data key (DEK)
 //!                                                        --encrypts--> content
 
 use aes_gcm::aead::{Aead, Payload};
@@ -14,10 +14,16 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{b64, pkcs8, CryptoError, Result};
+use crate::{b64, pkcs8, xwing, CryptoError, Result};
 
-/// HKDF info prefix binding a sealed box to the sealed-vault domain.
-const SEAL_INFO_PREFIX: &[u8] = b"sealed-vault:dek";
+/// HKDF info of a v2 seal: this prefix, then the scope (R2).
+const V2_INFO_PREFIX: &[u8] = b"joinery-seal:v2:";
+/// The scope of every key seal the sync client writes or opens.
+pub const SCOPE_DEK: &str = "dek";
+/// HKDF info prefix of a v1 seal (opened only, for an unrotated key).
+const V1_INFO_PREFIX: &[u8] = b"sealed-vault:dek";
+/// A v1 (X25519) public key's length: refused for sealing, opened by length.
+pub const V1_PUBLIC_BYTES: usize = 32;
 
 /// Argon2id defaults — must match `VaultCrypto.DEFAULT_KDF_PARAMS`
 /// (RFC 9106 second recommendation / Bitwarden default). `mem` is KiB.
@@ -40,39 +46,48 @@ impl Default for KdfParams {
     }
 }
 
-/// A vault identity: raw 32-byte public key (std base64, stored cleartext
-/// server-side) and the PKCS8-encoded secret key (wrapped under each
-/// unlocker's KEK, or sealed to a device keypair — never stored unwrapped).
+/// A vault identity: the 1216-byte X-Wing public key (std base64, stored
+/// cleartext server-side) and the 32-byte seed it is generated from (wrapped
+/// under each unlocker's KEK, or sealed to a device key, never stored
+/// unwrapped). A wrapping that opens to 48 bytes is an older X25519 PKCS#8
+/// secret: it still opens what was sealed to it, and nothing seals to it.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct VaultKeypair {
     #[zeroize(skip)]
     pub public_key_b64: String,
-    pub secret_key_pkcs8: Vec<u8>,
+    pub secret_key: Vec<u8>,
 }
 
 pub fn generate_vault_keypair() -> VaultKeypair {
     generate_vault_keypair_with_rng(OsRng)
 }
 
-pub fn generate_vault_keypair_with_rng<R: RngCore + CryptoRng>(rng: R) -> VaultKeypair {
-    let secret = StaticSecret::random_from_rng(rng);
-    let public = PublicKey::from(&secret);
-    VaultKeypair {
-        public_key_b64: b64::encode(public.as_bytes()),
-        secret_key_pkcs8: pkcs8::encode(secret.as_bytes()),
-    }
+pub fn generate_vault_keypair_with_rng<R: RngCore + CryptoRng>(mut rng: R) -> VaultKeypair {
+    let mut seed = [0u8; xwing::SEED_BYTES];
+    rng.fill_bytes(&mut seed);
+    let kp = VaultKeypair {
+        public_key_b64: b64::encode(&xwing::public_key(&seed).expect("a 32-byte seed")),
+        secret_key: seed.to_vec(),
+    };
+    seed.zeroize();
+    kp
 }
 
 /// The public half of a vault secret key, recomputed from the secret itself.
 ///
-/// A holder of the secret key needs the public one too, because the sealing
-/// scheme mixes the recipient's public key into its key derivation — nothing
-/// opens without it. Derived rather than stored alongside: a pair carried as
-/// two fields can be got out of step by a bad write or a stale config, and the
-/// symptom is every unwrap failing with an opaque decryption error that names
-/// nothing. Scalar multiplication cannot be out of step with its own scalar.
-pub fn public_key_from_secret_key(secret_key_pkcs8: &[u8]) -> Result<String> {
-    let mut scalar = pkcs8::decode(secret_key_pkcs8)?;
+/// A holder of the secret key needs the public one too: the opener chooses the
+/// seal's version by it, and v1's derivation mixes it in. Derived rather than
+/// stored alongside: a pair carried as two fields can be got out of step by a
+/// bad write or a stale config, and the symptom is every unwrap failing with an
+/// opaque decryption error that names nothing.
+///
+/// A 32-byte secret is an X-Wing seed; a 48-byte one is an older X25519
+/// PKCS#8 secret, whose 32-byte public key still opens what was sealed to it.
+pub fn public_key_from_secret_key(secret_key: &[u8]) -> Result<String> {
+    if secret_key.len() == xwing::SEED_BYTES {
+        return Ok(b64::encode(&xwing::public_key(secret_key)?));
+    }
+    let mut scalar = pkcs8::decode(secret_key)?;
     let secret = StaticSecret::from(scalar);
     scalar.zeroize();
     Ok(b64::encode(PublicKey::from(&secret).as_bytes()))
@@ -172,15 +187,18 @@ pub fn unwrap_secret_key(blob: &str, kek: &[u8; 32], ad: &str) -> Result<Vec<u8>
         .map_err(|_| CryptoError::DecryptFailed)
 }
 
-// ---- seal / open to the vault keypair (HKDF ECIES over X25519) --------------
+// ---- seal / open to a public key (v2: X-Wing) -------------------------------
+// `b64(ct[1120] || IV[12] || AES-256-GCM ct+tag)`, no AAD: a key seal binds to
+// its row through the row's own AEAD. The AES key is HKDF-SHA256 over the
+// X-Wing shared secret, salt empty, info 'joinery-seal:v2:' || scope. The
+// sync client seals and opens only scope 'dek' (a file key, a device handoff);
+// `seal_v2_with` takes a scope so the known-answer vectors of every scope can
+// be reproduced.
 
-fn seal_key(shared: &[u8], eph_pub: &[u8; 32], recipient_pub: &[u8; 32]) -> [u8; 32] {
-    let mut info = Vec::with_capacity(SEAL_INFO_PREFIX.len() + 64);
-    info.extend_from_slice(SEAL_INFO_PREFIX);
-    info.extend_from_slice(eph_pub);
-    info.extend_from_slice(recipient_pub);
-    // WebCrypto derives with an explicit zero-length salt; RFC 5869 maps the
-    // absent salt to the same HMAC key, so `None` here is byte-identical.
+fn v2_key(shared: &[u8; 32], scope: &str) -> [u8; 32] {
+    let mut info = Vec::with_capacity(V2_INFO_PREFIX.len() + scope.len());
+    info.extend_from_slice(V2_INFO_PREFIX);
+    info.extend_from_slice(scope.as_bytes());
     let hk = Hkdf::<Sha256>::new(None, shared);
     let mut okm = [0u8; 32];
     hk.expand(&info, &mut okm)
@@ -188,8 +206,55 @@ fn seal_key(shared: &[u8], eph_pub: &[u8; 32], recipient_pub: &[u8; 32]) -> [u8;
     okm
 }
 
-/// Seal bytes to a recipient's vault public key:
-/// `b64(ephPub[32] || IV[12] || AES-256-GCM ct)`. Anyone can seal.
+/// The raw v2 seal of `data` to a 1216-byte key, given its encapsulation
+/// randomness and IV. Only the known-answer vectors pass their own;
+/// `seal_to_public_key` draws both fresh.
+pub fn seal_v2_with(
+    data: &[u8],
+    recipient: &[u8],
+    scope: &str,
+    eseed: &[u8; xwing::ENCAPS_SEED_BYTES],
+    iv: &[u8; 12],
+) -> Result<Vec<u8>> {
+    let (ct, mut ss) = xwing::encapsulate_with(recipient, eseed)?;
+    let mut key = v2_key(&ss, scope);
+    ss.zeroize();
+    let sealed = aes(&key)
+        .encrypt(Nonce::from_slice(iv), data)
+        .map_err(|_| CryptoError::DecryptFailed);
+    key.zeroize();
+    let sealed = sealed?;
+    let mut blob = Vec::with_capacity(ct.len() + 12 + sealed.len());
+    blob.extend_from_slice(&ct);
+    blob.extend_from_slice(iv);
+    blob.extend_from_slice(&sealed);
+    Ok(blob)
+}
+
+/// Open a raw v2 seal with the 32-byte seed under `scope`.
+pub fn open_v2(raw: &[u8], seed: &[u8], scope: &str) -> Result<Vec<u8>> {
+    if seed.len() != xwing::SEED_BYTES {
+        return Err(CryptoError::Malformed(
+            "this is sealed to a new key, and the secret given is not one",
+        ));
+    }
+    if raw.len() < xwing::CIPHERTEXT_BYTES + 12 + 16 {
+        return Err(CryptoError::Malformed("sealed blob too short"));
+    }
+    let (ct, rest) = raw.split_at(xwing::CIPHERTEXT_BYTES);
+    let mut ss = xwing::decapsulate(seed, ct)?;
+    let mut key = v2_key(&ss, scope);
+    ss.zeroize();
+    let opened = aes(&key)
+        .decrypt(Nonce::from_slice(&rest[..12]), &rest[12..])
+        .map_err(|_| CryptoError::DecryptFailed);
+    key.zeroize();
+    opened
+}
+
+/// Seal bytes to a recipient's 1216-byte X-Wing public key, scope 'dek'.
+/// Anyone can seal. A 32-byte (X25519) key is refused: nothing writes a v1
+/// seal, and its holder owes a rotation.
 pub fn seal_to_public_key(data: &[u8], recipient_public_key_b64: &str) -> Result<String> {
     seal_to_public_key_with_rng(data, recipient_public_key_b64, OsRng)
 }
@@ -199,56 +264,92 @@ pub fn seal_to_public_key_with_rng<R: RngCore + CryptoRng>(
     recipient_public_key_b64: &str,
     mut rng: R,
 ) -> Result<String> {
-    let recipient_bytes = decode_public_key(recipient_public_key_b64)?;
-    let recipient = PublicKey::from(recipient_bytes);
-    let eph = StaticSecret::random_from_rng(&mut rng);
-    let eph_pub = PublicKey::from(&eph);
-    let shared = eph.diffie_hellman(&recipient);
-    if !shared.was_contributory() {
-        return Err(CryptoError::BadPublicKey);
+    let recipient = b64::decode(recipient_public_key_b64)?;
+    if recipient.len() == V1_PUBLIC_BYTES {
+        return Err(CryptoError::OldKey);
     }
-    let key = seal_key(shared.as_bytes(), eph_pub.as_bytes(), &recipient_bytes);
-    let cipher = aes(&key);
+    if recipient.len() != xwing::PUBLIC_KEY_BYTES {
+        return Err(CryptoError::Malformed("that is not a public key to seal to"));
+    }
+    let mut eseed = [0u8; xwing::ENCAPS_SEED_BYTES];
+    rng.fill_bytes(&mut eseed);
     let mut iv = [0u8; 12];
     rng.fill_bytes(&mut iv);
-    let ct = cipher
-        .encrypt(Nonce::from_slice(&iv), data)
-        .map_err(|_| CryptoError::DecryptFailed);
-    let ct = ct?;
-    let mut blob = Vec::with_capacity(32 + 12 + ct.len());
-    blob.extend_from_slice(eph_pub.as_bytes());
-    blob.extend_from_slice(&iv);
-    blob.extend_from_slice(&ct);
-    Ok(b64::encode(&blob))
+    let blob = seal_v2_with(data, &recipient, SCOPE_DEK, &eseed, &iv);
+    eseed.zeroize();
+    Ok(b64::encode(&blob?))
 }
 
-/// Open a sealed blob with the vault secret key (PKCS8). The recipient public
-/// key is required because it is bound into the KDF info — a blob sealed to a
-/// different keypair can never open, even with a colluding secret key.
+/// Open a key seal (scope 'dek') sealed to `recipient_public_key_b64` with its
+/// secret. The key's length names the version: 1216 bytes, a v2 seal opened
+/// with the 32-byte seed; 32 bytes, a v1 seal opened with the X25519 secret
+/// (PKCS#8 or the raw scalar), kept so an old key's grants still open until
+/// its holder rotates.
+///
+/// A v2 open first checks that the named public key is the seed's own, as
+/// `SealedBox::openEdge()` does. X-Wing already binds the ciphertext to the
+/// real recipient, so this adds no security; it turns a key pair that has got
+/// out of step into an error that says so, rather than an opaque decryption
+/// failure. v1 binds the public key into its derivation instead.
 pub fn open_from_secret_key(
     sealed_b64: &str,
-    secret_key_pkcs8: &[u8],
+    secret_key: &[u8],
     recipient_public_key_b64: &str,
 ) -> Result<Vec<u8>> {
     let raw = b64::decode(sealed_b64)?;
+    let recipient = b64::decode(recipient_public_key_b64)?;
+    if recipient.len() == xwing::PUBLIC_KEY_BYTES {
+        if secret_key.len() != xwing::SEED_BYTES {
+            return Err(CryptoError::Malformed(
+                "this is sealed to a new key, and the secret given is not one",
+            ));
+        }
+        if !constant_time_eq(&xwing::public_key(secret_key)?, &recipient) {
+            return Err(CryptoError::Malformed("the public key named is not this secret key's"));
+        }
+        return open_v2(&raw, secret_key, SCOPE_DEK);
+    }
+    let recipient_bytes: [u8; 32] = recipient
+        .try_into()
+        .map_err(|_| CryptoError::Malformed("that is not a public key"))?;
+    open_v1(&raw, secret_key, &recipient_bytes)
+}
+
+/// The v1 seal: X25519 ECIES, HKDF info 'sealed-vault:dek' || ephPub || recipientPub.
+fn open_v1(raw: &[u8], secret_key: &[u8], recipient_bytes: &[u8; 32]) -> Result<Vec<u8>> {
     if raw.len() < 32 + 12 + 16 {
         return Err(CryptoError::Malformed("sealed blob too short"));
     }
     let mut eph_pub_bytes = [0u8; 32];
     eph_pub_bytes.copy_from_slice(&raw[..32]);
-    let recipient_bytes = decode_public_key(recipient_public_key_b64)?;
-    let mut scalar = pkcs8::decode(secret_key_pkcs8)?;
+    let mut scalar = if secret_key.len() == 32 {
+        let mut s = [0u8; 32];
+        s.copy_from_slice(secret_key);
+        s
+    } else {
+        pkcs8::decode(secret_key)?
+    };
     let secret = StaticSecret::from(scalar);
     scalar.zeroize();
     let shared = secret.diffie_hellman(&PublicKey::from(eph_pub_bytes));
     if !shared.was_contributory() {
         return Err(CryptoError::BadPublicKey);
     }
-    let key = seal_key(shared.as_bytes(), &eph_pub_bytes, &recipient_bytes);
-    let cipher = aes(&key);
-    cipher
+    let mut info = Vec::with_capacity(V1_INFO_PREFIX.len() + 64);
+    info.extend_from_slice(V1_INFO_PREFIX);
+    info.extend_from_slice(&eph_pub_bytes);
+    info.extend_from_slice(recipient_bytes);
+    // WebCrypto derives with an explicit zero-length salt; RFC 5869 maps the
+    // absent salt to the same HMAC key, so `None` here is byte-identical.
+    let hk = Hkdf::<Sha256>::new(None, shared.as_bytes());
+    let mut key = [0u8; 32];
+    hk.expand(&info, &mut key)
+        .expect("32 bytes is a valid HKDF-SHA256 output length");
+    let opened = aes(&key)
         .decrypt(Nonce::from_slice(&raw[32..44]), &raw[44..])
-        .map_err(|_| CryptoError::DecryptFailed)
+        .map_err(|_| CryptoError::DecryptFailed);
+    key.zeroize();
+    opened
 }
 
 // ---- content blobs under a DEK/FK (the plain IV||ct contract, no AAD) -------
@@ -294,11 +395,8 @@ pub(crate) fn aes(key: &[u8; 32]) -> Aes256Gcm {
     Aes256Gcm::new_from_slice(key).expect("32-byte AES-256 key")
 }
 
-pub(crate) fn decode_public_key(public_key_b64: &str) -> Result<[u8; 32]> {
-    let bytes = b64::decode(public_key_b64)?;
-    bytes
-        .try_into()
-        .map_err(|_| CryptoError::Malformed("vault public key must be raw 32 bytes"))
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 pub fn random_bytes<const N: usize>() -> [u8; N] {

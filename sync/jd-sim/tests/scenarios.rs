@@ -1458,7 +1458,7 @@ fn sealed_metadata(world: &World, vault: &SimVault) -> jd_crypto::drive::FileMet
     let f = &files[0];
     let key = jd_crypto::drive::open_wrapped_file_key(
         f.wrapped_file_key.as_deref().expect("a grant"),
-        &vault.secret_key_pkcs8,
+        &vault.secret_key,
         &vault.public_key_b64,
     )
     .expect("the vault opens its key");
@@ -25706,7 +25706,7 @@ fn a_peers_rename_landing_while_an_encrypted_version_is_on_its_way_survives_it()
 
     laptop.fs.user_write("Private/plan.txt", EDIT);
     let server = world.server.clone();
-    let (secret, public) = (vault.secret_key_pkcs8.clone(), vault.public_key_b64.clone());
+    let (secret, public) = (vault.secret_key.clone(), vault.public_key_b64.clone());
     let done = std::sync::Arc::new(std::sync::Mutex::new(false));
     let once = done.clone();
     world.server.while_completing_an_upload(move || {
@@ -26044,7 +26044,7 @@ fn a_rename_landing_before_an_encrypted_version_reads_its_name_is_not_put_back()
     laptop.net.set_faults(NetFaults::none());
     assert!(laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"), "construction: not queued");
 
-    let (secret, public) = (vault.secret_key_pkcs8.clone(), vault.public_key_b64.clone());
+    let (secret, public) = (vault.secret_key.clone(), vault.public_key_b64.clone());
     let file = world.server.vault_files().into_iter().next().expect("the vault file");
     let blob = file.encrypted_metadata.clone().expect("its metadata");
     let key = jd_crypto::drive::open_wrapped_file_key(file.wrapped_file_key.as_deref().unwrap(), &secret, &public).unwrap();

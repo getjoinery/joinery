@@ -5,13 +5,15 @@
 //! `tests/functional/drive/sync_crypto_parity_gate.sh` (Rust encrypts / Node
 //! decrypts, and vice versa).
 //!
-//! Contract summary (specs/drive_sync_clients.md §III.1):
-//! - Encodings: standard base64 (padded) on the wire. Vault public key = raw
-//!   32-byte X25519, std base64. Vault secret key travels as PKCS8 DER.
-//! - Sealed box: custom HKDF ECIES (NOT libsodium crypto_box_seal) —
-//!   `b64(ephPub[32] || IV[12] || AES-256-GCM ct+tag)`, key =
-//!   HKDF-SHA256(salt = empty, ikm = X25519(eph, recipient),
-//!   info = "sealed-vault:dek" || ephPub || recipientPub), no AAD.
+//! Contract summary (seal and key forms: specs/post_quantum_sealing.md R2, R3):
+//! - Encodings: standard base64 (padded) on the wire. Vault public key = the
+//!   1216-byte X-Wing key, std base64. Vault secret key = the 32-byte seed it
+//!   is generated from (specs/post_quantum_sealing.md R3).
+//! - Sealed box (v2, the only one written): `b64(ct[1120] || IV[12] ||
+//!   AES-256-GCM ct+tag)`, key = HKDF-SHA256(salt = empty, ikm = the X-Wing
+//!   shared secret, info = "joinery-seal:v2:" || scope), no AAD. A 32-byte
+//!   (X25519) key is refused for sealing; what was sealed to one (v1, info
+//!   "sealed-vault:dek" || ephPub || recipientPub) still opens.
 //! - Content container: per 4 MiB plaintext chunk,
 //!   `uint32be(blockLen) || IV[12] || AES-256-GCM(ct+tag)`,
 //!   AAD = utf8(contentId + ":" + chunkIndex); empty file = one empty chunk.
@@ -24,6 +26,7 @@ pub mod b64;
 pub mod drive;
 pub mod pkcs8;
 pub mod vault;
+pub mod xwing;
 
 /// Every failure mode a caller can act on. AEAD failures are deliberately
 /// opaque (`DecryptFailed`) — a tag mismatch must not reveal which byte broke.
@@ -39,6 +42,9 @@ pub enum CryptoError {
     Kdf(&'static str),
     #[error("non-contributory X25519 shared secret")]
     BadPublicKey,
+    /// Sealing to a 32-byte X25519 key: nothing writes a v1 seal.
+    #[error("that vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it")]
+    OldKey,
     #[error("metadata JSON: {0}")]
     Json(#[from] serde_json::Error),
 }

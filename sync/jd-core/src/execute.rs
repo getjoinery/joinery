@@ -4082,6 +4082,46 @@ impl<W: Write> Write for Tallied<W> {
 /// new *version* reuses the existing key and content id, and the server refuses
 /// a key payload on that path: minting a fresh key would leave the new content
 /// readable only by this device, behind grants that all wrap the old one.
+/// Seal a new file's key to every reader `drive_public_keys` named: the grants,
+/// and how many readers have no Drive vault (counted, not sealed to).
+///
+/// A reader whose vault key is the old (pre-X-Wing) kind cannot be sealed to.
+/// Their rotation changes that, so the upload waits for it (`Retry`) rather
+/// than being dropped as unfixable.
+fn seal_to_readers(
+    file_key: &jd_crypto::drive::FileKey,
+    list: &[Value],
+) -> Result<Result<(Vec<(i64, String)>, usize), OpOutcome>, ExecError> {
+    let mut wrapped = Vec::new();
+    let mut without_vault = 0usize;
+    for reader in list {
+        let Some(user_id) = reader.get("user_id").and_then(Value::as_i64) else {
+            continue;
+        };
+        match reader.get("public_key").and_then(Value::as_str) {
+            Some(public_key) if !public_key.is_empty() => {
+                match jd_crypto::drive::wrap_file_key_to(file_key, public_key) {
+                    Ok(sealed) => wrapped.push((user_id, sealed)),
+                    Err(jd_crypto::CryptoError::OldKey) => {
+                        return Ok(Err(OpOutcome::Retry(
+                            "someone who can read this folder has not yet replaced their vault key \
+                             (Security page); this file uploads once they have"
+                                .into(),
+                        )))
+                    }
+                    Err(e) => return Err(ExecError::Contract(format!("sealing a file key: {e}"))),
+                }
+            }
+            // A member with no Drive vault cannot be given a key. Counted
+            // and reported once rather than failing the upload: the file is
+            // still readable by everyone who can read it, and refusing would
+            // mean one member without a vault blocks the folder for the rest.
+            _ => without_vault += 1,
+        }
+    }
+    Ok(Ok((wrapped, without_vault)))
+}
+
 fn encrypt_for_upload(
     env: &ExecEnv,
     entry: &Entry,
@@ -4138,24 +4178,11 @@ fn encrypt_for_upload(
             .get("keys")
             .and_then(Value::as_array)
             .ok_or_else(|| ExecError::Contract("drive_public_keys returned no keys".into()))?;
-        let mut without_vault = 0usize;
-        for reader in list {
-            let Some(user_id) = reader.get("user_id").and_then(Value::as_i64) else {
-                continue;
-            };
-            match reader.get("public_key").and_then(Value::as_str) {
-                Some(public_key) if !public_key.is_empty() => {
-                    let sealed = jd_crypto::drive::wrap_file_key_to(&file_key, public_key)
-                        .map_err(|e| ExecError::Contract(format!("sealing a file key: {e}")))?;
-                    wrapped_file_keys.push((user_id, sealed));
-                }
-                // A member with no Drive vault cannot be given a key. Counted
-                // and reported once rather than failing the upload: the file is
-                // still readable by everyone who can read it, and refusing would
-                // mean one member without a vault blocks the folder for the rest.
-                _ => without_vault += 1,
-            }
-        }
+        let without_vault;
+        (wrapped_file_keys, without_vault) = match seal_to_readers(&file_key, list)? {
+            Ok(sealed) => sealed,
+            Err(outcome) => return Ok(Err(outcome)),
+        };
         if wrapped_file_keys.is_empty() {
             return Ok(Err(OpOutcome::Retry(
                 "nobody who can reach this folder has a Drive vault to unlock it with".into(),
@@ -8965,6 +8992,31 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A reader still on an old vault key holds the upload back for their
+    /// rotation (Retry), never drops it; a reader with no vault is counted.
+    #[test]
+    fn a_reader_on_an_old_vault_key_holds_the_upload_until_they_rotate() {
+        let fk = jd_crypto::drive::FileKey::generate();
+        let current = jd_crypto::vault::generate_vault_keypair();
+        let old = jd_crypto::vault::public_key_from_secret_key(&jd_crypto::pkcs8::encode(&[4u8; 32])).unwrap();
+        let readers = vec![
+            json!({ "user_id": 1, "public_key": current.public_key_b64 }),
+            json!({ "user_id": 2, "public_key": "" }),
+        ];
+        let (sealed, without) = seal_to_readers(&fk, &readers).unwrap().unwrap();
+        assert_eq!((sealed.len(), sealed[0].0, without), (1, 1, 1));
+
+        let mut with_old = readers.clone();
+        with_old.push(json!({ "user_id": 3, "public_key": old }));
+        match seal_to_readers(&fk, &with_old).unwrap() {
+            Err(OpOutcome::Retry(m)) => assert!(m.contains("vault key"), "{m}"),
+            other => panic!("expected Retry, got {other:?}"),
+        }
+
+        let broken = vec![json!({ "user_id": 4, "public_key": "AAAA" })];
+        assert!(matches!(seal_to_readers(&fk, &broken), Err(ExecError::Contract(_))));
+    }
     use super::*;
     use crate::order::{PlannedOp, Stage};
 

@@ -23,14 +23,14 @@ use crate::server::ServerTree;
 
 /// What makes this derivation the rig's and nothing else's. A change here is a
 /// new key for every account, so it is versioned rather than edited.
-const INFO: &[u8] = b"jd-soak drive vault v1";
+const INFO: &[u8] = b"jd-soak drive vault v2";
 
 /// The Drive vault keypair of one rig account.
 #[derive(Clone)]
 pub struct DriveKey {
-    /// PKCS8, the form a device is handed and keeps.
-    pub secret_pkcs8: Vec<u8>,
-    /// Standard base64 of the raw X25519 public key, the form the server keeps.
+    /// The 32-byte X-Wing seed, the form a device is handed and keeps.
+    pub secret_key: Vec<u8>,
+    /// Standard base64 of the 1216-byte X-Wing public key, the form the server keeps.
     pub public_key: String,
 }
 
@@ -55,11 +55,11 @@ pub fn drive_key(account: &str, password: &str) -> DriveKey {
     Hkdf::<Sha256>::new(Some(account.trim().to_lowercase().as_bytes()), password.as_bytes())
         .expand(INFO, &mut scalar)
         .expect("32 bytes is a valid HKDF-SHA256 length");
-    let secret_pkcs8 = jd_crypto::pkcs8::encode(&scalar);
-    let public_key = jd_crypto::vault::public_key_from_secret_key(&secret_pkcs8)
-        .expect("a 32-byte scalar in its PKCS8 envelope is a valid X25519 key");
+    let secret_key = scalar.to_vec();
+    let public_key = jd_crypto::vault::public_key_from_secret_key(&secret_key)
+        .expect("a 32-byte seed is an X-Wing secret");
     DriveKey {
-        secret_pkcs8,
+        secret_key,
         public_key,
     }
 }
@@ -158,7 +158,7 @@ impl Opener {
             };
             let fk = match jd_crypto::drive::open_wrapped_file_key(
                 &sealed.wrapped_file_key,
-                &self.key.secret_pkcs8,
+                &self.key.secret_key,
                 &self.key.public_key,
             ) {
                 Ok(fk) => fk,
@@ -293,11 +293,11 @@ mod tests {
     #[test]
     fn the_key_is_the_accounts_own_and_the_same_every_time() {
         let a = drive_key("soak-rig-1@getjoinery.com", "pw");
-        assert_eq!(a.secret_pkcs8, drive_key("soak-rig-1@getjoinery.com", "pw").secret_pkcs8);
+        assert_eq!(a.secret_key, drive_key("soak-rig-1@getjoinery.com", "pw").secret_key);
         assert_eq!(a.public_key, drive_key(" Soak-Rig-1@getjoinery.com", "pw").public_key);
         assert_ne!(a.public_key, drive_key("soak-rig-2@getjoinery.com", "pw").public_key);
         assert_ne!(a.public_key, drive_key("soak-rig-1@getjoinery.com", "pw2").public_key);
-        assert!(!format!("{a:?}").contains(&jd_crypto::b64::encode(&a.secret_pkcs8)));
+        assert!(!format!("{a:?}").contains(&jd_crypto::b64::encode(&a.secret_key)));
     }
 
     use crate::server::{Entity, Sealed};
@@ -433,7 +433,7 @@ mod tests {
         let fk = jd_crypto::drive::FileKey::generate();
         let wrapped = jd_crypto::drive::wrap_file_key_to(&fk, &key.public_key).unwrap();
         let opened =
-            jd_crypto::drive::open_wrapped_file_key(&wrapped, &key.secret_pkcs8, &key.public_key)
+            jd_crypto::drive::open_wrapped_file_key(&wrapped, &key.secret_key, &key.public_key)
                 .unwrap();
         let cid = jd_crypto::drive::new_content_id();
         let sealed = jd_crypto::drive::encrypt_content(b"hello", &fk, &cid);

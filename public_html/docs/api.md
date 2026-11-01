@@ -339,7 +339,7 @@ The webview loads `bridge_url`; the server validates the token, starts an **app-
 
 ### `POST /api/v1/auth/device_link` — unauthenticated
 
-Opens a device-link ceremony: how a desktop sync client acquires a credential without ever handling the user's password. Body: `{"device_name": "Studio PC", "platform": "windows", "device_pubkey": "<base64 X25519, optional>"}` — platform is one of `macos`, `windows`, `linux`.
+Opens a device-link ceremony: how a desktop sync client acquires a credential without ever handling the user's password. Body: `{"device_name": "Studio PC", "platform": "windows", "device_pubkey": "<base64 X-Wing public key, 1216 bytes, optional>"}` — platform is one of `macos`, `windows`, `linux`.
 
 ```json
 { "data": { "link_code": "K4RT-9WZP", "poll_token": "…", "verify_url": "https://…/profile/devices/link?code=K4RT-9WZP", "expires_time": "…", "poll_after": 3 } }

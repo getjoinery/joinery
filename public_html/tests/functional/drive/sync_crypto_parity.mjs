@@ -146,13 +146,13 @@ async function emit(outPath) {
 
   for (const [label, payload] of [
     ['file-key', crypto.getRandomValues(new Uint8Array(32))],
-    ['pkcs8-handoff', (await VC.generateVaultKeypair()).secretKeyBytes],
+    ['seed-handoff', (await VC.generateVaultKeypair()).secretKeyBytes],
   ]) {
     const kp = await VC.generateVaultKeypair();
     v.sealed.push({
       label,
       recipient_public_key_b64: kp.publicKeyB64,
-      recipient_secret_pkcs8_b64: b64(kp.secretKeyBytes),
+      recipient_secret_b64: b64(kp.secretKeyBytes),
       plaintext_b64: b64(payload),
       sealed_b64: await VC.sealToPublicKey(payload, kp.publicKeyB64),
     });
@@ -199,7 +199,7 @@ async function emit(outPath) {
     v.refusals.push({
       kind: 'sealed', reason: 'wrong_keypair',
       sealed_b64: await VC.sealToPublicKey(packed.fkBytes, kp.publicKeyB64),
-      secret_pkcs8_b64: b64(other.secretKeyBytes),
+      secret_key_b64: b64(other.secretKeyBytes),
       public_key_b64: other.publicKeyB64,
     });
 
@@ -260,7 +260,7 @@ async function verify(inPath) {
 
   for (const s of v.sealed) {
     const r = await attempt(() =>
-      VC.openFromSecretKey(s.sealed_b64, unb64(s.recipient_secret_pkcs8_b64), s.recipient_public_key_b64));
+      VC.openFromSecretKey(s.sealed_b64, unb64(s.recipient_secret_b64), s.recipient_public_key_b64));
     check(r.ok && bytesEq(r.value, unb64(s.plaintext_b64)), 'sealed:' + s.label);
   }
 
@@ -280,7 +280,7 @@ async function verify(inPath) {
       refused = !a.ok;
     } else if (r.kind === 'sealed') {
       const a = await attempt(() =>
-        VC.openFromSecretKey(r.sealed_b64, unb64(r.secret_pkcs8_b64), r.public_key_b64));
+        VC.openFromSecretKey(r.sealed_b64, unb64(r.secret_key_b64), r.public_key_b64));
       refused = !a.ok;
     } else if (r.kind === 'wrapped_key') {
       const a = await attempt(async () =>

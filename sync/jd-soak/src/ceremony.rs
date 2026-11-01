@@ -157,7 +157,7 @@ pub fn approve(session: &BrowserSession, code: &str, drive_key: &DriveKey) -> Re
         .and_then(Value::as_str)
         .filter(|k| !k.is_empty())
         .ok_or("the device offered no key to seal the vault key to")?;
-    let sealed = jd_crypto::vault::seal_to_public_key(&drive_key.secret_pkcs8, device_pubkey)
+    let sealed = jd_crypto::vault::seal_to_public_key(&drive_key.secret_key, device_pubkey)
         .map_err(|e| format!("cannot seal the vault key to the device: {e}"))?;
     let approved = session.action(
         "drive_device_link_approve",

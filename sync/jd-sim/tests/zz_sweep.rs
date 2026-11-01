@@ -1785,7 +1785,7 @@ fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed
         for held in world.server.encrypted_contents() {
             let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
                 &held.wrapped_file_key,
-                &vault.secret_key_pkcs8,
+                &vault.secret_key,
                 &vault.public_key_b64,
             ) else {
                 continue;
@@ -2421,7 +2421,7 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
         for held in world.server.encrypted_contents() {
             let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
                 &held.wrapped_file_key,
-                &vault.secret_key_pkcs8,
+                &vault.secret_key,
                 &vault.public_key_b64,
             ) else {
                 continue;
