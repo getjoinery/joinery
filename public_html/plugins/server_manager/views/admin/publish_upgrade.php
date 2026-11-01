@@ -12,6 +12,8 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.18 - the archives on disk are counted whole: the releases this management node applied, which
+ *                carry no release record here, are counted beside the published ones and said
  * @version 1.17 - a site that republishes is offered Apply and publish while its upgrade source offers a newer
  *                release, and no Republish of a version it has already published (the publisher refuses it):
  *                the button that made getjoinery's 0.8.538 publish fail as 'Version 0.8.537 already exists'
@@ -256,6 +258,19 @@ foreach ($rows as $r) {
 		$reclaimable_bytes += $r['bytes'];
 	}
 }
+// The archives of releases this management node applied carry no release
+// record here (UpgradeRetention::keep_applied_archive): counted too, so the
+// figure is what the disk holds.
+$applied = 0;
+$applied_bytes = 0;
+$recorded = array_fill_keys(array_map(function ($r) { return (string)$r['filename']; }, $rows), true);
+foreach (glob(UpgradeRetention::getArchiveDir() . '/joinery-core-*.tar.gz') ?: array() as $path) {
+	if (isset($recorded[basename($path)])) continue;
+	$applied++;
+	$applied_bytes += (int)@filesize($path);
+}
+$on_disk += $applied;
+$on_disk_bytes += $applied_bytes;
 // Default view: the newest 10 releases whose archive is still on disk.
 // "Show all" (?show=all) reveals the full history, including releases whose
 // archive has already been reclaimed by retention.
@@ -428,7 +443,7 @@ $page->begin_box($pageoptions);
 		Archives are left untouched until this is resolved.
 	</div>
 <?php endif; ?>
-<?php if (empty($rows)): ?>
+<?php if (empty($rows) && $applied === 0): ?>
 	<p class="text-muted mb-0">No upgrades published yet.</p>
 <?php else: ?>
 	<p class="text-muted">
@@ -438,7 +453,8 @@ $page->begin_box($pageoptions);
 			Keeping the newest <?php echo (int)$keep_count; ?>.
 		<?php endif; ?>
 		<?php echo (int)$on_disk; ?> archive<?php echo $on_disk === 1 ? '' : 's'; ?> on disk
-		(<?php echo htmlspecialchars(UpgradeRetention::formatBytes($on_disk_bytes)); ?>).
+		(<?php echo htmlspecialchars(UpgradeRetention::formatBytes($on_disk_bytes)); ?>)<?php if ($applied > 0): ?>,
+		<?php echo (int)$applied; ?> of them releases this management node applied<?php endif; ?>.
 		<?php if ($reclaimable > 0): ?>
 			<?php echo (int)$reclaimable; ?> reclaimable
 			(<?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>).

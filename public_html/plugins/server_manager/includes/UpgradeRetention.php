@@ -17,6 +17,9 @@
  * A management node also keeps the archive of each release it upgrades to
  * (keep_applied_archive), pruned by the same rules (prune_kept).
  *
+ * @version 1.2 - prune_kept counts the newest N across every archive on disk, published or kept: kept ones
+ *                had a newest N of their own beside the published ones, so a management node held twice
+ *                its setting (getjoinery: 19 archives, keep 10)
  * @version 1.1 - keep_applied_archive and prune_kept: a management node keeps the release archives it
  *                applies, so a copy of one of its sites onto a host can install that release (B55)
  * @version 1.0
@@ -221,8 +224,9 @@ class UpgradeRetention {
 	/**
 	 * Remove kept archives (keep_applied_archive) by the rules published ones
 	 * follow: the newest N stay, and so does any release this management node
-	 * or one of its nodes runs. An archive a published release names is
-	 * prune()'s, never this.
+	 * or one of its nodes runs. The newest N are counted across every archive
+	 * on disk, published or kept, so the two kinds share one allowance. An
+	 * archive a published release names is prune()'s, never this.
 	 *
 	 * @return array ['removed' => [...versions], 'failed' => [...versions]]
 	 */
@@ -238,15 +242,21 @@ class UpgradeRetention {
 		}
 		$in_use = self::getInUseVersions();
 		$kept = [];
+		$on_disk = [];
 		foreach (glob(self::getArchiveDir() . '/joinery-core-*.tar.gz') ?: [] as $path) {
-			if (preg_match('/^joinery-core-(\d+\.\d+\.\d+)\.tar\.gz$/', basename($path), $m) && !isset($published[basename($path)])) {
+			if (!preg_match('/^joinery-core-(\d+\.\d+\.\d+)\.tar\.gz$/', basename($path), $m)) {
+				continue;
+			}
+			$on_disk[] = $m[1];
+			if (!isset($published[basename($path)])) {
 				$kept[$m[1]] = $path;
 			}
 		}
+		usort($on_disk, function ($a, $b) { return version_compare($b, $a); });
+		$newest = array_fill_keys(array_slice($on_disk, 0, $keep_count), true);
 		uksort($kept, function ($a, $b) { return version_compare($b, $a); });
-		$index = 0;
 		foreach ($kept as $version => $path) {
-			if ($index++ < $keep_count || isset($in_use[$version])) {
+			if (isset($newest[$version]) || isset($in_use[$version])) {
 				continue;
 			}
 			if (@unlink($path)) {

@@ -43,6 +43,7 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.7 - release archives in static_files/ are left out, as backup_files.sh 1.7.0 leaves them out
  * @version 1.6 - config/release_trust is the machine's own (specs/release_key_rotation.md R1)
  * @version 1.5 - every config file a restore keeps the machine's own copy of is left out, as the restore guard lists
  *               them: a host's code_check made every copy onto a host that refuses unsigned code differ (B22)
@@ -77,6 +78,13 @@ class SiteCensus {
 		'config/release_log_required', 'config/release_log_optional', 'config/tree_owner', 'config/agent_signing_key',
 		'config/release_statement_key', 'config/disk_allowance', 'config/code_check',
 		'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');
+
+	/**
+	 * Release archives a management node keeps in static_files/: no archive
+	 * carries them (backup_files.sh, anchored to static_files/), so neither
+	 * does the census.
+	 */
+	const RELEASE_ARCHIVE_PATTERN = 'joinery-core-*.tar.gz';
 
 	/** Tables a backup run writes on the source after its dump. */
 	const OWN_TABLES = array('bkh_backup_history');
@@ -227,6 +235,7 @@ class SiteCensus {
 				if (isset($skip_paths[$path])) { continue; }
 				if ($rel === '' && strpos($name, 'public_html_') === 0) { continue; }
 				if ($rel === '' && $name === 'vendor') { continue; }
+				if ($rel === 'static_files' && fnmatch(self::RELEASE_ARCHIVE_PATTERN, $name) && !is_dir($root . '/' . $path)) { continue; }
 				$group = $rel === '' ? (is_dir($root . '/' . $name) && !is_link($root . '/' . $name) ? $name : '.') : explode('/', $rel, 2)[0];
 				$full = $root . '/' . $path;
 				if (is_link($full)) {

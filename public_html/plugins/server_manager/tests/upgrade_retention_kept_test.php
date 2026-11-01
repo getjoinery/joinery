@@ -83,6 +83,29 @@ sort($report['removed']);
 check($report['removed'] === array('7.0.2', '7.0.3') && !in_array('joinery-core-7.0.3.tar.gz', $left, true),
 	'the rest go', json_encode($report));
 
+section('Published and kept archives share one newest N');
+
+// A published release newer than every kept one fills the allowance: the
+// kept ones get no newest N of their own beside it.
+foreach (array('7.0.5', '7.0.6') as $v) {
+	UpgradeRetention::keep_applied_archive($download('SIGNED ARCHIVE ' . $v), $v);
+}
+file_put_contents($dir . '/joinery-core-7.0.9.tar.gz', 'PUBLISHED 7.0.9');
+$pub = new Upgrade(NULL);
+$pub->set('upg_major_version', 7);
+$pub->set('upg_minor_version', 0);
+$pub->set('upg_patch_version', 9);
+$pub->set('upg_name', 'joinery-core-7.0.9.tar.gz');
+$pub->save();
+$pub->load();
+harness_register_row('upg_upgrades', 'upg_upgrade_id', $pub->key);
+$report = UpgradeRetention::prune_kept(1);
+$left = array_map(function ($f) { return basename($f); }, glob($dir . '/joinery-core-*.tar.gz'));
+check(!in_array('joinery-core-7.0.6.tar.gz', $left, true) && !in_array('joinery-core-7.0.5.tar.gz', $left, true),
+	'with the newest one published, the kept ones beyond it go', implode(' ', $left) . ' ' . json_encode($report));
+check(in_array('joinery-core-7.0.9.tar.gz', $left, true), 'the published one is never prune_kept\'s to remove');
+check(in_array('joinery-core-7.0.1.tar.gz', $left, true), 'a release a node runs still stays');
+
 section('upgrade.php keeps it before it empties its download folder, on a management node only');
 
 $up = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));

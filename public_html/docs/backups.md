@@ -676,9 +676,13 @@ leaves the same trees out. They are the machine's: neither restore script
 takes them from an archive, on any host (`restore_project.sh` sets them aside
 from what it unpacked; `restore_chain.sh` never extracts them). Neither
 `upgrades/` nor `upgrade_archives/` counts toward the data's identity: an
-upgrade makes its staging anew. These are anchored to the site
-directory, so a `public_html` deeper in the tree — a worktree under `sync/`,
-say — is data and is archived. A code archive is rooted at `public_html` and
+upgrade makes its staging anew. Release archives in `static_files/`
+(`joinery-core-*.tar.gz`, the ones a management node keeps to hand out and roll
+back to) are left out the same way: signed downloads the next publish brings
+back, not site data (`SiteCensus::RELEASE_ARCHIVE_PATTERN`). After a restore a
+management node holds none until it publishes or applies a release again. These
+are anchored to the site directory, so a `public_html` deeper in the tree — a
+worktree under `sync/`, say — is data and is archived. A code archive is rooted at `public_html` and
 extracts into the site directory, after the data.
 
 A run that **fails** partway puts every snapshot back as it stood before the

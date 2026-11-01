@@ -115,6 +115,26 @@ check($tar_files === $fs['public_html']['files'], 'and tar, given the same patte
 check($fs['.']['files'] === 1 && $fs['.']['bytes'] === 1, 'a loose file at the root is counted under .', json_encode($fs['.']));
 check($fs['empty_dir']['dirs'] === 1 && $fs['empty_dir']['files'] === 0, 'an empty directory is counted', json_encode($fs['empty_dir']));
 
+section('Release archives in static_files/ are left out, with no setting naming them');
+
+$r = $tmp . '/release/site';
+sc_site($r, array(
+	'static_files/joinery-core-0.8.555.tar.gz' => 'archive',
+	'static_files/sub/joinery-core-9.tar.gz'   => 'deeper: the site\'s own',
+));
+$fr = SiteCensus::files($r, array(), array());
+$tar_r = array();
+exec('tar -C ' . escapeshellarg(dirname($r)) . ' --anchored --exclude=' . escapeshellarg(basename($r) . '/static_files/joinery-core-*.tar.gz')
+	. ' --no-anchored -cf - ' . escapeshellarg(basename($r) . '/static_files') . ' | tar -tf -', $tar_r);
+$tar_r_files = count(array_filter($tar_r, function ($l) { return substr($l, -1) !== '/'; }));
+check($fr['static_files']['files'] === $tar_r_files,
+	'the census counts in static_files/ what backup_files.sh\'s anchored exclude leaves in', "census {$fr['static_files']['files']}, tar $tar_r_files: " . implode(' ', $tar_r));
+check(strpos(implode(' ', $tar_r), 'static_files/joinery-core-0.8.555.tar.gz') === false && strpos(implode(' ', $tar_r), 'sub/joinery-core-9.tar.gz') !== false,
+	'the top-level release archive is out; one deeper down stays in');
+check(strpos((string)file_get_contents(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/backup_files.sh'),
+	'--exclude="${BASE}/static_files/' . SiteCensus::RELEASE_ARCHIVE_PATTERN . '"') !== false,
+	'backup_files.sh leaves out the same pattern the census does');
+
 // ---------------------------------------------------------------- the copy
 
 section('What each machine keeps as its own differs without a difference');

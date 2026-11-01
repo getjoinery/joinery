@@ -118,12 +118,17 @@ FX="$T/fx/fxsite"
 mkdir -p "$FX/vendor/composer" "$FX/public_html/assets/vendor/argon2" "$FX/public_html/plugins/p/vendor/lib" "$FX/config"
 echo a > "$FX/vendor/composer/x.php"; echo b > "$FX/public_html/assets/vendor/argon2/a.js"
 echo c > "$FX/public_html/plugins/p/vendor/lib/l.php"; echo d > "$FX/config/c"
+mkdir -p "$FX/static_files/sub"
+echo e > "$FX/static_files/joinery-core-0.8.555.tar.gz"; echo f > "$FX/static_files/sub/joinery-core-9.tar.gz"
+echo g > "$FX/static_files/photo.jpg"
 head -c 32 /dev/urandom | base64 > "$T/fx.key"
 OUT="$(bash "$SYSADMIN/backup_files.sh" fxsite --project-dir "$FX" --output-dir "$T/fx" --name files-0000 --snar "$T/fx.snar" --key-file "$T/fx.key" 2>/dev/null)"
 ARC="$(echo "$OUT" | grep '^ARCHIVE=' | cut -d= -f2)"
 LIST="$(openssl enc -aes-256-cbc -d -pbkdf2 -pass file:"$T/fx.key" -in "$ARC" 2>/dev/null | tar -tzf - 2>/dev/null)"
 chk "backup_files: public_html/assets/vendor and a plugin's vendor/ are carried, the site root's vendor/ is not" \
     "$(grep -c '^fxsite/public_html/assets/vendor/argon2/a.js$' <<< "$LIST")|$(grep -c '^fxsite/public_html/plugins/p/vendor/lib/l.php$' <<< "$LIST")|$(grep -c '^fxsite/vendor/' <<< "$LIST")" "1|1|0"
+chk "backup_files: a release archive in static_files/ is left out; one deeper down, and the site's own files there, are carried" \
+    "$(grep -c '^fxsite/static_files/joinery-core-0.8.555.tar.gz$' <<< "$LIST")|$(grep -c '^fxsite/static_files/sub/joinery-core-9.tar.gz$' <<< "$LIST")|$(grep -c '^fxsite/static_files/photo.jpg$' <<< "$LIST")" "0|1|1"
 
 echo "=== A host that does not refuse unsigned code is never asked ==="
 mv "$T/hr" "$T/hr.off"

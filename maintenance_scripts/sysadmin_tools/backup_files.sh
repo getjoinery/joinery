@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.7.0 - release archives (static_files/joinery-core-*.tar.gz) are left out of the data part and
+#                  a whole-tree archive: signed downloads a publish brings back, not site data, and on a
+#                  management node most of the backup (getjoinery: 19 of them, 850 MB of a 1 GB backup)
 # Version: 1.6.2 - the root-only list is read from _backup_root_only_files.sh, which backup_project.sh
 #                  reads too
 # Version: 1.6.1 - config/admin_credentials.txt joins the root-only files an unprivileged run leaves out,
@@ -340,6 +343,10 @@ if [ "$PART" != "code" ]; then
     TAR_ARGS+=(--anchored --exclude="${BASE}/public_html_*"
                --exclude="${BASE}/upgrades" --exclude="${BASE}/upgrade_archives"
                --exclude="${BASE}/uploads/upgrades" --exclude="${BASE}/deploy" --no-anchored)
+    # Release archives a management node keeps to hand out and roll back to:
+    # signed downloads the next publish brings back, never site data
+    # (SiteCensus::RELEASE_ARCHIVE_PATTERN leaves out the same files).
+    TAR_ARGS+=(--anchored --exclude="${BASE}/static_files/joinery-core-*.tar.gz" --no-anchored)
 fi
 
 # The site root's Composer tree. The code part is rooted at public_html, so it
