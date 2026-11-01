@@ -269,7 +269,7 @@ class BackupVerifyLauncher {
 		}
 		ksort($epochs);
 		foreach (array_keys($epochs) as $epoch) {
-			$out['epoch_envelope_urls'][$epoch] = $sign(BackupObjects::envelope_relname($epoch));
+			$out['epoch_envelope_urls'][$epoch] = $sign(BackupObjects::envelope_relname_in($index, $epoch));
 		}
 		if ((int)$level === BackupVerifier::LEVEL_REHEARSE) {
 			foreach (BackupVerifier::sample_objects($index) as $name) {

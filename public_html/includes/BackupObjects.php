@@ -48,6 +48,8 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.8.0 - the index names each epoch's envelope re-sealed to the run's recovery key ('envelopes',
+ *                  envelope_relname_in()), so verify and restore read the copy today's keys open
  * @version 1.7.1 - the folder is BackupTarget::normalise_prefix(), the rule the engine writes by (WP4 review L12)
  * @version 1.7.0 - an object backup storage was proven not to hold is not held: the manager profile by the
  *                  locations its request carries from the management node's complete listing of the same space,
@@ -183,6 +185,42 @@ class BackupObjects {
 	/** An epoch envelope's name in backup storage: envelope.json, or a re-sealed one by name. */
 	public static function envelope_relname($epoch, $name = self::ENVELOPE_NAME) {
 		return self::DIR . '/' . $epoch . '/' . $name;
+	}
+
+	/**
+	 * Where a reader fetches an epoch's envelope for a given index: the one
+	 * the run re-sealed to its recovery key when the index names one
+	 * ('envelopes'), else the epoch's own envelope.json. A re-seal is written
+	 * beside the original, never over it, so a reader that always took
+	 * envelope.json would open only with the keys of the epoch's birth.
+	 */
+	public static function envelope_relname_in(array $index, $epoch) {
+		$name = (string)($index['envelopes'][(string)$epoch] ?? '');
+		return self::envelope_relname($epoch, ($name !== '' && self::is_envelope_name($name)) ? $name : self::ENVELOPE_NAME);
+	}
+
+	/**
+	 * The envelope each epoch should be read from, for this run's index: an
+	 * epoch re-sealed to the current recovery key (by this run, or one before
+	 * it, as the listing shows) names that file. Epochs whose own
+	 * envelope.json is already the current one are left out.
+	 *
+	 * @param array $resealed epoch ids this run re-sealed
+	 * @param array $listed   epoch => file names its folder holds (the shelf's 'envelope_names')
+	 */
+	public static function current_envelope_names(array $plan, array $resealed, array $listed) {
+		try {
+			$current = self::resealed_envelope_name((string)($plan['recovery_fpr'] ?? ''));
+		} catch (BackupObjectsException $e) {
+			return array();
+		}
+		$out = array();
+		foreach ($listed as $id => $names) {
+			if (in_array($current, (array)$names, true)) { $out[(string)$id] = $current; }
+		}
+		foreach ($resealed as $id) { $out[(string)$id] = $current; }
+		ksort($out);
+		return $out;
 	}
 
 	/** The name an envelope re-sealed to this recovery fingerprint goes up under. */
@@ -1093,8 +1131,9 @@ class BackupObjects {
 	 * @param array $objects the enumerated cloud objects
 	 * @param array $held    name => entry, what backup storage held before this run
 	 * @param array $stored  name => entry, what this run stored
+	 * @param array $envelopes epoch => envelope file to read it from (current_envelope_names())
 	 */
-	public static function build_index(array $plan, $run_label, array $objects, array $held, array $stored) {
+	public static function build_index(array $plan, $run_label, array $objects, array $held, array $stored, array $envelopes = array()) {
 		$entries = array();
 		$epochs = array();
 		foreach ($objects as $obj) {
@@ -1117,7 +1156,7 @@ class BackupObjects {
 			'created' => gmdate('Y-m-d\TH:i:s\Z'),
 			'epochs'  => array_keys($epochs),
 			'objects' => $entries,
-		);
+		) + ($envelopes ? array('envelopes' => array_intersect_key($envelopes, $epochs)) : array());
 	}
 
 	/** Write an index as a gzipped artifact and describe it for the manifest. */

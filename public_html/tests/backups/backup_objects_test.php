@@ -205,6 +205,28 @@ try { BackupObjects::read_index_file($work . '/site/bad.json.gz'); } catch (Back
 check($threw !== '', 'a file that is not a gzipped index is refused', $threw);
 check(BackupObjects::index_entries($read) === BackupObjects::held_from_index($read), 'index_entries() is the held set of an index');
 
+section('The index names the envelope today\'s keys open, for each epoch re-sealed');
+// A re-seal goes up beside the epoch's envelope.json; readers follow the index,
+// so a reader never fetches an envelope only the epoch's first keys open.
+$fpr_plan = $plan + array('recovery_fpr' => str_repeat('ab', 32));
+$cur = BackupObjects::resealed_envelope_name(str_repeat('ab', 32));
+$names = BackupObjects::current_envelope_names($fpr_plan, array('epoch-20260915_000000'),
+	array('epoch-20260901_000000' => array('envelope.json', $cur), 'epoch-20260801_000000' => array('envelope.json')));
+check($names === array('epoch-20260901_000000' => $cur, 'epoch-20260915_000000' => $cur),
+	're-sealed this run, or listed from a run before: both named; an epoch with only its own envelope is not', json_encode($names));
+check(BackupObjects::current_envelope_names($plan, array('epoch-20260915_000000'), array()) === array(),
+	'no recovery fingerprint: nothing named');
+$idx_env = BackupObjects::build_index($plan, 'chain-20260920_030000/3', $objects, $held, $stored, $names);
+check($idx_env['envelopes'] === array('epoch-20260901_000000' => $cur, 'epoch-20260915_000000' => $cur),
+	'build_index() carries the names for the epochs its entries use', json_encode($idx_env['envelopes'] ?? null));
+check(!isset($idx['envelopes']), 'an index with nothing re-sealed has no envelopes key');
+check(BackupObjects::envelope_relname_in($idx_env, 'epoch-20260901_000000') === 'objects/epoch-20260901_000000/' . $cur,
+	'a reader of a named epoch fetches the re-sealed envelope');
+check(BackupObjects::envelope_relname_in($idx, 'epoch-20260901_000000') === 'objects/epoch-20260901_000000/envelope.json',
+	'an epoch the index does not name: its own envelope.json');
+check(BackupObjects::envelope_relname_in(array('envelopes' => array('e' => '../../etc/passwd')), 'e') === 'objects/e/envelope.json',
+	'a name that is not an envelope file is not followed');
+
 // ── Exclude list ────────────────────────────────────────────────────────────
 section('The exclude list names original and every variant, in both placements');
 

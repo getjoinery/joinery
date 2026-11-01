@@ -2557,13 +2557,16 @@ class BackupRunner {
 			'exclude'   => $exclude,
 			'epoch'     => $epoch,
 			'resealed'  => $resealed,
+			'envelopes' => BackupObjects::current_envelope_names($plan, $resealed['resealed'],
+				(array)($picture['shelf']['envelope_names'] ?? array())),
 			'index'     => null,
 		);
 	}
 
 	/** Step 6: the index, from the enumeration, what was held and what this run stored. */
 	private static function write_index_artifact(array $plan, array &$ctx, $path) {
-		$index = BackupObjects::build_index($plan, $ctx['label'], $ctx['objects'], $ctx['held'] + $ctx['still_lost'], $ctx['stored']);
+		$index = BackupObjects::build_index($plan, $ctx['label'], $ctx['objects'], $ctx['held'] + $ctx['still_lost'], $ctx['stored'],
+			$ctx['envelopes'] ?? array());
 		$ctx['index'] = $index;
 		return BackupObjects::write_index($index, $path);
 	}

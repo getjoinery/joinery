@@ -194,7 +194,12 @@ function restore_objects_tree($config) {
 	$dir = $request['objects_dir'];
 	try {
 		$keys = BackupObjectRestore::epoch_keys(BackupObjectRestore::subset($index, $survey['want']),
-			function ($epoch) use ($dir) { return $dir . '/' . $epoch . '/' . BackupObjects::ENVELOPE_NAME; },
+			// The envelope the index names for the epoch (one re-sealed to the
+			// current recovery key) when the downloaded tree has it.
+			function ($epoch) use ($dir, $index) {
+				$named = $dir . '/' . substr(BackupObjects::envelope_relname_in($index, $epoch), strlen(BackupObjects::DIR) + 1);
+				return is_file($named) ? $named : $dir . '/' . $epoch . '/' . BackupObjects::ENVELOPE_NAME;
+			},
 			$request['epoch_keys']);
 		$counts = BackupObjectRestore::restore($index, $survey['want'], $request['mode'], $keys,
 			BackupObjectRestore::tree_source($dir), 'restore_objects_progress');

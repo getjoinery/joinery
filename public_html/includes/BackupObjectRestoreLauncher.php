@@ -235,7 +235,7 @@ class BackupObjectRestoreLauncher {
 					$need = array();
 					foreach ($page['objects'] as $e) {
 						$epoch = (string)$e['epoch'];
-						if (!isset($keys[$epoch])) { $need[$epoch] = $sign(BackupObjects::envelope_relname($epoch)); }
+						if (!isset($keys[$epoch])) { $need[$epoch] = $sign(BackupObjects::envelope_relname_in($index, $epoch)); }
 					}
 					if ($need) {
 						$envelopes = BackupStaging::fetch_envelopes($work, $page, $need, $note);

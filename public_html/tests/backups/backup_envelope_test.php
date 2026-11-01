@@ -115,6 +115,30 @@ try { BackupEnvelope::build($data_key, 'x.tar.gz.enc', [['kind' => 'recovery', '
 catch (BackupEnvelopeException $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'old X25519') !== false, 'sealing to a 32-byte X25519 key is refused', $threw);
 
+section('A retired site key still opens what it sealed');
+// The converger moves an old site key aside (backup_site_key.retired, or
+// .retired.{time} after the first); envelopes sealed to it name it, and the
+// files under them stay in backup storage, so open_as_site() falls back to it.
+$retire_dir = sys_get_temp_dir() . '/joinery-retired-' . getmypid();
+@mkdir($retire_dir, 0700, true);
+$old_site = sodium_crypto_box_keypair();
+file_put_contents($retire_dir . '/backup_site_key.retired', base64_encode($old_site));
+file_put_contents($retire_dir . '/backup_site_key.retired.20261101000000', 'not a key');
+$retired = BackupEnvelope::retired_site_secrets($retire_dir . '/backup_site_key');
+check($retired === array($old_site), 'the retired keypair is read; a malformed file beside it is passed over', count($retired) . ' key(s)');
+$old_site_env = BackupEnvelope::decode(BackupEnvelope::encode([
+	'version' => 1, 'artifact' => 'epoch-20260921_220331', 'cipher' => BackupEnvelope::CIPHER, 'created' => '2026-09-21T22:03:31Z',
+	'recipients' => [[
+		'kind' => 'site', 'fingerprint' => hash('sha256', sodium_crypto_box_publickey($old_site)),
+		'sealed' => base64_encode(sodium_crypto_box_seal($data_key, sodium_crypto_box_publickey($old_site))),
+	]],
+]));
+check(BackupEnvelope::open_with_any($old_site_env, array($recovery, $old_site)) === $data_key,
+	'an epoch sealed to the old site key opens with it, after a key that does not');
+check(BackupEnvelope::open_with_any($old_site_env, array($recovery)) === null, 'and with no key that opens it, nothing');
+array_map('unlink', glob($retire_dir . '/*'));
+@rmdir($retire_dir);
+
 // ── Encoding ────────────────────────────────────────────────────────────────
 section('Sidecar encoding');
 

@@ -86,7 +86,7 @@ class FleetObjectRestore {
 			}
 			$epoch = (string)$entries[$name]['epoch'];
 			$try_objects   = $objects + [$name => $sign(BackupObjects::object_relname($epoch, $name))];
-			$try_envelopes = $envelopes + (isset($envelopes[$epoch]) ? [] : [$epoch => $sign(BackupObjects::envelope_relname($epoch))]);
+			$try_envelopes = $envelopes + (isset($envelopes[$epoch]) ? [] : [$epoch => $sign(BackupObjects::envelope_relname_in($index, $epoch))]);
 			$size = strlen((string)json_encode($params + ['epoch_envelope_urls' => $try_envelopes, 'object_urls' => $try_objects]));
 			if ($size > ManagementJob::MAX_PARAMS_BYTES) {
 				if (!$objects) {

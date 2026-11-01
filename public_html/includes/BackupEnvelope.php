@@ -31,6 +31,8 @@
  * names neither version, so open() derives both candidate public keys from it
  * and opens the recipient whose recorded fingerprint matches.
  *
+ * @version 1.3 - open_as_site() also tries the retired site keys the converger moved aside, so an
+ *                epoch sealed before the key was replaced still opens here and can be re-sealed
  * @version 1.2 - envelope version 2 (X-Wing recipients, `alg`); 32-byte v1 recipients refused
  *                at build; the site key is a 32-byte seed (site_secret()); open() reads both
  *                versions by fingerprint
@@ -349,9 +351,56 @@ class BackupEnvelope {
 			. implode(', ', array_map(function ($r) { return (string)($r['kind'] ?? '?'); }, $recipients)) . '.');
 	}
 
-	/** Open an envelope with this site's own key. */
+	/**
+	 * Open an envelope with this site's own key: the current one, then any key
+	 * the converger moved aside (backup_site_key.retired, .retired.{time}).
+	 * Envelopes sealed before a key was replaced name the old key, and the
+	 * files under them stay in backup storage for as long as anything points
+	 * at them, so the old key keeps opening them here; the run re-seals each
+	 * such epoch to the current keys (BackupObjects::reseal_epochs()).
+	 */
 	public static function open_as_site(array $envelope) {
-		return self::open($envelope, self::site_secret());
+		try {
+			return self::open($envelope, self::site_secret());
+		} catch (\Throwable $current) {
+			$opened = self::open_with_any($envelope, self::retired_site_secrets());
+			if ($opened === null) { throw $current; }
+			return $opened;
+		}
+	}
+
+	/** The data key from the first of $secrets that opens $envelope, or null. */
+	public static function open_with_any(array $envelope, array $secrets) {
+		foreach ($secrets as $secret) {
+			try {
+				return self::open($envelope, $secret);
+			} catch (\Throwable $e) {
+				// not this one; try the next
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Every retired site key this machine keeps, oldest name first, as raw
+	 * bytes (a 64-byte X25519 keypair, or a 32-byte seed). Unreadable or
+	 * malformed files are passed over: they cannot open anything.
+	 *
+	 * @return string[]
+	 */
+	public static function retired_site_secrets(?string $key_path = null): array {
+		$out = array();
+		$paths = glob(($key_path ?? self::site_key_path()) . '.retired*') ?: array();
+		sort($paths);
+		foreach ($paths as $path) {
+			$raw = is_file($path) ? @file_get_contents($path) : false;
+			if ($raw === false || trim($raw) === '') { continue; }
+			$key = base64_decode(trim($raw), true);
+			if ($key !== false && in_array(strlen($key), array(SODIUM_CRYPTO_BOX_KEYPAIRBYTES, XWing::SEED_BYTES), true)) {
+				$out[] = $key;
+			}
+		}
+		return $out;
 	}
 
 	/**

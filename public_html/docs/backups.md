@@ -370,13 +370,17 @@ changed, when the site key cannot open the current envelope (degrade, never
 fail every run), or when backup storage is proven to have lost an object
 stored under the current epoch: a fresh encryption is never the ciphertext
 the backup sets naming the lost key recorded, so it is never written there. On recovery-key rotation the older epochs are **re-sealed**,
-not re-encrypted: each envelope the site key opens is rebuilt for the current
-recipients and uploaded **beside** it as `envelope-{fpr}.json`, named by the
-first 16 hex of the new recovery key's fingerprint — nothing in backup storage
-is written twice. The new key opens everything through those, and the old key
-still opens what it always did through `envelope.json`. An epoch whose envelope
-re-sealed to the current key is already there is left alone. An epoch the
-site key cannot open stays sealed to the retired key alone; the run writes
+not re-encrypted: each envelope the site key opens (the current one, or a
+retired one the converger kept, below) is rebuilt for the current recipients and
+uploaded **beside** it as `envelope-{fpr}.json`, named by the first 16 hex of
+the new recovery key's fingerprint — nothing in backup storage is written twice.
+The run's objects index names, under `envelopes`, the re-sealed file for each
+such epoch, and verify and restore fetch the envelope the index names
+(`BackupObjects::envelope_relname_in()`), so the new key opens everything
+through those, and the old key still opens what it always did through
+`envelope.json`. An epoch whose envelope re-sealed to the current key is
+already there is left alone. An epoch no site key here can open stays sealed to
+the retired key alone; the run writes
 those down (`objects/retired-epochs.json`), names them in its message (so a
 management node's job result and this site's history say so), and **Recovery
 Readiness** says so on the recovery-key card — "N objects (X GB) open only
@@ -947,7 +951,12 @@ that key to two recipients:
   management node can arrange from outside.
 - **site** — a keypair the site itself holds at `config/backup_site_key`. This is
   what lets a site restore itself unattended: routine restores need no operator. It is disposable — lose it and the recovery
-  key still opens everything, and the next run mints a new one.
+  key still opens everything, and the next run mints a new one. A key the host
+  converger replaces (an X25519 keypair, by an X-Wing seed) is moved aside as
+  `config/backup_site_key.retired` (`.retired.{time}` after the first), never
+  deleted: `BackupEnvelope::open_as_site()` tries it after the current key, so
+  everything sealed before the replacement still opens here, and the next run
+  re-seals those epochs to the current keys.
 
 Nothing on the machine is precious as a result. Losing a site, or its whole
 disk, costs no ability to read any backup it ever made.
@@ -1080,8 +1089,8 @@ as a deliberate rotation. Three properties make it safe:
 - **Old backups keep opening.** Each chain's data key was sealed at chain
   start; rotation never touches it. Keep the old private key until every chain
   sealed to it has been retired. Offloaded files' epoch envelopes are
-  re-sealed to the new key by the next run where the site key opens them; one
-  it cannot open is named on Recovery Readiness as opening only with the
+  re-sealed to the new key by the next run where a site key here (current or
+  retired) opens them; one none opens is named on Recovery Readiness as opening only with the
   retired key.
 - **Nothing seals to the new key until it is proven.** An interrupted rotation
   leaves the key unproven, and backups refuse to run — loudly — until the
