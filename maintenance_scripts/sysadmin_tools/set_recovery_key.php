@@ -31,13 +31,24 @@
  * Usage:
  *   php set_recovery_key.php --report
  *
- * Output is one machine-readable line on stdout, so a job step can record it:
+ * Output is machine-readable lines on stdout, so a job step can record them.
+ * The first says which recovery key the site holds:
  *
  *   RECOVERY_KEY=already fpr=<sha256> proven=0|1 [pub=<base64>]
  *                                                 the key this site holds, and a
  *                                                 proven key's public half
  *   RECOVERY_KEY=none                             nothing configured
- *   RECOVERY_KEY=invalid                          a value that is not a key
+ *   RECOVERY_KEY=invalid                          a value that is not a key (an old
+ *                                                 X25519 key reads so: see the kind)
+ *
+ * The rest say what kind each backup key is (BackupRecoveryKey::keys_report()),
+ * names and counts only:
+ *
+ *   RECOVERY_KEY_KIND=xwing|x25519|none|invalid
+ *   BACKUP_SITE_KEY=xwing|x25519|none|unreadable|invalid retired=<n>
+ *   BACKUP_OLD_EPOCHS=<n>|unknown                 offloaded-file epochs only a
+ *                                                 retired key opens; unknown until
+ *                                                 a backup run has looked
  *
  * Every one of those is exit 0: none of them is a fault of the run. Only bad
  * usage exits non-zero.
@@ -45,6 +56,8 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 2.2 - reports every backup key's kind on lines of their own (RECOVERY_KEY_KIND,
+ *                BACKUP_SITE_KEY, BACKUP_OLD_EPOCHS); the RECOVERY_KEY line is unchanged
  * @version 2.1 - a proven key's public half rides the report (pub=): a copy of this site onto a server in its
  *                owner's own account is born sealed to it (specs/site_copy_final_test.md E1). It is public.
  * @version 2.0 - reports only. Writing this site's recovery key from outside the site is gone:
@@ -93,7 +106,7 @@ function srk_opts(array $argv) {
     return $opts;
 }
 
-/** Emit the one status line and stop. */
+/** Emit the status lines and stop. */
 function srk_report($outcome, $fingerprint = '', $proven = null, $public = '') {
     $line = 'RECOVERY_KEY=' . $outcome;
     if ($fingerprint !== '') {
@@ -106,6 +119,15 @@ function srk_report($outcome, $fingerprint = '', $proven = null, $public = '') {
         $line .= ' pub=' . $public;
     }
     fwrite(STDOUT, $line . "\n");
+    // The kinds after it. A failure here never costs the line above, which
+    // backups are gated on.
+    try {
+        foreach (BackupRecoveryKey::keys_report_lines(BackupRecoveryKey::keys_report()) as $kind_line) {
+            fwrite(STDOUT, $kind_line . "\n");
+        }
+    } catch (\Throwable $e) {
+        fwrite(STDERR, 'WARNING: could not report the backup keys\' kinds: ' . $e->getMessage() . "\n");
+    }
     exit(0);
 }
 

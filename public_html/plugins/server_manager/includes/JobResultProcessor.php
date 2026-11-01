@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.112 - parse_backup_keys_tokens(): the backup keys' kinds from set_recovery_key.php 2.2 ride the status blob
  * @version 1.111 - process_site_converger: a site container's converger facts and log lines, each held to its kind
  * @version 1.110 - a recovery key report's pub= takes a 1216-byte X-Wing key, and only that is kept on the node
  *                 (specs/post_quantum_sealing.md WP1, reviewer2 B2)
@@ -883,6 +884,31 @@ class JobResultProcessor {
 	}
 
 	/**
+	 * Read the kind lines set_recovery_key.php prints after RECOVERY_KEY= (2.2+):
+	 * RECOVERY_KEY_KIND, BACKUP_SITE_KEY and BACKUP_OLD_EPOCHS. Each is kept
+	 * only when present, so a node on an older release leaves the facts it
+	 * never reported unmeasured rather than zero. Public and pure: tested
+	 * against the script's own lines.
+	 *
+	 * @return array{backup_recovery_kind?:string, backup_site_key?:string, backup_site_key_retired?:int, backup_old_epochs?:int|null}
+	 */
+	public static function parse_backup_keys_tokens($output): array {
+		$out = [];
+		$output = (string)$output;
+		if (preg_match('/^RECOVERY_KEY_KIND=(xwing|x25519|none|invalid)\s*$/m', $output, $m)) {
+			$out['backup_recovery_kind'] = $m[1];
+		}
+		if (preg_match('/^BACKUP_SITE_KEY=(xwing|x25519|none|unreadable|invalid) retired=(\d{1,3})\s*$/m', $output, $m)) {
+			$out['backup_site_key'] = $m[1];
+			$out['backup_site_key_retired'] = (int)$m[2];
+		}
+		if (preg_match('/^BACKUP_OLD_EPOCHS=(\d{1,6}|unknown)\s*$/m', $output, $m)) {
+			$out['backup_old_epochs'] = $m[1] === 'unknown' ? null : (int)$m[1];
+		}
+		return $out;
+	}
+
+	/**
 	 * A proven recovery key's public half from a report, or null: kept only
 	 * when the report says proven, the key is the one its fingerprint names,
 	 * and it is an X-Wing key (1216 bytes). An old 32-byte X25519 key is parsed
@@ -1026,7 +1052,7 @@ class JobResultProcessor {
 
 		$recovery = self::parse_recovery_key_token($output);
 		if ($recovery !== null) {
-			$result = array_merge($result, $recovery);
+			$result = array_merge($result, $recovery, self::parse_backup_keys_tokens($output));
 		}
 
 		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {
@@ -2532,6 +2558,9 @@ HTML;
 		}
 
 		$recovery = self::parse_recovery_key_token($output);
+		if ($recovery !== null) {
+			$recovery += self::parse_backup_keys_tokens($output);
+		}
 		if ($recovery === null) {
 			// A node too old to carry the tool, or one that answered something
 			// unreadable. Record that we asked and got nothing, and change no

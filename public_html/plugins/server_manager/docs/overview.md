@@ -2396,10 +2396,19 @@ records only its reason, beside the last real result.
 #### Which key each node holds, and whether it can be backed up
 
 `set_recovery_key.php --report` is asked during `check_status`, and the answer
-lands on `mgn_backup_recovery_fpr` and `backup_recovery_state`. It prints one
-machine-readable line, `RECOVERY_KEY=already|none|invalid`, and the fleet table
-on the Targets page reads the columns rather than reaching out to every node on
-page load.
+lands on `mgn_backup_recovery_fpr` and `backup_recovery_state`. It prints
+`RECOVERY_KEY=already|none|invalid`, then each backup key's kind on lines of its
+own (names and counts, never key material): `RECOVERY_KEY_KIND=xwing|x25519|none|invalid`,
+`BACKUP_SITE_KEY=xwing|x25519|none|unreadable|invalid retired=N` (the machine's own
+key, and how many retired ones it keeps) and `BACKUP_OLD_EPOCHS=N|unknown` (epochs of
+offloaded files only a retired recovery key opens, as the last backup run found
+them). `JobResultProcessor::parse_backup_keys_tokens()` folds those into the status
+blob, and a node whose report lacks them is left not reported. The fleet table on
+the Targets page reads the columns rather than reaching out to every node on page
+load: **Recovery key on the node**, and **Backup keys**
+(`RecoveryKeyFleet::keys_state()`): all post-quantum, post-quantum with the re-seal
+waiting for the next backup, needs attention (naming each old or missing key and
+any old epochs), or not reported.
 
 That state decides whether the node can be backed up at all, by anyone — the
 Targets page lists it as fleet coverage, and `RecoveryKeyFleet::has_own_key()` is

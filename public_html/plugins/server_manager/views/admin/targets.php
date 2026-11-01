@@ -329,11 +329,14 @@ if ($rk_rows) {
 	   . 'would be a key this machine could open every node\'s backups with. A node without a verified '
 	   . 'key takes no backups, including the ones scheduled from here.</p>';
 	echo '<table class="table table-sm"><thead><tr>'
-	   . '<th>Node</th><th>Recovery key on the node</th>'
+	   . '<th>Node</th><th>Recovery key on the node</th><th>Backup keys</th>'
 	   . '</tr></thead><tbody>';
 	$rk_badges = ['proven' => 'success', 'missing' => 'warning', 'unproven' => 'warning', 'unknown' => 'secondary'];
 	$rk_labels = ['proven' => 'can be backed up', 'missing' => 'no key — not backed up',
 		'unproven' => 'not verified — not backed up', 'unknown' => 'not checked yet'];
+	$ks_badges = ['current' => 'success', 'pending' => 'secondary', 'attention' => 'warning', 'unknown' => 'secondary'];
+	$ks_labels = ['current' => 'all post-quantum', 'pending' => 'post-quantum, re-seal on next backup',
+		'attention' => 'needs attention', 'unknown' => 'not reported'];
 	foreach ($rk_rows as $row) {
 		$n  = $row['node'];
 		$rk = $row['rk'];
@@ -347,6 +350,10 @@ if ($rk_rows) {
 			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk['fingerprint'])) . '&hellip;)';
 		}
 		echo '</span></td>';
+		$ks = RecoveryKeyFleet::keys_state($n);
+		echo '<td><span class="badge bg-' . ($ks_badges[$ks['state']] ?? 'secondary') . '">'
+		   . htmlspecialchars($ks_labels[$ks['state']] ?? $ks['state']) . '</span> '
+		   . '<span class="small text-muted">' . htmlspecialchars($ks['summary']) . '</span></td>';
 		echo '</tr>';
 	}
 	echo '</tbody></table>';
