@@ -101,20 +101,21 @@
                     : 'Off'; ?></p>
 
                 <?php if ($fs['active']): $cadence = $page_vars['cadence'] ?? 'every_login'; ?>
-                    <form action="/profile/security" method="POST" class="jy-mt-2">
-                        <input type="hidden" name="action" value="set_cadence">
-                        <label class="jy-block jy-mt-2">
-                            <input type="radio" name="cadence" value="every_login" <?php echo $cadence === 'every_login' ? 'checked' : ''; ?>>
-                            Ask for it at every sign-in
-                        </label>
-                        <label class="jy-block jy-mt-2">
-                            <input type="radio" name="cadence" value="sensitive_only" <?php echo $cadence === 'sensitive_only' ? 'checked' : ''; ?>>
-                            Ask for it only at sensitive actions (less secure)
-                        </label>
-                        <div class="jy-mt-3">
-                            <button type="submit" class="btn btn-secondary">Save</button>
-                        </div>
-                    </form>
+                    <?php
+                    $cadence_fw = $page->getFormWriter('cadence_form', ['action' => '/profile/security', 'method' => 'POST',
+                        'class' => 'jy-mt-2', 'data-stepup' => 'set_cadence']);
+                    $cadence_fw->begin_form();
+                    $cadence_fw->hiddeninput('action', '', ['value' => 'set_cadence']);
+                    $cadence_fw->radioinput('cadence', 'Ask for your second factor', [
+                        'options' => [
+                            'every_login'    => 'Ask for it at every sign-in',
+                            'sensitive_only' => 'Ask for it only at sensitive actions (less secure)',
+                        ],
+                        'value' => $cadence,
+                    ]);
+                    $cadence_fw->submitbutton('btn_cadence', 'Save', ['class' => 'btn btn-secondary']);
+                    $cadence_fw->end_form();
+                    ?>
 
                     <form action="/profile/security" method="POST" class="jy-mt-3"
                           data-jy-confirm="Forget all trusted devices? No one is signed out - each device, including this one, will simply be asked for your second factor at its next sign-in.">
@@ -177,7 +178,7 @@
                     <?php endif; ?>
                     </p>
 
-                    <form action="/profile/security" method="POST" class="d-none" id="totp-regen-form"
+                    <form action="/profile/security" method="POST" class="d-none" id="totp-regen-form" data-stepup="regenerate_backup_codes"
                           data-jy-confirm="Generate a fresh set of 10 single-use backup codes? This invalidates any previous codes.">
                         <input type="hidden" name="action" value="regenerate_backup_codes">
                     </form>
@@ -248,7 +249,7 @@
                 <?php if (!empty($page_vars['recovery_email']) && !empty($page_vars['recovery_email_verified'])): ?>
                     <p><strong>Status:</strong> Active — <?php echo htmlspecialchars($page_vars['recovery_email']); ?></p>
                     <p class="jy-auth-hint">Password reset links are also sent here. Anyone who controls this inbox can start a reset of your account session (they still cannot open your sealed mail).</p>
-                    <form action="/profile/security" method="POST" data-jy-confirm="Remove your recovery address?">
+                    <form action="/profile/security" method="POST" data-jy-confirm="Remove your recovery address?" data-stepup="remove_recovery_email">
                         <input type="hidden" name="action" value="remove_recovery_email">
                         <button type="submit" class="btn btn-secondary">Remove Recovery Address</button>
                     </form>
@@ -260,7 +261,7 @@
                         <p>An out-of-band address that also receives your password reset links — the way back in if your login email is a mailbox you could be locked out of. Anyone who controls this inbox can start a reset of your account session, so pick one only you reach.</p>
                     <?php endif; ?>
                     <?php
-                    $recovery_formwriter = $page->getFormWriter('recovery_form', ['action' => '/profile/security', 'method' => 'POST']);
+                    $recovery_formwriter = $page->getFormWriter('recovery_form', ['action' => '/profile/security', 'method' => 'POST', 'data-stepup' => 'set_recovery_email']);
                     $recovery_formwriter->begin_form();
                     $recovery_formwriter->hiddeninput('action', '', ['value' => 'set_recovery_email']);
                     $recovery_formwriter->textinput('recovery_email', 'Recovery email address', [
@@ -1328,7 +1329,6 @@ $pac_writer->end_form();
             <?php endif; ?>
             <?php
             $recovery_items = $page_vars['recovery_items'] ?? [];
-            $recovery_stepup = $page_vars['recovery_stepup'] ?? ['needed' => false, 'passkey' => false];
             $settings = $page_vars['settings'];
             $user = $page_vars['user'];
             $session = SessionControl::get_instance();
@@ -1372,7 +1372,7 @@ $pac_writer->end_form();
                             data-rr-code="rr-m-code-<?php echo $rr_i; ?>" data-rr-status="rr-m-status-<?php echo $rr_i; ?>">Check code</button>
                         <div id="rr-m-status-<?php echo $rr_i; ?>" class="jy-mt-1"></div>
                         <div data-rr-client-form="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>" hidden>
-                            <form action="/profile/security" method="POST">
+                            <form action="/profile/security" method="POST" data-stepup="vault_code_check_client:<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
                                 <input type="hidden" name="action" value="vault_code_check_client">
                                 <input type="hidden" name="scope" value="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
                                 <input type="hidden" name="passed" value="">
@@ -1394,13 +1394,16 @@ $pac_writer->end_form();
                         </div>
                         <?php endif; ?>
                     <?php else: ?>
-                        <form action="/profile/security" method="POST">
-                            <input type="hidden" name="action" value="vault_code_check">
-                            <input type="hidden" name="scope" value="<?php echo htmlspecialchars($rr_item['scope'], ENT_QUOTES); ?>">
-                            <label for="rr-m-code-<?php echo $rr_i; ?>" class="d-block">Enter one code (checked, not used up):</label>
-                            <input type="password" id="rr-m-code-<?php echo $rr_i; ?>" name="code" class="form-control" style="max-width:22rem;" autocomplete="off">
-                            <button type="submit" class="btn btn-primary jy-mt-1">Check code</button>
-                        </form>
+                        <?php
+                        $rr_fw = $page->getFormWriter('rr_code_check_' . $rr_i, ['action' => '/profile/security', 'method' => 'POST',
+                            'data-stepup' => 'vault_code_check:' . $rr_item['scope']]);
+                        $rr_fw->begin_form();
+                        $rr_fw->hiddeninput('action', '', ['value' => 'vault_code_check']);
+                        $rr_fw->hiddeninput('scope', '', ['value' => $rr_item['scope']]);
+                        $rr_fw->passwordinput('code', 'Enter one code (checked, not used up)', ['autocomplete' => 'off', 'required' => true]);
+                        $rr_fw->submitbutton('btn_rr_check_' . $rr_i, 'Check code', ['class' => 'btn btn-primary']);
+                        $rr_fw->end_form();
+                        ?>
                     <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
@@ -1432,13 +1435,12 @@ $pac_writer->end_form();
             <script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
             <script>
             window.rrClientConfigs = <?php echo json_encode($rr_client_configs); ?>;
-            window.rrStepup = <?php echo json_encode($recovery_stepup); ?>;
             document.addEventListener('DOMContentLoaded', function () {
                 if (window.recoveryReadiness) {
                     window.recoveryReadiness.attachClientChecks();
-                    window.recoveryReadiness.attachStepUp(window.rrStepup);
                 }
                 // Rotating a browser-held vault's key runs here, in the browser.
+                var ROTATE_RESUME = 'joinery_vault_rotate_resume';
                 document.querySelectorAll('[data-vault-rotate]').forEach(function (card) {
                     var scope = card.getAttribute('data-vault-rotate');
                     var btn = card.querySelector('[data-vault-rotate-btn]');
@@ -1450,7 +1452,17 @@ $pac_writer->end_form();
                     status.textContent = 'Rotate your vault first (the button at the top of this page); this one is next.';
                     return;
                     <?php endif; ?>
-                    btn.addEventListener('click', function () {
+                    // Back from /verify-stepup for this rotation: the confirmation is
+                    // given, and the rotation's own passkey prompts need a click.
+                    try {
+                        var back = JSON.parse(sessionStorage.getItem(ROTATE_RESUME) || 'null');
+                        if (back && back.scope === scope && Date.now() - back.t < 180000) {
+                            sessionStorage.removeItem(ROTATE_RESUME);
+                            status.textContent = 'Confirmed. Click the button again to rotate.';
+                            btn.focus();
+                        }
+                    } catch (x) {}
+                    btn.addEventListener('click', function rotate(ev, confirmed) {
                         if (!window.JoinerySealed) { status.textContent = 'Rotating is unavailable on this page.'; return; }
                         btn.disabled = true;
                         status.textContent = '';
@@ -1463,8 +1475,14 @@ $pac_writer->end_form();
                             })
                             .catch(function (e) {
                                 btn.disabled = false;
-                                if (e && e.data && e.data.requires_stepup) {
-                                    window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                                if (e && e.data && e.data.requires_stepup && !confirmed) {
+                                    // Confirm with a passkey here and carry on; without
+                                    // one, the trip to /verify-stepup remembers the scope.
+                                    status.textContent = 'Confirm it is you to rotate.';
+                                    JoineryPasskeys.stepUp().then(function () { rotate(ev, true); }, function () {
+                                        try { sessionStorage.setItem(ROTATE_RESUME, JSON.stringify({ t: Date.now(), scope: scope })); } catch (x) {}
+                                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                                    });
                                     return;
                                 }
                                 var msg = (e && e.message) || 'The rotation stopped.';
@@ -1475,6 +1493,16 @@ $pac_writer->end_form();
             });
             </script>
             <?php endif; ?>
+            <script>
+            // Every form here that posts a step-up-gated action is marked
+            // data-stepup: confirmed with a passkey before it posts, and carried
+            // across a trip to /verify-stepup.
+            document.addEventListener('DOMContentLoaded', function () {
+                if (window.JoineryPasskeys && JoineryPasskeys.confirmForms) {
+                    JoineryPasskeys.confirmForms(<?php echo json_encode($page_vars['stepup'] ?? ['needed' => false, 'passkey' => false]); ?>);
+                }
+            });
+            </script>
             <?php echo PublicPage::settings_layout_end(); ?>
         </div>
     </div>

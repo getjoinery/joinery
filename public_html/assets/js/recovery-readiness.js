@@ -36,6 +36,8 @@
  * Needs assets/js/vault-crypto.js on the page before it (every emitter puts
  * it there).
  *
+ * @version 2.1.0 - attachStepUp hands the data-stepup forms to JoineryPasskeys.confirmForms: it
+ *                  matched action names this page's forms no longer all used, so a check lost its post
  * @version 2.0.0 - X-Wing (specs/post_quantum_sealing.md WP2): the keypair, the challenge and the key box
  *                  go through VaultCrypto; this file has no crypto of its own
  * @version 1.4.0 - the approval opens a backup's key box with the pasted key (openKeyBox)
@@ -365,41 +367,14 @@ window.recoveryReadiness = (function () {
 	}
 
 	/**
-	 * Inline step-up: when the server would demand a second-factor confirmation
-	 * for a verify action, run the passkey ceremony right here and then let the
-	 * original submit proceed — one click, no redirect that loses the POST.
-	 *
-	 * Security is unchanged: the ceremony calls the same passkey_stepup_options
-	 * / passkey_stepup_verify endpoints and stamps the same server-side marker
-	 * the logic gate checks. If anything here fails (no WebAuthn, dismissed
-	 * prompt), the form submits anyway and the server redirect flow takes over.
+	 * The verify forms are marked data-stepup; the passkey script confirms
+	 * them in place before they post, and carries one across a /verify-stepup
+	 * trip (JoineryPasskeys.confirmForms). Same server gate either way.
 	 */
 	function attachStepUp(cfg) {
-		if (!cfg || !cfg.needed || !cfg.passkey) return;
-		if (!window.joineryApi || !window.JoineryPasskeys) return;
-
-		var VERIFY_ACTIONS = ['verify_item', 'record_client_dry_run'];
-		Array.prototype.forEach.call(document.querySelectorAll('form'), function (form) {
-			var action = form.querySelector('input[name="action"]');
-			if (!action || VERIFY_ACTIONS.indexOf(action.value) === -1) return;
-
-			form.addEventListener('submit', function (ev) {
-				// Idempotent: after one successful ceremony (any form), or after
-				// this form already went around once, do not intercept again.
-				if (!cfg.needed || form.dataset.rrStepped === '1') return;
-				ev.preventDefault();
-
-				JoineryPasskeys.stepUp().then(function () {
-					cfg.needed = false; // marker is stamped server-side for the whole session
-					form.dataset.rrStepped = '1';
-					if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
-				}).catch(function () {
-					// Fall back to the server's redirect flow rather than dead-ending.
-					form.dataset.rrStepped = '1';
-					if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
-				});
-			});
-		});
+		if (cfg && window.JoineryPasskeys && window.JoineryPasskeys.confirmForms) {
+			window.JoineryPasskeys.confirmForms(cfg);
+		}
 	}
 
 	// RecoveryKeySetupPanel emits window.rrPanel and nothing else — the panel

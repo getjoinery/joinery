@@ -113,6 +113,15 @@ than redirect, asks `SessionControl::step_up_outstanding($user, $ttl)` and
 replies `requires_stepup` in the error envelope's `data` so the page can run the
 ceremony and retry.
 
+A form that posts a gated action carries `data-stepup="KEY"` on its form tag
+(`getFormWriter($id, ['data-stepup' => KEY])`, KEY unique on the page), and the
+page calls `JoineryPasskeys.confirmForms({needed, passkey})`. The form is then
+confirmed with a passkey before it posts. Without one, the redirect to
+`/verify-stepup` carries the form across: back on the page with the
+confirmation given, it is submitted again, or, if it held a password field
+(never kept), refilled and the secret asked for once more. An unmarked form
+reaches the redirect and comes back empty.
+
 Both are a no-op for an account with no second factor enrolled — there is
 nothing to step up with, and `/verify-stepup` returns immediately for exactly
 that reason. A gate built on the bare "was there a recent confirmation?"

@@ -5,6 +5,8 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
+ * @version 1.8 - confirmForms(): a form marked data-stepup is confirmed here before it posts, and
+ *   remembered across a /verify-stepup trip and submitted on return
  * @version 1.7 - stepUp() and withStepUp(): the one browser path for an API
  *   action that answers requires_stepup
  * @version 1.6 - derive() hands back a second PRF output apart and strips it from the response
@@ -328,10 +330,121 @@ window.JoineryPasskeys = (function () {
 		}
 	}
 
+	/**
+	 * Forms that post an action the server gates on a fresh second-factor
+	 * confirmation carry data-stepup="KEY" on the form tag (FormWriter:
+	 * getFormWriter($id, ['data-stepup' => KEY])), KEY unique on the page.
+	 * confirmForms(cfg) confirms with a passkey right here and then lets the
+	 * submit go on, so nothing the person entered is lost. cfg is
+	 * { needed, passkey }: whether a confirmation is owed now, and whether the
+	 * person has a passkey to give it with.
+	 *
+	 * Without one (an authenticator app only), or when the passkey prompt is
+	 * dismissed, the form submits anyway and the server sends the person to
+	 * /verify-stepup. The form is remembered for that trip (this site's own
+	 * sessionStorage: a link from elsewhere cannot set it, as a URL could) and,
+	 * back on this page with the confirmation given, submitted again. A
+	 * password field's value is never kept: it is asked for again instead.
+	 *
+	 * The listener sits on window, so it runs after every form and document
+	 * handler; one that has already called preventDefault (a confirm dialog,
+	 * the validator) owns that round, and the round it submits comes here.
+	 */
+	var FORM_RESUME = 'joinery_stepup_form_resume';
+
+	function stepupKey(form) {
+		return form.hasAttribute('data-stepup') ? form.getAttribute('data-stepup') : null;
+	}
+
+	// Submit again what the person already said yes to: a form with a kit
+	// confirm (data-jy-confirm, base.js) is not asked a second time.
+	// Deferred a tick: a browser ignores requestSubmit() made while the form's
+	// own submit event is still being dispatched, which is where the
+	// no-passkey path calls it from.
+	function submitAgain(form) {
+		if (form.hasAttribute('data-jy-confirm')) form.dataset.jyConfirmed = '1';
+		setTimeout(function () {
+			if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+		}, 0);
+	}
+
+	function skippedField(el) {
+		return !el.name || el.type === 'password' || el.type === 'file' || /csrf/i.test(el.name);
+	}
+
+	function rememberForm(form, key) {
+		var fields = {};
+		var secret = false;
+		Array.prototype.forEach.call(form.elements, function (el) {
+			if (el.type === 'password' && el.value) secret = true;
+			if (skippedField(el)) return;
+			if ((el.type === 'radio' || el.type === 'checkbox') && !el.checked) return;
+			fields[el.name] = el.value;
+		});
+		try {
+			sessionStorage.setItem(FORM_RESUME, JSON.stringify({
+				t: Date.now(), path: location.pathname, key: key, fields: fields, secret: secret,
+			}));
+		} catch (x) {}
+	}
+
+	function resumeForm(cfg) {
+		var r;
+		try {
+			r = JSON.parse(sessionStorage.getItem(FORM_RESUME) || 'null');
+			sessionStorage.removeItem(FORM_RESUME);
+		} catch (x) { return; }
+		// Only the trip just made, back on the page it left: a confirmation
+		// abandoned and a visit later submits nothing.
+		if (!r || r.path !== location.pathname || !(Date.now() - r.t < 180000)) return;
+		var form = Array.prototype.find.call(document.querySelectorAll('form'), function (f) {
+			return stepupKey(f) === r.key;
+		});
+		if (!form) return;
+		Array.prototype.forEach.call(form.elements, function (el) {
+			if (skippedField(el) || !Object.prototype.hasOwnProperty.call(r.fields, el.name)) return;
+			if (el.type === 'radio' || el.type === 'checkbox') { el.checked = el.value === r.fields[el.name]; return; }
+			el.value = r.fields[el.name];
+		});
+		if (cfg.needed) return; // the confirmation was not given: nothing goes ahead
+		if (r.secret) {
+			var pw = form.querySelector('input[type="password"]');
+			var note = document.createElement('div');
+			note.className = 'jy-alert jy-alert-info jy-mt-1';
+			note.setAttribute('role', 'status');
+			note.textContent = 'Confirmed. Enter it again to finish: it was not kept while you confirmed.';
+			form.insertBefore(note, form.firstChild);
+			if (pw) pw.focus();
+			return;
+		}
+		submitAgain(form);
+	}
+
+	function confirmForms(cfg) {
+		cfg = cfg || {};
+		var start = function () { resumeForm(cfg); };
+		if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', start); } else { start(); }
+		window.addEventListener('submit', function (e) {
+			var form = e.target;
+			if (!cfg.needed || e.defaultPrevented || !form || !form.hasAttribute) return;
+			var key = stepupKey(form);
+			if (key === null) return;
+			e.preventDefault();
+			var go = function () {
+				cfg.needed = false; // given here, or owed to the server's redirect: either way not asked twice
+				submitAgain(form);
+			};
+			var away = function () { rememberForm(form, key); go(); };
+			if (!cfg.passkey) { away(); return; }
+			stepUp().then(go, away);
+		});
+	}
+
 	return {
 		isSupported: isSupported,
 		stepUp: stepUp,
 		withStepUp: withStepUp,
+		confirmForms: confirmForms,
 		isPrfLikely: isPrfLikely,
 		register: register,
 		authenticate: authenticate,

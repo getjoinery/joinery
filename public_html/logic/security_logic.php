@@ -463,7 +463,9 @@ function security_logic(array $input): LogicResult{
 	} catch (Throwable $e) {
 		$page_vars['through_root_vaults'] = array();
 	}
-	$page_vars['recovery_stepup'] = array(
+	// Whether a confirmation is owed now, for the forms the page confirms in
+	// place before they post (JoineryPasskeys.confirmForms).
+	$page_vars['stepup'] = array(
 		'needed'  => $page_vars['has_second_factor'] && !$session->has_recent_second_factor(),
 		'passkey' => $live_passkey_count > 0,
 	);

@@ -156,7 +156,7 @@ foreach ($items as $i => $item) {
 			echo '<div id="' . $ids['status'] . '" class="small mt-2"></div>';
 
 			echo '<div hidden>';
-			$fw = $page->getFormWriter('rr_ceremony_' . $i);
+			$fw = $page->getFormWriter('rr_ceremony_' . $i, array('data-stepup' => 'verify_item:' . $item['key']));
 			$fw->begin_form();
 			echo '<input type="hidden" name="action" value="verify_item">';
 			echo '<input type="hidden" name="item_key" value="' . htmlspecialchars($item['key'], ENT_QUOTES) . '">';
@@ -169,7 +169,7 @@ foreach ($items as $i => $item) {
 					. '<pre class="border rounded p-2 mt-2" style="white-space:pre-wrap;word-break:break-all;">'
 					. htmlspecialchars($item['ceremony']['cli_command']) . '</pre>';
 				// The CLI path recovers a plain sentence; paste it here to record.
-				$fw = $page->getFormWriter('rr_ceremony_cli_' . $i);
+				$fw = $page->getFormWriter('rr_ceremony_cli_' . $i, array('data-stepup' => 'verify_item_cli:' . $item['key']));
 				$fw->begin_form();
 				echo '<input type="hidden" name="action" value="verify_item">';
 				echo '<input type="hidden" name="item_key" value="' . htmlspecialchars($item['key'], ENT_QUOTES) . '">';
@@ -207,7 +207,7 @@ foreach ($items as $i => $item) {
 				echo '<div id="' . $ids['status'] . '" class="small mt-2"></div>';
 
 				echo '<div data-rr-client-form="' . htmlspecialchars($item['scope'], ENT_QUOTES) . '" hidden>';
-				$fw = $page->getFormWriter('rr_client_' . $i);
+				$fw = $page->getFormWriter('rr_client_' . $i, array('data-stepup' => 'record_client_dry_run:' . $item['scope']));
 				$fw->begin_form();
 				echo '<input type="hidden" name="action" value="record_client_dry_run">';
 				echo '<input type="hidden" name="scope" value="' . htmlspecialchars($item['scope'], ENT_QUOTES) . '">';
@@ -215,7 +215,7 @@ foreach ($items as $i => $item) {
 				$fw->end_form();
 				echo '</div>';
 			} else {
-				$fw = $page->getFormWriter('rr_dryrun_' . $i);
+				$fw = $page->getFormWriter('rr_dryrun_' . $i, array('data-stepup' => 'verify_item:' . $item['key']));
 				$fw->begin_form();
 				echo '<input type="hidden" name="action" value="verify_item">';
 				echo '<input type="hidden" name="item_key" value="' . htmlspecialchars($item['key'], ENT_QUOTES) . '">';
@@ -226,7 +226,7 @@ foreach ($items as $i => $item) {
 			break;
 
 		case 'attested':
-			$fw = $page->getFormWriter('rr_attest_' . $i);
+			$fw = $page->getFormWriter('rr_attest_' . $i, array('data-stepup' => 'verify_item:' . $item['key']));
 			$fw->begin_form();
 			echo '<input type="hidden" name="action" value="verify_item">';
 			echo '<input type="hidden" name="item_key" value="' . htmlspecialchars($item['key'], ENT_QUOTES) . '">';
