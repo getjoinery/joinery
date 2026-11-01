@@ -2606,6 +2606,7 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,site_log,log_table_tail',
 		'mgn_agent_log_access' => 'off',
+		'mgn_web_root'         => '/var/www/html/harness/public_html',
 	));
 	check(is_string(JobCommandBuilder::log_access_refusal($off_node))
 		&& strpos(JobCommandBuilder::log_access_refusal($off_node), 'agent_log_access') !== false,
@@ -2713,6 +2714,7 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,disk_usage',
 		'mgn_agent_log_access' => 'off',
+		'mgn_web_root'         => '/var/www/html/harness/public_html',
 	));
 	$threw = false;
 	try { JobCommandBuilder::build_unit_journal($off_node, 'man-db'); } catch (Exception $e) { $threw = strpos($e->getMessage(), 'not allowed log access') !== false; }
@@ -3273,9 +3275,46 @@ section('site_converger: a machine reads whether one of its site containers\' co
 		'mgn_agent_primitives' => 'check_status,host_report,site_converger',
 		'mgn_agent_log_access' => 'off',
 	));
+	$built_off = JobCommandBuilder::build_site_converger($off, 'sa', 10);
+	check(($built_off['primitive'] ?? '') === 'site_converger',
+		'site_converger is not refused on this machine\'s switch: the named site\'s own switch decides, and the machine asks it (agent 1.102.0)');
+	$hostless = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0f", 32)),
+		'mgn_agent_version'    => '1.101.0',
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal',
+		'mgn_agent_log_access' => 'off',
+	));
+	$hl_reason = (string)JobCommandBuilder::log_access_refusal($hostless);
+	check(strpos($hl_reason, 'has no site') !== false && strpos($hl_reason, '1.102.0') !== false
+		&& strpos($hl_reason, 'agent_log_access') === false,
+		'a machine with no site and an older agent is told there is no switch and which agent reads its host logs', $hl_reason);
+	$skipped_site = jcb_node(array(
+		'mgn_agent_public_key'    => base64_encode(str_repeat("\x10", 32)),
+		'mgn_agent_version'       => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives'    => 'check_status,host_report,unit_journal',
+		'mgn_agent_log_access'    => 'off',
+		'mgn_web_root'            => '/var/www/html/harness/public_html',
+		'mgn_skip_joinery_checks' => true,
+	));
+	$ss_reason = (string)JobCommandBuilder::log_access_refusal($skipped_site);
+	check(strpos($ss_reason, 'agent_log_access') !== false && strpos($ss_reason, 'has no site') === false,
+		'a site whose checks are skipped still has a site: its owner\'s switch is named, not a missing site', $ss_reason);
+	$gw_host = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x11", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,unit_journal,reset_failed_unit',
+		'mgn_agent_log_access' => 'on',
+	));
+	check(!array_key_exists('joinery-mail-gateway', JobCommandBuilder::unit_journal_readable_units_for($gw_host))
+		&& array_key_exists('joinery-mail-gateway', JobCommandBuilder::unit_journal_units_for($gw_host)),
+		'on a machine with no site the gateway journal is not offered for reading, but stays a unit the node knows');
 	$threw = false;
-	try { JobCommandBuilder::build_site_converger($off, 'sa', 10); } catch (Exception $e) { $threw = true; }
-	check($threw, 'site_converger is refused on the plane while the owner has log access off');
+	try { JobCommandBuilder::build_unit_journal($gw_host, 'joinery-mail-gateway'); } catch (Exception $e) { $threw = strpos($e->getMessage(), 'members of the sites') !== false; }
+	check($threw, 'and building a read of it is refused with the reason');
+	$cleared = JobCommandBuilder::build_reset_failed_unit($gw_host, 'joinery-mail-gateway');
+	check(($cleared['primitive'] ?? '') === 'reset_failed_unit', 'clearing a failed gateway reads nothing and is still built');
+	$built_cron = JobCommandBuilder::build_unit_journal($gw_host, 'cron');
+	check(($built_cron['primitive'] ?? '') === 'unit_journal', 'a host unit\'s journal is built on a machine with no site');
 	$older = jcb_node(array(
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0e", 32)),
 		'mgn_agent_version'    => AgentVocabulary::FLOOR,

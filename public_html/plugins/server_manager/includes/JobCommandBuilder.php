@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.154 - build_site_converger: no machine log-switch check, the site's own switch decides (agent 1.102.0);
+ *                 log_access_refusal names a machine with no site rather than a site's switch (machine_has_no_site:
+ *                 no web root); unit_journal_readable_units_for: no gateway journal on a machine with no site
  * @version 1.153 - relay_status (agent 1.101.0): this site's view of its mail relay, no parameters
  * @version 1.152 - build_largest_files (agent 1.100.0): a site's biggest files by name, behind the log switch
  * @version 1.151 - data_root_recipient and install_node take an X-Wing recovery key (1216 bytes); a copy_take_key request carries a v2 box;
@@ -558,6 +561,30 @@ class JobCommandBuilder {
 			unset($units['joinery-host-converger']);
 		}
 		return $units;
+	}
+
+	/**
+	 * The units whose journal this node will read: unit_journal_units_for,
+	 * less the mail apps gateway on a machine with no site, where that journal
+	 * is the container sites' members' sign-ins, which no switch there can
+	 * allow (the agent refuses it: unit_journal's SitelessRefuses, agent
+	 * 1.102.0). Clearing a failed gateway reads nothing and is not affected.
+	 */
+	public static function unit_journal_readable_units_for($node) {
+		$units = self::unit_journal_units_for($node);
+		if (self::machine_has_no_site($node)) {
+			unset($units['joinery-mail-gateway']);
+		}
+		return $units;
+	}
+
+	/**
+	 * Whether the machine has no Joinery site of its own (a container host):
+	 * its agent reports no web root. Not hosts_site(), which is also false for
+	 * a site whose checks are skipped.
+	 */
+	public static function machine_has_no_site($node): bool {
+		return trim((string)$node->get('mgn_web_root')) === '';
 	}
 
 	/**
@@ -2138,6 +2165,10 @@ class JobCommandBuilder {
 				. AgentVocabulary::needs_newer_agent_text($node, ['unit_journal']));
 		}
 		self::assert_log_access($node);
+		if ((string)$unit === 'joinery-mail-gateway' && self::machine_has_no_site($node)) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' has no site, and the mail apps gateway's journal there "
+				. "names the members of the sites it serves, so the node does not read it.");
+		}
 		return self::build_unit_journal_primitive($node, $unit, $lines);
 	}
 
@@ -2164,8 +2195,10 @@ class JobCommandBuilder {
 	 * Whether one site container's host converger is running, read by the
 	 * machine it runs on: its last run and outcome, its stamp, the code check,
 	 * its cron entry and cron, and the last lines of its log, redacted there
-	 * (agent 1.98.0). PRIMITIVE ONLY. Behind the same owner switch as
-	 * unit_journal, because it reads a log.
+	 * (agent 1.98.0). PRIMITIVE ONLY. It reads one site, so that site's own
+	 * log-access switch decides, and the machine asks the site itself (agent
+	 * 1.102.0). The machine's own switch is not that site's owner's, so it is
+	 * not checked here.
 	 *
 	 * @param string $site  the site container's name; the machine refuses one
 	 *                      that is not a site container on it
@@ -2177,7 +2210,6 @@ class JobCommandBuilder {
 				"Node '{$node->get('mgn_slug')}' cannot read a site container's converger. "
 				. AgentVocabulary::needs_newer_agent_text($node, ['site_converger']));
 		}
-		self::assert_log_access($node);
 		return self::build_site_converger_primitive($node, $site, $lines);
 	}
 
@@ -3731,6 +3763,13 @@ class JobCommandBuilder {
 	 * passes: has_primitive already turned it away.
 	 */
 	public static function log_access_refusal($node): ?string {
+		if ((string)$node->get('mgn_agent_log_access') === 'off' && self::machine_has_no_site($node)) {
+			// An agent before 1.102.0 on a machine with no site: there is no
+			// switch to turn on; a newer agent reads the host's logs.
+			return "This machine has no site, and its agent ("
+				. ((string)$node->get('mgn_agent_version') ?: 'version unknown')
+				. ") reads its host's logs only from agent 1.102.0 on.";
+		}
 		if ((string)$node->get('mgn_agent_log_access') === 'off') {
 			return "The owner of '{$node->get('mgn_slug')}' has not allowed log access: the "
 				. "agent_log_access switch on that site's Management Node page is off, and the node "

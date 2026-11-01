@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.93 - a machine with no site says whose logs it reads; its mail gateway offers no Why? (unit_journal_readable_units_for)
  * @version 1.92 - Why? and Clear are offered for a unit this node's agent accepts (unit_journal_units_for)
  * @version 1.91 - a Backups row (IncidentBackupVerdict); one Refresh button (refresh_status) in place of Check Status and Host Report; the page under the gauges is two lists of one-line rows that open to the full account: Status
  *                 (incidents, services, certificates, machine, agent, security, recent jobs; a problem opens by
@@ -1272,7 +1273,7 @@
 						. SmAdminCsrf::field() . '</form>';
 				}
 				if (JobCommandBuilder::has_primitive($node, 'unit_journal') && JobCommandBuilder::log_access_refusal($node) === null
-						&& array_key_exists($mg_unit, JobCommandBuilder::unit_journal_units_for($node))) {
+						&& array_key_exists($mg_unit, JobCommandBuilder::unit_journal_readable_units_for($node))) {
 					echo ' <button type="submit" form="nodeActionUnitJournal_mail_gateway"'
 						. ' class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 						. ' title="Read the gateway\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
@@ -1614,7 +1615,7 @@
 				foreach ($hr['failed_units'] as $unit) {
 					echo '<li>' . $hr_str($unit);
 					$bare = preg_replace('/\.service$/', '', (string)$unit);
-					if ($can_ask && array_key_exists($bare, JobCommandBuilder::unit_journal_units_for($node))) {
+					if ($can_ask && array_key_exists($bare, JobCommandBuilder::unit_journal_readable_units_for($node))) {
 						echo ' <button type="submit" form="nodeActionUnitJournal_' . $hr_str($bare)
 							. '" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 							. ' title="Read this unit\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
@@ -2164,7 +2165,13 @@
 		}
 		$log_access = (string)$node->get('mgn_agent_log_access');
 		if ($log_access !== '') {
-			echo '<div class="small text-muted">Its owner ' . ($log_access === 'on' ? 'lets' : 'does not let') . ' this management node read its logs.</div>';
+			if (JobCommandBuilder::machine_has_no_site($node)) {
+				echo '<div class="small text-muted">' . ($log_access === 'on'
+					? 'It has no site, so this management node reads its host\'s logs; each site container\'s owner decides about that site.'
+					: 'It has no site; its agent is too old to read its host\'s logs (agent 1.102.0).') . '</div>';
+			} else {
+				echo '<div class="small text-muted">Its owner ' . ($log_access === 'on' ? 'lets' : 'does not let') . ' this management node read its logs.</div>';
+			}
 		}
 		echo '</div></div>';
 

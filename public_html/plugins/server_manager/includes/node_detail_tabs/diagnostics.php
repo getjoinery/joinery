@@ -12,6 +12,9 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.5 - Site containers: Read site converger in its own box, offered whatever this machine's log switch
+ *                says, because the site's own switch decides (agent 1.102.0); Logs: a machine with no site picks
+ *                the site container for a per-site configuration file
  * @version 1.4 - The machine: Mail relay (relay_status, agent 1.101.0), where the Mailbox plugin is on
  * @version 1.3 - The machine: Biggest files (largest_files, agent 1.100.0), offered where the owner allows log access
  * @version 1.2 - Logs: Read site converger, for one of the machine's site containers (site_converger, agent 1.98.0)
@@ -125,6 +128,14 @@ if ($machine_qs) {
 	$shown++;
 }
 
+// The machine's site containers, from its last host report: the Logs box's
+// per-site configuration files and the Site containers box name one of them.
+$sc_sites = array();
+foreach ((is_array($diag_hr['containers'] ?? null) ? $diag_hr['containers'] : array()) as $sc_c) {
+	$sc_name = is_array($sc_c) ? (string)($sc_c['name'] ?? '') : '';
+	if (preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $sc_name)) { $sc_sites[$sc_name] = $sc_name; }
+}
+
 // The site's own logs, read on the node and redacted there, for a node
 // whose agent ships the two log words. The owner's switch on the node
 // decides; the node reports it at every poll, so a node that has said
@@ -214,30 +225,6 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 			$fw_hc->end_form();
 			echo '</div>';
 		}
-		// A site container's own converger, read from this machine: a site with
-		// no agent of its own has no other way to say its converger stopped.
-		$sc_sites = array();
-		foreach ((is_array($diag_hr['containers'] ?? null) ? $diag_hr['containers'] : array()) as $sc_c) {
-			$sc_name = is_array($sc_c) ? (string)($sc_c['name'] ?? '') : '';
-			if (preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $sc_name)) { $sc_sites[$sc_name] = $sc_name; }
-		}
-		if (JobCommandBuilder::has_primitive($node, 'site_converger') && count($sc_sites) > 0) {
-			echo '<div>';
-			$fw_sc = $page->getFormWriter('site_converger_form', [
-				'action' => $base_url . '&tab=diagnostics',
-				'values' => ['site' => array_key_first($sc_sites), 'lines' => '100'],
-			]);
-			$fw_sc->begin_form();
-			$fw_sc->hiddeninput('action', '', ['id' => 'site_converger_action', 'value' => 'site_converger']);
-			$fw_sc->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_converger_csrf', 'value' => SmAdminCsrf::token()]);
-			$fw_sc->dropinput('site', 'Site container', ['options' => $sc_sites]);
-			$fw_sc->numberinput('lines', 'Lines of its converger log (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')',
-				['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT,
-				 'helptext' => 'Whether the site\'s converger is running: when it last ran, its cron entry and cron, its code check, and its log.']);
-			$fw_sc->submitbutton('btn_site_converger', 'Read site converger', ['class' => 'btn btn-sm btn-outline-secondary']);
-			$fw_sc->end_form();
-			echo '</div>';
-		}
 		// Host configuration, from the compiled readable list: the node
 		// returns a line whose key names a credential as the key alone,
 		// and never reads a file that is itself a secret.
@@ -251,6 +238,11 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 			$fw_cfg->hiddeninput('action', '', ['id' => 'file_head_action', 'value' => 'file_head']);
 			$fw_cfg->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'file_head_csrf', 'value' => SmAdminCsrf::token()]);
 			$fw_cfg->dropinput('file', 'Configuration file', ['options' => JobCommandBuilder::FILE_HEAD_FILES]);
+			// A per-site file (its vhost, logrotate, cron) on a machine with
+			// no site names one of its containers; the node refuses it without.
+			if (JobCommandBuilder::machine_has_no_site($node) && count($sc_sites) > 0) {
+				$fw_cfg->dropinput('site', 'Site container (for a per-site file)', ['options' => $sc_sites]);
+			}
 			$fw_cfg->numberinput('lines', 'Lines (1 to ' . JobCommandBuilder::FILE_HEAD_MAX_LINES . ')', ['min' => 1, 'max' => JobCommandBuilder::FILE_HEAD_MAX_LINES]);
 			$fw_cfg->submitbutton('btn_file_head', 'Read configuration', ['class' => 'btn btn-sm btn-outline-secondary']);
 			$fw_cfg->end_form();
@@ -258,6 +250,34 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 		}
 		echo '</div>';
 	}
+	$page->end_box();
+	$shown++;
+}
+
+// A site container's own converger, read from this machine: a site with
+// no agent of its own has no other way to say its converger stopped. Its own
+// box, outside Logs, because the site's own log-access switch decides, not
+// this machine's: the machine asks the site, and a site whose owner said no
+// comes back as that refusal on the job page.
+if (JobCommandBuilder::has_primitive($node, 'site_converger') && count($sc_sites) > 0) {
+	$page->begin_box(['title' => 'Site containers']);
+	echo '<div class="small text-muted mb-2">Read here only when that site\'s owner allows log access. '
+		. 'The machine masks credentials and personal data before anything is sent; the result is on the job page.</div>';
+	echo '<div>';
+	$fw_sc = $page->getFormWriter('site_converger_form', [
+		'action' => $base_url . '&tab=diagnostics',
+		'values' => ['site' => array_key_first($sc_sites), 'lines' => '100'],
+	]);
+	$fw_sc->begin_form();
+	$fw_sc->hiddeninput('action', '', ['id' => 'site_converger_action', 'value' => 'site_converger']);
+	$fw_sc->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'site_converger_csrf', 'value' => SmAdminCsrf::token()]);
+	$fw_sc->dropinput('site', 'Site container', ['options' => $sc_sites]);
+	$fw_sc->numberinput('lines', 'Lines of its converger log (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')',
+		['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT,
+		 'helptext' => 'Whether the site\'s converger is running: when it last ran, its cron entry and cron, its code check, and its log.']);
+	$fw_sc->submitbutton('btn_site_converger', 'Read site converger', ['class' => 'btn btn-sm btn-outline-secondary']);
+	$fw_sc->end_form();
+	echo '</div>';
 	$page->end_box();
 	$shown++;
 }
