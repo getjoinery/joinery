@@ -135,6 +135,7 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 		'page_visitors' => $page_visitors,
 		't404_pages' => $t404_pages,
 		'rollup_notice' => AnalyticsRollup::proxy_notice($startdate),
+		'statistics_off' => !SessionControl::visitor_statistics_on(),
 	);
 
 	return $result;

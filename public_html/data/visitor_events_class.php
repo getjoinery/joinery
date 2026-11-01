@@ -84,7 +84,6 @@ class VisitorEvent extends SystemBase {
 	    'vse_visitor_id' => array('type'=>'varchar(20)'),
 	    'vse_usr_user_id' => array('type'=>'int4', 'index'=>true),
 	    'vse_type' => array('type'=>'int2'),
-	    'vse_ip' => array('type'=>'varchar(64)'),
 	    'vse_page' => array('type'=>'text'),
 	    'vse_referrer' => array('type'=>'text'),
 	    'vse_source' => array('type'=>'varchar(255)'),
@@ -107,6 +106,10 @@ class VisitorEvent extends SystemBase {
 	 */
 	public static function recordPageVisit($page) {
 		try {
+			if (!SessionControl::visitor_statistics_on()) {
+				return;
+			}
+
 			// Don't track admin pages or Ajax requests
 			if (strpos($page, '/admin/') === 0 || strpos($page, '/ajax/') === 0) {
 				return;
@@ -139,7 +142,6 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 			// Set tracking data
 			$visitor_event->set('vse_type', self::TYPE_PAGE_VIEW);
-			$visitor_event->set('vse_ip', $_SERVER['REMOTE_ADDR'] ?? '');
 			$visitor_event->set('vse_page', $page);
 			$visitor_event->set('vse_referrer', $_SERVER['HTTP_REFERER'] ?? '');
 

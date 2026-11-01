@@ -35,6 +35,12 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
+if (!empty($page_vars['statistics_off'])) {
+	echo '<p style="margin:0 0 1em;padding:.6em .9em;background:#fff8e1;border:1px solid #e6d8a8;border-radius:4px;font-size:.9em;">'
+		. 'Visitor statistics are off, so no new visits are being recorded. Turn them on under '
+		. '<a href="/admin/admin_settings">Settings</a> &rarr; Visitor tracking.</p>';
+}
+
 if (!empty($page_vars['rollup_notice'])) {
 	echo '<p style="margin:0 0 1em;padding:.6em .9em;background:#fff8e1;border:1px solid #e6d8a8;border-radius:4px;font-size:.9em;">'
 		. htmlspecialchars($page_vars['rollup_notice']) . '</p>';

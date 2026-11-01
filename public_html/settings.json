@@ -2153,6 +2153,18 @@
       "helptext": "Analytics snippet injected into every public page. Subject to cookie consent when consent is on."
     },
     {
+      "name": "visitor_statistics",
+      "default": "1",
+      "group": "tracking",
+      "label": "Built-in visitor statistics",
+      "type": "select",
+      "options": {
+        "1": "On",
+        "0": "Off"
+      },
+      "helptext": "Records page views and conversions (signups, cart adds, purchases) for the Statistics, Funnels and Attribution reports. Off records nothing new; what is already recorded stays until its retention window passes, and A/B tests keep counting. Orders and signups themselves are unaffected."
+    },
+    {
       "name": "upgrade_location",
       "default": "",
       "managed": true,

@@ -1882,3 +1882,15 @@
 	$migration['migration_sql'] = "DELETE FROM cme_calendar_emails c WHERE NOT EXISTS (SELECT 1 FROM usr_users u WHERE u.usr_user_id = c.cme_usr_user_id)";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// Visitor statistics keep no IP address: nothing read it, and the access log
+	// and sign-in records hold the addresses an investigation needs. The column
+	// leaves the data class; the addresses already stored are cleared here, since
+	// an ordinary update_database run keeps an undeclared column. Skipped where
+	// the column is already gone.
+	$migration = array();
+	$migration['database_version'] = '228';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'vse_visitor_events' AND column_name = 'vse_ip') THEN 0 ELSE 1 END AS count";
+	$migration['migration_sql'] = "UPDATE vse_visitor_events SET vse_ip = NULL WHERE vse_ip IS NOT NULL";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

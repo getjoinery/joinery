@@ -5,6 +5,7 @@
  * Provides a minimal-friction cookie consent system that enables compliance
  * with major privacy regulations while minimizing disruption to users.
  *
+ * @version 1.2 - a consent record keeps no IP address
  * @version 1.1 - an unset privacy-policy link or webDir reads as empty (no trim(null) deprecation)
  * @version 1.0
  */
@@ -386,7 +387,6 @@ HTML;
         $event->set('vse_visitor_id', $visitor_id);
         $event->set('vse_usr_user_id', $session->get_user_id());
         $event->set('vse_type', VisitorEvent::TYPE_COOKIE_CONSENT);
-        $event->set('vse_ip', $_SERVER['REMOTE_ADDR'] ?? '');
         $event->set('vse_source', json_encode([
             'a' => $analytics ? 1 : 0,
             'm' => $marketing ? 1 : 0,

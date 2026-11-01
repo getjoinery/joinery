@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.25 - save_visitor_event() records nothing when the visitor_statistics setting is off
+ *                (visitor_statistics_on()); A/B test counters still flush; a visitor event keeps no IP address
  * @version 1.24 - a machine account holds no website session: store_session_variables() refuses it and
  *                 validate_account_standing() signs out one marked mid-session (machine_accounts.md)
  * @version 1.23 - save_formfields() never keeps a password, card, token or secret field in the session
@@ -522,6 +524,11 @@ class SessionControl{
 	
 	
 	//TYPES:  1= WEB HIT, 3..8 = conversion/diagnostic events — see VisitorEvent::TYPE_* constants
+	/** Whether the site records built-in visitor statistics (the visitor_statistics setting). */
+	public static function visitor_statistics_on(): bool {
+		return (string)Globalvars::get_instance()->get_setting('visitor_statistics') !== '0';
+	}
+
 	public function save_visitor_event($type=1, $is_404=FALSE, $ref_type=NULL, $ref_id=NULL, $meta=NULL){
 		// A session signed out earlier in this request has no uniqid left.
 		$this->get_uniqid();
@@ -604,8 +611,18 @@ class SessionControl{
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 
-		$sql = 'INSERT INTO vse_visitor_events (vse_visitor_id, vse_usr_user_id, vse_type, vse_ip, vse_page, vse_referrer, vse_source, vse_campaign, vse_medium, vse_content, vse_is_404, vse_ref_type, vse_ref_id, vse_meta)
-		VALUES (:vse_visitor_id, :vse_usr_user_id, :vse_type, :vse_ip, :vse_page, :vse_referrer, :vse_source, :vse_campaign, :vse_medium, :vse_content, :vse_is_404, :vse_ref_type, :vse_ref_id, :vse_meta)';
+		// Statistics off: no row, but A/B tests run on their own switch and keep counting.
+		if (!self::visitor_statistics_on()) {
+			if (class_exists('AbTest', false)) {
+				SystemBase::server_initiated_write(function () use ($type) {
+					AbTest::flush_request_accounting($type);
+				});
+			}
+			return false;
+		}
+
+		$sql = 'INSERT INTO vse_visitor_events (vse_visitor_id, vse_usr_user_id, vse_type, vse_page, vse_referrer, vse_source, vse_campaign, vse_medium, vse_content, vse_is_404, vse_ref_type, vse_ref_id, vse_meta)
+		VALUES (:vse_visitor_id, :vse_usr_user_id, :vse_type, :vse_page, :vse_referrer, :vse_source, :vse_campaign, :vse_medium, :vse_content, :vse_is_404, :vse_ref_type, :vse_ref_id, :vse_meta)';
 
 		$referer = '';
 		if(isset($_SESSION['HTTP_REFERER'])){
@@ -620,7 +637,6 @@ class SessionControl{
 			$q->bindValue(':vse_visitor_id', $_SESSION['uniqid'], PDO::PARAM_STR);
 			$q->bindValue(':vse_usr_user_id', $this->get_user_id(), PDO::PARAM_INT);
 			$q->bindValue(':vse_type', $type, PDO::PARAM_INT);
-			$q->bindValue(':vse_ip', $_SERVER['REMOTE_ADDR'], PDO::PARAM_STR);
 			$q->bindValue(':vse_page', strtok($_SERVER["REQUEST_URI"],'?'), PDO::PARAM_STR);
 			$q->bindValue(':vse_referrer', $referer, PDO::PARAM_STR);
 			$q->bindValue(':vse_source', $source, PDO::PARAM_STR);

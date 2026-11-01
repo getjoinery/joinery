@@ -19,6 +19,14 @@ Constants on `VisitorEvent` (`data/visitor_events_class.php`):
 
 ## Recording events
 
+### The on/off switch
+
+The `visitor_statistics` setting (Settings → Visitor tracking, default on) decides whether anything is recorded. Off, `save_visitor_event()` and `VisitorEvent::recordPageVisit()` write no row for any event type, page view or conversion; rows already recorded age out on the normal retention schedule. A/B test counters still flush, since tests have their own switch. `SessionControl::visitor_statistics_on()` answers the question for any other caller, and the Statistics page says when recording is off.
+
+### No IP addresses
+
+A visitor event keeps no IP address. A visitor is the session's ID (`vse_visitor_id`) and, when signed in, the user (`vse_usr_user_id`). The addresses an abuse investigation needs are in the web server access log and the sign-in records.
+
 ### Bot filtering
 
 Before any row is inserted, `save_visitor_event()` short-circuits on `SessionControl::crawlerDetect($USER_AGENT)`. The filter is a case-insensitive substring match against a list of known bot patterns (Googlebot, bingbot, facebookexternalhit, Ahrefs, Semrush, curl, python-requests, etc.), plus any request with an empty UA.
