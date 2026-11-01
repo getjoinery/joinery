@@ -17,6 +17,9 @@
  * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
+ * @version 2.6 - every push attempt records its outcome on the relay row (mrl_last_push_attempt_time,
+ *                mrl_last_push_result, mrl_last_push_reason: a fixed code, never the relay's own words), so the
+ *                relay_status agent word can say why a map is not moving (jeremytunnell, 2026-11-01)
  * @version 2.5 - rotationRefusal(): a mail key rotation does not commit while the relay
  *                may still seal to the old key, or may still hold mail sealed to it
  *                (specs/client_custody_mail.md B33, B41)
@@ -115,6 +118,57 @@ class RelayMapSync {
 	 * relay keeps running the last accepted fragment).
 	 */
 	public static function push(MailboxRelay $relay, bool $force = false): array {
+		$result = self::attemptPush($relay, $force);
+		self::recordAttempt($relay, $result);
+		return $result;
+	}
+
+	/**
+	 * The outcome of a push, as a fixed code: what relay_status reports. Read
+	 * from the result's message, whose openings push writes itself; the
+	 * relay's own wording after them is never kept.
+	 */
+	public static function outcomeCode(array $result): string {
+		$message = (string)($result['message'] ?? '');
+		$codes = array(
+			'map unchanged'                          => 'unchanged',
+			'relay has no public address'            => 'no_address',
+			'relay has no identity pin'              => 'no_identity',
+			'map build failed'                       => 'build_failed',
+			'built fragment is not valid JSON'       => 'bad_fragment',
+			'fragment push failed'                   => 'unreachable',
+			'the relay did not apply the fragment'   => 'timeout',
+			'the relay could not apply the fragment' => 'apply_error',
+			'the relay answered the fragment push'   => 'no_verdict',
+			'merge rejected the fragment'            => 'rejected',
+			'merge validated the fragment but'       => 'not_installed',
+			'merge served fragment'                  => 'stale_version',
+		);
+		foreach ($codes as $opening => $code) {
+			if (strncmp($message, $opening, strlen($opening)) === 0) {
+				return $code;
+			}
+		}
+		return (($result['status'] ?? '') === 'success') ? 'pushed' : 'other';
+	}
+
+	/** Write a push's outcome onto the relay row. Never throws: the push's own result stands. */
+	private static function recordAttempt(MailboxRelay $relay, array $result): void {
+		if (!$relay->key) {
+			return;
+		}
+		try {
+			MailboxRelay::updateColumns(intval($relay->key), array(
+				'mrl_last_push_attempt_time' => gmdate('Y-m-d H:i:s'),
+				'mrl_last_push_result'       => in_array($result['status'] ?? '', array('success', 'skipped', 'error'), true) ? $result['status'] : 'error',
+				'mrl_last_push_reason'       => self::outcomeCode($result),
+			));
+		} catch (\Throwable $e) {
+			error_log('RelayMapSync: could not record the push outcome: ' . $e->getMessage());
+		}
+	}
+
+	private static function attemptPush(MailboxRelay $relay, bool $force): array {
 		if (!$relay->usesRelayApi()) {
 			// An error, not a skip: the relay is routing this deployment's mail on
 			// a map this server can no longer update.

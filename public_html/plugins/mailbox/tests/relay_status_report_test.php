@@ -14,6 +14,10 @@
  *
  * Run: php tests/run.php test-db --filter=relay_status_report
  *
+ * RelayMapSync::outcomeCode() turns a push's result into the fixed code it
+ * records, and never keeps the relay's own words.
+ *
+ * @version 1.1 - the last map push attempt
  * @version 1.0
  */
 
@@ -51,6 +55,9 @@ $relay->set('mrl_last_push_time', '2026-11-01 13:51:00');
 $relay->set('mrl_last_pull_time', '2026-11-01 13:54:00');
 $relay->set('mrl_last_pull_drained_time', '2026-11-01 13:54:00');
 $relay->set('mrl_last_pull_held', 1);
+$relay->set('mrl_last_push_attempt_time', '2026-11-01 16:25:00');
+$relay->set('mrl_last_push_result', 'skipped');
+$relay->set('mrl_last_push_reason', 'unchanged');
 $relay->save();
 harness_register_row('mrl_mailbox_relays', 'mrl_mailbox_relay_id', intval($relay->key));
 
@@ -70,8 +77,10 @@ check($r['health']['state'] === 'ok' && $r['health']['queue'] === 2 && $r['healt
 	&& $r['health']['checked_time'] === '2026-11-01 13:50:02', 'its last health answer, the time to the second');
 check($r['transport_key'] === array('kind' => 'xwing', 'generation' => 2, 'retired_kept' => true, 'replaced_time' => '2026-11-01 13:51:00'),
 	'the transport key\'s kind and generation, and that the old secret is still kept', $json);
-check($r['map'] === array('version' => 41, 'last_push_time' => '2026-11-01 13:51:00')
+check($r['map']['version'] === 41 && $r['map']['last_push_time'] === '2026-11-01 13:51:00'
 	&& $r['pickup']['held'] === 1 && $r['pickup']['last_drained_time'] === '2026-11-01 13:54:00', 'the map push and pickup');
+check($r['map']['last_attempt_time'] === '2026-11-01 16:25:00' && $r['map']['last_attempt_result'] === 'skipped'
+	&& $r['map']['last_attempt_reason'] === 'unchanged', 'the last map check: when, its result and its reason code', $json);
 check(strpos($json, 'secret-name') === false && strpos($json, 'sealed-') === false && strpos($json, substr($new['public'], 0, 24)) === false,
 	'no name, host, key or sealed secret in it', $json);
 check($snapshot() === $row_before, 'reading it wrote nothing to the relay row');
@@ -95,5 +104,21 @@ exec('php ' . escapeshellarg($script) . ' 2>/dev/null', $out, $rc);
 $d = json_decode(implode("\n", $out), true);
 check($rc === 0 && count($out) === 1 && is_array($d) && ($d['mailbox'] ?? '') === 'active' && isset($d['relay']),
 	'one JSON line, the mailbox active, the relay field present', implode("\n", $out));
+
+section('A push outcome becomes a fixed code');
+check(RelayMapSync::outcomeCode(array('status' => 'skipped', 'message' => 'map unchanged')) === 'unchanged', 'unchanged');
+check(RelayMapSync::outcomeCode(array('status' => 'success', 'message' => 'map v34 pushed')) === 'pushed', 'pushed');
+check(RelayMapSync::outcomeCode(array('status' => 'error', 'message' => 'merge rejected the fragment: key for jeremy@secret.example too long')) === 'rejected',
+	'a refusal is its code; the relay\'s words (an address) are not kept');
+check(RelayMapSync::outcomeCode(array('status' => 'error', 'message' => 'fragment push failed (timeout): x')) === 'unreachable', 'unreachable');
+check(RelayMapSync::outcomeCode(array('status' => 'error', 'message' => 'something new')) === 'other', 'anything else is other');
+
+section('Every push attempt is recorded on the relay row');
+$res = RelayMapSync::push(new MailboxRelay(intval($relay->key), TRUE));
+$after = new MailboxRelay(intval($relay->key), TRUE);
+check($res['status'] === 'error' && (string)$after->get('mrl_last_push_result') === 'error'
+	&& (string)$after->get('mrl_last_push_reason') === 'no_identity'
+	&& (string)$after->get('mrl_last_push_attempt_time') !== '2026-11-01 16:25:00',
+	'a relay with no identity pin: the attempt, its error and its code are recorded', json_encode($res));
 
 harness_finish();

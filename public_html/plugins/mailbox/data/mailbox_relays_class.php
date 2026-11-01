@@ -35,6 +35,7 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.11 - mrl_last_push_attempt_time, mrl_last_push_result, mrl_last_push_reason: the last map push attempt's outcome
  * @version 1.10 - an old 32-byte transport key is replaced by an X-Wing one once the relay seals to it
  *                 (RelayVersion::sealsPostQuantum); mrl_transport_secret_retired_sealed keeps the old secret for
  *                 mail already in the spool (specs/post_quantum_sealing.md R7); transportSecretFor()
@@ -136,6 +137,13 @@ class MailboxRelay extends SystemBase {
 		'mrl_map_version'        => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
 		'mrl_map_content_hash'   => array('type'=>'varchar(64)'),
 		'mrl_last_push_time'     => array('type'=>'timestamp(6)'),
+		// The LAST push attempt, whatever came of it (RelayMapSync::push):
+		// success, skipped or error, and a fixed reason code
+		// (RelayMapSync::outcomeCode) — never the relay's own words. What the
+		// relay_status agent word reports when a map is not moving.
+		'mrl_last_push_attempt_time' => array('type'=>'timestamp(6)'),
+		'mrl_last_push_result'       => array('type'=>'varchar(10)'),
+		'mrl_last_push_reason'       => array('type'=>'varchar(20)'),
 		'mrl_last_pull_time'     => array('type'=>'timestamp(6)'),
 		// The last pull that read the relay's listing to its end (not stopped at its
 		// cap, no torn or failed entry) and processed all of it: everything the

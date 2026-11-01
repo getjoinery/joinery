@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.116 - relay_status carries the map's last push attempt (when, result, reason code)
  * @version 1.115 - relay_status (agent 1.101.0): sanitise_relay_status holds each field to its shape
  * @version 1.114 - an apply_update's target is the release this management node serves (DeploymentHelper::servedVersion);
  *                 a node whose source offered its own version is told the release is unpublished, not that it failed
@@ -4084,6 +4085,9 @@ HTML;
 			'map'           => [
 				'version'        => $count($m['version'] ?? null),
 				'last_push_time' => $time($m['last_push_time'] ?? ''),
+				'last_attempt_time'   => $time($m['last_attempt_time'] ?? ''),
+				'last_attempt_result' => in_array($m['last_attempt_result'] ?? null, ['success', 'skipped', 'error'], true) ? $m['last_attempt_result'] : '',
+				'last_attempt_reason' => $word($m['last_attempt_reason'] ?? ''),
 			],
 			'pickup'        => [
 				'last_pull_time'    => $time($p['last_pull_time'] ?? ''),

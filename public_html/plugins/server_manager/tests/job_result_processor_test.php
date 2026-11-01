@@ -2432,7 +2432,8 @@ $rs_in = array('mailbox' => 'active', 'relay' => 'active', 'relays_enabled' => 1
 	'version' => array('running' => '3.16', 'shipped' => '3.16', 'standing' => 'current', 'seals_for_browsers' => true, 'seals_post_quantum' => 'yes'),
 	'health' => array('state' => 'ok', 'reason' => '', 'failure' => 'Bad <b>', 'queue' => null, 'sole_tenant' => true, 'checked_time' => '2026-11-01 13:50:02', 'detail' => 'mail.example.com said hi'),
 	'last_test' => array('tested_time' => '2026-11-01 13:50:02', 'probe_state' => 'passed', 'probe_time' => 'yesterday'),
-	'map' => array('version' => 41, 'last_push_time' => '2026-11-01 13:51:00'),
+	'map' => array('version' => 41, 'last_push_time' => '2026-11-01 13:51:00', 'last_attempt_time' => '2026-11-01 16:25:00',
+		'last_attempt_result' => 'skipped', 'last_attempt_reason' => 'Unchanged <b>'),
 	'pickup' => array('last_pull_time' => '2026-11-01 13:54:00', 'last_drained_time' => '2026-11-01 13:54:00', 'held' => '0', 'alarm_time' => ''),
 	'transport_key' => array('kind' => 'xwing', 'generation' => 2, 'retired_kept' => true, 'replaced_time' => '2026-11-01 13:51:00', 'public' => 'AAAA'),
 	'inbound' => array('last_hour' => 3, 'last_day' => 40, 'newest_time' => '2026-11-01 13:54:01'));
@@ -2443,6 +2444,8 @@ check(strpos($rs_json, 'example.com') === false && strpos($rs_json, 'AAAA') === 
 check($rs['version']['running'] === '3.16' && $rs['version']['seals_post_quantum'] === false && $rs['health']['failure'] === ''
 	&& $rs['health']['queue'] === 'unknown' && $rs['last_test']['probe_time'] === '' && $rs['pickup']['held'] === 0,
 	'each field held to its shape: only a literal true, a time that is a time, a word that is a word', $rs_json);
+check($rs['map']['last_attempt_result'] === 'skipped' && $rs['map']['last_attempt_reason'] === ''
+	&& $rs['map']['last_attempt_time'] === '2026-11-01 16:25:00', 'the last map check: a reason that is not a code is dropped', $rs_json);
 check($rs['transport_key'] === array('kind' => 'xwing', 'generation' => 2, 'retired_kept' => true, 'replaced_time' => '2026-11-01 13:51:00')
 	&& $rs['inbound'] === array('last_hour' => 3, 'last_day' => 40, 'newest_time' => '2026-11-01 13:54:01'),
 	'the transport key\'s kind and generation, and the mail counts, kept', $rs_json);

@@ -14,6 +14,7 @@
  * building it can mint a new transport key (MailboxRelay::ensureTransportKeypair),
  * and an observe word writes nothing.
  *
+ * @version 1.1 - the map's last push attempt: when, its outcome and its reason code (RelayMapSync 2.6)
  * @version 1.0
  */
 
@@ -61,6 +62,10 @@ class RelayStatusReport {
 			'map'            => array(
 				'version'        => intval($relay->get('mrl_map_version')),
 				'last_push_time' => self::time($relay->get('mrl_last_push_time')),
+				// The last ATTEMPT, whatever came of it: why a map is not moving.
+				'last_attempt_time'   => self::time($relay->get('mrl_last_push_attempt_time')),
+				'last_attempt_result' => self::word($relay->get('mrl_last_push_result')),
+				'last_attempt_reason' => self::word($relay->get('mrl_last_push_reason')),
 			),
 			'pickup'         => array(
 				'last_pull_time'    => self::time($relay->get('mrl_last_pull_time')),

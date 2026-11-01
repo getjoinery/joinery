@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.32 - relay_status: the map's last check, with its outcome in words
  * @version 1.31 - relay_status results: this site's view of its mail relay
  * @version 1.30 - largest_files results: the site's biggest files, each with its folder, size and day
  * @version 1.29 - site_converger results: whether the site's converger is running, which part says why, then its log
@@ -924,7 +925,21 @@ if ($result) {
 			echo '<div><strong>Last Test Relay Health:</strong> ' . $rs_when($t['tested_time'])
 				. '; leak test message ' . htmlspecialchars($probe[$t['probe_state']] ?? 'not known')
 				. ($t['probe_time'] !== '' ? ' (' . $rs_when($t['probe_time']) . ')' : '') . '</div>';
+			$reasons = array('pushed' => 'pushed', 'unchanged' => 'unchanged, nothing to push', 'no_address' => 'the relay has no address yet',
+				'no_identity' => 'the relay row has no identity pin and cannot be reached', 'build_failed' => 'this site could not build the map',
+				'bad_fragment' => 'this site built a map that is not valid', 'unreachable' => 'the relay could not be reached',
+				'timeout' => 'the relay did not apply it in time', 'apply_error' => 'the relay could not apply it',
+				'no_verdict' => 'the relay gave no answer about it', 'rejected' => 'the relay REJECTED it',
+				'not_installed' => 'the relay accepted it but could not install it', 'stale_version' => 'the relay served an older map',
+				'other' => 'an unexpected outcome');
 			echo '<div class="mt-2"><strong>Map:</strong> push ' . $rs_n($m['version']) . ', ' . $rs_when($m['last_push_time']) . '</div>';
+			if (($m['last_attempt_time'] ?? '') !== '') {
+				$failed = ($m['last_attempt_result'] ?? '') === 'error';
+				echo '<div' . ($failed ? ' class="text-danger"' : '') . '><strong>Last map check:</strong> ' . $rs_when($m['last_attempt_time']) . ', '
+					. htmlspecialchars($reasons[$m['last_attempt_reason'] ?? ''] ?? 'not known') . '</div>';
+			} else {
+				echo '<div class="text-muted">Last map check: not recorded yet (a site on an older release does not record it).</div>';
+			}
 			echo '<div><strong>Pickup:</strong> last pull ' . $rs_when($p['last_pull_time']) . '; last pull that emptied the relay ' . $rs_when($p['last_drained_time'])
 				. '; held on the relay: ' . $rs_n($p['held'])
 				. ($p['alarm_time'] !== '' ? '; <span class="text-danger">pickup stopped, announced ' . $rs_when($p['alarm_time']) . '</span>' : '') . '</div>';
