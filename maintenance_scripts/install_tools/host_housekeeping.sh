@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.38 - kexec stays locked on every machine; where root wrote /etc/joinery/kdump_allowed (localdev only,
+#                to catch its freezes) boot leaves it open until kdump-tools loads the crash kernel, then
+#                joinery-kexec-lock.service locks it. Without the file nothing changes and the unit is removed
 # Version: 1.37 - Every FPM php.ini is held at ffi.enable = On on every converge, not only an untouched one
 #                (specs/post_quantum_sealing.md R4); a php.ini change restarts FPM through restart_php_fpm():
 #                systemd try-restart (a stopped PHP stays stopped), or USR2 in a site container
@@ -1381,6 +1384,15 @@ KMOD_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
 KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/99-zz-joinery-kernel.conf"
 KERNEL_SYSCTL_CONF_EARLIER="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
 NETWORK_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/99-security.conf"
+# kexec is locked on every machine. The one exception is a machine whose root
+# wrote KDUMP_ALLOWED (localdev, to catch its freezes): kdump loads its crash
+# kernel with kexec, and kernel.kexec_load_disabled cannot be undone until the
+# next boot, so there the boot file leaves it out and joinery-kexec-lock.service
+# sets it once kdump-tools has loaded the crash kernel. Every run there loads a
+# missing crash kernel while kexec is still open, then locks it. A machine
+# without the file keeps kexec in the boot file and has no lock unit.
+KDUMP_ALLOWED="${FS_ROOT}/etc/joinery/kdump_allowed"
+KEXEC_LOCK_UNIT="${FS_ROOT}/etc/systemd/system/joinery-kexec-lock.service"
 # blacklist-rare-network.conf as kmod ships it on Ubuntu 24.04 and 26.04. It is
 # written back only when its checksum is the one dpkg recorded for this kmod.
 kmod_shipped_rare_network() { cat <<'EOF'
@@ -1469,6 +1481,50 @@ write_sysctl_file() {
     # -e: a setting this kernel does not have is passed over, not an error.
     sysctl -e -q -p "${file}" >/dev/null 2>&1 || true
 }
+# Only where KDUMP_ALLOWED exists: the unit that locks kexec after the crash
+# kernel loads at boot, and on this run the crash kernel loaded (while kexec is
+# still open) and kexec locked.
+kexec_lock_after_kdump() {
+    local candidate
+    candidate="$(mktemp)"
+    cat > "${candidate}" <<'UNIT'
+# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.
+# Only where /etc/joinery/kdump_allowed exists: kexec stays open at boot until kdump-tools has loaded the crash kernel.
+[Unit]
+Description=Lock kexec once the crash kernel is loaded (Joinery)
+After=kdump-tools.service
+ConditionPathExists=/etc/joinery/kdump_allowed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/sysctl -q -w kernel.kexec_load_disabled=1
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    if install_file "${KEXEC_LOCK_UNIT}" "${candidate}"; then
+        say "wrote ${KEXEC_LOCK_UNIT}: ${KDUMP_ALLOWED} exists, so kexec locks after the crash kernel loads"
+        [[ "${HAVE_SYSTEMD}" == 1 ]] && systemctl daemon-reload >/dev/null 2>&1
+    fi
+    rm -f "${candidate}"
+    if [[ "${HAVE_SYSTEMD}" == 1 ]] && ! systemctl is-enabled --quiet joinery-kexec-lock.service 2>/dev/null; then
+        systemctl enable joinery-kexec-lock.service >/dev/null 2>&1 \
+            || warn "could not enable joinery-kexec-lock.service: the next boot leaves kexec open"
+    fi
+    [[ "${RUN_SYSTEM}" == 1 ]] || return 0
+    if [[ "$(cat /proc/sys/kernel/kexec_load_disabled 2>/dev/null)" == 0 \
+            && "$(cat /sys/kernel/kexec_crash_loaded 2>/dev/null)" != 1 ]] && command -v kdump-config >/dev/null 2>&1; then
+        if kdump-config load >/dev/null 2>&1; then
+            say "loaded the crash kernel before locking kexec"
+        else
+            warn "kdump-config load failed: no crash kernel is loaded (kdump-config load names why)"
+        fi
+    fi
+    sysctl -q -w kernel.kexec_load_disabled=1 >/dev/null 2>&1 || true
+    if [[ "$(cat /sys/kernel/kexec_crash_loaded 2>/dev/null)" != 1 ]]; then
+        warn "${KDUMP_ALLOWED} exists but no crash kernel is loaded: kexec was locked before it could load; the next boot loads it"
+    fi
+}
 # UFW applies a sysctl file of its own each time the firewall starts (every
 # boot, every ufw reload), after the files above were applied, and Ubuntu's copy
 # sets log_martians to 0. A pinned setting that file also names is written there
@@ -1496,7 +1552,24 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
         warn "no ${KERNEL_SETTINGS_HELPER}: the kernel and network settings were not written; this machine's support bundle is incomplete"
         FAILED=1
     else
-        write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
+        kernel_boot_settings=("${KERNEL_SETTINGS[@]}")
+        if [[ -f "${KDUMP_ALLOWED}" ]]; then
+            kernel_boot_settings=()
+            for line in "${KERNEL_SETTINGS[@]}"; do
+                [[ "${line}" == "kernel.kexec_load_disabled = "* ]] || kernel_boot_settings+=("${line}")
+            done
+        fi
+        write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${kernel_boot_settings[@]}"
+        if [[ -f "${KDUMP_ALLOWED}" ]]; then
+            kexec_lock_after_kdump
+        elif [[ -f "${KEXEC_LOCK_UNIT}" ]]; then
+            if [[ "${HAVE_SYSTEMD}" == 1 ]]; then
+                systemctl disable joinery-kexec-lock.service >/dev/null 2>&1 || true
+            fi
+            rm -f "${KEXEC_LOCK_UNIT}"
+            [[ "${HAVE_SYSTEMD}" == 1 ]] && systemctl daemon-reload >/dev/null 2>&1
+            say "removed ${KEXEC_LOCK_UNIT}: ${KDUMP_ALLOWED} is gone, so boot locks kexec itself"
+        fi
         if [[ -f "${KERNEL_SYSCTL_CONF_EARLIER}" ]]; then
             rm -f "${KERNEL_SYSCTL_CONF_EARLIER}"
             say "removed ${KERNEL_SYSCTL_CONF_EARLIER}: its settings are in ${KERNEL_SYSCTL_CONF}, which boot applies last"

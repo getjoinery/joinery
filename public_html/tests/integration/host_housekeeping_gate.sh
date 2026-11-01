@@ -415,6 +415,20 @@ done < <(grep -v '^#' "$SC")
 chk "boot applies every kernel setting from our file last: Ubuntu's 99-protect-links.conf overrules none (B34)" "$overruled" "0"
 chk "the file under its earlier name is gone, and the run says so" \
     "$([ -e "$RK/etc/sysctl.d/90-joinery-kernel.conf" ] && echo kept || echo gone)|$(grep -c 'removed .*90-joinery-kernel.conf' <<< "$out")" "gone|1"
+chk "no kexec lock unit where root has not allowed kdump" "$([ -e "$RK/etc/systemd/system/joinery-kexec-lock.service" ] && echo unit || echo none)" "none"
+# Only where root wrote /etc/joinery/kdump_allowed (localdev): boot leaves kexec
+# open for kdump-tools, and a unit ordered after it locks kexec.
+KD="$T/kdump"; cp -a "$RK" "$KD"; mkdir -p "$KD/etc/joinery"; : > "$KD/etc/joinery/kdump_allowed"
+JOINERY_HOUSEKEEPING_ROOT="$KD" bash "$SCRIPT" >/dev/null 2>&1; rc=$?
+KU="$KD/etc/systemd/system/joinery-kexec-lock.service"
+chk "kdump allowed: exit 0, the boot file leaves kexec out and keeps every other kernel setting" \
+    "$rc|$(grep -c 'kexec' "$KD/etc/sysctl.d/99-zz-joinery-kernel.conf")|$(grep -vc '^#' "$KD/etc/sysctl.d/99-zz-joinery-kernel.conf")" "0|0|15"
+chk "kdump allowed: the lock unit runs after kdump-tools and sets kexec_load_disabled" \
+    "$(grep -cxE 'After=kdump-tools.service|ExecStart=/usr/sbin/sysctl -q -w kernel.kexec_load_disabled=1|ConditionPathExists=/etc/joinery/kdump_allowed' "$KU")" "3"
+rm -f "$KD/etc/joinery/kdump_allowed"
+JOINERY_HOUSEKEEPING_ROOT="$KD" bash "$SCRIPT" >/dev/null 2>&1
+chk "the file removed: the unit goes and the boot file locks kexec again" \
+    "$([ -e "$KU" ] && echo unit || echo none)|$(grep -cx 'kernel.kexec_load_disabled = 1' "$KD/etc/sysctl.d/99-zz-joinery-kernel.conf")" "none|1"
 SN="$RK/etc/sysctl.d/99-security.conf"
 chk "the network settings are written on every machine: spoofing, redirects, source routes, SYN cookies" \
     "$(grep -cxE 'net.ipv4.conf.all.rp_filter = 1|net.ipv4.conf.all.accept_redirects = 0|net.ipv6.conf.all.accept_redirects = 0|net.ipv4.conf.all.send_redirects = 0|net.ipv4.conf.all.accept_source_route = 0|net.ipv4.tcp_syncookies = 1' "$SN")" "6"
