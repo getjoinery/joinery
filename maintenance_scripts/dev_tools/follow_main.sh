@@ -16,11 +16,19 @@
 #      a migration, or a declaration it seeds (settings.json, admin_menus.json,
 #      permissions.json, a plugin.json).
 #
+# First, the agent source (joinery-agent) is brought to its own origin/main the
+# same way, steps 1 to 3: a publish builds the agent it bundles from that
+# checkout, so one left behind ships an old agent in every release. A refusal
+# there is said and does not stop the site's own pull.
+#
 # A run that changes nothing prints nothing, so it can run every minute.
 #
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.3 - psql -w: the publish check never waits at a password prompt. Follows the agent source too (/home/user1/joinery-agent, the checkout a publish builds the
+#               agent from), under the same rules. Only the main repo was pulled, so every release from
+#               1.96.0 on bundled agent 1.96.0: 1.97.0 to 1.100.0 never shipped.
 # @version 1.2 - A difference in a file's mode alone is not a local edit: the host converger, not a
 #               person, sets every mode in the tree (.sh 755, the rest 644). Scripts git recorded at
 #               644 read as edited after every converge, and every pull was refused from 10-31.
@@ -33,6 +41,14 @@ set -u
 umask 022   # see 1.1: the converger runs this tree's installers as root
 
 REPO="${FOLLOW_MAIN_REPO:-/var/www/html/joinerytest}"   # override only to try it on a scratch clone
+# The agent source. A scratch REPO never reaches the real agent checkout: with
+# FOLLOW_MAIN_REPO set, the agent is followed only where FOLLOW_MAIN_AGENT_REPO
+# names a scratch one too.
+if [ -n "${FOLLOW_MAIN_REPO:-}" ]; then
+    AGENT_REPO="${FOLLOW_MAIN_AGENT_REPO:-}"
+else
+    AGENT_REPO="${FOLLOW_MAIN_AGENT_REPO:-/home/user1/joinery-agent}"
+fi
 BRANCH="main"
 LOCK="${HOME}/.cache/follow_main.lock"
 
@@ -41,6 +57,44 @@ say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) follow_main: $*"; }
 mkdir -p "$(dirname "$LOCK")"
 exec 9> "$LOCK"
 flock -n 9 || exit 0   # the previous minute's run is still going
+
+# A publish reads both checkouts; while one is building neither moves.
+publish_building() {
+    local building
+    building="$(psql -w -h localhost -U postgres -d joinerytest -Atc "SELECT count(*) FROM mjb_management_jobs
+        WHERE mjb_job_type = 'publish_upgrade' AND mjb_status IN ('queued', 'pending', 'running')
+        AND mjb_create_time > now() - interval '3 hours'" 2>/dev/null)"
+    [ "${building:-0}" != "0" ] || pgrep -f 'publish_upgrade\.php' >/dev/null 2>&1
+}
+
+# The agent source, to its origin/main: fetch, refuse local edits or a
+# non-fast-forward, fast-forward. Its own subshell, so nothing it does can stop
+# the site's pull below.
+follow_agent() {
+    [ -n "$AGENT_REPO" ] && [ -d "$AGENT_REPO/.git" ] || return 0
+    (
+        cd "$AGENT_REPO" || exit 0
+        git fetch -q origin "$BRANCH" 2>/dev/null || { say "agent: fetch failed"; exit 1; }
+        a_old="$(git rev-parse HEAD)"
+        a_new="$(git rev-parse "origin/${BRANCH}")"
+        [ "$a_old" = "$a_new" ] && exit 0
+        if [ -n "$(git -c core.fileMode=false status --porcelain)" ]; then
+            say "agent: NOT pulled $(git rev-parse --short "$a_new"): the checkout has local changes"
+            exit 1
+        fi
+        if ! git merge-base --is-ancestor "$a_old" "$a_new"; then
+            say "agent: NOT pulled $(git rev-parse --short "$a_new"): origin/${BRANCH} is not a fast-forward of $(git rev-parse --short "$a_old")"
+            exit 1
+        fi
+        publish_building && exit 0
+        if git -c core.fileMode=false merge -q --ff-only "$a_new" 2>&1; then
+            say "agent: at $(git log -1 --format='%h %s' "$a_new") (was $(git rev-parse --short "$a_old"))"
+        else
+            say "agent: fast-forward to $(git rev-parse --short "$a_new") failed"
+        fi
+    ) || true
+}
+follow_agent
 
 cd "$REPO" || { say "no checkout at $REPO"; exit 1; }
 
@@ -64,10 +118,7 @@ if ! git merge-base --is-ancestor "$old" "$new"; then
     say "NOT pulled $(git rev-parse --short "$new"): origin/${BRANCH} is not a fast-forward of $(git rev-parse --short "$old")"
     exit 1
 fi
-building="$(psql -h localhost -U postgres -d joinerytest -Atc "SELECT count(*) FROM mjb_management_jobs
-    WHERE mjb_job_type = 'publish_upgrade' AND mjb_status IN ('queued', 'pending', 'running')
-    AND mjb_create_time > now() - interval '3 hours'" 2>/dev/null)"
-if [ "${building:-0}" != "0" ] || pgrep -f 'publish_upgrade\.php' >/dev/null 2>&1; then
+if publish_building; then
     exit 0   # a publish is reading this tree; the next minute tries again
 fi
 
