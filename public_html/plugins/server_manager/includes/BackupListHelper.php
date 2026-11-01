@@ -10,6 +10,7 @@
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
+ * @version 1.6 - a run's ledger receipt and an offloaded file's stored copy are not listed as backup files
  * @version 1.5 - the cloud listing covers every live storage space of the node; each file names its space_id
  *                (specs/storage_targets.md WP4)
  * @version 1.4 - the cloud listing is S3Signer::list() of the node's named target (switched off included) under the node's own folder, so a node past the
@@ -78,6 +79,11 @@ class BackupListHelper {
 					// full under it, which restores nothing at all — chains
 					// are offered as chains, by BackupChainListHelper.
 					if (BackupChainListHelper::is_chain_object($f['key'])) continue;
+					// Nor is a run's ledger (ledger/{run}.json, the receipt of
+					// what the run uploaded) or an offloaded file's stored copy
+					// (objects/{epoch}/...): neither is a backup to restore, and
+					// deleting a receipt from here would unmake its proof.
+					if (preg_match('#/(ledger|' . preg_quote(BackupObjects::DIR, '#') . ')/#', (string)$f['key'])) continue;
 					$filename = basename($f['key']);
 					$mtime = $f['last_modified'] ? strtotime($f['last_modified']) : 0;
 					$cloud_files[$filename] = [

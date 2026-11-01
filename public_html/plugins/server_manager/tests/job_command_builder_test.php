@@ -3214,6 +3214,37 @@ section('net_health, web_workers and the access log (specs/slow_request_diagnosi
 		'the access log travels as the enum value, like any other file');
 }
 
+section('largest_files: a site\'s biggest files, by name, behind the owner\'s log switch (agent 1.100.0)');
+
+{
+	$lf_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1c", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,largest_files',
+		'mgn_agent_log_access' => 'on',
+	));
+	check(JobCommandBuilder::build_largest_files($lf_node) === array('primitive' => 'largest_files', 'params' => array()),
+		'largest_files travels as the name alone: no path, no count');
+	$lf_off = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,largest_files',
+		'mgn_agent_log_access' => 'off',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_largest_files($lf_off); } catch (Exception $e) { $threw = true; }
+	check($threw, 'largest_files is refused on the plane while the owner has log access off: it names files');
+	$lf_older = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1e", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,disk_usage',
+		'mgn_agent_log_access' => 'on',
+	));
+	$threw = false;
+	try { JobCommandBuilder::build_largest_files($lf_older); } catch (Exception $e) { $threw = true; }
+	check($threw, 'an agent that does not name largest_files is not sent it');
+}
+
 section('site_converger: a machine reads whether one of its site containers\' converger is running (agent 1.98.0)');
 
 {

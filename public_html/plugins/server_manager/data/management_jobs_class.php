@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.45 - largest_files joins LOG_EXCERPT_TYPES: its file names age out with the other excerpts
  * @version 1.44 - site_converger joins LOG_EXCERPT_TYPES: its converger log lines age out with the other excerpts
  * @version 1.43 - Re-run of a probe job (check_status by probe, edge_vs_origin) measures again and files a new completed
  *                 job; it used to refuse as a job with no steps. edge_vs_origin is a filterable job type
@@ -113,7 +114,7 @@ class ManagementJob extends SystemBase {
 	);
 
 	/** The job types whose result is a log excerpt and is pruned on the window above. */
-	const LOG_EXCERPT_TYPES = array('site_log', 'site_log_count', 'log_table_tail', 'unit_journal', 'file_head', 'site_converger');
+	const LOG_EXCERPT_TYPES = array('site_log', 'site_log_count', 'log_table_tail', 'unit_journal', 'file_head', 'site_converger', 'largest_files');
 
 	public static $field_specifications = array(
 		'mjb_management_job_id'                => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

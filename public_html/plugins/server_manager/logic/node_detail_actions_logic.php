@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.82 - largest_files: a site's biggest files, by name (Diagnostics; agent 1.100.0, behind the log switch)
  * @version 1.81 - site_converger: a machine reads whether one of its site containers' converger is running (Diagnostics)
  * @version 1.80 - refresh_status: one Refresh on the node page queues the check_status and the host_report the node
  *                 offers, and returns to the page
@@ -202,6 +203,7 @@ class NodeDetailActions {
 		'log_table_tail'           => 'diagnostics',
 		'unit_journal'             => 'overview',
 		'site_converger'           => 'diagnostics',
+		'largest_files'            => 'diagnostics',
 		'disk_usage'               => 'diagnostics',
 		'listening_sockets'        => 'diagnostics',
 		'site_state_report'        => 'diagnostics',
@@ -523,6 +525,12 @@ class NodeDetailActions {
 			// files the completed job; no agent is involved.
 			case 'edge_vs_origin': {
 				$job = EdgeOriginProbe::run_and_record($node, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'largest_files': {
+				$built = JobCommandBuilder::build_largest_files($node);
+				$job = ManagementJob::createFromBuild($node->key, 'largest_files', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

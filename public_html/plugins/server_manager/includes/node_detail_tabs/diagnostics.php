@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.3 - The machine: Biggest files (largest_files, agent 1.100.0), offered where the owner allows log access
  * @version 1.2 - Logs: Read site converger, for one of the machine's site containers (site_converger, agent 1.98.0)
  * @version 1.1 - Logs: the host converger's journal (unit_journal joinery-host-converger, agent 1.97.0), the
  *                record of which installer failed a converge on a host with a data root
@@ -26,7 +27,7 @@
 <input type="hidden" name="action" value="edge_vs_origin">
 <?php echo SmAdminCsrf::field(); ?>
 </form>
-<?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionListeningSockets' => 'listening_sockets',
+<?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionLargestFiles' => 'largest_files', 'nodeActionListeningSockets' => 'listening_sockets',
 	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status',
 	'nodeActionSiteStateReport' => 'site_state_report', 'nodeActionNetHealth' => 'net_health',
 	'nodeActionWebWorkers' => 'web_workers'] as $form_id => $form_action) { ?>
@@ -76,6 +77,11 @@ $diag_on_container = trim((string)$node->get('mgn_container_name')) !== '';
 $machine_qs = array();
 if (JobCommandBuilder::has_primitive($node, 'disk_usage')) {
 	$machine_qs[] = array('nodeActionDiskUsage', 'What is using the disk?', 'The biggest directories in the site tree and the usual machine directories, sizes only.');
+}
+// Names files, so it sits behind the owner's log switch; where that is off
+// the Logs box already says why, and the button is not offered.
+if (JobCommandBuilder::has_primitive($node, 'largest_files') && JobCommandBuilder::log_access_refusal($node) === null) {
+	$machine_qs[] = array('nodeActionLargestFiles', 'Biggest files', 'The site\'s twenty-five biggest files, by name, with their sizes and when each last changed. The site\'s settings folder is never looked at.');
 }
 if (JobCommandBuilder::has_primitive($node, 'listening_sockets')) {
 	$machine_qs[] = array('nodeActionListeningSockets', 'Listening ports', 'The addresses and ports the machine listens on, with the program and unit holding each.');

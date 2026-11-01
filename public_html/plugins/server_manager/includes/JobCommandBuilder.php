@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.152 - build_largest_files (agent 1.100.0): a site's biggest files by name, behind the log switch
  * @version 1.151 - data_root_recipient and install_node take an X-Wing recovery key (1216 bytes); a copy_take_key request carries a v2 box;
  *                 copy_export carries the copy's X-Wing key and its agent key's signature, and refuses without them (post_quantum_sealing WP3)
  * @version 1.150 - build_site_converger (agent 1.98.0): whether one site container's converger is running, read by its machine
@@ -3398,6 +3399,29 @@ class JobCommandBuilder {
 
 	public static function build_disk_usage_primitive($node) {
 		return ['primitive' => 'disk_usage', 'params' => []];
+	}
+
+	/**
+	 * This site's biggest files: the twenty-five of a megabyte or more in the
+	 * site tree and its data-root folder, with sizes and days, config/
+	 * excluded (agent 1.100.0). The question disk_usage leaves open: which
+	 * files fill the directory it named. PRIMITIVE ONLY, and it takes nothing.
+	 *
+	 * Behind the owner's log switch, unlike disk_usage: a file name can say
+	 * what somebody stored, and the node redacts the names before they leave.
+	 */
+	public static function build_largest_files($node) {
+		if (!self::has_primitive($node, 'largest_files')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot list its biggest files. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['largest_files']));
+		}
+		self::assert_log_access($node);
+		return self::build_largest_files_primitive($node);
+	}
+
+	public static function build_largest_files_primitive($node) {
+		return ['primitive' => 'largest_files', 'params' => []];
 	}
 
 	/**

@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.24 - Backup Files is Other backup files, below the backups, saying what belongs in it; ledger
+ *                 receipts and offloaded-file objects are never listed there (BackupListHelper)
+ * @version 1.23 - Verify the newest backup beside the backed-up line at the top: it opens the newest run's own Verify
  * @version 1.22 - a site's own getjoinery backup storage target is never offered as where a node's backups move
  * @version 1.21 - Prepare stages its own row's run (it staged only the newest), and Restore is offered for a run
  *                 once it is prepared on the node, never queued for the node to refuse (B39, B40)
@@ -251,7 +254,14 @@
 		   . (!empty($health['job_id'])
 		       ? ' <a href="/admin/server_manager/job_detail?job_id=' . (int)$health['job_id'] . '">See the failed job.</a>'
 		       : '')
+		   . ' <button type="button" class="btn btn-outline-primary btn-sm ms-1" id="verifyNewestTop" hidden'
+		   . ' onclick="var b=document.getElementById(\'verifyNewestBtn\'); if (b) { b.scrollIntoView({block:\'center\'}); b.click(); }">'
+		   . 'Verify the newest backup</button>'
 		   . '</p>';
+		// Shown once the backup list below has a run to verify: it opens that
+		// run's own Verify dialog, so there is one verify path, near the top.
+		echo '<script>document.addEventListener(\'DOMContentLoaded\', function () {'
+		   . ' if (document.getElementById(\'verifyNewestBtn\')) { document.getElementById(\'verifyNewestTop\').hidden = false; } });</script>';
 
 		// The runs this plane dispatched, with the level and size each one
 		// printed. The storage listing below says what is kept; this says what
@@ -382,8 +392,18 @@
 		echo '<div class="alert alert-warning">Cloud listing failed: ' . htmlspecialchars($cloud_error) . '</div>';
 	}
 
-	$pageoptions = ['title' => 'Backup Files'];
+	// Where Verify, Prepare and the scan report their progress: above the
+	// backups, so it is in view of the buttons that start them.
+	echo '<div id="backupScanStatus" hidden class="mb-2"></div>';
+
+	// The standalone archives box goes last: rendered here, shown below the
+	// backups, which are what a person comes to this tab for.
+	ob_start();
+	$pageoptions = ['title' => 'Other backup files'];
 	$page->begin_box($pageoptions);
+	echo '<p class="text-muted small">Single-file backups, in this node\'s backup storage or on the node, that are '
+	   . 'not part of the backups above: a whole-site download, or a backup taken before backups were kept in sets. '
+	   . 'Usually empty.</p>';
 
 	echo '<div class="d-flex justify-content-between align-items-center mb-2">';
 	if ($last_scan) {
@@ -393,8 +413,6 @@
 	}
 	echo '<button type="button" class="btn btn-sm btn-outline-primary" id="refreshBackupsBtn" onclick="refreshBackupList()">Scan for Backups</button>';
 	echo '</div>';
-
-	echo '<div id="backupScanStatus" hidden class="mb-2"></div>';
 
 	echo '<table class="table table-striped table-sm" id="backupFilesTable">';
 	echo '<thead><tr><th>Filename</th><th>Size</th><th>Date</th><th>Location</th><th>Actions</th></tr></thead>';
@@ -473,12 +491,13 @@
 			echo '</tr>';
 		}
 	} else {
-		echo '<tr><td colspan="5" class="text-muted text-center">' . ($last_scan ? 'No backup files found' : 'Click "Scan for Backups" to see files') . '</td></tr>';
+		echo '<tr><td colspan="5" class="text-muted text-center">' . ($last_scan ? 'None' : 'Click "Scan for Backups" to see files') . '</td></tr>';
 	}
 
 	echo '</tbody></table>';
 
 	$page->end_box();
+	$other_files_box = ob_get_clean();
 
 	// ── Backups in backup storage ──
 	//
@@ -656,7 +675,9 @@
 				    . htmlspecialchars(json_encode($run_when($r))) . ', '
 				    . htmlspecialchars(json_encode(BackupChainListHelper::format_size($needs))) . ', this';
 				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
-				echo '<button type="button" class="btn btn-outline-secondary btn-sm me-1" onclick="openVerifyModal(' . $va . ')">Verify</button>';
+				echo '<button type="button" class="btn btn-outline-secondary btn-sm me-1"'
+				   . ($entry === $shelf_runs[0] ? ' id="verifyNewestBtn"' : '')
+				   . ' onclick="openVerifyModal(' . $va . ')">Verify</button>';
 				echo '<button type="button" class="btn btn-outline-warning btn-sm" id="' . $restore_id . '"'
 				   . ($is_staged ? '' : ' disabled title="Prepare this backup first: it downloads what restoring this run needs onto the node."')
 				   . ' onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
@@ -679,6 +700,8 @@
 
 		$page->end_box();
 	}
+
+	echo $other_files_box;
 
 	// The domain every restore form pre-fills with. It is the node's recorded
 	// URL, offered rather than assumed: a rebuild keeps the site's own domain

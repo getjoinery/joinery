@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.30 - largest_files results: the site's biggest files, each with its folder, size and day
  * @version 1.29 - site_converger results: whether the site's converger is running, which part says why, then its log
  * @version 1.28 - disable_root_login results (agent 1.95.0): what sshd reads before and after, the reload, Match blocks
  * @version 1.27 - net_health and web_workers results (agent 1.93.0): a verdict line, then the counts
@@ -1062,6 +1063,38 @@ if ($result) {
 		if ($result_data['cleanup'] !== 'done') {
 			echo '<div class="text-danger small">Cleanup: ' . $h($result_data['cleanup']) . '</div>';
 		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'largest_files' && !empty($result_data['read'])) {
+		$fmt = function ($v) { return is_int($v) ? JobResultProcessor::format_size($v) : 'unknown'; };
+		$root_paths = array();
+		foreach ((is_array($result_data['roots'] ?? null) ? $result_data['roots'] : array()) as $r) {
+			$root_paths[(string)$r['label']] = (string)$r['path'];
+		}
+		$files = is_array($result_data['files'] ?? null) ? $result_data['files'] : array();
+		$shown_bytes = 0;
+		foreach ($files as $f) { $shown_bytes += (int)$f['bytes']; }
+		echo '<div class="card mb-3"><div class="card-header"><strong>Biggest files</strong> <small class="text-muted">— '
+			. count($files) . ' shown, ' . htmlspecialchars($fmt($shown_bytes)) . ' between them, of '
+			. htmlspecialchars(is_int($result_data['files_total'] ?? null) ? number_format($result_data['files_total']) : 'unknown')
+			. ' files (' . htmlspecialchars($fmt($result_data['bytes_total'] ?? null)) . ')'
+			. (!empty($result_data['partial']) ? ' — the walk could not read everything, so the list may be short' : '')
+			. '</small></div><div class="card-body">';
+		if (!$files) {
+			echo '<p class="mb-0 text-muted">No file of a megabyte or more.</p>';
+		} else {
+			echo '<table class="table table-sm mb-2"><thead><tr><th>File</th><th>Where</th><th class="text-end">Size</th><th>Changed</th></tr></thead><tbody>';
+			foreach ($files as $f) {
+				echo '<tr><td class="text-break">' . htmlspecialchars((string)$f['path']) . '</td>'
+					. '<td><small class="text-muted">' . htmlspecialchars($f['root'] === 'data' ? 'data root' : 'site tree') . '</small></td>'
+					. '<td class="text-end">' . htmlspecialchars($fmt($f['bytes'])) . '</td>'
+					. '<td><small>' . htmlspecialchars((string)$f['modified']) . '</small></td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+		echo '<p class="mb-0 text-muted small">Paths are relative to the site tree (' . htmlspecialchars($root_paths['site'] ?? 'unknown')
+			. ')' . (isset($root_paths['data']) ? ' or the site\'s data-root folder (' . htmlspecialchars($root_paths['data']) . ')' : '')
+			. '. Names are redacted on the node: a run of asterisks stands for an address or a token.</p>';
 		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'disk_usage' && !empty($result_data['read'])) {

@@ -2604,6 +2604,34 @@ check(JobResultProcessor::sanitise_host_report(array())['php_workers'] === null
 	&& JobResultProcessor::sanitise_host_report(array('php_workers' => 'x'))['php_workers'] === null,
 	'an older node, or no PHP-FPM: null');
 
+section('largest_files: a site\'s biggest files land bounded');
+
+{
+	$files = array();
+	for ($i = 0; $i < 30; $i++) {
+		$files[] = array('root' => 'data', 'path' => 'static_files/joinery-core-0.8.' . $i . '.tar.gz', 'bytes' => 49000000 - $i, 'modified' => '2026-10-31');
+	}
+	$files[0]['path'] = 'static_files/<script>x.tar.gz';
+	$files[1]['root'] = 'elsewhere';
+	$files[2]['bytes'] = 'lots';
+	$files[3]['modified'] = 'yesterday';
+	$r = JobResultProcessor::largest_files_result(array(
+		'roots' => array(array('label' => 'site', 'path' => '/var/www/html/getjoinery'), array('label' => 'data', 'path' => '/srv/joinery/sites/getjoinery'),
+			array('label' => 'machine', 'path' => '/')),
+		'files' => $files, 'files_total' => 4729, 'files_over_min' => 40, 'bytes_total' => 1000000000,
+		'min_bytes' => 1048576, 'partial' => false, 'generated_at' => 1793499330, 'extra' => 'dropped',
+	));
+	check($r['read'] === true && count($r['roots']) === 2, 'two roots kept; a label that is neither site nor data is dropped');
+	check(count($r['files']) <= 25, 'at most twenty-five files are kept', (string)count($r['files']));
+	check($r['files'][0]['path'] === 'static_files/scriptx.tar.gz', 'a path keeps only the characters the script prints', $r['files'][0]['path']);
+	$paths = array_column($r['files'], 'path');
+	check(!in_array('static_files/joinery-core-0.8.1.tar.gz', $paths, true), 'a file under a root that is not site or data is dropped');
+	check(!in_array('static_files/joinery-core-0.8.2.tar.gz', $paths, true), 'a file with no byte count is dropped');
+	$third = null; foreach ($r['files'] as $f) { if ($f['path'] === 'static_files/joinery-core-0.8.3.tar.gz') { $third = $f; } }
+	check($third !== null && $third['modified'] === '', 'a day that is not a date is blanked, the file kept');
+	check(!isset($r['extra']) && $r['files_total'] === 4729 && $r['partial'] === false, 'counts kept, anything else dropped');
+}
+
 section('site_converger: a site container\'s converger facts land bounded');
 
 {

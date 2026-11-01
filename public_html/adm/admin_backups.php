@@ -3,6 +3,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.27 - a site its management node backs up says where to verify a backup now
  * @version 1.26 - a build that had to step up through /verify-stepup (authenticator codes, no passkey) resumes on return
  *                 instead of being forgotten; remembered in sessionStorage (which no other site can set) for 3 minutes,
  *                 only on the #download return, and never sent round the step-up twice
@@ -224,6 +225,15 @@ if ($verified) {
 	} elseif ($verify_every <= 0) {
 		echo ' <span class="text-muted small">&middot; scheduled verification is switched off</span>';
 	}
+}
+// A site its management node backs up is verified from there: the
+// management node holds the links to its backup storage, not this site.
+if ($is_managed) {
+	echo '<div class="text-muted small">To verify a backup now, use <strong>Verify the newest backup</strong> on this site\'s '
+	   . 'Backups tab at its management node'
+	   . ($manager_url !== '' ? ' (<a href="' . htmlspecialchars(rtrim($manager_url, '/') . '/admin/server_manager') . '">'
+	       . htmlspecialchars($manager_url) . '</a>)' : '')
+	   . '.</div>';
 }
 if ($verify_failed) {
 	echo '<div class="text-danger small">Verification failed ' . htmlspecialchars($when($verify_failed->get('bkh_verify_time')))

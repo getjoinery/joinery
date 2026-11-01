@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.113 - process_largest_files: a site's biggest files, each a root, a path, a size and a day, capped
  * @version 1.112 - parse_backup_keys_tokens(): the backup keys' kinds from set_recovery_key.php 2.2 ride the status blob
  * @version 1.111 - process_site_converger: a site container's converger facts and log lines, each held to its kind
  * @version 1.110 - a recovery key report's pub= takes a 1216-byte X-Wing key, and only that is kept on the node
@@ -4377,6 +4378,65 @@ HTML;
 			$out[] = ['path' => $path, 'bytes' => $bytes];
 		}
 		return $out;
+	}
+
+	/** Files reported from a largest_files walk; the script caps at the same figure. */
+	const LARGEST_FILES_MAX = 25;
+
+	/**
+	 * A largest_files job's result: this site's biggest files. Each file is a
+	 * root label (site or data), a path, a byte count and a day, and nothing
+	 * else the node sent is kept; paths keep only the characters the script
+	 * prints, so a file named to break a page cannot.
+	 */
+	private static function process_largest_files($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		if (!is_array($decoded) || !is_array($decoded['files'] ?? null)) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$job->set('mjb_result', json_encode(self::largest_files_result($decoded)));
+		$job->save();
+	}
+
+	/** largest_files_result(), pure: the script's object in, the kept shape out. */
+	public static function largest_files_result(array $decoded): array {
+		$path = function ($v) {
+			if (!is_string($v)) { return ''; }
+			return substr(preg_replace('#[^A-Za-z0-9._/@:+=?*-]#', '', $v), 0, 200);
+		};
+		$roots = [];
+		foreach (array_slice(is_array($decoded['roots'] ?? null) ? $decoded['roots'] : [], 0, 2) as $r) {
+			$label = is_array($r) ? (string)($r['label'] ?? '') : '';
+			if (in_array($label, ['site', 'data'], true)) {
+				$roots[] = ['label' => $label, 'path' => $path($r['path'] ?? '')];
+			}
+		}
+		$files = [];
+		foreach (array_slice(array_values($decoded['files']), 0, self::LARGEST_FILES_MAX) as $f) {
+			if (!is_array($f)) { continue; }
+			$root = (string)($f['root'] ?? '');
+			$p = $path($f['path'] ?? '');
+			$bytes = self::host_report_count($f['bytes'] ?? null);
+			if (!in_array($root, ['site', 'data'], true) || $p === '' || !is_int($bytes)) { continue; }
+			$day = (string)($f['modified'] ?? '');
+			$files[] = ['root' => $root, 'path' => $p, 'bytes' => $bytes,
+				'modified' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) ? $day : ''];
+		}
+		return [
+			'read'           => true,
+			'roots'          => $roots,
+			'files'          => $files,
+			'files_total'    => self::host_report_count($decoded['files_total'] ?? null),
+			'files_over_min' => self::host_report_count($decoded['files_over_min'] ?? null),
+			'bytes_total'    => self::host_report_count($decoded['bytes_total'] ?? null),
+			'min_bytes'      => self::host_report_count($decoded['min_bytes'] ?? null),
+			'partial'        => !empty($decoded['partial']),
+			'generated_at'   => self::host_report_count($decoded['generated_at'] ?? null),
+		];
 	}
 
 	private static function process_host_report($job) {
