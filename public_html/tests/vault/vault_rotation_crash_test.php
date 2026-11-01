@@ -145,6 +145,30 @@ $seal_item('sealed while broken', 'item:4');
 check($consumer->items[3]['gen'] === 3, 'the new item is stamped with the orphan-risk generation');
 check($secret_for_generation(3) !== null, 'the generation-3 secret is recoverable from a durable wrapping (the fix)');
 
+// ---- A re-seal already running: a second one is refused, not doubled -----
+// The web rotation answers first and re-seals after the answer, under a
+// per-member advisory lock (VaultCeremonies 1.7). Another connection holding
+// that lock stands for a background re-seal still under way.
+section('A re-seal running elsewhere');
+$settings = Globalvars::get_instance();
+$other = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname'),
+	$settings->get_setting('dbusername'), $settings->get_setting('dbpassword'));
+$other->prepare('SELECT pg_advisory_lock(?, ?)')->execute(array(VaultCeremonies::DRAIN_LOCK_NAMESPACE, (int)$user->key));
+check(VaultCeremonies::drainRunning((int)$user->key), 'a re-seal running in another process is seen');
+$consumer->armed = false;
+$calls_before = count($consumer->calls);
+$threw = '';
+try { $rotate(); } catch (VaultCeremonyException $e) { $threw = $e->getMessage(); }
+check($threw === VaultCeremonies::DRAIN_RUNNING_MESSAGE, 'finishing the rotation meanwhile is refused with the wait message', $threw);
+check(count($consumer->calls) === $calls_before, 'and no second re-seal ran');
+$gens = UserEncryptionWrapping::liveGenerations($vault_id);
+sort($gens);
+check($gens === [2, 3], 'both generations are still live', json_encode($gens));
+$other->prepare('SELECT pg_advisory_unlock(?, ?)')->execute(array(VaultCeremonies::DRAIN_LOCK_NAMESPACE, (int)$user->key));
+$other = null;
+check(!VaultCeremonies::drainRunning((int)$user->key), 'once it ends, nothing is running');
+check(PHP_SAPI !== 'fpm-fcgi', 'here (not a web request) the re-seal runs inside the call, so the sections around this one see it finish');
+
 // ---- Completion: the retry converges instead of splitting forever -------
 section('Completion mode convergence');
 $consumer->armed = false;
@@ -153,6 +177,8 @@ check($r2['completed_pending'] === true, 'the retry COMPLETES the pending rotati
 check($r2['key_generation'] === 3, 'no new generation was minted');
 check($r2['regenerate_recommended'] === true, 'and the user is told to regenerate them');
 check(UserEncryptionWrapping::liveGenerations($vault_id) === [3], 'exactly one generation remains live');
+check(in_array(2, array_column(VaultPreviousKeys::entries(new UserEncryptionVault($vault_id, TRUE)), 'generation'), true),
+	'and the generation it retired is kept in the chain, so nothing left on it is stranded (reviewer1 B2)');
 $last = $consumer->calls[count($consumer->calls) - 1];
 check($last['old_gen'] === 2 && $last['new_gen'] === 3, 'the drain ran from generation 2 to 3');
 $gen3_secret = $secret_for_generation(3);

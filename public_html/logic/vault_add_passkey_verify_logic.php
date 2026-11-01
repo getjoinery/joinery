@@ -51,7 +51,7 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 	// A wrapping must be tagged with a single truthful generation, and in a
 	// partially-rotated vault the in-window secret's generation is ambiguous.
 	if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
-		return LogicResult::error('Your vault has an unfinished key rotation. Run the rotation again to complete it, then add this passkey.');
+		return LogicResult::error(VaultCeremonies::unfinishedRotationMessage((int)$user->key, 'add this passkey'));
 	}
 
 	// The wrapping is produced only under a fresh tap of an unlocker the vault

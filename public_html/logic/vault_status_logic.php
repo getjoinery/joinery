@@ -76,6 +76,10 @@ function vault_status_logic(array $input): LogicResult {
 		// (an app credential whose purpose borrows it): device name, purpose
 		// label, and when the window's absolute cap ends it.
 		'borrowed'                  => VaultUnlock::borrowedWindows((int)$user->key),
+		// Code regeneration and a passphrase change also need a recent step-up:
+		// said here so the page asks for it first, instead of the server
+		// refusing after the person has done every other ceremony.
+		'step_up_outstanding'       => $session->step_up_outstanding($user),
 		// False: codes made on the server before sets existed, which the next
 		// passkey unlock replaces with a browser-made set (§ R6).
 		'has_code_set'              => UserEncryptionWrapping::hasCodeSet((int)$vault->key),
@@ -88,6 +92,7 @@ function vault_status_logic(array $input): LogicResult {
 	]);
 }
 
+// @version 1.3 - step_up_outstanding: the page confirms the step-up before an action's own ceremonies, not after them
 // @version 1.2 - borrowed: the open windows app credentials borrowed from this unlock
 // @version 1.1 - root and content keyring views, has_code_set, passphrase_allowed
 function vault_status_logic_descriptor() {

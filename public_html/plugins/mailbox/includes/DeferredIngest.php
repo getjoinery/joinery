@@ -27,6 +27,8 @@
  * parse one message twice (twice would seal it twice, split its attachments
  * twice and run its rules twice).
  *
+ * @version 1.6 - a waiting blob sealed to a retired key is moved to the current key through the vault's retired keys
+ *                (VaultPreviousKeys) and parsed; one nothing opens is left quietly, not retried and logged on every page
  * @version 1.5 - the parse runs as server_initiated_write(): it is mail arriving late, which no
  *               person asked for, on whatever page the vault owner is viewing
  * @version 1.4 - per-message lock (parseOne); parseMessages() for a thread open; the
@@ -154,6 +156,22 @@ class DeferredIngest {
 			if (InboundEmailMessage::isBrowserSealed($msg)) {
 				return false;   // a Fortress arrival: the owner's browser parses it
 			}
+			// Sealed in another format than this key (an old v1 blob under a v2
+			// key): sealed to a key a rotation has since retired. The vault keeps
+			// its retired keys under the current one, so the blob is moved to the
+			// current key first; when nothing opens it, it is left alone, quietly
+			// (retrying on every page changes nothing and filled the log).
+			try {
+				[$blob_version] = SealedBox::unframeSeal((string)$msg->get('iem_relay_sealed_raw'));
+			} catch (\Throwable $e) {
+				$blob_version = null;
+			}
+			if ($blob_version !== null && $blob_version !== $key->version()) {
+				if (!self::moveToCurrentKey($msg, $user_id, $key)) {
+					return false;
+				}
+				$msg = new InboundEmailMessage($id, TRUE);
+			}
 			// One message is one unit of work for the hot-turn rule, by the
 			// same argument RecipeRunner::run() makes: a forward action can
 			// open this message's stored raw, and without the boundary that
@@ -173,11 +191,55 @@ class DeferredIngest {
 				});
 			});
 		} catch (\Throwable $e) {
+			// Same format, another key: a retired key of the same version.
+			// Moved to the current key, it parses on the next pass.
+			if (isset($msg) && $msg instanceof InboundEmailMessage && self::moveToCurrentKey($msg, $user_id, $key)) {
+				return false;
+			}
 			error_log('DeferredIngest: failed to parse pending message ' . $id . ': ' . $e->getMessage());
 			return false;
 		} finally {
 			self::unlockMessage($id);
 		}
+	}
+
+	/**
+	 * Re-seal a waiting message's blob from one of its owner's retired keys
+	 * (VaultPreviousKeys, reached through the open $key) to the vault's
+	 * current key. A compare-and-swap, so a blob moved or parsed meanwhile is
+	 * left as it is. Returns whether it moved.
+	 */
+	private static function moveToCurrentKey(InboundEmailMessage $msg, int $user_id, VaultKey $key): bool {
+		$vault = UserEncryptionVault::loadForUser($user_id);
+		if ($vault === null) {
+			return false;
+		}
+		$blob = (string)$msg->get('iem_relay_sealed_raw');
+		$crypto = new VaultCrypto();
+		foreach (VaultPreviousKeys::open($vault, $key) as $previous) {
+			// One unit for the hot-turn rule, armed while the plaintext is held.
+			$moved = SealedEgressGuard::isolate(function () use ($crypto, $blob, $previous, $vault, $msg) {
+				try {
+					$raw = $crypto->openHeldDeliveryBlob($blob, $previous);
+				} catch (\Throwable $e) {
+					return null;
+				}
+				SealedEgressGuard::markHot('mail:' . (int)$msg->key . ':iem_relay_sealed_raw');
+				$sealed = $crypto->sealItemDek($raw, (string)$vault->get('uev_public_key'));
+				$raw = null;
+				return (bool)SystemBase::server_initiated_write(function () use ($msg, $blob, $sealed) {
+					$stmt = DbConnector::get_instance()->get_db_link()->prepare('UPDATE iem_inbound_email_messages
+						SET iem_relay_sealed_raw = ? WHERE iem_inbound_email_message_id = ? AND iem_relay_sealed_raw = ?
+						AND iem_pending_parse = true');
+					$stmt->execute(array($sealed, (int)$msg->key, $blob));
+					return $stmt->rowCount() === 1;
+				});
+			});
+			if ($moved !== null) {
+				return $moved;
+			}
+		}
+		return false;
 	}
 
 	/**

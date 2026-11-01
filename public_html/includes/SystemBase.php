@@ -1151,9 +1151,119 @@ abstract class SystemBase {
 			throw new VaultLockedException();
 		}
 		$crypto = new VaultCrypto();
-		$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $key);
+		try {
+			$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $key);
+		} catch (Throwable $e) {
+			// Sealed to a key a rotation retired: the vault keeps its retired
+			// keys under the current one (VaultPreviousKeys), so it opens with
+			// the one it was sealed to. A re-seal still running, or a row nothing
+			// can open yet, reads as "not readable yet", which every reader
+			// handles, and not as a broken row.
+			$dek = static::openWithPreviousKeys((string)$row[static::sealedKeyColumn()], $owner_id, $key, $row);
+			if ($dek === null) {
+				if (static::rowAwaitsReseal($row, $owner_id)) {
+					throw new VaultLockedException('This item is being re-secured under your new key; it opens in a few minutes.');
+				}
+				throw $e;
+			}
+		}
 		return $crypto->openField($ciphertext, $dek,
 			static::sealAd(intval($row[static::$pkey_column] ?? 0), $field));
+	}
+
+	/**
+	 * Owners' account vaults looked up by openWithPreviousKeys(), each with when
+	 * it was read: a list of stranded rows costs one query, not one a row. Kept
+	 * for a few seconds only, so a long process (a drain, a worker) sees a chain
+	 * a rotation or an unlock has changed since.
+	 */
+	private static $previous_key_vaults = array();
+	const PREVIOUS_KEY_VAULT_SECONDS = 5;
+
+	/**
+	 * A sealed DEK opened with one of the owner's retired keys
+	 * (VaultPreviousKeys, reached through $current_key); null when none opens
+	 * it. The row it came from is then re-sealed to the current key on the
+	 * spot, so a leftover on a retired key (an old X25519 one in particular)
+	 * does not stay sealed to it: a compare-and-swap on the wrapped key and
+	 * generation read, as resealRows() does, so a row changed meanwhile keeps
+	 * what it holds. A write during a read, the server's own
+	 * (server_initiated_write); a failed one is logged and the read still
+	 * answers.
+	 */
+	protected static function openWithPreviousKeys(string $sealed, int $owner_id, VaultKey $current_key, array $row = array()): ?string {
+		// A cached vault with no chain is read again: the chain may have been
+		// written since (an unlock adopting retired keys), and a vault with
+		// none has nothing to reuse.
+		$cached = self::$previous_key_vaults[$owner_id] ?? null;
+		if ($cached === null || $cached[0] === null || (string)$cached[0]->get('uev_previous_keys') === ''
+				|| microtime(true) - $cached[1] > self::PREVIOUS_KEY_VAULT_SECONDS) {
+			try {
+				$cached = array(UserEncryptionVault::loadForUser($owner_id), microtime(true));
+			} catch (Throwable $e) {
+				$cached = array(null, microtime(true));
+			}
+			self::$previous_key_vaults[$owner_id] = $cached;
+		}
+		$vault = $cached[0];
+		if ($vault === null) {
+			return null;
+		}
+		$crypto = new VaultCrypto();
+		$dek = null;
+		foreach (VaultPreviousKeys::open($vault, $current_key) as $previous) {
+			try {
+				$dek = $crypto->openItemDek($sealed, $previous);
+				break;
+			} catch (Throwable $e) {
+				continue;
+			}
+		}
+		if ($dek === null) {
+			return null;
+		}
+		$key_col = static::sealedKeyColumn();
+		$gen_col = static::sealedGenerationColumn();
+		$row_id = intval($row[static::$pkey_column] ?? 0);
+		// Moved only to the key in hand, and only while the vault read names that
+		// key: a vault cached from before a rotation would name the generation
+		// the rotation retired, and moving the row there undoes the move. Then
+		// it is a read only, and the next read moves it.
+		if ($row_id > 0 && $gen_col !== '' && array_key_exists($gen_col, $row)
+				&& hash_equals((string)$vault->get('uev_public_key'), $current_key->publicKey())) {
+			try {
+				$moved = $crypto->sealItemDek($dek, $current_key->publicKey());
+				static::server_initiated_write(function () use ($key_col, $gen_col, $row_id, $moved, $vault, $sealed, $row) {
+					DbConnector::get_instance()->get_db_link()->prepare('UPDATE ' . static::$tablename . ' SET '
+						. $key_col . ' = ?, ' . $gen_col . ' = ? WHERE ' . static::$pkey_column . ' = ? AND '
+						. $key_col . ' = ? AND ' . $gen_col . ' IS NOT DISTINCT FROM ?')
+						->execute(array($moved, (int)$vault->get('uev_key_generation'), $row_id, $sealed, $row[$gen_col]));
+				});
+			} catch (Throwable $e) {
+				error_log(get_called_class() . ': read row ' . $row_id . ' through a previous key, could not move it to the current one: '
+					. $e->getMessage());
+			}
+		}
+		return $dek;
+	}
+
+	/** Is this row on an older key generation than its owner's account vault, while a re-seal that will reach it is running? */
+	protected static function rowAwaitsReseal(array $row, int $owner_id): bool {
+		$gen_col = static::sealedGenerationColumn();
+		if ($gen_col === '' || !isset($row[$gen_col])) {
+			return false;
+		}
+		try {
+			$vault = UserEncryptionVault::loadForUser($owner_id);
+		} catch (Throwable $e) {
+			return false;
+		}
+		if ($vault === null || (int)$row[$gen_col] >= (int)$vault->get('uev_key_generation')) {
+			return false;
+		}
+		// Only while a re-seal is actually running: a row one FAILED on would
+		// otherwise read as a short wait forever, its real error lost.
+		return VaultCeremonies::drainRunning($owner_id);
 	}
 
 	/**
@@ -2121,7 +2231,14 @@ abstract class SystemBase {
 	 * throws. That split exists so a consumer can compose several models (and its
 	 * own bespoke material) into one fail-loud callback.
 	 *
-	 * @return array{attempted:int, failed:int}
+	 * Each write is a compare-and-swap: it lands only while the row still holds
+	 * the wrapped key and generation this pass read. The pass can run for
+	 * minutes (a rotation re-seals after answering the browser), and a row
+	 * re-sealed or rewritten meanwhile already carries a key that opens; writing
+	 * the stale one back over it would leave content that never opens again. A
+	 * row that changed is counted as skipped, not failed.
+	 *
+	 * @return array{attempted:int, failed:int, skipped:int}
 	 */
 	public static function resealRows(int $user_id, VaultKey $old_key, int $old_generation,
 			string $new_public_key, int $new_generation): array {
@@ -2153,11 +2270,12 @@ abstract class SystemBase {
 		$rows = $select->fetchAll(PDO::FETCH_ASSOC);
 
 		$update = $db->prepare('UPDATE ' . static::$tablename . ' SET ' . $key_col . ' = ?, '
-			. $gen_col . ' = ? WHERE ' . static::$pkey_column . ' = ?');
+			. $gen_col . ' = ? WHERE ' . static::$pkey_column . ' = ? AND ' . $key_col . ' = ? AND ' . $gen_col . ' = ?');
 
 		$crypto    = new VaultCrypto();
 		$attempted = 0;
 		$failed    = 0;
+		$skipped   = 0;
 		foreach ($rows as $row) {
 			$sealed = (string)($row[$key_col] ?? '');
 			if ($sealed === '') {
@@ -2173,7 +2291,11 @@ abstract class SystemBase {
 			$row_id = intval($row[static::$pkey_column] ?? 0);
 			try {
 				$dek = $crypto->openItemDek($sealed, $old_key);
-				$update->execute(array($crypto->sealItemDek($dek, $new_public_key), $new_generation, $row_id));
+				$update->execute(array($crypto->sealItemDek($dek, $new_public_key), $new_generation, $row_id,
+					$sealed, $old_generation));
+				if ($update->rowCount() === 0) {
+					$skipped++;   // changed since this pass read it: what it holds now stands
+				}
 			} catch (Throwable $e) {
 				$failed++;
 				error_log('Vault reseal: failed for ' . static::$tablename . ' row ' . $row_id
@@ -2181,7 +2303,7 @@ abstract class SystemBase {
 			}
 		}
 
-		return array('attempted' => $attempted, 'failed' => $failed);
+		return array('attempted' => $attempted, 'failed' => $failed, 'skipped' => $skipped);
 	}
 
 	/**

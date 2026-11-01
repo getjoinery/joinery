@@ -13,6 +13,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * the browser's: only the account halves of their KEKs arrive
  * (specs/one_vault_experience.md § R6).
  *
+ * @version 1.4 - resealing_in_background: the answer goes before the content's re-seal (VaultCeremonies 1.7)
  * @version 1.3 - root_unlockers.key: the root vault's new key, moved with the account's (post_quantum_sealing R7)
  * @version 1.2 - root_unlockers: the root vault's code (and phrase) twins, replaced with the account's
  * @version 1.1
@@ -83,6 +84,8 @@ function vault_rotate_verify_logic(array $input): LogicResult {
 		'passphrase_reenrolled'  => $result['passphrase_reenrolled'],
 		'dropped_passkeys'       => $result['dropped_passkeys'],
 		'key_file'               => $result['key_file'],
+		// The new key is saved; the content's re-seal runs after this answer.
+		'resealing_in_background' => !empty($result['resealing_in_background']),
 	]);
 }
 

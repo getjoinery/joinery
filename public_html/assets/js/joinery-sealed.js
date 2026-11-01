@@ -57,6 +57,8 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.14 - adopt(): a session on a different key than the one held replaces it (it was opened from the
+ *   server's current wrapping; the held one predates a key change); the same key keeps the held one
  * @version 1.13 - a content vault on an old X25519 key opens only to be rotated (adopt, resume); the root
  *   opens, to move with the account vault's rotation (specs/post_quantum_sealing.md R7)
  * @version 1.12 - writes v2.edgeseal. (X-Wing, specs/post_quantum_sealing.md WP2); reads both frames
@@ -362,7 +364,15 @@ window.JoinerySealed = (function () {
 			refusal.rotationOwed = true;
 			throw refusal;
 		}
-		if (isOpen(scope)) { if (sessions[scope] !== s) s.lock(); return; }
+		if (isOpen(scope)) {
+			if (sessions[scope] === s) return;
+			if (sessions[scope].publicKey === s.publicKey) { s.lock(); return; }
+			// A different key: the newcomer was just opened from what the server
+			// holds now, and the held one is from before the key changed (a
+			// rotation in another request). Keeping the old one would wrap new
+			// unlockers under a secret that no longer opens the vault.
+			sessions[scope].lock();
+		}
 		sessions[scope] = s;
 		resetIdle();
 		persistResume(scope, s);

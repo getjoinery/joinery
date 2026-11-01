@@ -435,8 +435,9 @@ try {
 	check($callers['consentToValues('] === array('plugins/joinery_ai/includes/ActionQueue.php'),
 		'consent is given only by the action queue\'s approve step',
 		implode(', ', $callers['consentToValues(']));
-	check($callers['contentFree('] === array('includes/VaultAudit.php'),
-		'and only the vault audit declares a content-free write',
+	sort($callers['contentFree(']);
+	check($callers['contentFree('] === array('includes/VaultAudit.php', 'includes/VaultCeremonies.php', 'includes/VaultPreviousKeys.php'),
+		'and only the vault audit and the vault row\'s own key writes declare a content-free write',
 		implode(', ', $callers['contentFree(']));
 
 	// =====================================================================

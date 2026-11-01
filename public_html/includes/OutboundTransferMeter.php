@@ -30,6 +30,8 @@
  * on a site the operator hosts on its own account (hosted_plan_state): the
  * management node watches that machine from the provider's figure.
  *
+ * @version 1.3 - the email reads the month at the reading's time, not the clock's (a reading just before the turn
+ *                of the month was described as the new month, empty)
  * @version 1.2 - the signal declares its audience (superadmins); the payload names no recipients
  * @version 1.1 - an interface new under the same boot is a baseline (a default-route flap counted
  *                its whole since-boot counter); a reading with no interface changes nothing;
@@ -137,7 +139,7 @@ class OutboundTransferMeter {
 		$state['last_time'] = $now;
 
 		if (self::over($state, $now) && ($state['emailed'] ?? '') !== $period) {
-			self::email($state);
+			self::email($state, $now);
 			$state['emailed'] = $period;
 		}
 		Setting::put(self::STATE_SETTING, json_encode($state));
@@ -193,8 +195,8 @@ class OutboundTransferMeter {
 	}
 
 	/** The signal declares `audience: superadmins`; Notify reads who that is. */
-	private static function email(array $state): void {
-		$month = self::month($state);
+	private static function email(array $state, int $now): void {
+		$month = self::month($state, $now);
 		$send = self::$dispatch ?? array('SignalBus', 'dispatch');
 		$send(self::SIGNAL, array(
 			'sent'   => self::gb($month['sent_bytes']),

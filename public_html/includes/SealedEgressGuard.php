@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.7 - vault_keys: an account vault row's own key material is a declared content-free write
  * @version 1.6 - v2.seal. and v2.edgeseal. (the post-quantum seal) are sealed blobs
  * @version 1.5 - an owner-sealed UPDATE may end in RETURNING plain columns
  * @version 1.4 - consentToValues() for an owner-approved action's literal arguments;
@@ -133,8 +134,13 @@ class SealedEgressGuard {
 	 * reviewed claim that everything the write carries is metadata:
 	 *   vault_audit — VaultAudit's window opened/closed rows (scope, reason,
 	 *                 session digest, durations).
+	 *   vault_keys  — an account vault row's own key material: its public key,
+	 *                 salt, generation and the retired-key chain (each retired
+	 *                 secret wrapped under a KEK, the KEK sealed to the
+	 *                 current key). VaultCeremonies::rotate's flip and
+	 *                 VaultPreviousKeys::add.
 	 */
-	const CONTENT_FREE_WRITE_SITES = array('vault_audit');
+	const CONTENT_FREE_WRITE_SITES = array('vault_audit', 'vault_keys');
 
 	/** @var bool has this process opened sealed content? */
 	private static $hot = false;

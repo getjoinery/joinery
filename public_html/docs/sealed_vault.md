@@ -1050,6 +1050,24 @@ crash-safety order:
    never the whole pre-rotation list, so wrappings of any other live
    generation survive until a later rotation drains them.
 
+**The answer goes before the re-seal.** Step 2's commit is the point after
+which the rotation always completes, so a web request answers there (the new
+codes and key file, `resealing_in_background = true`) and runs steps 3 and 4
+after the response has gone (`fastcgi_finish_request()`;
+`VaultCeremonies::drainAfterResponse`). A vault with a lot of content takes
+minutes to re-seal, and a proxy in front of the site (Cloudflare: 100 s)
+would otherwise hand the browser its own error page in place of the codes.
+The command line and the tests re-seal inside the call. The window opens on
+the new key at once; a row the re-seal has not reached yet reads as locked
+("being re-secured", `SystemBase::rowAwaitsReseal`), not as a broken row. One
+re-seal per member runs at a time: `rotate()` takes a per-member advisory lock
+on its first step and the re-seal releases it when it ends, so a second rotate
+meanwhile, or an enrolment gated on two live generations, is told to wait
+(`VaultCeremonies::DRAIN_RUNNING_MESSAGE`, `unfinishedRotationMessage()`).
+Each re-seal write is a compare-and-swap on the wrapped key and generation it
+read (`SystemBase::resealRows`), so a row rewritten meanwhile keeps what it
+holds.
+
 A crash or callback failure at any point up through step 3 leaves both
 generations' wrappings live and both secrets recoverable — old wrappings
 still unwrap the old secret, and each wrapping's own `uew_key_generation`
@@ -1070,6 +1088,28 @@ recovery codes (the current generation's were minted by the interrupted
 attempt and never shown), and `regenerate_recommended = true`. Enrollment
 ceremonies refuse while two generations are live, so completion is the one
 road out of the interrupted state.
+
+**Retired keys stay reachable through the current one.** Content can reach an
+old key after the re-seal has passed it: mail a relay sealed before it learned
+the new key, a row written at the wrong moment. So a rotation keeps each key it
+retires in `uev_previous_keys` (`VaultPreviousKeys`): the retired secret wrapped
+under a random KEK (AD `vault:user:previous:{generation}`), and that KEK sealed
+to the new public key the way a row's DEK is. The next rotation re-seals every
+KEK to its own new key, so the chain follows the vault, and it keeps every
+retired key (a KEK that will not open fails the rotation rather than shorten
+the chain); an unlock adds to it with a compare-and-swap. While the vault is
+open, a read that the current key does not open tries the retired keys and
+re-seals that row to the current key on the spot
+(`SystemBase::openWithPreviousKeys`), and a message waiting to be parsed that
+is sealed to one is moved to the current key and parsed (`DeferredIngest`). Its
+owner does nothing. Whoever holds the current key can reach the previous ones,
+so a window on the current key reads whatever is still on an older generation
+(a row a re-seal failed on, a stranded relay blob): rotating after a suspected
+compromise of the current window does not cut those leftovers off. No retired
+unlocker comes back. A key retired before
+the chain existed joins it at its owner's next passkey unlock: the passkey's PRF
+output is the same for every generation, so it still opens that generation's
+retired wrapping (`VaultPreviousKeys::adoptRetired`).
 
 **Every wrapping not re-derivable during this same request is invalidated**,
 not left dangling — a KEK for another enrolled passkey can only come from

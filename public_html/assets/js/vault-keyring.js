@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.10 - replacementCodes() names the root key its twins are wrapped under (public_key), which the
+ *   server checks against the root's current key
  * @version 1.9 - rotationAware(): an unlock the server refuses for a rotation owed still opens the root
  * @version 1.8 - rootKeyReplacement(): the root vault's new key for the account rotation; a server answer of rotation_required (an old X25519 vault key) sends the unlock to the Security page;
  *   a content vault on an old key opens only to be rotated (specs/post_quantum_sealing.md R7)
@@ -1103,6 +1105,7 @@ window.VaultKeyring = (function () {
 	async function replacementCodes(rootSt, rootSession, count) {
 		var set = await makeCodeSet(rootSt.salt, count);
 		var twins = await rootCodeWrappings(set, function (kek, type) { return rootSession.wrapUnder(kek, type); });
+		twins.forEach(function (t) { t.public_key = rootSession.publicKey; });
 		return { codes: set.codes, code_set: set.post, root_wrappings: twins };
 	}
 

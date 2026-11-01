@@ -23,6 +23,8 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.7 - replaceRootRecovery refuses wrappings the page made under a root key that is not the root's
+ *               current one (a tab still holding the root from before a rotation; reviewer2 B3)
  * @version 1.6 - a content vault's new key (rotation, creation) is never wrapped under an old root;
  *   replaceRootKey(): the root vault's key replaced with the account vault's rotation, every content
  *   vault's `root` wrapping moved under the new one (specs/post_quantum_sealing.md R7, reviewer2 WP7 B1)
@@ -485,6 +487,16 @@ class VaultClientCustody {
 		$want = array();
 		foreach ($code_set['entries'] as $entry) {
 			$want[(int)$entry[0]] = true;
+		}
+		// The page says which root key it wrapped under. A tab that still held
+		// the root from before a rotation would wrap the OLD secret: codes that
+		// open the account half and not the root, with nothing saying so.
+		$current = (string)$root->get('uev_public_key');
+		foreach ($wrappings as $w) {
+			if (isset($w['public_key']) && (string)$w['public_key'] !== $current) {
+				throw new VaultClientCustodyException('This page was holding your vault from before its key changed. '
+					. 'Nothing was changed: reload the page and try again.');
+			}
 		}
 		$got = array();
 		foreach ($wrappings as $w) {

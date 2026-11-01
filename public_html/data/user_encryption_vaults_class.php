@@ -32,6 +32,8 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * will become) while every sealed DEK is re-sealed to it, and the commit makes
  * it current.
  *
+ * @version 1.5 - uev_previous_keys: the account vault's retired keys, each locked under the current key
+ *               (VaultPreviousKeys), so content still sealed to one opens while the vault is open
  * @version 1.4 - keyIsOld(), oldKeyScopesFor() and oldKeyCounts(): a vault still on an old X25519 key, which its owner rotates
  *   (specs/post_quantum_sealing.md R7)
  * @version 1.3 - uev_recovery_time: when a recovery code last opened this vault
@@ -79,6 +81,9 @@ class UserEncryptionVault extends SystemBase {
 		'uev_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
 		'uev_pending_public_key'     => array('type'=>'text', 'is_nullable'=>true),
 		'uev_pending_key_generation' => array('type'=>'int4', 'is_nullable'=>true),
+		// The account vault's retired keys, each wrapped under a KEK sealed to
+		// the current key: JSON, newest first (VaultPreviousKeys).
+		'uev_previous_keys'  => array('type'=>'text', 'is_nullable'=>true),
 		// When a recovery code last opened this vault (UTC). A recovery code
 		// used is a possible theft, so anything opened before it — a
 		// browser-held vault waiting to reopen after a reload

@@ -30,6 +30,12 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.8 - a rotation keeps the keys it retires under the new key (uev_previous_keys, VaultPreviousKeys), so
+ *               content still sealed to one opens while the vault is open, with no step from its owner
+ * @version 1.7 - a rotation answers as soon as the new key is saved, and re-seals the content after the answer has
+ *               gone (drainAfterResponse): a vault with a lot of content re-sealed past a proxy's time limit
+ *               (Cloudflare's 100 s), so the browser got the proxy's error page and never showed the new codes.
+ *               One drain per member at a time (an advisory lock); a second rotate meanwhile is told to wait
  * @version 1.6 - rotate() moves the root vault's key with the account's (and refuses to leave an old root behind); an
  *   interrupted rotation whose current generation is on an old key moves to a fresh one, both drained into it;
  *   an enrolment on an old-key vault opens no window (specs/post_quantum_sealing.md R7, reviewer2 WP7 B1, B3, B4)
@@ -280,6 +286,31 @@ class VaultCeremonies {
 	 */
 	public function rotate(User $user, UserEncryptionVault $vault, int $passkey_credential_id, ?string $passkey_label,
 			string $kek, string $passphrase_kek, array $code_set, array $root_unlockers, bool $open_window = true): array {
+		// The member's drain lock, from the first step to the end of the re-seal:
+		// a second rotate arriving in any gap (before the mint, between the
+		// answer and the background re-seal, between two drains) is told to
+		// wait instead of draining the same rows in parallel. A deferred
+		// re-seal takes the lock over and releases it when it ends.
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!self::takeDrainLock($db, (int)$user->key)) {
+			throw new VaultCeremonyException(self::DRAIN_RUNNING_MESSAGE);
+		}
+		$this->lock_handed_off = false;
+		try {
+			return $this->rotateLocked($user, $vault, $passkey_credential_id, $passkey_label, $kek, $passphrase_kek,
+				$code_set, $root_unlockers, $open_window);
+		} finally {
+			if (!$this->lock_handed_off) {
+				self::releaseDrainLock($db, (int)$user->key);
+			}
+		}
+	}
+
+	/** Whether a deferred re-seal took over this rotation's drain lock. */
+	private $lock_handed_off = false;
+
+	private function rotateLocked(User $user, UserEncryptionVault $vault, int $passkey_credential_id, ?string $passkey_label,
+			string $kek, string $passphrase_kek, array $code_set, array $root_unlockers, bool $open_window): array {
 		$this->assertEveryResealerPresent();
 		if ($passphrase_kek !== '' && !VaultClientCustody::passphraseAllowed((int)$user->key)) {
 			// specs/one_vault_experience.md § R8
@@ -409,11 +440,35 @@ class VaultCeremonies {
 			UserEncryptionWrapping::storeWrappings($rows, $opened['wrappings']);
 			$new_key = $opened['key'];
 
+			// The keys this rotation retires stay reachable through the new one
+			// (VaultPreviousKeys), so anything that still reaches an old key
+			// (mail a relay sealed before it learned the new key) opens with no
+			// step from its owner.
+			// The chain as the row holds it NOW, the row locked to this
+			// transaction: an unlock on another device that added to it after
+			// the page loaded the vault keeps its entries, and its own
+			// compare-and-swap waits for this commit and then misses.
+			$locked_row = $db->prepare('SELECT uev_previous_keys FROM uev_user_encryption_vaults
+				WHERE uev_user_encryption_vault_id = ? FOR UPDATE');
+			$locked_row->execute(array((int)$vault->key));
+			$vault->set('uev_previous_keys', $locked_row->fetchColumn());
+
+			$retiring = array($old_generation => $authorizing_wrapping->unlocker($kek));
+			if ($also_drain !== null) {
+				$retiring[$also_drain['generation']] = $current_wrapping->unlocker($kek);
+			}
+			// The chain is sealed to the vault's CURRENT key: the authorizing one,
+			// or in the double-drain case the stopped rotation's newer key.
+			$vault->set('uev_previous_keys', VaultPreviousKeys::forNewKey($vault,
+				$also_drain !== null ? $also_drain['key'] : $old_key, $retiring, $new_key->publicKey()));
+
 			$vault->set('uev_public_key', $new_key->publicKey());
 			$vault->set('uev_salt', $salt);
 			$vault->set('uev_key_generation', $new_generation);
 			$vault->set('uev_update_time', gmdate('Y-m-d H:i:s'));
-			$vault->save();
+			SealedEgressGuard::contentFree('vault_keys', function () use ($vault) {
+				$vault->save();
+			});
 
 			// The root's key moves with the account's when the browser sends it,
 			// and must when the root is still on an old X25519 key: its public
@@ -441,19 +496,29 @@ class VaultCeremonies {
 			throw new VaultCeremonyException('Key rotation could not start safely - nothing was changed and every unlocker you had still works. Try again.');
 		}
 
-		$this->drainAndRetire($user, $live_wrappings, $old_key, $old_generation, $new_key->publicKey(), $new_generation);
-		if ($also_drain !== null) {
-			$this->drainAndRetire($user, $live_wrappings, $also_drain['key'], $also_drain['generation'],
-				$new_key->publicKey(), $new_generation);
-		}
-
+		// The new key and every unlocker of it are saved: from here the rotation
+		// completes even if this request does not (completePendingRotation). The
+		// window opens on the new key now, because the session is written before
+		// the answer goes; the re-seal follows the answer.
 		if ($open_window) {
 			VaultUnlock::arm($user->key, $new_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_ROTATE);
 		}
 
+		$new_public = $new_key->publicKey();
+		$drains = array(array($old_key, $old_generation));
+		if ($also_drain !== null) {
+			$drains[] = array($also_drain['key'], $also_drain['generation']);
+		}
+		$in_background = $this->drainAfterResponse($user, function () use ($user, $live_wrappings, $drains, $new_public, $new_generation) {
+			foreach ($drains as list($key, $generation)) {
+				$this->drainAndRetire($user, $live_wrappings, $key, $generation, $new_public, $new_generation);
+			}
+		});
+
 		return [
 			'rotated'                => true,
 			'completed_pending'      => false,
+			'resealing_in_background' => $in_background,
 			'key_generation'         => $new_generation,
 			'regenerate_recommended' => false,
 			'passphrase_reenrolled'  => $passphrase_reenrolled,
@@ -493,8 +558,35 @@ class VaultCeremonies {
 			}
 		}
 
-		$this->drainAndRetire($user, $live_wrappings, $old_key, $old_generation,
-			(string)$vault->get('uev_public_key'), $current_generation);
+		// A rotation whose re-seal is still running in the background is not
+		// finished twice at once.
+		if (self::drainRunning((int)$user->key)) {
+			throw new VaultCeremonyException(self::DRAIN_RUNNING_MESSAGE);
+		}
+
+		// The generation this finishes retiring stays reachable through the
+		// current key (VaultPreviousKeys), as a rotation's does.
+		foreach ($live_wrappings as $wrapping) {
+			if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
+					&& (int)$wrapping->get('uew_pkc_passkey_credential_id') === $passkey_credential_id
+					&& (int)$wrapping->get('uew_key_generation') === $old_generation) {
+				// Retiring without the entry would strand that generation, so a
+				// missed compare-and-swap (the vault changed since the page read
+				// it) reads the row again and tries once more, and failing that
+				// nothing is retired: both generations stay live.
+				$entry = array($old_generation => $wrapping->unlocker($kek));
+				if (!in_array($old_generation, VaultPreviousKeys::add($vault, $entry), true)) {
+					$vault = new UserEncryptionVault((int)$vault->key, TRUE);
+					$held = array_column(VaultPreviousKeys::entries($vault), 'generation');
+					if (!in_array($old_generation, $held, true)
+							&& !in_array($old_generation, VaultPreviousKeys::add($vault, $entry), true)) {
+						throw new VaultCeremonyException('Your key rotation could not finish safely just now; nothing was '
+							. 'retired and every unlocker still works. Try again in a moment.');
+					}
+				}
+				break;
+			}
+		}
 
 		// The presented credential's current-generation wrapping (created by the
 		// interrupted attempt) opens with the same PRF output, putting the
@@ -547,9 +639,15 @@ class VaultCeremonies {
 			VaultUnlock::arm($user->key, $current_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_REENROLL);
 		}
 
+		$current_public = (string)$vault->get('uev_public_key');
+		$in_background = $this->drainAfterResponse($user, function () use ($user, $live_wrappings, $old_key, $old_generation, $current_public, $current_generation) {
+			$this->drainAndRetire($user, $live_wrappings, $old_key, $old_generation, $current_public, $current_generation);
+		});
+
 		return [
 			'rotated'                => true,
 			'completed_pending'      => true,
+			'resealing_in_background' => $in_background,
 			'key_generation'         => $current_generation,
 			'regenerate_recommended' => true,
 			'passphrase_reenrolled'  => $passphrase_reenrolled,
@@ -637,6 +735,110 @@ class VaultCeremonies {
 	 * the rotation completes it.
 	 */
 	private function drainAndRetire(User $user, array $live_wrappings, VaultKey $old_key,
+			int $old_generation, string $target_public_key, int $target_generation): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!self::takeDrainLock($db, (int)$user->key)) {
+			throw new VaultCeremonyException(self::DRAIN_RUNNING_MESSAGE);
+		}
+		try {
+			$this->drainAndRetireLocked($user, $live_wrappings, $old_key, $old_generation, $target_public_key, $target_generation);
+		} finally {
+			self::releaseDrainLock($db, (int)$user->key);
+		}
+	}
+
+	const DRAIN_RUNNING_MESSAGE = 'Your last key rotation is still re-securing your content in the background. '
+		. 'Wait a few minutes, then reload this page.';
+
+	/** The advisory lock's two keys: this class's namespace, and the member. */
+	const DRAIN_LOCK_NAMESPACE = 714201;
+
+	private static function takeDrainLock(PDO $db, int $user_id): bool {
+		$stmt = $db->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$stmt->execute(array(self::DRAIN_LOCK_NAMESPACE, $user_id));
+		return (bool)$stmt->fetchColumn();
+	}
+
+	private static function releaseDrainLock(PDO $db, int $user_id): void {
+		try {
+			$stmt = $db->prepare('SELECT pg_advisory_unlock(?, ?)');
+			$stmt->execute(array(self::DRAIN_LOCK_NAMESPACE, $user_id));
+		} catch (Throwable $e) {
+			// The lock is the connection's: it goes with the process anyway.
+		}
+	}
+
+	/**
+	 * What to tell a member whose vault has two key generations live. While a
+	 * rotation's re-seal is running that is the normal state for a few
+	 * minutes, and "run the rotation again" would only meet the wait message:
+	 * say to wait. Otherwise the rotation stopped, and running it again
+	 * finishes it. $then finishes the sentence ("regenerate your codes").
+	 */
+	public static function unfinishedRotationMessage(int $user_id, string $then): string {
+		if (self::drainRunning($user_id)) {
+			return self::DRAIN_RUNNING_MESSAGE;
+		}
+		return 'Your vault has an unfinished key rotation. Run the rotation again to complete it, then ' . $then . '.';
+	}
+
+	/** Is a re-seal of this member's content running now, in any process? */
+	public static function drainRunning(int $user_id): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!self::takeDrainLock($db, $user_id)) {
+			return true;
+		}
+		self::releaseDrainLock($db, $user_id);
+		return false;
+	}
+
+	/**
+	 * Run a rotation's re-seal once the answer has gone to the browser, where
+	 * this is a web request PHP-FPM can finish early; anywhere else (the
+	 * command line, the tests) now. Returns whether it was deferred.
+	 *
+	 * The re-seal can take minutes on a vault with a lot of content, and a
+	 * proxy in front of the site (Cloudflare: 100 s) gives up first and hands
+	 * the browser its own error page, so the new recovery codes, made in the
+	 * browser and shown from the answer, were never seen. Deferring is safe
+	 * because the new key and all its unlockers are saved before this runs:
+	 * a re-seal that stops (the process is killed, a consumer throws) leaves
+	 * both generations live, and rotating again finishes it
+	 * (completePendingRotation). Its failure is logged, since nobody is
+	 * waiting for it.
+	 */
+	private function drainAfterResponse(User $user, callable $drain): bool {
+		$web = PHP_SAPI === 'fpm-fcgi' && function_exists('fastcgi_finish_request');
+		if (!$web) {
+			$drain();
+			return false;
+		}
+		// The rotation's drain lock (taken in rotate()) stays held into the
+		// shutdown function and is released there, whatever happens.
+		$this->lock_handed_off = true;
+		register_shutdown_function(function () use ($user, $drain) {
+			if (session_status() === PHP_SESSION_ACTIVE) {
+				session_write_close();
+			}
+			ignore_user_abort(true);
+			fastcgi_finish_request();
+			@set_time_limit(0);
+			$db = DbConnector::get_instance()->get_db_link();
+			try {
+				$drain();
+				error_log('Vault rotation: re-seal finished in the background for user ' . $user->key . '.');
+			} catch (Throwable $e) {
+				error_log('Vault rotation: background re-seal stopped for user ' . $user->key . ': ' . $e->getMessage()
+					. ' Both key generations stay live; rotating again finishes it.');
+			} finally {
+				self::releaseDrainLock($db, (int)$user->key);
+			}
+		});
+		return true;
+	}
+
+	/** drainAndRetire's body, under the member's drain lock. */
+	private function drainAndRetireLocked(User $user, array $live_wrappings, VaultKey $old_key,
 			int $old_generation, string $target_public_key, int $target_generation): void {
 		try {
 			foreach (VaultUnlock::resealCallbacks() as $callback) {

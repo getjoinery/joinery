@@ -342,7 +342,16 @@
                     options = options || {};
                     options.headers = Object.assign({ 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }, options.headers || {});
                     return fetch(url, options).then(async function (res) {
-                        var json = await res.json();
+                        // A proxy in front of the site answers with its own web
+                        // page when the server is slow or down: say that, not a
+                        // JSON parse error.
+                        var json;
+                        try {
+                            json = await res.json();
+                        } catch (parseError) {
+                            throw new Error(window.joineryApi ? joineryApi.notJsonMessage(res.status)
+                                : 'The server answered with a web page instead of a result (' + res.status + ').');
+                        }
                         if (!res.ok) {
                             // A server refusal carries its one precise reason;
                             // the flag lets failure surfaces show it alone
@@ -910,7 +919,16 @@ $pac_writer->end_form();
                     options = options || {};
                     options.headers = Object.assign({ 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }, options.headers || {});
                     return fetch(url, options).then(async function (res) {
-                        var json = await res.json();
+                        // A proxy in front of the site answers with its own web
+                        // page when the server is slow or down: say that, not a
+                        // JSON parse error.
+                        var json;
+                        try {
+                            json = await res.json();
+                        } catch (parseError) {
+                            throw new Error(window.joineryApi ? joineryApi.notJsonMessage(res.status)
+                                : 'The server answered with a web page instead of a result (' + res.status + ').');
+                        }
                         if (!res.ok) {
                             var err = new Error(json.error || 'Request failed.');
                             err.data = json.data || {};
@@ -1008,6 +1026,43 @@ $pac_writer->end_form();
                     return JoinerySealed.session(VaultKeyring.ROOT, { reason: 'to change what opens it' });
                 }
 
+                // Code regeneration and a passphrase change need a recent step-up
+                // as well as an unlocker. Ask for it FIRST: refused at the end, the
+                // person has done every other ceremony for nothing and the page
+                // leaves for /verify-stepup, dropping the click. A passkey here
+                // confirms it in place; otherwise the authenticator app on
+                // /verify-stepup, which comes back to this page.
+                async function stepUpFirst() {
+                    var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
+                    if (!st.step_up_outstanding) return true;
+                    try {
+                        await JoineryPasskeys.stepUp();
+                        return true;
+                    } catch (e) {
+                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                        return false;
+                    }
+                }
+
+                // The fresh unlocker an enrolment presents, and the root it is made
+                // with. The unlocker FIRST: its own ceremony opens the root on the
+                // way (one touch, not two), and that root comes from the server's
+                // current wrapping. Only when it could not (a passkey with no root
+                // wrapping) is the root opened by its own ceremony, and the unlocker
+                // collected again: that ceremony replaced the one the first unlocker
+                // was signed against.
+                async function unlockerAndRoot(purpose) {
+                    var unlocker = await JoineryVaultLock.collectUnlocker(purpose);
+                    if (!unlocker) return null;
+                    var root = JoinerySealed.rootSession();
+                    if (!root) {
+                        root = await rootOpen();
+                        unlocker = await JoineryVaultLock.collectUnlocker(purpose);
+                        if (!unlocker) return null;
+                    }
+                    return { unlocker: unlocker, root: root };
+                }
+
                 function secondFactorRedirect(data) {
                     if (data && data.second_factor_required) {
                         window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
@@ -1068,13 +1123,13 @@ $pac_writer->end_form();
                 document.getElementById('vault-regenerate-codes-btn').addEventListener('click', async function () {
                     if (!await JoineryModal.confirmAsync('This replaces all your recovery codes, for all of your vault. Continue?', { confirmLabel: 'Regenerate' })) return;
                     try {
-                        var root = await rootOpen();
-                        var unlocker = await JoineryVaultLock.collectUnlocker('to replace your recovery codes');
-                        if (!unlocker) return;
+                        if (!await stepUpFirst()) return;
+                        var got = await unlockerAndRoot('to replace your recovery codes');
+                        if (!got) return;
                         var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
-                        var fresh = await VaultKeyring.replacementCodes(st.root, root);
+                        var fresh = await VaultKeyring.replacementCodes(st.root, got.root);
                         await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: JSON.stringify({
-                            unlocker: unlocker, code_set: fresh.code_set, root_wrappings: fresh.root_wrappings }) });
+                            unlocker: got.unlocker, code_set: fresh.code_set, root_wrappings: fresh.root_wrappings }) });
                         showCodes(fresh.codes, null);
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not regenerate recovery codes.');
@@ -1087,13 +1142,13 @@ $pac_writer->end_form();
                     if (!passphrase) return;
                     if (passphrase.length < 12) { JoineryModal.alert('Use a passphrase of at least 12 characters.'); return; }
                     try {
-                        var root = await rootOpen();
-                        var unlocker = await JoineryVaultLock.collectUnlocker('to change your passphrase');
-                        if (!unlocker) return;
+                        if (!await stepUpFirst()) return;
+                        var got = await unlockerAndRoot('to change your passphrase');
+                        if (!got) return;
                         var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
-                        var halves = await VaultKeyring.passphraseEnrolment(st.root, root, passphrase);
+                        var halves = await VaultKeyring.passphraseEnrolment(st.root, got.root, passphrase);
                         await apiFetch('/api/v1/action/vault_passphrase_enroll', { method: 'POST', body: JSON.stringify({
-                            unlocker: unlocker, passphrase_kek: halves.passphrase_kek, root_passphrase: halves.root_passphrase }) });
+                            unlocker: got.unlocker, passphrase_kek: halves.passphrase_kek, root_passphrase: halves.root_passphrase }) });
                         await refresh();
                         JoineryModal.alert('Passphrase changed.');
                     } catch (e) {
@@ -1151,6 +1206,11 @@ $pac_writer->end_form();
                             result = await apiFetch('/api/v1/action/vault_rotate_verify', { method: 'POST', body: JSON.stringify(body) });
                         } catch (e) {
                             if (newRoot) newRoot.session.lock();
+                            // The answer never arrived (a proxy's time limit, a dropped
+                            // connection): the server may have moved the root anyway, so
+                            // this tab's root may be the old one. Lock it; the next action
+                            // opens it again from what the server holds.
+                            if (window.JoinerySealed) JoinerySealed.lock('root');
                             throw e;
                         }
                         if (newRoot) {
@@ -1170,6 +1230,11 @@ $pac_writer->end_form();
                             JoineryModal.alert('Your key rotation is finished. Its recovery codes were never shown, so make a new set now: Actions → Regenerate Recovery Codes.');
                         } else {
                             showCodes(fresh.codes, result.data.key_file);
+                        }
+                        if (result.data.resealing_in_background) {
+                            JoineryModal.alert('Your vault is on its new key. Save the recovery codes shown now. '
+                                + 'Your stored content is being re-secured under the new key in the background; '
+                                + 'with a lot of mail this takes a few minutes, and until it finishes some older items may not open.');
                         }
                         if (result.data.dropped_passkeys && result.data.dropped_passkeys.length) {
                             JoineryModal.alert('These passkeys need to be re-added to your vault: ' + result.data.dropped_passkeys.map(function (p) { return p.label || 'Passkey'; }).join(', '));

@@ -38,6 +38,8 @@
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
+ * @version 1.5.0 - an answer that is not JSON (a proxy's error page) gets a sentence saying what it means,
+ *   by status: the server did not answer in time, or could not be reached (notJsonMessage)
  * @version 1.4.0 - postForm(action, formData, opts): opts.keepalive lets an
  *   unload-time save outlive the page
  * @version 1.3.0 - err.errorRef and reportLink()
@@ -84,7 +86,7 @@
 			keepalive: !!(opts && opts.keepalive),
 			body: isForm ? body : JSON.stringify(body || {})
 		}).then(function (r) {
-			return r.json().catch(function () { return {}; }).then(function (env) {
+			return r.json().catch(function () { return { error: notJsonMessage(r.status) }; }).then(function (env) {
 				if (!r.ok) {
 					// Stale-token recovery (see header): the 403 response has
 					// already re-synced the mirror cookie; a changed value means
@@ -116,6 +118,22 @@
 		});
 	}
 
+	/**
+	 * What to say when the answer was a web page, not the API's JSON: almost
+	 * always a proxy in front of the site (Cloudflare) answering for it. A
+	 * timeout does not mean the server stopped: it may still be finishing.
+	 */
+	function notJsonMessage(status) {
+		if (status === 504 || status === 524 || status === 522) {
+			return 'The server took too long to answer, so the connection gave up (' + status + '). '
+				+ 'It may still be finishing: wait a minute and reload the page to see.';
+		}
+		if (status === 502 || status === 503 || status === 520 || status === 521 || status === 523) {
+			return 'The server could not be reached (' + status + '). Try again in a minute.';
+		}
+		return 'The server answered with a web page instead of a result (' + status + '). Reload the page and try again.';
+	}
+
 	// A "Report a problem" link for a rejected call, or null.
 	function reportLink(err) {
 		var ref = err && err.errorRef;
@@ -127,5 +145,5 @@
 		return a;
 	}
 
-	window.joineryApi = { post: post, postForm: postForm, csrf: csrf, reportLink: reportLink };
+	window.joineryApi = { post: post, postForm: postForm, csrf: csrf, reportLink: reportLink, notJsonMessage: notJsonMessage };
 })();

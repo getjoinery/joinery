@@ -97,8 +97,16 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 				}
 			});
 		} else {
-			VaultUnlock::open($user->key, $wrapping->unlocker($prf_output), [], UserEncryptionVault::SCOPE_USER,
+			$opened = VaultUnlock::open($user->key, $wrapping->unlocker($prf_output), [], UserEncryptionVault::SCOPE_USER,
 				null, VaultAudit::VIA_PASSKEY);
+			// A key a rotation retired before retired keys were kept in the
+			// chain still opens with this passkey's output: keep it now, so
+			// content left sealed to it opens from here on (VaultPreviousKeys).
+			try {
+				VaultPreviousKeys::adoptRetired($vault, $opened['key'], (int)$passkey->key, $prf_output);
+			} catch (Throwable $e) {
+				error_log('vault_unlock_passkey: could not keep the retired keys for user ' . $user->key . ': ' . $e->getMessage());
+			}
 		}
 	} catch (VaultClientCustodyException $e) {
 		return LogicResult::error($e->getMessage());
@@ -145,6 +153,7 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 	]);
 }
 
+// @version 1.3 - a passkey unlock keeps the retired keys its output still opens (VaultPreviousKeys::adoptRetired)
 // @version 1.2 - a vault on an old X25519 key answers rotation_required with the rotation link (post_quantum_sealing R7)
 // @version 1.1 - one-vault: no second PRF output, code set adoption with the root vault, R8 phrase removal
 function vault_unlock_passkey_logic_descriptor() {

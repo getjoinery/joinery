@@ -2745,7 +2745,13 @@ matches, and *Cancel rotation* abandons the staged key. The live key is never
 overwritten or destroyed until its replacement is proven in DNS. A vault key
 rotation re-seals the DKIM keys — live and pending — alongside the message DEKs
 (the plugin's `onReseal` callback), for every protected-domain owner regardless
-of mailbox grants, on the same fail-loud contract.
+of mailbox grants, on the same fail-loud contract. The same callback moves mail still waiting to be
+parsed (`iem_pending_parse`: the relay sealed it whole to the owner's key, Seal at
+the relay): each blob the old key opens is sealed to the new key with a
+compare-and-swap, since it records no generation for the per-generation pass to
+find. A waiting blob sealed to a key since retired is moved to the
+current key through the vault's retired keys and parsed; one nothing opens is left
+quietly rather than retried on every page ([Sealed Vault § Key rotation](../../../docs/sealed_vault.md)).
 
 **Automated mail** (lists, receipts, notifications) that must run around the clock
 lives on a dedicated **non-protected** sending subdomain (e.g. `mail.<domain>`),

@@ -354,12 +354,15 @@ be able to quietly enroll their own key:
   them to `/verify-stepup`. Revoking a passkey and deactivating one for the
   vault work the same way, which is how the lost one is taken off the account.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
-  a passphrase): require an open unlock window, and code regeneration and
-  passphrase changes additionally require a recent step-up. When the window
-  is open at enrollment, a capable authenticator activates for the vault
-  inside the creation ceremony itself ([Passkeys § Creation-time vault
-  activation](passkeys.md)) — the same open-window requirement, one prompt
-  instead of two.
+  a passphrase): require an unlocker the vault already has (a passkey, the
+  passphrase or a recovery code) presented in the same request as the change,
+  and code regeneration and passphrase changes additionally require a recent
+  step-up. The security page asks for the step-up before either ceremony
+  (`vault_status` reports `step_up_outstanding`), and the unlocker's own
+  ceremony opens the root on the way, so a regeneration is two prompts. When
+  the window is open at enrollment, a capable authenticator activates for the
+  vault inside the creation ceremony itself ([Passkeys § Creation-time vault
+  activation](passkeys.md)), one prompt instead of two.
 
 **The `/setup` wizard mounts these same ceremonies.** The first-login setup
 wizard's sign-in and encryption-key steps drive the identical API actions

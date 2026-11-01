@@ -45,6 +45,19 @@ class CustodyChangeProbe extends MailboxContact {
 	}
 }
 
+/**
+ * A probe whose ownership hook, which resealRows() calls between reading a row
+ * and writing it, lets a test change the row at that moment: a concurrent
+ * writer during a re-seal that runs for minutes.
+ */
+class CustodyChangeRaceProbe extends CustodyChangeProbe {
+	public static $meanwhile = null;
+	protected static function sealedOwnerUserIdFor(array $row): ?int {
+		if (self::$meanwhile !== null) { (self::$meanwhile)($row); }
+		return parent::sealedOwnerUserIdFor($row);
+	}
+}
+
 function ccp_raw(int $id): array {
 	$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT * FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?');
 	$q->execute(array($id));
@@ -273,6 +286,94 @@ CustodyChangeProbe::sealColumns((int)$other_row->key, $drive_vault, array('imc_a
 $res = CustodyChangeProbe::resealRows($owner_id, $next_key, (int)$drive_vault->get('uev_key_generation'), $next_pub, 99);
 check($res['failed'] === 0 && strpos((string)ccp_raw((int)$other_row->key)['imc_sealed_key'], 'v2.edgeseal.drive.') === 0,
 	'a server rotation leaves a row under a client-custody vault to the browser', json_encode($res));
+
+// A row re-sealed by someone else while the pass runs keeps what they wrote:
+// the pass's write is a compare-and-swap on the key and generation it read.
+$race_row = new CustodyChangeProbe(NULL);
+$race_row->set('imc_usr_user_id', $owner_id);
+$race_row->set('imc_address', '');
+$race_row->set('imc_display_name', '');
+$race_row->set('imc_address_hash', hash('sha256', 'cc|' . random_bytes(8)));
+$race_row->set('imc_source', 'manual');
+$race_row->save();
+harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', (int)$race_row->key);
+CustodyChangeProbe::sealColumns((int)$race_row->key, $server_vault, array('imc_address' => 'race@example.com'));
+$race_gen = (int)$server_vault->get('uev_key_generation');
+$third_pub = $box->generateKeypair()['public'];
+$theirs = (new VaultCrypto())->sealItemDek(random_bytes(32), $third_pub);
+CustodyChangeRaceProbe::$meanwhile = function (array $row) use ($db, $race_row, $theirs, $race_gen) {
+	if ((int)$row['imc_mailbox_contact_id'] !== (int)$race_row->key) { return; }
+	$db->prepare('UPDATE imc_mailbox_contacts SET imc_sealed_key = ?, imc_key_generation = ? WHERE imc_mailbox_contact_id = ?')
+		->execute(array($theirs, $race_gen + 1, (int)$race_row->key));
+};
+$res = CustodyChangeRaceProbe::resealRows($owner_id, $next_key, $race_gen, $third_pub, $race_gen + 1);
+CustodyChangeRaceProbe::$meanwhile = null;
+check($res['failed'] === 0 && $res['skipped'] >= 1, 'a row changed mid-pass is skipped, not failed', json_encode($res));
+check((string)ccp_raw((int)$race_row->key)['imc_sealed_key'] === $theirs,
+	'and the concurrent writer\'s key stands: the stale one is not written back over it');
+
+// A row a rotation's re-seal has not reached yet reads as "not yet", not as
+// a broken row: the window holds the new key while the re-seal runs.
+$waiting = new CustodyChangeProbe(NULL);
+$waiting->set('imc_usr_user_id', $owner_id);
+$waiting->set('imc_address', '');
+$waiting->set('imc_display_name', '');
+$waiting->set('imc_address_hash', hash('sha256', 'cc|' . random_bytes(8)));
+$waiting->set('imc_source', 'manual');
+$waiting->save();
+harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', (int)$waiting->key);
+$waiting_vault = new UserEncryptionVault((int)$server_vault->key, TRUE);
+CustodyChangeProbe::sealColumns((int)$waiting->key, $waiting_vault, array('imc_address' => 'waiting@example.com'));
+$waiting_gen = (int)$waiting_vault->get('uev_key_generation');
+$rotated_pair = $box->generateKeypair();
+SealedEgressGuard::isolate(function () use ($db, $rotated_pair, $waiting_gen, $server_vault) {
+	$db->prepare('UPDATE uev_user_encryption_vaults SET uev_public_key = ?, uev_key_generation = ? WHERE uev_user_encryption_vault_id = ?')
+		->execute(array($rotated_pair['public'], $waiting_gen + 1, (int)$server_vault->key));
+});
+VaultCrypto::forgetItemDeks();
+vault_fixture_open_window($owner_id, $rotated_pair['secret']);
+$said = null;
+try { (new CustodyChangeProbe((int)$waiting->key, TRUE))->get('imc_address'); } catch (Throwable $e) { $said = $e; }
+check($said !== null && !($said instanceof VaultLockedException),
+	'with no re-seal running, a row on an older generation that nothing opens is an error, not a wait', $said ? get_class($said) : 'read');
+// A re-seal running elsewhere (another connection holds the member's drain lock).
+$gs = Globalvars::get_instance();
+$drain = new PDO('pgsql:host=localhost port=5432 dbname=' . $gs->get_setting('dbname'), $gs->get_setting('dbusername'), $gs->get_setting('dbpassword'));
+$drain->prepare('SELECT pg_advisory_lock(?, ?)')->execute(array(VaultCeremonies::DRAIN_LOCK_NAMESPACE, $owner_id));
+VaultCrypto::forgetItemDeks();
+$said = null;
+try { (new CustodyChangeProbe((int)$waiting->key, TRUE))->get('imc_address'); } catch (Throwable $e) { $said = $e; }
+$drain->prepare('SELECT pg_advisory_unlock(?, ?)')->execute(array(VaultCeremonies::DRAIN_LOCK_NAMESPACE, $owner_id));
+$drain = null;
+check($said instanceof VaultLockedException && strpos($said->getMessage(), 're-secured') !== false,
+	'while a re-seal runs, it waits instead of failing', $said ? get_class($said) . ': ' . $said->getMessage() : 'read');
+$db->prepare('UPDATE imc_mailbox_contacts SET imc_key_generation = ? WHERE imc_mailbox_contact_id = ?')->execute(array($waiting_gen + 1, (int)$waiting->key));
+VaultCrypto::forgetItemDeks();
+$said = null;
+try { (new CustodyChangeProbe((int)$waiting->key, TRUE))->get('imc_address'); } catch (Throwable $e) { $said = $e; }
+check($said !== null && !($said instanceof VaultLockedException),
+	'a row on the current generation that does not open is still an error, not a wait', $said ? get_class($said) : 'read');
+
+// The same row, once the vault keeps the key it was sealed to (a rotation's
+// chain): the read answers through that key and moves the row to the current one.
+$db->prepare('UPDATE imc_mailbox_contacts SET imc_key_generation = ? WHERE imc_mailbox_contact_id = ?')->execute(array($waiting_gen, (int)$waiting->key));
+$chain_kek = random_bytes(32);
+$chain_ad = 'custody-change-chain';
+// A rotation keeps the chain in its own request, which has read no content.
+SealedEgressGuard::isolate(function () use ($server_vault, $waiting_gen, $next_pair, $chain_kek, $chain_ad) {
+	VaultPreviousKeys::add(new UserEncryptionVault((int)$server_vault->key, TRUE), array($waiting_gen => array(
+		'wrapped' => (new SealedBox())->wrapKey(PoolVaultKey::wrappedForm($next_pair['secret'], SealedBox::V2), $chain_kek, $chain_ad),
+		'kek' => $chain_kek, 'ad' => $chain_ad)));
+});
+VaultCrypto::forgetItemDeks();
+$read_back = null;
+try { $read_back = (new CustodyChangeProbe((int)$waiting->key, TRUE))->get('imc_address'); } catch (Throwable $e) { $read_back = get_class($e) . ': ' . $e->getMessage(); }
+check($read_back === 'waiting@example.com', 'a row on a retired key reads through the vault\'s kept key', (string)$read_back);
+$healed = ccp_raw((int)$waiting->key);
+check((int)$healed['imc_key_generation'] === $waiting_gen + 1
+	&& vault_fixture_key($rotated_pair['secret']) !== null
+	&& strlen((new VaultCrypto())->openItemDek((string)$healed['imc_sealed_key'], vault_fixture_key($rotated_pair['secret']))) === 32,
+	'and the read moved it to the current key and generation');
 
 VaultUnlock::resetClientResealsForTests();
 harness_finish();

@@ -22,6 +22,9 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.29 - the rotation re-seal also moves mail waiting to be parsed (iem_pending_parse, relay-sealed whole to
+ *                the owner's vault key): it carries no generation, so the per-generation pass never touched it, and a
+ *                rotation stranded it (jeremytunnell message 104888, 2026-11-01)
  * @version 1.28 - registers the mailbox_export deferred-work consumer (a Private mailbox export builds in its owner's window)
  * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.26 - registers the mailbox_spam_backfill deferred-work consumer (SpamSenderBackfill)
@@ -314,9 +317,56 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		}
 	}
 
-	if ($failed > 0 || $dkim_failed > 0 || $direct_failed > 0) {
+	// Mail waiting to be parsed: the relay sealed the WHOLE message to this
+	// vault's public key (Seal at the relay, key_kind user), and it waits,
+	// unparsed, for the owner's window. It records no generation, so the pass
+	// above never sees it; left alone it is sealed to a key about to be
+	// retired. Each blob is opened with the old key and sealed to the new one.
+	// A blob the old key does not open is not this rotation's (it arrived
+	// sealed to the new key, or was never openable) and is left as it is. The
+	// write is a compare-and-swap, as resealRows() does: a row parsed or
+	// re-sealed meanwhile keeps what it holds.
+	$pending_failed = 0;
+	$pending_ids = $db->prepare("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+		WHERE iem_pending_parse = true AND iem_sealed_owner_user_id = ?
+		AND COALESCE(iem_relay_sealed_raw, '') <> ''
+		AND NOT " . InboundEmailMessage::mailKeySql("COALESCE(iem_sealed_key, '')"));
+	$pending_ids->execute(array($user_id));
+	$read_blob = $db->prepare('SELECT iem_relay_sealed_raw FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+	$swap_blob = $db->prepare('UPDATE iem_inbound_email_messages SET iem_relay_sealed_raw = ?
+		WHERE iem_inbound_email_message_id = ? AND iem_relay_sealed_raw = ? AND iem_pending_parse = true');
+	foreach ($pending_ids->fetchAll(PDO::FETCH_COLUMN) as $pid) {
+		$pid = intval($pid);
+		$read_blob->execute(array($pid));
+		$blob = (string)$read_blob->fetchColumn();
+		if ($blob === '') {
+			continue;
+		}
+		// One message is one unit for the hot-turn rule, armed while its
+		// plaintext is held (openHeldDeliveryBlob does not arm it) and gone
+		// before the next consumer's writes run.
+		$pending_failed += (int)SealedEgressGuard::isolate(function () use ($crypto, $blob, $old_key, $new_public_key, $swap_blob, $pid) {
+			try {
+				$raw = $crypto->openHeldDeliveryBlob($blob, $old_key);
+			} catch (Throwable $e) {
+				return 0;   // not sealed to the key being retired
+			}
+			SealedEgressGuard::markHot('mail:' . $pid . ':iem_relay_sealed_raw');
+			try {
+				$swap_blob->execute(array($crypto->sealItemDek($raw, $new_public_key), $pid, $blob));
+				return 0;
+			} catch (Throwable $e) {
+				error_log('Mailbox vault reseal: failed to re-seal waiting message ' . $pid . ': ' . $e->getMessage());
+				return 1;
+			} finally {
+				$raw = null;
+			}
+		});
+	}
+
+	if ($failed > 0 || $dkim_failed > 0 || $direct_failed > 0 || $pending_failed > 0) {
 		throw new RuntimeException(
-			'Mailbox reseal: ' . $failed . ' of ' . count($ids) . ' sealed messages, '
+			'Mailbox reseal: ' . $pending_failed . ' waiting messages, ' . $failed . ' of ' . count($ids) . ' sealed messages, '
 			. $dkim_failed . ' of ' . count($protected) . ' protected DKIM keys and '
 			. $direct_failed . ' of ' . $direct_count . ' Direct signing keys could not be re-sealed; '
 			. 'the old key generation must not be retired.');

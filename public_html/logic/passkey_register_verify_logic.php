@@ -92,7 +92,7 @@ function _passkey_register_try_vault_activation($user, $passkey, string $prf_out
 			return [true, null];
 		}
 		if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
-			return [false, 'Your vault has an unfinished key rotation. Run the rotation again to complete it, then activate this passkey.'];
+			return [false, VaultCeremonies::unfinishedRotationMessage((int)$user->key, 'activate this passkey')];
 		}
 		$prf_output = ParagonIE\ConstantTime\Base64UrlSafe::decodeNoPadding($prf_output_b64url);
 		$wrapping = UserEncryptionWrapping::reserve(
