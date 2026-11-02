@@ -43,6 +43,7 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.15 - permanent_delete(): the last row for a domain takes its Direct signing identities with it
  * @version 1.14 - forwarding_offered(): no forward off a Fortress domain or one sealed at the relay
  * @version 1.13 - Fortress is settable: ied_level_set_time marks a level set
  *   through set_security_level(), which is what tells a Fortress domain from a
@@ -70,7 +71,28 @@ class InboundEmailDomainException extends SystemBaseException {}
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/NotifiesRelayMapOnChange.php'));
 
 class InboundEmailDomain extends SystemBase {
-	use NotifiesRelayMapOnChange;
+	use NotifiesRelayMapOnChange {
+		permanent_delete as private permanentDeleteNotifyingRelay;
+	}
+
+	/**
+	 * Deleting the last row for a domain takes its Joinery Direct signing
+	 * identities with it. They are minted for a domain this deployment is
+	 * authoritative for (the mailbox's authority resolver reads this table),
+	 * so with the row gone none of them can sign or be minted again, and
+	 * nothing else removes them: they name the domain by text, not by key.
+	 */
+	public function permanent_delete($debug = false) {
+		$domain = strtolower(trim((string)$this->get('ied_domain')));
+		$result = $this->permanentDeleteNotifyingRelay($debug);
+		if (!$debug && $domain !== ''
+				&& !count(new MultiInboundEmailDomain(array('domain' => $domain)))) {
+			foreach (new MultiDirectIdentity(array('domain' => $domain)) as $identity) {
+				$identity->permanent_delete();
+			}
+		}
+		return $result;
+	}
 	public static $prefix = 'ied';
 	public static $tablename = 'ied_inbound_email_domains';
 	public static $access_class = 'config';
