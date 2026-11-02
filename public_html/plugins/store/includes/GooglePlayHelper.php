@@ -16,6 +16,7 @@
  * Android package names), store_play_service_account_json (the service account's
  * JSON key), store_play_rtdn_audience (expected `aud` on RTDN push tokens).
  *
+ * @version 1.1.0 - stored product info unserializes only Address and stdClass objects (v1_key_retirement C2)
  * @version 1.0.0
  */
 
@@ -229,7 +230,7 @@ class GooglePlayHelper {
 	public static function packageNameForOrderItem($order_item) {
 		$info = $order_item->get('odi_product_info');
 		if ($info) {
-			$data = @unserialize(base64_decode($info));
+			$data = @unserialize(base64_decode($info), ['allowed_classes' => array('Address', 'stdClass')]);
 			if (is_array($data) && !empty($data['play_package_name'])) {
 				return $data['play_package_name'];
 			}

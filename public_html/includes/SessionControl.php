@@ -110,6 +110,9 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.26 - get_formfields()/get_formfields_array() unserialize with allowed_classes => false: the
+ *                fields are strings and arrays, and an object planted in the session must not run its
+ *                magic methods in the reader's request (v1_key_retirement C2)
  * @version 1.25 - save_visitor_event() records nothing when the visitor_statistics setting is off
  *                (visitor_statistics_on()); A/B test counters still flush; a visitor event keeps no IP address
  * @version 1.24 - a machine account holds no website session: store_session_variables() refuses it and
@@ -2179,7 +2182,7 @@ class SessionControl{
 	function get_formfields($formname){
 
 			if(isset($_SESSION['formname']) && isset($_SESSION['formfields']) && $_SESSION['formname'] == $formname && $_SESSION['formfields'] != ''){
-				return((object)unserialize($_SESSION['formfields']));
+				return((object)unserialize($_SESSION['formfields'], ['allowed_classes' => false]));
 			}
 			else{
 				return FALSE;
@@ -2189,7 +2192,7 @@ class SessionControl{
 	function get_formfields_array($formname){
 
 			if(isset($_SESSION['formname']) && isset($_SESSION['formfields']) && $_SESSION['formname'] == $formname && $_SESSION['formfields'] != ''){
-				return(unserialize($_SESSION['formfields']));
+				return(unserialize($_SESSION['formfields'], ['allowed_classes' => false]));
 			}
 			else{
 				return FALSE;

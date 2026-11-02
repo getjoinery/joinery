@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.5 - odi_product_info unserializes only Address and stdClass objects, the two the checkout
+ *                stores; any other class comes back incomplete (v1_key_retirement C2)
  * @version 1.4 - refund_payment(): a line is refunded from the payment that paid it (a subscription's own
  *                latest invoice, or the order's charge), capped per line, and can cancel a subscription with it
  * @version 1.3 - a cancel notice goes to each address on subscription_notification_emails whether or not it is a
@@ -135,7 +137,7 @@ function get_order() {
 	}
 	
 	function get_data() {
-		$data = unserialize(base64_decode((string)$this->get('odi_product_info')));
+		$data = unserialize(base64_decode((string)$this->get('odi_product_info')), ['allowed_classes' => array('Address', 'stdClass')]);
 		$clean_data = array();
 		// An item bought without product info (a subscription renewal, an app
 		// store purchase) has none to show.
@@ -211,7 +213,7 @@ function get_order() {
 	}
 
 	function get_raw_data() {
-		return unserialize(base64_decode($this->get('odi_product_info')));
+		return unserialize(base64_decode((string)$this->get('odi_product_info')), ['allowed_classes' => array('Address', 'stdClass')]);
 	}
 
 	function get_product_version($product_id){

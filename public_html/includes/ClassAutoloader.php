@@ -16,6 +16,11 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.7.0 - a mapped path is required only when it is a .php file whose real path lies under core
+ *   includes/ or data/, or a plugin's includes/ or data/ (v1_key_retirement C1, 11-02). The map is data the
+ *   web user writes (APCu, cache/class_map.json), so without the check a planted map entry named the file
+ *   every request ran. A refused entry is logged once per process and makes the miss rebuild the map,
+ *   which rewrites the cache from the tree, even after an ordinary miss spent the process's rebuild.
  * @version 1.6.0 - a miss is offered to SandboxModels last, which declares the
  *   models an active sandboxed plugin's manifest names (they have no file)
  * @version 1.5.0 - a cached map is a site's and a plugin set's (B47, 10-10). The APCu key names the site
@@ -75,6 +80,12 @@ class ClassAutoloader {
 	private static $allowed = array();
 	/** plugin name => the classes allowPlugin() added for it. */
 	private static $allowed_by_plugin = array();
+	/** Real paths of the directories a mapped file may live under (trusted_roots()), per process. */
+	private static $trusted_roots = null;
+	/** True once this process refused a mapped path: the map is not the tree's, so a miss rebuilds it. */
+	private static $refused = false;
+	/** Paths already logged as refused, so a poisoned map logs once per process, not once per lookup. */
+	private static $refused_logged = array();
 
 	/**
 	 * Register the autoloader. Safe to call repeatedly.
@@ -117,6 +128,9 @@ class ClassAutoloader {
 		if ($plugin === '' || isset(self::$allowed_by_plugin[$plugin])) {
 			return;
 		}
+		// The plugin's directory may be newer than this process's list of
+		// trusted directories (unpacked, then installed, in one script).
+		self::$trusted_roots = null;
 		$map = array();
 		$prefixes = array();
 		foreach (array('includes', 'data') as $sub) {
@@ -169,16 +183,16 @@ class ClassAutoloader {
 		}
 
 		$map = self::map();
-		if (isset($map[$class]) && is_file($map[$class])) {
-			require_once($map[$class]);
+		if (isset($map[$class]) && ($path = self::trusted_path($map[$class])) !== null) {
+			require_once($path);
 			if (self::defined_now($class)) {
 				return;
 			}
 		}
 
 		// A plugin let in before activation (allowPlugin): its own install.
-		if (isset(self::$allowed[$class]) && is_file(self::$allowed[$class])) {
-			require_once(self::$allowed[$class]);
+		if (isset(self::$allowed[$class]) && ($path = self::trusted_path(self::$allowed[$class])) !== null) {
+			require_once($path);
 			if (self::defined_now($class)) {
 				return;
 			}
@@ -188,14 +202,16 @@ class ClassAutoloader {
 		// map was written — or it may simply not exist (a probe for an
 		// optional plugin's class). Only a tree that has changed since the map
 		// was built can hold a class the map does not know, so an unchanged
-		// tree answers the miss with a stat walk rather than a rebuild. Once
+		// tree answers the miss with a stat walk rather than a rebuild. A map
+		// that named a file outside the tree is not the tree's map whatever its
+		// fingerprint says, and is rebuilt too, which rewrites the cache. Once
 		// per process either way.
 		if (!self::$rebuilt) {
 			self::$rebuilt = true;
-			if (self::$stamp === null || self::fingerprint() !== self::$stamp) {
+			if (self::$stamp === null || self::$refused || self::fingerprint() !== self::$stamp) {
 				$map = self::rebuild();
-				if (isset($map[$class]) && is_file($map[$class])) {
-					require_once($map[$class]);
+				if (isset($map[$class]) && ($path = self::trusted_path($map[$class])) !== null) {
+					require_once($path);
 				}
 			}
 		}
@@ -212,6 +228,103 @@ class ClassAutoloader {
 			} finally {
 				self::$in_sandbox_lookup = false;
 			}
+		}
+	}
+
+	/**
+	 * The real path of a mapped file when it may be required, NULL when not.
+	 *
+	 * The map is data the web user writes — APCu under the web server,
+	 * cache/class_map.json on CLI — and this class requires whatever file it
+	 * names. Code that ran once in a worker could store a map naming its own
+	 * file for a class every request loads, and run again in every request on
+	 * every worker. So a path is required only when it has the shape the map
+	 * is built from (scan_roots()): a .php file whose real path lies under
+	 * core includes/ or data/, or a plugin's includes/ or data/. Real paths on
+	 * both sides, so `..` and symlinks resolve first and a site root reached
+	 * through a symlink still matches. The .php suffix keeps out the data files
+	 * those directories also hold, which require would echo into the response.
+	 * The check is on the shape, not on the active-plugin list, because that
+	 * list comes from the database, which the same code could write.
+	 *
+	 * @param mixed $path
+	 * @return string|null
+	 */
+	private static function trusted_path($path) {
+		if (!is_string($path) || $path === '' || strtolower(substr($path, -4)) !== '.php') {
+			self::refuse($path);
+			return null;
+		}
+		$real = realpath($path);
+		if ($real === false || !is_file($real)) {
+			// No file there. Under a trusted directory that is a stale map (a
+			// file removed since it was built, which the fingerprint answers);
+			// anywhere else it is a planted entry whose file is not written yet,
+			// and the map is rebuilt now rather than when the file appears.
+			$dir = realpath(dirname($path));
+			if ($dir === false || !self::under_trusted_root($dir . '/')) {
+				self::refuse($path);
+			}
+			return null;
+		}
+		if (self::under_trusted_root($real)) {
+			return $real;
+		}
+		self::refuse($path);
+		return null;
+	}
+
+	/** True when a real path lies under one of trusted_roots(). */
+	private static function under_trusted_root($real) {
+		foreach (self::trusted_roots() as $root) {
+			if (strncmp($real, $root . '/', strlen($root) + 1) === 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Real paths of core includes/ and data/ and of every plugin directory's
+	 * includes/ and data/, active or not: activity is the database's answer,
+	 * and the shape check must not lean on it.
+	 *
+	 * @return string[]
+	 */
+	private static function trusted_roots() {
+		if (self::$trusted_roots === null) {
+			$dirs = array(PathHelper::getIncludePath('includes'), PathHelper::getIncludePath('data'));
+			foreach ((array)glob(PathHelper::getIncludePath('plugins') . '/*', GLOB_ONLYDIR) as $plugin_dir) {
+				$dirs[] = $plugin_dir . '/includes';
+				$dirs[] = $plugin_dir . '/data';
+			}
+			$roots = array();
+			foreach ($dirs as $dir) {
+				$real = realpath($dir);
+				if ($real !== false && is_dir($real)) {
+					$roots[] = $real;
+				}
+			}
+			self::$trusted_roots = $roots;
+		}
+		return self::$trusted_roots;
+	}
+
+	/**
+	 * Note a refused map entry: logged once per path per process, and the miss
+	 * it causes rebuilds. The once-per-process rebuild is handed back here even
+	 * when an ordinary miss earlier in the process spent it, so a request that
+	 * probed for an absent class first still loads the class and heals the
+	 * cache (reviewer2 B1). A rebuilt map comes from the tree and refuses
+	 * nothing, so this cannot loop.
+	 */
+	private static function refuse($path) {
+		self::$refused = true;
+		self::$rebuilt = false;
+		$key = is_string($path) ? $path : gettype($path);
+		if (!isset(self::$refused_logged[$key])) {
+			self::$refused_logged[$key] = true;
+			error_log('[ClassAutoloader] refused a mapped path outside the tree\'s includes/ and data/: ' . substr($key, 0, 300));
 		}
 	}
 
@@ -321,6 +434,7 @@ class ClassAutoloader {
 		// A rebuild answers this process's one allowed miss-rebuild: a map
 		// built moments ago is not made stale by a miss.
 		self::$rebuilt = true;
+		self::$refused = false;
 
 		$plugins = array();
 		$roots = self::scan_roots($complete, $plugins);
@@ -742,6 +856,7 @@ class ClassAutoloader {
 	 * long-lived cache (plugin activation, upgrade).
 	 */
 	public static function flush() {
+		self::$refused = false;
 		self::$map = null;
 		self::$prefixes = null;
 		self::$stamp = null;

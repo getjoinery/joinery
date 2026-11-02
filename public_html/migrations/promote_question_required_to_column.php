@@ -14,7 +14,7 @@ function promote_question_required_to_column() {
     $promoted = 0;
     $cleaned = 0;
     foreach ($questions as $question) {
-        $validation = unserialize((string)$question->get('qst_validate')) ?: array();
+        $validation = unserialize((string)$question->get('qst_validate'), ['allowed_classes' => false]) ?: array();
         if (!array_key_exists('required', $validation)) {
             continue;
         }

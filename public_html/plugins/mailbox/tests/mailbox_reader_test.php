@@ -20,6 +20,8 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.10 - the singleton section's rows are tracked for tearDown() as they are made: a run that threw
+ *               mid-section left them behind its deleted domain (referential_integrity, 11-02)
  * @version 1.9 - a singleton key (m:<id>) follows its message into the thread a reply gave it
  * @version 1.8 - a message its From domain disowned (DMARC fail, enforcing policy):
  *                allowSender, a never_spam rule and Not spam all leave it in Spam
@@ -263,15 +265,20 @@ class MailboxReaderTest {
 		section('a singleton key follows its message into the thread it joined');
 		$svc = new MailboxService($this->bethViewer());
 		$lone = $this->insertMsg($this->beth_alias, null, 'lone ' . $this->suffix, true, false, 30);
+		// Tracked at once, so tearDown() removes them if a check below throws
+		// before this section's own delete (they outlived their domain once).
+		$this->msg_ids['lone'] = $lone;
 		$ids = $svc->messageIdsInThread(null, 'm:' . $lone);
 		$this->ok($ids === [$lone], 'an unthreaded message is its own thread');
 		$joined = '<joined_' . $this->suffix . '@x>';
 		InboundEmailMessage::updateColumns($lone, array('iem_thread_key' => $joined));
 		$reply = $this->insertMsg($this->beth_alias, $joined, 'Re: lone ' . $this->suffix, true, false, 1);
+		$this->msg_ids['lone_reply'] = $reply;
 		$ids = $svc->messageIdsInThread(null, 'm:' . $lone);
 		sort($ids);
 		$this->ok($ids === [$lone, $reply], 'once replied to, its singleton key opens the thread with the reply');
 		$foreign = $this->insertMsg($this->other_alias, null, 'foreign', true, false, 5);
+		$this->msg_ids['lone_foreign'] = $foreign;
 		$this->ok(count($svc->messageIdsInThread(null, 'm:' . $foreign)) === 0,
 			'a singleton key outside the viewer\'s scope still opens nothing');
 		// The expansion is scoped too: another mailbox's row on the joined key
@@ -283,6 +290,7 @@ class MailboxReaderTest {
 		// The later sections count each mailbox's rows: these go.
 		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?, ?)')
 			->execute(array($lone, $reply, $foreign));
+		unset($this->msg_ids['lone'], $this->msg_ids['lone_reply'], $this->msg_ids['lone_foreign']);
 	}
 
 	// ---- list / grouping ----

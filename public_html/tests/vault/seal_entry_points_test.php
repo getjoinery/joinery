@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [plugins/mailbox/provisioning/relay-sealer/seal.go]
  *
  * Every seal the platform writes is v2 (post_quantum_sealing.md,
  * Acceptance for the whole): each public PHP entry point that seals to a public

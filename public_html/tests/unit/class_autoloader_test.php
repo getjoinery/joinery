@@ -28,6 +28,10 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.8 - the poisoned lookup follows an ordinary miss, which used to spend the rebuild (reviewer2 B1);
+ *               a planted entry whose file is not written yet is healed too (B5); scratch removed on exit
+ * @version 1.7 - a map entry outside the tree's includes/ and data/, or not a .php file, is never
+ *               required, from APCu or from the JSON file, and the map is rebuilt (v1_key_retirement C1)
  * @version 1.6 - the timed miss runs after a priming one: another session's edit since the map was
  *               cached made the measured miss pay a rebuild it was owed
  * @version 1.5 - a cached map is one site's and one plugin set's (B47): per-site APCu key, the plugin set
@@ -181,6 +185,134 @@ check(trim((string)shell_exec($lookup . ' 2>/dev/null')) === 'yes',
 $after = json_decode((string)file_get_contents($json_map), true);
 check(($after['plugins'] ?? null) === $real_plugins,
 	'and the cache is rebuilt for the real set', json_encode($after['plugins'] ?? null));
+
+section('A map entry outside the tree is never required (C1)');
+
+// The map is data the web user writes, and the autoloader requires whatever
+// file it names. Code that ran once in a worker could store a map naming its
+// own file for a model every request loads, and run in every later request. A
+// mapped path is required only when it is a .php file under core includes/ or
+// data/ or a plugin's, by real path. Each case below plants a map in the cache
+// a fresh process reads, then asks for the classes it poisoned.
+$scratch = sys_get_temp_dir() . '/c1_autoload_' . getmypid();
+@mkdir($scratch, 0700, true);
+$planted = $scratch . '/planted.php';
+register_shutdown_function(function () use ($scratch) {
+	foreach ((array)glob($scratch . '/*') as $f) {
+		@unlink($f);
+	}
+	@rmdir($scratch);
+});
+$marker  = $scratch . '/ran';
+file_put_contents($planted, '<?php file_put_contents(' . var_export($marker, true) . ', "ran"); class Product {} class MultiProduct {}');
+$json_data = PathHelper::getIncludePath('includes/core_tier_features.json');
+check(is_file($json_data), 'a non-PHP file under includes/ to aim at', $json_data);
+$json_head = substr(trim((string)file_get_contents($json_data)), 0, 40);
+$dotdot = PathHelper::getIncludePath('includes') . '/../../' . basename(PathHelper::getSiteRoot()) . '/public_html/includes/../' . str_repeat('../', 8) . ltrim($planted, '/');
+
+// What a fresh process reports: whether each class resolved, from which file,
+// and what the poisoned cache holds after it ran.
+$report = 'echo json_encode(array('
+	. '"product" => class_exists("Product") ? (new ReflectionClass("Product"))->getFileName() : null,'
+	. '"multi" => class_exists("MultiProduct") ? (new ReflectionClass("MultiProduct"))->getFileName() : null,'
+	. '"coupon" => class_exists("CouponCode") ? (new ReflectionClass("CouponCode"))->getFileName() : null,'
+	. '"map" => ClassAutoloader::map()));';
+$boot = 'require_once("' . PathHelper::getIncludePath('includes/PathHelper.php') . '");';
+
+// From cache/class_map.json, the cache a cron run and a CLI script read.
+shell_exec($php_no_apcu . ' 2>/dev/null');
+$base = json_decode((string)file_get_contents($json_map), true);
+$poisoned = $base;
+$poisoned['map']['Product'] = $planted;
+$poisoned['map']['MultiProduct'] = $json_data;
+$poisoned['map']['CouponCode'] = $dotdot;
+$poisoned['map']['Address'] = $scratch . '/not_written_yet.php';
+$poisoned['built'] = time();
+file_put_contents($json_map . '.poison', json_encode($poisoned));
+rename($json_map . '.poison', $json_map);
+@unlink($marker);
+// An absent class is probed first, as a request that checks for an inactive
+// plugin's class does: that ordinary miss spends the process's one rebuild, and
+// the refusal must still rebuild (reviewer2 B1).
+$probe_first = ' class_exists("NoSuchClass_c1probe_" . getmypid());';
+$out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=0 -r ' . escapeshellarg($boot . $probe_first . ' ' . $report) . ' 2>/dev/null');
+check(!is_file($marker), 'JSON map: a planted file in /tmp named for Product never runs');
+check(strpos($out, $json_head) === false, 'JSON map: a .json file under includes/ is not required (its contents never reach the output)');
+$got = json_decode(substr($out, (int)strpos($out, '{"product"')), true);
+check(is_array($got) && strpos((string)$got['product'], '/data/products_class.php') !== false,
+	'JSON map: Product still resolves, from its real file', (string)($got['product'] ?? $out));
+check(is_array($got) && strpos((string)$got['multi'], '/data/products_class.php') !== false,
+	'JSON map: and so does MultiProduct', (string)($got['multi'] ?? ''));
+check(is_array($got) && strpos((string)$got['coupon'], '/data/coupon_codes_class.php') !== false,
+	'JSON map: a path that climbs out with .. is refused by its real path', (string)($got['coupon'] ?? ''));
+$healed = json_decode((string)file_get_contents($json_map), true);
+check(strpos((string)($healed['map']['Address'] ?? ''), '/data/users_addrs_class.php') !== false,
+	'JSON map: an entry naming a file outside the tree that is not written yet is refused and healed too',
+	(string)($healed['map']['Address'] ?? ''));
+check(strpos((string)($healed['map']['Product'] ?? ''), '/data/products_class.php') !== false
+	&& ($healed['map']['MultiProduct'] ?? '') === ($healed['map']['Product'] ?? ''),
+	'JSON map: the refusal rebuilds the map, and the cache file is rewritten from the tree');
+
+// From APCu, the cache the web server reads. APCu does not outlive a CLI
+// process, so one process caches the real map, poisons it, forgets its
+// in-process copy and looks again — what the next request on a worker does.
+$apcu_script = $boot
+	. ' if (!function_exists("apcu_enabled") || !apcu_enabled()) { echo "no-apcu"; exit; }'
+	. ' ClassAutoloader::map();'
+	. ' $key = ClassAutoloader::CACHE_KEY . ":" . md5(PathHelper::getSiteRoot());'
+	. ' $v = apcu_fetch($key); if (!is_array($v)) { echo "not-cached"; exit; }'
+	. ' $v["map"]["Product"] = ' . var_export($planted, true) . ';'
+	. ' $v["map"]["MultiProduct"] = ' . var_export($json_data, true) . ';'
+	. ' $v["map"]["CouponCode"] = ' . var_export($dotdot, true) . ';'
+	. ' apcu_store($key, $v);'
+	. ' foreach (array("map" => null, "prefixes" => null, "stamp" => null, "plugins" => null, "rebuilt" => false) as $p => $val) {'
+	. '   (new ReflectionProperty("ClassAutoloader", $p))->setValue(null, $val); }'
+	. $probe_first
+	. ' ob_start(); $r = array("product" => class_exists("Product") ? (new ReflectionClass("Product"))->getFileName() : null,'
+	. '   "multi" => class_exists("MultiProduct") ? (new ReflectionClass("MultiProduct"))->getFileName() : null,'
+	. '   "coupon" => class_exists("CouponCode") ? (new ReflectionClass("CouponCode"))->getFileName() : null);'
+	. ' $r["echoed"] = ob_get_clean(); $after = apcu_fetch($key); $r["healed"] = $after["map"]["Product"] ?? null;'
+	. ' echo json_encode($r);';
+@unlink($marker);
+$out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 -r ' . escapeshellarg($apcu_script) . ' 2>/dev/null');
+$got = json_decode($out, true);
+check(is_array($got), 'APCu: the poisoned-cache process ran', substr($out, 0, 200));
+check(!is_file($marker), 'APCu map: a planted file in /tmp named for Product never runs');
+check(is_array($got) && $got['echoed'] === '', 'APCu map: a .json file under includes/ is not required (nothing echoed)',
+	substr((string)($got['echoed'] ?? ''), 0, 80));
+check(is_array($got) && strpos((string)$got['product'], '/data/products_class.php') !== false
+	&& strpos((string)$got['multi'], '/data/products_class.php') !== false
+	&& strpos((string)$got['coupon'], '/data/coupon_codes_class.php') !== false,
+	'APCu map: Product, MultiProduct and CouponCode resolve from their real files', $out);
+check(is_array($got) && strpos((string)$got['healed'], '/data/products_class.php') !== false,
+	'APCu map: the refusal rebuilds the map and rewrites the APCu entry', (string)($got['healed'] ?? ''));
+
+// Every class the real map names passes the check: the rule refuses nothing
+// the tree itself builds, core or plugin, active or not.
+$check_path = new ReflectionMethod('ClassAutoloader', 'trusted_path');
+$refused = array();
+foreach ($healed['map'] ?? array() as $class => $path) {
+	if ($check_path->invoke(null, $path) === null) {
+		$refused[] = $class . ' => ' . $path;
+	}
+}
+check(count($healed['map'] ?? array()) > 500 && $refused === array(),
+	'every class in the real map passes the check (' . count($healed['map'] ?? array()) . ' classes)',
+	implode('; ', array_slice($refused, 0, 5)));
+$inactive = array();
+foreach ((array)glob(PathHelper::getIncludePath('plugins') . '/*/data/*_class.php') as $f) {
+	$name = basename(dirname(dirname($f)));
+	if (!in_array($name, PluginHelper::activePluginNames(), true)) {
+		$inactive[] = $f;
+	}
+}
+check($inactive === array() || $check_path->invoke(null, $inactive[0]) !== null,
+	'an inactive plugin\'s data file passes too: the rule is the shape, not the database\'s plugin list',
+	$inactive[0] ?? 'every plugin is active here');
+
+@unlink($marker);
+@unlink($planted);
+@rmdir($scratch);
 
 section('The cache is not writable by the whole machine');
 

@@ -74,7 +74,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	public static $json_vars = array('qst_config');
 
 	function output_js_validation($validation_rules){
-		$validation_options = unserialize($this->get('qst_validate')) ?: [];
+		$validation_options = unserialize((string)$this->get('qst_validate'), ['allowed_classes' => false]) ?: [];
 
 		if ($this->get('qst_type') == Question::TYPE_CHECKBOX_LIST){
 			$question_name = '"question_'.$this->key.'[]"';
@@ -108,7 +108,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 	}
 	
 	function validate_answers($answers){
-		$validation_options = unserialize($this->get('qst_validate')) ?: [];
+		$validation_options = unserialize((string)$this->get('qst_validate'), ['allowed_classes' => false]) ?: [];
 
 		if($this->get('qst_is_required')){
 			if($answers === '' || $answers === NULL || (is_array($answers) && count($answers) == 0)){
@@ -168,7 +168,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 		$question_text = $this->get('qst_question') . $append_text;
 
 		// Get validation options
-		$validation_options = unserialize($this->get('qst_validate')) ?: [];
+		$validation_options = unserialize((string)$this->get('qst_validate'), ['allowed_classes' => false]) ?: [];
 		$validation = [];
 
 		// The typing cap on the input comes from the question's own max_length
