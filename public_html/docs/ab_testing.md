@@ -7,7 +7,7 @@ Platform-level multi-armed bandit (epsilon-greedy) A/B testing. Tests attach to 
 - Pages rendering a tested entity automatically bypass the static cache.
 - Bot traffic is filtered by `SessionControl::crawlerDetect()` — both trials and rewards inherit this filter by construction.
 
-Spec: [`/specs/ab_testing_framework.md`](../specs/ab_testing_framework.md).
+Spec: `/specs/ab_testing_framework.md`.
 
 ## Opting an entity in
 

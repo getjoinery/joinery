@@ -49,42 +49,8 @@ $sk = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_na
 openssl_pkey_export($sk, $stmt_pem);
 $stmt_der = ReleaseLogClient::publicDer($stmt_pem);
 
-/** A log built here: origin, key pair, DER, and a transport that answers a submission with a proof. */
-function rlv_log($origin) {
-	$pair = sodium_crypto_sign_keypair();
-	$der = TransparencyProof::ED25519_SPKI_PREFIX . sodium_crypto_sign_publickey($pair);
-	$mth = function (array $leaves) use (&$mth) {
-		$n = count($leaves);
-		if ($n === 1) { return TransparencyProof::leafHash($leaves[0]); }
-		$k = 1; while ($k * 2 < $n) { $k *= 2; }
-		return TransparencyProof::nodeHash($mth(array_slice($leaves, 0, $k)), $mth(array_slice($leaves, $k)));
-	};
-	$path = function ($m, array $leaves) use (&$path, $mth) {
-		$n = count($leaves);
-		if ($n === 1) { return array(); }
-		$k = 1; while ($k * 2 < $n) { $k *= 2; }
-		if ($m < $k) { return array_merge($path($m, array_slice($leaves, 0, $k)), array($mth(array_slice($leaves, $k)))); }
-		return array_merge($path($m - $k, array_slice($leaves, $k)), array($mth(array_slice($leaves, 0, $k))));
-	};
-	$transport = function ($method, $url, $body) use ($pair, $origin, $mth, $path) {
-		$hr = json_decode($body, true)['hashedRekordRequestV002'];
-		$leaf = TransparencyProof::canonicalJson(array('apiVersion' => '0.0.2', 'kind' => 'hashedrekord', 'spec' => array('hashedRekordV002' => array(
-			'data' => array('algorithm' => 'SHA2_256', 'digest' => $hr['digest']),
-			'signature' => array('content' => $hr['signature']['content'], 'verifier' => $hr['signature']['verifier'])))));
-		$leaves = array('a', $leaf, 'c');
-		$root = $mth($leaves);
-		$note_body = "{$origin}\n3\n" . base64_encode($root) . "\n";
-		$kh = substr(hash('sha256', $origin . "\n\x01" . sodium_crypto_sign_publickey($pair), true), 0, 4);
-		$note = $note_body . "\n\u{2014} {$origin} " . base64_encode($kh . sodium_crypto_sign_detached($note_body, sodium_crypto_sign_secretkey($pair))) . "\n";
-		return array('status' => 201, 'body' => json_encode(array('logIndex' => '1', 'kindVersion' => array('kind' => 'hashedrekord', 'version' => '0.0.2'),
-			'inclusionProof' => array('logIndex' => '1', 'rootHash' => base64_encode($root), 'treeSize' => '3',
-				'hashes' => array_map('base64_encode', $path(1, $leaves)), 'checkpoint' => array('envelope' => $note)),
-			'canonicalizedBody' => base64_encode($leaf))));
-	};
-	$client = new ReleaseLogClient(array($origin => $der), null, $transport);
-	$shard = array('url' => 'https://' . $origin, 'origin' => $origin, 'key' => $der, 'ahead' => array(), 'waiting' => array(), 'genesis' => true);
-	return array('origin' => $origin, 'der' => $der, 'client' => $client, 'shard' => $shard);
-}
+require_once(__DIR__ . '/../lib/release_log_fixtures.php');
+function rlv_log($origin) { return fake_release_log($origin); }
 $log1 = rlv_log('log2025-1.rekor.sigstore.dev');
 $log2 = rlv_log('log2026-1.rekor.sigstore.dev');
 
@@ -194,6 +160,31 @@ check($v->verdict === PackageSignature::UNLOGGED && strpos($v->detail, 'more tha
 	'another file named RELEASE_STATEMENT with other bytes is never left out unlogged (B1)', $v->line());
 
 check($verify($dir, $node)->keys_proven === array(), 'and an unlogged verdict proves no keys');
+
+// ---------------------------------------------------------------------------
+section('A commit map and a release statement never pass for each other (specs_private_repo D3)');
+
+$log_keys1 = array($log1['origin'] => $log1['der']);
+$map_env = ReleaseLogClient::signEnvelope("{}\n", $stmt_pem, TransparencyProof::COMMIT_MAP_TYPE);
+$map_entry = $log1['client']->submitEntry($log1['shard'], $map_env, $stmt_der);
+check(is_array(TransparencyProof::verifyEntry($map_env, $map_entry, array($stmt_der), $log_keys1, TransparencyProof::COMMIT_MAP_TYPE)),
+	'a logged commit map verifies as a commit map');
+$why = rlv_refusal(function () use ($map_env, $map_entry, $stmt_der, $log_keys1) {
+	TransparencyProof::verifyEntry($map_env, $map_entry, array($stmt_der), $log_keys1);
+});
+check($why !== null && strpos($why, 'not a release statement') !== false, 'the same commit map is refused where a release statement is required', (string)$why);
+$st_env = ReleaseLogClient::signEnvelope("{}\n", $stmt_pem);
+$st_entry = $log1['client']->submitEntry($log1['shard'], $st_env, $stmt_der);
+$why = rlv_refusal(function () use ($st_env, $st_entry, $stmt_der, $log_keys1) {
+	TransparencyProof::verifyEntry($st_env, $st_entry, array($stmt_der), $log_keys1, TransparencyProof::COMMIT_MAP_TYPE);
+});
+check($why !== null && strpos($why, TransparencyProof::COMMIT_MAP_TYPE) !== false, 'a release statement is refused where a commit map is required', (string)$why);
+// Relabelled: the signature is over the type, so changing the label breaks it.
+$relabelled = array('payloadType' => TransparencyProof::PAYLOAD_TYPE) + $map_env;
+$why = rlv_refusal(function () use ($relabelled, $stmt_der) { TransparencyProof::verifyEnvelope($relabelled, array($stmt_der)); });
+check($why !== null && strpos($why, 'not signed by a statement key') !== false, 'a commit map relabelled as a release statement does not verify', (string)$why);
+check(rlv_refusal(function () use ($stmt_pem) { ReleaseLogClient::signEnvelope('{}', $stmt_pem, 'application/json'); }) !== null,
+	'the client signs no other payload type');
 
 // ---------------------------------------------------------------------------
 section('A fresh archive carries nothing the manifest does not list (B6)');

@@ -1048,6 +1048,6 @@ function my_logic($config) {
 
 - [FormWriter Documentation](formwriter.md) - Repeater field details
 - [Admin Pages Documentation](admin_pages.md) - Admin interface patterns
-- [Implemented Spec](/specs/implemented/page_component_system.md) - Full specification
-- [Vertical Margin Spec](/specs/implemented/component_vertical_margin.md) - Vertical margin system
-- [Newsletter Signup Spec](/specs/implemented/newsletter_signup_component.md) - Newsletter component (first logic function example)
+- Page component system (spec `page_component_system`) - Full specification
+- Vertical Margin Spec (spec `component_vertical_margin`) - Vertical margin system
+- Newsletter Signup Spec (spec `newsletter_signup_component`) - Newsletter component (first logic function example)

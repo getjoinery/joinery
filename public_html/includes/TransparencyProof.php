@@ -35,6 +35,8 @@
  *   inclusion_proof   {tree_size, root_hash (base64), hashes (base64[])}
  *   checkpoint        the signed note, verbatim
  *
+ * @version 1.2 - verifyEnvelope() and verifyEntry() take the payload type they require, a release statement by
+ *                default; a commit map is the other (specs_private_repo D3)
  * @version 1.1 - verifyCheckpoint() takes several keys for a log and accepts a note signed by any (WP7 review B7)
  * @version 1.0
  */
@@ -45,6 +47,13 @@ class TransparencyProof {
 
 	/** The DSSE payload type of a release statement. */
 	const PAYLOAD_TYPE = 'application/vnd.joinery.release-statement+json';
+
+	/**
+	 * The DSSE payload type of a commit map: the signed list of old and new
+	 * commits when the public history is rewritten (ReleaseHistoryMap). Its
+	 * own type, so a map never reads as a release statement or the reverse.
+	 */
+	const COMMIT_MAP_TYPE = 'application/vnd.joinery.commit-map+json';
 
 	/** The only log entry form Rekor v2 accepts, and the key form it carries. */
 	const LEAF_KIND          = 'hashedrekord';
@@ -97,16 +106,18 @@ class TransparencyProof {
 	 *
 	 * @param array    $envelope        {payloadType, payload (base64), signatures: [{keyid, sig (base64)}]}
 	 * @param string[] $statement_keys  P-256 SubjectPublicKeyInfo DER
+	 * @param string   $payload_type    the type the envelope must carry
 	 */
-	public static function verifyEnvelope(array $envelope, array $statement_keys) {
+	public static function verifyEnvelope(array $envelope, array $statement_keys, $payload_type = self::PAYLOAD_TYPE) {
 		$type    = $envelope['payloadType'] ?? null;
 		$payload = isset($envelope['payload']) ? base64_decode((string)$envelope['payload'], true) : false;
 		$sigs    = $envelope['signatures'] ?? null;
 		if (!is_string($type) || $payload === false || !is_array($sigs)) {
 			throw new TransparencyProofException('the statement envelope is not the DSSE form we write');
 		}
-		if ($type !== self::PAYLOAD_TYPE) {
-			throw new TransparencyProofException("the statement envelope's payload type is {$type}, not a release statement");
+		if ($type !== $payload_type) {
+			throw new TransparencyProofException("the statement envelope's payload type is {$type}, not "
+				. ($payload_type === self::PAYLOAD_TYPE ? 'a release statement' : $payload_type));
 		}
 		if (count($sigs) !== 1 || !isset($sigs[0]['sig'])) {
 			throw new TransparencyProofException('the statement envelope must carry exactly one signature');
@@ -239,14 +250,15 @@ class TransparencyProof {
 	 * @param array    $entry           the stored entry (see the class comment)
 	 * @param string[] $statement_keys  P-256 SubjectPublicKeyInfo DER
 	 * @param array    $log_keys        origin => Ed25519 SubjectPublicKeyInfo DER
+	 * @param string   $payload_type    the type the envelope must carry
 	 */
-	public static function verifyEntry(array $envelope, array $entry, array $statement_keys, array $log_keys) {
+	public static function verifyEntry(array $envelope, array $entry, array $statement_keys, array $log_keys, $payload_type = self::PAYLOAD_TYPE) {
 		foreach (array('log_origin', 'log_index', 'leaf', 'inclusion_proof', 'checkpoint') as $field) {
 			if (!isset($entry[$field])) {
 				throw new TransparencyProofException("the log entry has no {$field}");
 			}
 		}
-		$signer = self::verifyEnvelope($envelope, $statement_keys);
+		$signer = self::verifyEnvelope($envelope, $statement_keys, $payload_type);
 
 		$leaf = base64_decode((string)$entry['leaf'], true);
 		if ($leaf === false || $leaf === '') {

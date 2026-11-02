@@ -16,6 +16,8 @@
  * It also asks the site's upgrade source which release it offers now
  * (offered()), for the pages that say whether this site is current.
  *
+ * @version 1.2 - commit_url() links a core commit the public history rewrote to the commit that stands for it
+ *                (ReleaseHistoryMap, specs_private_repo D5)
  * @version 1.1 - offered(): the version the upgrade source offers, asked live
  * @version 1.0
  */
@@ -95,9 +97,26 @@ class ReleaseProvenance {
 			: array('version' => $version, 'error' => '');
 	}
 
-	/** A commit's page in its public repository; '' for anything that is not a full commit hash. */
-	public static function commit_url(string $repo, string $commit): string {
-		return self::commit($commit) === '' ? '' : $repo . '/commit/' . $commit;
+	/**
+	 * A commit's page in its public repository; '' for anything that is not a
+	 * full commit hash. A core commit the public history rewrote links to the
+	 * commit this site's commit map names for it, which GitHub still serves.
+	 *
+	 * @param ReleaseHistoryMap|null $map  the map to follow; this site's own by default
+	 */
+	public static function commit_url(string $repo, string $commit, ?ReleaseHistoryMap $map = null): string {
+		$commit = self::commit($commit);
+		if ($commit === '') {
+			return '';
+		}
+		if ($repo === self::CORE_REPO) {
+			try {
+				$commit = ($map ?? ReleaseHistoryMap::installed())->current($commit);
+			} catch (ReleaseHistoryMapException $e) {
+				// A link is not worth a broken page; the old hash still names the release.
+			}
+		}
+		return $repo . '/commit/' . $commit;
 	}
 
 	private static function commit($value): string {

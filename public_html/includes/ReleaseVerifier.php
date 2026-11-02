@@ -47,6 +47,10 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.7 - a core commit the public history rewrote is followed through the signed commit map on public main
+ *                (ReleaseHistoryMap, specs_private_repo D6); the files the commit ships are listed from the commit
+ *                itself (the list was read with git ls-files in an unpacked directory, found nothing, and the
+ *                check that every shipped file is listed passed without looking)
  * @version 1.6 - an agent is rebuilt with the release keys it was built with (AgentDistPublisher::bakedReleaseKeys,
  *                specs/release_key_rotation.md R3)
  * @version 1.5 - the support bundle may carry every plugin's prebuilt Go binary the statement records, not only
@@ -80,6 +84,12 @@ class ReleaseVerifier {
 	private $keys;
 	private $c_hashes = array();
 
+	/** @var string the git command prefix for the repository the core commit was read from */
+	private $c_git;
+
+	/** @var string the core commit the files were read from: the statement's, or the one the commit map names for it */
+	private $c_commit;
+
 	/**
 	 * @param array $opts version (required), source (the upgrade source's URL), statement (a
 	 *                    RELEASE_STATEMENT file instead of the core archive's), core_archive (a local
@@ -87,7 +97,8 @@ class ReleaseVerifier {
 	 *                    of fetching from GitHub), rebuild (bool, default true), go (path), keep (bool),
 	 *                    offline (bool: nothing is fetched; the commits come from the local clones, and the checks
 	 *                    that need GitHub or Sigstore are reported as not run). For tests: core_url / agent_url (the
-	 *                    public repositories), sigstore (false: Sigstore is not asked)
+	 *                    public repositories), sigstore (false: Sigstore is not asked), map_keys ({statement: DER[],
+	 *                    log: origin => DER}: the keys a commit map is checked against, instead of the release's own)
 	 * @param callable|null $out one line of output
 	 */
 	public function __construct(array $opts, $out = null) {
@@ -211,6 +222,12 @@ class ReleaseVerifier {
 	 * (commits only, no files) and the commit must be an ancestor of its tip,
 	 * which is the test publish itself applies (ReleaseCommit::onRemote()).
 	 * Offline, that test is reported as not run.
+	 *
+	 * A core commit main does not contain may have been rewritten: the
+	 * public history was rewritten without changing a shipped file, and the
+	 * commit map on main, signed by a key this release trusts and proven in
+	 * the log, names the commit that stands for it (followMap()). Every later
+	 * check then reads that commit.
 	 */
 	private function checkout($label, $public_url, $commit, $local) {
 		$dir = $this->work . '/' . $label . '-commit';
@@ -225,12 +242,20 @@ class ReleaseVerifier {
 				throw new ReleaseVerifyStop("--offline reads the commits from local clones: pass --{$label}-repo=DIR");
 			}
 			$this->skip("The {$label} commit " . substr($commit, 0, 12) . ' was not checked against the public repository (--offline)');
+			exec('git -C ' . escapeshellarg($local) . ' cat-file -e ' . escapeshellarg($commit . '^{commit}') . ' 2>&1', $o0, $code0);
+			if ($code0 !== 0 && $label === 'core') {
+				$commit = $this->followMap('git -C ' . escapeshellarg($local), 'main', $commit, $local);
+			}
 		} else {
 			exec($scratch . ' fetch -q --filter=tree:0 origin main 2>&1', $o, $code);
 			if ($code !== 0) {
 				throw new ReleaseVerifyStop("could not read the main branch of {$public_url}: " . implode(' | ', array_slice($o, -2)));
 			}
 			exec($scratch . ' merge-base --is-ancestor ' . escapeshellarg($commit) . ' refs/remotes/origin/main 2>&1', $o2, $code2);
+			if ($code2 !== 0 && $label === 'core') {
+				$commit = $this->followMap($scratch, 'refs/remotes/origin/main', $commit, $public_url);
+				exec($scratch . ' merge-base --is-ancestor ' . escapeshellarg($commit) . ' refs/remotes/origin/main 2>&1', $o2, $code2);
+			}
 			if ($code2 !== 0) {
 				throw new ReleaseVerifyStop("the {$label} commit {$commit} is not on the main branch of the public repository {$public_url}");
 			}
@@ -252,7 +277,56 @@ class ReleaseVerifier {
 		if ($code3 !== 0) {
 			throw new ReleaseVerifyStop("could not read the {$label} commit {$commit} from {$where}");
 		}
+		if ($label === 'core') {
+			$this->c_git = $git;
+			$this->c_commit = $commit;
+		}
 		return $dir;
+	}
+
+	/**
+	 * The commit the commit map on $ref names for release $version's core
+	 * commit, after checking the map is signed by a statement key the release
+	 * trusts and proven under a log key it lists (specs_private_repo D4).
+	 * Stops, with the reason, when main carries no map, the map does not list
+	 * the commit for this version, or a listed rewrite does not verify.
+	 */
+	private function followMap($git, $ref, $commit, $where) {
+		$version = (string)$this->payload['version'];
+		$not_on_main = "the core commit {$commit} is not on the main branch of the public repository {$where}";
+		$out = array();
+		exec($git . ' show ' . escapeshellarg($ref . ':' . ReleaseHistoryMap::PATH) . ' 2>/dev/null', $out, $code);
+		if ($code !== 0) {
+			throw new ReleaseVerifyStop($not_on_main . ', and main carries no commit map');
+		}
+		if (isset($this->opts['map_keys'])) {
+			$statement_keys = (array)$this->opts['map_keys']['statement'];
+			$log_keys = (array)$this->opts['map_keys']['log'];
+		} else {
+			$statement_keys = array();
+			foreach ($this->payload['keys_installed']['statement_keys'] ?? array() as $b64) {
+				$statement_keys[] = (string)base64_decode((string)$b64, true);
+			}
+			$log_keys = array();
+			foreach ($this->payload['keys_installed']['log_keys'] ?? array() as $pair) {
+				$log_keys[(string)($pair['origin'] ?? '')][] = (string)base64_decode((string)($pair['key'] ?? ''), true);
+			}
+		}
+		try {
+			$found = ReleaseHistoryMap::parse(implode("\n", $out))->verifiedFor($version, $commit, $statement_keys, $log_keys);
+		} catch (ReleaseHistoryMapException $e) {
+			throw new ReleaseVerifyStop($not_on_main . '; ' . $e->getMessage());
+		}
+		if ($found === null) {
+			throw new ReleaseVerifyStop($not_on_main . ", and its commit map does not list it for release {$version}");
+		}
+		foreach ($found['hops'] as $hop) {
+			$this->pass("The core commit " . substr($hop['old'], 0, 12) . ' was rewritten to ' . substr($hop['new'], 0, 12)
+				. ' on ' . ($hop['rewritten_at'] !== '' ? $hop['rewritten_at'] : 'an unrecorded date')
+				. " (log entry {$hop['log_index']} at {$hop['log_origin']}), by a key this release trusts; "
+				. 'the shipped files are checked against ' . substr($found['commit'], 0, 12));
+		}
+		return $found['commit'];
 	}
 
 	// ---- the statement and the log ------------------------------------------
@@ -438,7 +512,11 @@ class ReleaseVerifier {
 	 */
 	private function coreFilesOfCommit() {
 		$out = array();
-		exec('git -C ' . escapeshellarg($this->c_dir) . ' ls-files -z 2>/dev/null', $lines);
+		$lines = array();
+		exec($this->c_git . ' ls-tree -r -z --name-only ' . escapeshellarg($this->c_commit) . ' 2>/dev/null', $lines, $code);
+		if ($code !== 0 || $lines === array()) {
+			throw new ReleaseVerifyStop("could not list the files of the core commit {$this->c_commit}");
+		}
 		$skip_names = array('specs', 'uploads', 'cache', 'logs', 'backups', '.playwright-mcp', 'theme-sources', '.claude', '.git', '.gitignore',
 			'CLAUDE.md', 'GEMINI.md', 'AGENTS.md');
 		foreach (explode("\0", implode("\n", $lines)) as $rel) {
@@ -657,6 +735,7 @@ class ReleaseVerifier {
 		$version = (string)($this->payload['version'] ?? $this->opts['version']);
 		$doc = json_decode((string)$this->statement_bytes, true);
 		$this->say("VERIFIED: release {$version} is built from public commit {$this->payload['core_commit']}"
+			. ($this->c_commit !== null && $this->c_commit !== $this->payload['core_commit'] ? ", now {$this->c_commit} on main," : '')
 			. " (agent {$this->payload['agent_commit']}) and is in the public log {$doc['entry']['log_origin']} at index {$doc['entry']['log_index']}."
 			. ($skipped ? ' ' . count($skipped) . ' check(s) were not run; see above.' : ''));
 		return true;

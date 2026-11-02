@@ -60,7 +60,7 @@ combination the platform does not offer.
 
 ## One vault
 
-*(Design and decisions: [specs/one_vault_experience.md](../specs/one_vault_experience.md).)*
+*(Design and decisions: specs/one_vault_experience.md.)*
 
 Two kinds of key stay two — the **account vault** (`user`, server custody,
 opened in server RAM) and the **browser-held vaults** (client custody) — but a
@@ -332,7 +332,7 @@ tie-breaker and real state always wins over it.
 
 ## When a passkey cannot hold the key
 
-*(Rationale and the rejected alternatives: [specs/vault_passphrase_fallback.md](../specs/vault_passphrase_fallback.md).)*
+*(Rationale and the rejected alternatives: specs/vault_passphrase_fallback.md.)*
 
 PRF is a narrower requirement than passkey support: iPhones before iOS 18,
 Windows 10, older Firefox, older Android and most security keys enrol a passkey

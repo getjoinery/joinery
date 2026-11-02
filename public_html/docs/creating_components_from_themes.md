@@ -59,7 +59,7 @@ The `newsletter_signup` component supports:
 - **Anti-spam:** Automatic captcha/honeypot for non-logged-in users
 - **Background styling:** Solid color or gradient options
 
-See the [Newsletter Signup Spec](/specs/implemented/newsletter_signup_component.md) for full details.
+See the Newsletter Signup Spec (spec `newsletter_signup_component`) for full details.
 
 ### Safe Component Types
 
@@ -764,7 +764,7 @@ During sync:
 ## See Also
 
 - [Component System Documentation](/docs/component_system.md)
-- [Component Preview Utility](/specs/implemented/component_preview_utility.md)
-- [Component Type Library](/specs/component_type_library.md)
+- Component Preview Utility (spec `component_preview_utility`)
+- Component Type Library (spec `component_type_library`)
 - [Theme Integration Instructions](/docs/theme_integration_instructions.md)
 - [FormWriter - Repeater Fields](/docs/formwriter.md#repeater-fields)

@@ -2257,6 +2257,6 @@ This guide should enable successful theme integration following the proven Phill
 ## See Also
 
 - [Creating Components from Themes](/docs/creating_components_from_themes.md) - Extract theme sections into reusable components
-- [Component Preview Utility](/specs/implemented/component_preview_utility.md) - Test components with placeholder data
+- Component Preview Utility (spec `component_preview_utility`) - Test components with placeholder data
 - [Component System Documentation](/docs/component_system.md) - Full component system reference
 - [Plugin Developer Guide](/docs/plugin_developer_guide.md) - Themes, plugins, and routing details

@@ -9,7 +9,7 @@ Both surfaces drive the same `AgentLoop` over the same tools; what differs is re
 
 **Server requirement:** chat's live experience (streamed partial answers and the running activity line) depends on the turn detaching from the request via `fastcgi_finish_request()`, which only the php-fpm SAPI provides — the installer configures Apache with the event MPM + proxy_fcgi accordingly. Under any other SAPI (mod_php, CGI) `ChatAsync::canDetach()` is false and every turn runs synchronously: the reply still arrives, but as one block with no live feedback.
 
-This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md).
+This doc covers what plugin authors and model authors need to know. For original design rationale, see `specs/implemented/joinery_ai.md`, `specs/implemented/joinery_ai_autodiscovery.md`, and `specs/implemented/joinery_ai_write_tools.md`.
 
 ## What's in the plugin
 
@@ -1586,9 +1586,9 @@ Both chat and recipes are currently admin-gated, so the member fence governs the
 3. **Field allowlist** — only fields surviving the registry scan reach `set()`. The scan keeps a field only if it is in `$ai_writable_fields` and survives every strip: anything in `$ai_excluded_fields`, the credential auto-block regex, and the **shared core write floor** (`$api_unwritable_fields` + the credential pattern, via `SystemBase::is_unwritable_field()`) is removed. That floor is the same one the REST write boundary enforces, so a privileged column like `usr_permission` is unwritable on both surfaces. Dropped fields are reported in the response envelope's `fields_set`, so the LLM adapts without retrying.
 4. **Row scope** — `authenticate_write()` runs with the recipe owner's identity (the owner, else the model's class level; throw-to-deny) before `save()`. Soft delete uses the same allowlist + opt-in + `authenticate_write` gate, with no field allowlist (it touches only `delete_time`).
 
-See [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 1) for the gauntlet test that decides when a model qualifies for direct writes.
+See `specs/implemented/joinery_ai_write_tools.md` (Path 1) for the gauntlet test that decides when a model qualifies for direct writes.
 
-Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) (Path 2).
+Any write that needs cross-record invariants (capacity, payment effects, hooks, external system calls) belongs in a logic file with a write-capable descriptor — see `specs/implemented/joinery_ai_write_tools.md` (Path 2).
 
 ### Action exposure (`ai_agent`)
 
@@ -1704,9 +1704,9 @@ SELECT rcr_tool_calls FROM rcr_recipe_runs WHERE rcr_recipe_run_id = ?;
 
 ## See also
 
-- [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md) — original system spec
-- [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md) — auto-discovery read-side design and threat model
-- [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md) — write-tool design covering both direct-model and logic-file paths
-- [`specs/implemented/descriptor_rest_api_core.md`](../../../specs/implemented/descriptor_rest_api_core.md) — Step 7 core: API + AI consume `_logic_descriptor()` natively (migration continues in [`specs/logic_api_descriptor_migration.md`](../../../specs/logic_api_descriptor_migration.md))
+- `specs/implemented/joinery_ai.md` — original system spec
+- `specs/implemented/joinery_ai_autodiscovery.md` — auto-discovery read-side design and threat model
+- `specs/implemented/joinery_ai_write_tools.md` — write-tool design covering both direct-model and logic-file paths
+- `specs/implemented/descriptor_rest_api_core.md` — Step 7 core: API + AI consume `_logic_descriptor()` natively (migration continues in `specs/logic_api_descriptor_migration.md`)
 - [Plugin Developer Guide](/docs/plugin_developer_guide.md) — plugin architecture and routing
 - [Logic Architecture](/docs/logic_architecture.md) — business logic layer

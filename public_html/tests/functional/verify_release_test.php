@@ -17,9 +17,13 @@
  *  - a core archive with one byte changed is refused
  *  - a statement whose log entry is moved is refused
  *  - a version the statement does not name is refused
+ *  - a core commit main no longer holds verifies through a commit map naming
+ *    an equal-tree commit, and is refused with no map, a map for another
+ *    version, or a map signed by a key the release does not trust
  *
  * Run: php tests/run.php safe --filter=verify_release
  *
+ * @version 1.1 - a core commit the public history rewrote (specs_private_repo D6)
  * @version 1.0
  */
 
@@ -118,6 +122,70 @@ list($ok, $results) = vr_run(array('core_url' => $core_off) + $anchored);
 $fails = vr_failures($results);
 check(!$ok && count(preg_grep('/core commit .* is not on the main branch/', $fails)) === 1,
 	'a core commit main does not contain is refused, though the repository holds it', implode('; ', $fails));
+
+section('A core commit the public history rewrote (specs_private_repo D6)');
+
+// A stand-in whose main holds an equal-tree copy of the release's commit (as
+// a rewrite that removed only unshipped files leaves it), and, on top, a
+// commit map naming it. The map is signed by a key and log built here, which
+// map_keys hands the verifier in place of the release's own.
+require_once(__DIR__ . '/../lib/release_log_fixtures.php');
+$c = $statement_payload['core_commit'];
+$rewritten = function ($label, ?string $map_bytes) use ($tmp, $c) {
+	$bare = $tmp . '/public_' . $label . '.git';
+	exec('git clone -q --bare --shared ' . escapeshellarg(PathHelper::getSiteRoot()) . ' ' . escapeshellarg($bare) . ' 2>&1');
+	$g = 'git -C ' . escapeshellarg($bare);
+	exec($g . ' config uploadpack.allowFilter true');
+	$y = trim((string)shell_exec($g . ' commit-tree ' . escapeshellarg($c . '^{tree}') . ' -m rewritten 2>/dev/null'));
+	$tip = $y;
+	if ($map_bytes !== null) {
+		$blob_file = $tmp . '/' . $label . '_map.json';
+		file_put_contents($blob_file, $map_bytes);
+		$env = 'GIT_INDEX_FILE=' . escapeshellarg($tmp . '/' . $label . '.index') . ' ';
+		$blob = trim((string)shell_exec($g . ' hash-object -w ' . escapeshellarg($blob_file)));
+		exec($env . $g . ' read-tree ' . escapeshellarg($y));
+		exec($env . $g . ' update-index --add --cacheinfo ' . escapeshellarg('100644,' . $blob . ',' . ReleaseHistoryMap::PATH));
+		$tree = trim((string)shell_exec($env . $g . ' write-tree'));
+		$tip = trim((string)shell_exec($g . ' commit-tree ' . escapeshellarg($tree) . ' -p ' . escapeshellarg($y) . ' -m map 2>/dev/null'));
+	}
+	exec($g . ' update-ref refs/heads/main ' . escapeshellarg($tip));
+	return array('url' => 'file://' . $bare, 'new' => $y);
+};
+$map_log = fake_release_log('log2025-1.rekor.sigstore.dev');
+$sk = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1'));
+openssl_pkey_export($sk, $map_pem);
+$map_keys = array('statement' => array(ReleaseLogClient::publicDer($map_pem)), 'log' => array($map_log['origin'] => $map_log['der']));
+// The new commit is the commit-tree of C's tree, the same in every stand-in
+// under fixed dates: read it from one with no map, then sign maps naming it.
+$map_for = function ($map_version, $new) use ($map_log, $map_pem, $c) {
+	$env = ReleaseLogClient::signEnvelope(ReleaseHistoryMap::payload(array(array('version' => $map_version, 'old' => $c, 'new' => $new)), 'test'),
+		$map_pem, TransparencyProof::COMMIT_MAP_TYPE);
+	return ReleaseHistoryMap::append('', $env, $map_log['client']->submitEntry($map_log['shard'], $env, ReleaseLogClient::publicDer($map_pem)));
+};
+putenv('GIT_COMMITTER_DATE=2026-11-01T00:00:00Z'); putenv('GIT_AUTHOR_DATE=2026-11-01T00:00:00Z');
+$probe = $rewritten('probe', null);
+$mapped = $rewritten('mapped', $map_for($version, $probe['new']));
+$wrong_version = $rewritten('wrong_version', $map_for('0.0.1', $probe['new']));
+putenv('GIT_COMMITTER_DATE'); putenv('GIT_AUTHOR_DATE');
+check($mapped['new'] === $probe['new'], 'the stand-in\'s rewritten commit is the one the map names');
+
+$remapped = array('core_url' => $mapped['url'], 'core_repo' => null, 'map_keys' => $map_keys) + $anchored;
+list($ok, $results) = vr_run($remapped);
+$line = array_filter($results, function ($r) { return $r['status'] === 'ok' && strpos($r['what'], 'was rewritten to') !== false; });
+check($ok && count($line) === 1, 'a release whose commit was rewritten verifies through the map, and says so', implode('; ', vr_failures($results)));
+
+list($ok, $results) = vr_run(array('core_url' => $probe['url'], 'map_keys' => $map_keys) + $anchored);
+$fails = vr_failures($results);
+check(!$ok && count(preg_grep('/carries no commit map/', $fails)) === 1, 'with no map on main, it is refused', implode('; ', $fails));
+
+list($ok, $results) = vr_run(array('core_url' => $wrong_version['url'], 'map_keys' => $map_keys) + $anchored);
+$fails = vr_failures($results);
+check(!$ok && count(preg_grep('/does not list it for release/', $fails)) === 1, 'a map naming another version is refused', implode('; ', $fails));
+
+list($ok, $results) = vr_run(array('core_url' => $mapped['url']) + $anchored);
+$fails = vr_failures($results);
+check(!$ok && count(preg_grep('/not proven by a key that release trusts/', $fails)) === 1,
+	'a map signed by a key the release does not trust is refused', implode('; ', $fails));
 
 section('A version the statement does not name');
 list($ok, $results) = vr_run(array('version' => '0.0.1', 'core_archive' => $archive));

@@ -8,7 +8,7 @@ Core platform features for user-to-user interaction: reactions (likes, favorites
 
 A polymorphic reaction system that works with any entity type. Supports likes, favorites, bookmarks, passes, and any other reaction type. Uses the same `entity_type` + `entity_id` pattern as EntityPhoto and ChangeTracking.
 
-**Spec:** [Reaction System Spec](/specs/implemented/reaction_system_spec.md)
+**Spec:** Reaction System Spec (spec `reaction_system_spec`)
 
 ### Data Model
 
@@ -128,7 +128,7 @@ the iOS member surface, and any plugin that wants to start a conversation (the
 dating plugin opens one on a mutual like). The plugin owns the app — the views,
 the `messenger_*` actions, the polling, the assets.
 
-**Specs:** [Joinery Messenger](/specs/implemented/joinery_messenger.md)
+**Specs:** Joinery Messenger (spec `joinery_messenger`)
 
 ### Data model
 

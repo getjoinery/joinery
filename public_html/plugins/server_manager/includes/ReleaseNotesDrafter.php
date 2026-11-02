@@ -22,6 +22,8 @@
  * site's selection policy), under joinery_ai's monthly token ceiling. Without
  * joinery_ai active, available() is false and the form offers no button.
  *
+ * @version 1.3 - the last release's core commit is followed through the commit map, so a rewritten public history
+ *                still drafts from the right commits (specs_private_repo D5)
  * @version 1.2 - a republishing site's draft may run through a newer version than it runs ($through): the one
  *                Apply and publish brings in
  * @version 1.1 - buttonHtml(): the one Auto-notes button, on the Upgrades page and on the node page's
@@ -160,7 +162,14 @@ class ReleaseNotesDrafter {
 			throw new ReleaseNotesDrafterException('No earlier release here records the commit it was built from, so there is nothing to compare against.');
 		}
 		$version = UpgradeRetention::versionString($last);
-		$core = self::commitsSince(PathHelper::getSiteRoot(), (string)$last->get('upg_core_commit'));
+		// After a history rewrite the recorded hash is no longer in this
+		// repository; the commit map names the one that stands for it.
+		try {
+			$since = ReleaseHistoryMap::installed()->current((string)$last->get('upg_core_commit'));
+		} catch (ReleaseHistoryMapException $e) {
+			throw new ReleaseNotesDrafterException('This site\'s commit map cannot be read: ' . $e->getMessage());
+		}
+		$core = self::commitsSince(PathHelper::getSiteRoot(), $since);
 		if ($core === null) {
 			throw new ReleaseNotesDrafterException('Could not read the commit history of this site\'s repository.');
 		}

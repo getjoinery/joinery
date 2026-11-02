@@ -56,6 +56,8 @@
  * could not be reached or read, ReleaseLogShardAheadException when a listed
  * future shard is the problem, plain ReleaseLogException for every other rule.
  *
+ * @version 1.5 - log(), signEnvelope() and submitEntry() take a payload type, a release statement by default; a
+ *                commit map is the other (specs_private_repo D3)
  * @version 1.4 - repoRetiredStatementKeys(): the statement keys a rotation retired, for the watch (specs/release_key_rotation.md F9)
  * @version 1.3 - several pinned and held keys per log (repoLogKeys() reads one per line, keySets(), holdsKey()),
  *                and a key Sigstore names for the live log ahead of its start is pinned and shipped first, as a
@@ -142,9 +144,9 @@ class ReleaseLogClient {
 	 *
 	 * @return array{envelope:array, entry:array, shard:array}
 	 */
-	public function log($payload, $statement_key_pem) {
+	public function log($payload, $statement_key_pem, $payload_type = TransparencyProof::PAYLOAD_TYPE) {
 		$shard = $this->discover();
-		$envelope = self::signEnvelope($payload, $statement_key_pem);
+		$envelope = self::signEnvelope($payload, $statement_key_pem, $payload_type);
 		$entry = $this->submitEntry($shard, $envelope, self::publicDer($statement_key_pem));
 		return array('envelope' => $envelope, 'entry' => $entry, 'shard' => $shard);
 	}
@@ -362,7 +364,10 @@ class ReleaseLogClient {
 			'checkpoint'      => $proof['checkpoint']['envelope'],
 		);
 		try {
-			TransparencyProof::verifyEntry($envelope, $entry, array($statement_der), array($shard['origin'] => $shard['key']));
+			// The envelope is the one this client just signed; the check is of
+			// the log's answer, under whichever type it was signed as.
+			TransparencyProof::verifyEntry($envelope, $entry, array($statement_der), array($shard['origin'] => $shard['key']),
+				(string)($envelope['payloadType'] ?? ''));
 		} catch (TransparencyProofException $e) {
 			throw new ReleaseLogException("the log {$shard['origin']}'s answer does not prove the statement is in it: " . $e->getMessage());
 		}
@@ -374,17 +379,20 @@ class ReleaseLogClient {
 	 *
 	 * @return array{payloadType:string, payload:string, signatures:array}
 	 */
-	public static function signEnvelope($payload, $statement_key_pem) {
+	public static function signEnvelope($payload, $statement_key_pem, $payload_type = TransparencyProof::PAYLOAD_TYPE) {
+		if (!in_array($payload_type, array(TransparencyProof::PAYLOAD_TYPE, TransparencyProof::COMMIT_MAP_TYPE), true)) {
+			throw new ReleaseLogException("{$payload_type} is not a payload type this client signs");
+		}
 		$key = openssl_pkey_get_private($statement_key_pem);
 		if ($key === false) {
 			throw new ReleaseLogException('the statement key is not a readable private key');
 		}
-		$pae = TransparencyProof::pae(TransparencyProof::PAYLOAD_TYPE, $payload);
+		$pae = TransparencyProof::pae($payload_type, $payload);
 		if (!openssl_sign($pae, $sig, $key, OPENSSL_ALGO_SHA256)) {
 			throw new ReleaseLogException('signing the statement failed: ' . openssl_error_string());
 		}
 		return array(
-			'payloadType' => TransparencyProof::PAYLOAD_TYPE,
+			'payloadType' => $payload_type,
 			'payload'     => base64_encode($payload),
 			'signatures'  => array(array('keyid' => TransparencyProof::keyId(self::publicDer($statement_key_pem)), 'sig' => base64_encode($sig))),
 		);
