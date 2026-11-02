@@ -2238,10 +2238,16 @@ abstract class SystemBase {
 	 * the stale one back over it would leave content that never opens again. A
 	 * row that changed is counted as skipped, not failed.
 	 *
-	 * @return array{attempted:int, failed:int, skipped:int}
+	 * $limit > 0 takes one batch: at most $limit candidate rows with a key
+	 * above $after_id, in key order, so a caller with a deadline (the chain
+	 * sweep, VaultChainSweep) can stop between batches; 'last_id' is where the
+	 * next batch starts, 0 when there are no more. A row a batch fails on is
+	 * passed by the next one rather than tried again.
+	 *
+	 * @return array{attempted:int, failed:int, skipped:int, last_id:int}
 	 */
 	public static function resealRows(int $user_id, VaultKey $old_key, int $old_generation,
-			string $new_public_key, int $new_generation): array {
+			string $new_public_key, int $new_generation, int $limit = 0, int $after_id = 0): array {
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 
 		$flag      = static::sealFlagColumn();
@@ -2264,8 +2270,15 @@ abstract class SystemBase {
 			$params[] = $user_id;
 		}
 
+		$batch = '';
+		if ($limit > 0) {
+			$where[]  = static::$pkey_column . ' > ?';
+			$params[] = $after_id;
+			$batch = ' ORDER BY ' . static::$pkey_column . ' LIMIT ' . intval($limit);
+		}
+
 		$db = DbConnector::get_instance()->get_db_link();
-		$select = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . implode(' AND ', $where));
+		$select = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . implode(' AND ', $where) . $batch);
 		$select->execute($params);
 		$rows = $select->fetchAll(PDO::FETCH_ASSOC);
 
@@ -2303,7 +2316,9 @@ abstract class SystemBase {
 			}
 		}
 
-		return array('attempted' => $attempted, 'failed' => $failed, 'skipped' => $skipped);
+		$last_id = ($limit > 0 && count($rows) === $limit)
+			? intval($rows[count($rows) - 1][static::$pkey_column] ?? 0) : 0;
+		return array('attempted' => $attempted, 'failed' => $failed, 'skipped' => $skipped, 'last_id' => $last_id);
 	}
 
 	/**

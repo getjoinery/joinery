@@ -30,6 +30,8 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.10 - withDrainLock(): the chain sweep (VaultChainSweep) takes the member's drain lock, so it never runs
+ *               beside a rotation's re-seal
  * @version 1.9 - keyFile(): the key file built on demand for the security page's download
  * @version 1.8 - a rotation keeps the keys it retires under the new key (uev_previous_keys, VaultPreviousKeys), so
  *               content still sealed to one opens while the vault is open, with no step from its owner
@@ -781,6 +783,24 @@ class VaultCeremonies {
 			return self::DRAIN_RUNNING_MESSAGE;
 		}
 		return 'Your vault has an unfinished key rotation. Run the rotation again to complete it, then ' . $then . '.';
+	}
+
+	/**
+	 * Run $fn under this member's drain lock, the one a rotation's re-seal
+	 * holds. Returns false without running it when the lock is held elsewhere;
+	 * otherwise true.
+	 */
+	public static function withDrainLock(int $user_id, callable $fn): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!self::takeDrainLock($db, $user_id)) {
+			return false;
+		}
+		try {
+			$fn();
+		} finally {
+			self::releaseDrainLock($db, $user_id);
+		}
+		return true;
 	}
 
 	/** Is a re-seal of this member's content running now, in any process? */

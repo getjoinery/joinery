@@ -81,16 +81,25 @@ foreach ($declarations as $declaration) {
 	}
 }
 
+// Each sealed model has to be named by a resealing consumer, its own plugin's
+// or, for a core model, any. A plugin declaring reseals: true is not enough on
+// its own: joinery_ai declared it and re-sealed two of its four sealed models,
+// and a rotation left every recipe run and queued action on the old key. A
+// model whose fields seal under another row's DEK (an attachment under its
+// message's) has no key of its own to re-seal and is not asked.
 foreach ($sealed_models as $model) {
+	$source = (string)file_get_contents($model['file']);
+	if (!preg_match('/[\'"][a-z]{3}_sealed_key[\'"]\s*=>/', $source)) {
+		continue;
+	}
+	$named_in = $resealer_source;
 	if ($model['plugin'] !== '') {
 		$declaration = $declarations[$model['plugin']] ?? null;
 		check($declaration !== null && $declaration['reseals'] === true,
 			$model['class'] . ' is covered by plugin "' . $model['plugin'] . '" declaring reseals: true');
-		continue;
+		$named_in = ($declaration !== null && is_file($declaration['path'])) ? (string)file_get_contents($declaration['path']) : '';
 	}
-	// A core model has no plugin of its own to declare for it, so some consumer
-	// that does declare the obligation has to name it.
-	check(strpos($resealer_source, $model['class']) !== false,
+	check(preg_match('/\b' . preg_quote($model['class'], '/') . '\b/', $named_in) === 1,
 		$model['class'] . ' is named by a consumer declaring reseals: true');
 }
 

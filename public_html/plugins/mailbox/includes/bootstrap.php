@@ -27,6 +27,10 @@
  *                rotation stranded it (jeremytunnell message 104888, 2026-11-01)
  * @version 1.28 - registers the mailbox_export deferred-work consumer (a Private mailbox export builds in its owner's window)
  * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
+ * @version 1.28 - under the chain sweep (VaultUnlock::sweepingPreviousKey) a DKIM or Direct key the
+ *   retired key does not open has already moved, and is not a failure
+ * @version 1.27 - the rotation re-seals MailboxSendAttempt: a send attempt's recipients and
+ *   carrier error seal to the owner's vault, and a rotation left them on the old key
  * @version 1.26 - registers the mailbox_spam_backfill deferred-work consumer (SpamSenderBackfill)
  * @version 1.25 - registers the mailbox_contact_level deferred-work consumer (MailboxContactConvergence)
  * @version 1.24 - registers the mailbox_spam_learn deferred-work consumer (SpamLearning)
@@ -227,11 +231,15 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 			}
 		}
 
-		$index = new MailboxIndex();
-		$index->purgePersisted($user_id);
+		// The chain sweep moves leftovers onto the key the index already uses, so
+		// it rebuilds the index only when it moved a message the index lacks.
+		if (!VaultUnlock::sweepingPreviousKey() || count($ids)) {
+			$index = new MailboxIndex();
+			$index->purgePersisted($user_id);
+		}
 	}
 
-	// Contact store (specs/mailbox_compose_maturity.md § Phase 4): a sealed contact's
+	// Contact store, MailboxContact (specs/mailbox_compose_maturity.md § Phase 4): a sealed contact's
 	// DEK is sealed to the owner's vault, so a rotation must re-wrap it too, or the
 	// contact becomes unreadable. Same envelope re-seal as messages (the address/name
 	// ciphertext under the DEK is untouched).
@@ -275,6 +283,18 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 			}
 			try {
 				$private = $crypto->openItemDek($sealed, $old_key);
+			} catch (Throwable $e) {
+				// Under the chain sweep a key this retired key does not open has
+				// already moved to the current one; in a rotation it is a failure.
+				if (VaultUnlock::sweepingPreviousKey()) {
+					continue;
+				}
+				$dkim_failed++;
+				error_log('Mailbox vault reseal: failed to open DKIM key (' . $col . ') for domain '
+					. $domain->get('ied_domain') . ': ' . $e->getMessage());
+				continue;
+			}
+			try {
 				$resealed = $crypto->sealItemDek($private, $new_public_key);
 				$upd = $db->prepare(
 					'UPDATE ied_inbound_email_domains SET ' . $col . ' = ?
@@ -307,6 +327,16 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		$direct_count++;
 		try {
 			$secret = $crypto->openItemDek($sealed, $old_key);
+		} catch (Throwable $e) {
+			if (VaultUnlock::sweepingPreviousKey()) {
+				continue;   // already on the current key (see the DKIM keys above)
+			}
+			$direct_failed++;
+			error_log('Mailbox vault reseal: failed to open the Direct signing key for '
+				. $identity->get('jdi_domain') . ': ' . $e->getMessage());
+			continue;
+		}
+		try {
 			$upd = $db->prepare('UPDATE jdi_direct_identities SET jdi_sealed_secret_key = ?
 				WHERE jdi_direct_identity_id = ?');
 			$upd->execute(array($crypto->sealItemDek($secret, $new_public_key), intval($identity->key)));
@@ -375,9 +405,11 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 
 // The contact store's blind-index key (MailboxContactIndexKey) is sealed to the
 // vault like a row DEK and re-wraps through the generic model path, so a
-// rotation leaves every address hash valid.
+// rotation leaves every address hash valid. A send attempt's recipients and
+// carrier error (MailboxSendAttempt) seal to the owner's vault the same way.
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contact_index_keys_class.php'));
-VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::class)));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_send_attempts_class.php'));
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::class, MailboxSendAttempt::class)));
 
 // --- Fortress mail: the `mail` client-custody scope (specs/client_custody_mail.md § R11) ---
 // A Fortress row's DEK is sealed to the owner's `mail` vault, whose secret only

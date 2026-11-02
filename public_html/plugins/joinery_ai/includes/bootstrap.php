@@ -16,6 +16,8 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
+ * @version 1.5 - the reseal callback covers RecipeRun and AiQueuedAction: a rotation left
+ *   every run and queued action on the old key
  * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3
  * @changelog 1.3 - registers the ai_provider setup wizard step
@@ -94,8 +96,12 @@ File::registerDecryptHook(AiAttachment::FILE_SOURCE, function (string $ciphertex
 // sealed to the generation being drained, to the new keypair. Attachments seal
 // under the message DEK (the DEK bytes are unchanged — only their sealing to the
 // vault key moves), so re-sealing the message DEK covers them; no attachment row
-// is touched.
-VaultUnlock::onReseal(VaultUnlock::modelReseal(array(AiConversation::class, AiConversationMessage::class)));
+// is touched. A recipe run and a queued action each seal under a DEK of their
+// own, sealed to the vault like a message's.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_queued_actions_class.php'));
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(AiConversation::class, AiConversationMessage::class,
+	RecipeRun::class, AiQueuedAction::class)));
 
 // --- Window-wipe callback (docs/sealed_vault.md § consumer contract) ---
 // The only disposable in-window plaintext chat keeps is the streaming scratch for

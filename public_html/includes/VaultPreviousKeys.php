@@ -11,7 +11,7 @@
  * holds, so without this that content opens only through a passkey ceremony.
  *
  * Shape: uev_previous_keys is JSON, a list of
- *   {generation, wrapped, sealed_kek}
+ *   {generation, wrapped, sealed_kek[, swept][, sweep_at]}
  * where `wrapped` is the retired secret wrapped (SealedBox::wrapKey) under a
  * random 32-byte KEK, AD "vault:user:previous:{generation}", and `sealed_kek`
  * is that KEK sealed to the current public key, exactly as a row's DEK is
@@ -30,6 +30,14 @@
  * (SystemBase::openWithPreviousKeys), so a leftover on an old X25519 key does
  * not stay exposed.
  *
+ * Content left on a retired key does not wait to be read: VaultChainSweep moves
+ * it to the current key in the owner's window and then marks the entry
+ * `swept`, so later unlocks skip it. A rotation keeps the mark on the entries
+ * it carries over; the generation it retires starts unswept. A sweep that
+ * runs out of time records where it stopped (`sweep_at`) and the next window
+ * goes on from there.
+ *
+ * @version 1.1 - entries carry `swept` and the sweep's place, `sweep_at` (VaultChainSweep); recordSweep()
  * @version 1.0
  */
 class VaultPreviousKeys {
@@ -50,6 +58,12 @@ class VaultPreviousKeys {
 			if (is_array($e) && isset($e['generation'], $e['wrapped'], $e['sealed_kek'])) {
 				$out[(int)$e['generation']] = array('generation' => (int)$e['generation'],
 					'wrapped' => (string)$e['wrapped'], 'sealed_kek' => (string)$e['sealed_kek']);
+				if (!empty($e['swept'])) {
+					$out[(int)$e['generation']]['swept'] = true;
+				} elseif (isset($e['sweep_at']['step']) && is_string($e['sweep_at']['step'])) {
+					$out[(int)$e['generation']]['sweep_at'] = array('step' => $e['sweep_at']['step'],
+						'after' => (int)($e['sweep_at']['after'] ?? 0));
+				}
 			}
 		}
 		krsort($out);
@@ -74,6 +88,9 @@ class VaultPreviousKeys {
 			$kek = $crypto->openItemDek($e['sealed_kek'], $old_key);
 			$out[$e['generation']] = array('generation' => $e['generation'], 'wrapped' => $e['wrapped'],
 				'sealed_kek' => $crypto->sealItemDek($kek, $new_public_key));
+			if (!empty($e['swept'])) {
+				$out[$e['generation']]['swept'] = true;
+			}
 			sodium_memzero($kek);
 		}
 		foreach ($retiring as $generation => $unlocker) {
@@ -151,6 +168,34 @@ class VaultPreviousKeys {
 		if (!$added) {
 			return array();
 		}
+		return self::store($vault, $entries) ? $added : array();
+	}
+
+	/**
+	 * Record the chain sweep's state for one generation (VaultChainSweep): true
+	 * when nothing found on it is left to move, or where the sweep stopped,
+	 * ['step' => string, 'after' => int]. False when the chain changed
+	 * meanwhile; the sweep then starts that generation over.
+	 */
+	public static function recordSweep(UserEncryptionVault $vault, int $generation, $state): bool {
+		$entries = array();
+		foreach (self::entries($vault) as $e) {
+			$entries[$e['generation']] = $e;
+		}
+		if (!isset($entries[$generation])) {
+			return false;
+		}
+		unset($entries[$generation]['swept'], $entries[$generation]['sweep_at']);
+		if ($state === true) {
+			$entries[$generation]['swept'] = true;
+		} else {
+			$entries[$generation]['sweep_at'] = array('step' => (string)$state['step'], 'after' => (int)$state['after']);
+		}
+		return self::store($vault, $entries);
+	}
+
+	/** Write the chain $entries (generation => entry) over the one $vault was read with. */
+	private static function store(UserEncryptionVault $vault, array $entries): bool {
 		krsort($entries);
 		// A compare-and-swap, not a save: an unlock that loaded the vault before
 		// another device's rotation committed would otherwise write back a chain
@@ -167,10 +212,10 @@ class VaultPreviousKeys {
 				($read === null || $read === '') ? null : (string)$read));
 		});
 		if ($stmt->rowCount() !== 1) {
-			return array();
+			return false;
 		}
 		$vault->set('uev_previous_keys', $json);
-		return $added;
+		return true;
 	}
 
 	/** Per-request cache, keyed on the vault, the current key and the chain as stored: generation => VaultKey. */

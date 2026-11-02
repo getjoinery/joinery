@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.34 - v1_census: key generations per column and unswept chain entries
  * @version 1.33 - v1_census results: what the site still holds on an old X25519 key (TEMPORARY, v1_key_retirement)
  * @version 1.32 - relay_status: the map's last check, with its outcome in words
  * @version 1.31 - relay_status results: this site's view of its mail relay
@@ -917,6 +918,7 @@ if ($result) {
 			$who = array();
 			foreach ($c['owners'] as $uid => $n) { $who[] = 'user ' . (int)$uid . ': ' . $vc_n($n); }
 			if ($c['no_owner'] !== 0) { $who[] = 'no owner: ' . $vc_n($c['no_owner']); }
+			foreach ($c['generations'] ?? array() as $g => $n) { $who[] = 'generation ' . $g . ': ' . $vc_n($n); }
 			echo '<div class="small ms-3">' . $vc_h($c['table'] . '.' . $c['column']) . ' (' . $vc_h($c['prefix']) . '): ' . $vc_n($c['count'])
 				. ($who ? ' (' . $vc_h(implode(', ', $who)) . ')' : '') . '</div>';
 		}
@@ -924,7 +926,8 @@ if ($result) {
 			echo '<div class="small ms-3 text-danger">Not scanned in time: ' . $vc_h(implode(', ', $result_data['unscanned'])) . '</div>';
 		}
 		echo '<div class="mt-2"><strong>Retired keys kept in vault chains:</strong> ' . $vc_n($result_data['v3_chains']['entries'])
-			. ' in ' . $vc_n($result_data['v3_chains']['vaults']) . ' vault(s) (the old-key ones are dropped by the release)</div>';
+			. ' in ' . $vc_n($result_data['v3_chains']['vaults']) . ' vault(s), '
+			. $vc_n($result_data['v3_chains']['unswept'] ?? 0) . ' not yet swept (the old-key ones are dropped by the release)</div>';
 		$kinds = array('xwing' => 'post-quantum (X-Wing)', 'x25519' => 'old (X25519)', 'none' => 'none yet');
 		if (!$result_data['v4_relays']) {
 			echo '<div class="mt-2"><strong>Mail relays:</strong> none</div>';

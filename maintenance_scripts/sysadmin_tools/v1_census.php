@@ -19,6 +19,7 @@
  *                 and column; 'leftover' counts rows whose owner's account
  *                 vault is already X-Wing, which a completed rotation should
  *                 have re-sealed
+ *                 and 'generations' the key generation those rows record
  *   v3_chains     vaults with retired keys in their chain, and the entries
  *                 (their version only shows under the vault's key; the
  *                 deletion drops the v1 ones)
@@ -40,6 +41,8 @@
  * Validate with `php -l` only - never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.1 - each V2 column names the key generations its rows record, and V3
+ *               counts chain entries not yet swept (VaultChainSweep)
  * @version 1.0
  */
 
@@ -153,8 +156,19 @@ try {
 							}
 						}
 						arsort($owner_ids);
+						// The generation each row records: the chain sweep moves a row
+						// only when its generation names a retired key in the chain.
+						$generations = array();
+						$gen_col = substr($col, 0, 4) . 'key_generation';
+						if (in_array($gen_col, $all_cols[$table] ?? array(), true)) {
+							foreach ($db->query('SELECT ' . $q($gen_col) . ' AS g, count(*) AS n FROM ' . $q($table)
+									. ' WHERE ' . $q($col) . " LIKE '" . $p . "%' GROUP BY 1 ORDER BY 1") as $g) {
+								$generations[$g['g'] === null ? 'null' : (string)(int)$g['g']] = (int)$g['n'];
+							}
+						}
 						$blobs[] = array('table' => $table, 'column' => $col, 'prefix' => $p, 'count' => $n,
-							'leftover' => $left, 'no_owner' => $no_owner, 'owners' => array_slice($owner_ids, 0, 20, true));
+							'leftover' => $left, 'no_owner' => $no_owner, 'owners' => array_slice($owner_ids, 0, 20, true),
+							'generations' => $generations);
 						$v2_total += $n;
 						$v2_leftover += $left;
 					}
@@ -171,14 +185,17 @@ try {
 	$out['findings'] += $v2_total + count($unscanned);
 
 	// V3: retired keys kept in a vault's chain. Informational.
-	$chains = 0; $entries = 0;
+	$chains = 0; $entries = 0; $unswept = 0;
 	foreach ($db->query("SELECT uev_previous_keys FROM uev_user_encryption_vaults
 			WHERE coalesce(uev_previous_keys, '') NOT IN ('', '[]')") as $r) {
 		$list = json_decode((string)$r['uev_previous_keys'], true);
 		$chains++;
-		$entries += is_array($list) ? count($list) : 0;
+		foreach (is_array($list) ? $list : array() as $e) {
+			$entries++;
+			$unswept += empty($e['swept']) ? 1 : 0;
+		}
 	}
-	$out['v3_chains'] = array('vaults' => $chains, 'entries' => $entries);
+	$out['v3_chains'] = array('vaults' => $chains, 'entries' => $entries, 'unswept' => $unswept);
 
 	// V4: relay transport keys.
 	$relays = array();

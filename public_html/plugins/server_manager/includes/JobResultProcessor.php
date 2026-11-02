@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.118 - v1_census: each column's key generations and the chain entries not yet swept
  * @version 1.117 - v1_census (agent 1.103.0): sanitise_v1_census holds each field to its shape; TEMPORARY (v1_key_retirement)
  * @version 1.116 - relay_status carries the map's last push attempt (when, result, reason code)
  * @version 1.115 - relay_status (agent 1.101.0): sanitise_relay_status holds each field to its shape
@@ -4149,10 +4150,14 @@ HTML;
 			foreach (array_slice($part($c['owners'] ?? null), 0, 20, true) as $uid => $n) {
 				if (is_int($uid) || ctype_digit((string)$uid)) { $owners[(int)$uid] = $count($n); }
 			}
+			$generations = [];
+			foreach (array_slice($part($c['generations'] ?? null), 0, 20, true) as $g => $n) {
+				if ((string)$g === 'null' || ctype_digit((string)$g)) { $generations[(string)$g] = $count($n); }
+			}
 			return ['table' => $ident($c['table'] ?? ''), 'column' => $ident($c['column'] ?? ''),
 				'prefix' => $kind($c['prefix'] ?? null, ['v1.seal.', 'v1.edgeseal.']),
 				'count' => $count($c['count'] ?? null), 'leftover' => $count($c['leftover'] ?? null),
-				'no_owner' => $count($c['no_owner'] ?? null), 'owners' => $owners];
+				'no_owner' => $count($c['no_owner'] ?? null), 'owners' => $owners, 'generations' => $generations];
 		});
 		$v3 = $part($d['v3_chains'] ?? null);
 		$relays = $list($d['v4_relays'] ?? null, 20, function ($r) use ($count, $kind, $part) {
@@ -4170,7 +4175,8 @@ HTML;
 				'by_scope' => $by_scope, 'owners' => $owners],
 			'v2_blobs'  => ['total' => $count($v2['total'] ?? null), 'leftover' => $count($v2['leftover'] ?? null), 'columns' => $columns],
 			'unscanned' => array_values(array_filter($list($d['unscanned'] ?? null, 200, $ident), 'strlen')),
-			'v3_chains' => ['vaults' => $count($v3['vaults'] ?? null), 'entries' => $count($v3['entries'] ?? null)],
+			'v3_chains' => ['vaults' => $count($v3['vaults'] ?? null), 'entries' => $count($v3['entries'] ?? null),
+				'unswept' => $count($v3['unswept'] ?? null)],
 			'v4_relays' => $relays,
 			'v5'        => ['encrypted' => ($v5['encrypted'] ?? null) === true,
 				'sealed_to' => $kind($v5['sealed_to'] ?? null, ['', 'this_site', 'operator', 'other']),

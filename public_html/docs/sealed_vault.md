@@ -1180,6 +1180,28 @@ the chain existed joins it at its owner's next passkey unlock: the passkey's PRF
 output is the same for every generation, so it still opens that generation's
 retired wrapping (`VaultPreviousKeys::adoptRetired`).
 
+**Leftovers on a retired key move without being read.** The chain sweep
+(`VaultChainSweep`, deferred work declared in `vault_consumers.json`) runs in
+the owner's window for each chain generation not yet marked `swept`. It calls
+every registered re-seal callback as a rotation would, from the retired key and
+its generation to the current key and generation. Callbacks made by
+`VaultUnlock::modelReseal()` go in batches (`resealRows()` with a limit and a
+starting key) against the slice's deadline. A consumer's own callback runs
+whole. A slice that runs out of time records its place on the chain entry
+(`sweep_at`), and the next one goes on from there. When every step has run, the
+entry is marked `swept`, and later unlocks skip it. A rotation keeps the mark on
+the entries it carries over; the generation it retires starts unswept, so one
+sweep follows each rotation.
+
+Every callback selects by generation, so running one again moves nothing
+twice. A callback that holds material it cannot select by generation (mailbox's
+DKIM and Direct signing keys) checks `VaultUnlock::sweepingPreviousKey()`. When
+the sweep runs and the retired key does not open that material, it has already
+moved and is not a failure. A row the retired key does not open is logged and
+passed by; it stays readable through the chain. The sweep holds the member's
+drain lock (`VaultCeremonies::withDrainLock`), so it never runs beside a
+rotation's re-seal.
+
 **Every wrapping not re-derivable during this same request is invalidated**,
 not left dangling — a KEK for another enrolled passkey can only come from
 that passkey's own live WebAuthn assertion, which the ceremony doesn't have.

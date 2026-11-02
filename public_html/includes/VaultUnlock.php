@@ -42,7 +42,9 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
- * @version 1.18
+ * @version 1.19
+ * @changelog 1.19 - modelReseal() records the classes it covers (modelResealClasses) and
+ *   sweepingPreviousKey() tells a re-seal callback it runs for the chain sweep (VaultChainSweep)
  * @changelog 1.18 - arm() refuses a vault still on an old X25519 key unless the open is a recovery
  *   (VaultRotationOwedException): the unlock goes to the key rotation instead
  *   (specs/post_quantum_sealing.md R7)
@@ -151,6 +153,12 @@ class VaultUnlock {
 
 	/** @var callable[] consulted, in registration order, by the rotation ceremony. */
 	private static $reseal_callbacks = array();
+
+	/** @var array<int,string[]> spl_object_id of a modelReseal() callback => the classes it re-seals */
+	private static $model_reseal_classes = array();
+
+	/** True while VaultChainSweep runs the re-seal callbacks for a retired key (sweepingPreviousKey). */
+	private static $sweeping_previous_key = false;
 
 	/** @var callable[] consulted, in registration order, whenever a window closes. */
 	private static $wipe_callbacks = array();
@@ -949,7 +957,7 @@ class VaultUnlock {
 	 * @param string[] $model_classes SystemBase subclasses declaring $sealed_fields
 	 */
 	public static function modelReseal(array $model_classes): callable {
-		return function (int $user_id, VaultKey $old_key, int $old_key_generation,
+		$callback = function (int $user_id, VaultKey $old_key, int $old_key_generation,
 				string $new_public_key, int $new_key_generation) use ($model_classes) {
 			$attempted = 0;
 			$failed = 0;
@@ -970,6 +978,39 @@ class VaultUnlock {
 					. 'must not be retired.');
 			}
 		};
+		self::$model_reseal_classes[spl_object_id($callback)] = array_values($model_classes);
+		return $callback;
+	}
+
+	/**
+	 * The model classes a registered callback re-seals, when modelReseal() made
+	 * it; null for a consumer's own callback. The chain sweep re-seals these in
+	 * batches against its deadline instead of in one call.
+	 */
+	public static function modelResealClasses(callable $callback): ?array {
+		return is_object($callback) ? (self::$model_reseal_classes[spl_object_id($callback)] ?? null) : null;
+	}
+
+	/**
+	 * Whether the re-seal callbacks are running for the chain sweep: $old_key is
+	 * a retired key from the vault's chain, not the key a rotation is retiring,
+	 * so material its callback does not select by generation may already be on
+	 * the current key. Such material that $old_key does not open is not a
+	 * failure then; it has already moved.
+	 */
+	public static function sweepingPreviousKey(): bool {
+		return self::$sweeping_previous_key;
+	}
+
+	/** Run $fn with sweepingPreviousKey() true. VaultChainSweep only. */
+	public static function asPreviousKeySweep(callable $fn) {
+		$was = self::$sweeping_previous_key;
+		self::$sweeping_previous_key = true;
+		try {
+			return $fn();
+		} finally {
+			self::$sweeping_previous_key = $was;
+		}
 	}
 
 	/** @var array<string,array{classes:string[],scripts:string[]}> client-custody resealers by scope */

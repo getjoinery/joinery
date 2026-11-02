@@ -24,6 +24,8 @@
  * reported list sufficient: a name means one thing on every agent that
  * reports it.
  *
+ * @version 1.1 - a node already on the newest agent is not told to update: what it lacks, it
+ *   lacks on that machine (a siteless host offers no site words)
  * @version 1.0 - WP6 of specs/agent_recipes_and_vocabulary.md.
  */
 class AgentVocabulary {
@@ -112,6 +114,14 @@ class AgentVocabulary {
 			return 'This node has no paired agent, so nothing can be asked of it; pair it first.';
 		}
 		$v = self::version($node);
+		$newest = self::newest();
+		if ($missing && $v !== '' && $v === $newest) {
+			// Updating would change nothing: the newest agent leaves these out
+			// here, as one on a machine with no site of its own leaves out every
+			// word that reads a site.
+			return "Its agent ({$v}) is the newest and does not offer " . implode(', ', $missing)
+				. ' on this machine. A machine with no site of its own offers only the words about the machine.';
+		}
 		$running = $v !== '' ? "agent {$v}" : 'an agent that reports no version';
 		$what = $missing ? ' (it does not offer ' . implode(', ', $missing) . ')' : '';
 		$floor = self::below_floor($node)

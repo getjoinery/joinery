@@ -22,6 +22,7 @@
  * The agent half of the second direction (a newer agent against a plane that
  * refuses a field) is joinery-agent's vocabulary_test.go.
  *
+ * @version 1.1 - a node on the newest agent is not told to update
  * @version 1.0
  */
 
@@ -118,5 +119,18 @@ section('A node at the floor that reports no vocabulary is not guessed at');
 $quiet = new SpreadNode(array('mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => ''));
 check(!JobCommandBuilder::has_primitive($quiet, 'host_report') && JobCommandBuilder::has_primitive($quiet, 'apply_update'),
 	'every agent at the floor reports its words; an empty list is no evidence of one');
+
+section('A node on the newest agent is not told to update for a word it leaves out');
+
+$newest = AgentVocabulary::newest();
+if ($newest === null) {
+	harness_skip('this tree carries no agent_dist manifest', 'nothing is newest');
+} else {
+	$host = new SpreadNode(array('mgn_agent_version' => $newest, 'mgn_agent_primitives' => 'disk_usage,host_report'));
+	$text = AgentVocabulary::needs_newer_agent_text($host, array('v1_census'));
+	check(strpos($text, 'Needs a newer agent') === false && strpos($text, 'v1_census') !== false
+		&& strpos($text, 'no site of its own') !== false,
+		'a siteless host on the newest agent hears why, not "update this node"', $text);
+}
 
 harness_finish();

@@ -2462,10 +2462,11 @@ $vc_in = array('findings' => 5,
 		'owners' => array(array('user_id' => 4500, 'permission' => 0, 'deleted' => false, 'scopes' => 'drive,user', 'email' => 'a@example.com'))),
 	'v2_blobs' => array('total' => 3, 'leftover' => 1, 'columns' => array(
 		array('table' => 'iem_inbound_email_messages', 'column' => 'iem_sealed_key', 'prefix' => 'v1.seal.', 'count' => 3,
-			'leftover' => 1, 'no_owner' => 0, 'owners' => array('4500' => 3), 'sample' => 'v1.seal.AAAA'),
+			'leftover' => 1, 'no_owner' => 0, 'owners' => array('4500' => 3), 'sample' => 'v1.seal.AAAA',
+			'generations' => array('1' => 2, 'null' => 1, 'DROP' => 5)),
 		array('table' => 'x; DROP', 'column' => 'c', 'prefix' => 'v9.', 'count' => 'many', 'leftover' => 0, 'no_owner' => 0, 'owners' => array('evil' => 1)))),
 	'unscanned' => array('big_table', 'Not A Table'),
-	'v3_chains' => array('vaults' => 1, 'entries' => 2),
+	'v3_chains' => array('vaults' => 1, 'entries' => 2, 'unswept' => 1),
 	'v4_relays' => array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => 'yes', 'public' => 'BBBB')),
 	'v5' => array('encrypted' => true, 'sealed_to' => 'this_site', 'recovery_kind' => 'xwing', 'escrows_v1' => array(33, 'x')),
 	'v6' => array('recovery_kind' => 'xwing', 'site_kind' => 'xwing', 'site_retired' => 1, 'old_epochs' => null, 'key' => 'CCCC'));
@@ -2487,6 +2488,9 @@ check($vc['unscanned'] === array('big_table') && $vc['v4_relays'] === array(arra
 check(JobResultProcessor::sanitise_v1_census('ERROR') === array('read' => false)
 	&& JobResultProcessor::sanitise_v1_census(array('findings' => 0)) === array('read' => false),
 	'v1_census: anything without its fields is not read');
+check($vc['v2_blobs']['columns'][0]['generations'] === array('1' => 2, 'null' => 1)
+	&& $vc['v2_blobs']['columns'][1]['generations'] === array() && $vc['v3_chains']['unswept'] === 1,
+	'v1_census: key generations per column (a key that is not a number dropped) and unswept chain entries', $vc_json);
 
 // host_report 1.23: the data root script and the boot id.
 $drs = JobResultProcessor::host_report_data_root_script(array('installed_version' => '1.21', 'release_version' => '1.22', 'consumers' => array(

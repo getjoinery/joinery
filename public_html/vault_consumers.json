@@ -19,5 +19,9 @@
         "bootstrap": "includes/ApiIdempotencySealed.php",
         "order": 80,
         "reseals": true
+    },
+    "vault_chain_sweep": {
+        "bootstrap": "includes/VaultChainSweep.php",
+        "order": 200
     }
 }
