@@ -11,6 +11,7 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
+ * @version 1.6 - a plugin's packages install with --no-plugins: no package code runs as root, whatever allow-plugins lists
  * @version 1.5 - composer runs under umask 022: what it writes into vendor/ is never group- or world-writable,
  *                whatever the caller's umask (a deploy's read-only-tree gate reverted a release over it)
  * @version 1.4 - the active plugins are the ones with plg_active = 1; plg_status can read 'stale'
@@ -529,7 +530,7 @@ class ComposerValidator {
             $output = [];
             $return_code = 0;
             exec($env_prefix . 'composer require ' . escapeshellarg($package . ':' . $constraint)
-                . ' --no-dev --no-interaction --optimize-autoloader 2>&1', $output, $return_code);
+                . ' --no-dev --no-interaction --no-plugins --optimize-autoloader 2>&1', $output, $return_code);
             if ($return_code !== 0) {
                 $this->errors[] = "composer require failed for $package:$constraint";
                 $this->errors[] = implode("\n", array_slice($output, -12));

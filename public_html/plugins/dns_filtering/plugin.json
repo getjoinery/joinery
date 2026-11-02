@@ -1,6 +1,6 @@
 {
     "name": "DNS Filtering",
-    "version": "1.5.4",
+    "version": "1.5.5",
     "depends": { "store": ">=1.0.0" },
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
@@ -34,7 +34,7 @@
             "group": "primary",
             "label": "ScrollDaddy Internal URL",
             "type": "text",
-            "helptext": "e.g. http://127.0.0.1:8053"
+            "helptext": "e.g. https://dns1.example.com: the server's API over HTTPS. Use http only for a server on this same machine (http://127.0.0.1:8053): the API carries the key and members' query logs."
         },
         {
             "name": "dns_filtering_dns_api_key",
@@ -74,7 +74,7 @@
             "group": "secondary",
             "label": "Secondary Internal URL",
             "type": "text",
-            "helptext": "e.g. http://10.0.0.2:8053. Leave blank for single-server mode."
+            "helptext": "e.g. https://dns2.example.com. Leave blank for single-server mode."
         },
         {
             "name": "dns_filtering_dns_secondary_api_key",
