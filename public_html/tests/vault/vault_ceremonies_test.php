@@ -82,6 +82,9 @@ $recovered_v2 = $recovered !== null && strpos($recovered, PoolVaultKey::V2_TAG) 
 check($recovered_v2, 'the reconstructed secret is tagged v2 (X-Wing)');
 check($recovered_v2 && SealedBox::publicKeyFor(substr($recovered, strlen(PoolVaultKey::V2_TAG)), SealedBox::V2) === $kf['public_key'],
 	'the reconstructed secret matches the advertised public key');
+// The security page's download builds the file fresh: it must be the same
+// file the ceremony handed back, so a code still reconstructs from it.
+check(VaultCeremonies::keyFile($vault) == $kf, 'the on-demand key file (keyFile) matches the one setup returned');
 
 section('Setup refusals');
 $root_salt = vault_fixture_root_salt();

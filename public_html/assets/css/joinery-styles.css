@@ -724,6 +724,22 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   cursor: pointer;
 }
 .jy-check input { flex-shrink: 0; margin: 0; }
+/* The box sits inside its label, so it is the only box there is. Themes that
+   hide real checkboxes and paint one on a sibling label (ScrollDaddy) would
+   leave nothing to click; the kit's own control is always the native one. */
+.jy-check input[type="checkbox"],
+.jy-check input[type="radio"] {
+  display: inline-block;
+  visibility: visible;
+  opacity: 1;
+  width: 16px;
+  height: 16px;
+  position: static;
+  -webkit-appearance: auto;
+  appearance: auto;
+  accent-color: var(--jy-color-primary);
+  cursor: pointer;
+}
 .jy-check-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* Section layout helpers (used by base views like views/index.php) */

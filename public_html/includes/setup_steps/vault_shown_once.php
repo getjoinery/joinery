@@ -1,7 +1,8 @@
 <?php
 /**
- * The shown-once panel after a vault is created: recovery codes, key file, and
- * the "I've saved these" gate on Continue.
+ * The shown-once panel after a vault is created: the recovery codes and the
+ * "I've saved these" gate on Continue. The optional key file is not offered
+ * here; it is a download on the security page, built fresh on request.
  *
  * Shared by both routes into a key — the passkey ceremony and the bypass-phrase
  * compatibility fallback — because what has to be saved, and the fact that it
@@ -11,17 +12,17 @@
  * Defines window.setupVaultShowResult(result), which swaps the step's form for
  * this panel and wires the copy/download buttons to that result.
  *
+ * @version 1.1 - codes only; the key file moved to the security page
  * @version 1.0
  */
 ?>
 <div id="setup-vault-result" class="d-none">
 	<div class="jy-callout jy-callout-warning">
-		<div class="jy-callout-title">Save your recovery codes and key file</div>
-		<p>Either one can unlock your data if you lose your usual unlocker. They are shown only now.</p>
+		<div class="jy-callout-title">Save your recovery codes</div>
+		<p>Each code unlocks your data once if you lose your passkeys. They are shown only now.</p>
 		<pre class="jy-security-codes" id="setup-vault-codes"></pre>
 		<button type="button" class="btn btn-secondary" id="setup-vault-copy">Copy codes</button>
 		<button type="button" class="btn btn-secondary" id="setup-vault-codes-download">Download codes</button>
-		<button type="button" class="btn btn-secondary" id="setup-vault-keyfile-download">Download key file</button>
 	</div>
 	<label class="jy-check jy-mt-2">
 		<input type="checkbox" id="setup-vault-saved">
@@ -53,9 +54,6 @@ window.setupVaultShowResult = function (result, hideElementId) {
 	});
 	document.getElementById('setup-vault-codes-download').addEventListener('click', function () {
 		download('vault-recovery-codes.txt', new Blob([codes], { type: 'text/plain' }));
-	});
-	document.getElementById('setup-vault-keyfile-download').addEventListener('click', function () {
-		download('vault-key-file.json', new Blob([JSON.stringify(result.key_file, null, 2)], { type: 'application/json' }));
 	});
 
 	// Continue stays inert until the codes are acknowledged — this screen is

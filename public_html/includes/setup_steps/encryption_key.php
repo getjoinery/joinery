@@ -5,6 +5,7 @@
  * vault_setup_options / vault_setup_verify / vault_setup_passphrase). Included by views/setup.php with $page, $viewer, $settings,
  * $next_key in scope.
  *
+ * @version 1.7 - the shown-once panel offers the codes only
  * @version 1.6 - one vault: the codes, the phrase's keys and the root vault are made in the browser
  * @version 1.5 - "Add a passkey elsewhere" goes to the security page (the wizard interrupt
  *                exempts it); the bypass-phrase route steps up BEFORE the phrase is typed
@@ -128,7 +129,7 @@ document.addEventListener('DOMContentLoaded', function () {
 			if (window.JoinerySealed) { JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession); }
 			// The whole step collapses, not just the phrase panel — the
 			// "add a passkey elsewhere" route above it is moot now.
-			window.setupVaultShowResult({ recovery_codes: made.codes, key_file: result.key_file }, 'setup-vault-phrase-branch');
+			window.setupVaultShowResult({ recovery_codes: made.codes }, 'setup-vault-phrase-branch');
 		} catch (e) {
 			hint.textContent = e.message || 'The key could not be created.';
 			sync();
@@ -152,7 +153,7 @@ document.addEventListener('DOMContentLoaded', function () {
 		     or inline emphasis inside it becomes its own column. -->
 		<label class="jy-check">
 			<input type="checkbox" id="setup-vault-ack">
-			<span>I understand that if I lose my passkeys, recovery codes, and key file, this data is <strong>gone for good</strong> — nobody can recover it for me.</span>
+			<span>I understand that if I lose my passkeys and recovery codes, this data is <strong>gone for good</strong> — nobody can recover it for me.</span>
 		</label>
 		<!-- No decline: every account gets a key. The only ways past this step
 		     are the two the platform cannot solve for the user — hardware that
@@ -198,7 +199,7 @@ document.addEventListener('DOMContentLoaded', function () {
 			// with codes made here (specs/one_vault_experience.md § R4, R6).
 			var made = await VaultKeyring.setupVault({ acknowledged: true });
 			if (window.JoinerySealed) { JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession); }
-			window.setupVaultShowResult({ recovery_codes: made.codes, key_file: made.result.key_file }, 'setup-vault-start');
+			window.setupVaultShowResult({ recovery_codes: made.codes }, 'setup-vault-start');
 		} catch (e) {
 			// Every refusal this page cannot talk the user out of reveals the
 			// fallback: a mandatory step must never become a dead end. PRF

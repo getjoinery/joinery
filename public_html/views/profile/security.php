@@ -797,6 +797,7 @@
                             <button type="button" id="vault-regenerate-codes-btn">Regenerate Recovery Codes</button>
                             <button type="button" class="d-none" id="vault-passphrase-enroll-btn">Change Passphrase</button>
                             <button type="button" class="d-none" id="vault-passphrase-remove-btn">Remove Passphrase</button>
+                            <button type="button" id="vault-download-keyfile-btn">Download Key File (optional)</button>
                             <button type="button" class="jy-action-danger" id="vault-rotate-btn">Rotate Vault Key</button>
                         </div>
                     </details>
@@ -831,7 +832,6 @@
                     <h3 class="jy-mt-4">Recovery Codes</h3>
                     <p>Store these somewhere safe. Each can be used once. They will not be shown again.</p>
                     <pre class="jy-security-codes" id="vault-codes-pre"></pre>
-                    <button type="button" class="btn btn-secondary" id="vault-download-keyfile-btn">Download Key File</button>
                     <button type="button" class="btn btn-primary" id="vault-codes-done-btn">Done</button>
                 </div>
 
@@ -904,7 +904,6 @@ $pac_writer->end_form();
                     if (!visible) actionsDd.removeAttribute('open');
                 }
                 var codesPre = document.getElementById('vault-codes-pre');
-                var lastKeyFile = null;
 
                 // Setup wraps the key under a passkey: with none enrolled, say
                 // so in place of a button that could only fail.
@@ -945,9 +944,8 @@ $pac_writer->end_form();
                     });
                 }
 
-                function showCodes(recoveryCodes, keyFile) {
+                function showCodes(recoveryCodes) {
                     codesPre.textContent = recoveryCodes.join('\n');
-                    lastKeyFile = keyFile || null;
                     notSetUp.classList.add('d-none');
                     locked.classList.add('d-none');
                     unlocked.classList.add('d-none');
@@ -1086,7 +1084,7 @@ $pac_writer->end_form();
                     try {
                         var made = await VaultKeyring.setupVault({ acknowledged: true });
                         JoinerySealed.adopt(VaultKeyring.ROOT, made.rootSession);
-                        showCodes(made.codes, made.result.key_file);
+                        showCodes(made.codes);
                     } catch (e) {
                         // The hardware-limit refusal reveals the compatibility
                         // fallback here too — this page is the step's permanent
@@ -1101,7 +1099,7 @@ $pac_writer->end_form();
                                 var created = await VaultKeyring.setupVault({ acknowledged: true, passphrase: phrase });
                                 if (secondFactorRedirect(created.result)) return;
                                 JoinerySealed.adopt(VaultKeyring.ROOT, created.rootSession);
-                                showCodes(created.codes, created.result.key_file);
+                                showCodes(created.codes);
                             } catch (e2) {
                                 JoineryModal.alert(e2.message || 'Could not set up your vault.');
                             }
@@ -1130,7 +1128,7 @@ $pac_writer->end_form();
                         var fresh = await VaultKeyring.replacementCodes(st.root, got.root);
                         await apiFetch('/api/v1/action/vault_regenerate_codes', { method: 'POST', body: JSON.stringify({
                             unlocker: got.unlocker, code_set: fresh.code_set, root_wrappings: fresh.root_wrappings }) });
-                        showCodes(fresh.codes, null);
+                        showCodes(fresh.codes);
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not regenerate recovery codes.');
                     }
@@ -1229,7 +1227,7 @@ $pac_writer->end_form();
                             await refresh();
                             JoineryModal.alert('Your key rotation is finished. Its recovery codes were never shown, so make a new set now: Actions → Regenerate Recovery Codes.');
                         } else {
-                            showCodes(fresh.codes, result.data.key_file);
+                            showCodes(fresh.codes);
                         }
                         if (result.data.resealing_in_background) {
                             JoineryModal.alert('Your vault is on its new key. Save the recovery codes shown now. '
@@ -1244,9 +1242,19 @@ $pac_writer->end_form();
                     }
                 });
 
-                document.getElementById('vault-download-keyfile-btn').addEventListener('click', function () {
-                    if (!lastKeyFile) { JoineryModal.alert('No key file available for this action.'); return; }
-                    var blob = new Blob([JSON.stringify(lastKeyFile, null, 2)], { type: 'application/json' });
+                // An offline copy of the locked key: with one recovery code it
+                // rebuilds the key without this server. Nothing in it is secret,
+                // so it is built fresh on request and always matches the vault.
+                document.getElementById('vault-download-keyfile-btn').addEventListener('click', async function () {
+                    actionsDd.removeAttribute('open');
+                    var keyFile;
+                    try {
+                        keyFile = (await apiFetch('/api/v1/action/vault_key_file', { method: 'POST', body: '{}' })).data.key_file;
+                    } catch (e) {
+                        JoineryModal.alert(e.message || 'Could not build your key file.');
+                        return;
+                    }
+                    var blob = new Blob([JSON.stringify(keyFile, null, 2)], { type: 'application/json' });
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
                     a.href = url;

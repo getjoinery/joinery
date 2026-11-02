@@ -30,6 +30,7 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.9 - keyFile(): the key file built on demand for the security page's download
  * @version 1.8 - a rotation keeps the keys it retires under the new key (uev_previous_keys, VaultPreviousKeys), so
  *               content still sealed to one opens while the vault is open, with no step from its owner
  * @version 1.7 - a rotation answers as soon as the new key is saved, and re-seals the content after the answer has
@@ -253,7 +254,7 @@ class VaultCeremonies {
 
 		return [
 			'vault'          => $vault,
-			'key_file'       => $this->buildKeyFile((int)$vault->key, $opened['key']->publicKey(), $salt),
+			'key_file'       => self::buildKeyFile((int)$vault->key, $opened['key']->publicKey(), $salt),
 		];
 	}
 
@@ -523,7 +524,7 @@ class VaultCeremonies {
 			'regenerate_recommended' => false,
 			'passphrase_reenrolled'  => $passphrase_reenrolled,
 			'dropped_passkeys'       => $dropped_passkeys,
-			'key_file'               => $this->buildKeyFile((int)$vault->key, $new_key->publicKey(), $salt),
+			'key_file'               => self::buildKeyFile((int)$vault->key, $new_key->publicKey(), $salt),
 		];
 	}
 
@@ -652,7 +653,7 @@ class VaultCeremonies {
 			'regenerate_recommended' => true,
 			'passphrase_reenrolled'  => $passphrase_reenrolled,
 			'dropped_passkeys'       => $dropped_passkeys,
-			'key_file'               => $this->buildKeyFile((int)$vault->key, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_salt')),
+			'key_file'               => self::buildKeyFile((int)$vault->key, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_salt')),
 		];
 	}
 
@@ -1211,8 +1212,17 @@ class VaultCeremonies {
 		}
 	}
 
+	/**
+	 * The key file for a vault as it stands now: the security page's on-demand
+	 * download. Nothing in it is secret, so it is built fresh on every request
+	 * and always matches the current key and unlockers.
+	 */
+	public static function keyFile(UserEncryptionVault $vault): array {
+		return self::buildKeyFile((int)$vault->key, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_salt'));
+	}
+
 	/** The backup payload setup and rotation hand the client to download. */
-	private function buildKeyFile(int $vault_id, string $public_key, string $salt): array {
+	private static function buildKeyFile(int $vault_id, string $public_key, string $salt): array {
 		$wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault_id]);
 		$wrappings->load();
 		$rows = [];

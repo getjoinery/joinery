@@ -1122,11 +1122,17 @@ passphrase) need re-adding via the ordinary enrollment endpoints afterward.
 
 `uev`/`uew` are never excluded from backup sets — losing them is the one
 unrecoverable thing (every consumer's content is otherwise-unreadable
-ciphertext). The setup and rotation ceremonies both return a `key_file`
-payload (the wrapped-key rows, public key, and salt) for the client to offer
-as a download — useless without a live unlocker, but the thing that makes a
-restored backup's wrappings reconstructible if a `uew` row is ever lost
-independently of the vault row itself.
+ciphertext). The **key file** is an optional offline copy of the vault's
+locked key: the wrapped-key rows, public key, salt, and the code salt and
+derivation (`VaultCeremonies::keyFile()`). It is useless without a live
+unlocker, but with one recovery code it rebuilds the account key without the
+server — the thing that makes a restored backup's wrappings reconstructible if
+a `uew` row is ever lost independently of the vault row itself. Since nothing
+in it is secret, it is built fresh on request (`vault_key_file`) and offered
+only as **Actions → Download Key File (optional)** on the security page, where
+it always matches the current key and unlockers; the setup wizard asks the
+member to save their recovery codes alone. The setup and rotation ceremonies
+also return the same payload as `key_file`.
 
 ## Registering a consumer
 
