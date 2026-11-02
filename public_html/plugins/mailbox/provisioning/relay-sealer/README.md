@@ -180,9 +180,11 @@ merged tenant block here — a tenant's fragment cannot set its own caps.
 
 For each sealed message, two files committed atomically into the spool:
 
-- `<spoolid>.seal` — the whole raw message sealed with `crypto_box_seal`
-  (libsodium wire format), encoded as SealedBox's `v1.seal.<rawurlbase64>` so
-  the main box opens it with `SealedBox::openDek` (`sodium_crypto_box_seal_open`).
+- `<spoolid>.seal` — the whole raw message sealed to the recipient's X-Wing key
+  (the v2 seal), encoded as SealedBox's `v2.seal.<rawurlbase64>` so the main box
+  opens it with `SealedBox::openDek`. A Fortress (`key_kind=client`) recipient
+  gets the browser format instead: the body as `v1.edge.` under a fresh DEK, and
+  the DEK as `v2.edgeseal.{scope}.` in the `.meta`.
 - `<spoolid>.meta` — cleartext operational metadata only (recipient, envelope
   sender, Message-ID, In-Reply-To, References, Date, size, the milter-stamped
   Authentication-Results, `key_kind`). **Never** the subject or body — those do
@@ -209,7 +211,7 @@ transport key, shard-policy limits) lives in `tenants`:
       "srs_secret": "…",
       "forward_from_name": "Example",
       "forward_show_via": true,
-      "transport_public_key": "<base64url X25519>",
+      "transport_public_key": "<base64url X-Wing>",
       "spool_dir": "/var/spool/joinery-relay/main",
       "forwarding_domains": ["fwd.example.com"],
       "forward_hourly_limit": 0,
@@ -219,7 +221,7 @@ transport key, shard-policy limits) lives in `tenants`:
   },
   "recipients": {
     "alice@example.com": {
-      "public_key": "<base64url X25519>",
+      "public_key": "<base64url X-Wing>",
       "key_kind": "user",
       "mode": "store",
       "destinations": [],

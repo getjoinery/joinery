@@ -2,9 +2,9 @@
 #
 # roundtrip_test.sh - CI gate for the relay sealer's wire compatibility.
 #
-# Proves the pentest-brief invariant: a message sealed by the Go binary
-# (box.SealAnonymous) opens with PHP sodium_crypto_box_seal_open via the same
-# SealedBox::openDek the deferred-ingest consumer uses. If this passes, sealed
+# Proves the pentest-brief invariant: a message sealed by the Go binary (the
+# v2 X-Wing seal) opens with the same SealedBox::openDek the deferred-ingest
+# consumer uses. If this passes, sealed
 # spool blobs the relay writes are guaranteed openable by the main box.
 #
 # And the browser format (key_kind=client, specs/client_custody_mail.md WP7):
@@ -13,7 +13,7 @@
 # vault-crypto.js opens.
 #
 # Usage:  bash roundtrip_test.sh
-# Requires: go, php with ext-sodium.
+# Requires: go, php with ext-sodium and FFI (ML-KEM-768).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +38,7 @@ echo "== go unit tests =="
 
 echo "== generating a vault keypair (PHP SealedBox) =="
 WORK="${WORK}" SEALEDBOX="${SEALEDBOX}" php -r '
-require getenv("SEALEDBOX");
+foreach (["MlKem768.php", "XWing.php", "SealedBox.php"] as $f) { require dirname(getenv("SEALEDBOX"))."/".$f; }
 $box = new SealedBox();
 $kp = $box->generateKeypair();
 file_put_contents(getenv("WORK")."/pub", $kp["public"]);
@@ -47,10 +47,11 @@ file_put_contents(getenv("WORK")."/sec", $kp["secret"]);
 PUB="$(cat "${WORK}/pub")"
 
 echo "== generating a browser-format keypair (standard base64 public key) =="
-WORK="${WORK}" php -r '
-$kp = sodium_crypto_box_keypair();
-file_put_contents(getenv("WORK")."/cpub", base64_encode(sodium_crypto_box_publickey($kp)));
-file_put_contents(getenv("WORK")."/csec", rtrim(strtr(base64_encode(sodium_crypto_box_secretkey($kp)), "+/", "-_"), "="));
+WORK="${WORK}" SEALEDBOX="${SEALEDBOX}" php -r '
+foreach (["MlKem768.php", "XWing.php", "SealedBox.php"] as $f) { require dirname(getenv("SEALEDBOX"))."/".$f; }
+$kp = (new SealedBox())->generateKeypair();
+file_put_contents(getenv("WORK")."/cpub", base64_encode(SealedBox::b64url_decode($kp["public"])));
+file_put_contents(getenv("WORK")."/csec", $kp["secret"]);
 '
 CPUB="$(cat "${WORK}/cpub")"
 
@@ -98,9 +99,9 @@ META_FILE="$(find "${WORK}/spool" -maxdepth 1 -name '*.meta' | head -1)"
 [[ -n "${SEAL_FILE}" ]] || { echo "FAIL: no .seal produced" >&2; exit 1; }
 [[ -n "${META_FILE}" ]] || { echo "FAIL: no .meta produced" >&2; exit 1; }
 
-echo "== opening the seal with PHP sodium_crypto_box_seal_open (SealedBox::openDek) =="
+echo "== opening the seal with PHP SealedBox::openDek =="
 SEAL_FILE="${SEAL_FILE}" META_FILE="${META_FILE}" WORK="${WORK}" EXPECT="${MSG}" SEALEDBOX="${SEALEDBOX}" php -r '
-require getenv("SEALEDBOX");
+foreach (["MlKem768.php", "XWing.php", "SealedBox.php"] as $f) { require dirname(getenv("SEALEDBOX"))."/".$f; }
 $box = new SealedBox();
 $sealed = trim(file_get_contents(getenv("SEAL_FILE")));
 $secret = trim(file_get_contents(getenv("WORK")."/sec"));
@@ -135,7 +136,7 @@ CMETA_FILE="$(find "${WORK}/cspool" -maxdepth 1 -name '*.meta' | head -1)"
 
 echo "== opening the browser format with SealedBox::openEdge + aeadDecryptGcm =="
 CSEAL_FILE="${CSEAL_FILE}" CMETA_FILE="${CMETA_FILE}" WORK="${WORK}" EXPECT="${MSG}" SEALEDBOX="${SEALEDBOX}" php -r '
-require getenv("SEALEDBOX");
+foreach (["MlKem768.php", "XWing.php", "SealedBox.php"] as $f) { require dirname(getenv("SEALEDBOX"))."/".$f; }
 $box  = new SealedBox();
 $meta = json_decode(file_get_contents(getenv("CMETA_FILE")), true);
 $body = trim(file_get_contents(getenv("CSEAL_FILE")));
@@ -143,9 +144,9 @@ if (($meta["key_kind"] ?? "") !== "client" || ($meta["key_scope"] ?? "") !== "ma
     fwrite(STDERR, "FAIL: client .meta missing key_kind/key_scope/key_generation\n");
     exit(1);
 }
-$prefix = "v1.edgeseal.mail.";
+$prefix = "v2.edgeseal.mail.";
 if (strncmp($meta["sealed_dek"] ?? "", $prefix, strlen($prefix)) !== 0 || strncmp($body, "v1.edge.", 8) !== 0) {
-    fwrite(STDERR, "FAIL: client artifacts are not framed v1.edgeseal.mail. / v1.edge.\n");
+    fwrite(STDERR, "FAIL: client artifacts are not framed v2.edgeseal.mail. / v1.edge.\n");
     exit(1);
 }
 $dek = $box->openEdge(substr($meta["sealed_dek"], strlen($prefix)), trim(file_get_contents(getenv("WORK")."/csec")),

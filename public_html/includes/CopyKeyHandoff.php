@@ -26,6 +26,7 @@
  * The page does nothing unless a request is pending, and only the agent of a
  * dormant copy stages one, so on any other site it is an empty page.
  *
+ * @version 1.3 - X-Wing only: a request carries `ciphertext`; one with only `ephemeral_public` is not a request
  * @version 1.2 - a request in either seal version (specs/post_quantum_sealing.md R2): v2 carries the X-Wing
  *                `ciphertext` and its answer the 1216-byte public key; v1 (a backup sealed to an old recovery
  *                key) carries `ephemeral_public`
@@ -46,7 +47,7 @@ class CopyKeyHandoff {
 	 */
 	public static function pending(): ?array {
 		$req = json_decode(self::read_setting(self::REQUEST_SETTING), true);
-		if (!is_array($req) || empty($req['job_id']) || (empty($req['ephemeral_public']) && empty($req['ciphertext']))) {
+		if (!is_array($req) || empty($req['job_id']) || empty($req['ciphertext'])) {
 			return null;
 		}
 		$expires = strtotime((string)($req['expires_time'] ?? '') . ' UTC');
@@ -65,9 +66,8 @@ class CopyKeyHandoff {
 			'stored_at'            => (string)($req['stored_at'] ?? ''),
 			'manifest_sha256'      => (string)($req['manifest_sha256'] ?? ''),
 			'recovery_fingerprint' => (string)($req['recovery_fingerprint'] ?? ''),
-			'version'              => empty($req['ciphertext']) ? SealedBox::V1 : SealedBox::V2,
-			'ciphertext'           => (string)($req['ciphertext'] ?? ''),
-			'ephemeral_public'     => (string)($req['ephemeral_public'] ?? ''),
+			'version'              => SealedBox::V2,
+			'ciphertext'           => (string)$req['ciphertext'],
 			'last_error'           => (string)($req['last_error'] ?? ''),
 			'answered'             => $answered,
 			'seconds_left'         => (int)$left,
@@ -77,11 +77,10 @@ class CopyKeyHandoff {
 	/** Hand the agent what the owner's browser worked out. Shape only: the agent judges it. */
 	public static function answer($job_id, $shared, $public_key): void {
 		$pending = self::pending_for($job_id);
-		// `shared` is 32 bytes in both versions (v1: the X25519 shared secret;
-		// v2: the dek-scope AES key, SealedBox::v2Key(), never the X-Wing shared
-		// secret); the public key is the one the backup was sealed to: 1216
-		// bytes for v2, 32 for v1.
-		$public_bytes = $pending['version'] === SealedBox::V2 ? XWing::PUBLIC_KEY_BYTES : 32;
+		// `shared` is the dek-scope AES key (32 bytes, SealedBox::v2Key(), never
+		// the X-Wing shared secret); the public key is the 1216-byte key the
+		// backup was sealed to.
+		$public_bytes = XWing::PUBLIC_KEY_BYTES;
 		foreach (array('shared' => array($shared, 32), 'public_key' => array($public_key, $public_bytes)) as $what => [$value, $bytes]) {
 			$raw = base64_decode(trim((string)$value), true);
 			if ($raw === false || strlen($raw) !== $bytes) {

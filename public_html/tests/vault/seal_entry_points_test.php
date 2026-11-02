@@ -10,15 +10,10 @@
  * Every seal the platform writes is v2 (post_quantum_sealing.md,
  * Acceptance for the whole): each public PHP entry point that seals to a public
  * key is called, and the frame and size of what it returns are inspected,
- * then opened with the seed. A new keypair is X-Wing.
+ * then opened with the seed. A new keypair is X-Wing. The refusal to seal to
+ * a key that is not 1216 bytes is tests/vault/xwing_vector_test.php's.
  *
- * And the source holds no way back: no PHP outside the tests calls
- * sodium_crypto_box_seal() or mints a sodium box keypair, no browser script
- * generates an X25519 key (an ephemeral key is what a v1 seal needs), and the
- * relay's libsodium sealed box (the one v1 sealer, for a 32-byte key whose
- * holder has not rotated; Q8) stays in seal.go alone. The refusal to seal to a
- * 32-byte key is tests/vault/xwing_vector_test.php's.
- *
+ * @version 1.1 - the source scan for X25519 sealing is gone with the X25519 code
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -82,40 +77,5 @@ check($algs === array(BackupEnvelope::ALG_XWING), 'every recipient says alg xwin
 $sizes = array_unique(array_map(function ($r) { return strlen(base64_decode($r['sealed'], true)); }, $env['recipients']));
 check($sizes === array($v2_raw_len(32)), 'every recipient box is the v2 raw size');
 check(BackupEnvelope::open($env, base64_encode(SealedBox::b64url_decode($kp['secret']))) === $dek, 'the recovery seed opens it');
-
-section('No way back to a v1 seal in the source');
-$root = PathHelper::getSiteRoot() . '/public_html';
-$hits = function (string $pattern, array $dirs, string $glob_ext) use ($root) {
-	$out = array();
-	foreach ($dirs as $dir) {
-		$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS));
-		foreach ($it as $f) {
-			$path = $f->getPathname();
-			$rel = substr($path, strlen($root) + 1);
-			if (substr($path, -strlen($glob_ext)) !== $glob_ext
-				|| preg_match('#(^|/)(tests|vendor|node_modules)/#', $rel)
-				|| substr($rel, -8) === '_test.go') {
-				continue;
-			}
-			if (preg_match($pattern, (string)file_get_contents($path))) {
-				$out[] = $rel;
-			}
-		}
-	}
-	sort($out);
-	return $out;
-};
-$php_dirs = array('includes', 'data', 'logic', 'views', 'adm', 'ajax', 'api', 'utils', 'plugins', 'maintenance_scripts', 'theme');
-$php_dirs = array_values(array_filter($php_dirs, function ($d) use ($root) { return is_dir($root . '/' . $d); }));
-
-$found = $hits('/sodium_crypto_box_seal\s*\(/', $php_dirs, '.php');
-check($found === array(), 'no PHP seals with sodium_crypto_box_seal()', implode(', ', $found));
-$found = $hits('/sodium_crypto_box_keypair\s*\(/', $php_dirs, '.php');
-check($found === array(), 'no PHP mints a sodium box keypair', implode(', ', $found));
-$found = $hits('/generateKey\s*\(\s*\{[^}]*X25519/s', array('assets/js', 'plugins'), '.js');
-check($found === array(), 'no browser script generates an X25519 key', implode(', ', $found));
-$found = $hits('/box\.SealAnonymous\s*\(/', array('plugins'), '.go');
-check($found === array('plugins/mailbox/provisioning/relay-sealer/seal.go'),
-	'the relay\'s v1 sealed box is in seal.go alone (a 32-byte key not yet rotated)', implode(', ', $found));
 
 harness_finish();

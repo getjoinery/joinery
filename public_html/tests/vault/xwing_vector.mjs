@@ -11,22 +11,22 @@
  *     encapsulation seed, the shared secret again by decapsulation.
  *   - vault-crypto.js reproduces every v2 seal vector (the same file; made by
  *     includes/SealedBox.php) byte for byte and opens it, and refuses it under
- *     another scope; selfCheck() resolves true; sealing to a 32-byte key is
- *     refused naming the old key.
+ *     another scope; selfCheck() resolves true; sealing to or opening with a
+ *     32-byte key is refused naming the old key.
  *   - halfOpenKeyBox(): for a v2 box the posted value is the dek-scope AES key
  *     (it opens the box's AES-GCM, the X-Wing shared secret does not); a key
- *     whose fingerprint is not the box's is refused; a v1 box gets the X25519
- *     of the key with its ephemeral key.
+ *     whose fingerprint is not the box's is refused; a v1 box is refused.
  *
  *   node tests/vault/xwing_vector.mjs     (run by xwing_browser_gate.sh)
  *
+ * @version 1.1 - v1 retired (v1_key_retirement WP2): opening with a 32-byte key and a v1 key box are refused
  * @version 1.0
  */
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, createPublicKey, diffieHellman, generateKeyPairSync, webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -100,9 +100,9 @@ check(await VC.selfCheck() === true, 'VaultCrypto.selfCheck() resolves true');
 check(await VC.isSupported() === true, 'VaultCrypto.isSupported() resolves true');
 const pair = await VC.generateVaultKeypair();
 check(pair.secretKeyBytes.length === 32 && fromB64(pair.publicKeyB64).length === 1216, 'a fresh vault key is a 32-byte seed and a 1216-byte public key');
-const oldKey = b64(createPublicKey(generateKeyPairSync('x25519').privateKey).export({ format: 'der', type: 'spki' }).subarray(-32));
-const why = await refuses(VC.sealToPublicKey(new Uint8Array(32), oldKey));
-check(why !== null && /old X25519 key/.test(why) && /rotate/.test(why), 'sealing to a 32-byte key is refused, naming the old key and the rotation', why);
+const shortKey = b64(VC.randomBytes(32));
+check(await refuses(VC.sealToPublicKey(new Uint8Array(32), shortKey)) !== null, 'sealing to a key that is not 1216 bytes is refused');
+check(await refuses(VC.openFromSecretKey(b64(new Uint8Array(1200)), new Uint8Array(32), shortKey)) !== null, 'and so is opening with one');
 
 console.log('\n== a key box the agent finishes opening ==');
 {
@@ -124,16 +124,6 @@ console.log('\n== a key box the agent finishes opening ==');
 	check(await refuses(VC.halfOpenKeyBox({ version: 2, ciphertext: b64(ct) }, b64(VC.randomBytes(31)), fpr)) !== null, 'a key that is not 32 bytes is refused');
 	const noVersion = await refuses(VC.halfOpenKeyBox({ ciphertext: b64(ct) }, b64(seed), fpr));
 	check(noVersion !== null && /version/.test(noVersion), 'a box naming no seal version is refused', noVersion);
-
-	// v1: a backup sealed to an old recovery key.
-	const rec = generateKeyPairSync('x25519');
-	const eph = generateKeyPairSync('x25519');
-	const recScalar = rec.privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(-32);
-	const recPub = rec.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-	const ephPub = eph.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-	const r1 = await VC.halfOpenKeyBox({ version: 1, ephemeralPublic: b64(ephPub) }, b64(recScalar), hex(sha256(recPub)));
-	const expect = diffieHellman({ privateKey: rec.privateKey, publicKey: eph.publicKey });
-	check(r1.shared === b64(expect) && r1.pub === b64(recPub), 'v1: the X25519 of the key with the box\'s ephemeral key, and the old public half');
 }
 
 console.log('');

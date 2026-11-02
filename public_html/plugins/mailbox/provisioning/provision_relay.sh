@@ -14,6 +14,7 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.17 - the sealer seals to X-Wing keys only: a 32-byte key in a map is refused as malformed
 # Version: 3.16 - the sealer seals in the format each key names: a 1216-byte X-Wing key gets the v2 seal
 #                (v2.seal. / v2.edgeseal.), a 32-byte key not yet rotated the v1; the routing map takes
 #                both sizes; Direct decoys are X-Wing keys and the sealed-size ceiling is the v2 overhead
@@ -123,7 +124,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.16"
+RELAY_VERSION="3.17"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

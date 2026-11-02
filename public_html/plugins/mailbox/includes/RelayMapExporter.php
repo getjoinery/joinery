@@ -29,6 +29,7 @@
  * no SRS secret. The forwarding domains stay: bounces of the forwards this site
  * sends return to them, and the relay spools those too.
  *
+ * @version 2.9 - relayTakes() asks only the relay's version: every key is X-Wing
  * @version 2.8 - a key the relay cannot take (an X-Wing key, to a relay older than 3.16) is never put
  *                in the map: that mailbox takes the transport key until the relay reports 3.16
  *                (relayTakes(); specs/post_quantum_sealing.md Q8)
@@ -311,20 +312,14 @@ class RelayMapExporter {
 	}
 
 	/**
-	 * Will this relay accept $public_key as a seal target? A relay older than
-	 * 3.16 refuses any key that is not 32 bytes, and refuses the WHOLE fragment
-	 * with it: one rotated vault would freeze every mailbox's routing on the last
-	 * accepted map. So an X-Wing key goes in only once the relay reports 3.16
-	 * (RelayVersion::sealsPostQuantum); until then its mailbox takes the
-	 * transport key and the pull seals the message to the owner's key, as for a
-	 * relay that cannot write the browser's format. A site upgrades before its
-	 * relay can be rebuilt, because the rebuild ships with the site's release.
+	 * Will this relay accept $public_key as a seal target? Only a relay at 3.16
+	 * or later (RelayVersion::sealsPostQuantum) takes an X-Wing key: an older
+	 * one refuses the WHOLE fragment with it, and one rotated vault would freeze
+	 * every mailbox's routing on the last accepted map. Until then that mailbox
+	 * takes the transport key and the pull seals the message to the owner's
+	 * key, as for a relay that cannot write the browser's format.
 	 */
 	private function relayTakes(string $public_key): bool {
-		$raw = base64_decode(trim($public_key), true);
-		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-			return true;
-		}
 		return RelayVersion::sealsPostQuantum($this->relay->provisionedVersion());
 	}
 

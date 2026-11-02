@@ -27,16 +27,15 @@
  *
  * Keys are X-Wing (specs/post_quantum_sealing.md): a private key is a 32-byte
  * seed, a public key 1216 bytes, and an envelope is version 2 with each
- * recipient marked `"alg": "xwing"`. A version-1 envelope (libsodium sealed
- * boxes to 32-byte X25519 keys) still opens, with the old key.
+ * recipient marked `"alg": "xwing"`. A version-1 envelope (X25519 recipients)
+ * still reads, and no key opens it.
  *
  * `open`, `relabel` and `site-key` run with NO platform bootstrap, so they work
  * during disaster recovery when the site is gone — which is the moment that
  * matters, and none of them needs to know whose key anything seals to. They
  * need PHP's sodium and FFI extensions, OpenSSL 3.5 or later (Ubuntu 26.04
  * ships it), and a copy of the Joinery tree, whose includes/MlKem768.php,
- * XWing.php and SealedBox.php they load; opening a version-1 envelope needs
- * libsodium alone. `mint` runs only on a live site, and bootstraps.
+ * XWing.php and SealedBox.php they load. `mint` runs only on a live site, and bootstraps.
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
@@ -75,6 +74,8 @@
  * The envelope format written here is the same one includes/BackupEnvelope.php
  * reads; backup_envelope_cli_test.php holds both to that contract.
  *
+ * @version 1.5 - X-Wing only: open takes a 32-byte seed and opens only `xwing` recipients; a 64-byte
+ *                keypair is not a key
  * @version 1.4 - envelope version 2: X-Wing recipients with `alg`, the site key a 32-byte seed; open
  *                reads versions 1 and 2, choosing each recipient by the fingerprint of the key supplied
  * @version 1.3 - open refuses a chain manifest without its expected sha256 (--manifest-sha256) or an
@@ -98,8 +99,7 @@ const BE_ALG_XWING = 'xwing';
 
 /**
  * Load the tree's X-Wing classes and fail plainly when ML-KEM cannot run here.
- * Called only where a post-quantum key is needed, so a version-1 envelope
- * still opens on a machine without OpenSSL 3.5.
+ * Called only where a post-quantum key is needed.
  */
 function be_require_pq() {
     $inc = dirname(__DIR__, 2) . '/public_html/includes/';
@@ -194,10 +194,6 @@ function be_site_secret($path) {
         }
         if (trim($raw) !== '') {
             $seed = base64_decode(trim($raw), true);
-            if ($seed !== false && strlen($seed) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-                be_fail("the site key at {$path} is an old X25519 keypair. The host converger replaces it with a "
-                    . "post-quantum key on its next run; backups already made stay openable with the recovery key.");
-            }
             if ($seed === false || strlen($seed) !== 32) {
                 be_fail("the site key at {$path} is not a valid key. Move it aside to have a new one minted; "
                     . "backups already made stay openable with the recovery key.");
@@ -229,13 +225,13 @@ function be_site_secret($path) {
     return $won;
 }
 
-/** A supplied secret as raw bytes (raw or base64): a 32-byte secret or a 64-byte old keypair. */
+/** A supplied secret as raw bytes (raw or base64): a 32-byte seed. */
 function be_secret_bytes($secret) {
     $raw = trim((string)$secret);
     if ($raw === '') {
         be_fail('no key supplied.');
     }
-    if (!in_array(strlen($secret), [SODIUM_CRYPTO_BOX_KEYPAIRBYTES, 32], true)) {
+    if (strlen($secret) !== 32) {
         $decoded = base64_decode($raw, true);
         if ($decoded !== false && $decoded !== '') {
             $raw = $decoded;
@@ -243,7 +239,7 @@ function be_secret_bytes($secret) {
     } else {
         $raw = $secret;
     }
-    if (strlen($raw) !== SODIUM_CRYPTO_BOX_KEYPAIRBYTES && strlen($raw) !== 32) {
+    if (strlen($raw) !== 32) {
         be_fail('that is not a recovery key. Expected the base64 secret key, not a file path.');
     }
     return $raw;
@@ -438,57 +434,29 @@ if ($mode === 'open') {
         }
     }
 
-    // 32 bytes do not say whether they are an X-Wing seed or an old X25519
-    // key, so derive the public key each would be and open the recipient whose
+    // Derive the seed's public key and open the X-Wing recipient whose
     // recorded fingerprint matches.
     $raw_secret = be_secret_bytes($secret);
-    $wants_xwing = false;
-    foreach ($recipients as $r) {
-        $wants_xwing = $wants_xwing || ($r['alg'] ?? '') === BE_ALG_XWING;
-    }
-    if (strlen($raw_secret) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-        $v1_keypair = $raw_secret;
-        $v1_fpr = hash('sha256', sodium_crypto_box_publickey($raw_secret));
-        $v2_fpr = null;
-    } else {
-        $v1_pub = sodium_crypto_box_publickey_from_secretkey($raw_secret);
-        $v1_keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($raw_secret, $v1_pub);
-        $v1_fpr = hash('sha256', $v1_pub);
-        $v2_fpr = null;
-        if ($wants_xwing) {
-            be_require_pq();
-            $v2_fpr = hash('sha256', (new XWing())->publicKey($raw_secret));
-        }
-    }
+    be_require_pq();
+    $v2_fpr = hash('sha256', (new XWing())->publicKey($raw_secret));
 
     $data_key = false;
     foreach ($recipients as $r) {
         $blob = base64_decode((string)($r['sealed'] ?? ''), true);
-        if ($blob === false || $blob === '') {
+        if ($blob === false || $blob === '' || ($r['alg'] ?? '') !== BE_ALG_XWING) {
             continue;
         }
         $fpr = (string)($r['fingerprint'] ?? '');
-        if (($r['alg'] ?? '') === BE_ALG_XWING) {
-            if ($v2_fpr === null || ($fpr !== '' && !hash_equals($fpr, $v2_fpr))) {
-                continue;
-            }
-            try {
-                $data_key = SealedBox::openV2($blob, $raw_secret);
-                break;
-            } catch (RuntimeException $e) {
-                continue;
-            }
-        }
-        if ($fpr !== '' && !hash_equals($fpr, $v1_fpr)) {
+        if ($fpr !== '' && !hash_equals($fpr, $v2_fpr)) {
             continue;
         }
-        $opened = @sodium_crypto_box_seal_open($blob, $v1_keypair);
-        if ($opened !== false) {
-            $data_key = $opened;
+        try {
+            $data_key = SealedBox::openV2($blob, $raw_secret);
             break;
+        } catch (RuntimeException $e) {
+            continue;
         }
     }
-    sodium_memzero($v1_keypair);
 
     if ($data_key === false) {
         be_fail('that key does not open this backup. The envelope is sealed to: '

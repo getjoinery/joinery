@@ -299,13 +299,6 @@ the domain seals content), so the tiers behave as:
   secret travels to it in the relay map — a decoy that differed between the box
   and its relay would be a distinguisher in itself.
 
-A vault still on a 32-byte X25519 key, one whose owner has not rotated it to
-X-Wing, is answered with that key, not a decoy, by the box and the relay alike.
-The sender refuses to seal to it and falls back to SMTP, and that message waits
-until the owner rotates (a store that cannot seal rolls back and is retried),
-so it arrives or, past the sender's retry window, bounces. Until the rotation,
-the short key tells a prober the address is real.
-
 Sealing is **opportunistic**, and one case follows from that: a real recipient at a
 sealed tier who holds no vault is offered no key, so the delivery crosses unsealed
 and is still spooled and gated. The absence of a key downgrades content protection,

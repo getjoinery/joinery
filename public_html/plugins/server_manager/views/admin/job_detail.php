@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.35 - v1_census results removed with the v1 code; relay transport key shows kind and generation only
  * @version 1.34 - v1_census: key generations per column and unswept chain entries
  * @version 1.33 - v1_census results: what the site still holds on an old X25519 key (TEMPORARY, v1_key_retirement)
  * @version 1.32 - relay_status: the map's last check, with its outcome in words
@@ -897,55 +898,6 @@ if ($result) {
 		}
 		echo '</div></div>';
 		$result_data = null;
-	} elseif (is_array($result_data) && $job_type === 'v1_census' && !empty($result_data['read'])) {
-		// What the site still holds on an old X25519 key (agent 1.103.0), before
-		// the release that removes the v1 openers. TEMPORARY (v1_key_retirement).
-		$vc_n = function ($v) { return is_int($v) ? number_format($v) : 'unknown'; };
-		$vc_h = function ($v) { return htmlspecialchars((string)$v); };
-		$v1 = $result_data['v1_vaults']; $v2 = $result_data['v2_blobs']; $v5 = $result_data['v5']; $v6 = $result_data['v6'];
-		$clear = ($result_data['findings'] === 0);
-		echo '<div class="card mb-3"><div class="card-header"><strong>Old key census</strong></div><div class="card-body">';
-		echo '<div class="' . ($clear ? 'text-success' : 'text-danger') . '"><strong>' . ($clear ? 'Clear: nothing on this site is on an old key.'
-			: $vc_n($result_data['findings']) . ' thing(s) still on an old key.') . '</strong></div>';
-		echo '<div class="mt-2"><strong>Vaults on an old key:</strong> ' . $vc_n($v1['old']) . ' of ' . $vc_n($v1['total']) . '</div>';
-		foreach ($v1['owners'] as $o) {
-			echo '<div class="small ms-3">User ' . $vc_n($o['user_id']) . ' (permission ' . $vc_n($o['permission']) . ($o['deleted'] ? ', deleted' : '') . '): '
-				. $vc_h(implode(', ', $o['scopes'])) . '</div>';
-		}
-		echo '<div class="mt-2"><strong>Values sealed to an old key:</strong> ' . $vc_n($v2['total'])
-			. ($v2['leftover'] !== 0 ? '; <span class="text-danger">' . $vc_n($v2['leftover']) . ' belong to accounts that already rotated</span>' : '') . '</div>';
-		foreach ($v2['columns'] as $c) {
-			$who = array();
-			foreach ($c['owners'] as $uid => $n) { $who[] = 'user ' . (int)$uid . ': ' . $vc_n($n); }
-			if ($c['no_owner'] !== 0) { $who[] = 'no owner: ' . $vc_n($c['no_owner']); }
-			foreach ($c['generations'] ?? array() as $g => $n) { $who[] = 'generation ' . $g . ': ' . $vc_n($n); }
-			echo '<div class="small ms-3">' . $vc_h($c['table'] . '.' . $c['column']) . ' (' . $vc_h($c['prefix']) . '): ' . $vc_n($c['count'])
-				. ($who ? ' (' . $vc_h(implode(', ', $who)) . ')' : '') . '</div>';
-		}
-		if ($result_data['unscanned']) {
-			echo '<div class="small ms-3 text-danger">Not scanned in time: ' . $vc_h(implode(', ', $result_data['unscanned'])) . '</div>';
-		}
-		echo '<div class="mt-2"><strong>Retired keys kept in vault chains:</strong> ' . $vc_n($result_data['v3_chains']['entries'])
-			. ' in ' . $vc_n($result_data['v3_chains']['vaults']) . ' vault(s), '
-			. $vc_n($result_data['v3_chains']['unswept'] ?? 0) . ' not yet swept (the old-key ones are dropped by the release)</div>';
-		$kinds = array('xwing' => 'post-quantum (X-Wing)', 'x25519' => 'old (X25519)', 'none' => 'none yet');
-		if (!$result_data['v4_relays']) {
-			echo '<div class="mt-2"><strong>Mail relays:</strong> none</div>';
-		}
-		foreach ($result_data['v4_relays'] as $r) {
-			echo '<div class="mt-2"><strong>Mail relay ' . $vc_n($r['relay_id']) . ':</strong> transport key ' . $vc_h($kinds[$r['transport_kind']] ?? 'not known')
-				. ($r['retired_kept'] ? '; the old secret is still kept, so the relay has not been emptied since the key was replaced' : '') . '</div>';
-		}
-		$sealed = array('this_site' => 'this site\'s recovery key', 'operator' => 'the operator\'s key', 'other' => 'a key this site no longer holds');
-		echo '<div class="mt-2"><strong>Break-glass copy:</strong> ' . (!$v5['encrypted'] ? 'no encrypted data root on this node'
-			: 'sealed to ' . $vc_h($sealed[$v5['sealed_to']] ?? 'not known') . ', recovery key ' . $vc_h($kinds[$v5['recovery_kind']] ?? $v5['recovery_kind'])) . '</div>';
-		if (is_array($v5['escrows_v1'])) {
-			echo '<div><strong>Escrow rows with an old box (management node):</strong> ' . ($v5['escrows_v1'] ? $vc_h(implode(', ', $v5['escrows_v1'])) : 'none') . '</div>';
-		}
-		echo '<div class="mt-2 text-muted small">Backup keys: recovery ' . $vc_h($v6['recovery_kind']) . ', site key ' . $vc_h($v6['site_kind'])
-			. ', ' . $vc_n($v6['site_retired']) . ' retired site key(s), old epochs ' . $vc_n($v6['old_epochs']) . '. Backups made before a rotation are the accepted loss.</div>';
-		echo '</div></div>';
-		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'relay_status' && !empty($result_data['read'])) {
 		// This site's view of its mail relay (agent 1.101.0): no addresses, no keys.
 		$rs_when = function ($t) use ($session) {
@@ -994,10 +946,8 @@ if ($result) {
 			echo '<div><strong>Pickup:</strong> last pull ' . $rs_when($p['last_pull_time']) . '; last pull that emptied the relay ' . $rs_when($p['last_drained_time'])
 				. '; held on the relay: ' . $rs_n($p['held'])
 				. ($p['alarm_time'] !== '' ? '; <span class="text-danger">pickup stopped, announced ' . $rs_when($p['alarm_time']) . '</span>' : '') . '</div>';
-			$kinds = array('xwing' => 'post-quantum (X-Wing)', 'x25519' => 'old (X25519)', 'none' => 'none yet');
-			echo '<div><strong>Transport key:</strong> ' . htmlspecialchars($kinds[$k['kind']] ?? 'not known') . ', generation ' . $rs_n($k['generation'])
-				. ($k['replaced_time'] !== '' ? ', replaced ' . $rs_when($k['replaced_time']) : '')
-				. ($k['retired_kept'] ? '; the old secret is still kept for mail sealed before the switch' : '') . '</div>';
+			$kinds = array('xwing' => 'post-quantum (X-Wing)', 'invalid' => 'malformed', 'none' => 'none yet');
+			echo '<div><strong>Transport key:</strong> ' . htmlspecialchars($kinds[$k['kind']] ?? 'not known') . ', generation ' . $rs_n($k['generation']) . '</div>';
 		}
 		$in = $result_data['inbound'] ?? array();
 		echo '<div class="mt-2"><strong>Mail stored:</strong> ' . $rs_n($in['last_hour'] ?? null) . ' in the last hour, ' . $rs_n($in['last_day'] ?? null)

@@ -31,6 +31,7 @@
  * signature over the ordered hashes of the SEALED bytes before anything is
  * ingested.
  *
+ * @version 1.4.1 - comment: the old-key note is gone with the X25519 keys
  * @version 1.4 - a vault on an old X25519 key is answered with that key, so the sender falls back to SMTP and the
  *                mail waits for the rotation rather than going to a decoy (owner, 2026-10-31)
  * @version 1.3 - a vault on an old X25519 key is answered with its decoy key
@@ -232,12 +233,6 @@ class DirectReceiver {
 			$key_generation = DirectDecoyKeys::DECOY_GENERATION;
 			$is_decoy = true;
 		} elseif ($resolved['vault_public_key'] !== null) {
-			// A vault still on an old 32-byte X25519 key is answered with it too
-			// (owner, 2026-10-31; specs/post_quantum_sealing.md R3): the sender
-			// refuses to seal to it and falls back to SMTP, whose message waits
-			// until its holder rotates (a store that cannot seal rolls back and is
-			// retried) rather than vanishing into a decoy reported as delivered.
-			// The cost: until then, the old key shows the address is real.
 			// An ENCRYPTED mailbox: seal to its vault and defer the gate to that
 			// owner's unlock, the only moment its sealed contact list is readable.
 			$key = (string)$resolved['vault_public_key'];

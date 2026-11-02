@@ -23,6 +23,7 @@
  * The answer comes from what the last status check recorded, not from reaching
  * out to every node when someone opens a page.
  *
+ * @version 2.3 - keys_verdict() takes the two kinds only: no x25519 kind, retired site keys or old epochs
  * @version 2.2 - keys_state() / keys_verdict(): whether every backup key on a node is post-quantum
  * @version 2.1 - "hosts no Joinery site" is ManagedNode::hosts_site_from(), the same test the status
  *                processor applies before asking a node for its key
@@ -116,11 +117,8 @@ class RecoveryKeyFleet {
 	 * JobResultProcessor::parse_backup_keys_tokens()). state:
 	 *   unknown   - the node has not reported the kinds (an older release, or
 	 *               no report since its upgrade)
-	 *   pending   - every key is current, and no backup has run since to look
-	 *               for old offloaded-file epochs
-	 *   attention - an old key, a missing or unreadable one, or epochs only a
-	 *               retired key opens; the summary names each
-	 *   current   - all post-quantum, and the last run found no old epochs
+	 *   attention - a missing, unreadable or invalid key; the summary names each
+	 *   current   - both keys are X-Wing
 	 *
 	 * @return array{state:string, summary:string}
 	 */
@@ -130,37 +128,22 @@ class RecoveryKeyFleet {
 		if (!isset($status['backup_site_key'], $status['backup_recovery_kind'])) {
 			return array('state' => 'unknown', 'summary' => 'Not reported yet: it arrives with the node\'s first status check after it upgrades.');
 		}
-		return self::keys_verdict((string)$status['backup_recovery_kind'], (string)$status['backup_site_key'],
-			(int)($status['backup_site_key_retired'] ?? 0),
-			array_key_exists('backup_old_epochs', $status) ? $status['backup_old_epochs'] : null);
+		return self::keys_verdict((string)$status['backup_recovery_kind'], (string)$status['backup_site_key']);
 	}
 
 	/** keys_state()'s judgement, pure: the kinds in, the state and its sentence out. */
-	public static function keys_verdict(string $recovery, string $site, int $retired, $old_epochs): array {
+	public static function keys_verdict(string $recovery, string $site): array {
 		$issues = array();
-		if ($recovery === 'x25519') {
-			$issues[] = 'its recovery key is an old X25519 key, so no backup runs until it is rotated on the node\'s Backups page';
-		} elseif ($recovery !== 'xwing') {
+		if ($recovery !== 'xwing') {
 			$issues[] = 'it has no usable recovery key';
 		}
-		if ($site === 'x25519') {
-			$issues[] = 'its own backup key is an old X25519 key (host housekeeping replaces it on its next run)';
-		} elseif ($site !== 'xwing') {
+		if ($site !== 'xwing') {
 			$issues[] = 'its own backup key is ' . ($site === 'unreadable' ? 'unreadable to the backup tool' : 'missing');
 		}
-		if ($old_epochs !== null && (int)$old_epochs > 0) {
-			$n = (int)$old_epochs;
-			$issues[] = $n . ' epoch' . ($n === 1 ? '' : 's') . ' of offloaded files open' . ($n === 1 ? 's' : '')
-				. ' only with a retired recovery key';
-		}
-		$kept = $retired > 0 ? ' ' . $retired . ' retired site key' . ($retired === 1 ? '' : 's') . ' kept for older backups.' : '';
 		if ($issues) {
-			return array('state' => 'attention', 'summary' => ucfirst(implode('; ', $issues)) . '.' . $kept);
+			return array('state' => 'attention', 'summary' => ucfirst(implode('; ', $issues)) . '.');
 		}
-		if ($old_epochs === null) {
-			return array('state' => 'pending', 'summary' => 'Recovery key and site key are post-quantum. No backup has run since to re-seal older offloaded files: the next one does.' . $kept);
-		}
-		return array('state' => 'current', 'summary' => 'Recovery key and site key are post-quantum, and every offloaded file opens with them.' . $kept);
+		return array('state' => 'current', 'summary' => 'Recovery key and site key are post-quantum.');
 	}
 
 	/** The short fingerprint every surface shows, matching the Backups page. */

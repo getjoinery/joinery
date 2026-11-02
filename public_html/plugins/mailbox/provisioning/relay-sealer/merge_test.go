@@ -118,8 +118,8 @@ func simpleFragment(slug, domain string) mapFragment {
 	}
 }
 
-// A fixed valid X25519 public key (32 bytes of 0x01, base64url).
-var testPubKeyB64 = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+// A fixed valid X-Wing public key (base64url).
+var testPubKeyB64 = testXWingKey
 
 func TestMergeTwoTenantsIsolatedAndDerived(t *testing.T) {
 	f := newMergeFixture(t)

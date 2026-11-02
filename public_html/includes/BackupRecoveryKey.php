@@ -16,10 +16,11 @@
  * the value, and encrypted backups refuse to run until they have.
  *
  * The key is a 1216-byte X-Wing public key and a 32-byte seed
- * (specs/post_quantum_sealing.md R3). A stored 32-byte X25519 key is an old
- * one: nothing is sealed to it, and every parse says the operator owes a new
+ * (specs/post_quantum_sealing.md R3). Any other stored value is not a valid
  * key.
  *
+ * @version 1.6 - X-Wing only: no x25519 kind, OLD_KEY_MESSAGE, site_retired or old_epochs; the
+ *                report prints RECOVERY_KEY_KIND and BACKUP_SITE_KEY
  * @version 1.5 - key_kind(), keys_report(), keys_report_lines(): every backup key's kind, for the report tool
  * @version 1.4 - X-Wing keys: parsing takes 1216 bytes and names a 32-byte key as one to rotate;
  *                both challenges are v2 seals, each under its own scope (BROWSER_INFO, CLI_INFO)
@@ -101,9 +102,6 @@ class BackupRecoveryKey {
 
 	/** What makes a decoded stored key unusable, or null when it is a 1216-byte key. */
 	private static function key_shape_error($raw): ?string {
-		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-			return self::OLD_KEY_MESSAGE;
-		}
 		if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
 			return self::PUBLIC_KEY_SETTING . ' is not a valid base64 recovery public key.';
 		}
@@ -111,9 +109,8 @@ class BackupRecoveryKey {
 	}
 
 	/**
-	 * The kind of a stored recovery public key: 'xwing' (1216 bytes),
-	 * 'x25519' (an old 32-byte key backups no longer seal to), 'none' (unset)
-	 * or 'invalid'. Pure.
+	 * The kind of a stored recovery public key: 'xwing' (1216 bytes), 'none'
+	 * (unset) or 'invalid'. Pure.
 	 */
 	public static function key_kind($b64): string {
 		$b64 = trim((string)$b64);
@@ -121,7 +118,6 @@ class BackupRecoveryKey {
 		$raw = base64_decode($b64, true);
 		if ($raw === false) { return 'invalid'; }
 		if (strlen($raw) === XWing::PUBLIC_KEY_BYTES) { return 'xwing'; }
-		if (strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) { return 'x25519'; }
 		return 'invalid';
 	}
 
@@ -131,17 +127,11 @@ class BackupRecoveryKey {
 	 * material:
 	 *   recovery_kind  key_kind() of the stored recovery key
 	 *   site_kind      the machine's own key (config/backup_site_key): 'xwing'
-	 *                  (a 32-byte seed), 'x25519' (an old 64-byte keypair the
-	 *                  converger has not yet moved aside), 'none',
-	 *                  'unreadable' or 'invalid'
-	 *   site_retired   how many retired site keys are kept beside it
-	 *   old_epochs     epochs of offloaded files only a retired key opens, as
-	 *                  the last run found them; null when no run has looked
+	 *                  (a 32-byte seed), 'none', 'unreadable' or 'invalid'
 	 *
 	 * @param string|null $site_key_path tests only; the real key otherwise
-	 * @param string|null $base_dir      tests only; the backup directory otherwise
 	 */
-	public static function keys_report(?string $site_key_path = null, ?string $base_dir = null): array {
+	public static function keys_report(?string $site_key_path = null): array {
 		$site_key_path = $site_key_path ?? BackupEnvelope::site_key_path();
 
 		$site_kind = 'none';
@@ -152,30 +142,13 @@ class BackupRecoveryKey {
 			} else {
 				$key = base64_decode(trim($raw), true);
 				$len = $key === false ? -1 : strlen($key);
-				$site_kind = $len === XWing::SEED_BYTES ? 'xwing'
-					: ($len === SODIUM_CRYPTO_BOX_KEYPAIRBYTES ? 'x25519' : 'invalid');
+				$site_kind = $len === XWing::SEED_BYTES ? 'xwing' : 'invalid';
 			}
-		}
-
-		$old_epochs = null;
-		try {
-			$base_dir = $base_dir ?? BackupRunner::output_dir();
-			$looked = false;
-			foreach (BackupProfile::names() as $profile) {
-				if (is_file(BackupObjects::retired_path_for($profile, $base_dir))) { $looked = true; }
-			}
-			if ($looked) {
-				$old_epochs = count(BackupObjects::retired_summary(BackupProfile::names(), $base_dir)['epochs']);
-			}
-		} catch (\Throwable $e) {
-			$old_epochs = null;
 		}
 
 		return array(
 			'recovery_kind' => self::key_kind(self::read_public_key_setting()),
 			'site_kind'     => $site_kind,
-			'site_retired'  => count(BackupEnvelope::retired_site_secrets($site_key_path)),
-			'old_epochs'    => $old_epochs,
 		);
 	}
 
@@ -183,15 +156,9 @@ class BackupRecoveryKey {
 	public static function keys_report_lines(array $r): array {
 		return array(
 			'RECOVERY_KEY_KIND=' . $r['recovery_kind'],
-			'BACKUP_SITE_KEY=' . $r['site_kind'] . ' retired=' . (int)$r['site_retired'],
-			'BACKUP_OLD_EPOCHS=' . ($r['old_epochs'] === null ? 'unknown' : (int)$r['old_epochs']),
+			'BACKUP_SITE_KEY=' . $r['site_kind'],
 		);
 	}
-
-	/** What every surface says about a stored X25519 (v1) recovery key. */
-	const OLD_KEY_MESSAGE = 'The recovery key is an old X25519 key, and backups seal to post-quantum keys only. '
-		. 'Rotate it from the Backups page (Recovery key, Actions, Rotate key); backups already made stay openable '
-		. 'with the key you have.';
 
 	/** True when a public key is set but not yet proven (the verify card should show). */
 	public static function needs_possession_proof() {
@@ -366,11 +333,6 @@ class BackupRecoveryKey {
 				'Paste the recovery public key printed by "escrow_keypair.php generate", or generate one here.');
 		}
 		$raw = base64_decode($b64, true);
-		if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-			throw new BackupRecoveryKeyException(
-				'That is an old X25519 recovery key. Backups seal to post-quantum keys only: generate a new key here, '
-				. 'or with "escrow_keypair.php generate" on a machine with OpenSSL 3.5 or later.');
-		}
 		if ($raw === false || strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
 			throw new BackupRecoveryKeyException(
 				'That is not a recovery public key. Paste the single base64 line that "escrow_keypair.php '

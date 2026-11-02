@@ -25,16 +25,10 @@
  *                        (X-Wing to the 1216-byte public key; AES key =
  *                        HKDF(ss, salt empty, 'joinery-seal:v2:' || scope), scope 'dek')
  *   content blob       : base64( IV[12] || AES-GCM-ciphertext )
- * The v2 seal is the one every runtime writes (specs/post_quantum_sealing.md R2;
- * includes/SealedBox.php sealV2 makes the same bytes). A v1 seal (X25519 ECIES:
- * ephPub[32] || IV || ct, AES key HKDF(shared, 'sealed-vault:dek' || ephPub ||
- * recipientPub), the secret a 48-byte PKCS#8) is only ever OPENED, so a vault
- * still on its old key can be rotated: sealing to a 32-byte key is refused.
- * Which one a blob is follows from the recipient public key handed in beside
- * it (1216 bytes: v2; 32: v1), never from guessing at the blob.
+ * The v2 seal is the only seal (includes/SealedBox.php sealV2 makes the same
+ * bytes). A public key that is not 1216 bytes is refused.
  *
- * Crypto primitives are WebCrypto (AES-256-GCM, HKDF, SHA-256; X25519 only to
- * open a v1 seal) plus two vendored, hash-pinned bundles, the platform's
+ * Crypto primitives are WebCrypto (AES-256-GCM, HKDF, SHA-256) plus two vendored, hash-pinned bundles, the platform's
  * sanctioned deviation from vanilla-JS-only, each loaded on demand:
  * X-Wing (assets/vendor/noble/, WebCrypto has no ML-KEM), loaded with its
  * Subresource Integrity hash; and Argon2id WASM (assets/vendor/argon2/) used
@@ -47,6 +41,8 @@
  * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
  * shared vectors in tests/vault/fixtures/xwing_vector.json and edge_vector.json.
  *
+ * @version 2.2 - v1 retired (v1_key_retirement WP2): no X25519 open, no 48-byte secret, no v1 key box;
+ *   selfCheck opens the edge vector's field with its DEK directly
  * @version 2.1 - recoveryCodeProblem(): a typed recovery code's shape, checked before anything runs
  * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): a vault key is a 32-byte seed and a
  *   1216-byte public key; seals are v2, a 32-byte key is refused; v1 opens only; scoped seals for the
@@ -77,10 +73,8 @@ window.VaultCrypto = (function () {
 	var XWING_PUBLIC_BYTES = 1216;
 	var XWING_CIPHERTEXT_BYTES = 1120;
 	var XWING_SEED_BYTES = 32;
-	var V1_PUBLIC_BYTES = 32;
 	var V2_INFO = 'joinery-seal:v2:';
 	var SCOPE_DEK = 'dek';
-	var V1_KEY_REFUSAL = 'That key is an old X25519 key, which nothing seals to any more. Its holder rotates it to a new key first.';
 
 	// Argon2id parameters (RFC 9106 second recommendation / Bitwarden default).
 	// Stored per-user in uev_kdf_params so raising them later re-derives and
@@ -284,15 +278,11 @@ window.VaultCrypto = (function () {
 
 	// The public key (standard base64, as generateVaultKeypair gives it) of a
 	// vault secret: worked out from the secret itself, so a caller can know its
-	// own public key without taking anyone's word. A 32-byte secret is an X-Wing
-	// seed; a 48-byte one is a v1 X25519 PKCS#8 (a vault not yet rotated).
+	// own public key without taking anyone's word. The secret is the 32-byte
+	// X-Wing seed.
 	async function publicKeyFromSecret(secretBytes) {
-		if (secretBytes.length === XWING_SEED_BYTES) {
-			return b64encode(await xwingPublicKey(secretBytes));
-		}
-		var key = await subtle.importKey('pkcs8', secretBytes, { name: 'X25519' }, true, ['deriveBits']);
-		var jwk = await subtle.exportKey('jwk', key);
-		return b64encode(b64urlDecode(jwk.x));
+		if (secretBytes.length !== XWING_SEED_BYTES) throw new Error('That is not a vault secret.');
+		return b64encode(await xwingPublicKey(secretBytes));
 	}
 
 	// The 1216-byte X-Wing public key of a 32-byte seed.
@@ -365,20 +355,6 @@ window.VaultCrypto = (function () {
 		var seed = randomBytes(XWING_SEED_BYTES);
 		var pub = await xwingPublicKey(seed);
 		return { publicKeyB64: b64encode(pub), secretKeyBytes: seed };
-	}
-
-	// A v1 secret: the 48-byte X25519 PKCS#8 (or the raw 32-byte scalar a
-	// pasted v1 recovery key is), as WebCrypto imports it.
-	var X25519_PKCS8_PREFIX = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20];
-	async function importV1PrivateKey(secretKeyBytes, extractable) {
-		var pkcs8 = secretKeyBytes.length === 32 ? concat(new Uint8Array(X25519_PKCS8_PREFIX), secretKeyBytes) : secretKeyBytes;
-		try {
-			return await subtle.importKey('pkcs8', pkcs8, { name: 'X25519' }, !!extractable, ['deriveBits']);
-		} catch (e) {
-			throw new Error('This browser cannot do X25519, which opening something sealed to an old key needs. Use a current Chrome, Firefox or Safari.');
-		} finally {
-			if (pkcs8 !== secretKeyBytes) pkcs8.fill(0);
-		}
 	}
 
 	// ---- wrap / unwrap the vault secret key under a KEK (the uew blob) ---------
@@ -455,26 +431,21 @@ window.VaultCrypto = (function () {
 	}
 
 	// Seal bytes to a 1216-byte X-Wing public key (standard base64), under
-	// scope 'dek'. A 32-byte key is refused: nothing writes a v1 seal.
+	// scope 'dek'.
 	async function sealToPublicKey(dataBytes, recipientPublicKeyB64) {
 		var recipientBytes = b64decode(recipientPublicKeyB64);
-		if (recipientBytes.length === V1_PUBLIC_BYTES) throw new Error(V1_KEY_REFUSAL);
 		if (recipientBytes.length !== XWING_PUBLIC_BYTES) throw new Error('That is not a public key to seal to.');
 		return b64encode(await sealV2(dataBytes, recipientBytes, SCOPE_DEK));
 	}
 
 	// Open a key seal (scope 'dek': a row DEK, a file key, a handed-over
-	// secret) sealed to `recipientPublicKeyB64` with its secret. The key's
-	// length names the version: 1216 bytes, a v2 seal opened with the 32-byte
-	// seed; 32 bytes, a v1 seal opened with the PKCS#8 (or raw scalar) secret,
-	// kept so an old key's rows can be rotated. A challenge never comes here
-	// (openChallenge), so no caller can name a scope.
+	// secret) sealed to the 1216-byte `recipientPublicKeyB64` with its 32-byte
+	// seed. A challenge never comes here (openChallenge), so no caller can name
+	// a scope.
 	async function openFromSecretKey(sealedBlob, secretKeyBytes, recipientPublicKeyB64) {
-		var raw = b64decode(sealedBlob);
 		var recipientBytes = b64decode(recipientPublicKeyB64);
-		if (recipientBytes.length === XWING_PUBLIC_BYTES) return openV2(raw, secretKeyBytes, SCOPE_DEK);
-		if (recipientBytes.length !== V1_PUBLIC_BYTES) throw new Error('That is not a public key.');
-		return openV1(raw, secretKeyBytes, recipientBytes, 'sealed-vault:dek');
+		if (recipientBytes.length !== XWING_PUBLIC_BYTES) throw new Error('That is not a public key.');
+		return openV2(b64decode(sealedBlob), secretKeyBytes, SCOPE_DEK);
 	}
 
 	// The scopes an operator challenge is sealed under (BackupRecoveryKey::BROWSER_INFO,
@@ -492,34 +463,17 @@ window.VaultCrypto = (function () {
 	// one of CHALLENGE_SCOPES. Resolves the plaintext bytes.
 	async function openChallenge(sealedBlob, seedBytes, recipientPublicKeyB64, scope) {
 		if (CHALLENGE_SCOPES.indexOf(scope) === -1) throw new Error('That is not a challenge this page opens.');
-		if (b64decode(recipientPublicKeyB64).length !== XWING_PUBLIC_BYTES) throw new Error(V1_KEY_REFUSAL);
+		if (b64decode(recipientPublicKeyB64).length !== XWING_PUBLIC_BYTES) throw new Error('That is not a public key.');
 		return openV2(b64decode(sealedBlob), seedBytes, scope);
-	}
-
-	// The v1 browser seal: X25519 ECIES, HKDF info = label || ephPub || recipientPub.
-	async function openV1(raw, secretKeyBytes, recipientBytes, label) {
-		var ephPubBytes = raw.slice(0, 32), iv = raw.slice(32, 44), ct = raw.slice(44);
-		var priv = await importV1PrivateKey(secretKeyBytes, false);
-		var ephPub = await subtle.importKey('raw', ephPubBytes, { name: 'X25519' }, false, []);
-		var shared = new Uint8Array(await subtle.deriveBits({ name: 'X25519', public: ephPub }, priv, 256));
-		var hkdfKey = await subtle.importKey('raw', shared, { name: 'HKDF' }, false, ['deriveKey']);
-		shared.fill(0);
-		var key = await subtle.deriveKey(
-			{ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: concat(utf8(label), ephPubBytes, recipientBytes) },
-			hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
-		);
-		return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ct));
 	}
 
 	// ---- a box the agent finishes opening (a backup's data key, break-glass) ---
 	// The page works out, from a pasted 32-byte recovery key, the one value that
 	// opens this box and nothing else, checks the key is the one the box names
 	// (by fingerprint), and hands back { shared, pub } (both base64) to post.
-	//   v2 box { version: 2, ciphertext }: decapsulate in full and post the
-	//      dek-scope AES key, never the X-Wing shared secret, which would also
-	//      key any other scope's box with the same ciphertext (SealedBox::openV2WithKey).
-	//   v1 box { version: 1, ephemeralPublic }: the X25519 of the key with the
-	//      box's ephemeral key (a backup sealed to an old recovery key).
+	// The box is { version: 2, ciphertext }: decapsulate in full and post the
+	// dek-scope AES key, never the X-Wing shared secret, which would also key
+	// any other scope's box with the same ciphertext (SealedBox::openV2WithKey).
 	async function halfOpenKeyBox(box, secretB64, fingerprint) {
 		var secret;
 		try { secret = b64decode(String(secretB64).replace(/\s+/g, '')); } catch (e) {
@@ -530,34 +484,17 @@ window.VaultCrypto = (function () {
 		}
 		try {
 			var version = Number(box && box.version);
-			if (version !== 1 && version !== 2) throw new Error('This key box names no seal version this page knows.');
-			var v2 = version === 2;
-			var pub;
-			var key = null;
-			if (v2) {
-				pub = await xwingPublicKey(secret);
-			} else {
-				// Extractable only so its public half can be read back.
-				key = await importV1PrivateKey(secret, true);
-				var jwk = await subtle.exportKey('jwk', key);
-				pub = b64urlDecode(jwk.x);
-				jwk.d = '';
-			}
+			if (version !== 2) throw new Error('This key box names no seal version this page knows.');
+			var pub = await xwingPublicKey(secret);
 			var fp = toHex(new Uint8Array(await subtle.digest('SHA-256', pub)));
 			if (fp !== fingerprint) {
 				throw new Error('That recovery key has fingerprint ' + fp.slice(0, 16) + ', and this is sealed to ' +
 					String(fingerprint).slice(0, 16) + '. Check you copied the right entry.');
 			}
-			var shared;
-			if (v2) {
-				var xw = await loadXWing();
-				var ss = new Uint8Array(xw.decapsulate(b64decode(box.ciphertext), secret));
-				shared = await v2Key(ss, SCOPE_DEK);
-				ss.fill(0);
-			} else {
-				var eph = await subtle.importKey('raw', b64decode(box.ephemeralPublic), { name: 'X25519' }, false, []);
-				shared = new Uint8Array(await subtle.deriveBits({ name: 'X25519', public: eph }, key, 256));
-			}
+			var xw = await loadXWing();
+			var ss = new Uint8Array(xw.decapsulate(b64decode(box.ciphertext), secret));
+			var shared = await v2Key(ss, SCOPE_DEK);
+			ss.fill(0);
 			var out = { shared: b64encode(shared), pub: b64encode(pub) };
 			shared.fill(0);
 			return out;
@@ -622,14 +559,12 @@ window.VaultCrypto = (function () {
 		sealedB64: 'z1aicfmL55Dfzx8CxbR27MzZf8JJoTOJKvYTlgR/B0vFQaYjnfcSbhdI/ooEGqW5Swt2GOHSS9gEuozOjtKQeUZBCSgjb8Ao4E275/NnGhs7qguJvJ0Tzcq5NbEB7SoSq9nlSF2/x42nV03Oh8hsjMCHLZjOS2ADVnLJzzHQB9xnbzawUoNJ4/3EhNeAHltkMR1ovEgMWLQa+HNNQhwmhs3Ngvx431fGHavV/bUqg5RByS9u5DMelei6NwYYKQIDWgOpOxGZLQksIZZv7TyWsHRa6ZTNRQdU8Ki2RLHpgHSy/Z2RID/g1aNaxjWP98N/+3SQG6LrZRHz2QZQr4P5i5LRA0m6eCOG0fnCyAJ9rNaG4pTtBKRI7rvr/cuYkpfgZZUZmLlEW0J8wxr3lpXqeJURvn8h1ZKs01CHXggw8BORCekhiwQW4R1sWsqAnAE823F8rvMEB2QVDeYsWIyq2PF01reIv9p+qMKSZYHI8onk1IP+QksgOGcdKCkniiGWoCvQ0A+Hy8qtV9mERDDqgcHcmeSncROF89plr+JWTNqQfihJes1h8WVBG3eOIRRvXUTiGQ12zP8ZfTLgDHcwx01E7d1Ys/mhRlOTglDI0OJPUiWbRLX+A9BAvCeSFl6REvKLLFgRCwzf2rVreY8krX6ivDvKm8YzB3vob2lzVpH0J2dghd4ABYBeURN9+iL2lak1d56Erd1vdTbEqHfza6B8oH5OwbOTnW4ib5Hey7KLaj7JwrfeG1rabfGmgT2zjY3AwzVxoMuAUmWfLB0nUSRbREQkjABOgP1LNHebYfa76TVeoosqu5lfsi6MZDoOrGS2g1U+aVps//ngNfArqfL6WGqT8idCVT1D3YWb9odVD8LMwpeQbsOnAEavEqXA4NmmekD5IIUHMGmH+rw0WgS1cBBBgFx/B3TI6WWNS1XYUdVgLlO03sumT0bfL5wZjMz7AeHbFANHH44r8fuYJ/MjHU+WBK+EoaWKD+hMVbx/je0Sb6JT3JCGKQ6JPAFfiQZh+VuM51hZf6qNTjLj5pYQecg0GIXzCBemwPccw8T4Eh0garUBn3mNSy9a1je6YYEkh5QdKnm6GVxJL/zYjXFoKOCdmnPcURs4QvFh3Z/yheI+wtis1x9u6vvR6yZ7lh1Dt/audQzgpURFT2JAZ5U6K/kGfy2GcNuo4BZ07vEvtLIHid0Lvw8uXAlaGLwrP+6v8YI/klTEg8Xi6UDW1vvF7ChQnPOlLdiTALQW1YrCaNRW3oZ4bDJ30JXVWIb397A3D+bG/EDwmHzEJMEebsFK6gqFsqqwaabtHF/5PfFl/g3EOeqL6q1VPrG7EgdyR9jpmW0eCHNpueFfi9ninr4nF/cPXQwNo1U4dlmJ58tonJEFC3OOpWRely31+RJ5+fdGoJ0Idflo7jQt895Ta6ushvqKMyWInPNJBv5MSpkRaNoqe4x7Bg1Dq95r+zb7MFtnerSnOoqlG3lEY2iELxwKvn2e52q6A3cVBS0AqfnEL0mJXRDf7IENRhwhvHrWVEq4/SWEfUMBb7213p8gy/Msxe2PtdhjiO/FSg==',
 	};
 
-	// The v1 edge vector of tests/vault/fixtures/edge_vector.json: a v1 seal is
-	// still opened (a vault being rotated off its old key), and the field
-	// format is unchanged. Test material only.
+	// The field half of tests/vault/fixtures/edge_vector.json (the v1.edge.
+	// field format, AES-256-GCM under the row DEK); the 32-byte public key is
+	// there to be refused. Test material only.
 	var EDGE_VECTOR = {
-		recipientSecretHex: 'b8e67311ce5fc36fbea57ba23b44b7bd96f3a05386aaa808754e46a470cd4b64',
 		recipientPublicB64: 'YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=',
 		dekHex: 'a915e4d16fe838501138950a7aa00d509abd1416d68c069425cf44e0fab44ea3',
-		sealedDekB64: 'oYPrrXh6/HP7O/wBfmEjulnEr/TB/73xZKOGT1Bib1xN+CQ1a6AGgnOrKRin5mqZICXeL60kdnhYxr/h5FYNKC6F+d1tyW8/49UZifhpB2n13vjmXLhWtVyUd58=',
 		fieldAd: 'acn:42:acn_body',
 		fieldPlaintext: 'Edge vector: the same bytes on both sides. ✓',
 		fieldBlobB64: 'xPz/lc6huSNav/Tp2wox1T2zaBUxtkEVSUojPW+KZjNNwy4RtEMvEDIil5nXGNSR+LCPdKwkVsFTCBMNJ7rWIzGrFZWOrPe0sYM=',
@@ -651,9 +586,9 @@ window.VaultCrypto = (function () {
 	}
 
 	// Resolves true when this engine opens both vectors (the v2 seal, refusing
-	// it under another scope; the v1 DEK and its field, the field refusing
-	// another row's AD), a fresh v2 seal round-trips, and a 32-byte key is
-	// refused for sealing; false otherwise.
+	// it under another scope; the edge field, refusing another row's AD), a
+	// fresh v2 seal round-trips, and a 32-byte key is refused for sealing and
+	// opening; false otherwise.
 	async function selfCheck() {
 		try {
 			var w = V2_VECTOR;
@@ -665,13 +600,11 @@ window.VaultCrypto = (function () {
 			if (!await refuses(openChallenge(w.sealedB64, seed, b64encode(pub), 'dek'))) return false;
 
 			var v = EDGE_VECTOR;
-			var pkcs8 = concat(new Uint8Array(X25519_PKCS8_PREFIX), fromHex(v.recipientSecretHex));
-			var dek = await openFromSecretKey(v.sealedDekB64, pkcs8, v.recipientPublicB64);
-			if (!sameBytes(dek, fromHex(v.dekHex))) return false;
-			var dekKey = await importDek(dek);
+			var dekKey = await importDek(fromHex(v.dekHex));
 			if (await decrypt(v.fieldBlobB64, dekKey, v.fieldAd) !== v.fieldPlaintext) return false;
 			if (!await refuses(decrypt(v.fieldBlobB64, dekKey, v.fieldAd + 'x'))) return false;
 			if (!await refuses(sealToPublicKey(randomBytes(32), v.recipientPublicB64))) return false;
+			if (!await refuses(openFromSecretKey(w.sealedB64, seed, v.recipientPublicB64))) return false;
 
 			var pair = await generateVaultKeypair();
 			if (pair.secretKeyBytes.length !== XWING_SEED_BYTES || b64decode(pair.publicKeyB64).length !== XWING_PUBLIC_BYTES) return false;

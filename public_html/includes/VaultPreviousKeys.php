@@ -27,8 +27,7 @@
  * suspected compromise of the current window does not cut those leftovers off.
  * No retired unlocker comes back: a lost recovery code stays dead. A row read
  * through a previous key is re-sealed to the current one on the spot
- * (SystemBase::openWithPreviousKeys), so a leftover on an old X25519 key does
- * not stay exposed.
+ * (SystemBase::openWithPreviousKeys).
  *
  * Content left on a retired key does not wait to be read: VaultChainSweep moves
  * it to the current key in the owner's window and then marks the entry
@@ -38,6 +37,7 @@
  * runs out of time records where it stopped (`sweep_at`) and the next window
  * goes on from there.
  *
+ * @version 1.2.1 - comment: no X25519 note
  * @version 1.2 - `swept` holds the pass that swept the entry; true reads as pass 1
  * @version 1.1 - entries carry `swept` and the sweep's place, `sweep_at` (VaultChainSweep); recordSweep()
  * @version 1.0

@@ -32,6 +32,7 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * will become) while every sealed DEK is re-sealed to it, and the commit makes
  * it current.
  *
+ * @version 1.6 - keyIsOld(), oldKeyScopesFor() and oldKeyCounts() removed: every vault key is X-Wing
  * @version 1.5 - uev_previous_keys: the account vault's retired keys, each locked under the current key
  *               (VaultPreviousKeys), so content still sealed to one opens while the vault is open
  * @version 1.4 - keyIsOld(), oldKeyScopesFor() and oldKeyCounts(): a vault still on an old X25519 key, which its owner rotates
@@ -94,48 +95,6 @@ class UserEncryptionVault extends SystemBase {
 	);
 
 	/** The one vault row for a (user, scope), or null if not set up yet. */
-	/**
-	 * Is this vault still on an old 32-byte X25519 key (44 characters of
-	 * base64; an X-Wing key is 1624)? Nothing seals to one any more and it does
-	 * not open until its owner rotates it (specs/post_quantum_sealing.md R7).
-	 * The root counts too: nothing seals to its key, but its public key gives
-	 * up its secret to a quantum attacker, and that secret derives every
-	 * content vault's key. It moves with the account vault's rotation.
-	 */
-	public function keyIsOld(): bool {
-		$key = trim((string)$this->get('uev_public_key'));
-		return $key !== '' && strlen($key) < 100;
-	}
-
-	/**
-	 * The scopes of $user_id's vaults still on an old key, each with its label:
-	 * [scope => label]. What the Security page asks its owner to rotate.
-	 */
-	public static function oldKeyScopesFor(int $user_id): array {
-		$out = array();
-		foreach (new MultiUserEncryptionVault(array('user_id' => $user_id)) as $vault) {
-			if ($vault->keyIsOld()) {
-				$scope = (string)$vault->get('uev_scope');
-				$out[$scope] = $scope === self::SCOPE_USER ? 'Encrypted Vault'
-					: ($scope === VaultScopes::ROOT_SCOPE ? 'your vault\'s root key (it moves with the Encrypted Vault)' : VaultScopes::labelFor($scope));
-			}
-		}
-		return $out;
-	}
-
-	/**
-	 * Every vault on this site still on an old key, counted by scope
-	 * (keyIsOld()): [scope => count], largest first. Read by Recovery
-	 * Readiness, which says what each waits on.
-	 */
-	public static function oldKeyCounts(): array {
-		$db = DbConnector::get_instance()->get_db_link();
-		$rows = $db->query("SELECT uev_scope, count(*) FROM uev_user_encryption_vaults
-			WHERE length(trim(coalesce(uev_public_key, ''))) BETWEEN 1 AND 99
-			GROUP BY uev_scope ORDER BY count(*) DESC, uev_scope")->fetchAll(PDO::FETCH_KEY_PAIR);
-		return array_map('intval', $rows ?: array());
-	}
-
 	public static function loadForUser(int $user_id, string $scope = self::SCOPE_USER): ?UserEncryptionVault {
 		$multi = new MultiUserEncryptionVault(['user_id' => $user_id, 'scope' => $scope]);
 		$multi->load();

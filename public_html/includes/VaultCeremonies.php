@@ -30,6 +30,7 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.11 - X-Wing only: an interrupted rotation always completes into its own generation; no old-root check
  * @version 1.10 - withDrainLock(): the chain sweep (VaultChainSweep) takes the member's drain lock, so it never runs
  *               beside a rotation's re-seal
  * @version 1.9 - keyFile(): the key file built on demand for the security page's download
@@ -367,35 +368,10 @@ class VaultCeremonies {
 			throw new VaultCeremonyException('Could not verify your current vault key with this passkey.');
 		}
 
-		// An interrupted rotation whose CURRENT generation is still on an old
-		// X25519 key (it stopped before the X-Wing upgrade) cannot be completed
-		// into that generation: nothing seals to an old key any more. It is
-		// moved to a fresh generation instead, both old generations drained into
-		// it (specs/post_quantum_sealing.md R7, reviewer2 WP7 B3).
-		$also_drain = null;
+		// An interrupted rotation is completed into the generation it made.
 		if ($old_generation < $current_generation) {
-			if (!$vault->keyIsOld()) {
-				return $this->completePendingRotation($user, $vault, $live_wrappings, $old_key,
-					$old_generation, $current_generation, $passkey_credential_id, $kek, $passphrase_kek, $open_window);
-			}
-			$current_wrapping = null;
-			foreach ($live_wrappings as $wrapping) {
-				if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_PASSKEY
-						&& (int)$wrapping->get('uew_pkc_passkey_credential_id') === $passkey_credential_id
-						&& (int)$wrapping->get('uew_key_generation') === $current_generation) {
-					$current_wrapping = $wrapping;
-				}
-			}
-			if ($current_wrapping === null) {
-				throw new VaultCeremonyException('This passkey does not open your vault\'s newest key, which a rotation that '
-					. 'stopped part way left behind. Rotate with the passkey you used for that rotation.');
-			}
-			try {
-				$also_drain = array('key' => VaultUnlock::openKey((int)$user->key, $current_wrapping->unlocker($kek), [],
-					UserEncryptionVault::SCOPE_USER)['key'], 'generation' => $current_generation);
-			} catch (Exception $e) {
-				throw new VaultCeremonyException('Could not verify your current vault key with this passkey.');
-			}
+			return $this->completePendingRotation($user, $vault, $live_wrappings, $old_key,
+				$old_generation, $current_generation, $passkey_credential_id, $kek, $passphrase_kek, $open_window);
 		}
 
 		// --- Normal mode: mint a new generation ---
@@ -457,13 +433,9 @@ class VaultCeremonies {
 			$vault->set('uev_previous_keys', $locked_row->fetchColumn());
 
 			$retiring = array($old_generation => $authorizing_wrapping->unlocker($kek));
-			if ($also_drain !== null) {
-				$retiring[$also_drain['generation']] = $current_wrapping->unlocker($kek);
-			}
-			// The chain is sealed to the vault's CURRENT key: the authorizing one,
-			// or in the double-drain case the stopped rotation's newer key.
+			// The chain is sealed to the vault's current key, the authorizing one.
 			$vault->set('uev_previous_keys', VaultPreviousKeys::forNewKey($vault,
-				$also_drain !== null ? $also_drain['key'] : $old_key, $retiring, $new_key->publicKey()));
+				$old_key, $retiring, $new_key->publicKey()));
 
 			$vault->set('uev_public_key', $new_key->publicKey());
 			$vault->set('uev_salt', $salt);
@@ -473,16 +445,6 @@ class VaultCeremonies {
 				$vault->save();
 			});
 
-			// The root's key moves with the account's when the browser sends it,
-			// and must when the root is still on an old X25519 key: its public
-			// key gives up its secret to a quantum attacker, and that secret
-			// derives every content vault's key (specs/post_quantum_sealing.md R7).
-			if (!empty($root_unlockers['key'])) {
-				VaultClientCustody::replaceRootKey((int)$user->key, (array)$root_unlockers['key']);
-			} elseif (VaultClientCustody::rootKeyIsOld((int)$user->key)) {
-				throw new VaultClientCustodyException('Your vault\'s root key has to move to a new key with this rotation, '
-					. 'and this page did not send it. Reload the page and rotate again.');
-			}
 			$this->replaceRootTwins($user, $code_set, $root_unlockers, $passphrase_kek !== '');
 
 			$db->commit();
@@ -509,9 +471,6 @@ class VaultCeremonies {
 
 		$new_public = $new_key->publicKey();
 		$drains = array(array($old_key, $old_generation));
-		if ($also_drain !== null) {
-			$drains[] = array($also_drain['key'], $also_drain['generation']);
-		}
 		$in_background = $this->drainAfterResponse($user, function () use ($user, $live_wrappings, $drains, $new_public, $new_generation) {
 			foreach ($drains as list($key, $generation)) {
 				$this->drainAndRetire($user, $live_wrappings, $key, $generation, $new_public, $new_generation);
@@ -1135,12 +1094,7 @@ class VaultCeremonies {
 			throw new VaultCeremonyException('Confirm with your passkey, passphrase or a recovery code to continue.');
 		}
 
-		// An enrolment needs the opened key and the new wrappings, not a window.
-		// On a vault still on an old X25519 key it gets none: that vault does not
-		// open until its owner rotates it (VaultUnlock::arm()).
-		if ($probe['key']->version() !== SealedBox::V1) {
-			VaultUnlock::arm((int)$user->key, $probe['key'], UserEncryptionVault::SCOPE_USER, null, $via);
-		}
+		VaultUnlock::arm((int)$user->key, $probe['key'], UserEncryptionVault::SCOPE_USER, null, $via);
 		return ['key' => $probe['key'], 'wrappings' => $probe['wrappings']];
 	}
 

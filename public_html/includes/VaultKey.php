@@ -20,10 +20,11 @@
  * itself under any KEK would be a key-export door for anything resident in
  * the pool during a window.
  *
+ * @version 1.3 - version() is always 2: X25519 keys are gone
  * @version 1.2 - version(): 1 (X25519, opened only until the holder rotates)
  *   or 2 (X-Wing); unseal() opens raw boxes of the key's own version
  * @version 1.1 - unsealEdge(): the browser-format open, for a DEK a browser
- *   sealed to this key (vault-crypto.js, `v1.edgeseal.`)
+ *   sealed to this key (vault-crypto.js)
  * @version 1.0
  */
 interface VaultKey {
@@ -40,20 +41,18 @@ interface VaultKey {
 	public function publicKey(): string;
 
 	/**
-	 * SealedBox::V1 (an X25519 key, which nothing seals to any more) or
-	 * SealedBox::V2 (X-Wing). A raw box carries no frame, so this is the version
-	 * unseal() opens; a caller holding a framed blob checks the two agree
-	 * (specs/post_quantum_sealing.md R2).
+	 * SealedBox::V2 (X-Wing): the version unseal() opens. A caller holding a
+	 * framed blob checks the frame agrees.
 	 */
 	public function version(): int;
 
 	/**
-	 * Open raw sealed boxes (SealedBox::sealBinary()'s form for a v2 key, a
-	 * crypto_box_seal for a v1 key) sealed to this key's public half — the
+	 * Open raw sealed boxes (SealedBox::sealBinary()'s form) sealed to this
+	 * key's public half — the
 	 * daemon's `unwrap` operation. Always a list, usually of one: a page of
 	 * rows or a fold batch is one call.
 	 *
-	 * @param string[] $sealed raw ciphertexts (any `v1.seal.`/`v2.seal.` framing already
+	 * @param string[] $sealed raw ciphertexts (any `v2.seal.` framing already
 	 *   stripped — see SealedBox::unframeSeal()), keyed however the caller likes
 	 * @return string[] the plaintexts under the same keys, in the same order
 	 * @throws RuntimeException when any one of them does not open (tampered,
@@ -63,11 +62,11 @@ interface VaultKey {
 
 	/**
 	 * Open browser-format ciphertexts sealed to this key's public half — the
-	 * v2 seal, or vault-crypto.js's v1 X25519 ECIES (SealedBox openEdge). Same contract
+	 * v2 seal (SealedBox openEdge). Same contract
 	 * as unseal(): a list in, the plaintexts under the same keys out, nothing
 	 * returned partially.
 	 *
-	 * @param string[] $sealed base64 blobs, the `v1.edgeseal.{scope}.`/`v2.edgeseal.{scope}.` framing
+	 * @param string[] $sealed base64 blobs, the `v2.edgeseal.{scope}.` framing
 	 *   already stripped (VaultCrypto does that)
 	 * @return string[]
 	 * @throws RuntimeException when any one of them does not open

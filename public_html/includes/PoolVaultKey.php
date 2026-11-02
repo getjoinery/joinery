@@ -18,13 +18,11 @@
  * become when the window store is APCu rather than a process — VaultUnlock is
  * their only caller.
  *
- * A key is v1 (an X25519 secret, opened only, for the rotation off it) or v2
- * (an X-Wing seed; every key minted). Both are 32 bytes, so the version cannot
- * be read off the secret: it travels with it. The form wrapped under an
- * unlocker and stored in the window slot is `v2.` + base64url(seed) for a v2
- * key and the bare base64url secret for a v1 key, which is every wrapping and
- * slot written before v2 existed (specs/post_quantum_sealing.md R2).
+ * The key is an X-Wing seed. The form wrapped under an unlocker and stored in
+ * the window slot is `v2.` + base64url(seed); anything else (an untagged
+ * X25519 secret included) is refused as malformed.
  *
+ * @version 1.3 - X-Wing only: the untagged (X25519) form is refused; wrappedForm() takes no version
  * @version 1.2 - v2 keys: open() mints an X-Wing seed; the wrapped and slot
  *   forms carry the version; version(); unseal() opens with it
  * @version 1.1 - unsealEdge() through SealedBox::openEdge()
@@ -38,13 +36,10 @@ final class PoolVaultKey implements VaultKey {
 	/** The prefix that marks a v2 secret in its wrapped and slot forms. */
 	const V2_TAG = 'v2.';
 
-	/** @var string base64url secret: an X25519 key (v1) or an X-Wing seed (v2) */
+	/** @var string base64url X-Wing seed */
 	private $secret;
 
-	/** @var int SealedBox::V1 or SealedBox::V2 */
-	private $version;
-
-	/** @var string base64url public key, derived from the secret for its version */
+	/** @var string base64url public key, derived from the seed */
 	private $public;
 
 	/** @var string hex digest, see id() */
@@ -52,41 +47,36 @@ final class PoolVaultKey implements VaultKey {
 
 	/** @param string $stored a secret in its wrapped/slot form (see the class comment) */
 	private function __construct(string $stored) {
-		if (strncmp($stored, self::V2_TAG, strlen(self::V2_TAG)) === 0) {
-			$version = SealedBox::V2;
-			$secret_b64 = substr($stored, strlen(self::V2_TAG));
-		} else {
-			$version = SealedBox::V1;
-			$secret_b64 = $stored;
+		if (strncmp($stored, self::V2_TAG, strlen(self::V2_TAG)) !== 0) {
+			throw new RuntimeException('PoolVaultKey: malformed secret key.');
 		}
+		$secret_b64 = substr($stored, strlen(self::V2_TAG));
 		$raw = SealedBox::b64url_decode($secret_b64);
 		if ($raw === false || strlen($raw) !== 32) {
 			throw new RuntimeException('PoolVaultKey: malformed secret key.');
 		}
 		$this->secret = $secret_b64;
-		$this->version = $version;
-		$this->public = SealedBox::publicKeyFor($secret_b64, $version);
+		$this->public = SealedBox::publicKeyFor($secret_b64);
 		// One-way, and salted with a fixed label so the digest is never a bare
 		// hash of the key material. Deterministic on purpose: every fetch of
 		// the same window yields the same id, which is what lets the DEK memo
 		// hit across fetches.
-		$this->id = hash('sha256', 'joinery:vault-key:' . ($version === SealedBox::V2 ? 'v2:' : '') . $raw);
+		$this->id = hash('sha256', 'joinery:vault-key:v2:' . $raw);
 		sodium_memzero($raw);
 	}
 
-	/** The secret in its wrapped/slot form: tagged when v2. */
+	/** The secret in its wrapped/slot form. */
 	private function stored(): string {
-		return self::wrappedForm($this->secret, $this->version);
+		return self::wrappedForm($this->secret);
 	}
 
 	/**
-	 * A base64url secret of a known version in the form a wrapping holds:
-	 * `v2.` + the seed for v2, the bare secret for v1. For code that builds a
-	 * wrapping around a secret it minted itself (a test fixture); open() makes
-	 * every wrapping the platform stores.
+	 * A base64url seed in the form a wrapping holds: `v2.` + the seed. For
+	 * code that builds a wrapping around a seed it minted itself (a test
+	 * fixture); open() makes every wrapping the platform stores.
 	 */
-	public static function wrappedForm(string $secret_b64, int $version): string {
-		return $version === SealedBox::V2 ? self::V2_TAG . $secret_b64 : $secret_b64;
+	public static function wrappedForm(string $secret_b64): string {
+		return self::V2_TAG . $secret_b64;
 	}
 
 	/**
@@ -95,8 +85,7 @@ final class PoolVaultKey implements VaultKey {
 	 * derived, and UserEncryptionWrapping::adFor() of that row) the secret is
 	 * unwrapped; with null a fresh keypair is minted. Either way the secret is
 	 * then wrapped under every entry of $wrap_under (`kek`, `ad`) and those
-	 * wrappings are handed back beside the key. A minted key is v2; an
-	 * unwrapped one is whatever version its wrapping says. This is the ONLY place a
+	 * wrappings are handed back beside the key. This is the ONLY place a
 	 * wrapping is produced (spec B1): the caller presented a real unlocker, or
 	 * is first-time setup minting the key.
 	 *
@@ -133,14 +122,14 @@ final class PoolVaultKey implements VaultKey {
 	}
 
 	public function version(): int {
-		return $this->version;
+		return SealedBox::V2;
 	}
 
 	public function unseal(array $sealed): array {
 		$box = new SealedBox();
 		$out = array();
 		foreach ($sealed as $slot => $ciphertext) {
-			$out[$slot] = $box->openBinary((string)$ciphertext, $this->secret, $this->version);
+			$out[$slot] = $box->openBinary((string)$ciphertext, $this->secret);
 		}
 		return $out;
 	}
@@ -172,7 +161,7 @@ final class PoolVaultKey implements VaultKey {
 
 	/** A dump shows the id, never the bytes. */
 	public function __debugInfo(): array {
-		return array('id' => $this->id, 'version' => $this->version, 'public' => $this->public);
+		return array('id' => $this->id, 'version' => SealedBox::V2, 'public' => $this->public);
 	}
 
 	/** A key is never a value to persist or hand across a boundary. */

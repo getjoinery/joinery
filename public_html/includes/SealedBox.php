@@ -14,9 +14,8 @@
  * ML-KEM through OpenSSL 3.5 (MlKem768, pqReady()), and the constructor throws
  * when sodium is absent rather than silently degrading. Every output is a
  * self-describing versioned blob (`v2.seal.`, `v1.aead.`, ...) so a value
- * always carries the algorithm that produced it. Seals are v2 only; the v1
- * (X25519) openers stay so a holder's rotation can read what the old key
- * holds. Fails closed throughout: malformed input, tampered ciphertext, or an
+ * always carries the algorithm that produced it. Seals are v2 (X-Wing) only,
+ * and a 32-byte X25519 public key is refused as malformed. Fails closed throughout: malformed input, tampered ciphertext, or an
  * AD mismatch all raise RuntimeException; nothing is ever returned
  * half-verified.
  *
@@ -32,6 +31,8 @@
  * primitives like the rest; the `v2.edgeseal.` / `v1.edge.` framing belongs to
  * the row layer (VaultCrypto).
  *
+ * @version 2.4 - X-Wing only: the X25519 openers and V1 are gone; a 32-byte public key is
+ *                malformed; openBinary() and publicKeyFor() take no version
  * @version 2.3 - PASSPHRASE_MIN_CHARS says truthfully where it is enforced (the browser)
  * @version 2.2 - header describes the X-Wing keypair and v2 seals
  * @version 2.1 - RECOVERY_CODE_PATTERN / isRecoveryCodeShaped(): what a typed recovery code looks like
@@ -138,28 +139,18 @@ class SealedBox {
 	}
 
 	// ------------------------------------------------------------------
-	// Keys and the two seal versions (specs/post_quantum_sealing.md R2).
+	// Keys and seals.
 	//
-	// v2 (every seal written): X-Wing to a 1216-byte key, then AES-256-GCM.
+	// v2: X-Wing to a 1216-byte key, then AES-256-GCM.
 	//   raw = ct[1120] ‖ iv[12] ‖ AES-256-GCM(plaintext) ‖ tag[16]
 	//   key = HKDF-SHA256(ss, salt = '', info = 'joinery-seal:v2:' ‖ scope)
-	// v1 (opened only, for the rotation off it): libsodium crypto_box_seal to a
-	//   32-byte X25519 key, and the browser's X25519 ECIES (sealEdge's v1 half).
-	//
-	// A public key names its version by its length. A secret cannot: a v1
-	// X25519 secret and a v2 seed are both 32 bytes, so an opener learns the
-	// version from the blob's frame, the public key it is handed, or its caller.
 	// ------------------------------------------------------------------
 
-	const V1 = 1;
 	const V2 = 2;
 
 	const V2_INFO      = 'joinery-seal:v2:';
 	const SCOPE_DEK    = 'dek';
 	const V2_OVERHEAD  = 1148;   // XWing::CIPHERTEXT_BYTES + IV + tag
-
-	/** What every sealer says when handed a v1 (32-byte X25519) public key. */
-	const V1_KEY_REFUSAL = 'This is an old X25519 (v1) key, and nothing is sealed to one any more: its holder owes a key rotation to a post-quantum key.';
 
 	/**
 	 * Generate a fresh keypair: a 32-byte X-Wing seed and its 1216-byte public
@@ -181,31 +172,25 @@ class SealedBox {
 	}
 
 	/**
-	 * The public key a secret generates, base64url, for the version the caller
-	 * knows it to be (a secret cannot say). v1: the X25519 base-point multiple;
-	 * v2: X-Wing key generation from the seed.
+	 * The public key a seed generates, base64url: X-Wing key generation.
 	 */
-	public static function publicKeyFor(string $secret_key, int $version): string {
+	public static function publicKeyFor(string $secret_key): string {
 		$raw = self::b64url_decode($secret_key);
 		if ($raw === false || strlen($raw) !== 32) {
 			throw new RuntimeException('SealedBox: malformed secret key.');
 		}
-		$public = $version === self::V2 ? (new XWing())->publicKey($raw) : sodium_crypto_scalarmult_base($raw);
+		$public = (new XWing())->publicKey($raw);
 		sodium_memzero($raw);
 		return self::b64url($public);
 	}
 
 	/**
-	 * The version a raw public key names: 1 for a 32-byte X25519 key, 2 for a
-	 * 1216-byte X-Wing key. Throws on anything else.
+	 * The version a raw public key names: 2 for a 1216-byte X-Wing key. Throws
+	 * on anything else, a 32-byte X25519 key included.
 	 */
 	public static function publicKeyVersion(string $public_raw): int {
-		$len = strlen($public_raw);
-		if ($len === XWing::PUBLIC_KEY_BYTES) {
+		if (strlen($public_raw) === XWing::PUBLIC_KEY_BYTES) {
 			return self::V2;
-		}
-		if ($len === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-			return self::V1;
 		}
 		throw new RuntimeException('SealedBox: malformed public key.');
 	}
@@ -214,7 +199,7 @@ class SealedBox {
 	 * Seal bytes to a raw 1216-byte X-Wing key: the v2 raw form. $scope is the
 	 * HKDF label that separates one use from another ('dek' for every key
 	 * seal; a challenge passes its own), so a box made for one scope never
-	 * opens as another. A 32-byte key is refused with V1_KEY_REFUSAL.
+	 * opens as another. Any key but a 1216-byte one is refused as malformed.
 	 */
 	public static function sealV2(string $bytes, string $public_raw, string $scope = self::SCOPE_DEK): string {
 		return self::sealV2With($bytes, $public_raw, $scope, null, random_bytes(self::EDGE_IV_BYTES));
@@ -272,9 +257,7 @@ class SealedBox {
 
 	/** sealV2() with its randomness supplied — private so only the test vector can fix it. */
 	private static function sealV2With(string $bytes, string $public_raw, string $scope, ?string $eseed, string $iv): string {
-		if (self::publicKeyVersion($public_raw) !== self::V2) {
-			throw new RuntimeException(self::V1_KEY_REFUSAL);
-		}
+		self::publicKeyVersion($public_raw);
 		[$ct, $ss] = (new XWing())->encapsulate($public_raw, $eseed);
 		$aes = self::v2Kdf($ss, $scope);
 		sodium_memzero($ss);
@@ -293,44 +276,43 @@ class SealedBox {
 	/**
 	 * Seal arbitrary bytes (a per-item DEK) to a public key: `v2.seal.` +
 	 * base64url of the v2 raw form. Anonymous — anyone holding the public key
-	 * can seal, only the secret key can open. A v1 key is refused.
+	 * can seal, only the secret key can open.
 	 */
 	public function sealDek(string $bytes, string $public_key): string {
 		return 'v2.seal.' . self::b64url($this->sealBinary($bytes, $public_key));
 	}
 
 	/**
-	 * Open a `v1.seal.` or `v2.seal.` blob. The frame names the version, so
-	 * the secret is read as an X25519 key or an X-Wing seed accordingly.
-	 * Throws on tamper or a wrong secret key.
+	 * Open a `v2.seal.` blob with the X-Wing seed. Throws on tamper or a wrong
+	 * secret key.
 	 */
 	public function openDek(string $sealed, string $secret_key): string {
-		[$version, $raw] = self::unframeSeal($sealed);
-		return $this->openBinary($raw, $secret_key, $version);
+		[, $raw] = self::unframeSeal($sealed);
+		return $this->openBinary($raw, $secret_key);
 	}
 
 	/**
 	 * Split a sealDek() blob into its version and the raw sealed bytes — the
 	 * form a VaultKey::unseal() takes. Throws on anything that is not a
-	 * well-formed `v1.seal.` or `v2.seal.` blob; nothing is decrypted here.
+	 * well-formed `v2.seal.` blob; nothing is decrypted here.
 	 *
 	 * @return array{0:int,1:string} [version, raw bytes]
 	 */
 	public static function unframeSeal(string $sealed): array {
 		$parts = explode('.', $sealed);
-		if (count($parts) !== 3 || ($parts[0] !== 'v1' && $parts[0] !== 'v2') || $parts[1] !== 'seal') {
+		if (count($parts) !== 3 || $parts[0] !== 'v2' || $parts[1] !== 'seal') {
 			throw new RuntimeException('SealedBox: malformed sealed blob.');
 		}
 		$ciphertext = self::b64url_decode($parts[2]);
 		if ($ciphertext === false) {
 			throw new RuntimeException('SealedBox: malformed sealed blob encoding.');
 		}
-		return [$parts[0] === 'v2' ? self::V2 : self::V1, $ciphertext];
+		return [self::V2, $ciphertext];
 	}
 
 	/**
 	 * Seal BULK bytes to a public key, RAW: the v2 raw form with no `v2.seal.`
-	 * prefix and no base64url. A v1 key is refused.
+	 * prefix and no base64url.
 	 *
 	 * sealDek's text wrapping is right for a ~32-byte DEK travelling in a text
 	 * column. For a multi-megabyte payload it is dead weight: base64 inflates the
@@ -347,35 +329,19 @@ class SealedBox {
 	}
 
 	/**
-	 * Open raw sealed bytes with a secret of the version the caller names (raw
-	 * bytes carry no frame). v1: a crypto_box_seal, the public half derived from
-	 * the secret; v2: sealBinary()'s form under the `dek` scope. Throws on tamper
-	 * or a wrong secret key — including a box of the other version.
+	 * Open sealBinary()'s raw form (the `dek` scope) with the X-Wing seed.
+	 * Throws on tamper or a wrong secret key.
 	 */
-	public function openBinary(string $sealed, string $secret_key, int $version): string {
+	public function openBinary(string $sealed, string $secret_key): string {
 		$secret_raw = self::b64url_decode($secret_key);
 		if ($secret_raw === false || strlen($secret_raw) !== 32) {
 			throw new RuntimeException('SealedBox: malformed secret key.');
 		}
-		if ($version === self::V2) {
-			try {
-				return self::openV2($sealed, $secret_raw);
-			} finally {
-				sodium_memzero($secret_raw);
-			}
+		try {
+			return self::openV2($sealed, $secret_raw);
+		} finally {
+			sodium_memzero($secret_raw);
 		}
-		if ($version !== self::V1) {
-			throw new RuntimeException('SealedBox: unknown seal version ' . $version . '.');
-		}
-		$public_raw = sodium_crypto_box_publickey_from_secretkey($secret_raw);
-		$keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret_raw, $public_raw);
-		sodium_memzero($secret_raw);
-		$plain = sodium_crypto_box_seal_open($sealed, $keypair);
-		sodium_memzero($keypair);
-		if ($plain === false) {
-			throw new RuntimeException('SealedBox: unseal failed (tampered, wrong keypair, or a v2 box handed a v1 key).');
-		}
-		return $plain;
 	}
 
 	/**
@@ -418,10 +384,7 @@ class SealedBox {
 	// ------------------------------------------------------------------
 	// The browser format — byte-compatible with assets/js/vault-crypto.js.
 	//
-	// sealed DEK : base64 of the v2 raw form above, to a 1216-byte key. (v1, opened
-	//              only: base64( ephPub[32] ‖ IV[12] ‖ AES-256-GCM(ct ‖ tag[16]) ),
-	//              the AES key = HKDF-SHA256(X25519(eph, recipient), salt = empty,
-	//              info = 'sealed-vault:dek' ‖ ephPub ‖ recipientPub).)
+	// sealed DEK : base64 of the v2 raw form above, to a 1216-byte key.
 	// field      : base64( IV[12] ‖ AES-256-GCM(ct ‖ tag[16]) ), AD = the caller's
 	//
 	// WebCrypto appends the tag to the ciphertext; OpenSSL hands it back apart,
@@ -429,26 +392,23 @@ class SealedBox {
 	// base64 alphabet: a browser stores standard base64, a server vault base64url.
 	// ------------------------------------------------------------------
 
-	const EDGE_KDF_LABEL = 'sealed-vault:dek';
 	const EDGE_IV_BYTES  = 12;
 	const EDGE_TAG_BYTES = 16;
 
-	/** Seal bytes (a DEK) to a 1216-byte public key, standard base64 of the v2 raw form. A v1 key is refused. */
+	/** Seal bytes (a DEK) to a 1216-byte public key, standard base64 of the v2 raw form. */
 	public function sealEdge(string $bytes, string $recipient_pub_b64): string {
 		return base64_encode(self::sealV2($bytes, self::edgePublicKey($recipient_pub_b64)));
 	}
 
 	/**
 	 * Open a sealEdge() blob (or a vault-crypto.js sealToPublicKey() one) with
-	 * the recipient's secret. The recipient's public key names the version (32
-	 * bytes v1, 1216 bytes v2); it is DERIVED from the secret for that version
+	 * the recipient's seed. The recipient's public key is DERIVED from the seed
 	 * and checked against the one the caller names, so a mismatched pair is
 	 * refused rather than silently failing the tag.
 	 */
 	public function openEdge(string $blob_b64, string $secret_b64url, string $recipient_pub_b64): string {
 		$recipient_raw = self::edgePublicKey($recipient_pub_b64);
-		$version = self::publicKeyVersion($recipient_raw);
-		$derived = self::b64url_decode(self::publicKeyFor($secret_b64url, $version));
+		$derived = self::b64url_decode(self::publicKeyFor($secret_b64url));
 		if (!hash_equals($derived, $recipient_raw)) {
 			throw new RuntimeException('SealedBox: the public key named is not this secret key\'s.');
 		}
@@ -457,27 +417,11 @@ class SealedBox {
 			throw new RuntimeException('SealedBox: malformed edge-sealed blob.');
 		}
 		$secret_raw = self::b64url_decode($secret_b64url);
-		if ($version === self::V2) {
-			try {
-				return self::openV2($raw, $secret_raw);
-			} finally {
-				sodium_memzero($secret_raw);
-			}
+		try {
+			return self::openV2($raw, $secret_raw);
+		} finally {
+			sodium_memzero($secret_raw);
 		}
-		if (strlen($raw) < 32 + self::EDGE_IV_BYTES + self::EDGE_TAG_BYTES) {
-			throw new RuntimeException('SealedBox: malformed edge-sealed blob.');
-		}
-		$eph_pub = substr($raw, 0, 32);
-		$iv = substr($raw, 32, self::EDGE_IV_BYTES);
-		$ct = substr($raw, 32 + self::EDGE_IV_BYTES);
-		$aes = self::edgeKdf($secret_raw, $eph_pub, $eph_pub, $recipient_raw);
-		sodium_memzero($secret_raw);
-		$plain = self::gcmDecrypt($ct, $aes, $iv, '');
-		sodium_memzero($aes);
-		if ($plain === null) {
-			throw new RuntimeException('SealedBox: edge unseal failed (tampered or wrong keypair).');
-		}
-		return $plain;
 	}
 
 	/** AES-256-GCM of content under a 32-byte key, bound to $ad: base64(IV ‖ ct ‖ tag). */
@@ -505,19 +449,7 @@ class SealedBox {
 		return base64_encode($iv . self::gcmEncrypt($plaintext, $key, $iv, $ad));
 	}
 
-	/** The v1 ECIES AES key: HKDF-SHA256 over the X25519 shared secret, both public keys in the info. */
-	private static function edgeKdf(string $own_secret, string $peer_public, string $eph_pub, string $recipient_pub): string {
-		try {
-			$shared = sodium_crypto_scalarmult($own_secret, $peer_public);
-		} catch (SodiumException $e) {
-			throw new RuntimeException('SealedBox: X25519 refused the key (a low-order point).');
-		}
-		$aes = hash_hkdf('sha256', $shared, 32, self::EDGE_KDF_LABEL . $eph_pub . $recipient_pub, '');
-		sodium_memzero($shared);
-		return $aes;
-	}
-
-	/** A public key in either base64 alphabet, raw; 32 or 1216 bytes (publicKeyVersion() refuses anything else). */
+	/** A public key in either base64 alphabet, raw; 1216 bytes (publicKeyVersion() refuses anything else). */
 	private static function edgePublicKey(string $b64): string {
 		$raw = self::b64any_decode($b64);
 		if ($raw === false) {

@@ -190,9 +190,8 @@ func hashBytes(b []byte) string {
 // it would abort every honest sealed delivery. A Direct part is sealed RAW
 // (SealedBox::sealBinary): the growth is only the v2 seal's X-Wing ciphertext,
 // IV and tag (1120 + 12 + 16 = 1148, SealedBox::V2_OVERHEAD) — no base64, no
-// prefix, because a bulk part carries no DEK text wrapping. A v1 seal grows by
-// 48, inside the same ceiling. Must match DirectProtocol::sealedSizeCeiling
-// byte for byte.
+// prefix, because a bulk part carries no DEK text wrapping. Must match
+// DirectProtocol::sealedSizeCeiling byte for byte.
 func sealedSizeCeiling(plaintextBytes int64) int64 {
 	if plaintextBytes < 0 {
 		plaintextBytes = 0

@@ -250,16 +250,16 @@ function vault_fixture_server_vault(int $user_id): array {
 }
 
 /**
- * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair(),
- * v2; pass SealedBox::V1 for an old X25519 secret): the secret is wrapped under a throwaway KEK and opened exactly the way the
+ * A VaultKey for a keypair the test minted itself (SealedBox::generateKeypair()):
+ * the seed is wrapped under a throwaway KEK and opened exactly the way the
  * platform opens one — VaultUnlock::openKey() — so the test never needs a
  * constructor for the bytes and exercises the real seam.
  */
-function vault_fixture_key(string $secret_b64, int $version = SealedBox::V2): VaultKey {
+function vault_fixture_key(string $secret_b64): VaultKey {
 	$box = new SealedBox();
 	$kek = random_bytes(32);
 	$ad = 'vault-test:' . bin2hex(random_bytes(4));
-	$unlocker = ['wrapped' => $box->wrapKey(PoolVaultKey::wrappedForm($secret_b64, $version), $kek, $ad), 'kek' => $kek, 'ad' => $ad];
+	$unlocker = ['wrapped' => $box->wrapKey(PoolVaultKey::wrappedForm($secret_b64), $kek, $ad), 'kek' => $kek, 'ad' => $ad];
 	return VaultUnlock::openKey(0, $unlocker, [], UserEncryptionVault::SCOPE_USER)['key'];
 }
 

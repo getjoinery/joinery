@@ -7,6 +7,7 @@
  * never part of anything posted; assets/js/copy-key.js works out the one value
  * that opens this backup's sealed key and puts that in the form.
  *
+ * @version 1.6 - no ephemeralPublic: the box is X-Wing only
  * @version 1.5 - the ceremony carries the box's seal version and X-Wing ciphertext, and loads vault-crypto.js
  * @version 1.4 - copy-key.js carries its file time, so a changed one is never served from a cache
  * @version 1.3 - the newest run reads as the stored date does (2026-10-04 23:15 UTC), not the agent's RFC 3339 text
@@ -115,7 +116,6 @@
 			window.copyKeyCeremony = <?php echo json_encode(array(
 				'version'         => $pending['version'],
 				'ciphertext'      => $pending['ciphertext'],
-				'ephemeralPublic' => $pending['ephemeral_public'],
 				'fingerprint'     => $pending['recovery_fingerprint'],
 			)); ?>;
 		</script>

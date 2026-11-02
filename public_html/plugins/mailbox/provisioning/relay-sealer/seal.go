@@ -4,45 +4,28 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"regexp"
-
-	"golang.org/x/crypto/curve25519"
-	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/nacl/box"
 )
 
-// The self-describing prefixes SealedBox.php (openDek) expects. The sealer
-// seals in the format the recipient's key names (specs/post_quantum_sealing.md
-// Q8): a 1216-byte X-Wing key gets "v2.seal." + rawurlbase64(the v2 seal, scope
-// dek); a 32-byte X25519 key, one whose site has not upgraded and rotated yet,
-// gets "v1.seal." + rawurlbase64(crypto_box_seal(msg, pk)), libsodium's wire
-// form (box.SealAnonymous), opened with sodium_crypto_box_seal_open.
-const (
-	sealWirePrefix   = "v1.seal."
-	sealWirePrefixV2 = "v2.seal."
-)
-
-// x25519PublicKeyBytes is the fixed length of a Curve25519 public key.
-const x25519PublicKeyBytes = 32
+// The self-describing prefix SealedBox.php (openDek) expects: a 1216-byte
+// X-Wing key gets "v2.seal." + rawurlbase64(the v2 seal, scope dek).
+const sealWirePrefixV2 = "v2.seal."
 
 // decodePublicKey reads a recipient public key in either base64 alphabet: a
 // server vault's key is base64url with the padding trimmed
 // (SealedBox::b64url_encode), a browser-held key is standard base64
 // (vault-crypto.js), and the routing map carries whichever the vault stores.
-// It is an X-Wing key (1216 bytes) or an X25519 one (32 bytes); its length is
-// its version.
+// It is an X-Wing key (1216 bytes); any other length is refused as malformed.
 func decodePublicKey(encoded string) ([]byte, error) {
 	raw, err := decodeAnyBase64(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("public key is not valid base64: %w", err)
 	}
-	if len(raw) != x25519PublicKeyBytes && len(raw) != xwingPublicKeyBytes {
-		return nil, fmt.Errorf("public key must decode to %d (X-Wing) or %d (X25519) bytes, got %d",
-			xwingPublicKeyBytes, x25519PublicKeyBytes, len(raw))
+	if len(raw) != xwingPublicKeyBytes {
+		return nil, fmt.Errorf("public key must decode to %d (X-Wing) bytes, got %d", xwingPublicKeyBytes, len(raw))
 	}
 	return raw, nil
 }
@@ -57,20 +40,11 @@ func sealToPublicKey(message []byte, publicKeyB64 string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(pk) == xwingPublicKeyBytes {
-		sealed, err := sealV2(message, pk, v2ScopeDEK)
-		if err != nil {
-			return "", fmt.Errorf("v2 seal failed: %w", err)
-		}
-		return sealWirePrefixV2 + base64.RawURLEncoding.EncodeToString(sealed), nil
-	}
-	var pk32 [32]byte
-	copy(pk32[:], pk)
-	sealed, err := box.SealAnonymous(nil, message, &pk32, rand.Reader)
+	sealed, err := sealV2(message, pk, v2ScopeDEK)
 	if err != nil {
-		return "", fmt.Errorf("crypto_box_seal (SealAnonymous) failed: %w", err)
+		return "", fmt.Errorf("v2 seal failed: %w", err)
 	}
-	return sealWirePrefix + base64.RawURLEncoding.EncodeToString(sealed), nil
+	return sealWirePrefixV2 + base64.RawURLEncoding.EncodeToString(sealed), nil
 }
 
 // decodeAnyBase64 accepts standard or URL-safe base64, padded or not.
@@ -89,23 +63,19 @@ func decodeAnyBase64(encoded string) ([]byte, error) {
 // WebCrypto's format rather than libsodium's (specs/client_custody_mail.md
 // § R9). So a message for one is sealed the way the browser seals a row: a
 // fresh 32-byte DEK encrypts the whole message under AES-256-GCM, and the DEK
-// is sealed to the recipient's key with X25519 + HKDF-SHA256 + AES-256-GCM —
-// byte-for-byte SealedBox::sealEdge / aeadEncryptGcm and vault-crypto.js,
-// pinned by tests/vault/fixtures/edge_vector.json.
+// is sealed to the recipient's X-Wing key — byte-for-byte SealedBox::sealEdge /
+// aeadEncryptGcm and vault-crypto.js, pinned by
+// tests/vault/fixtures/edge_vector.json.
 //
 //	body : "v1.edge." + base64(IV[12] ‖ ct ‖ tag[16]), AD "mail:relay:{spool_id}"
-//	DEK  : to a 1216-byte X-Wing key, "v2.edgeseal.{scope}." + base64(the v2
-//	       seal, scope dek); to a 32-byte X25519 key not yet rotated,
-//	       "v1.edgeseal.{scope}." + base64(ephPub[32] ‖ IV[12] ‖ ct ‖ tag[16])
+//	DEK  : "v2.edgeseal.{scope}." + base64(the v2 seal, scope dek)
 //
 // The relay forgets the DEK when the function returns; nothing here can open
 // either blob again.
 
 const (
 	edgeFieldPrefix  = "v1.edge."
-	edgeSealPrefix   = "v1.edgeseal."
 	edgeSealPrefixV2 = "v2.edgeseal."
-	edgeKDFLabel     = "sealed-vault:dek"
 	edgeIVBytes      = 12
 )
 
@@ -142,27 +112,11 @@ func sealEdge(raw []byte, recipientPubB64, scope, spoolID string) (string, strin
 	if err != nil {
 		return "", "", err
 	}
-	if len(recipient) == xwingPublicKeyBytes {
-		sealed, err := sealV2(dek, recipient, v2ScopeDEK)
-		if err != nil {
-			return "", "", fmt.Errorf("v2 seal failed: %w", err)
-		}
-		return edgeFieldPrefix + body, edgeSealPrefixV2 + scope + "." + base64.StdEncoding.EncodeToString(sealed), nil
-	}
-	ephSecret := make([]byte, curve25519.ScalarSize)
-	if _, err := io.ReadFull(rand.Reader, ephSecret); err != nil {
-		return "", "", fmt.Errorf("ephemeral key: %w", err)
-	}
-	defer zero(ephSecret)
-	sealIV := make([]byte, edgeIVBytes)
-	if _, err := io.ReadFull(rand.Reader, sealIV); err != nil {
-		return "", "", fmt.Errorf("IV: %w", err)
-	}
-	sealed, err := edgeSealWith(dek, recipientPubB64, ephSecret, sealIV)
+	sealed, err := sealV2(dek, recipient, v2ScopeDEK)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("v2 seal failed: %w", err)
 	}
-	return edgeFieldPrefix + body, edgeSealPrefix + scope + "." + sealed, nil
+	return edgeFieldPrefix + body, edgeSealPrefixV2 + scope + "." + base64.StdEncoding.EncodeToString(sealed), nil
 }
 
 // edgeFieldWith is aeadEncryptGcm with its IV supplied (the vector fixes it):
@@ -174,42 +128,6 @@ func edgeFieldWith(plaintext, key []byte, ad string, iv []byte) (string, error) 
 	}
 	out := append([]byte{}, iv...)
 	out = gcm.Seal(out, iv, plaintext, []byte(ad))
-	return base64.StdEncoding.EncodeToString(out), nil
-}
-
-// edgeSealWith is sealEdge's v1 DEK half with its randomness supplied:
-// base64(ephPub ‖ IV ‖ ct ‖ tag), the AES key HKDF-SHA256 over
-// X25519(eph, recipient) with info 'sealed-vault:dek' ‖ ephPub ‖ recipientPub
-// and an empty salt.
-func edgeSealWith(dek []byte, recipientPubB64 string, ephSecret, iv []byte) (string, error) {
-	recipient, err := decodePublicKey(recipientPubB64)
-	if err != nil {
-		return "", err
-	}
-	if len(recipient) != x25519PublicKeyBytes {
-		return "", fmt.Errorf("a v1 edge seal needs a %d-byte X25519 key", x25519PublicKeyBytes)
-	}
-	ephPub, err := curve25519.X25519(ephSecret, curve25519.Basepoint)
-	if err != nil {
-		return "", fmt.Errorf("ephemeral public key: %w", err)
-	}
-	shared, err := curve25519.X25519(ephSecret, recipient[:])
-	if err != nil {
-		return "", fmt.Errorf("X25519 refused the key: %w", err)
-	}
-	defer zero(shared)
-	info := append(append([]byte(edgeKDFLabel), ephPub...), recipient[:]...)
-	aesKey := make([]byte, 32)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, shared, nil, info), aesKey); err != nil {
-		return "", fmt.Errorf("HKDF: %w", err)
-	}
-	defer zero(aesKey)
-	gcm, err := newGCM(aesKey)
-	if err != nil {
-		return "", err
-	}
-	out := append(append([]byte{}, ephPub...), iv...)
-	out = gcm.Seal(out, iv, dek, nil)
 	return base64.StdEncoding.EncodeToString(out), nil
 }
 

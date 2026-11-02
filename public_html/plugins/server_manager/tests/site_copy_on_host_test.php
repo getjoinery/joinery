@@ -46,13 +46,13 @@ $H_COPY = '198.51.100.72';
 $release = JobCommandBuilder::COPY_SOURCE_MIN_VERSION;
 
 // The owner's recovery key, and a chain whose data key is sealed to it.
-$recovery = sodium_crypto_box_keypair();
-$recovery_pub = sodium_crypto_box_publickey($recovery);
+$recovery = random_bytes(32);
+$recovery_pub = (new XWing())->publicKey($recovery);
 $recovery_fpr = hash('sha256', $recovery_pub);
 $chain_id = 'chain-' . gmdate('Ymd_His', time() - 2 * 86400);
 $manifest = json_encode(array('version' => 1, 'chain_id' => $chain_id, 'slug' => 'x',
 	'envelope' => array('version' => 1, 'recipients' => array(
-		array('kind' => 'recovery', 'fingerprint' => $recovery_fpr, 'sealed' => base64_encode(sodium_crypto_box_seal(random_bytes(32), $recovery_pub))),
+		array('kind' => 'recovery', 'alg' => BackupEnvelope::ALG_XWING, 'fingerprint' => $recovery_fpr, 'sealed' => base64_encode(SealedBox::sealV2(random_bytes(32), $recovery_pub))),
 	)),
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 3600)))));
 SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest) {

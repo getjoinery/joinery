@@ -9,45 +9,55 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/nacl/box"
 )
 
-// TestSealRoundTripInProcess seals to a freshly generated keypair and confirms
-// it opens with the NaCl OpenAnonymous — a fast in-process guard. The
-// authoritative wire-compatibility check against PHP sodium_crypto_box_seal_open
-// lives in roundtrip_test.sh.
+// TestSealRoundTripInProcess seals to a fresh X-Wing key and confirms the
+// wire string opens with the seed — a fast in-process guard. The authoritative
+// wire-compatibility check against PHP SealedBox lives in roundtrip_test.sh.
 func TestSealRoundTripInProcess(t *testing.T) {
-	pub, priv, err := box.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
+	seed := make([]byte, 32)
+	if _, err := rand.Read(seed); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
-	pubB64 := base64.RawURLEncoding.EncodeToString(pub[:])
+	pub, err := xwingPublicKey(seed)
+	if err != nil {
+		t.Fatalf("xwingPublicKey: %v", err)
+	}
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
 
 	msg := []byte("From: a@example.com\r\nSubject: hi\r\n\r\nbody\r\n")
 	wire, err := sealToPublicKey(msg, pubB64)
 	if err != nil {
 		t.Fatalf("sealToPublicKey: %v", err)
 	}
-	if !strings.HasPrefix(wire, sealWirePrefix) {
+	if !strings.HasPrefix(wire, sealWirePrefixV2) {
 		t.Fatalf("wire missing prefix: %q", wire)
 	}
-	sealed, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(wire, sealWirePrefix))
+	sealed, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(wire, sealWirePrefixV2))
 	if err != nil {
 		t.Fatalf("decode wire: %v", err)
 	}
-	opened, ok := box.OpenAnonymous(nil, sealed, pub, priv)
-	if !ok {
-		t.Fatal("OpenAnonymous failed")
+	opened, err := openV2(sealed, seed, v2ScopeDEK)
+	if err != nil {
+		t.Fatalf("openV2: %v", err)
 	}
 	if string(opened) != string(msg) {
 		t.Fatalf("round trip mismatch: got %q", opened)
 	}
 }
 
+// A key of any length but X-Wing's is malformed, a 32-byte X25519 key included:
+// nothing is ever sealed to one.
 func TestDecodePublicKeyRejectsWrongLength(t *testing.T) {
 	if _, err := decodePublicKey(base64.RawURLEncoding.EncodeToString([]byte("short"))); err == nil {
 		t.Fatal("expected error for short key")
+	}
+	x25519 := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if _, err := decodePublicKey(x25519); err == nil {
+		t.Fatal("a 32-byte X25519 key must be refused as malformed")
+	}
+	if _, err := sealToPublicKey([]byte("m"), x25519); err == nil {
+		t.Fatal("sealing to a 32-byte key must fail")
 	}
 }
 
@@ -267,11 +277,7 @@ func TestResolveSRSBounce(t *testing.T) {
 // and the exact public key the blob was sealed to (the pull consumer's owner
 // fallback when alias grants changed between seal and pull).
 func TestSealAndSpoolPreservesRecipientCaseAndSealKey(t *testing.T) {
-	pub, _, err := box.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	pubB64 := base64.RawURLEncoding.EncodeToString(pub[:])
+	pubB64 := testXWingKey
 
 	recipient := "SRS0=AbC9+z=5x=Gmail.com=Alice.Smith@fwd.example.com"
 	entry := routingEntry{PublicKey: pubB64, KeyKind: keyKindTransport, Mode: modeStore}

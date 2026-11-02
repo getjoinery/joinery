@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.8 - the X25519 frames (v1.seal., v1.edgeseal.) are not sealed blobs
  * @version 1.7 - vault_keys: an account vault row's own key material is a declared content-free write
  * @version 1.6 - v2.seal. and v2.edgeseal. (the post-quantum seal) are sealed blobs
  * @version 1.5 - an owner-sealed UPDATE may end in RETURNING plain columns
@@ -116,7 +117,7 @@ class SealedEgressGuard {
 	 * are already protected, so all pass — writing a sealed DEK is what
 	 * sealColumns() does on every seal, and it is longer than the threshold.
 	 */
-	const SEALED_PREFIXES = array('v1.aead.', 'v1.seal.', 'v2.seal.', 'v1.edge.', 'v1.edgeseal.', 'v2.edgeseal.');
+	const SEALED_PREFIXES = array('v1.aead.', 'v2.seal.', 'v1.edge.', 'v2.edgeseal.');
 
 	/** How many distinct source descriptions an exception message reports. */
 	const SOURCES_REPORTED = 5;

@@ -3,6 +3,7 @@
 # _config_secrets.sh - the per-site secrets that live in {site}/config, and the
 # one definition of how each is minted.
 #
+# Version: 1.2 - an old X25519 site key is no longer moved aside: nothing opens one
 # Version: 1.1 - the backup site key is a 32-byte X-Wing seed; an old 64-byte X25519 keypair is
 #                renamed to backup_site_key.retired and a seed minted (specs/post_quantum_sealing.md R7)
 # Version: 1.0 - Extracted so the install and the root moments mint identically
@@ -108,32 +109,6 @@ joinery_mint_backup_site_key() {
     mv -f "${tmp}" "${key_file}"
 }
 
-# An old backup site key (base64 of a 64-byte X25519 keypair) is moved aside so
-# a seed can be minted in its place: nothing seals to an X25519 key any more,
-# and the site would otherwise never back up again. The site still opens a
-# backup the old key sealed with it (BackupEnvelope::open_as_site() tries every
-# backup_site_key.retired*), and an operator can pass it by hand to
-# backup_envelope.php open --private. An existing .retired is never
-# overwritten; a later one takes a time suffix. Prints nothing; returns 0 when the
-# key was moved, 1 when there was nothing to move or it could not be moved.
-joinery_retire_old_backup_site_key() {
-    local config_dir="$1"
-    local key_file="${config_dir}/backup_site_key"
-    [[ -f "${key_file}" ]] || return 1
-    [[ "$(id -u)" == "0" ]] || return 1
-    local bytes
-    bytes="$(tr -d '[:space:]' < "${key_file}" | base64 -d 2>/dev/null | wc -c)"
-    [[ "${bytes}" == "64" ]] || return 1
-    local retired="${config_dir}/backup_site_key.retired"
-    if [[ -e "${retired}" ]]; then
-        retired="${retired}.$(date -u +%Y%m%d%H%M%S)"
-        [[ -e "${retired}" ]] && return 1
-    fi
-    mv -n "${key_file}" "${retired}" || return 1
-    [[ -e "${key_file}" ]] && return 1
-    return 0
-}
-
 # The ledger a restore consults before it loads bytes over live data. Created on
 # demand by the backup runner, which is the web user; the directory it needs is
 # in config/. 700 www-data:www-data - the agent refuses a ledger anyone else
@@ -165,9 +140,6 @@ joinery_mint_site_secrets() {
         fi
     fi
 
-    if joinery_retire_old_backup_site_key "${config_dir}"; then
-        echo "config secrets: moved the old X25519 backup_site_key aside (backup_site_key.retired)"
-    fi
     if [[ ! -e "${config_dir}/backup_site_key" ]]; then
         if joinery_mint_backup_site_key "${config_dir}"; then
             echo "config secrets: minted backup_site_key"

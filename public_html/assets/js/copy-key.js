@@ -4,10 +4,9 @@
  *
  * The backup's key is sealed to the owner's recovery key. The page does the
  * one step that needs the recovery key and posts only the value that opens
- * this box and nothing else; the copy's agent finishes the opening. For a v2
- * (X-Wing) box that value is the box's dek-scope AES key; for a v1 box (a
- * backup sealed to an old recovery key) it is the X25519 of the key with the
- * box's ephemeral key (VaultCrypto.halfOpenKeyBox). The page checks the
+ * this box and nothing else; the copy's agent finishes the opening. That
+ * value is the X-Wing box's dek-scope AES key (VaultCrypto.halfOpenKeyBox);
+ * a box sealed to an old X25519 recovery key is refused. The page checks the
  * pasted key's public half against the fingerprint the box is sealed to and
  * posts the value with that public half. The pasted key is cleared from the
  * box and never put in the form.
@@ -16,9 +15,10 @@
  * (server_manager node_detail_tabs/overview_encryption.php): the same value,
  * for the machine's break-glass box.
  *
- * window.copyKeyCeremony is { version, ciphertext, ephemeralPublic, fingerprint };
+ * window.copyKeyCeremony is { version, ciphertext, fingerprint };
  * assets/js/vault-crypto.js loads before this file.
  *
+ * @version 2.1 - header: a v1 box is refused (v1_key_retirement WP2)
  * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): a v2 box posts its dek-scope key; the
  *   arithmetic is VaultCrypto's
  * @version 1.0.1

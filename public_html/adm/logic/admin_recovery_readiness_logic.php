@@ -10,6 +10,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * rate-limited: a verify tool must never be a better guessing oracle than the
  * real recovery flow it mirrors.
  *
+ * @version 1.4.0 - pq_old_vaults removed: every vault key is X-Wing
  * @version 1.3.0 - a typed code not shaped like a recovery code is refused before the step-up
  * @version 1.2.0 - pq_old_vaults: the vaults still on old X25519 keys, by scope (post_quantum_sealing R7)
  * @version 1.1.0 - pq_reason: whether this server can seal with post-quantum keys
@@ -30,7 +31,6 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 	$page_vars['settings'] = $settings;
 	$page_vars['session'] = $session;
 	$page_vars['pq_reason'] = SealedBox::pqReadyReason();
-	$page_vars['pq_old_vaults'] = UserEncryptionVault::oldKeyCounts();
 
 	$page_regex = '/\/admin\/admin_recovery_readiness/';
 

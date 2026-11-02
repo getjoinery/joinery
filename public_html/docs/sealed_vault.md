@@ -201,15 +201,11 @@ or raw bytes where the recipient key is known from context. `tests/vault/xwing_v
 and its fixture `tests/vault/fixtures/xwing_vector.json` are the vectors every
 runtime reproduces byte for byte.
 
-**Sealers write v2 only.** A 32-byte X25519 public key is refused with
-`SealedBox::V1_KEY_REFUSAL`: its holder owes the rotation in
-[A key from before post-quantum sealing](#a-key-from-before-post-quantum-sealing).
-The v1 forms (`v1.seal.`, a libsodium sealed box; `v1.edgeseal.`, X25519 ECIES)
-still open, so that rotation can read what is sealed to the old key. An opener
-chooses the version by the blob's frame or the recipient public key's length
-(32 or 1216 bytes), never by the secret, since both secrets are 32 bytes; a
-wrapped vault secret carries its own (`v2.` + base64url seed for v2,
-`PoolVaultKey::wrappedForm()`).
+**Every key is X-Wing.** A public key that is not 1216 bytes (a 32-byte
+X25519 key included) is refused as malformed by every sealer and opener, and a
+frame other than `v2.seal.` or `v2.edgeseal.{scope}.` is malformed. A wrapped
+vault secret is `v2.` + the base64url seed (`PoolVaultKey::wrappedForm()`);
+anything else is refused.
 
 The server derives no KEK from a code or a phrase a person holds: the browser
 does, and posts only the account half (see [One vault](#one-vault)).
@@ -949,9 +945,8 @@ from then on. Cold is virtually every request, and costs one boolean
 check per statement. Hot, an INSERT or UPDATE carrying a string longer than
 `SealedEgressGuard::THRESHOLD` (64 characters) must satisfy one of:
 
-- every long value is already a sealed blob (`v1.aead.`, `v2.seal.` or
-  `v1.seal.`, or the browser's `v1.edge.`, `v2.edgeseal.{scope}.` or
-  `v1.edgeseal.{scope}.`) — this is how `sealColumns()`
+- every long value is already a sealed blob (`v1.aead.` or `v2.seal.`, or the
+  browser's `v1.edge.` or `v2.edgeseal.{scope}.`) — this is how `sealColumns()`
   writes through the rule it sits behind;
 - every long value is a list of integers (a JSON array or comma list of ids,
   `SealedEgressGuard::isIntegerList()`) — ids are references to content, never
@@ -1151,37 +1146,6 @@ recovery codes (the current generation's were minted by the interrupted
 attempt and never shown), and `regenerate_recommended = true`. Enrollment
 ceremonies refuse while two generations are live, so completion is the one
 road out of the interrupted state.
-
-### A key from before post-quantum sealing
-
-A vault whose public key is 32 bytes (X25519) gives up its secret to anyone
-with a large enough quantum computer and its public key, so it does not open
-until its owner rotates it. `VaultUnlock::arm()` throws
-`VaultRotationOwedException` for such a key, and the passkey and passphrase
-unlocks answer `rotation_required` with `rotate_url`
-(`/profile/security?rotate=owed`); the keyring and the lock chip send the
-person there. A recovery is the one open that is armed anyway, because it is
-how someone who lost their passkey gets back to one and so to the rotation.
-An enrolment on such a vault takes the opened key without a window. The
-rotation itself is the one above and needs a passkey: a server vault whose
-owner has none that can hold a key cannot rotate until they add one.
-
-**The root moves with the account vault.** The root's secret derives every
-content vault's key, so a root on an old key is replaced inside the same
-rotation: `VaultKeyring.rootKeyReplacement()` mints a new root secret in the
-same passkey touch, wraps it under that passkey and the new codes and phrase
-(the salt stays), re-wraps every content vault under it, and
-`VaultClientCustody::replaceRootKey()` stores all of it in `rotate()`'s
-transaction, which refuses to leave an old root behind. A content vault on an
-old key opens in the browser only to be rotated (`JoinerySealed` adopt and
-resume). The Security page and Recovery Readiness name and count the vaults
-that owe a rotation, the root included.
-
-Until a mail vault rotates, mail to it waits: the store cannot seal to the old
-key, rolls back and is retried (by the sender's mail server, or from the
-relay's spool), and a Joinery Direct sender is answered with the vault's own
-32-byte key, refuses to seal to it and falls back to SMTP (see
-[Joinery Direct](joinery_direct.md)).
 
 **Retired keys stay reachable through the current one.** Content can reach an
 old key after the re-seal has passed it: mail a relay sealed before it learned

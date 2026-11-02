@@ -1125,10 +1125,7 @@ Only the secret half is stored. The public half — what file-key grants are
 sealed to, and what the opener checks a grant's named key against — is
 recomputed from the secret on every start. A pair carried as two stored fields
 can be got out of step by one bad write, and the symptom is every unwrap failing
-with an error that names nothing. A grant sealed to a vault key of the older
-X25519 kind (a vault its owner has not rotated) still opens; the client never
-seals to one, and an upload into a folder with such a reader waits until they
-rotate.
+with an error that names nothing.
 
 A device with no vault key is an ordinary, supported state, not a degraded one:
 an account with no encrypted folders never needs one. So none of its failure

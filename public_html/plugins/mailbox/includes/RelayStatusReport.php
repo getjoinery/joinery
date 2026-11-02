@@ -14,6 +14,7 @@
  * building it can mint a new transport key (MailboxRelay::ensureTransportKeypair),
  * and an observe word writes nothing.
  *
+ * @version 1.2 - transport_key: kind is xwing or none; no retired_kept or replaced_time
  * @version 1.1 - the map's last push attempt: when, its outcome and its reason code (RelayMapSync 2.6)
  * @version 1.0
  */
@@ -74,10 +75,8 @@ class RelayStatusReport {
 				'alarm_time'        => self::time($relay->get('mrl_pickup_alarm_time')),
 			),
 			'transport_key'  => array(
-				'kind'          => ($public === '') ? 'none' : ($relay->transportKeyIsOld() ? 'x25519' : 'xwing'),
+				'kind'          => ($public === '') ? 'none' : 'xwing',
 				'generation'    => intval($relay->get('mrl_transport_key_generation')),
-				'retired_kept'  => (string)$relay->get('mrl_transport_secret_retired_sealed') !== '',
-				'replaced_time' => self::time($relay->get('mrl_transport_replaced_time')),
 			),
 			'inbound'        => self::inbound(),
 		);

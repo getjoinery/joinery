@@ -25,6 +25,7 @@
  * builds at once; a search meanwhile answers over what is indexed. Locking the
  * vault ends the worker; the saved index stays sealed.
  *
+ * @version 1.4 - a sealed key in any frame but v2.edgeseal. is refused (v1_key_retirement WP2)
  * @version 1.3 - the search key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.2 - a status notice comes only from a save or a build that ends or fails, never from
  *   a build that did not start (another tab holds it), so the reader's refresh-on-notice cannot
@@ -38,10 +39,14 @@ window.MailboxSearch = (function () {
 	'use strict';
 
 	var SCOPE = 'mail';
-	// Written v2 (X-Wing); a key written before reads v1, the same length, and
-	// is opened by slicing the frame off either way.
+	// A sealed key is v2 (X-Wing); any other frame is refused.
 	var EDGE_SEAL = 'v2.edgeseal.' + SCOPE + '.';
 	var EDGE_FIELD = 'v1.edge.';
+	function unframe(sealed) {
+		sealed = String(sealed);
+		if (sealed.indexOf(EDGE_SEAL) !== 0) throw new Error('This search key is not sealed to your mail vault.');
+		return sealed.slice(EDGE_SEAL.length);
+	}
 
 	function cfg() { return window.MAILBOX_READER || {}; }
 
@@ -159,7 +164,7 @@ window.MailboxSearch = (function () {
 				}
 			}
 			var session = await deps.session();
-			var bytes = await session.openSealed(String(got.sealed_key).slice(EDGE_SEAL.length));
+			var bytes = await session.openSealed(unframe(got.sealed_key));
 			try {
 				var base = await crypto.subtle.importKey('raw', bytes, 'HKDF', false, ['deriveKey', 'deriveBits']);
 				var te = new TextEncoder();
@@ -212,7 +217,7 @@ window.MailboxSearch = (function () {
 				if (!s || typeof s.iem_search_text !== 'string' || typeof s.sealed_dek !== 'string') return null;
 				tried++;
 				try {
-					var dek = await session.openSealed(s.sealed_dek.slice(EDGE_SEAL.length));
+					var dek = await session.openSealed(unframe(s.sealed_dek));
 					var rowKey;
 					try { rowKey = await VaultCrypto.importDek(dek); } finally { dek.fill(0); }
 					var text = await VaultCrypto.decrypt(s.iem_search_text.slice(EDGE_FIELD.length), rowKey,

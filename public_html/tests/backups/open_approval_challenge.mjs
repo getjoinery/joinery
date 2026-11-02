@@ -126,9 +126,8 @@ try {
 // that opens its key box, which the agent finishes opening. The fixture's
 // value was checked to open the box in Go; the shipped code must produce it,
 // and the key's public half, and refuse a key the box is not sealed to.
-if (fixture.boxEphemeral || fixture.boxCiphertext) {
-	const box = { version: fixture.boxCiphertext ? 2 : 1, ciphertext: fixture.boxCiphertext || '',
-		ephemeralPublic: fixture.boxEphemeral || '', fingerprint: fixture.boxFingerprint };
+if (fixture.boxCiphertext) {
+	const box = { version: 2, ciphertext: fixture.boxCiphertext, fingerprint: fixture.boxFingerprint };
 	const openKeyBox = api && api.openKeyBox;
 	if (typeof openKeyBox !== 'function') {
 		console.error('FAIL: recovery-readiness.js exposes no openKeyBox, so a restore of a backup another server '

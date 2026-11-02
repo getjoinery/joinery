@@ -127,8 +127,8 @@ if ($newest === null) {
 	harness_skip('this tree carries no agent_dist manifest', 'nothing is newest');
 } else {
 	$host = new SpreadNode(array('mgn_agent_version' => $newest, 'mgn_agent_primitives' => 'disk_usage,host_report'));
-	$text = AgentVocabulary::needs_newer_agent_text($host, array('v1_census'));
-	check(strpos($text, 'Needs a newer agent') === false && strpos($text, 'v1_census') !== false
+	$text = AgentVocabulary::needs_newer_agent_text($host, array('relay_status'));
+	check(strpos($text, 'Needs a newer agent') === false && strpos($text, 'relay_status') !== false
 		&& strpos($text, 'no site of its own') !== false,
 		'a siteless host on the newest agent hears why, not "update this node"', $text);
 }

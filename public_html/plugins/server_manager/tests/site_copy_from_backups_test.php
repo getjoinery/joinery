@@ -47,14 +47,14 @@ $S4 = '192.0.2.91';
 $T4 = '198.51.100.92';
 
 // The owner's recovery key, and a chain whose data key is sealed to it.
-$recovery = sodium_crypto_box_keypair();
-$recovery_pub = sodium_crypto_box_publickey($recovery);
+$recovery = random_bytes(32);
+$recovery_pub = (new XWing())->publicKey($recovery);
 $recovery_fpr = hash('sha256', $recovery_pub);
 $data_key = base64_encode(random_bytes(32));
 $chain_id = 'chain-' . gmdate('Ymd_His', time() - 9 * 86400);
 $manifest = json_encode(array('version' => 1, 'chain_id' => $chain_id, 'slug' => 'x',
 	'envelope' => array('version' => 1, 'recipients' => array(
-		array('kind' => 'recovery', 'fingerprint' => $recovery_fpr, 'sealed' => base64_encode(sodium_crypto_box_seal($data_key, $recovery_pub))),
+		array('kind' => 'recovery', 'alg' => BackupEnvelope::ALG_XWING, 'fingerprint' => $recovery_fpr, 'sealed' => base64_encode(SealedBox::sealV2($data_key, $recovery_pub))),
 		array('kind' => 'site', 'fingerprint' => str_repeat('0', 64), 'sealed' => base64_encode('not this one')),
 	)),
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 8 * 86400)))));
@@ -257,7 +257,7 @@ check(($params['chain_id'] ?? '') === $chain_id && ($params['manifest_sha256'] ?
 check(($params['manifest_url'] ?? '') === $manifest_link,
 	'with a link to the manifest, for the copy to read the backup at its provider itself');
 $sealed = base64_decode((string)($params['recovery_sealed'] ?? ''));
-check($sealed !== '' && sodium_crypto_box_seal_open($sealed, $recovery) === $data_key,
+check($sealed !== '' && SealedBox::openV2($sealed, $recovery) === $data_key,
 	'and is handed the data key as sealed to the recovery key: ciphertext only this management node cannot open');
 check(strpos(json_encode($params), $data_key) === false, 'the data key itself is nowhere in the job');
 check($copy->get('scp_look_path') === $look, 'the copy\'s look path is recorded, for the owner to reach its own page');
@@ -509,7 +509,7 @@ check($threw !== '', 'and takes no answer');
 
 Setting::put(CopyKeyHandoff::REQUEST_SETTING, json_encode(array('job_id' => 5, 'chain_id' => $chain_id, 'site' => 'scb.example.org',
 	'manifest_sha256' => str_repeat('ab', 32), 'recovery_fingerprint' => $recovery_fpr,
-	'ephemeral_public' => base64_encode(random_bytes(32)), 'issued_time' => gmdate('Y-m-d H:i:s'),
+	'ciphertext' => base64_encode(random_bytes(XWing::CIPHERTEXT_BYTES)), 'issued_time' => gmdate('Y-m-d H:i:s'),
 	'expires_time' => gmdate('Y-m-d H:i:s', time() + 3600), 'last_error' => 'that key does not open it',
 	'run_time' => '2026-10-01T03:00:00Z', 'stored_time' => '2026-10-01T03:20:00Z', 'stored_at' => 'Backblaze B2')));
 $p = CopyKeyHandoff::pending();

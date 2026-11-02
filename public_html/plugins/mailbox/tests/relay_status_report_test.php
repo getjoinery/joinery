@@ -36,7 +36,6 @@ check($none['relay'] === 'none' && isset($none['inbound']['last_day']) && !isset
 	'no enabled relay: says so, with the mail counts', json_encode($none));
 
 section('A relay on 3.16, after its transport key moved');
-$old_public = base64_encode(random_bytes(32));
 $new = (new SealedBox())->generateKeypair();
 $relay = new MailboxRelay(NULL);
 $relay->set('mrl_name', 'harnesstest relay1.secret-name.example');
@@ -47,9 +46,7 @@ $relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'reason' 
 $relay->set('mrl_last_health_time', '2026-11-01 13:50:02.123456');
 $relay->set('mrl_transport_public_key', $new['public']);
 $relay->set('mrl_transport_secret_sealed', 'sealed-current-secret-text');
-$relay->set('mrl_transport_secret_retired_sealed', 'sealed-retired-secret-text');
 $relay->set('mrl_transport_key_generation', 2);
-$relay->set('mrl_transport_replaced_time', '2026-11-01 13:51:00');
 $relay->set('mrl_map_version', 41);
 $relay->set('mrl_last_push_time', '2026-11-01 13:51:00');
 $relay->set('mrl_last_pull_time', '2026-11-01 13:54:00');
@@ -75,8 +72,8 @@ check($r['relay'] === 'active' && $r['relay_id'] === intval($relay->key) && $r['
 check($r['version']['running'] === '3.16' && $r['version']['seals_post_quantum'] === true, 'its version, and that it takes X-Wing keys');
 check($r['health']['state'] === 'ok' && $r['health']['queue'] === 2 && $r['health']['sole_tenant'] === true
 	&& $r['health']['checked_time'] === '2026-11-01 13:50:02', 'its last health answer, the time to the second');
-check($r['transport_key'] === array('kind' => 'xwing', 'generation' => 2, 'retired_kept' => true, 'replaced_time' => '2026-11-01 13:51:00'),
-	'the transport key\'s kind and generation, and that the old secret is still kept', $json);
+check($r['transport_key'] === array('kind' => 'xwing', 'generation' => 2),
+	'the transport key\'s kind and generation', $json);
 check($r['map']['version'] === 41 && $r['map']['last_push_time'] === '2026-11-01 13:51:00'
 	&& $r['pickup']['held'] === 1 && $r['pickup']['last_drained_time'] === '2026-11-01 13:54:00', 'the map push and pickup');
 check($r['map']['last_attempt_time'] === '2026-11-01 16:25:00' && $r['map']['last_attempt_result'] === 'skipped'
@@ -85,14 +82,10 @@ check(strpos($json, 'secret-name') === false && strpos($json, 'sealed-') === fal
 	'no name, host, key or sealed secret in it', $json);
 check($snapshot() === $row_before, 'reading it wrote nothing to the relay row');
 
-$relay->set('mrl_transport_public_key', $old_public);
 $relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.15')));
 $relay->save();
 $r = RelayStatusReport::status();
-check($r['transport_key']['kind'] === 'x25519' && $r['version']['seals_post_quantum'] === false,
-	'a 3.15 relay with the old key: the old kind, and no X-Wing keys');
-check((string)(new MailboxRelay(intval($relay->key), TRUE))->get('mrl_transport_public_key') === $old_public,
-	'and the old key is left alone, where building the map would replace it');
+check($r['version']['seals_post_quantum'] === false, 'a 3.15 relay takes no X-Wing keys');
 
 section('The script');
 $script = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/relay_status.php';

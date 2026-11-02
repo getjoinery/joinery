@@ -40,6 +40,7 @@
  * browser-held vault is open. It follows 'joinery:vault-scope-unlocked' /
  * 'joinery:vault-scope-locked' for those.
  *
+ * @version 2.4 - v1 retired (v1_key_retirement WP2): no rotation_required answer to handle
  * @version 2.3 - a vault that owes a key rotation still opens its root from the same touch, so the
  *   rotation can run (specs/post_quantum_sealing.md R7)
  * @version 2.2 - the one unlock finishes: a vault set up before the root (no root wrapping) is
@@ -158,15 +159,6 @@
 				root = c.rootSession;
 			}
 			if (res && res.success === false) { throw new Error(res.message || 'Unlock failed.'); }
-			if (res && res.rotation_required) {
-				// The vault itself stays shut until its key is rotated (R7); the
-				// root opened from the same touch, which that rotation needs. On
-				// any page but the Security page the keyring has already sent the
-				// person there.
-				if (root) { JoinerySealed.adopt(VaultKeyring.ROOT, root); }
-				render();
-				return !!root;
-			}
 			setState('open');
 			document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
 

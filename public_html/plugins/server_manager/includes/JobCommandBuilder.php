@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.156 - build_v1_census removed with the v1 code (v1_key_retirement WP2)
  * @version 1.155 - build_v1_census (agent 1.103.0): what a site still holds on an old X25519 key, no parameters; TEMPORARY (v1_key_retirement)
  * @version 1.154 - build_site_converger: no machine log-switch check, the site's own switch decides (agent 1.102.0);
  *                 log_access_refusal names a machine with no site rather than a site's switch (machine_has_no_site:
@@ -3642,25 +3643,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * What this site still holds on an old X25519 (v1) key (agent 1.103.0):
-	 * counts, ids and kinds, before the release that removes the v1 openers.
-	 * PRIMITIVE ONLY, and it takes nothing; a site word. TEMPORARY: the
-	 * deletion release removes it (strategy/v1_key_retirement.md).
-	 */
-	public static function build_v1_census($node) {
-		if (!self::has_primitive($node, 'v1_census')) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot take the v1 key census. "
-				. AgentVocabulary::needs_newer_agent_text($node, ['v1_census']));
-		}
-		return self::build_v1_census_primitive($node);
-	}
-
-	public static function build_v1_census_primitive($node) {
-		return ['primitive' => 'v1_census', 'params' => []];
-	}
-
-	/**
 	 * Why this plane will not ask the machine to reboot, or null. The node
 	 * refuses each of these itself (reboot_machine.sh); asking here names the
 	 * reason before a job is queued, from what the plane already knows: a
@@ -3958,7 +3940,7 @@ class JobCommandBuilder {
 		// An X-Wing key (specs/post_quantum_sealing.md R3): the agent seals the
 		// break-glass copy to nothing else.
 		if (!preg_match('#^[A-Za-z0-9+/]{1622}==$#', $public_key) || strlen((string)base64_decode($public_key, true)) !== XWing::PUBLIC_KEY_BYTES) {
-			throw new Exception('That is not a recovery public key (a 1216-byte X-Wing key; an old X25519 key is rotated on its site\'s Backups page first).');
+			throw new Exception('That is not a recovery public key (a 1216-byte X-Wing key).');
 		}
 		if (!self::has_primitive($node, 'data_root_recipient')) {
 			throw new Exception(

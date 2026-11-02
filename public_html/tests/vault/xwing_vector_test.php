@@ -15,12 +15,10 @@
  * and shared secrets byte for byte, reproduce the seal blobs from their fixed
  * inputs, and open them.
  *
- * The rules: nothing seals to a 32-byte (v1) key, and the refusal names the
- * rotation owed; a box sealed for one scope never opens as another (a restore
- * approval's answer cannot open a decommission box); a v1 blob still opens, so
- * a holder can rotate off it; and a blob of one version handed to a key of the
- * other is refused naming both versions. A half-open hands over the dek-scope
- * key, which opens no other scope's box.
+ * The rules: a public key that is not 1216 bytes is malformed; a box sealed for one scope
+ * never opens as another (a restore approval's answer cannot open a
+ * decommission box). A half-open hands over the dek-scope key, which opens no
+ * other scope's box.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 require_once(__DIR__ . '/../lib/vault_fixtures.php');
@@ -104,7 +102,7 @@ check(SealedBox::openV2WithKey($dek_box, SealedBox::v2Key($ss_dek)) === 'the dat
 check(xv_throws(function () use ($restore, $ss_restore) { SealedBox::openV2WithKey($restore, SealedBox::v2Key($ss_restore)); }) !== null,
 	'the dek-scope key worked out from a challenge\'s ciphertext does not open that challenge');
 
-section('nothing seals to a 32-byte key');
+section('nothing seals to or opens with a 32-byte key');
 
 $old = sodium_crypto_box_keypair();
 $old_pub = SealedBox::b64url(sodium_crypto_box_publickey($old));
@@ -115,48 +113,29 @@ foreach (array(
 	'sealEdge'  => function () use ($box, $old_pub) { $box->sealEdge(random_bytes(32), $old_pub); },
 	'sealV2'    => function () use ($old) { SealedBox::sealV2(random_bytes(32), sodium_crypto_box_publickey($old)); },
 	'VaultCrypto::sealItemDek' => function () use ($old_pub) { (new VaultCrypto())->sealItemDek(random_bytes(32), $old_pub); },
+	'openEdge'  => function () use ($box, $old_pub, $old_secret) { $box->openEdge(base64_encode(random_bytes(80)), $old_secret, $old_pub); },
 	'BackupEnvelope::build' => function () use ($old) {
 		BackupEnvelope::build('k', 'a', array(array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($old))));
 	},
 ) as $what => $fn) {
 	$msg = null;
 	try { $fn(); } catch (Throwable $e) { $msg = $e->getMessage(); }
-	check($msg !== null && stripos($msg, 'X25519') !== false && (stripos($msg, 'rotat') !== false || stripos($msg, 'new recovery key') !== false),
-		$what . ' refuses a 32-byte key and names the rotation owed', (string)$msg);
+	check($msg !== null && stripos($msg, 'malformed') !== false, $what . ' refuses a 32-byte key as malformed', (string)$msg);
 }
 
-section('v1 blobs still open, for the rotation off them');
+section('a v2 key opens what is sealed to it, in both framings');
 
 $dek = random_bytes(32);
-$v1_blob = 'v1.seal.' . SealedBox::b64url(sodium_crypto_box_seal($dek, sodium_crypto_box_publickey($old)));
-check($box->openDek($v1_blob, $old_secret) === $dek, 'a v1.seal. blob opens with its X25519 secret (the frame names the version)');
-check($box->openBinary(sodium_crypto_box_seal($dek, sodium_crypto_box_publickey($old)), $old_secret, SealedBox::V1) === $dek,
-	'a raw v1 box opens when the caller names v1');
-$edge = json_decode((string)file_get_contents(__DIR__ . '/fixtures/edge_vector.json'), true);
-check($box->openEdge($edge['sealed_dek_b64'], SealedBox::b64url(hex2bin($edge['recipient_secret_hex'])), $edge['recipient_public_b64'])
-	=== hex2bin($edge['dek_hex']), 'the browser\'s v1 ECIES vector opens (the 32-byte public key names v1)');
-$v1_key = vault_fixture_key($old_secret, SealedBox::V1);
-check($v1_key->version() === SealedBox::V1 && $v1_key->publicKey() === $old_pub, 'a v1 secret in a wrapping opens as a v1 vault key with its X25519 public key');
-check((new VaultCrypto())->openItemDek($v1_blob, $v1_key) === $dek, 'a v1 vault key opens a v1.seal. DEK');
-
-section('a blob of one version handed to a key of the other is refused, naming both');
-
 $kp = $box->generateKeypair();
 check($kp['version'] === SealedBox::V2 && strlen(SealedBox::b64url_decode($kp['public'])) === 1216
 	&& strlen(SealedBox::b64url_decode($kp['secret'])) === 32, 'generateKeypair() mints a 32-byte seed and a 1216-byte public key');
 $v2_key = vault_fixture_key($kp['secret']);
-check($v2_key->version() === SealedBox::V2 && $v2_key->publicKey() === $kp['public'], 'a v2 secret in a wrapping opens as a v2 vault key');
+check($v2_key->version() === SealedBox::V2 && $v2_key->publicKey() === $kp['public'], 'a seed in a wrapping opens as a vault key');
 $v2_blob = $box->sealDek($dek, $kp['public']);
 check(strpos($v2_blob, 'v2.seal.') === 0, 'sealDek() writes v2.seal.');
-check((new VaultCrypto())->openItemDek($v2_blob, $v2_key) === $dek, 'the v2 key opens it');
-$msg = xv_throws(function () use ($v2_blob, $v1_key) { (new VaultCrypto())->openItemDek($v2_blob, $v1_key); });
-check($msg !== null && strpos($msg, 'v2') !== false && strpos($msg, 'v1') !== false, 'a v2 blob under a v1 key is refused naming both versions', (string)$msg);
-$msg = xv_throws(function () use ($v1_blob, $v2_key) { (new VaultCrypto())->openItemDek($v1_blob, $v2_key); });
-check($msg !== null && strpos($msg, 'v1') !== false && strpos($msg, 'v2') !== false, 'and a v1 blob under a v2 key', (string)$msg);
+check((new VaultCrypto())->openItemDek($v2_blob, $v2_key) === $dek, 'and the vault key opens it');
 $edge_v2 = (new VaultCrypto())->sealItemDekToBrowserKey($dek, $kp['public'], 'drive');
 check(strpos($edge_v2, 'v2.edgeseal.drive.') === 0, 'the browser-format key is framed v2.edgeseal.{scope}.');
-$msg = xv_throws(function () use ($edge_v2, $v1_key) { (new VaultCrypto())->openItemDek($edge_v2, $v1_key); });
-check($msg !== null && strpos($msg, 'v2') !== false && strpos($msg, 'v1') !== false, 'a v2.edgeseal. key under a v1 vault key is refused naming both', (string)$msg);
-check((new VaultCrypto())->openItemDek($edge_v2, $v2_key) === $dek, 'and opens under the v2 key');
+check((new VaultCrypto())->openItemDek($edge_v2, $v2_key) === $dek, 'and opens under the vault key');
 
 harness_finish();

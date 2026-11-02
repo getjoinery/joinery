@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.7 - Old key census removed with the v1 code
  * @version 1.6 - The machine: Old key census (v1_census, agent 1.103.0; TEMPORARY, removed with the v1 code)
  * @version 1.5 - Site containers: Read site converger in its own box, offered whatever this machine's log switch
  *                says, because the site's own switch decides (agent 1.102.0); Logs: a machine with no site picks
@@ -33,7 +34,7 @@
 <?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionLargestFiles' => 'largest_files', 'nodeActionListeningSockets' => 'listening_sockets',
-	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRelayStatus' => 'relay_status', 'nodeActionV1Census' => 'v1_census',
+	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRelayStatus' => 'relay_status',
 	'nodeActionSiteStateReport' => 'site_state_report', 'nodeActionNetHealth' => 'net_health',
 	'nodeActionWebWorkers' => 'web_workers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -116,10 +117,6 @@ if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'spam_learning_stat
 }
 if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'relay_status')) {
 	$machine_qs[] = array('nodeActionRelayStatus', 'Mail relay', 'This site\'s view of its mail relay: the version and health it last reported, the map push, pickup and held mail, the transport key\'s kind, and mail arriving. No addresses.');
-}
-// Before the release that removes the v1 key openers (v1_key_retirement).
-if (JobCommandBuilder::has_primitive($node, 'v1_census')) {
-	$machine_qs[] = array('nodeActionV1Census', 'Old key census', 'What this site still holds on an old X25519 key: vaults, sealed values by table, relay keys, break-glass copies and backup keys. Counts and user ids only.');
 }
 if ($machine_qs) {
 	$page->begin_box(['title' => 'The machine']);

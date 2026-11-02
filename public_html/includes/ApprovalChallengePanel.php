@@ -22,6 +22,7 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.5 - the key box is X-Wing only: no ephemeralPublic
  * @version 1.4 - loads vault-crypto.js, which opens the challenge and the key box (post_quantum_sealing WP2)
  * @version 1.3 - the key box carries its seal version and, for v2, the X-Wing ciphertext
  * @version 1.2 - a restore of a backup another server made opens that backup's key with the pasted key too, and
@@ -172,7 +173,6 @@ class ApprovalChallengePanel {
 			'infoPrefix' => $pending['info'],
 			'keyBox'     => $box === null ? null : array(
 				'version'         => $box['version'],
-				'ephemeralPublic' => $box['ephemeral_public'] ?? '',
 				'ciphertext'      => $box['ciphertext'] ?? '',
 				'fingerprint'     => $box['recovery_fingerprint'],
 				'keyInputId'      => $box_input,

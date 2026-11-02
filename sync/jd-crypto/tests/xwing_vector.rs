@@ -77,45 +77,16 @@ fn a_fresh_keypair_is_a_seed_and_round_trips() {
 }
 
 #[test]
-fn sealing_to_an_old_key_is_refused_and_names_the_rotation() {
+fn an_old_key_is_refused_for_sealing_and_opening() {
     let old = jd_crypto::pkcs8::encode(&[9u8; 32]);
     let old_public = vault::public_key_from_secret_key(&old).unwrap();
     assert_eq!(b64::decode(&old_public).unwrap().len(), 32);
     let err = vault::seal_to_public_key(b"x", &old_public).unwrap_err();
     assert!(matches!(err, CryptoError::OldKey));
-    assert!(err.to_string().contains("rotate"), "{err}");
-}
-
-#[test]
-fn a_v1_seal_still_opens_with_its_old_secret() {
-    // A v1 seal built by hand (X25519 ECIES, HKDF info 'sealed-vault:dek' ||
-    // ephPub || recipientPub), as an unrotated vault's grants are.
-    use aes_gcm::aead::Aead;
-    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-    use x25519_dalek::{PublicKey, StaticSecret};
-
-    let scalar = [5u8; 32];
-    let secret = jd_crypto::pkcs8::encode(&scalar);
-    let recipient = PublicKey::from(&StaticSecret::from(scalar));
-    let eph = StaticSecret::from([6u8; 32]);
-    let eph_pub = PublicKey::from(&eph);
-    let shared = eph.diffie_hellman(&recipient);
-    let mut info = b"sealed-vault:dek".to_vec();
-    info.extend_from_slice(eph_pub.as_bytes());
-    info.extend_from_slice(recipient.as_bytes());
-    let mut key = [0u8; 32];
-    Hkdf::<Sha256>::new(None, shared.as_bytes()).expand(&info, &mut key).unwrap();
-    let iv = [1u8; 12];
-    let ct = Aes256Gcm::new_from_slice(&key).unwrap().encrypt(Nonce::from_slice(&iv), b"old grant".as_ref()).unwrap();
-    let mut raw = eph_pub.as_bytes().to_vec();
-    raw.extend_from_slice(&iv);
-    raw.extend_from_slice(&ct);
-
-    let recipient_b64 = b64::encode(recipient.as_bytes());
-    assert_eq!(vault::public_key_from_secret_key(&secret).unwrap(), recipient_b64);
-    assert_eq!(vault::open_from_secret_key(&b64::encode(&raw), &secret, &recipient_b64).unwrap(), b"old grant");
-    // ... and with the raw scalar, as the browser also accepts.
-    assert_eq!(vault::open_from_secret_key(&b64::encode(&raw), &scalar, &recipient_b64).unwrap(), b"old grant");
+    assert!(err.to_string().contains("old"), "{err}");
+    // Opening with it is refused the same way, with the PKCS#8 secret or the
+    // raw scalar: nothing opens a v1 seal.
+    let blob = b64::encode(&[0u8; 32 + 12 + 16]);
+    assert!(matches!(vault::open_from_secret_key(&blob, &old, &old_public), Err(CryptoError::OldKey)));
+    assert!(matches!(vault::open_from_secret_key(&blob, &[9u8; 32], &old_public), Err(CryptoError::OldKey)));
 }

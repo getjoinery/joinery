@@ -28,6 +28,8 @@
  * known (seen from its node's host report, never enrolled: a holder unlock can
  * still answer it), retired.
  *
+ * @version 1.5 - X-Wing only: a v1 (X25519 sealed box) break-glass box is malformed in box_parts(), canonical_box()
+ *                and accept_unlock_value()
  * @version 1.4 - box_parts() and accept_unlock_value() read a v2 (X-Wing) break-glass box as well as a v1 one;
  *                canonical_box() gives a v2 box its alg (by sealed length, so a host report and an
  *                enrolment store the same form) and room for its ~1,600-character sealed value
@@ -342,12 +344,11 @@ class DataRootEscrow extends SystemBase {
 		if (!preg_match('/^[0-9a-f]{64}$/', $fpr) || !preg_match('#^[A-Za-z0-9+/=]{60,4096}$#', $sealed)) {
 			return '';
 		}
-		$out = array('fingerprint' => $fpr, 'sealed' => $sealed);
 		$raw = base64_decode($sealed, true);
-		if ($raw !== false && strlen($raw) >= SealedBox::V2_OVERHEAD) {
-			$out['alg'] = BackupEnvelope::ALG_XWING;
+		if ($raw === false || strlen($raw) < SealedBox::V2_OVERHEAD) {
+			return '';
 		}
-		return json_encode($out);
+		return json_encode(array('fingerprint' => $fpr, 'sealed' => $sealed, 'alg' => BackupEnvelope::ALG_XWING));
 	}
 
 	/**
@@ -445,8 +446,7 @@ class DataRootEscrow extends SystemBase {
 		if ($parts === null) {
 			throw new DataRootEscrowException('This holder has no break-glass box for that machine to unlock it with.');
 		}
-		$public_bytes = $parts['version'] === SealedBox::V2 ? XWing::PUBLIC_KEY_BYTES : 32;
-		if ($shared === false || strlen($shared) !== 32 || $public === false || strlen($public) !== $public_bytes) {
+		if ($shared === false || strlen($shared) !== 32 || $public === false || strlen($public) !== XWing::PUBLIC_KEY_BYTES) {
 			throw new DataRootEscrowException('That is not what this page sends.');
 		}
 		if (!hash_equals($parts['fingerprint'], hash('sha256', $public))) {
@@ -459,8 +459,7 @@ class DataRootEscrow extends SystemBase {
 	/**
 	 * The break-glass envelope's recipient fingerprint and what the holder's
 	 * unlock page needs to work out the shared secret: the X-Wing ciphertext
-	 * for a v2 (`"alg": "xwing"`) recipient, the ephemeral public key for a v1
-	 * sealed box (specs/post_quantum_sealing.md R2).
+	 * of an `"alg": "xwing"` recipient. Null for anything else.
 	 */
 	public function box_parts(): ?array {
 		$r = json_decode((string)$this->get('dre_box'), true);
@@ -468,18 +467,11 @@ class DataRootEscrow extends SystemBase {
 			return null;
 		}
 		$sealed = base64_decode((string)$r['sealed'], true);
-		if (($r['alg'] ?? '') === BackupEnvelope::ALG_XWING) {
-			if ($sealed === false || strlen($sealed) <= SealedBox::V2_OVERHEAD) {
-				return null;
-			}
-			return array('version' => SealedBox::V2, 'fingerprint' => (string)($r['fingerprint'] ?? ''),
-				'ciphertext' => base64_encode(substr($sealed, 0, XWing::CIPHERTEXT_BYTES)));
-		}
-		if ($sealed === false || strlen($sealed) <= 32) {
+		if (($r['alg'] ?? '') !== BackupEnvelope::ALG_XWING || $sealed === false || strlen($sealed) <= SealedBox::V2_OVERHEAD) {
 			return null;
 		}
-		return array('version' => SealedBox::V1, 'fingerprint' => (string)($r['fingerprint'] ?? ''),
-			'ephemeral' => base64_encode(substr($sealed, 0, 32)));
+		return array('version' => SealedBox::V2, 'fingerprint' => (string)($r['fingerprint'] ?? ''),
+			'ciphertext' => base64_encode(substr($sealed, 0, XWing::CIPHERTEXT_BYTES)));
 	}
 }
 

@@ -42,7 +42,8 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
- * @version 1.20
+ * @version 1.21
+ * @changelog 1.21 - VaultRotationOwedException and arm()'s old-key refusal removed: every key is X-Wing
  * @changelog 1.20 - noteClientContentRead(): serving content the browser opens counts as a content read
  * @changelog 1.19 - modelReseal() records the classes it covers (modelResealClasses) and
  *   sweepingPreviousKey() tells a re-seal callback it runs for the chain sweep (VaultChainSweep)
@@ -101,20 +102,6 @@ class VaultLockedException extends Exception {}
  *  The API export is the one place that catches it, to hand the stored
  *  ciphertext to that browser (SystemBase::export_for_api()). */
 class VaultSealedForBrowserException extends RuntimeException {}
-
-/** Thrown by VaultUnlock::arm() for a vault still on an old X25519 key
- *  (specs/post_quantum_sealing.md R7): it does not open until its owner rotates
- *  it, which the Security page's rotation does with their passkey. ROTATE_URL
- *  is where an unlock prompt sends them. */
-class VaultRotationOwedException extends RuntimeException {
-	const ROTATE_URL = '/profile/security?rotate=owed#vault-panel';
-	const MESSAGE = 'Your vault\'s key is from before post-quantum protection, so it no longer opens. Move it to a new key '
-		. '(Security page, Rotate Vault Key): it takes your passkey and gives you new recovery codes.';
-
-	public function __construct() {
-		parent::__construct(self::MESSAGE);
-	}
-}
 
 require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 require_once(PathHelper::getIncludePath('includes/PoolVaultKey.php'));
@@ -253,14 +240,6 @@ class VaultUnlock {
 			string $via = VaultAudit::VIA_UNKNOWN): void {
 		if (!$key instanceof PoolVaultKey) {
 			throw new RuntimeException('VaultUnlock::arm: this build holds keys in the pool only.');
-		}
-		// A vault on an old X25519 key does not open (R7): its owner rotates it.
-		// A recovery still arms it: someone who lost their passkey gets back in
-		// that way, adds one, then rotates. An enrolment (adding that passkey)
-		// takes the opened key without arming (VaultCeremonies::openWithUnlocker),
-		// and rotation opens the old key with openKey() and never arms it.
-		if ($key->version() === SealedBox::V1 && $via !== VaultAudit::VIA_RECOVERY) {
-			throw new VaultRotationOwedException();
 		}
 		if ($caps === null) {
 			$caps = self::capsForUser($user_id);

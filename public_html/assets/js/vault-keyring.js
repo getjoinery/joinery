@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.12 - v1 retired (v1_key_retirement WP2): no rotation_required answer or redirect, no
+ *   rootKeyReplacement() (only an old X25519 root needed one)
  * @version 1.11 - a passphrase is at least 12 characters, as SealedBox::PASSPHRASE_MIN_CHARS says (it said 10)
  * @version 1.10 - replacementCodes() names the root key its twins are wrapped under (public_key), which the
  *   server checks against the root's current key
@@ -68,16 +70,7 @@ window.VaultKeyring = (function () {
 	}
 
 	function api(action, body) {
-		return joineryApi.post(action, body || {}).catch(function (e) {
-			// A vault still on an old X25519 key does not open: its owner moves it
-			// to a new key on the Security page (specs/post_quantum_sealing.md R7).
-			// Anywhere else, the unlock goes there.
-			if (e && e.data && e.data.rotation_required && e.data.rotate_url
-					&& window.location.pathname !== '/profile/security') {
-				window.location = e.data.rotate_url;
-			}
-			throw e;
-		});
+		return joineryApi.post(action, body || {});
 	}
 
 	// An unlocked session: the vault secret key held in a closure, plus the ops a
@@ -1016,7 +1009,7 @@ window.VaultKeyring = (function () {
 			body.root = made.payload;
 			codes = set.codes;
 		}
-		var res = await rotationAware(api('vault_unlock_passkey', body));
+		var res = await api('vault_unlock_passkey', body);
 		// The server adopts only when it can (not during an unfinished
 		// rotation): otherwise the codes and the root made here were not kept.
 		if (made && !(res && res.code_set_adopted)) {
@@ -1028,29 +1021,13 @@ window.VaultKeyring = (function () {
 			rootSession: made ? made.session : null };
 	}
 
-	// A vault on an old X25519 key does not open on the server (rotation
-	// required), but the same touch or phrase still opens the root here, which
-	// the rotation needs open (specs/post_quantum_sealing.md R7). So the
-	// refusal comes back as an answer, { rotation_required, rotate_url,
-	// message }, not an error that would stop the ceremony before the root.
-	async function rotationAware(call) {
-		try {
-			return await call;
-		} catch (e) {
-			if (e && e.data && e.data.rotation_required) {
-				return { rotation_required: true, rotate_url: e.data.rotate_url, message: e.message };
-			}
-			throw e;
-		}
-	}
-
 	// The passphrase: one Argon2id run, the account half posted, the root half
 	// kept. Resolves { res, rootSession }.
 	async function passphraseUnlock(st, phrase) {
 		var rootSt = st.root || {};
 		if (!rootSt.set_up) throw new Error('Your vault is not set up for a passphrase on this account.');
 		var k = await VaultCrypto.passphraseKeks(phrase, rootSt.salt, rootSt.kdf_params);
-		var res = await rotationAware(api('vault_unlock_passphrase', { passphrase_kek: VaultCrypto.b64urlEncode(k.account) }));
+		var res = await api('vault_unlock_passphrase', { passphrase_kek: VaultCrypto.b64urlEncode(k.account) });
 		k.account.fill(0);
 		return { res: res, rootSession: await openRoot(rootSt, k.root, 'passphrase') };
 	}
@@ -1111,44 +1088,6 @@ window.VaultKeyring = (function () {
 		var twins = await rootCodeWrappings(set, function (kek, type) { return rootSession.wrapUnder(kek, type); });
 		twins.forEach(function (t) { t.public_key = rootSession.publicKey; });
 		return { codes: set.codes, code_set: set.post, root_wrappings: twins };
-	}
-
-	/**
-	 * The root vault's new key, made for the account vault's rotation
-	 * (specs/post_quantum_sealing.md R7): an old X25519 root gives itself up
-	 * from its public key alone to a quantum attacker, and its secret derives
-	 * every content vault's key. With the old root open: a new X-Wing secret,
-	 * its wrapping under the rotating passkey's root output (the same touch,
-	 * vault_rotate_options with_root), and every content vault that opens
-	 * through the root re-wrapped under the new one. The recovery and
-	 * passphrase wrappings are made after, by replacementCodes() and
-	 * passphraseEnrolment() handed the new session; the salt stays.
-	 * Resolves { key: the root_unlockers.key to post, session: the new root }.
-	 */
-	async function rootKeyReplacement(st, oldRoot, credentialId, secondOutput) {
-		if (!secondOutput) throw new Error('Your passkey did not give your vault\'s second key. Reload the page and try again.');
-		var content = st.content || {};
-		var scopes = Object.keys(content);
-		for (var i = 0; i < scopes.length; i++) {
-			if (content[scopes[i]].pending_key_generation != null) {
-				throw new Error('Finish rotating the key of your ' + (content[scopes[i]].label || scopes[i]) + ' first, then rotate your vault.');
-			}
-		}
-		var pair = await VaultCrypto.generateVaultKeypair();
-		var session = makeSession(ROOT, pair.secretKeyBytes, pair.publicKeyB64);
-		var key = { public_key: pair.publicKeyB64, content: {},
-			passkey: [{ unlocker_type: 'passkey', credential_id: credentialId,
-				wrapped_secret_key: await freshWrap(pair.secretKeyBytes)(await prfKek(secondOutput), 'passkey', credentialId) }] };
-		for (var j = 0; j < scopes.length; j++) {
-			var cs = await openThroughRoot(oldRoot, scopes[j], content[scopes[j]]);
-			if (!cs) continue;   // opens with its own unlockers, not through the root
-			try {
-				key.content[scopes[j]] = await cs.wrapUnder(await session.scopeKek(scopes[j]), 'root');
-			} finally {
-				cs.lock();
-			}
-		}
-		return { key: key, session: session };
 	}
 
 	/**
@@ -1270,7 +1209,6 @@ window.VaultKeyring = (function () {
 		codeUnlock: codeUnlock,
 		enrolmentUnlocker: enrolmentUnlocker,
 		replacementCodes: replacementCodes,
-		rootKeyReplacement: rootKeyReplacement,
 		passphraseEnrolment: passphraseEnrolment,
 		setupVault: setupVault,
 	};

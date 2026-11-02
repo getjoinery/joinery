@@ -210,7 +210,6 @@ try {
 	// The browser's format is sealed too: a Fortress row's fields and its
 	// edge-sealed DEK, written by a hot process (a raise to end-to-end).
 	check(SealedEgressGuard::isSealedBlob('v1.edge.' . base64_encode(random_bytes(80)))
-		&& SealedEgressGuard::isSealedBlob('v1.edgeseal.mail.' . base64_encode(random_bytes(80)))
 		&& SealedEgressGuard::isSealedBlob('v2.edgeseal.mail.' . base64_encode(random_bytes(80)))
 		&& SealedEgressGuard::isSealedBlob('v2.seal.' . base64_encode(random_bytes(80))),
 		'browser-format content and keys count as sealed');

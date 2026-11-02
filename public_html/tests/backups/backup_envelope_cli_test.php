@@ -240,29 +240,6 @@ exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($fn_fil
 	. ' --trust-bucket-manifest --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
 check($rc !== 0, 'but a nested envelope from the future is still refused');
 
-// ── Version 1 still opens ───────────────────────────────────────────────────
-section('An old v1 envelope still opens in the CLI');
-
-// v1 sealing is gone; archives sealed before the switch must still open with
-// the X25519 key their owner saved. Built by hand with sodium.
-$v1_kp   = sodium_crypto_box_keypair();
-$v1_pub  = sodium_crypto_box_publickey($v1_kp);
-$v1_key  = base64_encode(random_bytes(32));
-$v1_side = $work . '/v1.tar.gz.enc' . BackupEnvelope::SIDECAR_SUFFIX;
-file_put_contents($v1_side, json_encode(['version' => 1, 'artifact' => 'v1.tar.gz.enc',
-	'cipher' => BackupEnvelope::CIPHER, 'created' => '2026-01-01T00:00:00Z',
-	'recipients' => [['kind' => 'recovery', 'fingerprint' => hash('sha256', $v1_pub),
-		'sealed' => base64_encode(sodium_crypto_box_seal($v1_key, $v1_pub))]]]));
-foreach (['32-byte secret' => sodium_crypto_box_secretkey($v1_kp), '64-byte keypair' => $v1_kp] as $label => $secret) {
-	$v1_file = $work . '/v1.key';
-	file_put_contents($v1_file, base64_encode($secret));
-	$out = [];
-	$rc  = 0;
-	exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($v1_side)
-		. ' --private ' . escapeshellarg($v1_file) . ' 2>&1', $out, $rc);
-	check($rc === 0 && trim(implode('', $out)) === $v1_key, "CLI opens a v1 envelope with its {$label}", implode(' | ', $out));
-}
-
 // ── Site key stability ──────────────────────────────────────────────────────
 section('Site key is minted once');
 

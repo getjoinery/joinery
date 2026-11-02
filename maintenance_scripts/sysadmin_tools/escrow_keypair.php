@@ -12,8 +12,7 @@
  * extensions and OpenSSL 3.5 or later (Ubuntu 26.04 ships it), from a copy of
  * the Joinery tree: it loads includes/MlKem768.php, XWing.php and SealedBox.php
  * from it, three classes with no platform bootstrap, so it works during
- * disaster recovery when the platform is gone. `unseal` also opens a blob made
- * for an old X25519 key, with that key, on libsodium alone. Validate with
+ * disaster recovery when the platform is gone. Validate with
  * `php -l` only — never the file validator (this is a CLI with a run-on-include
  * body).
  *
@@ -29,6 +28,7 @@
  *              private key, and prints the recovered backup key to stdout. This is
  *              the DR tool; run it on your own machine, never on the management node.
  *
+ * @version 1.3 - unseal opens X-Wing blobs only
  * @version 1.2 - generate names the Backups page (backup_recovery_public_key) as where the public key goes
  * @version 1.1 - X-Wing keys and v2 seals; unseal opens both versions; --scope names a v2 box's
  *                scope (the recovery key's command-line proof has its own; the default is a key seal's, dek)
@@ -155,9 +155,6 @@ if ($mode === 'unseal') {
         exit(1);
     }
 
-    // The 32 bytes do not say whether they are an X-Wing seed or an old
-    // X25519 key, and the blob carries no frame. Both opens are authenticated,
-    // so trying each is safe: a wrong guess fails its tag and opens nothing.
     $plain = false;
     $why = ek_load_pq();
     if ($why === null) {
@@ -167,12 +164,6 @@ if ($mode === 'unseal') {
         } catch (RuntimeException $e) {
             $plain = false;
         }
-    }
-    if ($plain === false) {
-        $public  = sodium_crypto_box_publickey_from_secretkey($secret);
-        $keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret, $public);
-        $plain = sodium_crypto_box_seal_open($cipher, $keypair);
-        sodium_memzero($keypair);
     }
     sodium_memzero($secret);
     if ($plain === false) {

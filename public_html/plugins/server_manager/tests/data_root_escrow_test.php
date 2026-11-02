@@ -93,7 +93,8 @@ function escrow_row(array $m): ?DataRootEscrow {
 }
 
 $box = json_encode(array('version' => 1, 'artifact' => 'data-root', 'recipients' => array(array(
-	'kind' => 'recovery', 'fingerprint' => str_repeat('ab', 32), 'sealed' => base64_encode(random_bytes(32 + 64 + 16))))));
+	'kind' => 'recovery', 'alg' => BackupEnvelope::ALG_XWING, 'fingerprint' => str_repeat('ab', 32),
+	'sealed' => base64_encode(random_bytes(SealedBox::V2_OVERHEAD + 64))))));
 
 section('The signing message is the agent\'s');
 check(EscrowEndpoint::signing_message('unlock', 'ID', '1700000000', 'NONCE', 'HASH')
@@ -192,14 +193,11 @@ $threw = false;
 try { $row->accept_unlock_value(base64_encode(random_bytes(32)), base64_encode(random_bytes(32))); } catch (DataRootEscrowException $e) { $threw = true; }
 check($threw, 'A value from a key the box is not sealed to is refused');
 // A box sealed to a key we hold, so the fingerprint matches.
-$rec = sodium_crypto_box_keypair();
-$recpub = sodium_crypto_box_publickey($rec);
-$row->note_box(json_encode(array('fingerprint' => hash('sha256', $recpub), 'sealed' => base64_encode(sodium_crypto_box_seal(random_bytes(64), $recpub)))));
+$recseed = random_bytes(32);
+$recpub = (new XWing())->publicKey($recseed);
+$row->note_box(json_encode(array('kind' => 'recovery', 'alg' => BackupEnvelope::ALG_XWING,
+	'fingerprint' => hash('sha256', $recpub), 'sealed' => base64_encode(SealedBox::sealV2(random_bytes(64), $recpub)))));
 $row->save();
-$parts = $row->box_parts();
-check(($parts['version'] ?? 0) === 1 && $parts['fingerprint'] === hash('sha256', $recpub)
-		&& strlen((string)base64_decode((string)($parts['ephemeral'] ?? ''), true)) === 32,
-	'A v1 box (what the agent seals today) gives the page its ephemeral public key', json_encode($parts));
 $shared = random_bytes(32);
 $row->accept_unlock_value(base64_encode($shared), base64_encode($recpub));
 $escrow_page = escrow_call(escrow_req($a, 'unlock', array('boot_id' => 'p1')), '192.0.2.10');
@@ -352,7 +350,7 @@ section('The host report names the node\'s identity (DataRootEscrowSync)');
 $c = escrow_machine();
 $enc = JobResultProcessor::host_report_data_root_encryption(array('backing' => 'luks-file', 'open' => false, 'identity' => $c['pub'],
 	'holder' => '', 'slot' => 'unknown', 'recipient_fingerprint' => str_repeat('cd', 32), 'box_fingerprint' => str_repeat('cd', 32),
-	'box_sealed' => base64_encode(random_bytes(112)), 'opened_by' => ''));
+	'box_sealed' => base64_encode(random_bytes(SealedBox::V2_OVERHEAD + 64)), 'opened_by' => ''));
 DataRootEscrowSync::from_host_report($node, $enc);
 $crow = escrow_row($c);
 if ($crow) { $made_escrows[] = $crow->key; }

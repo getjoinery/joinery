@@ -6,6 +6,7 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.19 - backup key states: no 'pending' (old epochs are not reported)
  * @version 2.18 - the Stored Backups Delete and Delete all buttons work: their scripts are attribute-escaped (the
  *                 json_encoded message's double quotes ended the onclick attribute, so a click did nothing)
  * @version 2.17 - the form is the Backups page's: one key per target, since nodes write through the backup
@@ -334,8 +335,8 @@ if ($rk_rows) {
 	$rk_badges = ['proven' => 'success', 'missing' => 'warning', 'unproven' => 'warning', 'unknown' => 'secondary'];
 	$rk_labels = ['proven' => 'can be backed up', 'missing' => 'no key — not backed up',
 		'unproven' => 'not verified — not backed up', 'unknown' => 'not checked yet'];
-	$ks_badges = ['current' => 'success', 'pending' => 'secondary', 'attention' => 'warning', 'unknown' => 'secondary'];
-	$ks_labels = ['current' => 'all post-quantum', 'pending' => 'post-quantum, re-seal on next backup',
+	$ks_badges = ['current' => 'success', 'attention' => 'warning', 'unknown' => 'secondary'];
+	$ks_labels = ['current' => 'all post-quantum',
 		'attention' => 'needs attention', 'unknown' => 'not reported'];
 	foreach ($rk_rows as $row) {
 		$n  = $row['node'];

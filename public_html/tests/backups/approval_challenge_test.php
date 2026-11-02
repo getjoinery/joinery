@@ -333,11 +333,11 @@ foreach (ApprovalChallenge::SCOPES as $name => $s) {
 
 section('A restore of a backup another server made opens its key with the same approval');
 
-$recovery_pub = random_bytes(32);
-$box = array('ephemeral_public' => base64_encode(random_bytes(32)), 'recovery_fingerprint' => hash('sha256', $recovery_pub));
+$recovery_pub = (new XWing())->publicKey(random_bytes(32));
+$box = array('ciphertext' => base64_encode(random_bytes(XWing::CIPHERTEXT_BYTES)), 'recovery_fingerprint' => hash('sha256', $recovery_pub));
 ac_stage(ApprovalChallenge::RESTORE, 7000, 900, array('public_key' => base64_encode($recovery_pub), 'key_box' => $box));
 $p = ApprovalChallenge::pending(ApprovalChallenge::RESTORE);
-check(($p['key_box'] ?? null) === array('version' => 1) + $box, 'the box the agent staged is shown as it was staged, as a v1 box',
+check(($p['key_box'] ?? null) === array('version' => 2) + $box, 'the box the agent staged is shown as it was staged',
 	json_encode($p['key_box'] ?? null));
 check(ac_refused(function () { ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7000, 'restore abc'); }),
 	'an answer that does not carry what opens the box is refused, so the agent is never handed half');
@@ -347,7 +347,7 @@ ob_start();
 ApprovalChallengePanel::render($page, ApprovalChallenge::RESTORE);
 $html = ob_get_clean();
 check(strpos($html, 'name="approval_shared"') !== false && strpos($html, 'name="approval_public_key"') !== false
-		&& strpos($html, '"ephemeralPublic":"' . $box['ephemeral_public'] . '"') !== false
+		&& strpos($html, '"ciphertext":"' . $box['ciphertext'] . '"') !== false
 		&& strpos($html, '"fingerprint":"' . $box['recovery_fingerprint'] . '"') !== false,
 	'the panel carries the box to the browser and has fields for what the browser works out');
 check(strpos($html, 'ra-boxkey') === false && strpos($html, 'Another server made this backup') !== false,
@@ -383,7 +383,7 @@ check(($a['shared'] ?? '') === $shared && ($a['public_key'] ?? '') === base64_en
 	'one naming the 1216-byte key is carried to the agent', json_encode($a));
 
 // A request with no box, or a malformed one, carries none.
-ac_stage(ApprovalChallenge::RESTORE, 7002, 900, array('key_box' => array('ephemeral_public' => 'x', 'recovery_fingerprint' => 'y')));
+ac_stage(ApprovalChallenge::RESTORE, 7002, 900, array('key_box' => array('ciphertext' => 'x', 'recovery_fingerprint' => 'y')));
 check(ApprovalChallenge::pending(ApprovalChallenge::RESTORE)['key_box'] === null, 'a malformed box is no box');
 ApprovalChallenge::answer(ApprovalChallenge::RESTORE, 7002, 'restore abc', 'ignored', 'ignored');
 $a = json_decode(ac_read('restore_approval_answer'), true);

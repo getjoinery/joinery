@@ -204,8 +204,8 @@ func (h *directHandler) handlePreflight(w http.ResponseWriter, r *http.Request) 
 	key, generation, isDecoy := "", 0, false
 	switch {
 	case matched && entry.KeyKind == keyKindClient:
-		// A key only the owner's browsers hold. A Direct sender seals with
-		// crypto_box_seal, which a browser cannot open, so the preflight names
+		// A key only the owner's browsers hold. A Direct sender seals each part
+		// raw (SealedBox::sealBinary), which a browser does not open, so the preflight names
 		// the tenant's transport key: the box opens the parts at pull and seals
 		// them to the browser's key, the path a Fortress row takes without a
 		// relay (specs/client_custody_mail.md B36).
@@ -234,13 +234,6 @@ func (h *directHandler) handlePreflight(w http.ResponseWriter, r *http.Request) 
 		generation = decoyGeneration
 		isDecoy = true
 	}
-	// A real key still on an old 32-byte X25519 key is answered as it is
-	// (owner, 2026-10-31; specs/post_quantum_sealing.md R3): the sender refuses
-	// to seal to it and falls back to SMTP, which seals the mail to it in the
-	// old format (Q8), so the mail arrives. A decoy here would drop the mail
-	// and report it delivered. The cost: until its holder rotates, the old key
-	// shows a prober that the address is real.
-
 	ttl := orInt(tc.DirectSessionTTLSeconds, 900)
 	h.state.openSession(&directSession{
 		Nonce:         env.Nonce,

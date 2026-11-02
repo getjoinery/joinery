@@ -39,14 +39,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 		return LogicResult::error($e->getMessage());
 	}
 
-	try {
-		VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
-	} catch (VaultRotationOwedException $e) {
-		// An old X25519 vault key: the unlock goes to the rotation instead (R7),
-		// which takes a passkey that can hold a key.
-		return LogicResult::error($e->getMessage(),
-			array('rotation_required' => true, 'rotate_url' => VaultRotationOwedException::ROTATE_URL));
-	}
+	VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
 	RequestLogger::log('vault_unlock_passphrase', 'verify', true, ['user_id' => $user->key]);
 
 	return LogicResult::render(['unlocked' => true]);

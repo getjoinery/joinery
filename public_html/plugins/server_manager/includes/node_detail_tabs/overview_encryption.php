@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.12 - the unlock page gets the X-Wing ciphertext only: no v1 ephemeral key
  * @version 1.10 - what to do while the provider's layer is on is DataRootEncryptionOffer::provider_layer_fix(): a machine
  *                in its owner's account is told to prove its recovery key first where it has none (B114)
  * @version 1.11 - loads vault-crypto.js before copy-key.js, which opens the box through it (post_quantum_sealing WP2)
@@ -245,7 +246,7 @@ if (is_array($dre_enc) || $dre_row) {
 			. '<button type="button" class="btn btn-sm btn-warning" id="copy_key_open">Unlock</button>'
 			. '<div id="copy_key_status" class="small mt-2"></div></form>';
 		echo '<script>window.copyKeyCeremony = ' . json_encode(array('fingerprint' => $parts['fingerprint'], 'version' => $parts['version'],
-			'ephemeralPublic' => $parts['ephemeral'] ?? '', 'ciphertext' => $parts['ciphertext'] ?? '')) . ';</script>';
+			'ciphertext' => $parts['ciphertext'])) . ';</script>';
 		echo VaultCrypto::browserScriptTag(false);
 		echo '<script src="/assets/js/copy-key.js?v=' . filemtime(PathHelper::getIncludePath('assets/js/copy-key.js')) . '"></script>';
 		echo '</div>';

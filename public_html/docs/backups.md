@@ -935,10 +935,7 @@ or written again since. The owner pastes the recovery key there, and the
 browser works out the one value that opens the recovery recipient's box and
 nothing else (`VaultCrypto.halfOpenKeyBox`): for an X-Wing box, the box's own
 AES key (X-Wing decapsulation, then HKDF-SHA256 under the `dek` scope), never
-the X-Wing shared secret; for a box sealed to an old X25519 recovery key, the
-X25519 of the key with the box's ephemeral key. The copy finishes opening it
-(AES-256-GCM, or for the old box `crypto_box`'s HSalsa20 key and BLAKE2b nonce)
-and writes `chain.key` and the manifest as the vouch, exactly as `copy_import`
+the X-Wing shared secret. The copy finishes opening it (AES-256-GCM) and writes `chain.key` and the manifest as the vouch, exactly as `copy_import`
 would. The
 recovery key never leaves the browser, and the page is the copy's own, so the
 management node never sees the key or what it opens. No machine that made the
@@ -962,20 +959,14 @@ that key to two recipients:
   of base64, a 32-byte X-Wing seed. This is what lets a site restore itself
   unattended: routine restores need no operator. It is disposable — lose it and
   the recovery key still opens everything, and the host converger mints a new
-  one. An old X25519 keypair (64 bytes) found there is moved aside by the
-  converger as `config/backup_site_key.retired` (`.retired.{time}` after the
-  first) and a seed minted in its place; the retired file is never deleted:
-  `BackupEnvelope::open_as_site()` tries it after the current key, so
-  everything the old key sealed still opens here, and the next run re-seals
-  those epochs to the current keys.
+  one.
 
 Each seal is X-Wing (the CFRG hybrid of ML-KEM-768 and X25519; a 1216-byte
 public key, a 32-byte seed as the private key) followed by AES-256-GCM, keyed by
 HKDF-SHA256 under the `dek` scope (`SealedBox::sealV2`). The envelope is
 version 2, each recipient marked `"alg": "xwing"` with the sha256 fingerprint of
 the key it is sealed to. A version-1 envelope (recipients with no `alg`,
-libsodium sealed boxes to 32-byte X25519 keys) is a backup sealed before the
-site's keys were X-Wing, and opens with those old keys; nothing writes one.
+X25519 sealed boxes) still reads, and no key opens it.
 
 Nothing on the machine is precious as a result. Losing a site, or its whole
 disk, costs no ability to read any backup it ever made.
@@ -1040,21 +1031,13 @@ openssl enc -d -aes-256-cbc -pbkdf2 -pass file:data_key.txt \
 ```
 
 Then shred `data_key.txt`. The same two steps work with the site key: pass
-`config/backup_site_key` as `--private`, or a `config/backup_site_key.retired*`
-file for what an old X25519 site key sealed — and that is all the
+`config/backup_site_key` as `--private` — and that is all the
 platform's own restore path does. A chain restores by decrypting the full plus
 each incremental with the one data key from the chain manifest's envelope and
 applying them oldest-first. Check the manifest first — `sha256sum
 manifest-NNNN.json` against the hash recorded when it was written (beside the
 run on the management node, or in the run's ledger file in the bucket) — since
 every archive is checked against the hashes it names.
-
-A version-1 envelope opens with the old X25519 recovery key it was sealed to,
-through either tool, and needs only PHP's sodium extension: no FFI, no
-OpenSSL 3.5. The 32 bytes of a private key do not say whether they are an
-X-Wing seed or an old X25519 key; `backup_envelope.php open` derives both
-public keys and opens the recipient whose fingerprint matches, and
-`escrow_keypair.php unseal` tries the X-Wing open first, then the sealed box.
 
 An encrypted data root's break-glass copy (`/srv/joinery.img.recovery`) is the
 same envelope around the volume key. The agent binary opens it with the
@@ -1131,9 +1114,7 @@ php maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal   --private ~/r
 `generate` writes the private key to the path given (mode 0600, refusing to
 overwrite) and prints only the public key. `unseal` reads a sealed blob
 (base64) from `--in` or stdin and prints what it holds; `--scope` names a
-challenge's scope, and without it the blob is opened as a key seal (`dek`). It
-also opens a blob sealed to an old X25519 key, with that key, on libsodium
-alone.
+challenge's scope, and without it the blob is opened as a key seal (`dek`).
 
 The encoding is one contract across all of them: the private key is the 32-byte
 seed and the public key the 1216-byte X-Wing key derived from it, each one line
@@ -1617,15 +1598,13 @@ there with their recovery key, in their browser, and answers. The agent verifies
 the answer against what it sealed and only then restores.
 
 A chain staged without a key (another server made it) carries its key box in
-the statement: the recovery recipient's box as the page needs it (the X-Wing
-ciphertext of an X-Wing box, or the ephemeral public key of a box sealed to an
-old X25519 recovery key) and the recovery key's fingerprint, bound into the
+the statement: the recovery recipient's box as the page needs it (its X-Wing
+ciphertext) and the recovery key's fingerprint, bound into the
 challenge with the rest. The statement says the backup opens only with the
 recovery key, and names the server before the switch-over as its maker when the
 ledger line was handed over. The page works out, from the same pasted key, the
 one value that opens that box (`recovery-readiness.js` `openKeyBox`, through
-`VaultCrypto.halfOpenKeyBox`): the box's `dek`-scope AES key, or for an old box
-the X25519 of the key with the ephemeral key. It posts that with the answer;
+`VaultCrypto.halfOpenKeyBox`): the box's `dek`-scope AES key. It posts that with the answer;
 a backup sealed to an earlier recovery key asks for that key in a second box,
 by its fingerprint. The agent finishes opening
 the box as `copy_take_key` does, writes the chain key where Prepare would have,

@@ -3,7 +3,7 @@
  * Vault's shared client-custody module (assets/js/vault-crypto.js).
  *
  * The vault (VaultCrypto + VaultKeyring, scope 'drive') owns the identity: the
- * per-user X25519 keypair and its unlockers. DriveCrypto adds only what Drive
+ * per-user X-Wing keypair and its unlockers. DriveCrypto adds only what Drive
  * needs on top — per-file content keys, chunked authenticated encryption of file
  * bytes, the encrypted per-file metadata blob, the encrypted thumbnail, and the
  * seal/open of a file key to a user's vault public key for sharing.
@@ -21,6 +21,7 @@
  *
  * Depends on VaultCrypto (assets/js/vault-crypto.js).
  *
+ * @version 1.3 - comments: the vault key is X-Wing
  * @version 1.2 - contentSupported(): the share page's check, which needs no X-Wing module
  * @version 1.1
  */
@@ -220,7 +221,7 @@ window.DriveCrypto = (function () {
 	// ---- sharing: seal / open a file key to a vault public key --------------
 
 	// Seal the raw file key to a recipient's drive vault public key (a
-	// FileKeyGrant's wrapped_file_key). ECIES over X25519 — anyone can seal.
+	// FileKeyGrant's wrapped_file_key), a v2 X-Wing seal — anyone can seal.
 	function wrapFileKeyTo(fkBytes, recipientPublicKeyB64) {
 		return enc().sealToPublicKey(fkBytes, recipientPublicKeyB64);
 	}

@@ -438,25 +438,6 @@ if ($held_row !== null) {
 }
 
 // ---------------------------------------------------------------------------
-section('A vault still on an old X25519 key is answered with that key');
-// ---------------------------------------------------------------------------
-
-// Not its decoy (owner, 2026-10-31; post_quantum_sealing R3): the sender
-// refuses to seal to a 32-byte key and falls back to SMTP, where the message
-// waits for the holder's rotation. A decoy would drop it and report it delivered.
-$x_wing_key = $RECIPIENT_VAULT_KEY;
-$RECIPIENT_VAULT_KEY = SealedBox::b64url(random_bytes(32));
-direct_test_setup(true);
-$old_answer = (new DirectReceiver())->preflight(direct_test_envelope($REAL), direct_test_manifest('x'), $LOOPBACK);
-check($old_answer['answer'] === DirectProtocol::ANSWER_ACCEPT && ($old_answer['key'] ?? '') === $RECIPIENT_VAULT_KEY,
-	'the real address answers with its own old key, so the sender falls back rather than sealing to a decoy',
-	(string)($old_answer['key'] ?? ''));
-$threw = '';
-try { (new SealedBox())->sealBinary('x', $RECIPIENT_VAULT_KEY); } catch (Throwable $e) { $threw = $e->getMessage(); }
-check($threw === SealedBox::V1_KEY_REFUSAL, 'and a sender\'s seal refuses it as an old key, which is what sends the mail by SMTP', $threw);
-$RECIPIENT_VAULT_KEY = $x_wing_key;
-
-// ---------------------------------------------------------------------------
 section('A decoy delivery keeps its byte charge, so a full spool is not an existence oracle');
 // ---------------------------------------------------------------------------
 

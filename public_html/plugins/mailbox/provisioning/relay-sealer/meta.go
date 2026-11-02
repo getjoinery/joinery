@@ -35,7 +35,7 @@ type spoolMeta struct {
 	MapVersion  int64  `json:"map_version"`
 	ReceivedUTC string `json:"received_utc"`
 	// key_kind=client only: the message's DEK sealed to the recipient's
-	// browser-held key ("v1.edgeseal.{scope}."), the scope, and the key
+	// browser-held key ("v2.edgeseal.{scope}."), the scope, and the key
 	// generation the map named. The .seal holds the body under that DEK.
 	SealedDEK     string `json:"sealed_dek,omitempty"`
 	KeyScope      string `json:"key_scope,omitempty"`

@@ -2446,7 +2446,7 @@ check($rs['version']['running'] === '3.16' && $rs['version']['seals_post_quantum
 	'each field held to its shape: only a literal true, a time that is a time, a word that is a word', $rs_json);
 check($rs['map']['last_attempt_result'] === 'skipped' && $rs['map']['last_attempt_reason'] === ''
 	&& $rs['map']['last_attempt_time'] === '2026-11-01 16:25:00', 'the last map check: a reason that is not a code is dropped', $rs_json);
-check($rs['transport_key'] === array('kind' => 'xwing', 'generation' => 2, 'retired_kept' => true, 'replaced_time' => '2026-11-01 13:51:00')
+check($rs['transport_key'] === array('kind' => 'xwing', 'generation' => 2)
 	&& $rs['inbound'] === array('last_hour' => 3, 'last_day' => 40, 'newest_time' => '2026-11-01 13:54:01'),
 	'the transport key\'s kind and generation, and the mail counts, kept', $rs_json);
 $rs_none = JobResultProcessor::sanitise_relay_status(array('mailbox' => 'active', 'relay' => 'none', 'relays_enabled' => 0,
@@ -2455,42 +2455,6 @@ check($rs_none['relay'] === 'none' && !isset($rs_none['version']), 'no relay: th
 check(JobResultProcessor::sanitise_relay_status(array('mailbox' => 'inactive')) === array('read' => true, 'mailbox' => 'inactive')
 	&& JobResultProcessor::sanitise_relay_status('ERROR') === array('read' => false),
 	'mailbox inactive is said; anything else is not read');
-
-// v1_census (TEMPORARY, v1_key_retirement): counts, ids and kinds; no value, address or key crosses.
-$vc_in = array('findings' => 5,
-	'v1_vaults' => array('total' => 10, 'old' => 2, 'by_scope' => array('user' => 1, 'Bad Scope' => 9),
-		'owners' => array(array('user_id' => 4500, 'permission' => 0, 'deleted' => false, 'scopes' => 'drive,user', 'email' => 'a@example.com'))),
-	'v2_blobs' => array('total' => 3, 'leftover' => 1, 'columns' => array(
-		array('table' => 'iem_inbound_email_messages', 'column' => 'iem_sealed_key', 'prefix' => 'v1.seal.', 'count' => 3,
-			'leftover' => 1, 'no_owner' => 0, 'owners' => array('4500' => 3), 'sample' => 'v1.seal.AAAA',
-			'generations' => array('1' => 2, 'null' => 1, 'DROP' => 5)),
-		array('table' => 'x; DROP', 'column' => 'c', 'prefix' => 'v9.', 'count' => 'many', 'leftover' => 0, 'no_owner' => 0, 'owners' => array('evil' => 1)))),
-	'unscanned' => array('big_table', 'Not A Table', 'iem_inbound_email_messages.iem_raw_message', 'a.b.c', 'x.Bad Col'),
-	'v3_chains' => array('vaults' => 1, 'entries' => 2, 'unswept' => 1),
-	'v4_relays' => array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => 'yes', 'public' => 'BBBB')),
-	'v5' => array('encrypted' => true, 'sealed_to' => 'this_site', 'recovery_kind' => 'xwing', 'escrows_v1' => array(33, 'x')),
-	'v6' => array('recovery_kind' => 'xwing', 'site_kind' => 'xwing', 'site_retired' => 1, 'old_epochs' => null, 'key' => 'CCCC'));
-$vc = JobResultProcessor::sanitise_v1_census($vc_in);
-$vc_json = json_encode($vc);
-check(strpos($vc_json, 'example.com') === false && strpos($vc_json, 'AAAA') === false && strpos($vc_json, 'BBBB') === false
-	&& strpos($vc_json, 'CCCC') === false && strpos($vc_json, 'DROP') === false,
-	'v1_census: no address, sealed value or key crosses, whatever the node sent', $vc_json);
-check($vc['findings'] === 5 && $vc['v1_vaults']['by_scope'] === array('user' => 1)
-	&& $vc['v1_vaults']['owners'] === array(array('user_id' => 4500, 'permission' => 0, 'deleted' => false, 'scopes' => array('drive', 'user'))),
-	'v1_census: vaults by scope and owners by id, a scope that is not a name dropped', $vc_json);
-check($vc['v2_blobs']['columns'][0]['owners'] === array(4500 => 3) && $vc['v2_blobs']['columns'][0]['leftover'] === 1
-	&& $vc['v2_blobs']['columns'][1]['table'] === '' && $vc['v2_blobs']['columns'][1]['prefix'] === ''
-	&& $vc['v2_blobs']['columns'][1]['count'] === 'unknown' && $vc['v2_blobs']['columns'][1]['owners'] === array(),
-	'v1_census: each sealed-value column held to its shape', $vc_json);
-check($vc['unscanned'] === array('big_table', 'iem_inbound_email_messages.iem_raw_message') && $vc['v4_relays'] === array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => false))
-	&& $vc['v5']['escrows_v1'] === array(33, 'unknown') && $vc['v6']['old_epochs'] === 'unknown',
-	'v1_census: unscanned tables, relay key kinds, escrow ids and backup kinds kept to their shapes', $vc_json);
-check(JobResultProcessor::sanitise_v1_census('ERROR') === array('read' => false)
-	&& JobResultProcessor::sanitise_v1_census(array('findings' => 0)) === array('read' => false),
-	'v1_census: anything without its fields is not read');
-check($vc['v2_blobs']['columns'][0]['generations'] === array('1' => 2, 'null' => 1)
-	&& $vc['v2_blobs']['columns'][1]['generations'] === array() && $vc['v3_chains']['unswept'] === 1,
-	'v1_census: key generations per column (a key that is not a number dropped) and unswept chain entries', $vc_json);
 
 // host_report 1.23: the data root script and the boot id.
 $drs = JobResultProcessor::host_report_data_root_script(array('installed_version' => '1.21', 'release_version' => '1.22', 'consumers' => array(

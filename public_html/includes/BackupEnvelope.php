@@ -24,13 +24,13 @@
  * ({archive}.keys.json), and inside the chain manifest for incremental chains.
  * Both use the recipient structure built here.
  *
- * Envelope version 2 marks each recipient `"alg": "xwing"`. Version 1, whose
- * recipients carry no `alg` and are libsodium sealed boxes to 32-byte X25519
- * keys, is opened only: an old backup restores with the old recovery key
- * while retention keeps it (specs/post_quantum_sealing.md R2, R7). A secret
- * names neither version, so open() derives both candidate public keys from it
- * and opens the recipient whose recorded fingerprint matches.
+ * Each recipient is marked `"alg": "xwing"`: an X-Wing seal to the
+ * recipient's 1216-byte key. open() derives the public key from the 32-byte
+ * seed it is handed and opens the recipient whose recorded fingerprint
+ * matches. A recipient with no `alg` is passed over.
  *
+ * @version 1.4 - X-Wing only: X25519 recipients, 64-byte keypairs and the retired site keys are gone;
+ *                open_as_site() opens with the current site key
  * @version 1.3 - open_as_site() also tries the retired site keys the converger moved aside, so an
  *                epoch sealed before the key was replaced still opens here and can be re-sealed
  * @version 1.2 - envelope version 2 (X-Wing recipients, `alg`); 32-byte v1 recipients refused
@@ -50,7 +50,7 @@ class BackupEnvelope {
 	/** Sidecar/manifest envelope schema version written. */
 	const VERSION = 2;
 
-	/** Every version decode() reads: 1 (sodium sealed boxes) is opened only. */
+	/** Every version decode() reads. A version-1 envelope (no X-Wing recipient) decodes, and opens with nothing. */
 	const READABLE_VERSIONS = [1, 2];
 
 	/** A version-2 recipient's algorithm. */
@@ -96,10 +96,6 @@ class BackupEnvelope {
 		$raw = (string)$pub;
 		if (strlen($raw) !== XWing::PUBLIC_KEY_BYTES) {
 			$decoded = base64_decode(trim($raw), true);
-			if ($decoded !== false && strlen($decoded) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-				throw new BackupEnvelopeException('The supplied recovery public key is an old X25519 key. '
-					. 'Backups seal to post-quantum keys only: generate a new recovery key.');
-			}
 			if ($decoded === false || strlen($decoded) !== XWing::PUBLIC_KEY_BYTES) {
 				throw new BackupEnvelopeException(
 					'The supplied recovery public key is not a valid public key '
@@ -125,12 +121,6 @@ class BackupEnvelope {
 
 		$sealed = [];
 		foreach ($recipients as $r) {
-			if (strlen((string)$r['pub']) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-				throw new BackupEnvelopeException('The ' . $r['kind'] . ' key is an old X25519 key, and backups seal to '
-					. 'post-quantum keys only. ' . ($r['kind'] === 'recovery'
-						? 'Generate a new recovery key on the Backups page; older backups stay openable with the key you have.'
-						: 'The host converger replaces it on its next run.'));
-			}
 			try {
 				$box = SealedBox::sealV2($data_key, (string)$r['pub']);
 			} catch (RuntimeException $e) {
@@ -249,11 +239,6 @@ class BackupEnvelope {
 			return null;
 		}
 		$seed = base64_decode(trim($raw), true);
-		if ($seed !== false && strlen($seed) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-			throw new BackupEnvelopeException(
-				'The site backup key at ' . $path . ' is an old X25519 keypair. The host converger replaces it '
-				. 'with a post-quantum key on its next run; backups already made stay openable with the recovery key.');
-		}
 		if ($seed === false || strlen($seed) !== XWing::SEED_BYTES) {
 			throw new BackupEnvelopeException(
 				'The site backup key at ' . $path . ' is not a valid key. Move it aside to have a new one '
@@ -267,11 +252,10 @@ class BackupEnvelope {
 	/**
 	 * Recover the data key from an envelope using a secret key.
 	 *
-	 * Accepts a 32-byte secret (a v2 seed or a v1 X25519 secret: the bytes do
-	 * not say which) or a 64-byte v1 sodium keypair, raw or base64, so the same
-	 * call serves the site key file and a recovery private key pasted from a
-	 * password manager. The candidate public keys are derived from it and the
-	 * recipient whose recorded fingerprint matches is opened.
+	 * Accepts a 32-byte X-Wing seed, raw or base64, so the same call serves
+	 * the site key file and a recovery private key pasted from a password
+	 * manager. The public key is derived from it and the recipient whose
+	 * recorded fingerprint matches is opened.
 	 */
 	public static function open(array $envelope, $secret) {
 		$recipients = $envelope['recipients'] ?? null;
@@ -279,13 +263,12 @@ class BackupEnvelope {
 			throw new BackupEnvelopeException('This backup envelope lists no recipients.');
 		}
 
-		// Public and secret keys can look alike (a v1 public key and any secret
-		// are both 32 bytes), and the two failures need opposite fixes. The
+		// A pasted public key and a secret need opposite fixes. The
 		// envelope carries the fingerprint of every recipient's PUBLIC key, so
 		// say plainly when that is what was pasted, instead of reporting the
 		// wrong key, which is the last thing anyone needs mid-disaster.
 		$raw = self::raw_key_bytes($secret);
-		if ($raw !== null && in_array(strlen($raw), [SODIUM_CRYPTO_BOX_PUBLICKEYBYTES, XWing::PUBLIC_KEY_BYTES], true)) {
+		if ($raw !== null && strlen($raw) === XWing::PUBLIC_KEY_BYTES) {
 			$fpr = hash('sha256', $raw);
 			foreach ($recipients as $r) {
 				if (hash_equals((string)($r['fingerprint'] ?? ''), $fpr)) {
@@ -303,42 +286,32 @@ class BackupEnvelope {
 			throw new BackupEnvelopeException('That is a PUBLIC key — public keys seal backups but cannot open them, '
 				. 'and this one is not even a recipient of this backup. Supply the private key you saved when the keypair was generated.');
 		}
-		if (strlen($raw) !== SODIUM_CRYPTO_BOX_KEYPAIRBYTES && strlen($raw) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
+		if (strlen($raw) !== XWing::SEED_BYTES) {
 			throw new BackupEnvelopeException(
 				'That is not a recovery key. Expected the base64 secret key, not a file path.');
 		}
 
-		$wants_xwing = false;
-		foreach ($recipients as $r) {
-			$wants_xwing = $wants_xwing || ($r['alg'] ?? '') === self::ALG_XWING;
-		}
 		$pq_unavailable = null;
-		$candidates = self::candidate_keys($raw, $wants_xwing, $pq_unavailable);
+		$fingerprint = null;
+		try {
+			$fingerprint = hash('sha256', (new XWing())->publicKey($raw));
+		} catch (RuntimeException $e) {
+			$pq_unavailable = $e->getMessage();
+		}
 
-		foreach ($recipients as $r) {
+		foreach ($fingerprint === null ? array() : $recipients as $r) {
 			$blob = base64_decode((string)($r['sealed'] ?? ''), true);
-			if ($blob === false || $blob === '') {
-				continue;
-			}
-			$xwing = ($r['alg'] ?? '') === self::ALG_XWING;
-			$candidate = $candidates[$xwing ? 2 : 1] ?? null;
-			if ($candidate === null) {
+			if ($blob === false || $blob === '' || ($r['alg'] ?? '') !== self::ALG_XWING) {
 				continue;
 			}
 			$fpr = (string)($r['fingerprint'] ?? '');
-			if ($fpr !== '' && !hash_equals($fpr, $candidate['fingerprint'])) {
+			if ($fpr !== '' && !hash_equals($fpr, $fingerprint)) {
 				continue;
 			}
-			if ($xwing) {
-				try {
-					return SealedBox::openV2($blob, $candidate['secret']);
-				} catch (RuntimeException $e) {
-					continue;
-				}
-			}
-			$opened = @sodium_crypto_box_seal_open($blob, $candidate['secret']);
-			if ($opened !== false) {
-				return $opened;
+			try {
+				return SealedBox::openV2($blob, $raw);
+			} catch (RuntimeException $e) {
+				continue;
 			}
 		}
 
@@ -351,88 +324,9 @@ class BackupEnvelope {
 			. implode(', ', array_map(function ($r) { return (string)($r['kind'] ?? '?'); }, $recipients)) . '.');
 	}
 
-	/**
-	 * Open an envelope with this site's own key: the current one, then any key
-	 * the converger moved aside (backup_site_key.retired, .retired.{time}).
-	 * Envelopes sealed before a key was replaced name the old key, and the
-	 * files under them stay in backup storage for as long as anything points
-	 * at them, so the old key keeps opening them here; the run re-seals each
-	 * such epoch to the current keys (BackupObjects::reseal_epochs()).
-	 */
+	/** Open an envelope with this site's own key. */
 	public static function open_as_site(array $envelope) {
-		try {
-			return self::open($envelope, self::site_secret());
-		} catch (\Throwable $current) {
-			$opened = self::open_with_any($envelope, self::retired_site_secrets());
-			if ($opened === null) { throw $current; }
-			return $opened;
-		}
-	}
-
-	/** The data key from the first of $secrets that opens $envelope, or null. */
-	public static function open_with_any(array $envelope, array $secrets) {
-		foreach ($secrets as $secret) {
-			try {
-				return self::open($envelope, $secret);
-			} catch (\Throwable $e) {
-				// not this one; try the next
-			}
-		}
-		return null;
-	}
-
-	/**
-	 * Every retired site key this machine keeps, oldest name first, as raw
-	 * bytes (a 64-byte X25519 keypair, or a 32-byte seed). Unreadable or
-	 * malformed files are passed over: they cannot open anything.
-	 *
-	 * @return string[]
-	 */
-	public static function retired_site_secrets(?string $key_path = null): array {
-		$out = array();
-		$paths = glob(($key_path ?? self::site_key_path()) . '.retired*') ?: array();
-		sort($paths);
-		foreach ($paths as $path) {
-			$raw = is_file($path) ? @file_get_contents($path) : false;
-			if ($raw === false || trim($raw) === '') { continue; }
-			$key = base64_decode(trim($raw), true);
-			if ($key !== false && in_array(strlen($key), array(SODIUM_CRYPTO_BOX_KEYPAIRBYTES, XWing::SEED_BYTES), true)) {
-				$out[] = $key;
-			}
-		}
-		return $out;
-	}
-
-	/**
-	 * What a secret can open, by seal version: [1 => [secret = sodium keypair,
-	 * fingerprint], 2 => [secret = seed, fingerprint]]. A 64-byte keypair is v1
-	 * only; 32 bytes may be either, so both are derived. The v2 candidate is
-	 * left out when no recipient needs it, so a v1 envelope opens on a machine
-	 * without OpenSSL 3.5. When the v2 candidate is wanted but ML-KEM is not
-	 * available here, it is left out and $pq_unavailable says why: the caller
-	 * reports that only if no v1 recipient opened, since an old key may still
-	 * open an old recipient.
-	 */
-	private static function candidate_keys(string $raw, bool $want_xwing, ?string &$pq_unavailable = null): array {
-		$out = [];
-		if (strlen($raw) === SODIUM_CRYPTO_BOX_KEYPAIRBYTES) {
-			$out[1] = ['secret' => $raw, 'fingerprint' => hash('sha256', sodium_crypto_box_publickey($raw))];
-			return $out;
-		}
-		$v1_pub = sodium_crypto_box_publickey_from_secretkey($raw);
-		$out[1] = [
-			'secret'      => sodium_crypto_box_keypair_from_secretkey_and_publickey($raw, $v1_pub),
-			'fingerprint' => hash('sha256', $v1_pub),
-		];
-		if ($want_xwing) {
-			try {
-				$v2_pub = (new XWing())->publicKey($raw);
-				$out[2] = ['secret' => $raw, 'fingerprint' => hash('sha256', $v2_pub)];
-			} catch (RuntimeException $e) {
-				$pq_unavailable = $e->getMessage();
-			}
-		}
-		return $out;
+		return self::open($envelope, self::site_secret());
 	}
 
 	/**
@@ -444,7 +338,7 @@ class BackupEnvelope {
 		if (!is_string($secret) || trim($secret) === '') {
 			return null;
 		}
-		$known = [SODIUM_CRYPTO_BOX_KEYPAIRBYTES, SODIUM_CRYPTO_BOX_SECRETKEYBYTES, XWing::PUBLIC_KEY_BYTES];
+		$known = [XWing::SEED_BYTES, XWing::PUBLIC_KEY_BYTES];
 		if (in_array(strlen($secret), $known, true)) {
 			return $secret;
 		}

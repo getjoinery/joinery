@@ -692,14 +692,12 @@ try {
 	check($target->invoke($exporter, $alias, $domain) === null,
 		'a 3.15 relay (it seals for browsers, but refuses a 1216-byte key) is not given the X-Wing mail key: the transport key carries it');
 	$takes = new ReflectionMethod('RelayMapExporter', 'relayTakes');
-	$old_key = base64_encode(random_bytes(SODIUM_CRYPTO_BOX_PUBLICKEYBYTES));
-	check($takes->invoke($exporter, $old_key) === true, 'a 32-byte key still goes to a 3.15 relay');
 	check(strlen(base64_decode($pub)) === XWing::PUBLIC_KEY_BYTES && $takes->invoke($exporter, $pub) === false,
-		'a 1216-byte key does not');
+		'a 3.15 relay does not take a 1216-byte key');
 	$relay_prop->setValue($exporter, $relay_at(''));
 	check($takes->invoke($exporter, $pub) === false, 'nor to a relay that has not said its version');
 	$relay_prop->setValue($exporter, $relay_at('3.16'));
-	check($takes->invoke($exporter, $pub) === true && $takes->invoke($exporter, $old_key) === true, 'a 3.16 relay takes both');
+	check($takes->invoke($exporter, $pub) === true, 'a 3.16 relay takes it');
 	$upgrade_src = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 	check(strpos($upgrade_src, 'upgrade_relay_ready();') === false,
 		'an upgrade is not refused for its relay: the relay is rebuilt from the bundle the upgraded site carries');

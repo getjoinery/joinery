@@ -27,6 +27,7 @@
  * parse one message twice (twice would seal it twice, split its attachments
  * twice and run its rules twice).
  *
+ * @version 1.7 - no seal-version check: every blob is v2, and one sealed to a retired key moves after its parse fails
  * @version 1.6 - a waiting blob sealed to a retired key is moved to the current key through the vault's retired keys
  *                (VaultPreviousKeys) and parsed; one nothing opens is left quietly, not retried and logged on every page
  * @version 1.5 - the parse runs as server_initiated_write(): it is mail arriving late, which no
@@ -156,22 +157,6 @@ class DeferredIngest {
 			if (InboundEmailMessage::isBrowserSealed($msg)) {
 				return false;   // a Fortress arrival: the owner's browser parses it
 			}
-			// Sealed in another format than this key (an old v1 blob under a v2
-			// key): sealed to a key a rotation has since retired. The vault keeps
-			// its retired keys under the current one, so the blob is moved to the
-			// current key first; when nothing opens it, it is left alone, quietly
-			// (retrying on every page changes nothing and filled the log).
-			try {
-				[$blob_version] = SealedBox::unframeSeal((string)$msg->get('iem_relay_sealed_raw'));
-			} catch (\Throwable $e) {
-				$blob_version = null;
-			}
-			if ($blob_version !== null && $blob_version !== $key->version()) {
-				if (!self::moveToCurrentKey($msg, $user_id, $key)) {
-					return false;
-				}
-				$msg = new InboundEmailMessage($id, TRUE);
-			}
 			// One message is one unit of work for the hot-turn rule, by the
 			// same argument RecipeRunner::run() makes: a forward action can
 			// open this message's stored raw, and without the boundary that
@@ -191,8 +176,9 @@ class DeferredIngest {
 				});
 			});
 		} catch (\Throwable $e) {
-			// Same format, another key: a retired key of the same version.
-			// Moved to the current key, it parses on the next pass.
+			// Sealed to a key a rotation has since retired: the vault keeps its
+			// retired keys under the current one, so the blob is moved to the
+			// current key and parses on the next pass.
 			if (isset($msg) && $msg instanceof InboundEmailMessage && self::moveToCurrentKey($msg, $user_id, $key)) {
 				return false;
 			}

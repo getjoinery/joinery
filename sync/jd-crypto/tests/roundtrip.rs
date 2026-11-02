@@ -162,8 +162,7 @@ fn sealed_box_round_trips_and_refuses_other_keypairs() {
         Ok(_) => panic!("opened with another key named as its public half"),
     };
     assert!(err.to_string().contains("not this secret key's"), "{err}");
-    // A claimed public key of the other version sends it down the v1 opener,
-    // which refuses.
+    // An old 32-byte key named as the public half is refused.
     let old_public = vault::public_key_from_secret_key(&jd_crypto::pkcs8::encode(&[3u8; 32])).unwrap();
     assert!(drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &old_public).is_err());
 }

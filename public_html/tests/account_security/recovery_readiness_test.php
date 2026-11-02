@@ -65,7 +65,7 @@ section('Vault-code dry run: pass without consuming');
 $box = new SealedBox();
 $code = 'RRTEST-' . bin2hex(random_bytes(4));
 $salt = base64_encode(random_bytes(16));
-$secret = $box->generateKeypair()['secret']; // the dry run opens it through VaultUnlock::openKey(), which wants a real X25519 secret
+$secret = $box->generateKeypair()['secret']; // the dry run opens it through VaultUnlock::openKey(), which wants a seed in its wrapped form
 
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', $fixture_user_id);
@@ -89,7 +89,7 @@ $wrapping->load();
 
 $kek = $box->kekFromRecoveryCode($code, $salt);
 $ad = UserEncryptionWrapping::adFor((int)$vault->key, (int)$wrapping->key);
-$wrapping->set('uew_wrapped_secret_key', $box->wrapKey($secret, $kek, $ad));
+$wrapping->set('uew_wrapped_secret_key', $box->wrapKey(PoolVaultKey::wrappedForm($secret), $kek, $ad));
 $wrapping->save();
 
 $outcome = RecoveryReadiness::dryRunVaultCode($fixture_user_id, UserEncryptionVault::SCOPE_USER, $code);

@@ -27,8 +27,8 @@
  * lock with its server unlock window while it is open: when it ends, the beacon's
  * 'joinery:vault-locked' locks them (the lock chip calls lockAll()), and they
  * keep no idle clock of their own, so the one vault never reads partly
- * locked because a tab sat still. A scope held while that window is shut (the
- * root a rotation-owed unlock opens) keeps the idle clock below, as does every
+ * locked because a tab sat still. A scope held while that window is shut (a
+ * content vault opened by its own ceremony) keeps the idle clock below, as does every
  * scope for someone without an account vault: they lock after
  * `vault_client_autolock_minutes` of no
  * keyboard or pointer activity (the site's value, on the joinery-vault meta as
@@ -54,9 +54,7 @@
  * idle clock survives reloads: a tab idle past its limit does not reopen.
  *
  * Framing lives here: `v2.edgeseal.{scope}.` on a sealed DEK and `v1.edge.` on
- * a field. vault-crypto.js stays raw. A key written before X-Wing reads
- * `v1.edgeseal.{scope}.`: it is still opened (by the old key, during that
- * vault's rotation) and never written.
+ * a field. vault-crypto.js stays raw.
  *
  * Depends on VaultCrypto, VaultKeyring and joineryApi (at call time).
  *
@@ -64,6 +62,7 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.16 - v1 retired (v1_key_retirement WP2): reads only v2.edgeseal.
  * @version 1.15 - with an account vault, browser-held scopes follow its server window while it is open
  *   (serverWindowOpenNow): no idle clock of their own then, and a page that loads with the window shut reopens
  *   none of them; a scope held while the window is shut keeps the idle clock; a back/forward-cache restore
@@ -95,7 +94,6 @@ window.JoinerySealed = (function () {
 	'use strict';
 
 	var EDGE_SEAL = 'v2.edgeseal.';
-	var EDGE_SEAL_READ = /^v[12]\.edgeseal\./;   // a v1 key is opened, never written
 	var EDGE_FIELD = 'v1.edge.';
 
 	var sessions = {};      // scope -> keyring session (closure)
@@ -150,8 +148,8 @@ window.JoinerySealed = (function () {
 	// With an account vault, the browser-held scopes live and lock with its
 	// server window while that window is open (see the file header). The idle
 	// clock here runs for someone without one, and for a scope held while the
-	// window is shut (the root a rotation-owed unlock opens, a content vault
-	// opened by its own ceremony), which no window would ever lock.
+	// window is shut (a content vault opened by its own ceremony), which no
+	// window would ever lock.
 	function followsServerWindow() {
 		var meta = document.querySelector('meta[name="joinery-vault"]');
 		return !!meta && meta.getAttribute('data-server-vault') !== '0';
@@ -299,11 +297,6 @@ window.JoinerySealed = (function () {
 			if (isOpen(scope)) { secret.fill(0); return; }   // a ceremony won the race
 			var s = VaultKeyring.sessionFrom(scope, secret, rec.public_key);
 			s.label = rec.label || s.label;
-			if (scope !== ROOT && isOldKey(rec.public_key)) {   // opens only to be rotated (adopt)
-				s.lock();
-				dropResume(scope);
-				return;
-			}
 			sessions[scope] = s;
 			resetIdle();
 			document.dispatchEvent(new CustomEvent('joinery:vault-scope-unlocked',
@@ -351,11 +344,9 @@ window.JoinerySealed = (function () {
 
 	function isEdgeField(v) { return typeof v === 'string' && v.indexOf(EDGE_FIELD) === 0; }
 
-	// The scope and raw blob of a `v2.edgeseal.{scope}.` (or v1) key, or null.
-	// The blob's version need not be returned: the session opening it goes by
-	// its own key, and a frame that is not its key's version fails to open.
+	// The scope and raw blob of a `v2.edgeseal.{scope}.` key, or null.
 	function parseSealedDek(sealed) {
-		if (typeof sealed !== 'string' || !EDGE_SEAL_READ.test(sealed)) return null;
+		if (typeof sealed !== 'string' || sealed.indexOf(EDGE_SEAL) !== 0) return null;
 		var rest = sealed.slice(EDGE_SEAL.length);
 		var dot = rest.indexOf('.');
 		if (dot < 1) return null;
@@ -389,26 +380,8 @@ window.JoinerySealed = (function () {
 
 	// Hold a session a ceremony elsewhere opened (the lock chip's unlock), as
 	// session() holds one it opened itself.
-	// A content vault still on an old 32-byte X25519 key does not open
-	// (specs/post_quantum_sealing.md R7): nothing seals to it any more, and its
-	// owner moves it to a new key on the Security page, whose rotation is the
-	// one open that may take it (opts.rotating). The root still opens: its key
-	// moves with the account vault's rotation, which needs it open to re-wrap
-	// every content vault under the new one (VaultKeyring.rootKeyReplacement).
-	var OLD_KEY_REFUSAL = 'This part of your vault has a key from before post-quantum protection, so it no longer opens. '
-		+ 'Move it to a new key on your Security page (Vault Keys, Rotate this key).';
-	function isOldKey(publicKeyB64) {
-		try { return VaultCrypto.b64decode(publicKeyB64 || '').length === 32; } catch (e) { return false; }
-	}
-
 	function adopt(scope, s, opts) {
 		if (!s || s.locked()) return;
-		if (scope !== ROOT && isOldKey(s.publicKey) && !(opts && opts.rotating)) {
-			s.lock();
-			var refusal = new Error(OLD_KEY_REFUSAL);
-			refusal.rotationOwed = true;
-			throw refusal;
-		}
 		if (isOpen(scope)) {
 			if (sessions[scope] === s) return;
 			if (sessions[scope].publicKey === s.publicKey) { s.lock(); return; }
@@ -714,7 +687,7 @@ window.JoinerySealed = (function () {
 		var report = opts.progress || function () {};
 		var st = await VaultKeyring.status(scope);
 		if (!st.set_up) throw new Error('This vault is not set up.');
-		var oldSession = await session(scope, { reason: 'to rotate its key', rotating: true });
+		var oldSession = await session(scope, { reason: 'to rotate its key' });
 		var newSession, newPublicKey;
 
 		// A vault that opens through the root rotates under it: its new key is

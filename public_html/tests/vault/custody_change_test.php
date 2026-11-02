@@ -362,7 +362,7 @@ $chain_ad = 'custody-change-chain';
 // A rotation keeps the chain in its own request, which has read no content.
 SealedEgressGuard::isolate(function () use ($server_vault, $waiting_gen, $next_pair, $chain_kek, $chain_ad) {
 	VaultPreviousKeys::add(new UserEncryptionVault((int)$server_vault->key, TRUE), array($waiting_gen => array(
-		'wrapped' => (new SealedBox())->wrapKey(PoolVaultKey::wrappedForm($next_pair['secret'], SealedBox::V2), $chain_kek, $chain_ad),
+		'wrapped' => (new SealedBox())->wrapKey(PoolVaultKey::wrappedForm($next_pair['secret']), $chain_kek, $chain_ad),
 		'kek' => $chain_kek, 'ad' => $chain_ad)));
 });
 VaultCrypto::forgetItemDeks();

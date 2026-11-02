@@ -29,13 +29,14 @@
  * its key is sealed in to the recovery key. The approval works out, from the
  * same pasted key (or the earlier key the backup was sealed to, pasted in a
  * box of its own), the one value that opens that box, which the agent
- * finishes opening (VaultCrypto.halfOpenKeyBox: the dek-scope key of a v2 box,
- * the X25519 of a v1 one). That value and the key's public half go into the
+ * finishes opening (VaultCrypto.halfOpenKeyBox: the dek-scope key of the
+ * X-Wing box; a v1 box is refused). That value and the key's public half go into the
  * form; the key does not.
  *
  * Needs assets/js/vault-crypto.js on the page before it (every emitter puts
  * it there).
  *
+ * @version 2.2.1 - header: a v1 key box is refused (v1_key_retirement WP2)
  * @version 2.2.0 - a client check refuses text that is not shaped like a recovery code, before it runs
  * @version 2.1.0 - attachStepUp hands the data-stepup forms to JoineryPasskeys.confirmForms: it
  *                  matched action names this page's forms no longer all used, so a check lost its post
@@ -123,7 +124,7 @@ window.recoveryReadiness = (function () {
 	/**
 	 * Work out what opens a backup's key box with a pasted recovery key, after
 	 * checking the key is the one the box is sealed to.
-	 * `box` is { version, ciphertext (v2), ephemeralPublic (v1), fingerprint }.
+	 * `box` is { version, ciphertext, fingerprint }.
 	 * @returns {Promise<{shared: string, pub: string}>} both base64
 	 */
 	async function openKeyBox(privateKeyB64, box) {

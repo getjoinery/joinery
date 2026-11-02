@@ -1926,8 +1926,7 @@ first and its relay's Update follows.
 - The map names the mail vault's key (`key_kind: client`, `key_scope: mail`, its
   generation). The relay seals the whole message for the browser (`sealEdge`: a
   fresh DEK, the body `v1.edge.` with AD `mail:relay:{spool_id}`, the DEK
-  `v2.edgeseal.mail.` for an X-Wing key, `v1.edgeseal.mail.` for a vault whose
-  owner has not rotated off X25519). Joinery Direct into such a mailbox stays on the transport
+  `v2.edgeseal.mail.`). Joinery Direct into such a mailbox stays on the transport
   key and is sealed to the mail key at pull.
 - The pull stores it as a waiting row (`iem_pending_parse`,
   `iem_relay_sealed_raw`, the DEK in the key column). An entry sealed to a key no
@@ -2894,10 +2893,10 @@ For each accepted message it:
   drains: `collect-status` rewrites the `joinery-deferred` access map every
   thirty seconds, so the mail waits on the sending server, which tells its own
   sender if it gives up, rather than in the relay's queue.
-- Seals the **entire raw message** to that public key in the format the key names
+- Seals the **entire raw message** to that public key
   (`SealedBox::openDek`-compatible): `v2.seal.` (X-Wing, then AES-256-GCM) to a
-  1216-byte key, `v1.seal.` (libsodium's sealed box) to a 32-byte X25519 one not yet
-  rotated — recipients on a domain with
+  1216-byte key; a key of any other size makes the relay refuse the tenant's map —
+  recipients on a domain with
   Seal at the relay to the owner's vault key, Standard/Private to the ambient transport key Joinery holds.
 - Writes `<spoolid>.seal` (ciphertext) + `<spoolid>.meta` (cleartext operational
   metadata only — recipient, Message-ID, thread inputs, size, the milter-stamped

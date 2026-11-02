@@ -3118,11 +3118,11 @@ $cp_none->load();
 check(JobResultProcessor::bundle_of($cp_none) === null, 'a declined export keeps no bundle');
 
 
-section('The running list\'s words: listening_sockets, container_inventory, spam_learning_status, reboot_machine (agent 1.76.0), relay_status (1.101.0), v1_census (1.103.0)');
+section('The running list\'s words: listening_sockets, container_inventory, spam_learning_status, reboot_machine (agent 1.76.0), relay_status (1.101.0)');
 
 {
 	$rl_node = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x31", 32))));
-	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'v1_census', 'reboot_machine') as $w) {
+	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'reboot_machine') as $w) {
 		$m = 'build_' . $w;
 		$built = JobCommandBuilder::$m($rl_node);
 		check($built === array('primitive' => $w, 'params' => array()),
@@ -3135,7 +3135,7 @@ section('The running list\'s words: listening_sockets, container_inventory, spam
 		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,disk_usage',
 	));
-	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'v1_census', 'reboot_machine') as $w) {
+	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'reboot_machine') as $w) {
 		$m = 'build_' . $w;
 		$said = '';
 		try { JobCommandBuilder::$m($rl_old); } catch (Exception $e) { $said = $e->getMessage(); }

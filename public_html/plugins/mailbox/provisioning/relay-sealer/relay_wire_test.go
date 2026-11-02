@@ -290,10 +290,10 @@ func TestRelaySpoolListFetchAck(t *testing.T) {
 	// Two complete entries, one torn (artifact without .meta), one of the other
 	// kind, and a stray tmp file.
 	f.spoolWrite("main", "1000-aaaa", "meta", `{"spool_id":"1000-aaaa"}`)
-	f.spoolWrite("main", "1000-aaaa", "seal", "v1.seal.AAAA")
+	f.spoolWrite("main", "1000-aaaa", "seal", "v2.seal.AAAA")
 	f.spoolWrite("main", "1001-bbbb", "meta", `{}`)
 	f.spoolWrite("main", "1001-bbbb", "direct", `{"recipient":"x@y"}`)
-	f.spoolWrite("main", "1002-torn", "seal", "v1.seal.TORN")
+	f.spoolWrite("main", "1002-torn", "seal", "v2.seal.TORN")
 	if err := os.MkdirAll(filepath.Join(f.paths.spoolDir("main"), "tmp"), 0o700); err != nil {
 		t.Fatal(err)
 	}

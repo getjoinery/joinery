@@ -12,8 +12,7 @@
 //! - Sealed box (v2, the only one written): `b64(ct[1120] || IV[12] ||
 //!   AES-256-GCM ct+tag)`, key = HKDF-SHA256(salt = empty, ikm = the X-Wing
 //!   shared secret, info = "joinery-seal:v2:" || scope), no AAD. A 32-byte
-//!   (X25519) key is refused for sealing; what was sealed to one (v1, info
-//!   "sealed-vault:dek" || ephPub || recipientPub) still opens.
+//!   (X25519) key is refused for sealing and opening.
 //! - Content container: per 4 MiB plaintext chunk,
 //!   `uint32be(blockLen) || IV[12] || AES-256-GCM(ct+tag)`,
 //!   AAD = utf8(contentId + ":" + chunkIndex); empty file = one empty chunk.
@@ -42,8 +41,8 @@ pub enum CryptoError {
     Kdf(&'static str),
     #[error("non-contributory X25519 shared secret")]
     BadPublicKey,
-    /// Sealing to a 32-byte X25519 key: nothing writes a v1 seal.
-    #[error("that vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it")]
+    /// A 32-byte X25519 key: nothing seals to or opens with one.
+    #[error("that vault key is an old (pre-X-Wing) key, which nothing seals to or opens any more")]
     OldKey,
     #[error("metadata JSON: {0}")]
     Json(#[from] serde_json::Error),

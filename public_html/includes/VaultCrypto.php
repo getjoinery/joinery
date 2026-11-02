@@ -20,7 +20,7 @@
  *
  * The three asymmetric opens take a VaultKey (docs/sealed_vault.md § The
  * unlock window) rather than secret bytes: the key object does the
- * crypto_box_seal open, this class does the framing, the memo and the
+ * X-Wing open, this class does the framing, the memo and the
  * hot-turn accounting. The DEK memo keys on VaultKey::id(), so a row is still
  * unwrapped once per request however many times the window is fetched.
  *
@@ -31,11 +31,11 @@
  * Writers emit the format their custody dictates; readers here open whichever
  * prefix they find.
  *
- * A DEK frame's `v1`/`v2` is the seal version (specs/post_quantum_sealing.md
- * R2): v2 is X-Wing and is all that is written; a v1 key (X25519) is opened
- * only, by a v1 vault key, until its holder rotates. A blob whose version is
- * not its key's is refused naming both, never handed to the wrong opener.
+ * A DEK frame's `v2` is the seal version: X-Wing. A frame of any other
+ * version is malformed.
  *
+ * @version 1.11 - v2 frames only: `v1.seal.` and `v1.edgeseal.` are malformed; EDGE_SEAL_PREFIX_V1
+ *   and the key-version check are gone
  * @version 1.10 - browserScriptTag(): the one tag that puts assets/js/vault-crypto.js on a page
  *   whose own script (a challenge or key-box ceremony) calls it
  * @version 1.9 - v2 frames: `v2.seal.` and `v2.edgeseal.{scope}.` written,
@@ -64,9 +64,6 @@ class VaultCrypto {
 
 	/** The browser-format DEK frame: `v2.edgeseal.{scope}.` + base64(the v2 raw seal). */
 	const EDGE_SEAL_PREFIX = 'v2.edgeseal.';
-
-	/** The v1 frame, opened only: `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct). */
-	const EDGE_SEAL_PREFIX_V1 = 'v1.edgeseal.';
 
 	/** The browser-format field frame: `v1.edge.` + base64(IV ‖ ct ‖ tag). */
 	const EDGE_FIELD_PREFIX = 'v1.edge.';
@@ -125,7 +122,7 @@ class VaultCrypto {
 		return self::EDGE_FIELD_PREFIX . $this->box->aeadEncryptGcm($plaintext, $dek, $ad);
 	}
 
-	/** The scope a `v1.edgeseal.` or `v2.edgeseal.` blob names, or null for anything else. */
+	/** The scope a `v2.edgeseal.` blob names, or null for anything else. */
 	public static function parseEdgeScope(string $sealed): ?string {
 		$frame = self::edgeFrame($sealed);
 		return $frame === null ? null : $frame['scope'];
@@ -133,16 +130,13 @@ class VaultCrypto {
 
 	/**
 	 * A browser-format DEK split into its parts, or null when it is not one:
-	 * ['version' => 1|2, 'scope' => string, 'body' => base64 of the raw seal].
+	 * ['version' => 2, 'scope' => string, 'body' => base64 of the raw seal].
 	 */
 	public static function edgeFrame(string $sealed): ?array {
-		if (strncmp($sealed, self::EDGE_SEAL_PREFIX, strlen(self::EDGE_SEAL_PREFIX)) === 0) {
-			$version = SealedBox::V2;
-		} elseif (strncmp($sealed, self::EDGE_SEAL_PREFIX_V1, strlen(self::EDGE_SEAL_PREFIX_V1)) === 0) {
-			$version = SealedBox::V1;
-		} else {
+		if (strncmp($sealed, self::EDGE_SEAL_PREFIX, strlen(self::EDGE_SEAL_PREFIX)) !== 0) {
 			return null;
 		}
+		$version = SealedBox::V2;
 		$rest = substr($sealed, strlen(self::EDGE_SEAL_PREFIX));
 		$dot = strpos($rest, '.');
 		if ($dot === false) {
@@ -156,11 +150,10 @@ class VaultCrypto {
 	}
 
 	/**
-	 * Does a browser-format DEK's frame version match the key it says it is
-	 * sealed to? A 32-byte public key takes v1, a 1216-byte one v2; a blob of
-	 * the other version could never be opened by that key's holder, so a
-	 * browser write naming it is refused rather than stored (a stale page
-	 * posting v1 for a v2 vault). False also for a blob or key that is not one.
+	 * Is this a browser-format DEK sealed in the version the key it names
+	 * takes (a 1216-byte X-Wing key, a `v2.edgeseal.` frame)? A browser write
+	 * that is not is refused rather than stored. False for a blob or key that
+	 * is not one.
 	 */
 	public static function edgeVersionMatchesKey(string $sealed, string $public_key): bool {
 		$frame = self::edgeFrame($sealed);
@@ -176,11 +169,9 @@ class VaultCrypto {
 	}
 
 	/**
-	 * A LIKE pattern prefix (ESCAPE '\\') matching both versions' browser-format
-	 * DEKs: `_` is LIKE's one-character wildcard, so `v_.edgeseal.` matches a
-	 * v1 row not yet re-sealed as well as a v2 one.
+	 * A LIKE pattern prefix (ESCAPE '\\') matching browser-format DEKs.
 	 */
-	const EDGE_SEAL_LIKE_PREFIX = 'v_.edgeseal.';
+	const EDGE_SEAL_LIKE_PREFIX = 'v2.edgeseal.';
 
 	/**
 	 * The client-custody scope a key is sealed to, or null when a server key
@@ -246,7 +237,7 @@ class VaultCrypto {
 	 * resealer, a deferred-work drain) uses this so the per-row opens that
 	 * follow all hit the memo.
 	 *
-	 * @param string[] $sealed `v1.seal.`/`v2.seal.` or `v1.edgeseal.`/`v2.edgeseal.` blobs
+	 * @param string[] $sealed `v2.seal.` or `v2.edgeseal.` blobs
 	 *   under any keys
 	 * @return string[] the DEKs under the same keys
 	 * @throws RuntimeException when any blob is malformed or does not open
@@ -264,11 +255,9 @@ class VaultCrypto {
 			}
 			$frame = self::edgeFrame($blob);
 			if ($frame !== null) {
-				self::assertKeyVersion($frame['version'], $key);
 				$pending[$slot] = array('ck' => $ck, 'edge' => true, 'raw' => $frame['body']);
 			} else {
-				[$version, $raw] = SealedBox::unframeSeal($blob);
-				self::assertKeyVersion($version, $key);
+				[, $raw] = SealedBox::unframeSeal($blob);
 				$pending[$slot] = array('ck' => $ck, 'edge' => false, 'raw' => $raw);
 			}
 		}
@@ -403,21 +392,8 @@ class VaultCrypto {
 	 * which arms.
 	 */
 	public function openHeldDeliveryBlob(string $sealed, VaultKey $key): string {
-		[$version, $raw] = SealedBox::unframeSeal($sealed);
-		self::assertKeyVersion($version, $key);
+		[, $raw] = SealedBox::unframeSeal($sealed);
 		return $key->unseal(array($raw))[0];
-	}
-
-	/**
-	 * Refuse a blob sealed in one version handed to a key of the other, naming
-	 * both: a v2 box under a v1 key (or the reverse) can never open, and the
-	 * tag failure it would otherwise produce says nothing useful.
-	 */
-	private static function assertKeyVersion(int $blob_version, VaultKey $key): void {
-		if ($blob_version !== $key->version()) {
-			throw new RuntimeException('VaultCrypto: this key is sealed in format v' . $blob_version
-				. ' and the vault key that should open it is v' . $key->version() . '.');
-		}
 	}
 
 	/** Open content sealed by sealField() or sealFieldForBrowser(). Throws on tamper or an AD mismatch. */
