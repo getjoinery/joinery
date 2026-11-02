@@ -32,11 +32,13 @@
  *
  * Content left on a retired key does not wait to be read: VaultChainSweep moves
  * it to the current key in the owner's window and then marks the entry
- * `swept`, so later unlocks skip it. A rotation keeps the mark on the entries
+ * `swept` with the sweep's pass (VaultChainSweep::PASS), so later unlocks skip
+ * it until a new pass. A mark stored as true is pass 1. A rotation keeps the mark on the entries
  * it carries over; the generation it retires starts unswept. A sweep that
  * runs out of time records where it stopped (`sweep_at`) and the next window
  * goes on from there.
  *
+ * @version 1.2 - `swept` holds the pass that swept the entry; true reads as pass 1
  * @version 1.1 - entries carry `swept` and the sweep's place, `sweep_at` (VaultChainSweep); recordSweep()
  * @version 1.0
  */
@@ -59,7 +61,7 @@ class VaultPreviousKeys {
 				$out[(int)$e['generation']] = array('generation' => (int)$e['generation'],
 					'wrapped' => (string)$e['wrapped'], 'sealed_kek' => (string)$e['sealed_kek']);
 				if (!empty($e['swept'])) {
-					$out[(int)$e['generation']]['swept'] = true;
+					$out[(int)$e['generation']]['swept'] = (int)$e['swept'];
 				} elseif (isset($e['sweep_at']['step']) && is_string($e['sweep_at']['step'])) {
 					$out[(int)$e['generation']]['sweep_at'] = array('step' => $e['sweep_at']['step'],
 						'after' => (int)($e['sweep_at']['after'] ?? 0));
@@ -89,7 +91,7 @@ class VaultPreviousKeys {
 			$out[$e['generation']] = array('generation' => $e['generation'], 'wrapped' => $e['wrapped'],
 				'sealed_kek' => $crypto->sealItemDek($kek, $new_public_key));
 			if (!empty($e['swept'])) {
-				$out[$e['generation']]['swept'] = true;
+				$out[$e['generation']]['swept'] = (int)$e['swept'];
 			}
 			sodium_memzero($kek);
 		}
@@ -173,7 +175,7 @@ class VaultPreviousKeys {
 
 	/**
 	 * Record the chain sweep's state for one generation (VaultChainSweep): true
-	 * when nothing found on it is left to move, or where the sweep stopped,
+	 * when nothing found on it is left to move (stored as the sweep's pass), or where the sweep stopped,
 	 * ['step' => string, 'after' => int]. False when the chain changed
 	 * meanwhile; the sweep then starts that generation over.
 	 */
@@ -187,7 +189,7 @@ class VaultPreviousKeys {
 		}
 		unset($entries[$generation]['swept'], $entries[$generation]['sweep_at']);
 		if ($state === true) {
-			$entries[$generation]['swept'] = true;
+			$entries[$generation]['swept'] = VaultChainSweep::PASS;
 		} else {
 			$entries[$generation]['sweep_at'] = array('step' => (string)$state['step'], 'after' => (int)$state['after']);
 		}

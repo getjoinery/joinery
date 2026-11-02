@@ -22,6 +22,9 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.30 - the rotation re-seal picks a message by the key it holds, not by iem_content_sealed: a sealed draft
+ *                moved to or sent from a standard From keeps its key for its sealed attachments with the flag off,
+ *                and every rotation passed it by (jeremytunnell, two rows on generation 1, 2026-11-02)
  * @version 1.29 - the rotation re-seal also moves mail waiting to be parsed (iem_pending_parse, relay-sealed whole to
  *                the owner's vault key): it carries no generation, so the per-generation pass never touched it, and a
  *                rotation stranded it (jeremytunnell message 104888, 2026-11-01)
@@ -188,55 +191,62 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 	$failed = 0;
 	$ids = array();
 
-	// Message DEKs: only users holding mailbox grants have sealed messages.
-	// This block is conditional; the DKIM block below is NOT — owning a
-	// protected sending domain is independent of holding mailbox grants, and
-	// an early return here would silently skip the DKIM re-seal (permanent
-	// key loss once the old generation is retired).
+	// Message DEKs. No early return here: the DKIM block below runs for every
+	// member — owning a protected sending domain is independent of holding
+	// mailbox grants, and skipping it would lose the key once the old
+	// generation is retired.
+	// A message's key is sealed to iem_sealed_owner_user_id; a row older than
+	// that column is scoped by the mailboxes its owner holds.
 	$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+	$scope = 'iem_sealed_owner_user_id = ' . intval($user_id);
 	if (count($alias_ids)) {
-		$in = implode(',', array_map('intval', $alias_ids));
-		// Soft-deleted messages are re-sealed too (the resealRows() contract): a
-		// deleted row is restorable, and one left on a retired generation would
-		// come back permanently unreadable. A Fortress row's key belongs to the
-		// `mail` vault, whose generations are counted separately and which only
-		// the browser can re-seal (the `mail` client reseal below), so it is
-		// never this rotation's to touch. One moved back off end-to-end keeps
-		// its key in the browser's format sealed to this vault
-		// (`v2.edgeseal.user.`) and is re-sealed here like the rest.
-		$stmt = $db->prepare(
-			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-			 WHERE iem_iea_inbound_email_alias_id IN ($in)
-			 AND iem_content_sealed = true AND iem_key_generation = ?
-			 AND NOT " . InboundEmailMessage::mailKeySql());
-		$stmt->execute(array($old_key_generation));
-		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+		$scope = "($scope OR (iem_sealed_owner_user_id IS NULL AND iem_iea_inbound_email_alias_id IN ("
+			. implode(',', array_map('intval', $alias_ids)) . ')))';
+	}
+	// Soft-deleted messages are re-sealed too (the resealRows() contract): a
+	// deleted row is restorable, and one left on a retired generation would
+	// come back permanently unreadable. A Fortress row's key belongs to the
+	// `mail` vault, whose generations are counted separately and which only
+	// the browser can re-seal (the `mail` client reseal below), so it is
+	// never this rotation's to touch. One moved back off end-to-end keeps
+	// its key in the browser's format sealed to this vault
+	// (`v2.edgeseal.user.`) and is re-sealed here like the rest.
+	// A row is picked by the key it holds, not by iem_content_sealed: a sealed
+	// draft moved to (or sent from) a standard From has plaintext content and
+	// the flag off, but keeps its key for its still-sealed attachments
+	// (MailboxDrafts::save, MailboxSender).
+	$stmt = $db->prepare(
+		"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+		 WHERE $scope
+		 AND COALESCE(iem_sealed_key, '') <> '' AND iem_key_generation = ?
+		 AND NOT " . InboundEmailMessage::mailKeySql());
+	$stmt->execute(array($old_key_generation));
+	$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-		foreach ($ids as $id) {
-			$id = intval($id);
-			try {
-				$msg = new InboundEmailMessage($id, TRUE);
-				if (!$msg->key || !$msg->get('iem_sealed_key')) {
-					continue;
-				}
-				$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_key);
-				$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
-				$upd = $db->prepare(
-					'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
-					 WHERE iem_inbound_email_message_id = ?');
-				$upd->execute(array($new_sealed_key, $new_key_generation, $id));
-			} catch (Throwable $e) {
-				$failed++;
-				error_log('Mailbox vault reseal: failed for message ' . $id . ': ' . $e->getMessage());
+	foreach ($ids as $id) {
+		$id = intval($id);
+		try {
+			$msg = new InboundEmailMessage($id, TRUE);
+			if (!$msg->key || !$msg->get('iem_sealed_key')) {
+				continue;
 			}
+			$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_key);
+			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
+			$upd = $db->prepare(
+				'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
+				 WHERE iem_inbound_email_message_id = ?');
+			$upd->execute(array($new_sealed_key, $new_key_generation, $id));
+		} catch (Throwable $e) {
+			$failed++;
+			error_log('Mailbox vault reseal: failed for message ' . $id . ': ' . $e->getMessage());
 		}
+	}
 
-		// The chain sweep moves leftovers onto the key the index already uses, so
-		// it rebuilds the index only when it moved a message the index lacks.
-		if (!VaultUnlock::sweepingPreviousKey() || count($ids)) {
-			$index = new MailboxIndex();
-			$index->purgePersisted($user_id);
-		}
+	// The chain sweep moves leftovers onto the key the index already uses, so
+	// it rebuilds the index only when it moved a message the index lacks.
+	if ((!VaultUnlock::sweepingPreviousKey() && count($alias_ids)) || count($ids)) {
+		$index = new MailboxIndex();
+		$index->purgePersisted($user_id);
 	}
 
 	// Contact store, MailboxContact (specs/mailbox_compose_maturity.md § Phase 4): a sealed contact's

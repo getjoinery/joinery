@@ -1214,9 +1214,11 @@ its generation to the current key and generation. Callbacks made by
 starting key) against the slice's deadline. A consumer's own callback runs
 whole. A slice that runs out of time records its place on the chain entry
 (`sweep_at`), and the next one goes on from there. When every step has run, the
-entry is marked `swept`, and later unlocks skip it. A rotation keeps the mark on
-the entries it carries over; the generation it retires starts unswept, so one
-sweep follows each rotation.
+entry is marked `swept` with the sweep's pass (`VaultChainSweep::PASS`), and
+later unlocks skip it. A rotation keeps the mark on the entries it carries
+over; the generation it retires starts unswept, so one sweep follows each
+rotation. When a re-seal callback starts finding rows it passed by before,
+`PASS` goes up, and every entry marked with a lower pass is swept again.
 
 Every callback selects by generation, so running one again moves nothing
 twice. A callback that holds material it cannot select by generation (mailbox's

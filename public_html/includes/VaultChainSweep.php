@@ -24,6 +24,10 @@
  * when every step has run; a slice that runs out of time records its place
  * on the chain entry and the next one goes on from there.
  *
+ * A generation's mark holds the pass that swept it. When a consumer's callback
+ * learns to find more (mailbox 1.144.23: messages whose key outlived their
+ * sealed flag), PASS goes up and every chain is swept once more.
+ *
  * A row that does not move (its key does not open) is logged and passed; it
  * stays readable through the chain, and the v1 census reports it.
  *
@@ -33,12 +37,20 @@
  * Deferred work (VaultDeferredWork), declared in vault_consumers.json; this
  * file is its bootstrap.
  *
+ * @version 1.1 - PASS: a mark from an earlier pass is work again
  * @version 1.0
  */
 
 class VaultChainSweep {
 
 	const CONSUMER_ID = 'vault_chain_sweep';
+
+	/**
+	 * The sweep's pass. Raise it when a re-seal callback starts finding rows
+	 * it passed by before, so chains already swept are swept again.
+	 * 2: mailbox 1.144.23 moves messages whose key outlived iem_content_sealed.
+	 */
+	const PASS = 2;
 
 	/** Rows a model step re-seals per query. */
 	const BATCH = 200;
@@ -51,7 +63,7 @@ class VaultChainSweep {
 		}
 		$current = (int)$vault->get('uev_key_generation');
 		foreach (VaultPreviousKeys::entries($vault) as $e) {
-			if (empty($e['swept']) && $e['generation'] < $current) {
+			if (($e['swept'] ?? 0) < self::PASS && $e['generation'] < $current) {
 				return true;
 			}
 		}
@@ -84,7 +96,7 @@ class VaultChainSweep {
 		$steps = self::steps();
 		foreach (VaultPreviousKeys::entries($vault) as $e) {
 			$generation = $e['generation'];
-			if (!empty($e['swept']) || $generation >= $current_generation) {
+			if (($e['swept'] ?? 0) >= self::PASS || $generation >= $current_generation) {
 				continue;
 			}
 			if (!$retired) {

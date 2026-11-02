@@ -5,7 +5,7 @@
  * env: dev-only
  * needs: []
  * timeout: 300
- * covers: [includes/VaultChainSweep.php, includes/VaultPreviousKeys.php]
+ * covers: [includes/VaultChainSweep.php, includes/VaultPreviousKeys.php, plugins/mailbox/includes/bootstrap.php]
  */
 /**
  * Content left on a retired vault key moves to the current key in its owner's
@@ -19,6 +19,7 @@
  *
  * Run: php tests/run.php db --filter=vault_chain_sweep
  *
+ * @version 1.2 - a mail message whose key outlived its sealed flag moves; a mark from an earlier pass is work again
  * @version 1.1 - the fixture recipe is named HarnessTest, so it is never scheduled
  * @version 1.0
  */
@@ -111,6 +112,24 @@ $entry = function () use ($vault_id, $gen1): array {
 
 $runs = array($left_behind(), $left_behind(), $left_behind());
 
+// A sealed draft moved to a standard From: plaintext content, iem_content_sealed
+// off, its key kept for its sealed attachments, on no mailbox the owner holds.
+$mail = null;
+if (class_exists('InboundEmailMessage')) {
+	$domain = new InboundEmailDomain(NULL);
+	$domain->set('ied_domain', 'harnesstest-sweep-' . bin2hex(random_bytes(4)) . '.example');
+	$domain->set('ied_owner_usr_user_id', $uid);
+	$domain->save();
+	harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', (int)$domain->key);
+	$mail_dek = random_bytes(32);
+	$stmt = $db->prepare("INSERT INTO iem_inbound_email_messages (iem_ied_inbound_email_domain_id, iem_recipient, iem_sender,
+		iem_subject, iem_direction, iem_content_sealed, iem_sealed_key, iem_key_generation, iem_sealed_owner_user_id)
+		VALUES (?, 'someone@example.com', '', 'plain', 'draft', false, ?, ?, ?) RETURNING iem_inbound_email_message_id");
+	$stmt->execute(array((int)$domain->key, $crypto->sealItemDek($mail_dek, $old_public), $gen1, $uid));
+	$mail = (int)$stmt->fetchColumn();
+	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $mail);
+}
+
 section('Batches: resealRows takes a limit and says where the next batch starts');
 $retired = VaultPreviousKeys::open(new UserEncryptionVault($vault_id, TRUE), $current);
 check(isset($retired[$gen1]), 'the chain holds the retired generation, opened through the current key');
@@ -139,6 +158,16 @@ check($moved === 3, 'every left-behind run opens with the current key, its DEK u
 check($opens_with($runs[0][0], $retired[$gen1]) === null, 'and no longer with the retired one');
 $e = $entry();
 check(!empty($e['swept']) && !isset($e['sweep_at']), 'the generation is marked swept', json_encode($e));
+if ($mail !== null) {
+	$q = $db->prepare('SELECT iem_sealed_key, iem_key_generation FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+	$q->execute(array($mail));
+	$m = $q->fetch(PDO::FETCH_ASSOC);
+	$m_dek = null;
+	try { $m_dek = $crypto->openItemDek((string)$m['iem_sealed_key'], $current); } catch (Throwable $ex) {}
+	check((int)$m['iem_key_generation'] === $gen2 && $m_dek === $mail_dek,
+		'a mail message whose key outlived its sealed flag moved too (mailbox 1.144.23)', (string)$m['iem_key_generation']);
+}
+check(($e['swept'] ?? 0) === VaultChainSweep::PASS, 'the mark is the current pass', json_encode($e['swept'] ?? null));
 check(!VaultChainSweep::hasWork($uid), 'so the next unlock has nothing to do');
 check(VaultChainSweep::drain($uid, $current, microtime(true) + 60) === 0, 'and a drain anyway moves nothing');
 
@@ -161,9 +190,10 @@ check(VaultChainSweep::drain($uid, $secret_for_generation($gen3), microtime(true
 
 section('A window on a key that is not the vault\'s current one sweeps nothing');
 $v = new UserEncryptionVault($vault_id, TRUE);
+// Marks from the first pass, stored as true before PASS existed.
 $db->prepare('UPDATE uev_user_encryption_vaults SET uev_previous_keys = ? WHERE uev_user_encryption_vault_id = ?')
-	->execute(array(str_replace('"swept":true', '"swept":false', (string)$v->get('uev_previous_keys')), $vault_id));
-check(VaultChainSweep::hasWork($uid), 'with the marks cleared there is work again');
+	->execute(array(preg_replace('/"swept":(true|\d+)/', '"swept":true', (string)$v->get('uev_previous_keys')), $vault_id));
+check(VaultChainSweep::PASS > 1 && VaultChainSweep::hasWork($uid), 'a mark from an earlier pass is work again');
 check(VaultChainSweep::drain($uid, $current, microtime(true) + 60) === 0 && VaultChainSweep::hasWork($uid),
 	'a stale key (generation ' . $gen2 . ') moves nothing and marks nothing');
 
