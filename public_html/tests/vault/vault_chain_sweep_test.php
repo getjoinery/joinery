@@ -19,6 +19,7 @@
  *
  * Run: php tests/run.php db --filter=vault_chain_sweep
  *
+ * @version 1.1 - the fixture recipe is named HarnessTest, so it is never scheduled
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -70,7 +71,7 @@ $vault = new UserEncryptionVault($vault_id, TRUE);
 // sealed again to the old public key at the old generation, as a rotation
 // that missed the model left it.
 $recipe = new Recipe(NULL);
-$recipe->set('rcp_name', 'chain sweep ' . bin2hex(random_bytes(3)));
+$recipe->set('rcp_name', 'HarnessTest chain sweep ' . bin2hex(random_bytes(3)));
 $recipe->set('rcp_owner_user_id', $uid);
 $recipe->set('rcp_allowed_tools', json_encode(array()));
 $recipe->set('rcp_allowed_models', json_encode(array()));
