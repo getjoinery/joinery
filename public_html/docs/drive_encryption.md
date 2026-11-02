@@ -217,12 +217,13 @@ files (`File::is_encrypted()` is the gate):
   editor's upload into someone else's shared vault readable by the vault's
   owner.
 - **User-to-user** — the share dialog creates the `FileAccessGrant` (access) and,
-  in the owner's browser, the `FileKeyGrant` wrap (readability). For a folder it
-  batch-wraps every contained file's FK to the recipient's vault public key
-  (fetched with `drive_public_keys`), enumerating the subtree completely — the
-  walk pages through `drive_list` with `offset` while `truncated` is set, and
-  aborts the whole key sync loudly on any gap (granting access without keys is
-  the failure mode being prevented). Requires the recipient to have a Drive vault
+  in the owner's browser, the `FileKeyGrant` wrap (readability). It asks
+  `drive_public_keys` for the key plan of what it shares (`entity_type` +
+  `entity_id`): every Fortress file under it, the browser's own wrapped key for
+  each, and each file's full reader set with public keys — grants on folders
+  above it and on files inside it included, not only the dialog's grantees —
+  and wraps each file key to exactly those readers. Requires the recipient to
+  have a Drive vault
   (opted in); the dialog says so if a member has none. Removing access re-wraps to
   the remaining grantees, so the removed user's key grant is deleted. A key is
   only ever wrapped to a reader of the file: `drive_key_grants_sync` skips a
@@ -240,6 +241,15 @@ files (`File::is_encrypted()` is the gate):
   readers at the destination needs no keys. Whoever may make the move
   supplies the keys, an editor included; the owner's own key is never
   written by a move or a key sync.
+- **Restores** — a folder restored while its parent is still in the trash
+  comes back at the top of the Drive, out of the shares that reached it
+  there, so `drive_restore` takes `file_keys` and refuses `keys_needed` the
+  same way. A Fortress or Private file whose folder is still in the trash is
+  refused (`protection_boundary`) rather than restored loose at the top, where
+  nothing would protect it: its folder comes back first. Restored where it was, a
+  Fortress item takes the readers that place has now (its sharing can change
+  while the item sits in the trash): the keys are put right, or `keys_needed`
+  refused, before anything comes back.
 - **Anonymous share links** — a single-file mechanism: `drive_link_create` mints
   the token, and the client appends the file key to the URL **fragment** (never
   sent to the server). `/s/{token}#<key>` serves ciphertext plus a
@@ -259,7 +269,10 @@ files (`File::is_encrypted()` is the gate):
     `drive` vault public keys for share wraps (null for a member with no Drive
     vault); `folder_id` returns the folder's full reader set — owner plus every
     grant holder on the folder or an ancestor — for upload-time sealing
-    (requires write access to the folder).
+    (requires write access to the folder); `entity_type` + `entity_id`
+    returns the key plan: every Fortress file under it with the caller's own
+    wrapped key and its readers (the owner, or staff: whoever
+    `drive_key_grants_sync` takes keys from).
   - `drive_key_grants_sync` — owner reconciles the per-user wrapped file keys for
     one or more files (`file_keys`: `{ file_id: { user_id: wrapped_file_key } }`);
     every user named must be a reader of the file.

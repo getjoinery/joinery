@@ -23,6 +23,7 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.11 - a passphrase is at least 12 characters, as SealedBox::PASSPHRASE_MIN_CHARS says (it said 10)
  * @version 1.10 - replacementCodes() names the root key its twins are wrapped under (public_key), which the
  *   server checks against the root's current key
  * @version 1.9 - rotationAware(): an unlock the server refuses for a rotation owed still opens the root
@@ -307,7 +308,10 @@ window.VaultKeyring = (function () {
 	// Setup, the recovery codes and unlock are steps rendered into ONE
 	// JoineryModal content element: the modal is a singleton and cannot nest.
 
-	var MIN_PASSPHRASE = 10;
+	// SealedBox::PASSPHRASE_MIN_CHARS: the server only ever receives a key derived
+	// from the phrase, so this is the one place its length is checked
+	// (tests/unit/vault_passphrase_minimum_test.php keeps the two equal).
+	var MIN_PASSPHRASE = 12;
 
 	function el(tag, cls, text) {
 		var e = document.createElement(tag);

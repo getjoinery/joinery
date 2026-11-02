@@ -15,6 +15,20 @@ class DriveDestinationTrashedException extends RuntimeException {}
  */
 class DriveMovedSinceException extends RuntimeException {}
 
+/** A Fortress move or restore whose files need keys for new readers; carries what to wrap. */
+class DriveKeysNeededException extends RuntimeException {
+	/** More files than one move re-keys: the caller moves fewer at a time. */
+	const MAX_FILES = 2000;
+	public $files;
+	public $too_many;
+	public function __construct(array $files, bool $too_many = false) {
+		parent::__construct('keys_needed');
+		$this->files = $files;
+		$this->too_many = $too_many;
+	}
+}
+
+
 /**
  * DriveHelper — shared tree + access logic for the member Drive.
  *
@@ -218,6 +232,223 @@ class DriveHelper {
 			}
 		}
 		return array_keys($ids);
+	}
+
+	/**
+	 * For every Fortress file under an entity (the file, or everything under a
+	 * folder, trashed or not, so a file restored later is keyed for where it
+	 * stands): the readers its key must be wrapped to, less the owner (whose key
+	 * is never touched) and anyone with no Drive vault (who cannot hold one, as
+	 * on upload); who holds its key now; and which readers have no vault.
+	 * { file_id: { required: { user_id: public_key }, holders: [user_id, ...]
+	 * sorted, without_vault: [user_id, ...] } }, or none for anything not
+	 * Fortress.
+	 *
+	 * Readers are worked out once per folder (every file in a folder shares its
+	 * chain; only grants on the file itself differ), and the files' own grants and
+	 * key holders are each read in one query, so a large vault costs a handful of
+	 * queries per folder rather than several per file.
+	 */
+	private static function fortress_readers($entity_type, $entity_id, $owner_id) {
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
+		$owner_id = (int)$owner_id;
+		$db = DbConnector::get_instance()->get_db_link();
+		$in = function (array $ids) { return implode(',', array_fill(0, count($ids), '?')); };
+
+		if ($entity_type === self::ENTITY_FILE) {
+			$file = self::load_file($entity_id);
+			if (!$file || !$file->is_encrypted()) {
+				return array();
+			}
+			$files = array((int)$entity_id => (int)$file->get('fil_fol_folder_id'));
+		} else {
+			$folder = self::load_folder($entity_id);
+			if (!$folder || !self::folder_is_encrypted($folder)) {
+				return array();
+			}
+			// Every folder under it, trashed or not. Capped at the depth limit, as
+			// descendant_folder_ids() is, so a cycle a bad row put in ends the walk
+			// instead of spinning inside the move's locks.
+			$q = $db->prepare('WITH RECURSIVE sub AS (
+				    SELECT ?::bigint AS id, 0 AS lvl
+				  UNION ALL
+				    SELECT f.fol_folder_id, s.lvl + 1 FROM fol_folders f JOIN sub s ON f.fol_parent_folder_id = s.id
+				     WHERE s.lvl < ?
+				) SELECT DISTINCT id FROM sub');
+			$q->execute(array((int)$entity_id, self::max_depth() + 2));
+			$folder_ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+			$q = $db->prepare('SELECT fil_file_id, fil_fol_folder_id FROM fil_files WHERE fil_fol_folder_id IN ('
+				. $in($folder_ids) . ') AND fil_protection_level = ? AND fil_source = ? ORDER BY fil_file_id');
+			$q->execute(array_merge($folder_ids, array(ProtectionLevel::FORTRESS, File::SOURCE_DRIVE)));
+			$files = array();
+			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+				$files[(int)$row['fil_file_id']] = (int)$row['fil_fol_folder_id'];
+			}
+		}
+		if (!$files) {
+			return array();
+		}
+		$file_ids = array_keys($files);
+
+		// Grants on the files themselves, and who holds each file's key now.
+		$file_grants = array();
+		$q = $db->prepare('SELECT fga_entity_id, fga_usr_user_id FROM fga_file_access_grants WHERE fga_entity_type = ? AND fga_entity_id IN (' . $in($file_ids) . ')');
+		$q->execute(array_merge(array(self::ENTITY_FILE), $file_ids));
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$file_grants[(int)$row['fga_entity_id']][] = (int)$row['fga_usr_user_id'];
+		}
+		$holders = array();
+		$q = $db->prepare('SELECT fkg_fil_file_id, fkg_usr_user_id FROM fkg_file_key_grants WHERE fkg_fil_file_id IN (' . $in($file_ids) . ')');
+		$q->execute($file_ids);
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			if ((int)$row['fkg_usr_user_id'] !== $owner_id) {
+				$holders[(int)$row['fkg_fil_file_id']][] = (int)$row['fkg_usr_user_id'];
+			}
+		}
+
+		$folder_readers = array();
+		$readers_of_folder = function ($folder_id) use (&$folder_readers) {
+			if (!array_key_exists($folder_id, $folder_readers)) {
+				$folder = $folder_id > 0 ? self::load_folder($folder_id) : null;
+				$folder_readers[$folder_id] = $folder ? array_map('intval', self::reader_user_ids_for_folder($folder)) : array();
+			}
+			return $folder_readers[$folder_id];
+		};
+		$public_keys = array();
+		$public_key_of = function ($uid) use (&$public_keys) {
+			if (!array_key_exists($uid, $public_keys)) {
+				$vault = UserEncryptionVault::loadForUser($uid, 'drive');
+				$public_keys[$uid] = ($vault && $vault->key) ? $vault->sealingPublicKey() : null;
+			}
+			return $public_keys[$uid];
+		};
+
+		$out = array();
+		foreach ($files as $file_id => $folder_id) {
+			// The same set reader_user_ids_for_file() gives: the folder's readers
+			// and the grants on the file itself.
+			$required = array();
+			$without_vault = array();
+			foreach (array_merge($readers_of_folder($folder_id), $file_grants[$file_id] ?? array()) as $uid) {
+				if ($uid === $owner_id || isset($required[$uid]) || isset($without_vault[$uid])) {
+					continue;
+				}
+				$pk = $public_key_of($uid);
+				if ($pk !== null && $pk !== '') {
+					$required[$uid] = $pk;
+				} else {
+					$without_vault[$uid] = true;
+				}
+			}
+			$have = $holders[$file_id] ?? array();
+			sort($have);
+			$out[$file_id] = array('required' => $required, 'holders' => $have, 'without_vault' => array_keys($without_vault));
+		}
+		return $out;
+	}
+
+	/**
+	 * Re-key the Fortress files a move just placed (called inside the write that
+	 * placed it, after the item stands at its new place: drive_move, and
+	 * drive_restore when it re-roots a folder). Keys supplied for a file must
+	 * name exactly its readers (fortress_readers()); none supplied is fine when
+	 * the file's key holders already are exactly those users. Anything else
+	 * throws DriveKeysNeededException, which rolls the move back.
+	 */
+	public static function rekey_fortress($entity_type, $entity_id, $owner_id, $actor_id, array $file_keys) {
+		require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
+		$owner_id = (int)$owner_id;
+		$plan = self::fortress_readers($entity_type, $entity_id, $owner_id);
+		$needed = array();
+		$apply = array();
+		foreach ($plan as $file_id => $entry) {
+			$required = $entry['required'];
+			$want = array_keys($required);
+			sort($want);
+
+			$supplied = (isset($file_keys[$file_id]) && is_array($file_keys[$file_id])) ? $file_keys[$file_id] : null;
+			if ($supplied !== null) {
+				// Only the readers' keys are taken: the owner's is never the
+				// mover's to write, whatever the map says.
+				$map = array();
+				foreach ($supplied as $uid => $blob) {
+					if ((int)$uid !== $owner_id && is_string($blob) && $blob !== '') {
+						$map[(int)$uid] = $blob;
+					}
+				}
+				$got = array_keys($map);
+				sort($got);
+				if ($got === $want) {
+					$apply[$file_id] = $map;
+					continue;
+				}
+			} elseif ($entry['holders'] === $want) {
+				continue;
+			}
+			$readers = array();
+			foreach ($required as $uid => $pk) {
+				$readers[] = array('user_id' => $uid, 'public_key' => $pk);
+			}
+			$needed[] = array('file_id' => $file_id, 'readers' => $readers);
+		}
+
+		if ($needed) {
+			if (count($needed) > DriveKeysNeededException::MAX_FILES) {
+				throw new DriveKeysNeededException(array(), true);
+			}
+			$own = FileKeyGrant::wrapped_keys_for_user(array_column($needed, 'file_id'), (int)$actor_id);
+			foreach ($needed as $i => $entry) {
+				$needed[$i]['wrapped_file_key'] = $own[$entry['file_id']] ?? null;
+			}
+			throw new DriveKeysNeededException($needed);
+		}
+		foreach ($apply as $file_id => $map) {
+			$removed = array();
+			$added = FileKeyGrant::sync_for_file($file_id, $map, $owner_id, $removed);
+			foreach (array_merge($added, $removed) as $changed_id) {
+				FileChange::record(FileChange::KIND_GRANT_CHANGED, self::ENTITY_FILE, $file_id, $owner_id, (int)$actor_id, $changed_id);
+			}
+		}
+	}
+
+	/**
+	 * Every Fortress file under an entity with the readers its key must be
+	 * wrapped to, for a browser that re-wraps them after a share changes: each
+	 * file's id, the caller's own wrapped key and its readers with their public
+	 * keys (less the owner, whose key is never rewritten), and the number of
+	 * readers with no Drive vault, who cannot be given one.
+	 */
+	public static function fortress_key_plan($entity_type, $entity_id, $owner_id, $actor_id) {
+		require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
+		$plan = self::fortress_readers($entity_type, $entity_id, (int)$owner_id);
+		$own = $plan ? FileKeyGrant::wrapped_keys_for_user(array_keys($plan), (int)$actor_id) : array();
+		$files = array();
+		$without_vault = array();
+		foreach ($plan as $file_id => $entry) {
+			$readers = array();
+			foreach ($entry['required'] as $uid => $pk) {
+				$readers[] = array('user_id' => $uid, 'public_key' => $pk);
+			}
+			foreach ($entry['without_vault'] as $uid) {
+				$without_vault[$uid] = true;
+			}
+			$files[] = array('file_id' => $file_id, 'wrapped_file_key' => $own[$file_id] ?? null, 'readers' => $readers);
+		}
+		return array('files' => $files, 'without_vault' => count($without_vault));
+	}
+
+	/** The refusal a keys_needed move answers with: what to wrap, and to whom. */
+	public static function keys_needed_refusal(DriveKeysNeededException $e) {
+		if ($e->too_many) {
+			return LogicResult::error('That changes who reads too many encrypted files at once to re-key them. Do it a smaller folder at a time.',
+				array('reason' => 'too_many_to_rekey', 'standing' => true));
+		}
+		// Standing: the same move without the keys is refused again until the
+		// sharing changes, so a client that cannot wrap them holds the move rather
+		// than asking again (docs/drive.md, Standing refusals).
+		return LogicResult::error('The people who can read this change, so its encrypted files need keys for them. Do it in Drive in your browser with your vault unlocked.',
+			array('reason' => 'keys_needed', 'standing' => true, 'files' => $e->files));
 	}
 
 	/**

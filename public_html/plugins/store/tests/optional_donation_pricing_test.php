@@ -17,6 +17,7 @@
  * read, so all blank-setting checks run before the setting is pointed at the
  * fixture product.
  *
+ * @version 1.1 - buyer_amount(): malformed amounts are refused, not guessed at
  * @version 1.0
  */
 
@@ -26,6 +27,14 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 require_once(PathHelper::getIncludePath('plugins/store/data/product_versions_class.php'));
 require_once(PathHelper::getIncludePath('data/settings_class.php'));
+
+section('A buyer-typed amount is a well-formed amount or nothing');
+foreach (array('25' => '25.00', '25,5' => '25.50', '$12,34' => '12.34', ' 7 ' => '7.00') as $in => $want) {
+	check(Product::buyer_amount($in) === $want, "'$in' reads as $want", var_export(Product::buyer_amount($in), true));
+}
+foreach (array('1.2.3', '1,234.56', '12.345', 'abc', '') as $bad) {
+	check(Product::buyer_amount($bad) === null, "'$bad' is not an amount");
+}
 
 const ODP_SETTING = 'store_optional_donation_product_id';
 
@@ -133,6 +142,11 @@ check($product->is_optional_donation() === true,
 $price = $product->get_price($version, array('user_price' => '$12,34'));
 check($price === '12.34',
 	'get_price uses the sanitized buyer-entered amount',
+	"got '" . var_export($price, true) . "'");
+
+$price = $product->get_price($version, array('user_price' => '1.2.3'));
+check(is_numeric($price) && abs((float)$price - 5.00) < 0.001,
+	'a malformed donation is not guessed into a price: the version price stands',
 	"got '" . var_export($price, true) . "'");
 
 $price = $product->get_price($version, array());

@@ -788,7 +788,17 @@
 			.then(load).catch(function (e) { toast(e.message || 'Delete failed.', e); });
 	}
 	function doRestore(it) {
-		api.post('drive_restore', { entity_type: it.entity_type, entity_id: it.id })
+		var body = { entity_type: it.entity_type, entity_id: it.id };
+		api.post('drive_restore', body)
+			.catch(function (err) {
+				// A Fortress folder restored to the top of the Drive changes who
+				// reads its files: their keys go with it, as on a move.
+				if (!(err && err.data && err.data.reason === 'keys_needed')) throw err;
+				return rekeyForMove(err.data.files || []).then(function (fileKeys) {
+					body.file_keys = fileKeys;
+					return api.post('drive_restore', body);
+				});
+			})
 			.then(load).catch(function (e) { toast(e.message || 'Restore failed.', e); });
 	}
 	function confirmDelete(it) {
@@ -1105,7 +1115,7 @@
 			fileKeys[f.file_id] = perUser;
 		}
 		if (withoutKey) {
-			throw new Error('You do not hold the key for ' + withoutKey + ' of these encrypted files, so they cannot be moved where other people read them.');
+			throw new Error('You do not hold the key for ' + withoutKey + ' of these encrypted files, so they cannot go where other people read them.');
 		}
 		return fileKeys;
 	}
@@ -1162,75 +1172,34 @@
 			.catch(function (e) { toast(e.message || 'Update failed.', e); });
 	}
 
-	// Re-wrap encrypted file keys to the current grantee set (file, or every
-	// encrypted file in a shared folder subtree). The owner's browser unwraps each
-	// file key once and seals it to each recipient's drive vault public key.
+	// Re-wrap encrypted file keys to everyone who reads each file now (a file,
+	// or every encrypted file under a shared folder). The server names each
+	// file's readers -- grants above this folder and on files inside it
+	// included, not only this dialog's grantees -- with this browser's own
+	// wrapped key; the browser unwraps each file key once and seals it to each.
 	async function syncEncryptedKeys() {
 		try {
 			var session = await ensureUnlocked();
-			var granteeIds = shareGrants.map(function (g) { return g.user_id; });
-
-			// Resolve recipients' public keys (members without a Drive vault can't
-			// receive encrypted files — surfaced, not silently dropped).
-			var pubByUser = {};
-			if (granteeIds.length) {
-				var pk = await api.post('drive_public_keys', { identifiers: granteeIds });
-				var missing = [];
-				(pk.keys || []).forEach(function (k) {
-					if (k.user_id && k.public_key) pubByUser[k.user_id] = k.public_key;
-					else if (k.user_id) missing.push(k.identifier);
-				});
-				if (missing.length) toast('These members have no Drive vault yet and can\'t open shared encrypted files.');
-			}
-
-			// Gather the target encrypted files (a file, or a folder subtree).
-			var files = shareTarget.entity_type === 'file'
-				? [shareTarget]
-				: await collectEncryptedFiles(shareTarget.id);
-
+			var plan = await api.post('drive_public_keys', { entity_type: shareTarget.entity_type, entity_id: shareTarget.id });
+			if (plan.without_vault) toast('Some people who can open these files have no Drive vault yet and can\'t open encrypted files.');
 			var fileKeys = {};
+			var files = plan.files || [];
+			var withoutKey = 0;
 			for (var i = 0; i < files.length; i++) {
 				var f = files[i];
-				if (!f.encrypted || !f.wrapped_file_key) continue;
+				if (!f.wrapped_file_key) { withoutKey++; continue; }
 				var fkBytes = await session.openSealed(f.wrapped_file_key);
 				var perUser = {};
-				for (var uid in pubByUser) {
-					perUser[uid] = await DC.wrapFileKeyTo(fkBytes, pubByUser[uid]);
+				for (var j = 0; j < f.readers.length; j++) {
+					perUser[f.readers[j].user_id] = await DC.wrapFileKeyTo(fkBytes, f.readers[j].public_key);
 				}
-				fileKeys[f.id] = perUser; // owner's own key is preserved server-side
+				fileKeys[f.file_id] = perUser; // the owner's own key is never rewritten
 			}
 			if (Object.keys(fileKeys).length) {
 				await api.post('drive_key_grants_sync', { file_keys: fileKeys });
 			}
+			if (withoutKey) toast(withoutKey + ' encrypted file(s) here you hold no key for were left as they are.');
 		} catch (e) { toast(e.message || 'Could not update encrypted access.', e); }
-	}
-
-	// Walk a folder subtree, collecting every encrypted file (with the caller's
-	// own wrapped key) via repeated listings, paging past the listing cap with
-	// `offset`. Completeness is load-bearing: any file this walk misses would be
-	// granted ACCESS by the share sync but no KEY — so on any gap (guard tripped,
-	// listing failed) it throws and the caller aborts the whole key sync loudly.
-	async function collectEncryptedFiles(rootFolderId) {
-		var out = [];
-		var queue = [rootFolderId];
-		var guard = 0;
-		while (queue.length) {
-			var fid = queue.shift();
-			var offset = 0, more = true;
-			while (more) {
-				if (++guard > 5000) throw new Error('This folder is too large to sync encrypted access for.');
-				var r = await api.post('drive_list', { view: 'mine', folder_id: fid, offset: offset });
-				var items = r.items || [];
-				items.forEach(function (it) {
-					if (it.entity_type === 'folder') queue.push(it.id);
-					else if (it.encrypted) out.push(it);
-				});
-				more = !!r.truncated;
-				if (more && !items.length) throw new Error('Could not fully enumerate the folder.');
-				offset += items.length;
-			}
-		}
-		return out;
 	}
 
 	function renderGrants() {

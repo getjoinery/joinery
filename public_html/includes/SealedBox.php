@@ -32,6 +32,7 @@
  * primitives like the rest; the `v2.edgeseal.` / `v1.edge.` framing belongs to
  * the row layer (VaultCrypto).
  *
+ * @version 2.3 - PASSPHRASE_MIN_CHARS says truthfully where it is enforced (the browser)
  * @version 2.2 - header describes the X-Wing keypair and v2 seals
  * @version 2.1 - RECOVERY_CODE_PATTERN / isRecoveryCodeShaped(): what a typed recovery code looks like
  * @version 2.0 - v2 seals (specs/post_quantum_sealing.md R2): generateKeypair() mints an X-Wing
@@ -69,10 +70,13 @@ class SealedBox {
 	const RECOVERY_CODE_PATTERN = '/^[\s-]*(?:[0-9A-TV-Za-tv-z][\s-]*){26}$/';
 	const RECOVERY_CODE_SHAPE_MESSAGE = 'That is not a recovery code. A code is 26 letters and numbers, in groups split by dashes. Check what you pasted.';
 
-	// Minimum length for a vault passphrase, enforced by EVERY enrollment path
-	// (setup, enroll, rotation resupply). The vault is exactly as strong as its
-	// weakest wrapping; a short passphrase is an offline-guessable unlocker for
-	// anyone holding a copy of the database.
+	// Minimum length for a vault passphrase. The vault is exactly as strong as
+	// its weakest wrapping; a short passphrase is an offline-guessable unlocker
+	// for anyone holding a copy of the database. The server never receives the
+	// phrase, only a key the browser derives from it, so the browser enforces
+	// this on every path that sets one: the setup wizard reads this constant,
+	// and vault-keyring.js's MIN_PASSPHRASE (setup, enroll, rotation resupply)
+	// is held equal to it by tests/unit/vault_passphrase_minimum_test.php.
 	const PASSPHRASE_MIN_CHARS = 12;
 
 	public function __construct() {

@@ -337,6 +337,91 @@ check(($tbare['json']['data']['reason'] ?? '') === 'keys_needed' && $tneed === a
 	'a file in a trashed folder under the moved folder is named too', json_encode($tbare['json']['data'] ?? null));
 
 // ---------------------------------------------------------------------------
+section('API: restore out of a trashed Fortress folder');
+
+// Vault R is shared with the friend; its subfolder S holds a file keyed for
+// the owner and the friend. With R in the trash, restoring S brings it back at
+// the top of the Drive, where only the owner reads it.
+$vr = $mk_vault('RestoreR', $friend);
+$rs = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'RestoreS_' . bin2hex(random_bytes(3)), 'parent_id' => $vr));
+$rs_id = (int)($rs['json']['data']['folder']['id'] ?? 0);
+if ($rs_id) { $made_folders[] = $rs_id; }
+$rfile = $mk_file($rs_id, array((int)$owner->key => base64_encode(random_bytes(80)), (int)$friend->key => base64_encode(random_bytes(80))));
+$loose = $mk_file($vr, array((int)$owner->key => base64_encode(random_bytes(80)), (int)$friend->key => base64_encode(random_bytes(80))));
+$tr = api_request('POST', '/api/v1/action/drive_trash', $H, array('entity_type' => 'folder', 'entity_id' => $vr));
+check(empty($tr['json']['error']), 'the vault goes to the trash with everything in it', json_encode($tr['json']['data'] ?? null));
+$in_trash = function ($table, $col, $id) use ($dblink) {
+	$pk = ($table === 'fol_folders') ? 'fol_folder_id' : 'fil_file_id';
+	return $dblink->query("SELECT $col IS NOT NULL FROM $table WHERE $pk = " . (int)$id)->fetchColumn() === true;
+};
+
+$rbare = api_request('POST', '/api/v1/action/drive_restore', $H, array('entity_type' => 'folder', 'entity_id' => $rs_id));
+$rneed = array_map(function ($f) { return (int)$f['file_id']; }, $rbare['json']['data']['files'] ?? array());
+check(($rbare['json']['data']['reason'] ?? '') === 'keys_needed' && $rneed === array($rfile),
+	'restoring the subfolder to the top is refused as keys_needed, naming its file', json_encode($rbare['json']['data'] ?? null));
+check($in_trash('fol_folders', 'fol_delete_time', $rs_id) && (int)(new Folder($rs_id, true))->get('fol_parent_folder_id') === $vr,
+	'and it stays in the trash where it was');
+
+$rkeyed = api_request('POST', '/api/v1/action/drive_restore', $H, array('entity_type' => 'folder', 'entity_id' => $rs_id,
+	'file_keys' => array((string)$rfile => array())));
+check(empty($rkeyed['json']['error']) && !$in_trash('fol_folders', 'fol_delete_time', $rs_id)
+	&& (new Folder($rs_id, true))->get('fol_parent_folder_id') === null,
+	'with its readers\' keys (here none but the owner) it comes back at the top', json_encode($rkeyed['json']));
+check(FileKeyGrant::wrapped_key_for($rfile, $friend->key) === null && FileKeyGrant::wrapped_key_for($rfile, $owner->key) !== null,
+	'the friend, who no longer reaches it, no longer holds its key; the owner still does');
+
+$rfile_alone = api_request('POST', '/api/v1/action/drive_restore', $H, array('entity_type' => 'file', 'entity_id' => $loose));
+check(($rfile_alone['json']['data']['reason'] ?? '') === 'protection_boundary' && $in_trash('fil_files', 'fil_delete_time', $loose)
+	&& (int)(new File($loose, true))->get('fil_fol_folder_id') === $vr,
+	'a Fortress file whose vault is still in the trash is not restored loose at the top', json_encode($rfile_alone['json']['data'] ?? null));
+
+// A folder restored where it was takes the readers that place has now: here
+// its vault was shared with the stranger while it sat in the trash.
+$vd = $mk_vault('DriftV', $friend);
+$dsub = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'DriftS_' . bin2hex(random_bytes(3)), 'parent_id' => $vd));
+$dsub_id = (int)($dsub['json']['data']['folder']['id'] ?? 0);
+if ($dsub_id) { $made_folders[] = $dsub_id; }
+$dfile = $mk_file($dsub_id, array((int)$owner->key => base64_encode(random_bytes(80)), (int)$friend->key => base64_encode(random_bytes(80))));
+api_request('POST', '/api/v1/action/drive_trash', $H, array('entity_type' => 'folder', 'entity_id' => $dsub_id));
+FileAccessGrant::sync_for_entity(DriveHelper::ENTITY_FOLDER, $vd, array((int)$friend->key => 'viewer', (int)$stranger->key => 'viewer'), $owner->key);
+$dbare = api_request('POST', '/api/v1/action/drive_restore', $H, array('entity_type' => 'folder', 'entity_id' => $dsub_id));
+check(($dbare['json']['data']['reason'] ?? '') === 'keys_needed' && $in_trash('fol_folders', 'fol_delete_time', $dsub_id)
+	&& $in_trash('fil_files', 'fil_delete_time', $dfile),
+	'restoring it in place asks for the new reader\'s key first, and nothing comes back', json_encode($dbare['json']['data'] ?? null));
+$dkeyed = api_request('POST', '/api/v1/action/drive_restore', $H, array('entity_type' => 'folder', 'entity_id' => $dsub_id,
+	'file_keys' => array((string)$dfile => array((string)$friend->key => base64_encode(random_bytes(80)), (string)$stranger->key => base64_encode(random_bytes(80))))));
+check(empty($dkeyed['json']['error']) && !$in_trash('fol_folders', 'fol_delete_time', $dsub_id) && !$in_trash('fil_files', 'fil_delete_time', $dfile)
+	&& FileKeyGrant::wrapped_key_for($dfile, $stranger->key) !== null,
+	'with it the folder and its file come back, the new reader holding the key', json_encode($dkeyed['json']));
+
+// ---------------------------------------------------------------------------
+section('API: the key plan a share dialog re-wraps to');
+
+// Vault P is shared with the friend; its subfolder Q is also shared with the
+// stranger. Re-wrapping Q's files after a change to Q's sharing must keep the
+// friend, who reads them through P, and not only Q's own grantee.
+$vp = $mk_vault('PlanP', $friend);
+$q = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'PlanQ_' . bin2hex(random_bytes(3)), 'parent_id' => $vp));
+$q_id = (int)($q['json']['data']['folder']['id'] ?? 0);
+if ($q_id) { $made_folders[] = $q_id; }
+FileAccessGrant::sync_for_entity(DriveHelper::ENTITY_FOLDER, $q_id, array((int)$stranger->key => 'viewer'), $owner->key);
+$owner_plan_key = base64_encode(random_bytes(80));
+$pfile_id = $mk_file($q_id, array((int)$owner->key => $owner_plan_key, (int)$friend->key => base64_encode(random_bytes(80))));
+$plan = api_request('POST', '/api/v1/action/drive_public_keys', $H, array('entity_type' => 'folder', 'entity_id' => $q_id));
+$pf = $plan['json']['data']['files'] ?? array();
+$plan_readers = array();
+foreach ($pf[0]['readers'] ?? array() as $rr) { $plan_readers[] = (int)$rr['user_id']; }
+sort($plan_readers);
+$expect = array((int)$friend->key, (int)$stranger->key); sort($expect);
+check(count($pf) === 1 && (int)$pf[0]['file_id'] === $pfile_id && $pf[0]['wrapped_file_key'] === $owner_plan_key && $plan_readers === $expect,
+	'the plan names the file, the caller\'s own key, and both readers: the one above and the one on the folder', json_encode($plan['json']['data'] ?? null));
+$plan_bad = api_request('POST', '/api/v1/action/drive_public_keys', $FH, array('entity_type' => 'folder', 'entity_id' => $q_id));
+check(($plan_bad['json']['data']['reason'] ?? '') === 'forbidden', 'someone who may not set its keys cannot read its plan', json_encode($plan_bad['json']['data'] ?? null));
+FileAccessGrant::sync_for_entity(DriveHelper::ENTITY_FOLDER, $vp, array((int)$friend->key => 'editor'), $owner->key);
+$plan_editor = api_request('POST', '/api/v1/action/drive_public_keys', $FH, array('entity_type' => 'folder', 'entity_id' => $q_id));
+check(($plan_editor['json']['data']['reason'] ?? '') === 'forbidden', 'nor can a Drive editor, who could not submit the keys either', json_encode($plan_editor['json']['data'] ?? null));
+
+// ---------------------------------------------------------------------------
 section('API: rename — encrypted files rename via their metadata');
 
 // A plaintext name on an encrypted file would leak the secret name — refused.

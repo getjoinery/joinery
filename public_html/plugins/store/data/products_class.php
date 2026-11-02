@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.4 - buyer_amount(): an amount a buyer types is a well-formed amount above zero, or refused
  * @version 1.3 - prepare() holds the form's rules for the link's form, the fulfilment provider key and
  *                ownership vs subscription; open to content packs (specs/content_pack_feature.md)
  * @version 1.2 - price_period_suffix(): the period a product's price is shown with ('/month')
@@ -349,26 +350,39 @@ public function get_requirement_info($output='text') {
 		return count($suffixes) === 1 ? (string)array_key_first($suffixes) : '';
 	}
 
+	/**
+	 * An amount a buyer typed (a donation, or the price of a version where the
+	 * buyer chooses), as a plain decimal string ('12.50'), or null when it is
+	 * not one: digits, then at most one decimal point or comma (a European
+	 * comma reads as the point) and at most two decimals. A currency symbol or
+	 * spaces around it are allowed; anything else -- '1.2.3', '1,234.56', words
+	 * -- is not guessed at.
+	 */
+	public static function buyer_amount($raw): ?string {
+		$s = trim(preg_replace('/[\s\p{Sc}]+/u', '', (string)$raw));
+		if (!preg_match('/^(\d+)(?:[.,](\d{1,2}))?$/', $s, $m)) {
+			return null;
+		}
+		return number_format((float)($m[1] . '.' . ($m[2] ?? '0')), 2, '.', '');
+	}
+
 	public function get_price($product_version, $data){
 		//HANDLE PRICES
 		$settings = Globalvars::get_instance(); 
 		
-		if($this->is_optional_donation() && !empty($data['user_price'])){
-			//IT IS AN OPTIONAL DONATION
-			//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
-			return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price']));
+		$donation = $this->is_optional_donation() ? self::buyer_amount($data['user_price'] ?? '') : null;
+		if($donation !== null && (float)$donation > 0){
+			// An optional donation: the amount the buyer chose.
+			return $donation;
 		}
 		else if($product_version->get('prv_price_type') == 'user'){
-	
-			if($data['user_price_override']){
-				//REMOVE EVERYTHING BUT DECIMALS AND INTEGERS (ALLOW FOR EUROPEAN COMMAS)
-				return str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $data['user_price_override']));
+			// The buyer chooses the price: a well-formed amount above zero.
+			$amount = self::buyer_amount($data['user_price_override'] ?? '');
+			if ($amount !== null && (float)$amount > 0) {
+				return $amount;
 			}
-			else{
-				$error = 'This product is missing the price override.';
-				throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
-				exit;
-			}
+			$error = 'This product is missing a valid amount to pay.';
+			throw new SystemDisplayableError($error. "  Contact us at ".$settings->get_setting('defaultemail')." if you keep having trouble.");
 		}
 		else if($product_version){
 			//THIS PRODUCT HAS A VERSION THAT WE SHOULD PULL TO GET THE PRICE
@@ -573,9 +587,10 @@ public function get_requirement_info($output='text') {
 
 		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
 		if($product_version->get('prv_price_type') == 'user' && isset($form_data['user_price_override'])){
-			if(!$form_data['user_price_override']){
+			$amount = self::buyer_amount($form_data['user_price_override']);
+			if($amount === null || (float)$amount <= 0){
 				throw new SystemDisplayableErrorNoLog(
-					'You must enter an amount in the "Price to pay" field.');
+					'Enter the amount to pay as a number above zero, like 25 or 25.50.');
 			}
 		}
 

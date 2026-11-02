@@ -5,6 +5,7 @@
  * Tier 2 custom requirement: allows user to choose a price (donation amount).
  * affects_pricing() returns true.
  *
+ * @version 1.1 - the donation is read with Product::buyer_amount(): a malformed amount is refused, not guessed at
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
@@ -23,26 +24,23 @@ class UserPriceRequirement extends AbstractProductRequirement {
         $errors = [];
 
         // Clean up the price value
-        $price = isset($post_data['user_price']) ? $post_data['user_price'] : '';
-        $price = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $price));
-
-        if ($price !== '' && $price < 0) {
-            $errors[] = 'Donation amount must be zero or more.';
+        $raw = trim((string)($post_data['user_price'] ?? ''));
+        if ($raw !== '' && Product::buyer_amount($raw) === null) {
+            $errors[] = 'Enter the donation as a number, like 25 or 25.50.';
         }
 
         return $errors;
     }
 
     public function process($post_data, $product, $order_detail, $user) {
-        $price = isset($post_data['user_price']) ? $post_data['user_price'] : '';
-        $price = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $price));
+        $price = (string)Product::buyer_amount($post_data['user_price'] ?? '');
 
         $data_array = [
             'user_price' => $price,
         ];
 
         $display_array = [
-            'Donation amount ($)' => $price . '.00',
+            'Donation amount ($)' => $price,
         ];
 
         return [$data_array, $display_array];
@@ -53,11 +51,9 @@ class UserPriceRequirement extends AbstractProductRequirement {
     }
 
     public function get_modified_price($post_data, $product, $base_price) {
-        $price = isset($post_data['user_price']) ? $post_data['user_price'] : '';
-        $price = str_replace(',', '.', preg_replace("/[^0-9\.,]/", "", $price));
-
-        if ($price !== '' && is_numeric($price)) {
-            return $base_price + floatval($price);
+        $price = Product::buyer_amount($post_data['user_price'] ?? '');
+        if ($price !== null) {
+            return $base_price + (float)$price;
         }
 
         return $base_price;

@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.40 - A firewall rule opening PostgreSQL (5432) to the world, which bare-metal installs before
+#                install.sh 2.23 added, is deleted; a rule for a named source is left as someone's choice.
 # Version: 1.39 - In a container, a standalone server's listen pin (conf.d/99-joinery-local-only.conf) an
 #                earlier run left is removed and PostgreSQL restarted: housekeeping before 1.19 took a Podman
 #                container for a standalone server, and its host could not reach the site's database.
@@ -1605,6 +1607,32 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
             done < <(kernel_settings_state)
         fi
     fi
+fi
+
+# Bare-metal installs before install.sh 2.23 opened PostgreSQL's port to every
+# address (`ufw allow 5432/tcp`). Nothing connects to it from outside -- jobs
+# run psql and pg_dump on the machine -- so the rule is only attack surface,
+# and install stopped adding it; a machine installed before that still has it.
+# A rule from Anywhere is deleted, highest number first so the numbers left do
+# not shift; one that names a source is someone's own choice and stays.
+close_world_postgres_rule() {
+    command -v ufw >/dev/null 2>&1 || return 0
+    local rules n
+    rules="$(ufw status numbered 2>/dev/null)" || return 0
+    while read -r n; do
+        [[ -n "${n}" ]] || continue
+        if ufw --force delete "${n}" >/dev/null 2>&1; then
+            say "deleted firewall rule ${n}, which opened PostgreSQL (5432) to every address: nothing connects to it from outside"
+        else
+            warn "could not delete firewall rule ${n}, which opens PostgreSQL (5432) to every address"
+            FAILED=1
+        fi
+    done < <(printf '%s\n' "${rules}" \
+        | grep -E '^\[ *[0-9]+\] +5432(/tcp)?( \(v6\))? +ALLOW IN +Anywhere( \(v6\))? *$' \
+        | sed -E 's/^\[ *([0-9]+)\].*/\1/' | sort -rn)
+}
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 ]]; then
+    close_world_postgres_rule
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

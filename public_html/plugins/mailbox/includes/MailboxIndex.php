@@ -97,6 +97,7 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.15 - the fold lock is a PostgreSQL advisory lock, not a world-writable /dev/shm file
  * @version 1.14 - FILE_SOURCE: the mailbox_search_index origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.13 - FORMAT 3: the persisted index is a SealedFileContainer (the
@@ -903,30 +904,28 @@ class MailboxIndex {
 		);
 	}
 
+	/** Advisory-lock class for the per-user fold lock (74211-74213 are the mailbox's other three). */
+	const FOLD_LOCK_CLASS = 74214;
+
 	/**
-	 * The per-user fold lock: one fold at a time, non-blocking. The lock FILE
-	 * is never unlinked — deleting a file another process holds an flock on
-	 * would hand the next opener a fresh inode and break the mutual exclusion.
-	 * It is zero bytes and rides along in /dev/shm.
+	 * The per-user fold lock: one fold at a time, non-blocking. A PostgreSQL
+	 * advisory lock rather than a file, so no other local user can take it and
+	 * hold a member's index still: the web pool and the CLI both fold (search
+	 * request, drain, tests) under different users, which a shared lock file
+	 * could only serve by being writable by everyone. Session-scoped, so a
+	 * process that dies mid-fold gives it back with its connection.
 	 */
 	private function acquireFoldLock(int $user_id) {
-		$path = self::SHM_DIR . '/mailfts_' . $user_id . '.lock';
-		$fh = @fopen($path, 'c');
-		if ($fh === false) {
-			return null;
-		}
-		@chmod($path, 0666); // web and CLI both fold (search request / drain / tests)
-		if (!flock($fh, LOCK_EX | LOCK_NB)) {
-			fclose($fh);
-			return null;
-		}
-		return $fh;
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$q->execute(array(self::FOLD_LOCK_CLASS, $user_id));
+		return $q->fetchColumn() ? $user_id : null;
 	}
 
-	private function releaseFoldLock($fh): void {
-		if (is_resource($fh)) {
-			flock($fh, LOCK_UN);
-			fclose($fh);
+	private function releaseFoldLock($held): void {
+		if ($held !== null) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$db->prepare('SELECT pg_advisory_unlock(?, ?)')->execute(array(self::FOLD_LOCK_CLASS, (int)$held));
 		}
 	}
 

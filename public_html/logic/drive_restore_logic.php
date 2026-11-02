@@ -1,4 +1,22 @@
 <?php
+/**
+ * drive_restore — bring a Drive file or folder back from the trash (owner only).
+ *
+ * A folder whose parent is still in the trash comes back at the top of the
+ * Drive, out of every share that reached it through that parent. For a Fortress
+ * folder that changes who must hold its files' keys, so the re-rooting carries
+ * them (`file_keys`, as drive_move takes) or is refused as `keys_needed`, the
+ * folder staying in the trash (DriveHelper::rekey_fortress). A protected file
+ * whose folder is still in the trash is not put loose at the top, where nothing
+ * would protect it: its folder is restored first. Restored where it was, a
+ * Fortress item's readers are those of that place, which can have changed while
+ * it sat in the trash, so its keys are put right the same way before anything
+ * comes back.
+ *
+ * @version 1.3 - a restore in place puts the keys right first (keys_needed), the folder and file paths alike
+ * @version 1.2 - every refusal says why (reason)
+ * @version 1.1 - a re-rooted Fortress folder re-keys its files; a protected file waits for its folder
+ */
 
 function drive_restore_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -10,25 +28,26 @@ function drive_restore_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$entity_type = (string)($input['entity_type'] ?? '');
 	$entity_id   = (int)($input['entity_id'] ?? 0);
+	$file_keys   = (isset($input['file_keys']) && is_array($input['file_keys'])) ? $input['file_keys'] : array();
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
-		return LogicResult::error('Invalid entity type.');
+		return LogicResult::error('Invalid entity type.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$entity = DriveHelper::load_entity($entity_type, $entity_id);
 	if (!$entity) {
-		return LogicResult::error('Item not found.');
+		return LogicResult::error('Item not found.', array('reason' => 'not_found'));
 	}
 	if (!DriveHelper::owns($entity_type, $entity, $user_id)) {
-		return LogicResult::error('You do not have permission to restore this item.');
+		return LogicResult::error('You do not have permission to restore this item.', array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	// Held against a trash of the owner's tree from the restore to its change
@@ -62,16 +81,35 @@ function drive_restore_logic(array $input): LogicResult {
 						}
 						$entity->set('fol_name', substr($name, 0, 255));
 					}
-					$saved = DriveHelper::reparent_and_tell(DriveHelper::ENTITY_FOLDER, (int)$entity->key, $parent_id, 0,
-						$entity_owner, $user_id, function () use ($entity) {
-							$entity->set('fol_parent_folder_id', null);
-							return DriveHelper::save_folder_unless_name_taken($entity);
-						});
+					try {
+						$saved = DriveHelper::reparent_and_tell(DriveHelper::ENTITY_FOLDER, (int)$entity->key, $parent_id, 0,
+							$entity_owner, $user_id, function () use ($entity, $entity_owner, $user_id, $file_keys) {
+								$entity->set('fol_parent_folder_id', null);
+								$saved = DriveHelper::save_folder_unless_name_taken($entity);
+								// Its readers are the ones at the top now: a throw
+								// here rolls the re-rooting back with it.
+								if ($saved) {
+									DriveHelper::rekey_fortress(DriveHelper::ENTITY_FOLDER, (int)$entity->key, $entity_owner, $user_id, $file_keys);
+								}
+								return $saved;
+							});
+					} catch (DriveKeysNeededException $e) {
+						return DriveHelper::keys_needed_refusal($e);
+					}
 					if (!$saved) {
 						// Something else claimed the free name between the search
 						// above and here. The folder is still safely in the trash.
-						return LogicResult::error('That name was taken while restoring. Try again.');
+						return LogicResult::error('That name was taken while restoring. Try again.', array('reason' => 'name_taken'));
 					}
+				}
+			}
+			// Restored where it was, its readers are those of the place it stands,
+			// which can have changed while it sat in the trash; the keys are put
+			// right before anything comes back (the re-rooting above already did).
+			if ((int)$entity->get('fol_parent_folder_id') === $parent_id) {
+				$refused = _drive_restore_rekey_in_place(DriveHelper::ENTITY_FOLDER, (int)$entity->key, $entity_owner, $user_id, $file_keys);
+				if ($refused !== null) {
+					return $refused;
 				}
 			}
 			// The re-rooting above read the parent; the cascade below writes. Held
@@ -82,7 +120,7 @@ function drive_restore_logic(array $input): LogicResult {
 					DriveHelper::restore_folder_cascade($entity);
 				});
 			} catch (DriveDestinationTrashedException $e) {
-				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.', array('reason' => 'parent_trashed'));
 			}
 		} else {
 			// If the file's folder is itself trashed, restore it to the root so it
@@ -94,6 +132,13 @@ function drive_restore_logic(array $input): LogicResult {
 			if ($folder_id > 0) {
 				$folder = DriveHelper::load_folder($folder_id);
 				if ($folder && $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '') {
+					// A file's protection is its folder's: loose at the top it
+					// would read as Standard on every device that sees it.
+					require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+					if ($entity->protection_level() !== ProtectionLevel::STANDARD) {
+						return LogicResult::error('This file is protected by the folder it was in, which is still in the trash. Restore that folder first.',
+							array('reason' => 'protection_boundary', 'folder_id' => (int)$folder_id, 'standing' => true));
+					}
 					$entity->set('fil_fol_folder_id', null);
 					$folder_id = 0;
 				}
@@ -113,6 +158,12 @@ function drive_restore_logic(array $input): LogicResult {
 				}
 				$entity->set('fil_title', $name);
 			}
+			if ($folder_id > 0) {
+				$refused = _drive_restore_rekey_in_place(DriveHelper::ENTITY_FILE, (int)$entity->key, $entity_owner, $user_id, $file_keys);
+				if ($refused !== null) {
+					return $refused;
+				}
+			}
 			$entity->set('fil_delete_time', null);
 			try {
 				$saved = DriveHelper::place_into($folder_id, function () use ($entity, $from_folder_id, $folder_id, $entity_owner, $user_id) {
@@ -128,12 +179,12 @@ function drive_restore_logic(array $input): LogicResult {
 			} catch (DriveDestinationTrashedException $e) {
 				// The folder was live when it was chosen above and is not now. The
 				// file stays in the trash rather than coming back invisible.
-				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.', array('reason' => 'parent_trashed'));
 			}
 			if (!$saved) {
 				// Something else claimed the free name between the search above and
 				// here. The file is still safely in the trash.
-				return LogicResult::error('That name was taken while restoring. Try again.');
+				return LogicResult::error('That name was taken while restoring. Try again.', array('reason' => 'name_taken'));
 			}
 		}
 
@@ -143,6 +194,31 @@ function drive_restore_logic(array $input): LogicResult {
 	}
 
 	return LogicResult::render(array('ok' => true));
+}
+
+/**
+ * Put a Fortress item's keys right for where it is restored to, before any of
+ * it comes back: the readers of a folder can change while something sits in
+ * its trash, and the cascade that un-trashes a subtree moves bytes row by row,
+ * so it cannot be rolled back afterwards. Its own transaction; supplied keys
+ * that match are applied, anything else is refused as keys_needed with nothing
+ * restored. Returns the refusal, or null to go on.
+ */
+function _drive_restore_rekey_in_place($entity_type, $entity_id, $owner_id, $actor_id, array $file_keys) {
+	$db = DbConnector::get_instance()->get_db_link();
+	$own = !$db->inTransaction();
+	if ($own) $db->beginTransaction();
+	try {
+		DriveHelper::rekey_fortress($entity_type, $entity_id, $owner_id, $actor_id, $file_keys);
+		if ($own) $db->commit();
+	} catch (DriveKeysNeededException $e) {
+		if ($own && $db->inTransaction()) $db->rollBack();
+		return DriveHelper::keys_needed_refusal($e);
+	} catch (Throwable $e) {
+		if ($own && $db->inTransaction()) $db->rollBack();
+		throw $e;
+	}
+	return null;
 }
 
 /**
@@ -172,6 +248,7 @@ function drive_restore_logic_descriptor(): array {
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
+			'file_keys'   => array('type' => 'object', 'required' => false, 'label' => 'For a Fortress restore that changes who reads its files: { file_id: { user_id: wrapped_file_key } } for their readers where it lands, as a keys_needed refusal names them'),
 		),
 	);
 }

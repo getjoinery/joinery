@@ -17,6 +17,16 @@
  * the file lands readable by everyone who can already reach it. Requires write
  * access to the folder (public keys are public; the gate only prevents fishing
  * for another user's grant lists).
+ *
+ * Input `entity_type` + `entity_id` (key-plan mode): every Fortress file under
+ * that file or folder with the caller's own wrapped key and the readers its
+ * key must be wrapped to (DriveHelper::fortress_key_plan()), so the share
+ * dialog re-wraps each file to everyone who reads it — grants above the shared
+ * folder and on files inside it included — not only to the folder's own
+ * grantees. Admits whoever drive_key_grants_sync takes keys from: the owner,
+ * or staff through the model's own check.
+ *
+ * @version 1.1 - key-plan mode (entity_type + entity_id)
  */
 
 function drive_public_keys_logic(array $input): LogicResult {
@@ -35,6 +45,23 @@ function drive_public_keys_logic(array $input): LogicResult {
 	}
 	if (!$user_id) {
 		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
+	}
+
+	$plan_type = (string)($input['entity_type'] ?? '');
+	$plan_id   = (int)($input['entity_id'] ?? 0);
+	if ($plan_type !== '' && $plan_id > 0) {
+		if ($plan_type !== DriveHelper::ENTITY_FILE && $plan_type !== DriveHelper::ENTITY_FOLDER) {
+			return LogicResult::error('Invalid entity type.', array('reason' => 'invalid_request', 'standing' => true));
+		}
+		$entity = DriveHelper::load_entity($plan_type, $plan_id);
+		// The same people drive_key_grants_sync takes keys from: the owner, or
+		// staff through the model's own check -- never a Drive editor grant.
+		if (!$entity || (!DriveHelper::owns($plan_type, $entity, $user_id) && !$entity->can_write($session))) {
+			return LogicResult::error('You do not have access to that item.', array('reason' => 'forbidden', 'standing' => true));
+		}
+		$owner_id = (int)$entity->get($plan_type === DriveHelper::ENTITY_FOLDER ? 'fol_usr_user_id' : 'fil_usr_user_id');
+		$plan = DriveHelper::fortress_key_plan($plan_type, $plan_id, $owner_id, $user_id);
+		return LogicResult::render(array('ok' => true, 'files' => $plan['files'], 'without_vault' => $plan['without_vault']));
 	}
 
 	$folder_id = (isset($input['folder_id']) && (int)$input['folder_id'] > 0) ? (int)$input['folder_id'] : 0;
@@ -81,13 +108,15 @@ function drive_public_keys_logic(array $input): LogicResult {
 
 function drive_public_keys_logic_descriptor(): array {
 	return array(
-		'description'      => 'Resolve members\' drive-scope vault public keys for encrypted-file key wraps. Body carries either `identifiers` (a list of user ids and/or emails — the share-dialog mode) or `folder_id` (returns the folder\'s full reader set: owner + all grant holders; requires write access — the encrypted-upload mode). Both are validated in the logic and pass the boundary untouched.',
+		'description'      => 'Resolve members\' drive-scope vault public keys for encrypted-file key wraps. Body carries either `identifiers` (a list of user ids and/or emails — the share-dialog mode) or `folder_id` (returns the folder\'s full reader set: owner + all grant holders; requires write access — the encrypted-upload mode), or `entity_type` + `entity_id` (every Fortress file under it with the caller\'s own wrapped key and its readers — the key re-wrap mode). Both are validated in the logic and pass the boundary untouched.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('min_user_permission' => 0, 'capability' => 'read'),
 		'input'            => array(
 			'folder_id' => array('type' => 'int', 'required' => false, 'label' => 'Folder id (reader-set mode)'),
+			'entity_type' => array('type' => 'string', 'required' => false, 'enum' => array('file', 'folder'), 'label' => 'Entity type (key-plan mode)'),
+			'entity_id' => array('type' => 'int', 'required' => false, 'label' => 'Entity id (key-plan mode)'),
 		),
 	);
 }

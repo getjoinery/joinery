@@ -244,7 +244,10 @@ public static function GetBySessionNumber($event_id, $session_number){
 		$q->bindValue(3, $type, PDO::PARAM_INT);
 		$q->bindValue(4, $user_id, PDO::PARAM_INT);
 		$q->bindValue(5, 'now()', PDO::PARAM_STR);
-		$q->execute();
+		// A visit counted as the page is shown: the platform's bookkeeping of a
+		// view, not anything the viewer asked to change, so it is declared as
+		// the server's own write and not refused or logged as a GET write.
+		SystemBase::server_initiated_write(function () use ($q) { $q->execute(); });
 
 		return true;
 	}

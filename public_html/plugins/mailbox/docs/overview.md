@@ -2197,8 +2197,8 @@ which the provisioning check `checkSearchIndexEngine()` verifies with the real D
 Folding is batched, checkpointed, and bounded
 (`specs/mailbox_search_incremental_fold.md`): every id is delete-then-insert (so
 re-folding is harmless), the high-water mark advances per completed batch, and
-`fold()` takes an optional deadline plus a non-blocking per-user `flock`
-(`/dev/shm/mailfts_{uid}.lock`) so exactly one fold runs at a time — a second caller
+`fold()` takes an optional deadline plus a non-blocking per-user PostgreSQL
+advisory lock (`MailboxIndex::FOLD_LOCK_CLASS`, the user id) so exactly one fold runs at a time — a second caller
 searches what is already indexed and reports the backlog instead of contending. The
 search request folds at most `MailboxService::SEARCH_FOLD_BUDGET_SECONDS`; a backlog
 beyond that (a bulk import, a long-offline owner) drains in-window through the

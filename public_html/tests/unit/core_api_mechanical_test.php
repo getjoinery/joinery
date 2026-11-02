@@ -310,6 +310,7 @@ $permitted = array(
 	'includes/calendar/IcsImporter.php' => 'an .ics import writes its run record (EventLog), which no person asked for',
 	'includes/joinery_direct/DirectIdentity.php' => 'the site\'s own signing key, minted the first time anything needs it',
 	'data/content_versions_class.php' => 'the oldest content versions pruned to the cap, after whoever\'s save added the newest',
+	'plugins/event_manager/data/event_sessions_class.php' => 'a course session visit counted as the page is shown: the view\'s bookkeeping, not the viewer\'s change',
 );
 
 $found = array();

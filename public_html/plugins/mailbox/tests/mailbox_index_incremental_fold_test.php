@@ -180,17 +180,22 @@ check($shm_rows() === 3, 'one row per message overall', 'rows=' . $shm_rows());
 
 section('a fold finding the lock held touches nothing and still searches');
 
-$lock_path = MailboxIndex::SHM_DIR . '/mailfts_' . $uid . '.lock';
-$holder = fopen($lock_path, 'c');
-flock($holder, LOCK_EX);
+// Held from another connection, as another process would hold it (an
+// advisory lock is shared within one session).
+$settings = Globalvars::get_instance();
+$holder = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname')
+	. ' user=' . $settings->get_setting('dbusername') . ' password=' . $settings->get_setting('dbpassword'));
+$take = $holder->prepare('SELECT pg_try_advisory_lock(?, ?)');
+$take->execute(array(MailboxIndex::FOLD_LOCK_CLASS, $uid));
+check((bool)$take->fetchColumn(), 'another process takes the fold lock');
 $m4 = $make_msg('Fourth', 'delta incfoldkwfour');
 $r = $idx->fold($uid, vault_fixture_key($kp['secret']), microtime(true) + 30);
 check($r['folded'] === 0 && $r['complete'] === false && $r['remaining'] === 1,
 	'the locked-out fold did no work and reported the backlog', json_encode($r));
 check($idx->search($uid, 'incfoldkwone') === array($m1),
 	'search still answers from what is already indexed');
-flock($holder, LOCK_UN);
-fclose($holder);
+$holder->prepare('SELECT pg_advisory_unlock(?, ?)')->execute(array(MailboxIndex::FOLD_LOCK_CLASS, $uid));
+$holder = null;
 $r = $idx->fold($uid, vault_fixture_key($kp['secret']));
 check($r['complete'] === true && $idx->search($uid, 'incfoldkwfour') === array($m4),
 	'with the lock released the fold catches up');
