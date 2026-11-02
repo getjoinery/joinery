@@ -151,6 +151,12 @@ fun FormBody(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        for (field in state.definition.fields) {
+            if (!state.isVisible(field)) continue
+            FormFieldRow(field, state)
+        }
+        // The outcome shows beside the button that asked for it: a form longer
+        // than the screen is scrolled to its end when Save is tapped.
         state.formError?.let {
             Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("form_error"))
         }
@@ -159,10 +165,6 @@ fun FormBody(
                 Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Text(it, modifier = Modifier.testTag("form_success"))
             }
-        }
-        for (field in state.definition.fields) {
-            if (!state.isVisible(field)) continue
-            FormFieldRow(field, state)
         }
         Button(
             onClick = { submit() },

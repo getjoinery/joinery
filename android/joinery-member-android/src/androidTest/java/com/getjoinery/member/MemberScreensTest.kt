@@ -52,20 +52,20 @@ class MemberScreensTest {
         // No back press out of the dashboard: when profile is a pinned tab it
         // is the tab root, and openNavEntry switches tabs itself.
 
-        // Orders / Subscriptions / Events reachable as menu entries directly.
-        compose.openNavEntry("core-orders")
-        compose.awaitTag("member_orders_list")
-        compose.onNodeWithTag("member_orders_list").assertIsDisplayed()
-        Espresso.pressBack()
-
-        compose.openNavEntry("core-subscriptions")
-        compose.awaitTag("member_subscriptions_list")
-        compose.onNodeWithTag("member_subscriptions_list").assertIsDisplayed()
-        Espresso.pressBack()
-
-        compose.openNavEntry("core-events")
-        compose.awaitTag("member_events_list")
-        compose.onNodeWithTag("member_events_list").assertIsDisplayed()
+        // Orders / Subscriptions / Events are reached from the dashboard too
+        // (the member menu carries none of them; Events is also in More).
+        for ((tile, list) in listOf(
+            "member_profile_tile_orders" to "member_orders_list",
+            "member_profile_tile_subscriptions" to "member_subscriptions_list",
+            "member_profile_tile_events" to "member_events_list",
+        )) {
+            compose.awaitTag("member_profile_dashboard")
+            compose.scrollListTo("member_profile_dashboard", tile)
+            compose.onNodeWithTag(tile).performClick()
+            compose.awaitTag(list)
+            compose.onNodeWithTag(list).assertIsDisplayed()
+            Espresso.pressBack()
+        }
     }
 
     @Test
@@ -74,7 +74,10 @@ class MemberScreensTest {
         compose.signIn()
 
         // Change Plan (from native subscriptions) is a web bridge surface.
-        compose.openNavEntry("core-subscriptions")
+        compose.openNavEntry("core-profile")
+        compose.awaitTag("member_profile_dashboard")
+        compose.scrollListTo("member_profile_dashboard", "member_profile_tile_subscriptions")
+        compose.onNodeWithTag("member_profile_tile_subscriptions").performClick()
         compose.awaitTag("member_subscriptions_change_plan")
         compose.onNodeWithTag("member_subscriptions_change_plan").performClick()
         // The authenticated webview shows its loading/loaded chrome, never a

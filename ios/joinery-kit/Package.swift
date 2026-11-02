@@ -16,8 +16,7 @@
 // JoineryBillingKit — the native in-app purchase surface (StoreKit 2 purchase,
 // plan change, restore, server-authoritative status), registered as the
 // `billing` screen; same layering as mail.
-// Version: 0.9.0 (X-Wing seals, iOS 26 the floor: specs/post_quantum_sealing.md WP5;
-// tools 6.2 for .v26, the code kept in the Swift 5 language mode)
+// Version: 0.9.1 (a server form's save outcome shows beside its Save button)
 import PackageDescription
 
 let package = Package(

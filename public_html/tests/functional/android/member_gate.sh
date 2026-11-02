@@ -9,8 +9,8 @@
 # Android member gate runner — specs/implemented/android_native_member_screens.md.
 #
 # Drives the joinery-member-android Compose instrumented suites on the Android
-# emulator (AVD `joinery_test`) on the Mac mini (ssh alias `macmini`) against
-# dev.getjoinery.com, orchestrating the server-side state each leg needs. It
+# emulator (AVD `joinery_test`, screen-lock PIN AVD_PIN) on the Mac mini (ssh alias
+# `macmini`) against this site (its webDir), orchestrating the server-side state each leg needs. It
 # mirrors tests/functional/ios/phase3_gate.sh leg for leg and REUSES its
 # platform-neutral seed scripts unchanged (phase3_fixtures.php,
 # phase3_conversation_fixtures.php).
@@ -40,7 +40,7 @@
 # NOTE: do not run the emulator while the mini's Ollama is serving a
 # generation — they starve each other (16GB box).
 #
-# Version: 1.0.0
+# Version: 1.1.0 (this site, not dev.getjoinery.com; the shared emulator boot; mail through the local sink)
 
 set -u
 cd "$(dirname "$0")"
@@ -58,7 +58,10 @@ APP_APK="$MINI_BUILD/joinery-member-android/build/outputs/apk/debug/joinery-memb
 TEST_APK="$MINI_BUILD/joinery-member-android/build/outputs/apk/androidTest/debug/joinery-member-android-debug-androidTest.apk"
 TEST_PKG="com.getjoinery.member.test"
 RUNNER="androidx.test.runner.AndroidJUnitRunner"
-BASE_URL="https://dev.getjoinery.com"
+# The site the fixtures are made on and the psql checks read: this one.
+BASE_URL="https://$($SETTING_CTL get webDir)"
+# The test emulator's screen-lock PIN (see fortress_gate.sh).
+AVD_PIN="1111"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -108,28 +111,17 @@ run_leg() {
 record_fail() { FAIL_COUNT=$((FAIL_COUNT+1)); FAILED_LEGS="$FAILED_LEGS $1;"; echo "-- $1: FAIL"; }
 record_pass() { PASS_COUNT=$((PASS_COUNT+1)); echo "-- $1: PASS"; }
 
-# ---- outbound SMTP flip (reply delivery must be local + fast) ---------------
+# ---- mail: a local sink that stores mail for the fixture's domain ------------
+# Seeded messages go to the sink, and so does the site's own mail for the run
+# (the in-app reply): mail to the fixture's domain is stored in this site's
+# mailbox through its inbound handler, everything else is dropped. Nothing
+# leaves the box (phone_mail_sink.sh).
 
-SMTP_SAVED_SERVICE=""
-flip_smtp_local() {
-    SMTP_SAVED_SERVICE=$($SETTING_CTL get email_service)
-    SMTP_SAVED_HOST=$($SETTING_CTL get smtp_host)
-    SMTP_SAVED_PORT=$($SETTING_CTL get smtp_port)
-    SMTP_SAVED_AUTH=$($SETTING_CTL get smtp_auth)
-    $SETTING_CTL set email_service smtp
-    $SETTING_CTL set smtp_host localhost
-    $SETTING_CTL set smtp_port 25
-    $SETTING_CTL set smtp_auth 0
-}
-restore_smtp() {
-    if [ -n "$SMTP_SAVED_SERVICE" ]; then
-        $SETTING_CTL set email_service "$SMTP_SAVED_SERVICE"
-        $SETTING_CTL set smtp_host "$SMTP_SAVED_HOST"
-        $SETTING_CTL set smtp_port "$SMTP_SAVED_PORT"
-        $SETTING_CTL set smtp_auth "$SMTP_SAVED_AUTH"
-        SMTP_SAVED_SERVICE=""
-    fi
-}
+source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
+MAIL_SINK_DELIVER="$MAIL_DOMAIN"
+
+mini() { ssh macmini "source ~/.android-env; $1"; }
+source "$PUBLIC_HTML/tests/functional/android/emulator.sh"
 
 DEVICE_CREDS="/data/local/tmp/joinery_member_gate.creds"
 
@@ -143,10 +135,10 @@ push_device_creds() {
 cleanup() {
     echo ""
     echo "== restore server state =="
-    restore_smtp
+    mail_sink_off
     $SETTING_CTL set app_bridge_key_check_seconds "$BRIDGE_CHECK_BEFORE"
     ssh macmini "source ~/.android-env; adb shell rm -f $DEVICE_CREDS" 2>/dev/null
-    echo "restored: smtp, app_bridge_key_check_seconds=$BRIDGE_CHECK_BEFORE, device creds removed"
+    echo "restored: mail settings, app_bridge_key_check_seconds=$BRIDGE_CHECK_BEFORE, device creds removed"
 }
 
 BRIDGE_CHECK_BEFORE=$($SETTING_CTL get app_bridge_key_check_seconds)
@@ -179,12 +171,7 @@ ssh macmini "source ~/.android-env; cd $MINI_BUILD && $GRADLE \
     :joinery-member-android:assembleDebugAndroidTest --console=plain 2>&1 | tail -3" || exit 1
 
 echo "== boot emulator + install =="
-ssh macmini "source ~/.android-env; \
-    (adb devices | grep -q emulator) || (nohup emulator -avd $AVD -no-window -no-audio -no-snapshot >/tmp/emulator.log 2>&1 &); \
-    adb wait-for-device; \
-    until [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ]; do sleep 3; done; \
-    adb install -r -t $APP_APK >/dev/null && adb install -r -t $TEST_APK >/dev/null && echo 'installed'" || {
-    echo "FATAL: emulator/install failed"; exit 1; }
+emulator_boot_install "$APP_APK" "$TEST_APK" || { echo "FATAL: emulator/install failed"; exit 1; }
 
 echo "== push fixture creds to the device (stdin, never argv) =="
 push_device_creds || { echo "FATAL: could not stage device creds"; exit 1; }
@@ -251,14 +238,14 @@ MAIL_REPLY="AndroidGateReply-$STAMP"
 # reply never touched.
 PICKER_SUBJECT="Android Picker Mail $STAMP"
 
-flip_smtp_local
+mail_sink_on || exit 1
 echo ""
 echo "== seed mailbox messages (read+reply and picker) =="
-python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" "$PICKER_SUBJECT" <<'PYEOF'
+python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" "$PICKER_SUBJECT" "$MAIL_SINK_PORT" <<'PYEOF'
 import smtplib, sys
 from email.message import EmailMessage
-sender, to, subject, body, picker_subject = sys.argv[1:6]
-s = smtplib.SMTP('localhost', 25, timeout=30)
+sender, to, subject, body, picker_subject, port = sys.argv[1:7]
+s = smtplib.SMTP('127.0.0.1', int(port), timeout=30)
 for subj in (subject, picker_subject):
     msg = EmailMessage()
     msg['From'] = f'Phase3 Sender <{sender}>'
@@ -280,7 +267,7 @@ for i in $(seq 1 18); do
 done
 if [ -z "$SEEDED" ] || [ -z "$PICKER_SEEDED" ]; then
     record_fail "mailbox-seed (message never arrived)"
-    restore_smtp
+    mail_sink_off
 else
     echo "-- seeded messages stored (iem ids $SEEDED, $PICKER_SEEDED)"
     run_leg "Mailbox: read + reply in-app" \
@@ -296,7 +283,7 @@ else
         [ -n "$REPLY_ROW" ] && break
         sleep 5
     done
-    restore_smtp
+    mail_sink_off
     if [ -n "$REPLY_ROW" ]; then
         record_pass "Mailbox reply delivery (server-side, iem id $REPLY_ROW)"
     else

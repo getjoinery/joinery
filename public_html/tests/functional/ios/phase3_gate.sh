@@ -9,7 +9,8 @@
 # Phase 3 gate runner — specs/ios_app_platform.md § Phase 3.
 #
 # Drives the JoineryMember XCUITest suites in the iOS Simulator on the Mac
-# mini (ssh alias `macmini`) against dev.getjoinery.com, orchestrating the
+# mini (ssh alias `macmini`) against this site (its webDir, passed as
+# JOINERY_BASE_URL), orchestrating the
 # server-side state each leg needs:
 #   1. Regression: Phase 2 auth + account-form suites under the new shell
 #   2. Navigation: tab bar + More list from /api/v1/app/navigation
@@ -21,7 +22,7 @@
 #      their native entry points (change-tier, notifications)
 #   6. Conversations: seeded peer + 1:1 thread, native read + reply, the
 #      reply row verified in msg_messages
-#   7. Mailbox: grant + seeded message (local SMTP), read + reply in-app,
+#   7. Mailbox: grant + seeded message (the local sink stores it), read + reply in-app,
 #      reply arrival verified in iem_inbound_email_messages; then the
 #      folder picker files the seeded thread into a fresh label, verified
 #      in ilb_inbound_email_labels/ilm_inbound_label_members
@@ -37,14 +38,18 @@
 # {repo root}/ios/ (synced to the mini build area ~/dev/joinery-ios before
 # building).
 #
-# Version: 1.3.1
+# Version: 1.4.0 (this site, not dev.getjoinery.com; its own simulator; mail through the local sink)
 
 set -u
 cd "$(dirname "$0")"
 PUBLIC_HTML="$(cd ../../.. && pwd)"
 CREDS_FILE="$HOME/.joinery_app_test_creds"
-DEST='platform=iOS Simulator,name=iPhone 16'
+SIM_NAME='Joinery Gate iPhone'
+DEST="platform=iOS Simulator,name=$SIM_NAME"
 SETTING_CTL="php $PUBLIC_HTML/tests/functional/ios/setting_ctl.php"
+# The site the fixtures are made on and the psql checks read: this one.
+BASE_URL="https://$($SETTING_CTL get webDir)"
+source "$PUBLIC_HTML/tests/functional/ios/mini_sim.sh"
 PSQL="psql -U postgres -d joinerytest -tAc"
 SENDER_LOCAL="phase3.sender"
 
@@ -72,6 +77,7 @@ run_suite() {
     ssh macmini "cd dev/joinery-ios/joinery-member-ios && \
         TEST_RUNNER_JOINERY_TEST_EMAIL='$TEST_EMAIL' \
         TEST_RUNNER_JOINERY_TEST_PASSWORD='$TEST_PASSWORD' \
+        TEST_RUNNER_JOINERY_BASE_URL='$BASE_URL' \
         $extra_env \
         xcodebuild test-without-building -scheme JoineryMember \
         -destination '$DEST' -only-testing:'$only' 2>&1" \
@@ -122,37 +128,24 @@ remove_link_probe() {
     fi
 }
 
-# ---- outbound SMTP flip (reply delivery must be local + fast) ---------------
+# ---- mail: a local sink that stores mail for the fixture's domain ------------
+# Seeded messages go to the sink, and so does the site's own mail for the run
+# (the in-app reply): mail to the fixture's domain is stored in this site's
+# mailbox through its inbound handler, everything else is dropped. Nothing
+# leaves the box (phone_mail_sink.sh).
 
-SMTP_SAVED_SERVICE=""
-flip_smtp_local() {
-    SMTP_SAVED_SERVICE=$($SETTING_CTL get email_service)
-    SMTP_SAVED_HOST=$($SETTING_CTL get smtp_host)
-    SMTP_SAVED_PORT=$($SETTING_CTL get smtp_port)
-    SMTP_SAVED_AUTH=$($SETTING_CTL get smtp_auth)
-    $SETTING_CTL set email_service smtp
-    $SETTING_CTL set smtp_host localhost
-    $SETTING_CTL set smtp_port 25
-    $SETTING_CTL set smtp_auth 0
-}
-restore_smtp() {
-    if [ -n "$SMTP_SAVED_SERVICE" ]; then
-        $SETTING_CTL set email_service "$SMTP_SAVED_SERVICE"
-        $SETTING_CTL set smtp_host "$SMTP_SAVED_HOST"
-        $SETTING_CTL set smtp_port "$SMTP_SAVED_PORT"
-        $SETTING_CTL set smtp_auth "$SMTP_SAVED_AUTH"
-        SMTP_SAVED_SERVICE=""
-    fi
-}
+source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
+MAIL_SINK_DELIVER="$MAIL_DOMAIN"
 
 cleanup() {
     echo ""
     echo "== restore server state =="
-    restore_smtp
+    mail_sink_off
     remove_link_probe
     php "$PUBLIC_HTML/tests/functional/ios/menu_probe.php" remove
     $SETTING_CTL set app_bridge_key_check_seconds "$BRIDGE_CHECK_BEFORE"
-    echo "restored: smtp, link probe removed, menu probe removed, app_bridge_key_check_seconds=$BRIDGE_CHECK_BEFORE"
+    mini_sim_off "$SIM_NAME"
+    echo "restored: mail settings, link probe removed, menu probe removed, app_bridge_key_check_seconds=$BRIDGE_CHECK_BEFORE"
 }
 
 # ---- server state ----------------------------------------------------------
@@ -181,7 +174,8 @@ rsync -a --delete --exclude '.build' --exclude '.swiftpm' --exclude 'xcuserdata'
     "$PUBLIC_HTML/../ios/" macmini:dev/joinery-ios/ || exit 1
 
 echo "== build-for-testing (mini) =="
-ssh macmini "xcrun simctl boot 'iPhone 16' 2>/dev/null; cd dev/joinery-ios/joinery-member-ios && \
+mini_sim "$SIM_NAME" || exit 1
+ssh macmini "cd dev/joinery-ios/joinery-member-ios && \
     ~/dev/.tools/xcodegen/xcodegen/bin/xcodegen generate > /dev/null && \
     xcodebuild build-for-testing -scheme JoineryMember -destination '$DEST' 2>&1 | tail -2" || exit 1
 
@@ -266,14 +260,14 @@ MAIL_REPLY="Phase3GateReply-$STAMP"
 # thread the reply never touched.
 PICKER_SUBJECT="Phase3 Picker Mail $STAMP"
 
-flip_smtp_local
+mail_sink_on || exit 1
 echo ""
 echo "== seed mailbox messages (read+reply and picker) =="
-python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" "$PICKER_SUBJECT" <<'PYEOF'
+python3 - "$SENDER_EMAIL" "$TEST_EMAIL" "$MAIL_SUBJECT" "$MAIL_BODY" "$PICKER_SUBJECT" "$MAIL_SINK_PORT" <<'PYEOF'
 import smtplib, sys
 from email.message import EmailMessage
-sender, to, subject, body, picker_subject = sys.argv[1:6]
-s = smtplib.SMTP('localhost', 25, timeout=30)
+sender, to, subject, body, picker_subject, port = sys.argv[1:7]
+s = smtplib.SMTP('127.0.0.1', int(port), timeout=30)
 for subj in (subject, picker_subject):
     msg = EmailMessage()
     msg['From'] = f'Phase3 Sender <{sender}>'
@@ -296,7 +290,7 @@ for i in $(seq 1 18); do
 done
 if [ -z "$SEEDED" ] || [ -z "$PICKER_SEEDED" ]; then
     record_fail "mailbox-seed (message never arrived)"
-    restore_smtp
+    mail_sink_off
 else
     echo "-- seeded messages stored (iem ids $SEEDED, $PICKER_SEEDED)"
     run_suite "Mailbox: read + reply in-app" "JoineryMemberUITests/MailboxUITests" \
@@ -313,7 +307,7 @@ else
         [ -n "$REPLY_ROW" ] && break
         sleep 5
     done
-    restore_smtp
+    mail_sink_off
     if [ -n "$REPLY_ROW" ]; then
         PASS_COUNT=$((PASS_COUNT+1))
         echo "-- Mailbox reply delivery (server-side): PASS (iem id $REPLY_ROW)"

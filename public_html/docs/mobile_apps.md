@@ -139,6 +139,9 @@ Themes must apply the same wrap to their header and footer blocks; the check
 is a constant `true` for all ordinary traffic, so wrapped chrome renders
 byte-identically outside app mode.
 
+An app session's pages are never interrupted by the setup wizard
+(`SetupSteps::shouldInterrupt()`): the page the app opened is the page shown.
+
 ## Settings
 
 | Setting | Default | Purpose |

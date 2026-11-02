@@ -29,7 +29,8 @@ final class AuthUITests: XCTestCase {
 
         // Sign out (confirmation dialog) returns to the native login screen.
         app.buttons["settings_sign_out"].tap()
-        let confirm = app.buttons["settings_sign_out_confirm"]
+        // iOS 26+ reports the dialog's button twice (sheet and its popover host).
+        let confirm = app.buttons["settings_sign_out_confirm"].firstMatch
         if confirm.waitForExistence(timeout: 5) {
             confirm.tap()
         } else {

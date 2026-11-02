@@ -20,6 +20,7 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.9 - a singleton key (m:<id>) follows its message into the thread a reply gave it
  * @version 1.8 - a message its From domain disowned (DMARC fail, enforcing policy):
  *                allowSender, a never_spam rule and Not spam all leave it in Spam
  * @version 1.7 - allowSender: the Spam view's "always allow this sender"
@@ -72,6 +73,7 @@ class MailboxReaderTest {
 			$this->setUp();
 			$this->testThreadKey();
 			$this->testScope();
+			$this->testSingletonJoinsThread();
 			$this->testListThreads();
 			$this->testUnmatched();
 			$this->testSearch();
@@ -249,6 +251,38 @@ class MailboxReaderTest {
 		// accessible mailbox may compose.
 		$this->ok($beth->canCompose() === true, 'canCompose true with accessible mailboxes');
 		$this->ok(MailboxViewer::forUser(-1, 1)->canCompose() === false, 'canCompose false with none');
+	}
+
+	/**
+	 * A message with no Message-ID is read under a singleton key (m:<id>). A
+	 * reply gives it a real thread key (MailboxSender::resolveThreadKey()); a
+	 * reader still holding m:<id> reloads after the send and must see the
+	 * reply, not the original alone.
+	 */
+	private function testSingletonJoinsThread() {
+		section('a singleton key follows its message into the thread it joined');
+		$svc = new MailboxService($this->bethViewer());
+		$lone = $this->insertMsg($this->beth_alias, null, 'lone ' . $this->suffix, true, false, 30);
+		$ids = $svc->messageIdsInThread(null, 'm:' . $lone);
+		$this->ok($ids === [$lone], 'an unthreaded message is its own thread');
+		$joined = '<joined_' . $this->suffix . '@x>';
+		InboundEmailMessage::updateColumns($lone, array('iem_thread_key' => $joined));
+		$reply = $this->insertMsg($this->beth_alias, $joined, 'Re: lone ' . $this->suffix, true, false, 1);
+		$ids = $svc->messageIdsInThread(null, 'm:' . $lone);
+		sort($ids);
+		$this->ok($ids === [$lone, $reply], 'once replied to, its singleton key opens the thread with the reply');
+		$foreign = $this->insertMsg($this->other_alias, null, 'foreign', true, false, 5);
+		$this->ok(count($svc->messageIdsInThread(null, 'm:' . $foreign)) === 0,
+			'a singleton key outside the viewer\'s scope still opens nothing');
+		// The expansion is scoped too: another mailbox's row on the joined key
+		// stays out of what the singleton key opens.
+		InboundEmailMessage::updateColumns($foreign, array('iem_thread_key' => $joined));
+		$ids = $svc->messageIdsInThread(null, 'm:' . $lone);
+		sort($ids);
+		$this->ok($ids === [$lone, $reply], 'the joined thread it opens holds only the viewer\'s own rows');
+		// The later sections count each mailbox's rows: these go.
+		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?, ?)')
+			->execute(array($lone, $reply, $foreign));
 	}
 
 	// ---- list / grouping ----

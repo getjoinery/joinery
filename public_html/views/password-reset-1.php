@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', function () {
     btn.addEventListener('click', async function () {
         btn.disabled = true;
         try {
-            var emailField = document.querySelector('input[name="usr_email"]');
+            var emailField = document.querySelector('input[name="email"]');
             var email = emailField ? emailField.value.trim() : '';
 
             // Vault holders finish the second factor first; everyone else goes

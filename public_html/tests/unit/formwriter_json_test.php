@@ -36,6 +36,7 @@
  *
  * Run:  php tests/unit/formwriter_json_test.php
  *
+ * @version 1.2 - every server-driven form carries each input its action's descriptor requires
  * @version 1.1
  */
 
@@ -275,5 +276,52 @@ $json_names = array_keys($fields_prop->getValue($json));
 
 ok('account_edit builder registers identical field names in identical order via HTML5 and JSON',
       $html5_names === $json_names && count($json_names) >= 3);
+
+// ── Every server-driven form posts what its action requires ───────────────
+// The apps render GET /api/v1/form/{action} and submit its field names to the
+// action, whose descriptor validates the input. A required input the form
+// does not carry refuses every submission (password_reset_1 published
+// usr_email while its action required email).
+
+section('every server-driven form carries each input its action requires');
+$builders = array();
+// Core, and active plugins only: an inactive plugin's classes do not resolve.
+$logic_files = glob(PathHelper::getBasePath() . '/logic/*_logic.php');
+foreach (glob(PathHelper::getBasePath() . '/plugins/*/logic/*_logic.php') as $plugin_logic) {
+    if (PluginHelper::isPluginActive(basename(dirname(dirname($plugin_logic))))) {
+        $logic_files[] = $plugin_logic;
+    }
+}
+foreach ($logic_files as $logic_file) {
+    if (preg_match('/function\s+(\w+)_logic_form\s*\(/', file_get_contents($logic_file), $m)) {
+        $builders[$m[1]] = $logic_file;
+    }
+}
+ok('the server-driven forms are found', count($builders) >= 5, count($builders) . ' builders');
+foreach ($builders as $action => $logic_file) {
+    require_once($logic_file);
+    $descriptor_fn = $action . '_logic_descriptor';
+    if (!function_exists($descriptor_fn)) {
+        continue;
+    }
+    $descriptor = call_user_func($descriptor_fn);
+    if (!empty($descriptor['auth']['requires_browser_session'])) {
+        continue;   // a web page's own builder: no app fetches its definition
+    }
+    $form = new FormWriterV2JSON($action);
+    // As ApiLogicEndpoint::serveForm() calls it: a signed-in form gets its
+    // user (unsaved here, since this test writes nothing), a sessionless one null.
+    call_user_func($action . '_logic_form', $form,
+        !empty($descriptor['requires_session']) ? new User(NULL) : null, array());
+    $names = array_keys($fields_prop->getValue($form));
+    $missing = array();
+    foreach (($descriptor['input'] ?? array()) as $input => $spec) {
+        if (!empty($spec['required']) && !in_array($input, $names, true)) {
+            $missing[] = $input;
+        }
+    }
+    ok($action . ': its form carries every required input', !$missing,
+       $missing ? 'action requires ' . implode(', ', $missing) . '; form has ' . implode(', ', $names) : '');
+}
 
 harness_finish();

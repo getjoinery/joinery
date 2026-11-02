@@ -31,7 +31,7 @@
 # Own build area and simulator on the mini (~/dev/fma-ios, "FMA iPhone"), so
 # it never collides with the phase gates' ~/dev/joinery-ios.
 #
-# Version: 1.3 (the app talks to this site, not dev.getjoinery.com; sends go to a local sink)
+# Version: 1.4 (the simulator is made when missing and shut on exit: mini_sim.sh)
 
 set -u
 cd "$(dirname "$0")"
@@ -40,7 +40,8 @@ REPO="$(cd "$PUBLIC_HTML/.." && pwd)"
 PURPOSE="ios-fma"
 FIXTURE="php $REPO/maintenance_scripts/dev_tools/walk_fixture.php"
 KEYFILE="/tmp/joinery-app-fortress-$PURPOSE.json"
-DEST='platform=iOS Simulator,name=FMA iPhone'
+SIM_NAME='FMA iPhone'
+DEST="platform=iOS Simulator,name=$SIM_NAME"
 CODE_FILE="/Users/jeremytunnell/dev/fma-enroll-code.txt"
 PSQL="psql -U postgres -d joinerytest -tAc"
 # The site the fixture is made on and the psql checks read: this one.
@@ -48,7 +49,8 @@ SETTING_CTL="php $PUBLIC_HTML/tests/functional/ios/setting_ctl.php"
 BASE_URL="https://$($SETTING_CTL get webDir)"
 # Sends go to a local sink for the run (phone_mail_sink.sh): nothing leaves the box.
 source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
-trap mail_sink_off EXIT
+source "$PUBLIC_HTML/tests/functional/ios/mini_sim.sh"
+trap 'mail_sink_off; mini_sim_off "$SIM_NAME"' EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 STAMP=$(date +%s)
@@ -91,7 +93,8 @@ bash "$REPO/ios/joinery-kit/Tests/sync_vectors.sh" --check || fail "shared vecto
 echo "== build-for-testing (mini) =="
 rsync -a --delete --exclude .build --exclude .swiftpm --exclude xcuserdata --exclude DerivedData \
     --exclude '*.xcodeproj' "$REPO/ios/" macmini:dev/fma-ios/ || exit 1
-ssh macmini "rm -f '$CODE_FILE' '$CONTROL_FILE'; xcrun simctl boot 'FMA iPhone' 2>/dev/null; cd dev/fma-ios/joinery-member-ios && \
+mini_sim "$SIM_NAME" || exit 1
+ssh macmini "rm -f '$CODE_FILE' '$CONTROL_FILE'; cd dev/fma-ios/joinery-member-ios && \
     ~/dev/.tools/xcodegen/xcodegen/bin/xcodegen generate > /dev/null && \
     xcodebuild build-for-testing -scheme JoineryMember -destination '$DEST' -derivedDataPath ~/dev/fma-dd-app 2>&1 | tail -1" || exit 1
 

@@ -17,13 +17,7 @@ final class ExternalLinkUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchJoinery()
         app.signIn(email: TestEnv.email, password: TestEnv.password)
-        app.expectSignedIn()
-        app.tabBars.buttons["My Profile"].tap()
-        app.expect(app.staticTexts["profile_user_name"].firstMatch, timeout: 20, "native profile dashboard")
-
-        let row = app.buttons["profile_notifications"].firstMatch
-        app.expect(row, timeout: 10, "Notifications row on dashboard")
-        row.tap()
+        app.openDashboardLink("profile_notifications", "Notifications row on dashboard")
 
         let webView = app.webViews.firstMatch
         app.dismissCookieConsent()

@@ -59,6 +59,7 @@
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.6 - add-rule --forward also confirms the destination, as its owner following the link would
  * @version 1.5 - approve-device hands over the X-Wing seed itself, as the browser does; deliver-relay
  *   stands in a relay at SEALS_POST_QUANTUM (post_quantum_sealing WP5/WP6)
  * @version 1.4 - add-rule, retire-key, ai-on: the phone gates' rule, rotation and AI legs
@@ -332,6 +333,22 @@ function walk_add_rule(array $names, string $word, string $forward): void {
 		$f = new InboundEmailFilter(intval($f->key), TRUE);
 		$f->recordForwardAcknowledgment(intval($user->key));
 		$f->save();
+		// The destination's owner agreed, as following the confirmation link
+		// does (ForwardConfirmation::confirm()): a forward goes only to a
+		// confirmed destination, and nobody reads an .invalid inbox.
+		$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+		$dest = InboundForwardDestination::find($domain_id, intval($alias->key), $forward);
+		if (!$dest) {
+			$dest = new InboundForwardDestination(NULL);
+			$dest->set('ifd_ied_inbound_email_domain_id', $domain_id);
+			$dest->set('ifd_iea_inbound_email_alias_id', intval($alias->key));
+			$dest->set('ifd_destination', strtolower(trim($forward)));
+		}
+		if (!$dest->is_confirmed()) {
+			$dest->set('ifd_status', InboundForwardDestination::STATUS_CONFIRMED);
+			$dest->set('ifd_confirmed_time', gmdate('Y-m-d H:i:s'));
+			$dest->save();
+		}
 	}
 	echo 'rule ' . intval($f->key) . ': subject contains "' . $word . '" → ' . ($forward !== '' ? 'forward to ' . $forward : 'star') . "\n";
 }

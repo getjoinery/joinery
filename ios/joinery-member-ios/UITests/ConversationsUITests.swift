@@ -19,11 +19,7 @@ final class ConversationsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchJoinery()
         app.signIn(email: TestEnv.email, password: TestEnv.password)
-        app.expectSignedIn()
-        app.tabBars.buttons["My Profile"].tap()
-        app.expect(app.staticTexts["profile_user_name"].firstMatch, timeout: 20, "native profile dashboard")
-
-        app.staticTexts["Messages"].firstMatch.tap()
+        app.openDashboardLink("profile_tile_conversations", "Messages tile")
 
         // Native proof: the inbox list renders (no webview involved).
         app.expect(app.collectionViews["conversations_list"].firstMatch, timeout: 20, "native conversations list")

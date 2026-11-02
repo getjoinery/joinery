@@ -15,17 +15,16 @@ final class NavigationShellUITests: XCTestCase {
         app.signIn(email: TestEnv.email, password: TestEnv.password)
         app.expectSignedIn()
 
-        // The dev deployment pins these three (app_navigation default).
-        app.expect(app.tabBars.buttons["My Profile"], timeout: 10, "My Profile tab")
+        // app_navigation's default pins these three.
+        app.expect(app.tabBars.buttons["Dashboard"], timeout: 10, "Dashboard tab")
         app.expect(app.tabBars.buttons["Calendar"], "Calendar tab")
         app.expect(app.tabBars.buttons["Email"], "Email tab")
 
         // Everything unpinned lands in More, plus native Settings.
         app.openMore()
         app.expect(app.buttons["more_core-home"], timeout: 10, "Home in More")
-        app.expect(app.buttons["more_core-orders"], "Orders in More")
-        app.expect(app.buttons["more_core-subscriptions"], "Subscriptions in More")
-        app.expect(app.buttons["more_settings"], "Settings in More")
+        app.expect(app.buttons["more_messenger"], "Messages in More")
+        _ = app.moreRow("more_settings", "Settings in More")
 
         // Pinned entries never duplicate into More.
         XCTAssertFalse(app.buttons["more_core-calendar"].exists)

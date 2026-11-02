@@ -453,6 +453,49 @@ try {
 	$fwd_rule->set('ief_is_enabled', false);
 	$fwd_rule->save();
 
+	section('B1: a member\'s parse writes the rule\'s log and asks a new destination to confirm');
+	// Signed in as the owner, as the phone's post is: the router's own records
+	// pass the model check (a member is below the log's and the destination's level).
+	$dest3 = 'harnesstest-fwd3-' . bin2hex(random_bytes(4)) . '@example.invalid';
+	$fwd3_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'receipt', 'ief_action_forward_to' => $dest3));
+	$fwd3_rule->recordForwardAcknowledgment($owner_id);
+	$fwd3_rule->save();
+	$raw3 = "From: Shop <shop@example.com>\r\nTo: " . $address . "\r\nSubject: Your receipt\r\n\r\nThanks.\r\n";
+	$entry3 = $client_entry($address, $raw3);
+	check($pull($entry3) === 'pending', 'a third relay message waits');
+	$q->execute(array($entry3[2]));
+	$id3 = intval($q->fetchColumn());
+	$next3 = MailboxFortressParse::next($owner_id);
+	$dek3 = $box->openEdge(VaultCrypto::edgeFrame($next3['item']['sealed_dek'])['body'], $pair['secret'], $pub);
+	$prefix3 = $next3['item']['sealed_ad_prefix'] . $id3;
+	$params3 = array('id' => $id3, 'sealed_dek' => $next3['item']['sealed_dek'], 'forward_raw' => $raw3,
+		'rule_matches' => array(intval($fwd3_rule->key)), 'fields' => array(
+		'iem_sender' => 'v1.edge.' . $box->aeadEncryptGcm('Shop <shop@example.com>', $dek3, $prefix3 . ':iem_sender'),
+		'iem_subject' => 'v1.edge.' . $box->aeadEncryptGcm('Your receipt', $dek3, $prefix3 . ':iem_subject'),
+	));
+	$logs = $db->prepare('SELECT COUNT(*) FROM iel_inbound_email_logs WHERE iel_ied_inbound_email_domain_id = ? AND iel_destinations LIKE ?');
+	$logs_before = (function () use ($logs, $domain, $fwd3_rule) {
+		$logs->execute(array(intval($domain->key), 'filters: #' . intval($fwd3_rule->key) . ' %'));
+		return intval($logs->fetchColumn());
+	});
+	$was_logged = $logs_before();
+	$_SESSION['loggedin'] = 1;
+	$_SESSION['usr_user_id'] = $owner_id;
+	$_SESSION['permission'] = intval($owner->get('usr_permission'));
+	try {
+		$stored3 = MailboxFortressParse::storeParts($owner_id, $params3, array());
+	} finally {
+		unset($_SESSION['loggedin'], $_SESSION['usr_user_id'], $_SESSION['permission']);
+	}
+	check($stored3 === array('id' => $id3, 'stored' => true), 'the member\'s parse with a forwarding rule is stored');
+	check($logs_before() === $was_logged + 1, 'the rule match is logged');
+	$asked = InboundForwardDestination::find(intval($domain->key), intval($alias->key), $dest3);
+	if ($asked) {
+		harness_register_row('ifd_inbound_forward_destinations', 'ifd_inbound_forward_destination_id', intval($asked->key));
+	}
+	check($asked !== null && !$asked->is_confirmed(), 'the new destination is asked to confirm, and nothing is relayed to it yet');
+	$db->prepare('DELETE FROM iel_inbound_email_logs WHERE iel_ied_inbound_email_domain_id = ?')->execute(array(intval($domain->key)));
+
 	section('R14: apply to existing, on the owner\'s device');
 	$back_rule = $make_rule(intval($alias->key), array('ief_match_subject' => 'relay sealed', 'ief_action_archive' => true));
 	$back_rule->requestApplyExisting();

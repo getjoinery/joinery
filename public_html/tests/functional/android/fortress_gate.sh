@@ -39,7 +39,7 @@
 # approves each new enrollment code the test logs (tag FmaGate). After each
 # leg it checks the server's side in psql (reads only).
 #
-# Version: 2.2.0 (this site, not dev.getjoinery.com; sends to a local sink; unlock a cold boot with the PIN; stale AVD locks; bounded boot wait)
+# Version: 2.3.1 (a failed leg prints its stack)
 
 set -u
 cd "$(dirname "$0")"
@@ -82,6 +82,7 @@ mini() { ssh macmini "source ~/.android-env; $1"; }
 
 # Sends go to a local sink for the run (phone_mail_sink.sh): nothing leaves the box.
 source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
+source "$PUBLIC_HTML/tests/functional/android/emulator.sh"
 
 HELPER_PID=""
 cleanup() {
@@ -109,6 +110,8 @@ run_leg() {
         record_pass "$label"
     else
         record_fail "$label"
+        echo "-- the failure's stack:"
+        echo "$out" | awk '/^(Error in|java\.|Caused by)/{p=1} p' | grep -E "^(Error in|[a-zA-Z.]*(Exception|Error)|Caused by)|getjoinery" | head -30
         echo "-- on screen at the failure:"
         mini "adb logcat -d -s FmaGate:V" | grep -oE "Text = '\[[^]]*\]'|Tag = '[^']*'" | tail -50
     fi
@@ -131,21 +134,7 @@ rsync -a --delete "$PUBLIC_HTML/plugins/mailbox/tests/fixtures/" macmini:"$MINI_
 rsync -a "$PUBLIC_HTML/tests/functional/android/ai_standin.py" macmini:"$MINI_BUILD/"
 mini "cd $MINI_BUILD/android && echo sdk.dir=\$ANDROID_HOME > local.properties && $GRADLE \
     :joinery-member-android:assembleDebug :joinery-member-android:assembleDebugAndroidTest --console=plain -q 2>&1 | grep -v '^w: ' | tail -5" || exit 1
-# Boot the emulator if none is up. An emulator that died leaves its AVD's lock
-# files behind and the next start refuses ("multiple emulators"), so they go
-# when no emulator is running; the wait gives up after five minutes rather
-# than hanging the gate. A cold boot leaves the user locked (no app starts,
-# "Activity class does not exist") until the screen-lock PIN is entered.
-mini "(adb devices | grep -q emulator) || { rm -f ~/.android/avd/$AVD.avd/*.lock; \
-      (nohup ~/android-sdk/emulator/emulator @$AVD -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >~/emulator.log 2>&1 &); }; \
-    for i in \$(seq 1 100); do [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ] && break; sleep 3; done; \
-    [ \"\$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')\" = '1' ] || { tail -3 ~/emulator.log; exit 1; }; \
-    adb shell input keyevent KEYCODE_WAKEUP; \
-    if adb shell dumpsys user | grep -q RUNNING_LOCKED; then \
-        adb shell wm dismiss-keyguard; sleep 1; adb shell input swipe 540 2000 540 500 300; sleep 2; adb shell input text $AVD_PIN; adb shell input keyevent KEYCODE_ENTER; sleep 3; \
-        adb shell dumpsys user | grep -q RUNNING_LOCKED && { echo 'the emulator stays locked: is its PIN $AVD_PIN?'; exit 1; }; \
-    fi; \
-    adb install -r -t $APP_APK >/dev/null && adb install -r -t $TEST_APK >/dev/null && echo installed" || { echo "FATAL: boot or install"; exit 1; }
+emulator_boot_install "$APP_APK" "$TEST_APK" || { echo "FATAL: boot or install"; exit 1; }
 # A fresh phone: nothing held from an earlier run.
 mini "adb shell pm clear $APP_PKG >/dev/null; adb logcat -c; adb shell pm grant $APP_PKG android.permission.POST_NOTIFICATIONS"
 

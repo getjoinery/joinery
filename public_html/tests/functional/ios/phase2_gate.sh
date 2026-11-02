@@ -9,14 +9,16 @@
 # Phase 2 gate runner — specs/ios_app_platform.md § Phase 2.
 #
 # Drives the JoineryMember XCUITest suites in the iOS Simulator on the Mac
-# mini (ssh alias `macmini`) against dev.getjoinery.com, orchestrating the
+# mini (ssh alias `macmini`) against this site (its webDir, passed as
+# JOINERY_BASE_URL), orchestrating the
 # server-side state each suite needs:
 #   1. Auth: login/logout, invalid-credential error
 #   2. Forms: account_edit renders + submits from the server definition
 #   3. Server-driven change: probe field added server-side appears with NO
 #      app rebuild, then is removed
-#   4. Password reset: both steps native; the reset code is read from the
-#      fixture inbox (iem_inbound_email_messages) between the two steps
+#   4. Password reset: both steps native; the reset email reaches the fixture
+#      inbox through the local mail sink, and its code is read from
+#      iem_inbound_email_messages between the two steps
 #   5. Upgrade gate: api_min_client_versions raised -> login renders 426 screen
 #   6. Rate limit (LAST - trips the 15-min failed-auth window for the mini's IP)
 #
@@ -29,15 +31,20 @@
 # account/password saves re-validate the fixture address, and the run must
 # not depend on public DNS.
 #
-# Version: 1.1.0
+# Version: 1.2.0 (this site, not dev.getjoinery.com; its own simulator; the reset email through the local sink)
 
 set -u
 cd "$(dirname "$0")"
 PUBLIC_HTML="$(cd ../../.. && pwd)"
 CREDS_FILE="$HOME/.joinery_app_test_creds"
-DEST='platform=iOS Simulator,name=iPhone 16'
+SIM_NAME='Joinery Gate iPhone'
+DEST="platform=iOS Simulator,name=$SIM_NAME"
 CLIENT_APP='joinery-member-ios'
 SETTING_CTL="php $PUBLIC_HTML/tests/functional/ios/setting_ctl.php"
+# The site the suites sign in to and the psql checks read: this one.
+BASE_URL="https://$($SETTING_CTL get webDir)"
+source "$PUBLIC_HTML/tests/functional/ios/mini_sim.sh"
+source "$PUBLIC_HTML/tests/functional/phone_mail_sink.sh"
 PSQL="psql -U postgres -d joinerytest -tAc"
 
 PASS_COUNT=0
@@ -49,6 +56,8 @@ if [ ! -f "$CREDS_FILE" ]; then
 fi
 TEST_EMAIL=$(grep '^email=' "$CREDS_FILE" | cut -d= -f2-)
 TEST_PASSWORD=$(grep '^password=' "$CREDS_FILE" | cut -d= -f2-)
+# The reset email is stored in this site's mailbox for the fixture's domain.
+MAIL_SINK_DELIVER="${TEST_EMAIL#*@}"
 
 # ---- helpers ---------------------------------------------------------------
 
@@ -64,6 +73,7 @@ run_suite() {
     ssh macmini "cd dev/joinery-ios/joinery-member-ios && \
         TEST_RUNNER_JOINERY_TEST_EMAIL='$TEST_EMAIL' \
         TEST_RUNNER_JOINERY_TEST_PASSWORD='$TEST_PASSWORD' \
+        TEST_RUNNER_JOINERY_BASE_URL='$BASE_URL' \
         $extra_env \
         xcodebuild test-without-building -scheme JoineryMember \
         -destination '$DEST' -only-testing:'$only' 2>&1" \
@@ -86,9 +96,10 @@ cleanup() {
     echo "== restore server state =="
     $SETTING_CTL set email_validation_mx_check "$MX_BEFORE"
     $SETTING_CTL set api_min_client_versions "$MIN_VERSIONS_BEFORE"
-    # If the run died inside the reset leg, put the outbound provider back.
-    if [ -n "${SMTP_SAVED_SERVICE:-}" ]; then restore_smtp; fi
+    # If the run died inside the reset leg, put the mail settings back.
+    mail_sink_off
     remove_probe
+    mini_sim_off "$SIM_NAME"
     echo "restored: email_validation_mx_check=$MX_BEFORE, api_min_client_versions restored, probe removed"
 }
 
@@ -137,7 +148,8 @@ rsync -a --delete --exclude '.build' --exclude '.swiftpm' --exclude 'xcuserdata'
     "$PUBLIC_HTML/../ios/" macmini:dev/joinery-ios/ || exit 1
 
 echo "== build-for-testing (mini) =="
-ssh macmini "xcrun simctl boot 'iPhone 16' 2>/dev/null; cd dev/joinery-ios/joinery-member-ios && \
+mini_sim "$SIM_NAME" || exit 1
+ssh macmini "cd dev/joinery-ios/joinery-member-ios && \
     ~/dev/.tools/xcodegen/xcodegen/bin/xcodegen generate > /dev/null && \
     xcodebuild build-for-testing -scheme JoineryMember -destination '$DEST' 2>&1 | tail -2" || exit 1
 
@@ -160,23 +172,9 @@ remove_probe
 
 # ---- 4. password reset (two orchestrated invocations) ------------------------
 
-# The default outbound path (Mailgun) loops off-box and back and can take
-# 10+ erratic minutes to reach our own Postfix. For the reset leg only, send
-# via localhost SMTP — Postfix delivers the locally-hosted domain in seconds.
-SMTP_SAVED_SERVICE=$($SETTING_CTL get email_service)
-SMTP_SAVED_HOST=$($SETTING_CTL get smtp_host)
-SMTP_SAVED_PORT=$($SETTING_CTL get smtp_port)
-SMTP_SAVED_AUTH=$($SETTING_CTL get smtp_auth)
-restore_smtp() {
-    $SETTING_CTL set email_service "$SMTP_SAVED_SERVICE"
-    $SETTING_CTL set smtp_host "$SMTP_SAVED_HOST"
-    $SETTING_CTL set smtp_port "$SMTP_SAVED_PORT"
-    $SETTING_CTL set smtp_auth "$SMTP_SAVED_AUTH"
-}
-$SETTING_CTL set email_service smtp
-$SETTING_CTL set smtp_host localhost
-$SETTING_CTL set smtp_port 25
-$SETTING_CTL set smtp_auth 0
+# For the reset leg the site's mail goes to the local sink, which stores the
+# reset email in this site's mailbox for the fixture's domain (phone_mail_sink.sh).
+mail_sink_on || exit 1
 
 RESET_START_UTC=$(date -u '+%Y-%m-%d %H:%M:%S')
 run_suite "Password reset step 1 (request email)" "JoineryMemberUITests/PasswordResetUITests/testRequestResetEmail"
@@ -191,7 +189,7 @@ for i in $(seq 1 18); do
     [ -n "$RESET_CODE" ] && break
     sleep 5
 done
-restore_smtp
+mail_sink_off
 if [ -z "$RESET_CODE" ]; then
     echo "-- Password reset: FAIL (no reset email with act_code arrived within 90s)"
     FAIL_COUNT=$((FAIL_COUNT+1)); FAILED_SUITES="$FAILED_SUITES reset-email;"

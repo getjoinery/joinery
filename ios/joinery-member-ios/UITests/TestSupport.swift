@@ -122,6 +122,43 @@ extension XCUIApplication {
         tabBars.buttons["More"].tap()
     }
 
+    /// A row of the More list, scrolled into being: the list is lazy, so a row
+    /// below the fold does not exist until it is scrolled to. Opens More first.
+    func moreRow(_ identifier: String, _ label: String) -> XCUIElement {
+        openMore()
+        let row = buttons[identifier].firstMatch
+        var scrolls = 0
+        while !row.waitForExistence(timeout: scrolls == 0 ? 5 : 1) && scrolls < 8 {
+            collectionViews.firstMatch.swipeUp()
+            scrolls += 1
+        }
+        expect(row, timeout: 5, label)
+        return row
+    }
+
+    /// The Dashboard tab (core-profile, pinned first by app_navigation's
+    /// default): the native member dashboard, from which Orders,
+    /// Subscriptions, Events, Messages and Security are reached.
+    func openDashboard() {
+        expectSignedIn()
+        tabBars.buttons["Dashboard"].tap()
+        expect(staticTexts["profile_user_name"].firstMatch, timeout: 20, "native dashboard")
+    }
+
+    /// Open the dashboard and follow one of its links (profile_tile_*,
+    /// profile_notifications), scrolling to it if it is below the fold.
+    func openDashboardLink(_ identifier: String, _ label: String) {
+        openDashboard()
+        let link = descendants(matching: .any)[identifier].firstMatch
+        var scrolls = 0
+        while !link.waitForExistence(timeout: scrolls == 0 ? 5 : 1) && scrolls < 8 {
+            collectionViews.firstMatch.swipeUp()
+            scrolls += 1
+        }
+        expect(link, timeout: 5, label)
+        link.tap()
+    }
+
     /// Dismiss the site cookie-consent banner if it's showing in a webview.
     /// Its fixed-position layer swallows taps on page controls underneath;
     /// each test run reinstalls the app (fresh webview data store), so the
@@ -133,10 +170,7 @@ extension XCUIApplication {
 
     /// Navigate More → Settings (the native settings screen).
     func openSettings() {
-        openMore()
-        let row = buttons["more_settings"]
-        expect(row, timeout: 10, "Settings row in More")
-        row.tap()
+        moreRow("more_settings", "Settings row in More").tap()
         expect(staticTexts["settings_display_name"], timeout: 15, "settings screen")
     }
 }

@@ -20,8 +20,7 @@ final class WebviewUITests: XCTestCase {
 
     func testChangePlanLoadsFromNativeSubscriptions() {
         let app = signedInApp()
-        app.openMore()
-        app.buttons["more_core-subscriptions"].tap()
+        app.openDashboardLink("profile_tile_subscriptions", "Subscriptions tile")
         app.expect(app.navigationBars["Subscriptions"].firstMatch, timeout: 20, "native subscriptions screen")
 
         app.buttons["subscriptions_change_plan"].firstMatch.tap()
@@ -34,12 +33,7 @@ final class WebviewUITests: XCTestCase {
 
     func testNotificationsLoadFromProfileDashboard() {
         let app = signedInApp()
-        app.tabBars.buttons["My Profile"].tap()
-        app.expect(app.staticTexts["profile_user_name"].firstMatch, timeout: 20, "native profile dashboard")
-
-        let row = app.buttons["profile_notifications"].firstMatch
-        app.expect(row, timeout: 10, "Notifications row on dashboard")
-        row.tap()
+        app.openDashboardLink("profile_notifications", "Notifications row on dashboard")
 
         // The notifications page renders in the bridged webview and the app
         // stays foreground (same-origin content never hands off to Safari).

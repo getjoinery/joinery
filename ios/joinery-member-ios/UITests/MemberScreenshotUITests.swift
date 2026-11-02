@@ -17,46 +17,25 @@ final class MemberScreenshotUITests: XCTestCase {
         app.signIn(email: TestEnv.email, password: TestEnv.password)
         app.expectSignedIn()
 
-        app.tabBars.buttons["My Profile"].tap()
-        guard app.staticTexts["profile_user_name"].firstMatch.waitForExistence(timeout: 20) else { return }
+        app.openDashboard()
         sleep(1)
         attach(app, "1-profile-dashboard")
 
-        app.openMore()
-        if app.buttons["more_core-orders"].firstMatch.waitForExistence(timeout: 10) {
-            app.buttons["more_core-orders"].tap()
-            _ = app.navigationBars["Orders"].firstMatch.waitForExistence(timeout: 15)
+        // Each native list is reached from its dashboard link, as a member reaches it.
+        for (tile, bar, shot) in [("profile_tile_orders", "Orders", "2-orders"),
+                                  ("profile_tile_subscriptions", "Subscriptions", "3-subscriptions"),
+                                  ("profile_tile_events", "My Events", "4-events")] {
+            app.openDashboardLink(tile, bar)
+            _ = app.navigationBars[bar].firstMatch.waitForExistence(timeout: 15)
             sleep(1)
-            attach(app, "2-orders")
+            attach(app, shot)
             app.navigationBars.buttons.firstMatch.tap()
         }
 
-        app.openMore()
-        if app.buttons["more_core-subscriptions"].firstMatch.waitForExistence(timeout: 10) {
-            app.buttons["more_core-subscriptions"].tap()
-            _ = app.navigationBars["Subscriptions"].firstMatch.waitForExistence(timeout: 15)
-            sleep(1)
-            attach(app, "3-subscriptions")
-            app.navigationBars.buttons.firstMatch.tap()
-        }
-
-        app.openMore()
-        if app.buttons["more_core-events"].firstMatch.waitForExistence(timeout: 10) {
-            app.buttons["more_core-events"].tap()
-            _ = app.navigationBars["My Events"].firstMatch.waitForExistence(timeout: 15)
-            sleep(1)
-            attach(app, "4-events")
-            app.navigationBars.buttons.firstMatch.tap()
-        }
-
-        app.tabBars.buttons["My Profile"].tap()
-        _ = app.staticTexts["profile_user_name"].firstMatch.waitForExistence(timeout: 15)
-        if app.staticTexts["Messages"].firstMatch.waitForExistence(timeout: 5) {
-            app.staticTexts["Messages"].firstMatch.tap()
-            _ = app.collectionViews["conversations_list"].firstMatch.waitForExistence(timeout: 15)
-            sleep(1)
-            attach(app, "5-conversations")
-        }
+        app.openDashboardLink("profile_tile_conversations", "Messages")
+        _ = app.collectionViews["conversations_list"].firstMatch.waitForExistence(timeout: 15)
+        sleep(1)
+        attach(app, "5-conversations")
 
         app.openSettings()
         if app.buttons["settings_security"].firstMatch.waitForExistence(timeout: 10) {

@@ -82,7 +82,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
  * form definition (GET /api/v1/form/password_reset_1).
  */
 function password_reset_1_logic_form($formwriter, $user = null, $input = []) {
-	$formwriter->textinput('usr_email', 'Email or username:', [
+	// Named as the action's input (email): the apps post the field names this form publishes.
+	$formwriter->textinput('email', 'Email or username:', [
 		'required'     => true,
 		'maxlength'    => 64,
 		'autocomplete' => 'username',

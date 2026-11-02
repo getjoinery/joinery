@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.64 - a singleton thread key (m:<id>) expands to the thread its message joined when replied to
  * @version 1.63 - purgeFromTrash() deletes as rule_checked_write(): trashMutationScopeSql() limits it to the viewer's mailboxes
  * @version 1.62 - fortressExportMessages(): a mailbox export pages through Fortress rows in the thread payload's shape
  * @version 1.61 - a label belongs to one mailbox: the no-feed rail lists the mailbox's own, setMembership()
@@ -2550,22 +2551,26 @@ class MailboxService {
 			if ($mid <= 0) {
 				return array();
 			}
-			$sql = "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-					WHERE iem_inbound_email_message_id = ? AND $scope";
-			$stmt = $db->prepare($sql);
+			$stmt = $db->prepare("SELECT iem_inbound_email_message_id, iem_thread_key FROM iem_inbound_email_messages
+					WHERE iem_inbound_email_message_id = ? AND $scope");
 			$stmt->execute(array($mid));
-		} else {
-			$sql = "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
-					WHERE iem_thread_key = ? AND $scope";
-			$stmt = $db->prepare($sql);
-			$stmt->execute(array($thread_key));
+			$row = $stmt->fetch(PDO::FETCH_ASSOC);
+			if (!$row) {
+				return array();
+			}
+			// A message with no Message-ID joins a real thread when it is replied
+			// to (MailboxSender::resolveThreadKey()); a reader still holding its
+			// singleton key is shown the thread it joined, the reply included.
+			$thread_key = trim((string)$row['iem_thread_key']);
+			if ($thread_key === '') {
+				return array(intval($row['iem_inbound_email_message_id']));
+			}
 		}
 
-		$ids = array();
-		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
-			$ids[] = intval($id);
-		}
-		return $ids;
+		$stmt = $db->prepare("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+				WHERE iem_thread_key = ? AND $scope");
+		$stmt->execute(array($thread_key));
+		return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 	}
 
 	// ------------------------------------------------------------ mutations

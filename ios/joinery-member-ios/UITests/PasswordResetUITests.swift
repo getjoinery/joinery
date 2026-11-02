@@ -21,7 +21,7 @@ final class PasswordResetUITests: XCTestCase {
         app.buttons["login_forgot"].tap()
 
         // Step 1 is the server-driven password_reset_1 form.
-        let email = app.textFields["usr_email"]
+        let email = app.textFields["email"]
         app.expect(email, timeout: 15, "reset email field")
         email.tap()
         email.typeText(TestEnv.email)

@@ -393,6 +393,7 @@ $rule_permitted = array(
 	'plugins/dns_filtering/logic/scheduled_block_edit_logic.php' => 'the owner\'s block delete and toggle removals behind assert_can_write',
 	'plugins/forum/includes/ForumPosting.php' => 'topic, counter and change-log writes behind mayPost and the author or moderator checks',
 	'plugins/joinery_ai/includes/ChatAttachmentIngest.php' => 'dropping a broken upload in the member\'s own chat',
+	'plugins/mailbox/data/inbound_email_filters_class.php' => 'a device-run rule\'s match log and forward bookkeeping (confirmation request and its queued email, attempt record), the mailbox\'s own records, for a message its callers checked the caller holds',
 	'plugins/mailbox/includes/MailboxDrafts.php' => 'a draft\'s own purges after the grant and authorship checks (loadDraftInScope, canAccess)',
 	'plugins/mailbox/includes/MailboxFortressParse.php' => 'a refused device parse removes the part Files it made; standing() checked the sealed owner',
 	'plugins/mailbox/includes/MailboxRelayPin.php' => 'storing a mailbox\'s relay pin after grantedAlias checked the caller\'s grant',

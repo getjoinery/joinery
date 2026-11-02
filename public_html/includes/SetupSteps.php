@@ -36,6 +36,8 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.24
+ * @changelog 1.24 - shouldInterrupt() never interrupts an app session's web pages
  * @version 1.23
  * @changelog 1.23 - New core step: 'post_quantum' (site scope, order 84), present only while this server
  *   cannot seal with post-quantum keys (specs/post_quantum_sealing.md R4)
@@ -380,6 +382,11 @@ class SetupSteps {
 		}
 		$session = SessionControl::get_instance();
 		if (!$session->is_logged_in()) {
+			return false;
+		}
+		// The apps' web pages show the page asked for: the wizard is the
+		// website's (docs/mobile_apps.md, App display mode).
+		if ($session->is_app_session()) {
 			return false;
 		}
 		$viewer = self::viewerUser();

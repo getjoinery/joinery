@@ -278,13 +278,13 @@ check(RequestLogger::check_attempt_limit('password_reset', 5, 900, null),
 
 for ($i = 0; $i < 5; $i++) {
 	harness_call_logic('logic/password_reset_1_logic.php', 'password_reset_1_logic',
-		array('usr_email' => $user->get('usr_email')), 'POST');
+		array('email' => $user->get('usr_email')), 'POST');
 }
 check(!RequestLogger::check_attempt_limit('password_reset', 5, 900, null),
 	'five reset requests exhaust the budget for that address');
 
 $res = harness_call_logic('logic/password_reset_1_logic.php', 'password_reset_1_logic',
-	array('usr_email' => $user->get('usr_email')), 'POST');
+	array('email' => $user->get('usr_email')), 'POST');
 check($res->error !== null,
 	'a sixth reset request from the same address is refused',
 	'error: ' . var_export($res->error, true));

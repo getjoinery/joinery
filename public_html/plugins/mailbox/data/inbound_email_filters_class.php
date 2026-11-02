@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.12 - a device-run rule's match log and forward bookkeeping run as rule_checked_write(): a member's parse had them refused
  * @version 1.11 - access_owner_is(): a mailbox's filter is its grant holders'; a domain-wide one is level-only
  * @version 1.10 - a filter removed with its mailbox or domain goes through its own permanent_delete(),
  *                so its per-device progress rows go with it rather than naming a filter that is gone
@@ -459,6 +460,9 @@ class InboundEmailFilter extends SystemBase {
 	 * A forward is relayed from $forward_raw, the opened RFC 822 the device
 	 * posted; without it no forward is sent. Returns what was applied.
 	 *
+	 * The caller must have checked that the caller holds $msg (standing(),
+	 * outcomes()): the writes inside run rule-checked.
+	 *
 	 * @param int[] $ids
 	 * @return array{matched:int[],actions:string[],forward_to:string[]}
 	 * @throws InvalidArgumentException naming a rule not in scope
@@ -504,7 +508,12 @@ class InboundEmailFilter extends SystemBase {
 			return array('matched' => array(), 'actions' => array(), 'forward_to' => array());
 		}
 		$actions = self::applyActionSet($msg, $accum, false);
-		self::logMatch($msg, $applied_ids, $actions);
+		// The match log is the router's own record, written whoever's device
+		// ran the rule: both callers checked the caller holds this message
+		// (MailboxFortressParse::standing(), MailboxDeviceRules::outcomes()).
+		SystemBase::rule_checked_write(function () use ($msg, $applied_ids, $actions) {
+			self::logMatch($msg, $applied_ids, $actions);
+		});
 		return array('matched' => $applied_ids, 'actions' => $actions,
 			'forward_to' => ($allow_forward && $forward_raw !== null && $forward_raw !== '') ? $forward_to : array());
 	}
@@ -524,14 +533,24 @@ class InboundEmailFilter extends SystemBase {
 		return intval($r['ief_ied_inbound_email_domain_id']) === $domainId;
 	}
 
-	/** Relay the device-opened raw to the forward destinations applyDeviceMatches() named. */
+	/**
+	 * Relay the device-opened raw to the forward destinations applyDeviceMatches()
+	 * named. The caller must have checked that the caller holds $msg: the
+	 * forward's writes run rule-checked.
+	 */
 	static function relayDeviceForward(InboundEmailMessage $msg, array $destinations, string $raw): void {
 		if (!$destinations || $raw === '') {
 			return;
 		}
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
-			(new InboundEmailRouter())->forwardStoredMessage($msg, $destinations, $raw);
+			// The forward's bookkeeping (a destination's confirmation request and
+			// its queued email, the attempt record) is the mailbox's, written for whoever's device
+			// opened the message; applyDeviceMatches() named only the rule's own
+			// acknowledged destinations, for a message the caller holds.
+			SystemBase::rule_checked_write(function () use ($msg, $destinations, $raw) {
+				(new InboundEmailRouter())->forwardStoredMessage($msg, $destinations, $raw);
+			});
 		} catch (\Throwable $e) {
 			error_log('InboundEmailFilter: device-opened forward failed for message ' . intval($msg->key) . ': ' . $e->getMessage());
 		}

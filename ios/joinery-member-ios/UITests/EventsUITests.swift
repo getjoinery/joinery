@@ -13,12 +13,7 @@ final class EventsUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchJoinery()
         app.signIn(email: TestEnv.email, password: TestEnv.password)
-        app.expectSignedIn()
-        app.openMore()
-
-        let row = app.buttons["more_core-events"]
-        app.expect(row, timeout: 10, "My Events row in More")
-        row.tap()
+        app.moreRow("more_event-manager-events", "Events row in More").tap()
 
         app.expect(app.navigationBars["My Events"].firstMatch, timeout: 20, "native events screen")
         XCTAssertFalse(app.webViews.firstMatch.exists, "Events must be native, not a webview")

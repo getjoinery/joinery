@@ -33,7 +33,9 @@ final class RateLimitUITests: XCTestCase {
 
             let error = app.staticTexts["login_error"]
             XCTAssertTrue(error.waitForExistence(timeout: 10), "attempt \(attempt) produced no inline error")
-            if error.label.lowercased().contains("too many") {
+            // The limiter's words (api_rate_limited): "... failed sign-in
+            // attempts in the last 15 minutes; the limit is 10. ..."
+            if error.label.lowercased().contains("the limit is") {
                 sawRateLimit = true
                 break
             }

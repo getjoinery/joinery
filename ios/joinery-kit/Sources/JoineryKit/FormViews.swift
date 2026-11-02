@@ -97,26 +97,24 @@ struct FormBodyView: View {
 
     var body: some View {
         Form {
-            if let formError = state.formError {
-                Section {
-                    Text(formError)
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("form_error")
-                }
-            }
-            if let successMessage {
-                Section {
-                    Label(successMessage, systemImage: "checkmark.circle")
-                        .foregroundStyle(.green)
-                        .accessibilityIdentifier("form_success")
-                }
-            }
             ForEach(state.definition.fields.filter { state.isVisible($0) }, id: \.name) { field in
                 Section(footer: fieldFooter(field)) {
                     FormFieldView(field: field, state: state)
                 }
             }
+            // The outcome shows beside the button that asked for it: a form
+            // longer than the screen is scrolled to its end when Save is tapped.
             Section {
+                if let formError = state.formError {
+                    Text(formError)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("form_error")
+                }
+                if let successMessage {
+                    Label(successMessage, systemImage: "checkmark.circle")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("form_success")
+                }
                 Button {
                     Task { await submit() }
                 } label: {
