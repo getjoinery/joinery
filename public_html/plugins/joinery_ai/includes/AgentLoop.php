@@ -93,6 +93,10 @@ class AgentLoop {
         ?array $thinking = null
     ): array {
         $model = $resolution->modelId();
+        // Every tool in this loop answers a model on this endpoint: what it
+        // reads may travel only as far as its source allows (a mail domain's
+        // AI consent, ModelQueryExecutor).
+        $context->setEndpointTrust($resolution->trust());
         $thinking = $thinking ?? $resolution->thinkingDirective();
         $tool_schemas = RecipeToolRegistry::schemasFor($allowed_tools);
         foreach (RecipeToolRegistry::unknown($allowed_tools) as $unknown_name) {

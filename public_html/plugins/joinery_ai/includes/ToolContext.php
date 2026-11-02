@@ -42,6 +42,15 @@ interface ToolContext {
      *  results (the <<UNTRUSTED_nonce>>…>> delimiters). */
     public function untrustedNonce(): string;
 
+    /** The trust class (local, trusted, cloud) of the endpoint the loop's model
+     *  runs on, which decides how far what a tool reads may travel. Set by the
+     *  loop from its resolution before any tool runs; until then a context
+     *  answers 'cloud', the class that may see the least. */
+    public function endpointTrust(): string;
+
+    /** The loop's resolution, told to the context (AgentLoop::run). */
+    public function setEndpointTrust(string $trust): void;
+
     /** Model class names in scope for query_model (decoded allowlist). */
     public function allowedModels(): array;
 

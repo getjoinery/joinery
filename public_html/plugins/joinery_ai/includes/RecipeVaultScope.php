@@ -174,7 +174,9 @@ class RecipeVaultScope {
 	 */
 	public static function consentTrustFloor(Recipe $recipe): ?string {
 		// Agent mode is out of scope here, for the reason scopeOrThrow() states;
-		// a pipeline recipe that declares no job reads nothing.
+		// its reads keep to each domain's consent at the query instead
+		// (InboundEmailMessage::ai_travel_filter()). A pipeline recipe that
+		// declares no job reads nothing.
 		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
 			return null;
 		}

@@ -83,6 +83,11 @@ class SupportTurnContext implements ToolContext {
 		return (string)$this->thread->get('sth_nonce');
 	}
 
+	/** Who sees what a tool reads: the loop's endpoint (ToolContext). */
+	private $endpoint_trust = 'cloud';
+	public function endpointTrust(): string { return $this->endpoint_trust; }
+	public function setEndpointTrust(string $trust): void { $this->endpoint_trust = $trust; }
+
 	public function allowedModels(): array {
 		return array();
 	}

@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.49 - ai_travel_filter(): an agent or chat read keeps to each domain's AI consent
  * @version 1.48 - access_owner_is(): a message is its mailbox's grant holders' and its sealed owner's (a draft its author's),
  *               so a holder below the personal level may change their own mail (MailboxViewer::holdsMessageRow)
  * @version 1.47 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
@@ -343,6 +344,26 @@ class InboundEmailMessage extends SystemBase {
 	public static $ai_read_filter = "iem_direction IS DISTINCT FROM 'draft'";
 	public static $ai_owner_field = 'iem_sealed_owner_user_id';
 	public static $ai_untrusted_fields = array('iem_sender', 'iem_subject', 'iem_body_plain');
+
+	/**
+	 * The rows a model on an endpoint of this trust class may read: those whose
+	 * domain's AI consent reaches that far (ModelQueryExecutor). A local model
+	 * reads every domain's mail; a trusted one, mail its domain lets reach
+	 * trusted vendors or any cloud; anything else, mail its domain lets reach
+	 * any cloud. A consent that is not one of the three reads as local, as
+	 * InboundEmailDomain::ai_processing_consent() reads it.
+	 */
+	public static function ai_travel_filter(string $endpoint_trust): ?string {
+		if ($endpoint_trust === InboundEmailDomain::CONSENT_LOCAL) {
+			return null;
+		}
+		$allowed = $endpoint_trust === InboundEmailDomain::CONSENT_TRUSTED
+			? array(InboundEmailDomain::CONSENT_TRUSTED, InboundEmailDomain::CONSENT_CLOUD)
+			: array(InboundEmailDomain::CONSENT_CLOUD);
+		return 'iem_ied_inbound_email_domain_id IN (SELECT ied_inbound_email_domain_id FROM '
+			. InboundEmailDomain::$tablename . " WHERE lower(trim(ied_ai_processing_consent)) IN ('"
+			. implode("', '", $allowed) . "'))";
+	}
 
 	protected static $foreign_key_actions = [
 		// permanent_delete, not cascade: this model's permanent_delete() override

@@ -40,6 +40,8 @@ class StubReadContext implements ToolContext {
     public function actingUserId(): int { return $this->uid; }
     public function ownerTimezone(): string { return 'UTC'; }
     public function untrustedNonce(): string { return 'testnonce'; }
+    public function endpointTrust(): string { return 'local'; }
+    public function setEndpointTrust(string $trust): void {}
     public function allowedModels(): array { return array_keys(ModelRegistry::all()); }
     public function allowedActions(): array { return []; }
     public function queuesWrites(): bool { return false; }

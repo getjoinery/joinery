@@ -44,6 +44,10 @@ class ApprovedActionContext implements ToolContext {
         return $this->nonce;
     }
 
+    /** No model is in the loop: nothing a tool reads here leaves the box. */
+    public function endpointTrust(): string { return AiModelRequirement::TRUST_LOCAL; }
+    public function setEndpointTrust(string $trust): void {}
+
     /** The proposing recipe's scope, exactly as a run of it would have. */
     public function allowedModels(): array {
         return self::decodeJsonArray($this->recipe->get('rcp_allowed_models'));

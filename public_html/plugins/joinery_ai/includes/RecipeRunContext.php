@@ -87,6 +87,11 @@ class RecipeRunContext implements ToolContext {
         return $this->untrusted_input_nonce;
     }
 
+    /** Who sees what a tool reads: the loop's endpoint (ToolContext). */
+    private $endpoint_trust = 'cloud';
+    public function endpointTrust(): string { return $this->endpoint_trust; }
+    public function setEndpointTrust(string $trust): void { $this->endpoint_trust = $trust; }
+
     /** Models in scope for this recipe (decoded rcp_allowed_models). */
     public function allowedModels(): array {
         return self::decodeJsonArray($this->recipe->get('rcp_allowed_models'));

@@ -44,6 +44,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
  *
+ * @version 1.5 - rows a model's ai_travel_filter() holds back from the loop's endpoint are left out (mail AI consent)
  * @version 1.4 - a column stricter than its model is left out below its read level
  * @version 1.3 - owner scoping is per model: staff below a model's read level read only their own rows of it
  * @version 1.2 - browser-format values under a server key (a row moved back off
@@ -172,6 +173,16 @@ class ModelQueryExecutor {
             $filter_sql = $class::$ai_read_filter;
             if (is_string($filter_sql) && $filter_sql !== '') {
                 $where_parts[] = $filter_sql;
+            }
+        }
+
+        // A model may also hold back rows by where the reader's model runs: a
+        // mail domain's AI consent says how far its mail may travel, at every
+        // security level, and an agent or chat read is no exception to it.
+        if (method_exists($class, 'ai_travel_filter')) {
+            $travel_sql = $class::ai_travel_filter($ctx->endpointTrust());
+            if (is_string($travel_sql) && $travel_sql !== '') {
+                $where_parts[] = $travel_sql;
             }
         }
 

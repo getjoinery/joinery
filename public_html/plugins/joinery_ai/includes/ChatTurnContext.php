@@ -100,6 +100,11 @@ class ChatTurnContext implements ToolContext {
         return $this->nonce;
     }
 
+    /** Who sees what a tool reads: the loop's endpoint (ToolContext). */
+    private $endpoint_trust = 'cloud';
+    public function endpointTrust(): string { return $this->endpoint_trust; }
+    public function setEndpointTrust(string $trust): void { $this->endpoint_trust = $trust; }
+
     /** Sealed content is confined to protected chats (see ToolContext). A standard
      *  conversation cannot open protected mail / sealed drive: the read executor
      *  excludes those rows instead of decrypting them, so the turn never goes hot. */

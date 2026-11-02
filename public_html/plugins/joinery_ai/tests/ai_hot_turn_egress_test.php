@@ -333,6 +333,8 @@ $stub_ctx = new class implements ToolContext {
 	public function actingUserId(): int { return 0; }
 	public function ownerTimezone(): string { return 'UTC'; }
 	public function untrustedNonce(): string { return 'stub'; }
+	public function endpointTrust(): string { return 'cloud'; }
+	public function setEndpointTrust(string $trust): void {}
 	public function allowedModels(): array { return []; }
 	public function allowedActions(): array { return []; }
 	public function queuesWrites(): bool { return false; }
