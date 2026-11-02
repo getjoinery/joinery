@@ -449,7 +449,7 @@ those recipes keep running unattended on their schedule.
 
 A **Fortress** mailbox is not a sealed subset of this kind. Its rows are sealed
 to the owner's browser-held `mail` vault, the candidate query excludes them
-(`iem_sealed_key LIKE 'v1.edgeseal.%'`), and no server run — cron, Run Now or
+(`iem_sealed_key LIKE 'v_.edgeseal.mail.%'`), and no server run — cron, Run Now or
 an in-window slice — ever judges one. A `deviceCapable()` job bound to such a
 mailbox runs in the owner's browser against a model the owner names, with the
 same system blocks a server run would use; the mail plugin owns that path

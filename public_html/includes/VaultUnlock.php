@@ -93,7 +93,7 @@
 class VaultLockedException extends Exception {}
 
 /** Thrown by a server read of a row sealed to a CLIENT-custody scope
- *  (a `v1.edgeseal.{scope}.` key). Not "wait for the window": no server code
+ *  (a `v2.edgeseal.{scope}.` key). Not "wait for the window": no server code
  *  reads this row, ever — only the browser holding the scope's secret does.
  *  The API export is the one place that catches it, to hand the stored
  *  ciphertext to that browser (SystemBase::export_for_api()). */

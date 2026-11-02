@@ -25,7 +25,8 @@ for the developer-facing walkthrough.
 
 ## The shape of it
 
-Each user gets an X25519 keypair per **scope** (`uev_scope`). `user` is the
+Each user gets an X-Wing keypair (the hybrid of ML-KEM-768 and X25519, so a
+seal holds against a quantum computer as well as today's attacks) per **scope** (`uev_scope`). `user` is the
 server-custody scope, shared by Private mail, chat and every other consumer the
 server reads for while the member is present; every other scope — `mail` for
 Fortress mail, `drive`, `passwords`, … — is client custody. The
@@ -156,15 +157,19 @@ Security page's detail list and in logs.
 ## Crypto core
 
 `includes/SealedBox.php` — the asymmetric sibling of
-[SecretBox](secret_box.md), hard-requiring `ext-sodium` (no OpenSSL fallback;
-`crypto_box_seal` has none). Versioned, self-describing base64url blobs, same
+[SecretBox](secret_box.md). Versioned, self-describing base64url blobs, same
 philosophy as SecretBox: fail closed, never return half-verified plaintext.
+It needs `ext-sodium` (the AEAD, X25519) and ML-KEM-768, which PHP reaches
+through FFI to OpenSSL 3.5 (`includes/MlKem768.php`; Ubuntu 26.04 or later
+with `ffi.enable = On`, see [Installation](installation.md)). `SealedBox::pqReady()`
+says whether this process can reach it, and `pqReadyReason()` why not; the
+setup step, Recovery Readiness and the vault health check report the same.
 
 ```php
 $box = new SealedBox();
-$keypair = $box->generateKeypair();               // ['public'=>b64, 'secret'=>b64] X25519
-$sealed  = $box->sealDek($bytes, $public_key);     // crypto_box_seal - anyone can seal
-$bytes   = $box->openDek($sealed, $secret_key);       // public key derived from the secret
+$keypair = $box->generateKeypair();               // ['public'=>b64, 'secret'=>b64, 'version'=>2] X-Wing
+$sealed  = $box->sealDek($bytes, $public_key);     // v2.seal. - anyone can seal
+$bytes   = $box->openDek($sealed, $secret_key);       // the frame names the version
 $blob    = $box->aeadEncrypt($plaintext, $key, $ad);   // xchacha20poly1305_ietf
 $plain   = $box->aeadDecrypt($blob, $key, $ad);        // throws on tamper or AD mismatch
 $wrapped = $box->wrapKey($secret_key, $kek, $ad);      // same AEAD primitive, wrapping a key
@@ -173,6 +178,38 @@ $kek     = $box->kekFromRecoveryCode($code, $salt);    // crypto_generichash; th
 $salt    = $box->generateSalt();                       // a vault row's uev_salt
 $code    = $box->generateRecoveryCode();               // 26 Crockford-base32 chars, >=128 bits, grouped
 ```
+
+**The seal.** Every key the platform seals to a public key, in every runtime
+(PHP, the browser, the relay and agent in Go, the Drive client in Rust, both
+phone apps), is one format, `v2`:
+
+```
+key pair  secret: a 32-byte X-Wing seed;  public: 1216 bytes (ML-KEM-768 1184 ‖ X25519 32)
+raw       ct[1120] ‖ iv[12] ‖ AES-256-GCM(plaintext) ‖ tag[16]
+key       HKDF-SHA256(ikm = X-Wing shared secret, salt = '', info = 'joinery-seal:v2:' ‖ scope)
+```
+
+`scope` keeps uses apart: every key seal (a row's DEK, a wrapped secret, a
+Drive grant, a device handoff, a backup recipient) is `dek`, and each approval
+challenge has its own, so a box made for one never opens as another
+(`SealedBox::sealV2()`/`openV2()`). A holder that decapsulates elsewhere, a
+browser that keeps the seed, hands over the `dek`-scope key
+(`SealedBox::v2Key()`), never the shared secret, and the receiver finishes with
+`openV2WithKey()`. The framings are `v2.seal.` + base64url (a server-custody
+key), `v2.edgeseal.{scope}.` + base64 (a client-custody key), and bare base64
+or raw bytes where the recipient key is known from context. `tests/vault/xwing_vector_test.php`
+and its fixture `tests/vault/fixtures/xwing_vector.json` are the vectors every
+runtime reproduces byte for byte.
+
+**Sealers write v2 only.** A 32-byte X25519 public key is refused with
+`SealedBox::V1_KEY_REFUSAL`: its holder owes the rotation in
+[A key from before post-quantum sealing](#a-key-from-before-post-quantum-sealing).
+The v1 forms (`v1.seal.`, a libsodium sealed box; `v1.edgeseal.`, X25519 ECIES)
+still open, so that rotation can read what is sealed to the old key. An opener
+chooses the version by the blob's frame or the recipient public key's length
+(32 or 1216 bytes), never by the secret, since both secrets are 32 bytes; a
+wrapped vault secret carries its own (`v2.` + base64url seed for v2,
+`PoolVaultKey::wrappedForm()`).
 
 The server derives no KEK from a code or a phrase a person holds: the browser
 does, and posts only the account half (see [One vault](#one-vault)).
@@ -214,7 +251,7 @@ index this serves then fails SQLite's own integrity check and is rebuilt.
 
 **A vault key is used, never read.** `VaultUnlock::secretKey()` returns a
 `VaultKey` (`includes/VaultKey.php`): `unseal(array $sealed)` opens
-crypto_box_seal ciphertexts sealed to its public half, `publicKey()` is that
+DEKs sealed to its public half, `publicKey()` is that
 half, and `id()` is a stable non-secret identity the DEK memo keys on. There
 is no getter for the bytes and no wrap method. `PoolVaultKey` is the
 implementation that holds the bytes in PHP; the `SealedBox` primitives that
@@ -887,8 +924,9 @@ from then on. Cold is virtually every request, and costs one boolean
 check per statement. Hot, an INSERT or UPDATE carrying a string longer than
 `SealedEgressGuard::THRESHOLD` (64 characters) must satisfy one of:
 
-- every long value is already a sealed blob (`v1.aead.` or `v1.seal.`, or the
-  browser's `v1.edge.` or `v1.edgeseal.{scope}.`) — this is how `sealColumns()`
+- every long value is already a sealed blob (`v1.aead.`, `v2.seal.` or
+  `v1.seal.`, or the browser's `v1.edge.`, `v2.edgeseal.{scope}.` or
+  `v1.edgeseal.{scope}.`) — this is how `sealColumns()`
   writes through the rule it sits behind;
 - every long value is a list of integers (a JSON array or comma list of ids,
   `SealedEgressGuard::isIntegerList()`) — ids are references to content, never
@@ -1088,6 +1126,37 @@ recovery codes (the current generation's were minted by the interrupted
 attempt and never shown), and `regenerate_recommended = true`. Enrollment
 ceremonies refuse while two generations are live, so completion is the one
 road out of the interrupted state.
+
+### A key from before post-quantum sealing
+
+A vault whose public key is 32 bytes (X25519) gives up its secret to anyone
+with a large enough quantum computer and its public key, so it does not open
+until its owner rotates it. `VaultUnlock::arm()` throws
+`VaultRotationOwedException` for such a key, and the passkey and passphrase
+unlocks answer `rotation_required` with `rotate_url`
+(`/profile/security?rotate=owed`); the keyring and the lock chip send the
+person there. A recovery is the one open that is armed anyway, because it is
+how someone who lost their passkey gets back to one and so to the rotation.
+An enrolment on such a vault takes the opened key without a window. The
+rotation itself is the one above and needs a passkey: a server vault whose
+owner has none that can hold a key cannot rotate until they add one.
+
+**The root moves with the account vault.** The root's secret derives every
+content vault's key, so a root on an old key is replaced inside the same
+rotation: `VaultKeyring.rootKeyReplacement()` mints a new root secret in the
+same passkey touch, wraps it under that passkey and the new codes and phrase
+(the salt stays), re-wraps every content vault under it, and
+`VaultClientCustody::replaceRootKey()` stores all of it in `rotate()`'s
+transaction, which refuses to leave an old root behind. A content vault on an
+old key opens in the browser only to be rotated (`JoinerySealed` adopt and
+resume). The Security page and Recovery Readiness name and count the vaults
+that owe a rotation, the root included.
+
+Until a mail vault rotates, mail to it waits: the store cannot seal to the old
+key, rolls back and is retried (by the sender's mail server, or from the
+relay's spool), and a Joinery Direct sender is answered with the vault's own
+32-byte key, refuses to seal to it and falls back to SMTP (see
+[Joinery Direct](joinery_direct.md)).
 
 **Retired keys stay reachable through the current one.** Content can reach an
 old key after the re-seal has passed it: mail a relay sealed before it learned
@@ -1519,11 +1588,15 @@ Everything a consumer needs lives in **core**, so a consumer writes no crypto,
 no ceremony and no session code:
 
 - **`assets/js/vault-crypto.js`** — the browser crypto module: WebCrypto
-  AES-GCM/X25519, the vendored hash-pinned Argon2id WASM for the passphrase KDF,
+  AES-GCM, X-Wing from the vendored `@noble/post-quantum` bundle
+  (`assets/vendor/noble/`, loaded on demand and pinned by its Subresource
+  Integrity hash), the vendored hash-pinned Argon2id WASM for the passphrase KDF,
   KEK derivation (passkey PRF / recovery / passphrase), wrap/unwrap of the vault
   secret key, ECIES seal/open of a data key, and `encrypt(str, key, ad?)` /
   `decrypt(blob, key, ad?)`. `selfCheck()` proves this engine and the server
-  agree on the bytes (the shared vector in `tests/vault/fixtures/edge_vector.json`).
+  agree on the bytes (the shared vectors in `tests/vault/fixtures/edge_vector.json`
+  and `xwing_vector.json`). A client-custody secret is the same bare 32-byte
+  seed as a server one.
 - **`assets/js/vault-keyring.js`** — `VaultKeyring.ensureUnlocked(scope, opts)`,
   the one ceremony: setup (then the recovery codes), unlock, or nothing.
 - **`assets/js/joinery-sealed.js`** — `JoinerySealed`: opening and sealing rows,
@@ -1587,7 +1660,7 @@ with no extra column:
 
 | Blob | Server custody | Client custody |
 |---|---|---|
-| sealed DEK | `v1.seal.` + libsodium sealed box | `v1.edgeseal.{scope}.` + base64(ephPub ‖ IV ‖ ct ‖ tag), `vault-crypto.js` ECIES to the scope's public key |
+| sealed DEK | `v2.seal.` + base64url of the v2 seal | `v2.edgeseal.{scope}.` + base64 of the v2 seal, made by `vault-crypto.js` to the scope's public key |
 | field | `v1.aead.` + XChaCha20-Poly1305 | `v1.edge.` + base64(IV ‖ ct ‖ tag), AES-256-GCM under the DEK, AD = the model's `sealAd($row_id, $field)` |
 
 The prefixes belong to the row layer (`SystemBase`, `joinery-sealed.js`); the
@@ -1605,12 +1678,12 @@ open window or not. The one place it is caught is the API export.
 What makes a row the browser's is the **scope its key is sealed to**, not the
 frame: `VaultCrypto::clientCustodyScope($sealed_key)` names the scope when it is
 client custody (or declared by nothing active) and is null otherwise. A key in
-the browser's format sealed to a server scope — `v1.edgeseal.user.`, what a row
-moved off client custody carries, since the browser cannot write libsodium's
-sealed box — opens in the window like a `v1.seal.` key, and its `v1.edge.`
-fields open with it. Every "only the browser opens this" check asks
-`clientCustodyScope()`; a consumer's SQL names its client scope
-(`iem_sealed_key LIKE 'v1.edgeseal.mail.%'`), never the bare frame.
+the browser's format sealed to a server scope — `v2.edgeseal.user.`, what a row
+moved off client custody carries — opens in the window like a `v2.seal.` key,
+and its `v1.edge.` fields open with it. Every "only the browser opens this"
+check asks `clientCustodyScope()`; a consumer's SQL names its client scope
+with `VaultCrypto::EDGE_SEAL_LIKE_PREFIX` (`'v_.edgeseal.'`, so both versions
+match: `iem_sealed_key LIKE 'v_.edgeseal.mail.%'`), never the bare frame.
 
 **The API representation.** `export_for_api()` hands such a row to the browser
 as stored: every plain column normally, each sealed field as its ciphertext,
@@ -1632,7 +1705,8 @@ row changing scope.
 **Writing from the browser** is two steps, because the AD needs the row id:
 create the row with its sealed columns empty, then post the ciphertext. The
 ciphertext enters only through `SystemBase::acceptBrowserSealed($row_id,
-$sealed_dek, $fields)`, which checks the `v1.edgeseal.{scope}.` prefix, that the
+$sealed_dek, $fields)`, which checks the `v2.edgeseal.{scope}.` prefix (and that
+its version is the scope key's), that the
 scope is the row's `sealScopeForWrite()` and client custody, that `shouldSeal()`
 does not keep the row plaintext, that every field is declared and carries
 `v1.edge.`, and that no populated sealed field is left behind, then writes the
@@ -1647,7 +1721,7 @@ mail). It takes `column => v1.edge. ciphertext` sealed with the row's own DEK
 under the row's AD, and only for columns the model lists in
 `$browser_appendable_fields` (mail: `iem_ai_summary`, `iem_ai_scan`), which
 must also be `$sealed_fields`. It requires the row's stored key to be
-`v1.edgeseal.{scope}.` for a client-custody scope (a row lowered to a server
+an edge-sealed key (`v2.edgeseal.{scope}.`) for a client-custody scope (a row lowered to a server
 scope is the server's to write), lets the model refuse for a reason of its
 own (`browserAppendRefusal()`: a mail row still awaiting its browser parse),
 and writes those columns and nothing else. The row's key, generation and
@@ -1682,13 +1756,13 @@ format and whose key wraps the DEK move.
   also opens a field with the key first, so a wrong key never replaces a good
   one. The UPDATE is conditional on the key it read. A moved row is not listed
   again, so the walk resumes wherever it stopped. The row is left with a
-  `v1.edgeseal.user.` key and its `v1.edge.` fields (see Reading on the server).
+  `v2.edgeseal.user.` key and its `v1.edge.` fields (see Reading on the server).
   `browserCustodyPage()` asks the hook of every row the scope holds. Its
   count, `browserCustodyBacklog()`, is null unless a model overrides it: a
   model with many rows overrides both with SQL that states the hook's rule
   (mail does), and the walk's first page carries `remaining` only when every
   model can count.
-- **Rotation.** A server rotation re-seals a lowered row's key into `v1.seal.`;
+- **Rotation.** A server rotation re-seals a lowered row's key into `v2.seal.`;
   `resealRows()` leaves a row under a client-custody key to the browser's
   rotation.
 

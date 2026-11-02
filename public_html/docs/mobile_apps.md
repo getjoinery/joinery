@@ -774,18 +774,23 @@ to the browser's own code.
 
 **The key on the phone.** The phone holds the mail vault's secret and opens
 rows itself; there is no server window and no passkey. At first enrollment the
-app makes an X25519 device keypair and keeps it across sign-outs. Enrollment is
+app makes an X-Wing device keypair (ML-KEM-768 + X25519, a 32-byte seed
+and a 1216-byte public key) and keeps it across sign-outs. Enrollment is
 bound to the session key the app already has (`device_key_enroll`,
 `docs/sealed_vault.md` § Handing a vault to a device): the app shows a code and
 the page to open, the owner approves it on a computer (`/profile/devices/link`,
 where the browser seals the mail secret to the device key), and the app's poll
 collects the sealed key, opens it with the device secret, and stores the mail
-secret. Neither the Secure Enclave nor StrongBox holds X25519 keys, so both
+secret. Neither the Secure Enclave nor StrongBox holds X-Wing keys, so both
 secrets live **behind** the chip's biometric gate: on iOS as Keychain items
 (`WhenPasscodeSetThisDeviceOnly`, `.biometryCurrentSet`); on Android wrapped
 under a Keystore AES-GCM key that needs strong biometrics, is invalidated by a
 new enrollment, and is StrongBox-backed where the phone has one
-(`BiometricPrompt`; Tink does the X25519, HKDF and AES-GCM). A stolen phone
+(`BiometricPrompt`). iOS seals and opens with CryptoKit's `XWingMLKEM768X25519`,
+which is why the apps need iOS 26; Android with Bouncy Castle's ML-KEM-768 and
+Tink's X25519, HKDF and AES-GCM. An install still holding a 32-byte X25519
+device or vault key from before post-quantum sealing discards it and enrolls
+again. A stolen phone
 yields nothing without the owner's face or finger; a new fingerprint or face
 invalidates the stored key.
 
@@ -798,7 +803,7 @@ recovery-code use: the app wipes the secret and shows the enroll banner again.
 Sign-out keeps the device key, so re-enrollment approves the same one.
 
 **Reading.** List rows and messages arrive with empty clear fields and a
-`sealed` shape; the app opens the row key (`v1.edgeseal.mail.`) with the mail
+`sealed` shape; the app opens the row key (`v2.edgeseal.mail.`) with the mail
 secret and each field (`v1.edge.`, AD `mail:{id}:{field}`) with the row key,
 names parts from the sealed manifest, and fetches each part through its
 signed URL (the stored ciphertext; no credential) and opens it with the row key

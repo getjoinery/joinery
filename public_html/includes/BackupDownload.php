@@ -25,6 +25,7 @@
  * file was kept. It is deleted KEEP_SECONDS after it is built, by the hourly
  * BackupDownloadSweep task and by any read of its state after that.
  *
+ * @version 1.1 - the download's readme says how its X-Wing envelope opens
  * @version 1.0
  */
 
@@ -600,10 +601,12 @@ Restoring onto a Joinery site (install the site first, then, as root):
       {$archive} --key-file /tmp/k
   shred -u /tmp/k
 
-Opening it with no Joinery anywhere (openssl and PHP's sodium extension):
+Opening it with no Joinery anywhere (a copy of the Joinery source, PHP with
+the sodium and FFI extensions, OpenSSL 3.5 or later, and openssl):
 
   1. Unseal the data key from {$keys} with the recovery private key: each
-     recipients[].sealed entry is a libsodium sealed box over the data key.
+     recipients[].sealed entry is the data key sealed with X-Wing (a v2 seal);
+     backup_envelope.php open (above) does it from the source copy alone.
   2. openssl enc -d -aes-256-cbc -pbkdf2 -pass file:data_key.txt \\
          -in {$archive} -out {$name}.tar.gz
   3. Shred data_key.txt.

@@ -1825,7 +1825,7 @@ target and its mail is held, as at Private. `InboundEmailMessage::isBrowserSeale
 predicate every server reader checks; `mailKeySql()` is its SQL spelling.
 
 **The row.** Every sealed field is `v1.edge.` under the row's DEK (AD
-`mail:{id}:{field}`), the DEK `v1.edgeseal.mail.…`. Three more sealed fields are
+`mail:{id}:{field}`), the DEK `v2.edgeseal.mail.…`. Three more sealed fields are
 written with it: `iem_search_text` (the folded search text, at most 32,768
 characters, `gz:`-compressed when that saves a third), `iem_snippet` (the list
 preview) and `iem_attachment_manifest` (`[{id, filename, content_type, content_id,
@@ -1926,7 +1926,8 @@ first and its relay's Update follows.
 - The map names the mail vault's key (`key_kind: client`, `key_scope: mail`, its
   generation). The relay seals the whole message for the browser (`sealEdge`: a
   fresh DEK, the body `v1.edge.` with AD `mail:relay:{spool_id}`, the DEK
-  `v1.edgeseal.mail.`). Joinery Direct into such a mailbox stays on the transport
+  `v2.edgeseal.mail.` for an X-Wing key, `v1.edgeseal.mail.` for a vault whose
+  owner has not rotated off X25519). Joinery Direct into such a mailbox stays on the transport
   key and is sealed to the mail key at pull.
 - The pull stores it as a waiting row (`iem_pending_parse`,
   `iem_relay_sealed_raw`, the DEK in the key column). An entry sealed to a key no
@@ -2072,7 +2073,7 @@ in the native mail modules.
 A mailbox seals when its **posture** says so — Private, resolved per
 mailbox — *and* its **single owner** (the alias's one grantee — a shared or
 catch-all mailbox is never sealed) holds a Sealed Vault (`docs/sealed_vault.md`, the
-platform's per-user X25519 key hierarchy and unlock window). Mail is the vault's first
+platform's per-user X-Wing key hierarchy and unlock window). Mail is the vault's first
 consumer: it supplies its own AD row-binding convention and content, and reuses every
 generic vault mechanism — key hierarchy, unlock window, the File decrypt hook, the
 sealed-field model hook, rotation, revocation. See the [Passkeys](../../../docs/passkeys.md)
@@ -2464,7 +2465,7 @@ write re-checks it.
 **The server's half** is `MailboxDeviceAi`, behind four actions, each
 authorised the same way (`authorize()`: the recipe is the caller's own and
 `deviceCapable()`; the row is the caller's, sealed to the `mail` vault
-(`v1.edgeseal.mail.`, never a lowered row's `v1.edgeseal.user.`), and on a
+(`v2.edgeseal.mail.`, never a lowered row's `v2.edgeseal.user.`), and on a
 mailbox the recipe covers):
 
 - `mailbox/ai_device_recipes {mailbox}` — the caller's device-capable
@@ -2577,7 +2578,7 @@ compromised (even root) box does not control.
 
 - **Sealed DKIM key, signed in-app.** The domain's DKIM private key is generated
   in-session, sealed to the owner's vault public key (`ied_dkim_sealed_key`, a
-  `crypto_box_seal` envelope — the same one message DEKs use), and stored in the
+  `v2.seal.` envelope — the same one message DEKs use), and stored in the
   database. The plaintext never touches disk and is never given to rspamd. At
   compose time, inside an unlock window, `MailboxDkimSigner::resolveFor()` unwraps
   it and PHPMailer signs with it as an in-memory string (`DKIM_private_string`),
@@ -2893,8 +2894,10 @@ For each accepted message it:
   drains: `collect-status` rewrites the `joinery-deferred` access map every
   thirty seconds, so the mail waits on the sending server, which tells its own
   sender if it gives up, rather than in the relay's queue.
-- Seals the **entire raw message** with `crypto_box_seal` (libsodium wire format,
-  `SealedBox::openDek`-compatible) to that public key — recipients on a domain with
+- Seals the **entire raw message** to that public key in the format the key names
+  (`SealedBox::openDek`-compatible): `v2.seal.` (X-Wing, then AES-256-GCM) to a
+  1216-byte key, `v1.seal.` (libsodium's sealed box) to a 32-byte X25519 one not yet
+  rotated — recipients on a domain with
   Seal at the relay to the owner's vault key, Standard/Private to the ambient transport key Joinery holds.
 - Writes `<spoolid>.seal` (ciphertext) + `<spoolid>.meta` (cleartext operational
   metadata only — recipient, Message-ID, thread inputs, size, the milter-stamped

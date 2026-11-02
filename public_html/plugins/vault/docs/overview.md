@@ -36,12 +36,12 @@ keylogger on your own machine) defeats any password manager and is out of scope.
 ## Crypto architecture
 
 The identity is the vault's **own `passwords` client-custody keypair**
-(`uev_scope='passwords'`, `uev_custody='client'`, X25519) — separate from Drive's,
+(`uev_scope='passwords'`, `uev_custody='client'`, X-Wing: ML-KEM-768 + X25519) — separate from Drive's,
 Fortress mail's and the server-custody account vault's, so no other scope's key
 opens it. The key hierarchy, performed entirely in the browser:
 
 ```
-unlocker --> root secret --scope KEK--> vault X25519 secret key --seals--> store DEK --encrypts--> each entry
+unlocker --> root secret --scope KEK--> vault X-Wing secret key --seals--> store DEK --encrypts--> each entry
 ```
 
 - **The vault key opens through the root vault**
@@ -54,7 +54,8 @@ unlocker --> root secret --scope KEK--> vault X25519 secret key --seals--> store
   A passwords vault with no `root` wrapping yet has unlockers of its own (a
   passkey's PRF output under context `vault-passwords-kek`, a recovery key, a
   passphrase); its first unlock by them gives it the `root` wrapping.
-- **Store DEK** — a random 256-bit AES-GCM key sealed once (ECIES over X25519)
+- **Store DEK** — a random 256-bit AES-GCM key sealed once (the platform's v2
+  seal: X-Wing, then AES-256-GCM; [Crypto core](../../../docs/sealed_vault.md#crypto-core))
   to the vault public key and held as one blob (`vlk_wrapped_dek`). On unlock the
   browser unwraps the secret key, opens the sealed DEK, and holds it as a
   **non-extractable `CryptoKey`**.

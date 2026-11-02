@@ -275,7 +275,8 @@ the domain seals content), so the tiers behave as:
   locked or unlocked, colocated or relay-fronted alike: the receiver accepts unconditionally — never a live
   `declined`, no lock-state oracle — and returns a key for every address that
   exists or not, with a deterministic decoy (reporting key generation 1) standing
-  in for addresses that do not, so existence, contact membership, and block status
+  in for addresses that do not (`DirectDecoyKeys`: an HMAC of the address used as
+  an X-Wing seed, published as the 1216-byte key it generates and discarded), so existence, contact membership, and block status
   are unknowable from the wire. Authentication (signature verification, hash
   checks) runs at receive; authorization defers: the framework spools the accepted
   delivery in the **Direct spool** — keyed by kind, holding the envelope,
@@ -297,6 +298,13 @@ the domain seals content), so the tiers behave as:
   itself be the tell. On a relay-fronted deployment the relay answers preflights, so that same
   secret travels to it in the relay map — a decoy that differed between the box
   and its relay would be a distinguisher in itself.
+
+A vault still on a 32-byte X25519 key, one whose owner has not rotated it to
+X-Wing, is answered with that key, not a decoy, by the box and the relay alike.
+The sender refuses to seal to it and falls back to SMTP, and that message waits
+until the owner rotates (a store that cannot seal rolls back and is retried),
+so it arrives or, past the sender's retry window, bounces. Until the rotation,
+the short key tells a prober the address is real.
 
 Sealing is **opportunistic**, and one case follows from that: a real recipient at a
 sealed tier who holds no vault is offered no key, so the delivery crosses unsealed

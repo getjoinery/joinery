@@ -104,7 +104,7 @@ refuses the value.
 
 SecretBox is one symmetric key the *server* holds for its own secrets.
 [`SealedBox`](sealed_vault.md) (`includes/SealedBox.php`) is the asymmetric
-sibling one layer up: a per-*user* X25519 keypair whose secret half the
+sibling one layer up: a per-*user* X-Wing (ML-KEM-768 + X25519) keypair whose secret half the
 server never holds at rest, behind the [Sealed Vault](sealed_vault.md)'s
 unlock window. Reach for SecretBox for server-held credentials (OAuth
 secrets, IMAP passwords); reach for the vault for user content the server

@@ -18,7 +18,7 @@
  *
  * Every entry point checks the same four things (authorize()): the recipe is
  * the caller's own; it is one of the jobs a device may run; the row is the
- * caller's; the row is sealed to the `mail` vault (`v1.edgeseal.mail.`) and
+ * caller's; the row is sealed to the `mail` vault (`v2.edgeseal.mail.`) and
  * on a mailbox the recipe covers. Without the owner check one member could
  * mark another's message judged and hide it from that member's own scan.
  *

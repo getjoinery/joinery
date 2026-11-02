@@ -4,31 +4,35 @@
  *
  * SecretBox is one symmetric key the server holds and uses to protect its own
  * secrets. SealedBox is the primitive behind the Sealed Vault
- * (docs/sealed_vault.md): every user gets an X25519 keypair whose PUBLIC half
- * is cleartext at rest (anything can seal to it, even while the user is
- * offline) and whose SECRET half exists at rest only as wrappings — one per
- * enrolled unlocker (passkey PRF, recovery code, optional passphrase).
+ * (docs/sealed_vault.md): every user gets an X-Wing (ML-KEM-768 + X25519)
+ * keypair whose PUBLIC half is cleartext at rest (anything can seal to it,
+ * even while the user is offline) and whose SECRET half, a 32-byte seed,
+ * exists at rest only as wrappings — one per enrolled unlocker (passkey PRF,
+ * recovery code, optional passphrase).
  *
- * Unlike SecretBox, this class has NO fallback: crypto_box_seal has no clean
- * OpenSSL equivalent, so the constructor throws when ext-sodium is absent
- * rather than silently degrading. Every output is a self-describing versioned
- * base64url blob (`v1.<kind>.<part>.<part>...`) so a value always carries the
- * algorithm that produced it. Fails closed throughout: malformed input,
- * tampered ciphertext, or an AD mismatch all raise RuntimeException; nothing
- * is ever returned half-verified.
+ * Unlike SecretBox, this class has NO fallback: it needs ext-sodium and
+ * ML-KEM through OpenSSL 3.5 (MlKem768, pqReady()), and the constructor throws
+ * when sodium is absent rather than silently degrading. Every output is a
+ * self-describing versioned blob (`v2.seal.`, `v1.aead.`, ...) so a value
+ * always carries the algorithm that produced it. Seals are v2 only; the v1
+ * (X25519) openers stay so a holder's rotation can read what the old key
+ * holds. Fails closed throughout: malformed input, tampered ciphertext, or an
+ * AD mismatch all raise RuntimeException; nothing is ever returned
+ * half-verified.
  *
  * Whole FILES are not sealed here: SealedFileContainer is the platform's one
  * chunked format, and VaultCrypto::sealFieldFile()/openFieldFile() put it
  * behind the same DEK and AD discipline as the string forms.
  *
- * Beside the libsodium forms sits the BROWSER format (sealEdge/openEdge,
+ * Beside the server forms sits the BROWSER format (sealEdge/openEdge,
  * aeadEncryptGcm/aeadDecryptGcm): the exact bytes vault-crypto.js produces —
- * X25519 ECIES with HKDF-SHA256 and AES-256-GCM for a DEK, AES-256-GCM with an
- * AD for content, standard base64 of raw bytes. It exists so the server can
- * seal to a client-custody scope's key and open what a browser sealed to a
- * server key. These are raw primitives like the rest; the `v1.edgeseal.` /
- * `v1.edge.` framing belongs to the row layer (VaultCrypto).
+ * the v2 seal for a DEK, AES-256-GCM with an AD for content, standard base64
+ * of raw bytes. It exists so the server can seal to a client-custody scope's
+ * key and open what a browser sealed to a server key. These are raw
+ * primitives like the rest; the `v2.edgeseal.` / `v1.edge.` framing belongs to
+ * the row layer (VaultCrypto).
  *
+ * @version 2.2 - header describes the X-Wing keypair and v2 seals
  * @version 2.1 - RECOVERY_CODE_PATTERN / isRecoveryCodeShaped(): what a typed recovery code looks like
  * @version 2.0 - v2 seals (specs/post_quantum_sealing.md R2): generateKeypair() mints an X-Wing
  *                seed and 1216-byte key; sealDek()/sealBinary()/sealEdge() write v2 only and refuse

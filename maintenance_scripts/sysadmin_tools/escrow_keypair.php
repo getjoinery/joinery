@@ -21,7 +21,7 @@
  *   generate:  php escrow_keypair.php generate --private-out /secure/recovery.key
  *              Writes the private key (base64, mode 0600) to the path you give and
  *              prints ONLY the public key (base64) to stdout. Paste that public key
- *              into the server_manager_escrow_public_key setting, then move the
+ *              into the site's Backups page (the backup_recovery_public_key setting), then move the
  *              private key into your password manager and delete the local file.
  *
  *   unseal:    php escrow_keypair.php unseal --private /secure/recovery.key [--in blob.b64] [--scope SCOPE]
@@ -29,6 +29,7 @@
  *              private key, and prints the recovered backup key to stdout. This is
  *              the DR tool; run it on your own machine, never on the management node.
  *
+ * @version 1.2 - generate names the Backups page (backup_recovery_public_key) as where the public key goes
  * @version 1.1 - X-Wing keys and v2 seals; unseal opens both versions; --scope names a v2 box's
  *                scope (the recovery key's command-line proof has its own; the default is a key seal's, dek)
  * @version 1.0
@@ -120,7 +121,7 @@ if ($mode === 'generate') {
     // Public key is the ONLY thing printed. The private key never touches stdout.
     echo base64_encode($public) . "\n";
     fwrite(STDERR, "Private key written to {$out} (mode 0600).\n");
-    fwrite(STDERR, "Paste the public key above into server_manager_escrow_public_key,\n");
+    fwrite(STDERR, "Paste the public key above into the site's Backups page (Admin, System, Backups),\n");
     fwrite(STDERR, "then move {$out} into your password manager and delete the local file.\n");
     sodium_memzero($secret);
     exit(0);

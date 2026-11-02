@@ -35,7 +35,7 @@
  *                the old key (RelayMapSync::rotationRefusal, B33)
  * @version 1.21 - a `mail` rotation pushes the relay routing map at begin and commit
  * @version 1.20 - deferred work mailbox_fortress_raise and mailbox_fortress_lowered (R8);
- *   the server rotation re-seals a row moved back off end-to-end (v1.edgeseal.user.)
+ *   the server rotation re-seals a row moved back off end-to-end (v2.edgeseal.user.)
  * @version 1.19 - the mail rotation re-seals the Fortress search key (MailboxSearchKey)
  * @version 1.18
  * @changelog 1.18 - Fortress mail (specs/client_custody_mail.md): registers the
@@ -199,7 +199,7 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		// the browser can re-seal (the `mail` client reseal below), so it is
 		// never this rotation's to touch. One moved back off end-to-end keeps
 		// its key in the browser's format sealed to this vault
-		// (`v1.edgeseal.user.`) and is re-sealed here like the rest.
+		// (`v2.edgeseal.user.`) and is re-sealed here like the rest.
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)

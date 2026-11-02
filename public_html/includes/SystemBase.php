@@ -1688,7 +1688,7 @@ abstract class SystemBase {
 	 * value), and it is the second step of a browser write: the row exists
 	 * first, because the AD binds each field to the row id.
 	 *
-	 * Checks, each refusing with its own reason: the key is `v1.edgeseal.{scope}.`
+	 * Checks, each refusing with its own reason: the key is `v2.edgeseal.{scope}.`
 	 * for the scope sealScopeForWrite() gives this row, and that scope is client
 	 * custody; shouldSeal() does not keep the row in plaintext; every field is declared in $sealed_fields, holds content on this
 	 * row, and carries `v1.edge.` (or is empty); no sealed field that holds a
@@ -1814,7 +1814,7 @@ abstract class SystemBase {
 	 * with the same DEK under the row's AD ({prefix}:{id}:{field}).
 	 *
 	 * Checks, each refusing with its own reason: the row exists and is sealed;
-	 * its stored key is `v1.edgeseal.{scope}.` for a client-custody scope (a
+	 * its stored key is `v2.edgeseal.{scope}.` for a client-custody scope (a
 	 * row lowered to a server scope is the server's to write); the model has no
 	 * reason of its own to refuse it now (browserAppendRefusal()); each field
 	 * is on $browser_appendable_fields and in $sealed_fields, holds content on
@@ -2101,7 +2101,7 @@ abstract class SystemBase {
 	 * Store the DEK of a row moving off client custody, re-sealed by its owner's
 	 * browser to the vault the row's hook now names (the lowering, R8). The
 	 * browser writes the edge format only, so a row moved to the server's
-	 * `user` vault keeps a `v1.edgeseal.user.` key and its `v1.edge.` fields:
+	 * `user` vault keeps a `v2.edgeseal.user.` key and its `v1.edge.` fields:
 	 * the window opens both (VaultCrypto::clientCustodyScope()). Nothing but
 	 * the key, its generation and owner is written.
 	 *

@@ -5,7 +5,7 @@
  *
  * A relay that fronts a Fortress mailbox seals each message to the owner's
  * browser-held mail key: the raw message under a fresh DEK (`v1.edge.`, AD
- * `mail:relay:{spool_id}`), the DEK to the key (`v1.edgeseal.mail.`). The pull
+ * `mail:relay:{spool_id}`), the DEK to the key (`v2.edgeseal.mail.`). The pull
  * stores that as a PENDING row whose key is the relay's DEK and whose body is
  * iem_relay_sealed_raw (RelaySpoolConsumer::ingestClient). The server cannot
  * open either, so the first of the owner's browsers to unlock does the parse

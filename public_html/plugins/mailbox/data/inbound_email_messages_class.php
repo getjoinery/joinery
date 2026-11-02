@@ -128,7 +128,7 @@
  * @version 1.37 - index on sealed live rows by (owner, mailbox, domain), for the reader's
  *   per-load unseal question
  * @version 1.36 - isBrowserSealed() and unwrapDekInWindow() go by the key's custody, so a
- *   row moved back off end-to-end (v1.edgeseal.user.) reads in the window; its
+ *   row moved back off end-to-end (v2.edgeseal.user.) reads in the window; its
  *   v1.edge. fields unseal and an outbound recipient in that format is sealed;
  *   unsealing such a row puts its attachment names back first and leaves no Fortress-only
  *   column behind (FORTRESS_DERIVED); browserCustodyPage() and browserCustodyBacklog()

@@ -110,10 +110,11 @@ joinery_mint_backup_site_key() {
 
 # An old backup site key (base64 of a 64-byte X25519 keypair) is moved aside so
 # a seed can be minted in its place: nothing seals to an X25519 key any more,
-# and the site would otherwise never back up again. Nothing reads the
-# .retired file; it is kept for an operator to pass by hand to
-# backup_envelope.php open --private, for a backup the old key sealed. An
-# existing .retired is never overwritten. Prints nothing; returns 0 when the
+# and the site would otherwise never back up again. The site still opens a
+# backup the old key sealed with it (BackupEnvelope::open_as_site() tries every
+# backup_site_key.retired*), and an operator can pass it by hand to
+# backup_envelope.php open --private. An existing .retired is never
+# overwritten; a later one takes a time suffix. Prints nothing; returns 0 when the
 # key was moved, 1 when there was nothing to move or it could not be moved.
 joinery_retire_old_backup_site_key() {
     local config_dir="$1"

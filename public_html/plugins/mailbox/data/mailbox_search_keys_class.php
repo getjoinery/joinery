@@ -4,7 +4,7 @@
  * index each of their browsers keeps over their end-to-end (Fortress) mail
  * (specs/client_custody_mail.md § R5), sealed to their `mail` vault.
  *
- * The browser mints it and seals it (`v1.edgeseal.mail.`); the server stores
+ * The browser mints it and seals it (`v2.edgeseal.mail.`); the server stores
  * the blob and cannot open it. Every browser the person searches from opens the
  * same key, so an index record one browser wrote is readable only there, and a
  * rotation of the mail vault moves only this row's wrapping: the key itself

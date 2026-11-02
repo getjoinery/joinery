@@ -1252,7 +1252,7 @@ class InboundEmailRouter {
 	 *
 	 * $client is set for a Fortress arrival the relay sealed in the browser's
 	 * format (specs/client_custody_mail.md § R9): ['sealed_dek' => the
-	 * `v1.edgeseal.mail.` key, 'vault' => the owner's mail vault, 'generation'
+	 * `v2.edgeseal.mail.` key, 'vault' => the owner's mail vault, 'generation'
 	 * => the generation that key belongs to]. The row takes that key as its own
 	 * in the same transaction as the insert, so a row never exists under a key
 	 * that does not open its body; the owner's browser parses it, not
