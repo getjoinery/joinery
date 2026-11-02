@@ -223,6 +223,13 @@ function drive_list_logic(array $input): LogicResult {
 		);
 	}
 
+	// A Fortress folder's items are opened in the browser: listing one keeps
+	// the window open.
+	if (($current_folder && DriveHelper::folder_level($current_folder) === ProtectionLevel::FORTRESS)
+			|| in_array(ProtectionLevel::FORTRESS, array_column($items, 'protection_level'), true)) {
+		VaultUnlock::noteClientContentRead($user_id);
+	}
+
 	return LogicResult::render(array(
 		'ok'         => true,
 		'view'       => $view,

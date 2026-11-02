@@ -9,6 +9,7 @@
  * the encrypted entries, and wipes them in its onLock handler: every
  * plaintext lives only in this tab's memory and the lock discards it.
  *
+ * @version 2.2 - with an account vault the auto-lock select gives way to 'Locks with your vault'
  * @version 2.1 - a failed call's toast carries the "Report a problem" link (joineryApi.reportLink).
  * @version 2.0 - the ceremony, the session and the idle lock are core's
  * @version 1.1 - lock() clears the clipboard it filled; a bfcache restore locks.
@@ -669,6 +670,12 @@
 	function initAutolockControl() {
 		var sel = $('jy-vault-autolock-select');
 		if (!sel) return;
+		// With an account vault this vault locks with it, not on a clock of its own.
+		if (JoinerySealed.followsServerWindow && JoinerySealed.followsServerWindow()) {
+			var label = sel.closest('label');
+			if (label) { label.textContent = 'Locks with your vault'; }
+			return;
+		}
 		var current = String(JoinerySealed.idleMinutes());
 		if (!sel.querySelector('option[value="' + current + '"]')) {
 			var opt = document.createElement('option');

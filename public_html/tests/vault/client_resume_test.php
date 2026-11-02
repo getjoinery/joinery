@@ -17,12 +17,15 @@
  *    hold, a share that is not 32 bytes, a malformed tab id;
  *  - a half kept for one user is never answered to another in the same
  *    session (login-as);
+ *  - with an account vault, nothing is answered while its window is shut,
+ *    and the half is dropped (a browser-held vault lives with that window);
  *  - at most MAX_PER_SCOPE halves per scope, oldest dropped first;
  *  - the action declares a browser session and session_write, and nothing in
  *    it or the class logs a share.
  *
  * Run: php tests/run.php test-db --filter=client_resume
  *
+ * @version 1.1 - the account vault's window gates a half
  * @version 1.0
  */
 
@@ -117,6 +120,32 @@ try {
 		&& VaultClientResume::get($owner_id, 'drive', $tabs[1]) === null, 'the oldest halves went first');
 	check(VaultClientResume::get($owner_id, 'drive', $tabs[VaultClientResume::MAX_PER_SCOPE + 1]) !== null,
 		'the newest is kept');
+	VaultClientResume::drop();
+
+	// ------------------------------------------------- the account vault's window
+	section('with an account vault, a half is answered only while its window is open');
+
+	$acct = make_user('ResumeAccount');
+	$acct_id = intval($acct->key);
+	$server = vault_fixture_server_vault($acct_id);
+	vault_fixture_client_vault($acct_id, $pub, 'drive');
+	$tab_c = bin2hex(random_bytes(16));
+	$c = $share();
+	VaultClientResume::put($acct_id, 'drive', $tab_c, $c);
+	if (!vault_apcu_usable()) {
+		harness_skip('APCu is off in this CLI, so no window can open');
+	} else {
+		vault_fixture_open_window($acct_id, $server['secret']);
+		check((VaultClientResume::get($acct_id, 'drive', $tab_c)['share'] ?? null) === $c,
+			'the window open: the half is answered');
+		VaultUnlock::lock($acct_id, session_id());
+		check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
+			'the window ended: nothing is answered, so no tab reopens the vault on its own');
+		vault_fixture_open_window($acct_id, $server['secret']);
+		check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
+			'and the half was dropped, not kept for the next window');
+		VaultUnlock::lock($acct_id, session_id());
+	}
 	VaultClientResume::drop();
 
 	// ---------------------------------------------------------------- the action

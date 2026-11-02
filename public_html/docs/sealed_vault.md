@@ -594,6 +594,31 @@ users, so headers never carry an empty gap) — and falls back to a fixed
 bottom-right chip on any theme without a slot, so the idiom holds everywhere
 with zero theme work.
 
+**One clock.** For someone with an account vault, the vaults the browser holds
+(the root, the password vault, Fortress folders and mail) live and lock with
+the account vault's server window. They keep no idle clock of their own
+(`JoinerySealed.followsServerWindow()`): when the window ends, the beacon's
+`joinery:vault-locked` locks them on the open page, and the server answers no
+resume half while the window is shut (`VaultClientResume::get`), so no tab
+reopens one on its own and a page loaded after the window ended drops its
+halves. The chip therefore never reads partly locked because a tab sat still.
+A new tab is the one honest exception: the root's key never reaches the
+server, so a tab that has not held it asks for the unlock once.
+
+Content the browser opens never passes through `secretKey()`, so the actions
+that serve it count it themselves with `VaultUnlock::noteClientContentRead()`:
+the password vault's entry list, a mail thread or thread list holding Fortress
+mail, and a Drive listing of a Fortress folder. It does the same accounting a
+content decrypt does, after the same policy checks, for a browser session
+only and never under background work. Reading what a page already fetched
+sends no request, so a person who only does that locks after
+`vault_unlock_idle_minutes`, the same rule as for content the server rendered.
+A scope held while the window is shut (the root a rotation-owed unlock opens,
+a content vault opened by its own ceremony) has no window to lock it, so it
+keeps the browser's idle clock (`vault_client_autolock_minutes`). A page the
+back/forward cache restores ignores its own meta, which predates any unlock it
+saw, and asks the server for its resume halves.
+
 **The ceremony surface.** `window.JoineryVaultLock` is the one client-side
 unlock/lock ceremony: `unlock()` (resolves `true` on success), `lock()`, and
 `state()`. Consumer surfaces (the mail reader's unlock banners, a
@@ -1592,12 +1617,12 @@ window suite exercises APCu and skips under plain CLI — run it directly with
 
 - `vault_unlock_idle_minutes` (default `30`) — the server unlock window's idle
   timeout.
-- `vault_client_autolock_minutes` (default `15`) — how long a vault the browser
-  holds (the password vault, Fortress folders, Fortress mail) stays unlocked
-  without activity.
-  A person can choose a shorter or longer time for their own browser (the
-  password manager's select; stored in `localStorage` as
-  `jy_vault_client_autolock`).
+- `vault_client_autolock_minutes` (default `15`) — for someone with no account
+  vault, how long a vault the browser holds (the password vault, Fortress
+  folders, Fortress mail) stays unlocked without activity. A person can choose
+  a shorter or longer time for their own browser (the password manager's
+  select; stored in `localStorage` as `jy_vault_client_autolock`). With an
+  account vault it does not apply: see § The lock chip.
 
 No RP-ID, origin, or PRF-context setting here — see [Passkeys](passkeys.md)
 for those (the vault uses the `vault-kek` PRF context).

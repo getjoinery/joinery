@@ -90,6 +90,31 @@ if (!function_exists('apcu_key_info')) {
 	VaultUnlock::close($uid);
 }
 
+section('A read of content the browser opens counts as a content read');
+// One clock (docs/sealed_vault.md § The lock chip): the password vault's
+// entries, Fortress mail and Fortress folders never reach secretKey(), so the
+// actions serving them call noteClientContentRead() instead.
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
+$meta = apcu_fetch($meta_key);
+$meta['content'] = time() - 500;
+apcu_store($meta_key, $meta, 3600);
+check(VaultUnlock::noteClientContentRead($uid) === true, 'with the window open it refreshes the window');
+check((apcu_fetch($meta_key)['content'] ?? 0) >= time() - 5, 'and restarts the idle cap, as a content decrypt does');
+VaultUnlock::setActivitySuppressed(true);
+$meta = apcu_fetch($meta_key);
+$meta['content'] = time() - 500;
+apcu_store($meta_key, $meta, 3600);
+$suppressed = VaultUnlock::noteClientContentRead($uid);
+VaultUnlock::setActivitySuppressed(false);
+check($suppressed === false && (apcu_fetch($meta_key)['content'] ?? 0) <= time() - 400,
+	'background work does not count');
+$meta = apcu_fetch($meta_key);
+$meta['content'] = time() - 1200;
+apcu_store($meta_key, $meta, 3600);
+check(VaultUnlock::noteClientContentRead($uid) === false && !VaultUnlock::isOpen($uid),
+	'past the idle cap it refreshes nothing: the policy ends the window first');
+check(VaultUnlock::noteClientContentRead($uid) === false, 'with no window there is nothing to refresh');
+
 section('lockAll and wipe callbacks');
 $wipes = [];
 VaultUnlock::onWipe(function (int $u, ?string $s) use (&$wipes) { $wipes[] = [$u, $s]; });

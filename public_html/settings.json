@@ -642,7 +642,7 @@
     {
       "name": "vault_client_autolock_minutes",
       "default": "15",
-      "helptext": "How long a vault held in the browser stays unlocked without activity: the password vault and Fortress folders. Each person can choose a shorter or longer time for their own browser from the password manager. This is separate from the server unlock window above.",
+      "helptext": "For someone without an account vault: how long a vault held in the browser stays unlocked without activity (the password vault and Fortress folders). Each such person can choose a shorter or longer time for their own browser from the password manager. With an account vault, browser-held vaults lock with the server unlock window above instead.",
       "group": "vault_unlock",
       "label": "Lock browser-held vaults after (minutes)",
       "type": "number",

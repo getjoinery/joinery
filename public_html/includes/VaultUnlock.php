@@ -42,7 +42,8 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
- * @version 1.19
+ * @version 1.20
+ * @changelog 1.20 - noteClientContentRead(): serving content the browser opens counts as a content read
  * @changelog 1.19 - modelReseal() records the classes it covers (modelResealClasses) and
  *   sweepingPreviousKey() tells a re-seal callback it runs for the chain sweep (VaultChainSweep)
  * @changelog 1.18 - arm() refuses a vault still on an old X25519 key unless the open is a recovery
@@ -617,6 +618,44 @@ class VaultUnlock {
 		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 		SealedEgressGuard::noteScopeOpened($user_id, $scope);
 		return $key;
+	}
+
+	/**
+	 * A read of content the browser opens (the password vault's entries,
+	 * Fortress mail, a Fortress Drive folder) is a content read the person
+	 * asked for, the same thing secretKey() counts: with one clock
+	 * (docs/sealed_vault.md § The lock chip) the browser-held vaults live as
+	 * long as the account vault's window, so someone using only those keeps
+	 * that window open. The action serving such rows calls this; it never
+	 * opens anything itself.
+	 *
+	 * The same accounting as secretKey(), after the same policy checks: a
+	 * browser session only (a borrowing credential refreshes through
+	 * touchActivity()), and not under background work. Returns false when there
+	 * is no open window to refresh.
+	 */
+	public static function noteClientContentRead(int $user_id): bool {
+		if (self::$credential_window !== null || self::$activity_suppressed) {
+			return false;
+		}
+		$sid = self::currentSessionIdOrNull();
+		if ($sid === null) {
+			return false;
+		}
+		$scope = UserEncryptionVault::SCOPE_USER;
+		$slot = self::apcuKey($sid, $user_id, $scope);
+		$key = PoolVaultKey::fromSlot($slot);
+		if ($key === null) {
+			self::observeClosed($user_id, $scope);
+			return false;
+		}
+		if (self::endedByPolicy($sid, $user_id, $scope)) {
+			return false;
+		}
+		$key->storeInSlot($slot, self::idleSeconds());
+		self::touchWindowMarker($user_id, $scope);
+		self::stampMeta($sid, $user_id, $scope, 'content');
+		return true;
 	}
 
 	/**

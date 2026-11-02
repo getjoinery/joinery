@@ -1197,6 +1197,7 @@ class VaultCustodyChange {
  *
  * Never log a share. The API logs no request bodies; keep it that way here.
  *
+ * @version 1.2 - with an account vault, no half is answered while its window is shut
  * @version 1.1 - a half kept before the account's last recovery-code use is refused
  * @version 1.0
  */
@@ -1263,6 +1264,14 @@ class VaultClientResume {
 		$entry = $_SESSION[self::SESSION_KEY][$scope][$tab] ?? null;
 		if (!is_array($entry) || intval($entry['user_id'] ?? 0) !== $user_id || (string)($entry['share'] ?? '') === '') {
 			self::drop($scope, $tab);
+			return null;
+		}
+		// With an account vault, a browser-held vault lives and locks with its
+		// window (docs/sealed_vault.md § The lock chip): once that window has
+		// ended, no tab reopens one on its own, including a page the browser
+		// brings back from its back/forward cache believing it still open.
+		if (UserEncryptionVault::loadForUser($user_id) !== null && !VaultUnlock::isOpen($user_id)) {
+			self::drop();
 			return null;
 		}
 		// A recovery code used since this half was kept ends it, in every

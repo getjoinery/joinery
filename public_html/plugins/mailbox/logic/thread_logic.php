@@ -21,6 +21,7 @@
  * with no name or URL. The response's own `fortress: true` says some message
  * needs the mail key: a client without it shows that and opens the web reader.
  *
+ * @version 1.4.0 - a thread with a Fortress message counts as a content read (VaultUnlock::noteClientContentRead)
  * @version 1.3.0 - Fortress messages travel sealed; `fortress` on the response
  * @version 1.2.1
  */
@@ -59,6 +60,10 @@ function thread_logic(array $input): LogicResult {
 			$fortress = true;
 			break;
 		}
+	}
+	// A Fortress message is opened in the browser: reading it keeps the window open.
+	if ($fortress) {
+		VaultUnlock::noteClientContentRead((int)SessionControl::get_instance()->get_user_id());
 	}
 
 	return LogicResult::render(array(

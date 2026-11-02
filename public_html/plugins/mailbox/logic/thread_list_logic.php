@@ -25,6 +25,7 @@
  * With `device_only` (every mailbox in view is Fortress) there is no `q`: the
  * ids are the whole search, and the term never reaches the server.
  *
+ * @version 1.7.0 - a list with Fortress threads counts as a content read (VaultUnlock::noteClientContentRead)
  * @version 1.6.1 - comment: Trash rows carry no purge_time
  * @version 1.6.0 - device_only: a search over end-to-end mail alone sends no term
  * @version 1.5.0 - device_hits: a browser's search over its own Fortress index
@@ -86,7 +87,12 @@ function thread_list_logic(array $input): LogicResult {
 	$folder_id = isset($input['folder_id']) && $input['folder_id'] !== '' && $input['folder_id'] !== null
 		? intval($input['folder_id']) : null;
 
-	return LogicResult::render($service->listThreads($alias_id, $filters, $page, 50, $folder_id));
+	$listed = $service->listThreads($alias_id, $filters, $page, 50, $folder_id);
+	// Fortress threads are opened in the browser: listing them keeps the window open.
+	if (!empty($listed['fortress'])) {
+		VaultUnlock::noteClientContentRead((int)SessionControl::get_instance()->get_user_id());
+	}
+	return LogicResult::render($listed);
 }
 
 function thread_list_logic_descriptor() {

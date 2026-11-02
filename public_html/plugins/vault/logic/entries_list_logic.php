@@ -26,6 +26,8 @@ function entries_list_logic(array $input): LogicResult {
 		];
 	}
 
+	// Every entry is opened in the browser: this read keeps the window open.
+	VaultUnlock::noteClientContentRead($user_id);
 	return LogicResult::render(['entries' => $out, 'trashed' => $trashed]);
 }
 

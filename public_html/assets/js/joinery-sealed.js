@@ -23,7 +23,14 @@
  * `joinery:vault-scope-locked` (detail.scope). What a consumer wrote into its
  * own DOM and caches is the consumer's to wipe, in its onLock handler.
  *
- * Every open scope locks together: after `vault_client_autolock_minutes` of no
+ * Every open scope locks together. For someone with an account vault they
+ * lock with its server unlock window while it is open: when it ends, the beacon's
+ * 'joinery:vault-locked' locks them (the lock chip calls lockAll()), and they
+ * keep no idle clock of their own, so the one vault never reads partly
+ * locked because a tab sat still. A scope held while that window is shut (the
+ * root a rotation-owed unlock opens) keeps the idle clock below, as does every
+ * scope for someone without an account vault: they lock after
+ * `vault_client_autolock_minutes` of no
  * keyboard or pointer activity (the site's value, on the joinery-vault meta as
  * data-client-idle-minutes; a person's own choice for this browser overrides
  * it, see idleMinutes()), when the page is hidden for good (pagehide), and
@@ -57,6 +64,10 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.15 - with an account vault, browser-held scopes follow its server window while it is open
+ *   (serverWindowOpenNow): no idle clock of their own then, and a page that loads with the window shut reopens
+ *   none of them; a scope held while the window is shut keeps the idle clock; a back/forward-cache restore
+ *   asks the server instead of its stale meta
  * @version 1.14 - adopt(): a session on a different key than the one held replaces it (it was opened from the
  *   server's current wrapping; the held one predates a key change); the same key keeps the held one
  * @version 1.13 - a content vault on an old X25519 key opens only to be rotated (adopt, resume); the root
@@ -136,8 +147,32 @@ window.JoinerySealed = (function () {
 		resetIdle();
 	}
 
+	// With an account vault, the browser-held scopes live and lock with its
+	// server window while that window is open (see the file header). The idle
+	// clock here runs for someone without one, and for a scope held while the
+	// window is shut (the root a rotation-owed unlock opens, a content vault
+	// opened by its own ceremony), which no window would ever lock.
+	function followsServerWindow() {
+		var meta = document.querySelector('meta[name="joinery-vault"]');
+		return !!meta && meta.getAttribute('data-server-vault') !== '0';
+	}
+	// The window as this page rendered it. Trustworthy only at the initial
+	// load: a page the back/forward cache restores carries the meta from
+	// before any unlock it saw.
+	function serverWindowOpenAtLoad() {
+		var meta = document.querySelector('meta[name="joinery-vault"]');
+		return !!meta && meta.getAttribute('content') === 'open';
+	}
+	// The window as the page knows it now: the lock chip's state, which every
+	// unlock and lock on the page updates; the meta when there is no chip.
+	function serverWindowOpenNow() {
+		if (!followsServerWindow()) return false;
+		return window.JoineryVaultLock ? JoineryVaultLock.state() === 'open' : serverWindowOpenAtLoad();
+	}
+
 	function resetIdle() {
 		if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+		if (serverWindowOpenNow()) return;
 		if (!openScopes().length) return;
 		idleTimer = setTimeout(lockAll, idleMinutes() * 60000);
 	}
@@ -160,7 +195,7 @@ window.JoinerySealed = (function () {
 	window.addEventListener('pageshow', function (e) {
 		if (!e.persisted) return;
 		lockAll({ keepResume: true });
-		ready = resumeAll();
+		ready = resumeAll({ fromCache: true });
 	});
 
 	// ---- surviving a reload (the resume halves) ---------------------------------
@@ -182,6 +217,7 @@ window.JoinerySealed = (function () {
 		ssSet(ACTIVITY_KEY, String(now));
 	}
 	function idleExpired() {
+		if (followsServerWindow() && serverWindowOpenAtLoad()) return false;
 		var last = parseInt(ssGet(ACTIVITY_KEY), 10);
 		return last > 0 && (Date.now() - last) > idleMinutes() * 60000;
 	}
@@ -282,7 +318,7 @@ window.JoinerySealed = (function () {
 
 	// Reopen every scope this tab had open. Resolves when each has reopened or
 	// been given up; never rejects.
-	function resumeAll() {
+	function resumeAll(opts) {
 		var scopes = [];
 		try {
 			for (var i = 0; i < sessionStorage.length; i++) {
@@ -291,6 +327,15 @@ window.JoinerySealed = (function () {
 			}
 		} catch (e) { return Promise.resolve(); }
 		if (!scopes.length) return Promise.resolve();
+		// The account vault's window ended while no page was here to hear it:
+		// what lived with it does not come back on its own. Only at the initial
+		// load: a page restored from the back/forward cache carries a meta from
+		// before any unlock it saw, so it asks the server, which answers no half
+		// while the window is shut (VaultClientResume::get).
+		if (!(opts && opts.fromCache) && followsServerWindow() && !serverWindowOpenAtLoad()) {
+			scopes.forEach(dropResume);
+			return Promise.resolve();
+		}
 		return new Promise(function (resolve) {
 			var go = function () {
 				if (!window.joineryApi || !window.VaultKeyring || !window.VaultCrypto) { resolve(); return; }
@@ -821,6 +866,7 @@ window.JoinerySealed = (function () {
 		openScopes: openScopes,
 		labelFor: labelFor,
 		idleMinutes: idleMinutes,
+		followsServerWindow: followsServerWindow,
 		setIdleMinutes: setIdleMinutes,
 		onReseal: onReseal,
 		resealScope: resealScope,
