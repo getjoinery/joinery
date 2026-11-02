@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.119 - v1_census: an unscanned entry may name a column (table.column)
  * @version 1.118 - v1_census: each column's key generations and the chain entries not yet swept
  * @version 1.117 - v1_census (agent 1.103.0): sanitise_v1_census holds each field to its shape; TEMPORARY (v1_key_retirement)
  * @version 1.116 - relay_status carries the map's last push attempt (when, result, reason code)
@@ -4174,7 +4175,11 @@ HTML;
 			'v1_vaults' => ['total' => $count($v1['total'] ?? null), 'old' => $count($v1['old'] ?? null),
 				'by_scope' => $by_scope, 'owners' => $owners],
 			'v2_blobs'  => ['total' => $count($v2['total'] ?? null), 'leftover' => $count($v2['leftover'] ?? null), 'columns' => $columns],
-			'unscanned' => array_values(array_filter($list($d['unscanned'] ?? null, 200, $ident), 'strlen')),
+			'unscanned' => array_values(array_filter($list($d['unscanned'] ?? null, 200, function ($v) use ($ident) {
+				// A table, or one of its columns as table.column.
+				$parts = explode('.', (string)$v);
+				return (count($parts) <= 2 && !in_array('', array_map($ident, $parts), true)) ? implode('.', $parts) : '';
+			}), 'strlen')),
 			'v3_chains' => ['vaults' => $count($v3['vaults'] ?? null), 'entries' => $count($v3['entries'] ?? null),
 				'unswept' => $count($v3['unswept'] ?? null)],
 			'v4_relays' => $relays,

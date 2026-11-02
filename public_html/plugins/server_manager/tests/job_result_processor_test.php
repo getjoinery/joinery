@@ -2465,7 +2465,7 @@ $vc_in = array('findings' => 5,
 			'leftover' => 1, 'no_owner' => 0, 'owners' => array('4500' => 3), 'sample' => 'v1.seal.AAAA',
 			'generations' => array('1' => 2, 'null' => 1, 'DROP' => 5)),
 		array('table' => 'x; DROP', 'column' => 'c', 'prefix' => 'v9.', 'count' => 'many', 'leftover' => 0, 'no_owner' => 0, 'owners' => array('evil' => 1)))),
-	'unscanned' => array('big_table', 'Not A Table'),
+	'unscanned' => array('big_table', 'Not A Table', 'iem_inbound_email_messages.iem_raw_message', 'a.b.c', 'x.Bad Col'),
 	'v3_chains' => array('vaults' => 1, 'entries' => 2, 'unswept' => 1),
 	'v4_relays' => array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => 'yes', 'public' => 'BBBB')),
 	'v5' => array('encrypted' => true, 'sealed_to' => 'this_site', 'recovery_kind' => 'xwing', 'escrows_v1' => array(33, 'x')),
@@ -2482,7 +2482,7 @@ check($vc['v2_blobs']['columns'][0]['owners'] === array(4500 => 3) && $vc['v2_bl
 	&& $vc['v2_blobs']['columns'][1]['table'] === '' && $vc['v2_blobs']['columns'][1]['prefix'] === ''
 	&& $vc['v2_blobs']['columns'][1]['count'] === 'unknown' && $vc['v2_blobs']['columns'][1]['owners'] === array(),
 	'v1_census: each sealed-value column held to its shape', $vc_json);
-check($vc['unscanned'] === array('big_table') && $vc['v4_relays'] === array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => false))
+check($vc['unscanned'] === array('big_table', 'iem_inbound_email_messages.iem_raw_message') && $vc['v4_relays'] === array(array('relay_id' => 1, 'transport_kind' => 'x25519', 'retired_kept' => false))
 	&& $vc['v5']['escrows_v1'] === array(33, 'unknown') && $vc['v6']['old_epochs'] === 'unknown',
 	'v1_census: unscanned tables, relay key kinds, escrow ids and backup kinds kept to their shapes', $vc_json);
 check(JobResultProcessor::sanitise_v1_census('ERROR') === array('read' => false)

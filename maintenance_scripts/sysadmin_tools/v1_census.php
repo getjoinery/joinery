@@ -28,8 +28,8 @@
  *   v5            this node's break-glass copy (whose key, and that key's kind)
  *                 and, on a management node, live escrow rows with a v1 box
  *   v6            backup keys (informational: old backups are the accepted loss)
- *   unscanned     tables the V2 scan could not finish in time (each counts as a
- *                 finding: 20 s a table, four minutes in all)
+ *   unscanned     columns the V2 scan could not finish in time, as table.column
+ *                 (each counts as a finding: 20 s a column, four minutes in all)
  *   findings      what is left to handle; 0 means clear
  *
  * It reads and never writes: every query runs in a READ ONLY transaction. It
@@ -41,6 +41,8 @@
  * Validate with `php -l` only - never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.2 - scans column by column: a column that does not finish in time is the
+ *               one unscanned (table.column), not its whole table
  * @version 1.1 - each V2 column names the key generations its rows record, and V3
  *               counts chain entries not yet swept (VaultChainSweep)
  * @version 1.0
@@ -109,7 +111,8 @@ try {
 	$v2_total = 0;
 	$v2_leftover = 0;
 	// The agent gives an observe word five minutes: four for the scan, each
-	// table at most 20 s. A table not reached or not finished is unscanned.
+	// column at most 20 s. A table not reached is unscanned, and so is a column
+	// not reached or not finished (table.column).
 	$scan_until = microtime(true) + 240;
 	foreach ($text_cols as $table => $columns) {
 		if (microtime(true) > $scan_until) {
@@ -125,18 +128,22 @@ try {
 				}
 			}
 		}
-		$filters = array();
+		// Each column on its own: one large column (a message body) that does not
+		// finish in time leaves only itself unscanned, not its whole table.
 		foreach ($columns as $col) {
+			if (microtime(true) > $scan_until) {
+				$unscanned[] = $table . '.' . $col;
+				continue;
+			}
+			$filters = array();
 			foreach ($prefixes as $p) {
 				$filters[] = $q($col) . " LIKE '" . $p . "%'";
 			}
-		}
-		$db->exec('SAVEPOINT v1_census_table');
-		try {
-			$db->exec("SET LOCAL statement_timeout = '20s'");
-			$hits = (int)$db->query('SELECT count(*) FROM ' . $q($table) . ' WHERE ' . implode(' OR ', $filters))->fetchColumn();
-			if ($hits > 0) {
-				foreach ($columns as $col) {
+			$db->exec('SAVEPOINT v1_census_table');
+			try {
+				$db->exec("SET LOCAL statement_timeout = '20s'");
+				$hits = (int)$db->query('SELECT count(*) FROM ' . $q($table) . ' WHERE ' . implode(' OR ', $filters))->fetchColumn();
+				if ($hits > 0) {
 					foreach ($prefixes as $p) {
 						$groups = $db->query('SELECT ' . ($owner ? $q($owner) : 'NULL') . ' AS owner, count(*) AS n FROM ' . $q($table)
 							. ' WHERE ' . $q($col) . " LIKE '" . $p . "%' GROUP BY 1")->fetchAll(PDO::FETCH_ASSOC);
@@ -173,11 +180,11 @@ try {
 						$v2_leftover += $left;
 					}
 				}
+				$db->exec('RELEASE SAVEPOINT v1_census_table');
+			} catch (PDOException $e) {
+				$db->exec('ROLLBACK TO SAVEPOINT v1_census_table');
+				$unscanned[] = $table . '.' . $col;
 			}
-			$db->exec('RELEASE SAVEPOINT v1_census_table');
-		} catch (PDOException $e) {
-			$db->exec('ROLLBACK TO SAVEPOINT v1_census_table');
-			$unscanned[] = $table;
 		}
 	}
 	$out['v2_blobs'] = array('total' => $v2_total, 'leftover' => $v2_leftover, 'columns' => $blobs);
