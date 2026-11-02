@@ -44,8 +44,6 @@ class SdDevice extends SystemBase {
 	    'sdd_log_queries' => array('type'=>'bool', 'default'=>false),
 	);
 
-	function prepare() {}
-
 	static function createDevice($device, $user, $post_vars){
 		// The owner types this on the device to turn filtering off, so it must not be guessable.
 		$deactivation_pin = random_int(100000, 999999);

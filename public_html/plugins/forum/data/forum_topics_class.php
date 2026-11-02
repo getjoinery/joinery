@@ -68,7 +68,6 @@ class ForumTopic extends SystemBase {
 	}
 
 	function prepare() {
-		parent::prepare();
 		if ($problems = $this->problems()) {
 			throw new DisplayableUserException(implode(' ', $problems));
 		}

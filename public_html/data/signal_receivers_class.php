@@ -137,7 +137,6 @@ class SignalReceiver extends SystemBase {
 
 	/** Refuses, with a message an admin can act on, a receiver that cannot be sent to. */
 	function prepare() {
-		parent::prepare();
 		if (trim((string)$this->get('sgr_name')) === '') {
 			throw new DisplayableUserException('Give it a name.');
 		}

@@ -216,7 +216,7 @@ class InboundImapAccount extends SystemBase {
 		'iia_import_scope'              => array('type'=>'varchar(10)', 'default'=>'future', 'is_nullable'=>false, 'allowed_values'=>array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL)),
 		'iia_import_days'               => array('type'=>'int4', 'default'=>'30'),
 		'iia_create_time'               => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'iia_update_time'               => array('type'=>'timestamp(6)'),
+		'iia_update_time'               => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'iia_delete_time'               => array('type'=>'timestamp(6)'),
 	);
 
@@ -262,7 +262,10 @@ class InboundImapAccount extends SystemBase {
 		if (!in_array($mode, array(self::SYNC_OFF, self::SYNC_PULL, self::SYNC_BOTH), true)) {
 			$mode = self::SYNC_OFF;
 		}
-		if ($mode !== self::SYNC_OFF && !$this->get('iia_supports_condstore')) {
+		// Refused only as the mode is chosen: a poller's save after a capability
+		// read that failed for a moment must not switch a chosen mode off for
+		// good. The ingestor syncs only while CONDSTORE is there as well.
+		if ($mode !== self::SYNC_OFF && !$this->get('iia_supports_condstore') && $this->column_value_changed('iia_sync_mode')) {
 			$mode = self::SYNC_OFF;
 		}
 		$this->set('iia_sync_mode', $mode);
@@ -277,7 +280,6 @@ class InboundImapAccount extends SystemBase {
 		if ($days < 1) { $days = self::IMPORT_DAYS_DEFAULT; }
 		$this->set('iia_import_days', min($days, self::IMPORT_DAYS_MAX));
 
-		$this->set('iia_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	// --- Preset helpers -----------------------------------------------------

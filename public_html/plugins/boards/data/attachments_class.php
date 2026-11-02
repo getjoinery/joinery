@@ -38,18 +38,18 @@ class BoardAttachment extends SystemBase {
 	);
 
 	function prepare() {
-		$result = parent::prepare();
+		$problems = array();
 		$has_file = (bool)$this->get('bat_fil_file_id');
 		$has_url = trim((string)$this->get('bat_url')) !== '';
 		if ($has_file === $has_url) {
-			$result['messages'][] = 'An attachment is either a file or a link.';
-			$result['success'] = false;
+			$problems[] = 'An attachment is either a file or a link.';
 		}
 		if ($has_url && !preg_match('#^https?://#i', trim((string)$this->get('bat_url')))) {
-			$result['messages'][] = 'A link attachment must be an http or https address.';
-			$result['success'] = false;
+			$problems[] = 'A link attachment must be an http or https address.';
 		}
-		return $result;
+		if ($problems) {
+			throw new DisplayableUserException(implode(' ', $problems));
+		}
 	}
 
 	public function boardId(): int {

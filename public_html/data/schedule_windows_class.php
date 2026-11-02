@@ -48,12 +48,13 @@ class ScheduleWindow extends SystemBase {
 
 	// Business-rule extension point. TODO: add cross-field validation, computed
 	// export_as_array() keys, or relationship loading here. Override prepare()
-	// for validation (docs/validation.md); note prepare() is not guaranteed to
-	// run before save() — mandatory transforms belong in save().
+	// for a rule $field_specifications cannot declare (docs/validation.md): a
+	// broken rule throws, a clean-up gives the same row run twice, and it never
+	// calls parent::prepare() (the declared rules are save()'s).
 	// function prepare() {
-	//     $result = parent::prepare();
-	//     // ... your checks; set $result['success'] = false and append messages on failure ...
-	//     return $result;
+	//     if (/* a rule is broken */ false) {
+	//         throw new DisplayableUserException('What is wrong, in words for the user.');
+	//     }
 	// }
 }
 

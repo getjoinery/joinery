@@ -60,7 +60,7 @@ class ManagedHost extends SystemBase {
 		'mgh_mgn_managed_node_id'     => array('type'=>'int8'),
 		'mgh_notes'                => array('type'=>'text'),
 		'mgh_create_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mgh_update_time'          => array('type'=>'timestamp(6)'),
+		'mgh_update_time'          => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mgh_delete_time'          => array('type'=>'timestamp(6)'),
 	);
 
@@ -100,7 +100,6 @@ class ManagedHost extends SystemBase {
 			}
 		}
 
-		$this->set('mgh_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

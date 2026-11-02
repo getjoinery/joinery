@@ -502,10 +502,16 @@ private static function UcAddress($string) {
 				'This address (' . $this->get_address_string(', ') . ') has already been entered in your account.  Please select it from the dropdown instead of re-entering it.');
 		}
 
-		//CAPITALIZATION
-		$this->set('usa_city', ucwords($this->get('usa_city')));
-		$this->set('usa_address1', Address::UcAddress($this->get('usa_address1')));
-		$this->set('usa_address2', Address::UcAddress($this->get('usa_address2')));
+		// Capitalization tidies an address as it is typed: only the parts this
+		// save changes, so an unrelated save never rewrites one stored as it is.
+		if ($this->column_value_changed('usa_city')) {
+			$this->set('usa_city', ucwords((string)$this->get('usa_city')));
+		}
+		foreach (array('usa_address1', 'usa_address2') as $column) {
+			if ($this->column_value_changed($column)) {
+				$this->set($column, Address::UcAddress($this->get($column)));
+			}
+		}
 
 	}
 

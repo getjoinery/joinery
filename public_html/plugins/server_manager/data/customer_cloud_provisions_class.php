@@ -278,7 +278,7 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_expected_host_key'      => array('type'=>'varchar(16)'),
 		'cvp_keys_captured_time'     => array('type'=>'timestamp(6)'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'cvp_update_time'            => array('type'=>'timestamp(6)'),
+		'cvp_update_time'            => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'cvp_delete_time'            => array('type'=>'timestamp(6)'),
 	);
 
@@ -286,7 +286,6 @@ class CustomerCloudProvision extends SystemBase {
 		$this->normalize_addresses();
 		$this->stamp_account();
 		$this->validate_row();
-		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	// Validation lives in save(): prepare() is not guaranteed to run first.
@@ -294,7 +293,6 @@ class CustomerCloudProvision extends SystemBase {
 		$this->normalize_addresses();
 		$this->stamp_account();
 		$this->validate_row();
-		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

@@ -736,7 +736,7 @@ class ImapIngestor {
 		$this->client(); // force connect
 		$this->detectCapabilities();
 
-		if ($this->account->syncEnabled()) {
+		if ($this->account->syncEnabled() && $this->account->supportsCondstore()) {
 			$res = $this->ingestTrackedFolders($maxPerRun, $alias, $domain, $recipient);
 		} else {
 			// Off feed: the single configured folder only, no membership rows — behavior

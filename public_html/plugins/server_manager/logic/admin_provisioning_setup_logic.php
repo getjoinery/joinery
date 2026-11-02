@@ -318,7 +318,7 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 			'provider'  => ucfirst((string)$ca->get('cca_provider')),
 			'who'       => $ca_user->key ? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name')) : 'user #' . $ca->get('cca_usr_user_id'),
 			'user_id'   => (int)$ca->get('cca_usr_user_id'),
-			'connected' => $ca->get_local(trim((string)$ca->get('cca_update_time')) !== '' ? 'cca_update_time' : 'cca_create_time', 'M j, Y g:i a T'),
+			'connected' => $ca->get_local(trim((string)$ca->get('cca_connected_time')) !== '' ? 'cca_connected_time' : 'cca_create_time', 'M j, Y g:i a T'),
 			'state'     => $ca->get('cca_status') !== 'active' ? 'Needs reconnecting (' . $ca->get('cca_status') . ')'
 				: (CustomerCloudAccount::grant_expired($ca) ? 'Expired' : 'Connected'),
 		);

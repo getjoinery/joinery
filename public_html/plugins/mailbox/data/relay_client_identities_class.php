@@ -46,13 +46,10 @@ class RelayClientIdentity extends SystemBase {
 		'rci_sealed_secret_key' => array('type'=>'text', 'is_nullable'=>false),
 		'rci_is_active'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
 		'rci_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'rci_update_time'       => array('type'=>'timestamp(6)'),
+		'rci_update_time'       => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'rci_delete_time'       => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('rci_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** @var array kind => RelayClientIdentity, request-scoped */
 	private static $cache = array();

@@ -102,13 +102,10 @@ class HostedTrial extends SystemBase {
 		'htr_pushed_time'         => array('type'=>'timestamp(6)'),
 		'htr_note'                => array('type'=>'text'),
 		'htr_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'htr_update_time'         => array('type'=>'timestamp(6)'),
+		'htr_update_time'         => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'htr_delete_time'         => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('htr_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (!$this->get('htr_cvp_customer_cloud_provision_id')) {
@@ -118,7 +115,6 @@ class HostedTrial extends SystemBase {
 		if (!in_array($state, array_merge(self::LIVE_STATES, array(self::STATE_SHUTDOWN, self::STATE_TRANSFERRED)), true)) {
 			throw new HostedTrialException("Unknown hosted state '{$state}'.");
 		}
-		$this->set('htr_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

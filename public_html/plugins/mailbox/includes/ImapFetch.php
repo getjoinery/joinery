@@ -61,7 +61,10 @@ class ImapFetch {
 		$ingestor = new ImapIngestor($account, $client);
 		$ingestor->setDeadline($deadline);
 		try {
-			if ($account->syncEnabled()) {
+			// Sync runs while the mode asks for it and the server last said it
+			// has CONDSTORE; a capability read that failed for a moment drops
+			// one cycle to a plain fetch, and the next detection brings it back.
+			if ($account->syncEnabled() && $account->supportsCondstore()) {
 				$syncer = new ImapSyncer($account, $ingestor);
 				$t = microtime(true);
 				$syncer->prepare();                 // capabilities + folder discovery

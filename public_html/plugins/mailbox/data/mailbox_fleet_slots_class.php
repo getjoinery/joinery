@@ -81,7 +81,7 @@ class MailboxFleetSlot extends SystemBase {
 		'mft_entitlement_check_time'=> array('type'=>'timestamp(6)'),
 		'mft_entitlement_lapse_time'=> array('type'=>'timestamp(6)'),
 		'mft_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mft_update_time'           => array('type'=>'timestamp(6)'),
+		'mft_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mft_delete_time'           => array('type'=>'timestamp(6)'),
 	);
 
@@ -89,9 +89,6 @@ class MailboxFleetSlot extends SystemBase {
 	// is exactly right — the enrolled customer touches their own slot, the
 	// operator's staff touch all of them.
 
-	function prepare() {
-		$this->set('mft_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** The tenant's live (non-terminal) slot for a user, or null. */
 	public static function activeForUser(int $user_id): ?MailboxFleetSlot {

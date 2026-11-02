@@ -37,7 +37,6 @@ class SdScheduledBlock extends SystemBase {
 	    'sdb_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {}
 
 	/** The member a block's device belongs to (sdd_usr_user_id), or 0. */
 	public static function ownerOfBlock(int $block_id): int {

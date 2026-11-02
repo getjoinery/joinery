@@ -99,19 +99,11 @@ class RelayCloudProvision extends SystemBase {
 		'rcl_mfs_mailbox_fleet_shard_id'     => array('type'=>'int8'),
 		'rcl_error'           => array('type'=>'text'),
 		'rcl_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'rcl_update_time'     => array('type'=>'timestamp(6)'),
+		'rcl_update_time'     => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'rcl_delete_time'     => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('rcl_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
-	// Mandatory stamping lives in save(): prepare() is not guaranteed to run first.
-	function save($debug = false) {
-		$this->set('rcl_update_time', gmdate('Y-m-d H:i:s'));
-		return parent::save($debug);
-	}
 
 	/** Seal the provider access token onto the row (not saved here). */
 	public function sealToken(string $access_token): void {

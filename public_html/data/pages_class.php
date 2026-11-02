@@ -201,7 +201,6 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	 * saves untouched.
 	 */
 	function prepare() {
-		parent::prepare();
 
 		$link = (string)$this->get('pag_link');
 		if ($link !== '' && $this->value_changes('pag_link') && $link !== SystemBase::slug_form($link)) {

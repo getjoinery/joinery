@@ -2919,7 +2919,14 @@ abstract class SystemBase {
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', 'now()');
-				$this->save_checked_as('soft_delete');
+				// A row going to the trash is not judged by the rules for
+				// rows in use: one that breaks them must still be deletable.
+				$this->deleting = true;
+				try {
+					$this->save_checked_as('soft_delete');
+				} finally {
+					$this->deleting = false;
+				}
 				return true;				
 			}
 		}
@@ -3270,14 +3277,48 @@ abstract class SystemBase {
 		}
 	}
 
-	// To prepare it is without error
-	function prepare() {
-		// Check unique constraints defined in field_specifications
-		$duplicate = $this->check_unique_constraints();
-		if ($duplicate) {
-			// Use DisplayableUserException for user-friendly errors
-			throw new DisplayableUserException($duplicate['message']);
+	/** 'log' while the [MODEL_RULES] log is burned down; 'refuse' once it is clean. */
+	const MODEL_RULES = 'log';
+
+	/** Set while save() runs prepare(), so a prepare() that saves does not loop. */
+	private static $running_model_rules = false;
+
+	/** Set by soft_delete() around its save: the rules do not judge a row going to the trash. */
+	private $deleting = false;
+
+	/** save()'s call of prepare(): refused, or logged while MODEL_RULES is 'log'. */
+	private function run_model_rules(): void {
+		if (self::$running_model_rules || $this->deleting) {
+			return;
 		}
+		self::$running_model_rules = true;
+		try {
+			$this->prepare();
+		} catch (Throwable $e) {
+			if (static::MODEL_RULES === 'refuse') {
+				throw $e;
+			}
+			$where = PHP_SAPI === 'cli' ? 'cli ' . ($_SERVER['argv'][0] ?? '?')
+				: (($_SERVER['REQUEST_METHOD'] ?? '?') . ' ' . ($_SERVER['REQUEST_URI'] ?? '?'));
+			error_log('[MODEL_RULES] ' . static::class . ' (' . ($this->key ? 'key ' . $this->key : 'new') . ') at ' . $where
+				. ': ' . get_class($e) . ': ' . $e->getMessage() . "\n" . (new Exception())->getTraceAsString());
+		} finally {
+			self::$running_model_rules = false;
+		}
+	}
+
+	/**
+	 * This model's own rules beyond what $field_specifications declares: a
+	 * rule broken throws (a DisplayableUserException, or the model's own
+	 * exception), and a clean-up must give the same row when run twice.
+	 * Declared rules -- required, allowed values, validation, unique and
+	 * unique_with -- are save()'s, so an override never calls the parent. A
+	 * rule never saves anything: save() runs it under a guard that would skip
+	 * the rules of any row it saved.
+	 * save() runs it on every write (run_model_rules()); it stays callable on
+	 * its own, to check input early (before charging a card, say).
+	 */
+	function prepare() {
 	}
 	
 	
@@ -3331,6 +3372,31 @@ abstract class SystemBase {
 		}
 		if (!$this->access_checked) {
 			$this->enforce_access('write');
+		}
+
+		// The model's own rules run on every save, whoever saves it (spec
+		// model_rules_on_every_save). Until the log they write is clean, a rule
+		// that would refuse is logged as [MODEL_RULES] and the save goes ahead;
+		// MODEL_RULES = 'refuse' then refuses it. prepare() is safe to run again
+		// after a caller ran it, so one that did changes nothing.
+		$this->run_model_rules();
+
+		// A column declared 'stamp_on_save' holds when the row was last written,
+		// whoever writes it. A time that means something else
+		// (since when a state has held, when a draft was frozen) is a column of
+		// its own that the code moving it sets on purpose.
+		// Only a save that writes something else moves it, so a save with
+		// nothing to write still runs no UPDATE.
+		$stamp_columns = array();
+		foreach (static::$field_specifications as $field_name => $spec) {
+			if (!empty($spec['stamp_on_save'])) {
+				$stamp_columns[] = $field_name;
+			}
+		}
+		if ($stamp_columns && ($this->key === NULL || array_diff(array_keys($this->changed), $stamp_columns))) {
+			foreach ($stamp_columns as $field_name) {
+				$this->set($field_name, gmdate('Y-m-d H:i:s'));
+			}
 		}
 		
 		// EXACT SAME BEHAVIOR AS CURRENT - just reading from field_specifications instead of separate arrays

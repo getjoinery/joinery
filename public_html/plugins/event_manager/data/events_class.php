@@ -522,9 +522,6 @@ function get_leader() {
 	}	
 
 	function prepare() {
-		if ($this->data === NULL) {
-			throw new eventException('This request has no data.');
-		}
 		// Both local times are in the event's own timezone, so they compare directly.
 		$start = (string)$this->get('evt_start_time_local');
 		$end = (string)$this->get('evt_end_time_local');

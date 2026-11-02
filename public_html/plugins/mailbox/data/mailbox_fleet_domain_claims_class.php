@@ -43,7 +43,7 @@ class MailboxFleetDomainClaim extends SystemBase {
 		'mfd_status'       => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending'),
 		'mfd_verify_time'  => array('type'=>'timestamp(6)'),
 		'mfd_create_time'  => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mfd_update_time'  => array('type'=>'timestamp(6)'),
+		'mfd_update_time'  => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mfd_delete_time'  => array('type'=>'timestamp(6)'),
 	);
 
@@ -51,9 +51,6 @@ class MailboxFleetDomainClaim extends SystemBase {
 	// correct for the REST surface. The fleet_* actions mediate customer access
 	// (a claim is reachable only through the customer's own slot).
 
-	function prepare() {
-		$this->set('mfd_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** The full TXT record host the tenant must create. */
 	public function challengeHost(): string {

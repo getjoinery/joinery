@@ -700,14 +700,22 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public function prepare() {
 		// Uniqueness and the email-or-username rule are save()'s (check_identifiers()),
 		// which every write passes through; this is the friendly address check.
-		if ($this->get('usr_email') !== NULL && !LibraryFunctions::IsValidEmail($this->get('usr_email'))) {
+		// The friendly word on an address that is not one, as it is set or
+		// changed. Its form only: whether the domain takes mail is the declared
+		// email rule's, which save() runs (asking DNS once, not twice).
+		if ($this->get('usr_email') !== NULL && $this->column_value_changed('usr_email')
+				&& !filter_var($this->get('usr_email'), FILTER_VALIDATE_EMAIL)) {
 			throw new DisplayableUserException(
 				'Sorry, that email address "'.$this->get('usr_email').'" you entered is invalid.  Please try again.');
 		}
 
-		//CAPITALIZATION
-		$this->set('usr_first_name', User::UcName($this->get('usr_first_name')));
-		$this->set('usr_last_name', User::UcName($this->get('usr_last_name')));
+		// Capitalization tidies a name as it is typed: only a name this save
+		// changes, so an unrelated save never rewrites one stored as it is.
+		foreach (array('usr_first_name', 'usr_last_name') as $column) {
+			if ($this->column_value_changed($column)) {
+				$this->set($column, User::UcName($this->get($column)));
+			}
+		}
 	}
 
 	/**

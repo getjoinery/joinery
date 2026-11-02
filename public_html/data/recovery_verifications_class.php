@@ -47,7 +47,6 @@ class RecoveryVerification extends SystemBase {
 		if (!in_array($method, array(self::METHOD_CEREMONY, self::METHOD_DRY_RUN, self::METHOD_ATTESTED), true)) {
 			throw new Exception('Unknown verification method: ' . $method);
 		}
-		return parent::prepare();
 	}
 
 	/** Append a ledger row. Returns the saved model. */

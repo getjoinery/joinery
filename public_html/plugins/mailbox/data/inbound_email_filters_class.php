@@ -149,7 +149,7 @@ class InboundEmailFilter extends SystemBase {
 		'ief_device_backlog_requested_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 
 		'ief_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ief_update_time' => array('type'=>'timestamp(6)'),
+		'ief_update_time' => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'ief_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
@@ -247,7 +247,6 @@ class InboundEmailFilter extends SystemBase {
 	}
 
 	function prepare() {
-		$this->set('ief_update_time', gmdate('Y-m-d H:i:s'));
 
 		// A filter must do something to one of the criteria — reject an all-empty
 		// rule so a stray save can't match (and act on) every message.

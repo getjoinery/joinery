@@ -100,12 +100,9 @@ class MailExportRun extends SystemBase {
 		'mxr_finish_time'                => array('type'=>'timestamp(6)'),
 		// When the person was told it is ready (MailExport::announceReady).
 		'mxr_announce_time'              => array('type'=>'timestamp(6)'),
-		'mxr_update_time'                => array('type'=>'timestamp(6)'),
+		'mxr_update_time'                => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 	);
 
-	function prepare() {
-		$this->set('mxr_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** Where this run's pieces live. */
 	function dir(): string {

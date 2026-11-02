@@ -249,7 +249,6 @@ class PageContent extends SystemBase {
 	 * save changes it, so a stored row that predates a rule still saves.
 	 */
 	function prepare() {
-		parent::prepare();
 
 		$slug = (string)$this->get('pac_location_name');
 		if ($slug !== '' && $this->value_changes('pac_location_name') && $slug !== $this->generate_slug($slug)) {

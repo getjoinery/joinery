@@ -49,6 +49,7 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 		}
 		$account->storeToken($token);
 		$account->set('cca_status', 'active');
+		$account->set('cca_connected_time', gmdate('Y-m-d H:i:s'));
 		$account->set('cca_account_name', self::account_name($provider, $token->getAccessToken()));
 		$account->save();
 

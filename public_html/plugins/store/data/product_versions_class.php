@@ -62,7 +62,6 @@ class ProductVersion extends SystemBase {	public static $prefix = 'prv';
 	 * predates a rule still saves untouched.
 	 */
 	function prepare(){
-		parent::prepare();
 
 		$price_type = (string)$this->get('prv_price_type');
 		if($this->value_changes('prv_price_type')){

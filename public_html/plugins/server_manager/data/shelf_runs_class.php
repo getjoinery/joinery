@@ -95,13 +95,10 @@ class ShelfRun extends SystemBase {
 		// when that was: tried again a day after the last attempt.
 		'svr_ledger_problem'        => array('type'=>'text'),
 		'svr_ledger_tried_time'     => array('type'=>'timestamp(6)'),
-		'svr_update_time'           => array('type'=>'timestamp(6)'),
+		'svr_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'svr_delete_time'           => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('svr_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (!(int)$this->get('svr_svt_service_tenant_id') === !(int)$this->get('svr_mgn_managed_node_id')) {
@@ -113,7 +110,6 @@ class ShelfRun extends SystemBase {
 		if (trim((string)$this->get('svr_base_key')) === '') {
 			throw new ShelfRunException('A backup storage run has a base key.');
 		}
-		$this->set('svr_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

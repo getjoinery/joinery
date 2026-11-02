@@ -43,7 +43,10 @@ class CustomerCloudAccount extends SystemBase {
 		'cca_account_name'  => array('type'=>'varchar(255)'),
 		'cca_status'        => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'active'),
 		'cca_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'cca_update_time'   => array('type'=>'timestamp(6)'),
+		'cca_update_time'   => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
+		// When the owner last connected the account (the sign-in to the
+		// provider): a refresh, a revoke or any other save leaves it.
+		'cca_connected_time' => array('type'=>'timestamp(6)'),
 		'cca_delete_time'   => array('type'=>'timestamp(6)'),
 	);
 
@@ -68,7 +71,6 @@ class CustomerCloudAccount extends SystemBase {
 		if (empty($this->get('cca_provider'))) {
 			throw new CustomerCloudAccountException('Provider is required.');
 		}
-		$this->set('cca_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

@@ -87,7 +87,7 @@ class EntityPhoto extends SystemBase {
 			$limits_json = $settings->get_setting('max_entity_photos', true, true);
 			if ($limits_json) {
 				$limits = json_decode($limits_json, true);
-				if (is_array($limits) && isset($limits[$entity_type])) {
+				if (is_array($limits) && $entity_type !== null && isset($limits[$entity_type])) {
 					$max = (int) $limits[$entity_type];
 
 					// Check current count

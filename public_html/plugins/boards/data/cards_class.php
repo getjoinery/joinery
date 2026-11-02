@@ -85,12 +85,11 @@ class BoardCard extends SystemBase {
 	);
 
 	function prepare() {
-		$result = parent::prepare();
+		$problems = array();
 
 		$title = $this->get('bcd_title');
 		if ($title !== null && trim((string)$title) === '') {
-			$result['messages'][] = 'A card needs a title.';
-			$result['success'] = false;
+			$problems[] = 'A card needs a title.';
 		}
 
 		// A card sits in a list of its own board, whoever is setting the column
@@ -102,11 +101,12 @@ class BoardCard extends SystemBase {
 			$q->execute(array($list_id));
 			$list_board = $q->fetchColumn();
 			if ($list_board === false || (int)$list_board !== $board_id) {
-				$result['messages'][] = 'That list is not on this card\'s board.';
-				$result['success'] = false;
+				$problems[] = 'That list is not on this card\'s board.';
 			}
 		}
-		return $result;
+		if ($problems) {
+			throw new DisplayableUserException(implode(' ', $problems));
+		}
 	}
 
 	public function boardId(): int {

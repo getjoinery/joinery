@@ -46,9 +46,7 @@ class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	);
 
 /*
-	function prepare() {
-
-	}	
+	
 	*/
 	
 }

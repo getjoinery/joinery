@@ -74,7 +74,7 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 function prepare() {	
 		//CHECK FOR DUPLICATES
 		if($this->check_for_duplicate(array('pst_link'))){
-			throw new SystemAuthenticationError(
+			throw new DisplayableUserException(
 					'This page link is a duplicate.');
 		}
 	}	

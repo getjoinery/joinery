@@ -156,7 +156,7 @@ class ManagementJob extends SystemBase {
 		'mjb_started_time'      => array('type'=>'timestamp(6)'),
 		'mjb_completed_time'    => array('type'=>'timestamp(6)'),
 		'mjb_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mjb_update_time'       => array('type'=>'timestamp(6)'),
+		'mjb_update_time'       => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mjb_delete_time'       => array('type'=>'timestamp(6)'),
 	);
 
@@ -780,7 +780,6 @@ class ManagementJob extends SystemBase {
 		if (empty($this->get('mjb_job_type'))) {
 			throw new ManagementJobException('Job type is required.');
 		}
-		$this->set('mjb_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

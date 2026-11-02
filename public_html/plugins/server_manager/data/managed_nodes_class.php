@@ -508,7 +508,7 @@ class ManagedNode extends SystemBase {
 		// credential for the machine's account.
 		'mgn_mtr_machine_transfer_id' => array('type'=>'int8'),
 		'mgn_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mgn_update_time'         => array('type'=>'timestamp(6)'),
+		'mgn_update_time'         => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mgn_delete_time'         => array('type'=>'timestamp(6)'),
 	);
 
@@ -1504,7 +1504,6 @@ class ManagedNode extends SystemBase {
 			}
 		}
 
-		$this->set('mgn_update_time', gmdate('Y-m-d H:i:s'));
 	}
 }
 

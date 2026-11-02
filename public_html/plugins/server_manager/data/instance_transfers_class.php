@@ -138,13 +138,10 @@ class InstanceTransfer extends SystemBase {
 		// Which emails went, and when: {invite, code_ready, code_expired, done, failed, …}.
 		'itx_email_times'      => array('type'=>'jsonb'),
 		'itx_create_time'      => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'itx_update_time'      => array('type'=>'timestamp(6)'),
+		'itx_update_time'      => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'itx_delete_time'      => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('itx_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (!(int)$this->get('itx_cvp_customer_cloud_provision_id')) {
@@ -158,7 +155,6 @@ class InstanceTransfer extends SystemBase {
 		if (!in_array($state, self::TOKEN_STATES, true) && trim((string)$this->get('itx_token_sealed')) !== '') {
 			$this->set('itx_token_sealed', null);
 		}
-		$this->set('itx_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

@@ -154,13 +154,10 @@ class ServiceTenant extends SystemBase {
 		'svt_notice'             => array('type'=>'text'),
 		'svt_note'               => array('type'=>'text'),
 		'svt_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'svt_update_time'        => array('type'=>'timestamp(6)'),
+		'svt_update_time'        => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'svt_delete_time'        => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('svt_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (!(int)$this->get('svt_usr_user_id')) {
@@ -173,7 +170,6 @@ class ServiceTenant extends SystemBase {
 		if (!in_array($state, self::STATES, true)) {
 			throw new ServiceTenantException("Unknown tenant state '{$state}'.");
 		}
-		$this->set('svt_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

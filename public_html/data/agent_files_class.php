@@ -138,6 +138,9 @@ class AgentFile extends SystemBase {
 	}
 
 	public function save($debug = false) {
+		// These rules refuse here today; save() runs them again, log-only,
+		// until SystemBase::MODEL_RULES refuses (spec model_rules_on_every_save
+		// WP5), when this call goes.
 		$this->prepare();
 
 		// Determine whether this save should produce a new content version snapshot.

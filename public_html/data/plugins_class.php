@@ -287,8 +287,6 @@ class Plugin extends SystemBase {
 		if ($plugin_name && !self::is_valid_plugin_name($plugin_name)) {
 			throw new PluginException('Invalid plugin name: ' . $plugin_name);
 		}
-		
-		return parent::prepare();
 	}
 
 	/**

@@ -64,13 +64,10 @@ class MailboxFleetShard extends SystemBase {
 		// unknown must never render as up to date.
 		'mfs_provisioned_version'    => array('type'=>'varchar(20)'),
 		'mfs_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'mfs_update_time'            => array('type'=>'timestamp(6)'),
+		'mfs_update_time'            => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mfs_delete_time'            => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('mfs_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** Active (non-evicted, non-deleted) slot count on this shard. */
 	public function slotCount(): int {

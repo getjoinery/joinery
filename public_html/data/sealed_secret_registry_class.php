@@ -47,12 +47,9 @@ class SealedSecretRegistry extends SystemBase {
 		'ssr_dead_count'    => array('type'=>'int4', 'default'=>0, 'is_nullable'=>false),
 		'ssr_checked_time'  => array('type'=>'timestamp(6)'),
 		'ssr_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ssr_update_time'   => array('type'=>'timestamp(6)'),
+		'ssr_update_time'   => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 	);
 
-	function prepare() {
-		$this->set('ssr_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/**
 	 * Seed/refresh the registry table from the on-disk manifests.

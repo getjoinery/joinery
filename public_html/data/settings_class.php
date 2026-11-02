@@ -37,25 +37,19 @@ class Setting extends SystemBase {	public static $prefix = 'stg';
 	    'stg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);	
 
-private function _check_for_duplicate_setting() {
-		
-		$settings = Globalvars::get_instance();
-		if($settings->get_setting($this->get('stg_name'))){
-			return true;
+/**
+	 * Is there already a row of this name? Asked of the table, not of
+	 * Globalvars: a declared setting with no row yet reads as its default
+	 * there, which is not a row. A row with no name is save()'s to refuse.
+	 */
+	private function _check_for_duplicate_setting() {
+		$name = (string)$this->get('stg_name');
+		if ($name === '') {
+			return false;
 		}
-		
-		$count = new MultiSetting(array(
-			'setting_name' => $this->get('stg_name'),
-		));
-		
-		if ($count->count_all() > 0) {
-						echo 'duplicate';
-			exit();
-			$count->load();
-			return $count->get(0);
-		}
-		return NULL;
-	}		
+		$rows = new MultiSetting(array('setting_name' => $name));
+		return $rows->count_all() > 0;
+	}
 
 	/**
 	 * A saved row drops its name from Globalvars' memo, so a read later in

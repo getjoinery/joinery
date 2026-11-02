@@ -140,6 +140,7 @@ When `as:` is absent, the form type falls back to a mechanical DB-type default (
 | `unique_with` | multi-column unique constraint (array of column names) |
 | `default` | default value applied on INSERT (e.g. `0`, `"now()"`) |
 | `zero_on_create` | set to 0 on create when null |
+| `stamp_on_save` | set to the current UTC time on an insert and on any update that writes another column (an `_update_time` column) |
 | `nullable` | overrides the `is_nullable` default (which is `!required`) |
 | `as` / `options` | semantic form type and select options (above) |
 | `placeholder` / `help` | passed through to the rendered form field |

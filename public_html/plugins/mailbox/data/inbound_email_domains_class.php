@@ -195,7 +195,7 @@ class InboundEmailDomain extends SystemBase {
 		'ied_dkim_pending_public_dns' => array('type'=>'text', 'is_nullable'=>true),
 		'ied_forwarding_subdomain'  => array('type'=>'varchar(255)', 'is_nullable'=>true),  // e.g. 'fwd.example.com' (per-domain only)
 		'ied_create_time'       => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ied_update_time'       => array('type'=>'timestamp(6)'),
+		'ied_update_time'       => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'ied_delete_time'       => array('type'=>'timestamp(6)'),
 	);
 
@@ -283,7 +283,6 @@ class InboundEmailDomain extends SystemBase {
 			}
 		}
 
-		$this->set('ied_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

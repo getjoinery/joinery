@@ -126,7 +126,6 @@ class AiMemory extends SystemBase {
 
     function prepare() {
         $this->validateRow();
-        parent::prepare();
     }
 
     function save($debug = false) {

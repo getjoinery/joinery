@@ -104,12 +104,9 @@ class InboundImapFolder extends SystemBase {
 		// push step issues the IMAP CREATE and clears this flag (specs/two_way_imap_sync.md §14).
 		'iif_pending_remote_create'       => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'iif_create_time'                 => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'iif_update_time'                 => array('type'=>'timestamp(6)'),
+		'iif_update_time'                 => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 	);
 
-	function prepare() {
-		$this->set('iif_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** This folder is the coverage source (\All / [Gmail]/All Mail), not a membership folder. */
 	function isCoverage(): bool {

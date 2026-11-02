@@ -67,13 +67,14 @@ class Board extends SystemBase {
 	);
 
 	function prepare() {
-		$result = parent::prepare();
+		$problems = array();
 		$name = trim((string)$this->get('bbd_name'));
 		if ($name === '' && $this->get('bbd_name') !== null) {
-			$result['messages'][] = 'A board needs a name.';
-			$result['success'] = false;
+			$problems[] = 'A board needs a name.';
 		}
-		return $result;
+		if ($problems) {
+			throw new DisplayableUserException(implode(' ', $problems));
+		}
 	}
 
 	public function is_archived(): bool {

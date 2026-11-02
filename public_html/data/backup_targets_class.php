@@ -110,7 +110,7 @@ class BackupTarget extends SystemBase {
 		// this machine sweeps: prefix => {time, keys, left, refused, problem}.
 		'bkt_hidden_sweep'    => array('type'=>'jsonb'),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'bkt_update_time'     => array('type'=>'timestamp(6)'),
+		'bkt_update_time'     => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),
 	);
 
@@ -137,7 +137,6 @@ class BackupTarget extends SystemBase {
 		}
 		$this->assert_own_name();
 
-		$this->set('bkt_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

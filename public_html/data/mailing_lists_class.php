@@ -281,12 +281,6 @@ function get_subscribed_users($return='object'){
 		}
 	}
 	
-	function prepare() {
-		if ($this->data === NULL) {
-			throw new MailingListException('This request has no data.');
-		}
-		
-	}
 
 	// ===== Entity Photo Methods =====
 

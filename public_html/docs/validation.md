@@ -383,10 +383,11 @@ $user->set('usr_username', $_POST['username']);
 $user->set('usr_password', $_POST['password']);
 
 try {
-    // This triggers all validation from field_specifications
+    // The model's own rules (User: a well-formed address)
     $user->prepare();
 
-    // If prepare() succeeds, save to database
+    // save() checks every declared field rule (required, allowed values,
+    // validation, unique) and refuses a row that breaks one
     $user->save();
 
     echo "User created successfully!";
@@ -420,16 +421,15 @@ This ensures (usr_code, org_id) combination is unique.
 
 ### Validation in Model Methods
 
-Override `prepare()` for custom validation:
+Override `prepare()` for a rule `$field_specifications` cannot declare. A broken
+rule throws; a clean-up gives the same row when run twice. The declared rules
+are `save()`'s, so an override never calls `parent::prepare()`:
 
 ```php
 class Product extends SystemBase {
     // ... field specifications ...
 
     function prepare() {
-        // Call parent validation first
-        parent::prepare();
-
         // Custom validation logic
         if ($this->get('pro_price') < 0) {
             throw new DisplayableUserException('Price cannot be negative');
@@ -574,8 +574,6 @@ class Product extends SystemBase {
 
     // Custom validation
     function prepare() {
-        parent::prepare();
-
         // Business logic validation
         if ($this->get('pro_price') < 0.01) {
             throw new DisplayableUserException('Price must be at least $0.01');

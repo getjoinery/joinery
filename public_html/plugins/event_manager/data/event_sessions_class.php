@@ -196,11 +196,6 @@ public static function GetBySessionNumber($event_id, $session_number){
 	}
 	
 
-	function prepare() {
-		if ($this->data === NULL) {
-			throw new eventException('This request has no data.');
-		}
-	}
 
 	function save($debug=false) {
 		// Derive UTC from local + the parent event's timezone (local is source of

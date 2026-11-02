@@ -165,6 +165,14 @@ class Example extends SystemBase
     //                                string as time input, and the schema
     //                                backfill renders them unquoted.
     // 'zero_on_create' => true     - Set to 0 when creating if NULL
+    // 'stamp_on_save' => true      - save() sets it to the current UTC time on
+    //                                an insert and on any update that writes
+    //                                another column (a save with nothing to
+    //                                write leaves it): a '{prefix}_update_time'
+    //                                column. A time with
+    //                                another meaning (since a state began, when
+    //                                a draft was frozen) gets a column of its
+    //                                own, set on purpose by the code moving it.
     // 'insert_only' => true        - save() writes it when the row is created
     //                                and never afterwards, even when set; its
     //                                owner moves it with a targeted UPDATE, and
@@ -449,30 +457,29 @@ class Example extends SystemBase
     }
     
     /**
-     * CUSTOM METHOD EXAMPLE: Validate before save
-     * 
-     * Override prepare() to add custom validation logic
+     * CUSTOM METHOD EXAMPLE: rules $field_specifications cannot declare
+     *
+     * A broken rule throws; a clean-up must give the same row when run twice.
+     * Required, allowed values, validation and unique are save()'s, so this
+     * never calls parent::prepare().
      */
-    function prepare() 
+    function prepare()
     {
-        // Call parent validation first
-        $result = parent::prepare();
-        
-        // Add custom validation (required fields are handled automatically by parent)
+        $problems = array();
+
         $name = $this->get('exm_name');
         if (!empty($name) && strlen($name) < 3) {
-            $result['messages'][] = 'Name must be at least 3 characters';
-            $result['success'] = false;
+            $problems[] = 'Name must be at least 3 characters.';
         }
-        
-        // Validate price if provided
+
         $price = $this->get('exm_price');
         if (!is_null($price) && $price < 0) {
-            $result['messages'][] = 'Price cannot be negative';
-            $result['success'] = false;
+            $problems[] = 'Price cannot be negative.';
         }
-        
-        return $result;
+
+        if ($problems) {
+            throw new DisplayableUserException(implode(' ', $problems));
+        }
     }
 
     // ====================================================================
@@ -591,13 +598,15 @@ class MultiExample extends SystemMultiBase
  * $example->set('exm_name', 'Test Example');           // Required field
  * $example->set('exm_description', 'This is a test');
  * $example->set('exm_price', 19.99);
- * $result = $example->prepare();
- * if ($result['success']) {
- *     $example->save();
+ * try {
+ *     $example->prepare();   // this model's own rules; throws when one is broken
+ *     $example->save();      // the declared rules, then the write
  *     echo "Created example with ID: " . $example->get('exm_example_id');
  *     echo "Status (default): " . $example->get('exm_status');      // Will be 1 (default)
  *     echo "Counter (zero): " . $example->get('exm_counter');       // Will be 0 (zero_on_create)
  *     echo "Active (default): " . $example->get('exm_is_active');   // Will be true (default)
+ * } catch (DisplayableUserException $e) {
+ *     echo "Not saved: " . $e->getMessage();
  * }
  * 
  * // Load existing record

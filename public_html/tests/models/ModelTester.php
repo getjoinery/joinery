@@ -259,7 +259,11 @@ class ModelTester {
                 if (is_string($stored_value) && preg_match('/^char(acter)?\\s*\\(/i', $field_type)) {
                     $stored_value = rtrim($stored_value);
                 }
-                $this->assert_equals($new_value, $stored_value, "Field should be updated");
+                // A model's own rules may tidy a value as save() writes it (a
+                // slug made lower-case and dashed): what is stored is what those
+                // rules make of the value, not necessarily the value as typed.
+                $expected_value = $this->value_after_model_rules($updateable_field, $new_value);
+                $this->assert_equals($expected_value, $stored_value, "Field should be updated");
                 if ($debug) echo "Updated $updateable_field to $new_value<br>\n";
                 if ($verbose) echo "Update test completed<br>\n"; flush();
             }
@@ -1443,6 +1447,25 @@ class ModelTester {
     /**
      * Find a field that can be updated for testing
      */
+    /**
+     * What the model's own rules (prepare(), which save() runs) make of a
+     * value for one field, read off a fresh copy holding only that value: as
+     * far as the rules got, when one about another field stops them.
+     */
+    protected function value_after_model_rules($field, $value) {
+        $class = $this->model_class;
+        $probe = null;
+        try {
+            $probe = new $class(NULL);
+            $probe->set($field, $value);
+            $probe->prepare();
+        } catch (Throwable $e) {
+            // A rule about another field the bare copy does not hold: the
+            // tidying done before it still stands.
+        }
+        return $probe ? $probe->get($field) : $value;
+    }
+
     protected function find_updateable_field($model) {
         $model_class = $this->model_class;
 

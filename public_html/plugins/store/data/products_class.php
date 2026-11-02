@@ -847,7 +847,6 @@ public function get_requirement_info($output='text') {
 	}
 
 	function prepare(){
-		parent::prepare();
 		//DO NOT ALLOW DUPLICATE PRODUCT LINKS
 		if($product = Product::get_by_link($this->get('pro_link'))){
 			if($product->key != $this->key){

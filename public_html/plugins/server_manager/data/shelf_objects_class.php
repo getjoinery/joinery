@@ -82,13 +82,10 @@ class ShelfObject extends SystemBase {
 		'svo_pruned_cause'          => array('type'=>'varchar(16)',
 			'allowed_values'=>array('retention', 'lapse', 'abort', 'reconcile')),
 		'svo_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'svo_update_time'           => array('type'=>'timestamp(6)'),
+		'svo_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'svo_delete_time'           => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('svo_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (trim((string)$this->get('svo_key')) === '') {
@@ -97,7 +94,6 @@ class ShelfObject extends SystemBase {
 		if (!$this->key && !(int)$this->get('svo_sps_storage_space_id')) {
 			throw new ShelfObjectException('A ledger row is in a storage space.');
 		}
-		$this->set('svo_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

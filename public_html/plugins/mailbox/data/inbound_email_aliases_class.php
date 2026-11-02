@@ -82,7 +82,7 @@ class InboundEmailAlias extends SystemBase {
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
 		'iea_last_forward_time'  => array('type'=>'timestamp(6)'),
 		'iea_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'iea_update_time'        => array('type'=>'timestamp(6)'),
+		'iea_update_time'        => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'iea_delete_time'        => array('type'=>'timestamp(6)'),
 	);
 
@@ -165,7 +165,6 @@ class InboundEmailAlias extends SystemBase {
 			}
 		}
 
-		$this->set('iea_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	/**

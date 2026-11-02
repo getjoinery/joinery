@@ -55,13 +55,12 @@ class InboundForwardDestination extends SystemBase {
 		'ifd_request_count'      => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'ifd_confirmed_time'     => array('type'=>'timestamp(6)'),
 		'ifd_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ifd_update_time'        => array('type'=>'timestamp(6)'),
+		'ifd_update_time'        => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'ifd_delete_time'        => array('type'=>'timestamp(6)'),
 	);
 
 	function prepare() {
 		$this->set('ifd_destination', strtolower(trim((string)$this->get('ifd_destination'))));
-		$this->set('ifd_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	function is_confirmed(): bool {

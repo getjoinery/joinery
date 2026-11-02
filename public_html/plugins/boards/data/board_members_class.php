@@ -41,14 +41,15 @@ class BoardMember extends SystemBase {
 	);
 
 	function prepare() {
-		$result = parent::prepare();
+		$problems = array();
 		$has_user = (bool)$this->get('bbm_usr_user_id');
 		$has_group = (bool)$this->get('bbm_grp_group_id');
 		if ($has_user === $has_group) {
-			$result['messages'][] = 'A board member is either one person or one group.';
-			$result['success'] = false;
+			$problems[] = 'A board member is either one person or one group.';
 		}
-		return $result;
+		if ($problems) {
+			throw new DisplayableUserException(implode(' ', $problems));
+		}
 	}
 
 	public function boardId(): int {

@@ -103,13 +103,10 @@ class RegisteredDomain extends SystemBase {
 		'rdm_taken_time'             => array('type'=>'timestamp(6)'),
 		'rdm_error'                  => array('type'=>'text'),
 		'rdm_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'rdm_update_time'            => array('type'=>'timestamp(6)'),
+		'rdm_update_time'            => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'rdm_delete_time'            => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('rdm_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		$domain = strtolower(trim((string)$this->get('rdm_domain')));
@@ -120,7 +117,6 @@ class RegisteredDomain extends SystemBase {
 		if (!$this->get('rdm_usr_user_id')) {
 			throw new RegisteredDomainException('A registered domain row needs an owner.');
 		}
-		$this->set('rdm_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

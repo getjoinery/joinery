@@ -69,12 +69,9 @@ class InboundLabelMember extends SystemBase {
 		'ilm_imap_uid'                     => array('type'=>'int8'),
 		'ilm_imap_uidvalidity'             => array('type'=>'int8'),
 		'ilm_create_time'                  => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ilm_update_time'                  => array('type'=>'timestamp(6)'),
+		'ilm_update_time'                  => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 	);
 
-	function prepare() {
-		$this->set('ilm_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	// ── lookups ──────────────────────────────────────────────────────────────
 

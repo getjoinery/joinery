@@ -85,12 +85,9 @@ class StorageSpace extends SystemBase {
 		// under the space, as the pruner names it) => when it was first found
 		// so, UTC. BackupSafety::confirm() reads and rewrites it every pass.
 		'sps_surplus'               => array('type'=>'text'),
-		'sps_update_time'           => array('type'=>'timestamp(6)'),
+		'sps_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 	);
 
-	function prepare() {
-		$this->set('sps_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	function save($debug = false) {
 		if (!(int)$this->get('sps_bkt_backup_target_id')) {
@@ -103,7 +100,6 @@ class StorageSpace extends SystemBase {
 		if (!preg_match('#^[^/].*/$#', (string)$this->get('sps_base_key'))) {
 			throw new StorageSpaceException('A storage space has a base key ending in a slash.');
 		}
-		$this->set('sps_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 

@@ -127,13 +127,10 @@ class MailImportRun extends SystemBase {
 		'mir_create_time'                => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mir_start_time'                 => array('type'=>'timestamp(6)'),
 		'mir_finish_time'                => array('type'=>'timestamp(6)'),
-		'mir_update_time'                => array('type'=>'timestamp(6)'),
+		'mir_update_time'                => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mir_delete_time'                => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('mir_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** The declared addresses, lowercased and de-duplicated. */
 	function ownAddresses(): array {

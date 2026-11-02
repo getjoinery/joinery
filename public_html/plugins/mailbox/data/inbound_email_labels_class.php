@@ -56,13 +56,10 @@ class InboundEmailLabel extends SystemBase {
 		'ilb_label_name'  => array('type'=>'varchar(255)', 'is_nullable'=>true,
 			'unique_with'=>array('ilb_iea_inbound_email_alias_id')),
 		'ilb_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
-		'ilb_update_time' => array('type'=>'timestamp(6)'),
+		'ilb_update_time' => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'ilb_delete_time' => array('type'=>'timestamp(6)'),
 	);
 
-	function prepare() {
-		$this->set('ilb_update_time', gmdate('Y-m-d H:i:s'));
-	}
 
 	/** The mailbox's non-deleted label with this name, or null. */
 	static function getByName(int $alias_id, string $name): ?InboundEmailLabel {
