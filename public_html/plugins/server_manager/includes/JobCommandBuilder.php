@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.155 - build_v1_census (agent 1.103.0): what a site still holds on an old X25519 key, no parameters; TEMPORARY (v1_key_retirement)
  * @version 1.154 - build_site_converger: no machine log-switch check, the site's own switch decides (agent 1.102.0);
  *                 log_access_refusal names a machine with no site rather than a site's switch (machine_has_no_site:
  *                 no web root); unit_journal_readable_units_for: no gateway journal on a machine with no site
@@ -3638,6 +3639,25 @@ class JobCommandBuilder {
 
 	public static function build_relay_status_primitive($node) {
 		return ['primitive' => 'relay_status', 'params' => []];
+	}
+
+	/**
+	 * What this site still holds on an old X25519 (v1) key (agent 1.103.0):
+	 * counts, ids and kinds, before the release that removes the v1 openers.
+	 * PRIMITIVE ONLY, and it takes nothing; a site word. TEMPORARY: the
+	 * deletion release removes it (strategy/v1_key_retirement.md).
+	 */
+	public static function build_v1_census($node) {
+		if (!self::has_primitive($node, 'v1_census')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot take the v1 key census. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['v1_census']));
+		}
+		return self::build_v1_census_primitive($node);
+	}
+
+	public static function build_v1_census_primitive($node) {
+		return ['primitive' => 'v1_census', 'params' => []];
 	}
 
 	/**

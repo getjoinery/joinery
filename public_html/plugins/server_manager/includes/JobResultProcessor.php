@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.117 - v1_census (agent 1.103.0): sanitise_v1_census holds each field to its shape; TEMPORARY (v1_key_retirement)
  * @version 1.116 - relay_status carries the map's last push attempt (when, result, reason code)
  * @version 1.115 - relay_status (agent 1.101.0): sanitise_relay_status holds each field to its shape
  * @version 1.114 - an apply_update's target is the release this management node serves (DeploymentHelper::servedVersion);
@@ -4106,6 +4107,83 @@ HTML;
 
 	private static function process_relay_status($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_relay_status(self::script_json($job))));
+		$job->save();
+	}
+
+	/**
+	 * A v1_census job's result (agent 1.103.0): what the site still holds on an
+	 * old X25519 key. Counts, ids, kinds and the site's own table and column
+	 * names, each held to its shape; anything else the node sent is dropped.
+	 * Pure; the processor test drives it. TEMPORARY (v1_key_retirement).
+	 */
+	public static function sanitise_v1_census($d) {
+		if (!is_array($d) || !isset($d['findings'], $d['v1_vaults'])) {
+			return ['read' => false];
+		}
+		$count = function ($v) { return self::host_report_count($v); };
+		$part = function ($v) { return is_array($v) ? $v : []; };
+		$ident = function ($v) { $v = (string)$v; return preg_match('/^[a-z][a-z0-9_]{0,62}$/', $v) ? $v : ''; };
+		$kind = function ($v, array $allowed) { return in_array($v, $allowed, true) ? $v : ''; };
+		$list = function ($v, $max, $each) {
+			$out = [];
+			foreach (array_slice(is_array($v) ? array_values($v) : [], 0, $max) as $item) {
+				$out[] = $each($item);
+			}
+			return $out;
+		};
+		$v1 = $part($d['v1_vaults']);
+		$by_scope = [];
+		foreach (array_slice($part($v1['by_scope'] ?? null), 0, 20, true) as $scope => $n) {
+			if (($s = $ident($scope)) !== '') { $by_scope[$s] = $count($n); }
+		}
+		$owners = $list($v1['owners'] ?? null, 200, function ($o) use ($count, $ident, $part) {
+			$o = $part($o);
+			$scopes = array_values(array_filter(array_map($ident, explode(',', (string)($o['scopes'] ?? ''))), 'strlen'));
+			return ['user_id' => $count($o['user_id'] ?? null), 'permission' => $count($o['permission'] ?? null),
+				'deleted' => ($o['deleted'] ?? null) === true, 'scopes' => $scopes];
+		});
+		$v2 = $part($d['v2_blobs'] ?? null);
+		$columns = $list($v2['columns'] ?? null, 200, function ($c) use ($count, $ident, $kind, $part) {
+			$c = $part($c);
+			$owners = [];
+			foreach (array_slice($part($c['owners'] ?? null), 0, 20, true) as $uid => $n) {
+				if (is_int($uid) || ctype_digit((string)$uid)) { $owners[(int)$uid] = $count($n); }
+			}
+			return ['table' => $ident($c['table'] ?? ''), 'column' => $ident($c['column'] ?? ''),
+				'prefix' => $kind($c['prefix'] ?? null, ['v1.seal.', 'v1.edgeseal.']),
+				'count' => $count($c['count'] ?? null), 'leftover' => $count($c['leftover'] ?? null),
+				'no_owner' => $count($c['no_owner'] ?? null), 'owners' => $owners];
+		});
+		$v3 = $part($d['v3_chains'] ?? null);
+		$relays = $list($d['v4_relays'] ?? null, 20, function ($r) use ($count, $kind, $part) {
+			$r = $part($r);
+			return ['relay_id' => $count($r['relay_id'] ?? null),
+				'transport_kind' => $kind($r['transport_kind'] ?? null, ['xwing', 'x25519', 'none']),
+				'retired_kept' => ($r['retired_kept'] ?? null) === true];
+		});
+		$v5 = $part($d['v5'] ?? null);
+		$v6 = $part($d['v6'] ?? null);
+		return [
+			'read'      => true,
+			'findings'  => $count($d['findings']),
+			'v1_vaults' => ['total' => $count($v1['total'] ?? null), 'old' => $count($v1['old'] ?? null),
+				'by_scope' => $by_scope, 'owners' => $owners],
+			'v2_blobs'  => ['total' => $count($v2['total'] ?? null), 'leftover' => $count($v2['leftover'] ?? null), 'columns' => $columns],
+			'unscanned' => array_values(array_filter($list($d['unscanned'] ?? null, 200, $ident), 'strlen')),
+			'v3_chains' => ['vaults' => $count($v3['vaults'] ?? null), 'entries' => $count($v3['entries'] ?? null)],
+			'v4_relays' => $relays,
+			'v5'        => ['encrypted' => ($v5['encrypted'] ?? null) === true,
+				'sealed_to' => $kind($v5['sealed_to'] ?? null, ['', 'this_site', 'operator', 'other']),
+				'recovery_kind' => $kind($v5['recovery_kind'] ?? null, ['', 'xwing', 'x25519', 'none', 'invalid']),
+				'escrows_v1' => is_array($v5['escrows_v1'] ?? null) ? $list($v5['escrows_v1'], 200, $count) : null],
+			'v6'        => ['recovery_kind' => $kind($v6['recovery_kind'] ?? null, ['xwing', 'x25519', 'none', 'invalid']),
+				'site_kind' => $kind($v6['site_kind'] ?? null, ['xwing', 'x25519', 'none', 'unreadable', 'invalid']),
+				'site_retired' => $count($v6['site_retired'] ?? null), 'old_epochs' => $count($v6['old_epochs'] ?? null)],
+		];
+	}
+
+	private static function process_v1_census($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_v1_census(self::script_json($job))));
 		$job->save();
 	}
 

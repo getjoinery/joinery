@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.84 - v1_census: what a site still holds on an old X25519 key (Diagnostics; agent 1.103.0; TEMPORARY)
  * @version 1.83 - relay_status: this site's view of its mail relay (Diagnostics; agent 1.101.0)
  * @version 1.82 - largest_files: a site's biggest files, by name (Diagnostics; agent 1.100.0, behind the log switch)
  * @version 1.81 - site_converger: a machine reads whether one of its site containers' converger is running (Diagnostics)
@@ -213,6 +214,7 @@ class NodeDetailActions {
 		'container_inventory'      => 'diagnostics',
 		'spam_learning_status'     => 'diagnostics',
 		'relay_status'             => 'diagnostics',
+		'v1_census'                => 'diagnostics',
 		'reboot_machine'           => 'overview',
 		'disable_root_login'       => 'overview',
 		'reset_failed_unit'        => 'overview',
@@ -554,6 +556,7 @@ class NodeDetailActions {
 			case 'container_inventory':
 			case 'spam_learning_status':
 			case 'relay_status':
+			case 'v1_census':
 			case 'site_state_report':
 			case 'install_security_updates':
 			case 'refresh_site_containers':
