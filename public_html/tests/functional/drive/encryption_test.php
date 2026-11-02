@@ -36,6 +36,10 @@ $friend_pk = base64_encode(random_bytes(32));
 // Client-custody drive vaults so drive_public_keys can resolve each user's key.
 vault_fixture_client_vault((int)$owner->key, $owner_pk, 'drive');
 vault_fixture_client_vault((int)$friend->key, $friend_pk, 'drive');
+$stranger = make_user('drvenc_stranger');
+$stranger_pk = base64_encode(random_bytes(32));
+vault_fixture_client_vault((int)$stranger->key, $stranger_pk, 'drive');
+require_once(PathHelper::getIncludePath('data/file_access_grants_class.php'));
 
 // ---------------------------------------------------------------------------
 section('encrypted folder + file model layer');
@@ -129,6 +133,16 @@ check(($byUser[$friend->key] ?? null) === $friend_pk, 'friend public key resolve
 $null_count = 0; foreach ($keys as $k) { if ($k['public_key'] === null) $null_count++; }
 check($null_count === 1, 'unknown identifier resolves to a null key (no vault)');
 
+// A key is only wrapped to a reader: the friend can read the file once it is
+// shared with them, and a stranger never can.
+FileAccessGrant::sync_for_entity(DriveHelper::ENTITY_FILE, $efile->key, array((int)$friend->key => 'viewer'), $owner->key);
+$sync_out = api_request('POST', '/api/v1/action/drive_key_grants_sync', $H, array(
+	'file_keys' => array((string)$efile->key => array((string)$stranger->key => base64_encode(random_bytes(80)))),
+));
+check(in_array((int)$efile->key, array_map('intval', $sync_out['json']['data']['skipped'] ?? array()), true)
+	&& FileKeyGrant::wrapped_key_for($efile->key, $stranger->key) === null,
+	'a key for someone who cannot read the file is refused (skipped, nothing stored)');
+
 $wk_friend2 = base64_encode(random_bytes(80));
 $sync = api_request('POST', '/api/v1/action/drive_key_grants_sync', $H, array(
 	'file_keys' => array((string)$efile->key => array((string)$friend->key => $wk_friend2)),
@@ -221,6 +235,106 @@ $mv_bad = api_request('POST', '/api/v1/action/drive_move', $H, array(
 	'entity_type' => 'folder', 'entity_id' => $inner_id, 'parent_id' => (int)$plain_folder->key,
 ));
 check(!empty($mv_bad['json']['error']), 'a vault folder still cannot sit inside a plaintext one');
+
+// ---------------------------------------------------------------------------
+section('API: a Fortress move takes its keys to its new readers');
+
+// Vault A is shared with the friend, vault B with the stranger. A file in A
+// holds keys for the owner and the friend.
+$mk_vault = function ($label, $reader) use ($H, &$made_folders, $owner) {
+	$r = api_request('POST', '/api/v1/action/drive_folder_create', $H, array(
+		'name' => $label . '_' . bin2hex(random_bytes(3)), 'encrypted' => true,
+	));
+	$id = (int)($r['json']['data']['folder']['id'] ?? 0);
+	if ($id) { $made_folders[] = $id; }
+	if ($id && $reader) {
+		FileAccessGrant::sync_for_entity(DriveHelper::ENTITY_FOLDER, $id, array((int)$reader->key => 'viewer'), $owner->key);
+	}
+	return $id;
+};
+$mk_file = function ($folder_id, array $holders) use ($owner, &$made_files) {
+	$f = File::createFromBytes('mv-' . bin2hex(random_bytes(6)), 'enc-mv' . bin2hex(random_bytes(3)), 'application/octet-stream', $owner->key, array(
+		'fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_protection_level' => ProtectionLevel::FORTRESS,
+		'fil_encrypted_metadata' => base64_encode(random_bytes(40)),
+	));
+	$f->set('fil_fol_folder_id', $folder_id); $f->save();
+	$made_files[] = $f->key;
+	foreach ($holders as $uid => $blob) { FileKeyGrant::put($f->key, $uid, $blob); }
+	return (int)$f->key;
+};
+$va = $mk_vault('MoveA', $friend);
+$vb = $mk_vault('MoveB', $stranger);
+$vc = $mk_vault('MoveC', $stranger);
+check($va > 0 && $vb > 0 && $vc > 0, 'three vaults: A shared with the friend, B and C with the stranger');
+$owner_key = base64_encode(random_bytes(80));
+$mf = $mk_file($va, array((int)$owner->key => $owner_key, (int)$friend->key => base64_encode(random_bytes(80))));
+$folder_of = function ($fid) { return (int)(new File($fid, true))->get('fil_fol_folder_id'); };
+
+$bare = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'file', 'entity_id' => $mf, 'parent_id' => $vb));
+$need = $bare['json']['data']['files'] ?? array();
+check(($bare['json']['data']['reason'] ?? '') === 'keys_needed', 'a move that changes the readers, sent without keys, is refused as keys_needed',
+	json_encode($bare['json']['data'] ?? null));
+check(count($need) === 1 && (int)$need[0]['file_id'] === $mf && $need[0]['wrapped_file_key'] === $owner_key
+	&& count($need[0]['readers']) === 1 && (int)$need[0]['readers'][0]['user_id'] === (int)$stranger->key
+	&& $need[0]['readers'][0]['public_key'] === $stranger_pk,
+	'it names the file, the caller\'s own wrapped key and the one new reader with their public key', json_encode($need));
+check($folder_of($mf) === $va && FileKeyGrant::wrapped_key_for($mf, $friend->key) !== null, 'and nothing moved: the file and the friend\'s key are where they were');
+
+$wrong = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'file', 'entity_id' => $mf, 'parent_id' => $vb,
+	'file_keys' => array((string)$mf => array((string)$friend->key => base64_encode(random_bytes(80))))));
+check(($wrong['json']['data']['reason'] ?? '') === 'keys_needed' && $folder_of($mf) === $va,
+	'keys for the wrong people are refused the same way, nothing moved');
+
+$stranger_key = base64_encode(random_bytes(80));
+$keyed = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'file', 'entity_id' => $mf, 'parent_id' => $vb,
+	'file_keys' => array((string)$mf => array((string)$stranger->key => $stranger_key))));
+check(empty($keyed['json']['error']) && $folder_of($mf) === $vb, 'with the new readers\' keys the move lands', json_encode($keyed['json']));
+check(FileKeyGrant::wrapped_key_for($mf, $stranger->key) === $stranger_key, 'the new reader holds the key it was sent');
+check(FileKeyGrant::wrapped_key_for($mf, $friend->key) === null, 'the reader it left no longer does');
+check(FileKeyGrant::wrapped_key_for($mf, $owner->key) === $owner_key, 'the owner\'s key is untouched');
+$told = (int)$dblink->query("SELECT COUNT(*) FROM fch_file_changes WHERE fch_change_kind = 'grant_changed' AND fch_entity_type = 'file' AND fch_entity_id = " . (int)$mf
+	. ' AND fch_audience_usr_user_id IN (' . (int)$friend->key . ', ' . (int)$stranger->key . ')')->fetchColumn();
+check($told === 2, 'each of them is told through the change feed', (string)$told);
+
+$same = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'file', 'entity_id' => $mf, 'parent_id' => $vc));
+check(empty($same['json']['error']) && $folder_of($mf) === $vc && FileKeyGrant::wrapped_key_for($mf, $stranger->key) === $stranger_key,
+	'a move that keeps the same readers needs no keys and changes none', json_encode($same['json']['data'] ?? null));
+
+// A folder takes every encrypted file under it along.
+$sub = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'Sub_' . bin2hex(random_bytes(3)), 'parent_id' => $va));
+$sub_id = (int)($sub['json']['data']['folder']['id'] ?? 0);
+if ($sub_id) { $made_folders[] = $sub_id; }
+$inner_file = $mk_file($sub_id, array((int)$owner->key => base64_encode(random_bytes(80)), (int)$friend->key => base64_encode(random_bytes(80))));
+$fbare = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'folder', 'entity_id' => $sub_id, 'parent_id' => $vb));
+$fneed = $fbare['json']['data']['files'] ?? array();
+check(($fbare['json']['data']['reason'] ?? '') === 'keys_needed' && count($fneed) === 1 && (int)$fneed[0]['file_id'] === $inner_file,
+	'a folder move names the encrypted files inside it', json_encode($fbare['json']['data'] ?? null));
+$fkeyed = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'folder', 'entity_id' => $sub_id, 'parent_id' => $vb,
+	'file_keys' => array((string)$inner_file => array((string)$stranger->key => base64_encode(random_bytes(80))))));
+check(empty($fkeyed['json']['error']) && (int)(new Folder($sub_id, true))->get('fol_parent_folder_id') === $vb
+	&& FileKeyGrant::wrapped_key_for($inner_file, $friend->key) === null && FileKeyGrant::wrapped_key_for($inner_file, $stranger->key) !== null,
+	'and with their keys the folder lands and its files change hands', json_encode($fkeyed['json']));
+
+// The owner's own key is never the mover's to write, whatever the map says.
+$back_keys = array((string)$mf => array((string)$owner->key => base64_encode('garbage'), (string)$friend->key => base64_encode(random_bytes(80))));
+$back = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'file', 'entity_id' => $mf, 'parent_id' => $va, 'file_keys' => $back_keys));
+check(empty($back['json']['error']) && $folder_of($mf) === $va, 'a map that also names the owner still moves the file', json_encode($back['json']['data'] ?? null));
+check(FileKeyGrant::wrapped_key_for($mf, $owner->key) === $owner_key, 'and the owner\'s own key is left exactly as it was');
+
+// A trashed folder inside a moved folder goes with it, and so do its files'
+// keys: restored later, they stand under the new share already keyed for it.
+$outer2 = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'Outer2_' . bin2hex(random_bytes(3)), 'parent_id' => $va));
+$outer2_id = (int)($outer2['json']['data']['folder']['id'] ?? 0);
+if ($outer2_id) { $made_folders[] = $outer2_id; }
+$binned = api_request('POST', '/api/v1/action/drive_folder_create', $H, array('name' => 'Binned_' . bin2hex(random_bytes(3)), 'parent_id' => $outer2_id));
+$binned_id = (int)($binned['json']['data']['folder']['id'] ?? 0);
+if ($binned_id) { $made_folders[] = $binned_id; }
+$binned_file = $mk_file($binned_id, array((int)$owner->key => base64_encode(random_bytes(80)), (int)$friend->key => base64_encode(random_bytes(80))));
+$dblink->prepare('UPDATE fol_folders SET fol_delete_time = now() WHERE fol_folder_id = ?')->execute(array($binned_id));
+$tbare = api_request('POST', '/api/v1/action/drive_move', $H, array('entity_type' => 'folder', 'entity_id' => $outer2_id, 'parent_id' => $vb));
+$tneed = array_map(function ($f) { return (int)$f['file_id']; }, $tbare['json']['data']['files'] ?? array());
+check(($tbare['json']['data']['reason'] ?? '') === 'keys_needed' && $tneed === array($binned_file),
+	'a file in a trashed folder under the moved folder is named too', json_encode($tbare['json']['data'] ?? null));
 
 // ---------------------------------------------------------------------------
 section('API: rename — encrypted files rename via their metadata');

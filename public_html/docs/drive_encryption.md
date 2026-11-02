@@ -73,8 +73,9 @@ never open another's key.
    chunk can neither be reordered within a file nor transplanted to another).
 3. **Key grants** — `FileKeyGrant` (`fkg_file_key_grants`): the FK sealed to a
    user's `drive` vault public key (an X-Wing seal, produced in the owner's
-   browser), one row per (file, user), unique on (file, user). The owner always
-   holds a row. **This table is the multi-user story**: sharing an encrypted file
+   browser, or in the mover's when a move changes the file's readers), one row
+   per (file, user), unique on (file, user). The owner always holds a row, and
+   only the owner's own paths ever write it. **This table is the multi-user story**: sharing an encrypted file
    is the owner's browser unwrapping the FK and re-wrapping it to the recipient's
    public key — one new row, no content re-encryption. Revocation deletes the row
    (and, as in every E2EE product, cannot un-know a key a past recipient saved —
@@ -223,7 +224,22 @@ files (`File::is_encrypted()` is the gate):
   aborts the whole key sync loudly on any gap (granting access without keys is
   the failure mode being prevented). Requires the recipient to have a Drive vault
   (opted in); the dialog says so if a member has none. Removing access re-wraps to
-  the remaining grantees, so the removed user's key grant is deleted.
+  the remaining grantees, so the removed user's key grant is deleted. A key is
+  only ever wrapped to a reader of the file: `drive_key_grants_sync` skips a
+  file whose map names anyone who cannot read it.
+- **Moves** — a file's readers are its folder's readers plus the holders of a
+  grant on the file, so moving a Fortress file or folder between vaults shared
+  with different people changes who must hold its key. `drive_move` takes
+  `file_keys` (`{ file_id: { user_id: wrapped_file_key } }`) for each file's
+  readers at the destination, less the owner and anyone with no Drive vault,
+  and lands the move, the new keys and the removal of the old readers' keys as
+  one write. Sent without them, a move that changes any file's readers is
+  refused as `keys_needed` (standing), naming each file, the caller's own
+  wrapped key and the readers to wrap to; nothing moves. The browser wraps and
+  sends the move again. A move whose files' key holders already match their
+  readers at the destination needs no keys. Whoever may make the move
+  supplies the keys, an editor included; the owner's own key is never
+  written by a move or a key sync.
 - **Anonymous share links** — a single-file mechanism: `drive_link_create` mints
   the token, and the client appends the file key to the URL **fragment** (never
   sent to the server). `/s/{token}#<key>` serves ciphertext plus a
@@ -245,7 +261,10 @@ files (`File::is_encrypted()` is the gate):
     grant holder on the folder or an ancestor — for upload-time sealing
     (requires write access to the folder).
   - `drive_key_grants_sync` — owner reconciles the per-user wrapped file keys for
-    one or more files (`file_keys`: `{ file_id: { user_id: wrapped_file_key } }`).
+    one or more files (`file_keys`: `{ file_id: { user_id: wrapped_file_key } }`);
+    every user named must be a reader of the file.
+  - `drive_move` — a Fortress move that changes who can read its files carries
+    their keys in `file_keys`, or is refused as `keys_needed` (see Sharing).
   - `drive_key_grants` — fetch the caller's own wrapped file keys for a set of
     files (their own key material only).
   - `drive_upload_complete` — for a new encrypted file, accepts the opaque

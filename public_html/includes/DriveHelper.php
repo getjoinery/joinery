@@ -221,6 +221,30 @@ class DriveHelper {
 	}
 
 	/**
+	 * Every user who can read one file: its folder's readers (the owner and
+	 * every grant holder on the folder or an ancestor) plus the holders of a
+	 * grant on the file itself. The set a Fortress file's key must be wrapped
+	 * to, and the only users it may be wrapped to.
+	 */
+	public static function reader_user_ids_for_file($file) {
+		require_once(PathHelper::getIncludePath('data/file_access_grants_class.php'));
+		$ids = array((int)$file->get('fil_usr_user_id') => true);
+		$folder_id = (int)$file->get('fil_fol_folder_id');
+		if ($folder_id > 0) {
+			$folder = self::load_folder($folder_id);
+			if ($folder) {
+				foreach (self::reader_user_ids_for_folder($folder) as $uid) {
+					$ids[(int)$uid] = true;
+				}
+			}
+		}
+		foreach (FileAccessGrant::user_ids_for_entity(self::ENTITY_FILE, (int)$file->key) as $uid) {
+			$ids[(int)$uid] = true;
+		}
+		return array_keys($ids);
+	}
+
+	/**
 	 * Change an item's parent and tell whoever it leaves, as one write.
 	 *
 	 * The change feed judges what a caller may see by where an entity is now,

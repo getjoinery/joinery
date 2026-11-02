@@ -14,6 +14,10 @@
  * For a folder share the client enumerates the subtree's files and sends one
  * entry per file. The wrapped blobs are opaque — the server never opens them.
  *
+ * A key is only ever wrapped to a reader of the file: a map naming anyone who
+ * cannot read it skips that file, as an upload refuses one (a key handed to
+ * someone outside the share is a copy of the file waiting for its bytes).
+ *
  * Each user whose key a file gains or loses is told through the change feed:
  * one `grant_changed` row per file per such user, addressed to them and
  * written in the same transaction as the key.
@@ -58,6 +62,17 @@ function drive_key_grants_sync_logic(array $input): LogicResult {
 		}
 		$owner_id = (int)$file->get('fil_usr_user_id');
 		$map = is_array($wrapped) ? $wrapped : array();
+		$readers = array_flip(array_map('intval', DriveHelper::reader_user_ids_for_file($file)));
+		$outsider = false;
+		foreach ($map as $uid => $blob) {
+			if (!isset($readers[(int)$uid])) {
+				$outsider = true;
+			}
+		}
+		if ($outsider) {
+			$skipped[] = $file_id;
+			continue;
+		}
 
 		// A key that arrives says nothing to the person it is for. Their
 		// devices hold the file waiting for a key, and nothing in the feed

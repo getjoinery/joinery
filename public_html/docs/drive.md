@@ -863,6 +863,8 @@ on the message, which is prose for people.
 | `protection_boundary`, `level_change_refused` | a protection level the request would cross or change |
 | `vault_needed` | a Private change needs the vault set up or unlocked |
 | `key_unavailable` | the caller does not hold the file's key |
+| `keys_needed` | a Fortress move changes who can read its files and carries no keys for the new readers (with `files`: each file's id, the caller's own wrapped key and the readers to wrap to); standing |
+| `too_many_to_rekey` | a Fortress move would re-key more files than one move carries; standing |
 | `move_into_self` | a folder moved into its own subtree |
 | `too_deep` | the folder depth limit |
 | `name_too_long` | the name is over the server's limit |

@@ -19,6 +19,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * (drive_key_grants_sync / drive_key_grants). Revocation is a hard delete (no
  * delete_time column), the FileAccessGrant precedent.
  *
+ * @version 1.2.0 - sync_for_file never writes the owner's key: not deleted, not replaced
  * @version 1.1.0 - sync_for_file reports whose key it removed
  * @version 1.0.0
  */
@@ -118,7 +119,10 @@ class FileKeyGrant extends SystemBase {
 	/**
 	 * Reconcile the key-grant set for a file to $wrapped (user_id =>
 	 * wrapped_file_key): insert/update the listed users, hard-delete users not in
-	 * the set EXCEPT never the owner (an owner always keeps their own key).
+	 * the set. The owner's own key is never touched: not deleted when absent and
+	 * not replaced when listed, so nobody who may set others' keys (an editor
+	 * moving a file supplies them) can overwrite the one key the owner opens the
+	 * file with.
 	 * Returns the list of newly-added user ids, and fills $removed with the user
 	 * ids whose key was taken away -- the row is hard-deleted, so afterwards
 	 * nothing records that they ever held one.
@@ -141,7 +145,7 @@ class FileKeyGrant extends SystemBase {
 			$desired = array();
 			foreach ($wrapped as $uid => $blob) {
 				$uid = (int)$uid;
-				if ($uid > 0 && $blob !== null && $blob !== '') {
+				if ($uid > 0 && $uid !== $owner_id && $blob !== null && $blob !== '') {
 					$desired[$uid] = (string)$blob;
 				}
 			}

@@ -1070,9 +1070,44 @@
 		e.preventDefault();
 		if (!moveTarget) return;
 		var pid = parseInt($('drvMoveParent').value, 10) || 0;
-		api.post('drive_move', { entity_type: moveTarget.entity_type, entity_id: moveTarget.id, parent_id: pid })
+		var body = { entity_type: moveTarget.entity_type, entity_id: moveTarget.id, parent_id: pid };
+		api.post('drive_move', body)
+			.catch(function (err) {
+				// A Fortress move that changes who can read its files carries
+				// their keys: the refusal names each file, this browser's own
+				// wrapped key for it and the readers to wrap it to. Wrapped and
+				// sent once; the move and the keys then land together.
+				if (!(err && err.data && err.data.reason === 'keys_needed')) throw err;
+				return rekeyForMove(err.data.files || []).then(function (fileKeys) {
+					body.file_keys = fileKeys;
+					return api.post('drive_move', body);
+				});
+			})
 			.then(function () { $('drvMoveDialog').close(); load(); })
 			.catch(function (e) { toast(e.message || 'Move failed.', e); });
+	}
+
+	// Wrap each named file's key to each of its new readers:
+	// { file_id: { user_id: wrapped_file_key } }.
+	async function rekeyForMove(files) {
+		var session = await ensureUnlocked();
+		var fileKeys = {};
+		var withoutKey = 0;
+		for (var i = 0; i < files.length; i++) {
+			var f = files[i];
+			if (!f.wrapped_file_key) { withoutKey++; continue; }
+			var fkBytes = await session.openSealed(f.wrapped_file_key);
+			var perUser = {};
+			for (var j = 0; j < (f.readers || []).length; j++) {
+				var r = f.readers[j];
+				perUser[r.user_id] = await DC.wrapFileKeyTo(fkBytes, r.public_key);
+			}
+			fileKeys[f.file_id] = perUser;
+		}
+		if (withoutKey) {
+			throw new Error('You do not hold the key for ' + withoutKey + ' of these encrypted files, so they cannot be moved where other people read them.');
+		}
+		return fileKeys;
 	}
 
 	// ---- sharing -----------------------------------------------------------
