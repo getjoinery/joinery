@@ -294,6 +294,22 @@
       "helptext": "A Managed site draft the buyer never continued is deleted after this many days; one frozen for the cart but never paid returns to draft, because its domain quote is stale."
     },
     {
+      "name": "server_manager_hosted_sites_per_buyer",
+      "default": "3",
+      "group": "hosted",
+      "label": "Hosted sites per buyer",
+      "type": "number",
+      "helptext": "The most hosted sites one account, or one card on any account, may have at once. Checkout refuses one more for the account; a paid order past either limit is held on the Server Manager board until you approve or refuse it."
+    },
+    {
+      "name": "server_manager_hosted_sites_limit_exempt",
+      "default": "",
+      "group": "hosted",
+      "label": "Accounts past the per-buyer limit",
+      "type": "text",
+      "helptext": "User ids, comma separated, that may have more hosted sites than the limit (a customer who asked for more)."
+    },
+    {
       "name": "server_manager_upgrade_retention_count",
       "default": "3",
       "helptext": "How many recent core upgrade archives to keep on disk. Older archives are removed after each publish; their release-history records are always kept. Archives marked Keep, and any version a managed node is running, are never removed. Set to 0 to keep every archive.",

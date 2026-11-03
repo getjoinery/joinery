@@ -28,6 +28,15 @@ is a draft on their sites page (Continue, Edit, Delete) that holds nothing and
 expires after `server_manager_draft_days`. Payment activates it (see
 [Server Manager § The buyer configures first](overview.md#the-buyer-configures-first-then-pays-payment-activates)).
 
+**One buyer, a few sites.** One account may hold `server_manager_hosted_sites_per_buyer` hosted sites at once (default 3), and so may one card across every account. A site counts from payment until it is deleted, held and failed ones included; a server on the buyer's own cloud account is not ours and does not count.
+
+- **At checkout**, before any money moves, an account already at the limit is refused with *This account already has 3 hosted sites, the most one account can have. Contact us if you need more.*
+- **At payment** the card is known: `fulfill()` reads its Stripe fingerprint (`StripeHelper::card_fingerprint_for_order`) and counts again, by account and by card. Two lines in one cart each pass checkout alone, which is why the account is counted again here. A PayPal payment carries no card and is judged by the account alone.
+- **An order past either limit is held**, at status `held`: nothing is built and no domain is bought. The operator is alerted, and the Server Manager board shows the row with **Approve**, **Refuse** and a link to its order.
+  - **Approve** goes on as an activation under the limit would.
+  - **Refuse** takes the row off the board. It moves no money: refund the payment and cancel the subscription on the order page first.
+- A customer who needs more sites goes on `server_manager_hosted_sites_limit_exempt` (user ids).
+
 A few minutes after paying their site is live at that domain, with email that
 sends and backups that run. The welcome email carries the address — and, for a
 domain they brought themselves, the one A record to add — and a link to

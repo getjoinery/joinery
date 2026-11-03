@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.7 - approve_held_provision and refuse_held_provision on the dashboard (10)
  * @version 1.6 - never_do_accept clears a security incident (10)
  * @version 1.5 - v1_census removed with the v1 code
  * @version 1.4 - v1_census is a look (7); TEMPORARY (v1_key_retirement)
@@ -55,6 +56,8 @@ final class SmActionLevels {
 			'break_glass_reveal' => 10, 'break_glass_retire' => 10, 'break_glass_retire_all' => 10,
 			'escrow_approve' => 10, 'escrow_refuse' => 10,
 			'upgrade_host_sites' => 8, 'dismiss_provision' => 8,
+			// A paid hosted order held over the per-buyer limit: a money and abuse call.
+			'approve_held_provision' => 10, 'refuse_held_provision' => 10,
 		),
 		'job_detail' => array(
 			'cancel_job' => 8, 'rerun_job' => 8, 'mark_job_lost' => 8,

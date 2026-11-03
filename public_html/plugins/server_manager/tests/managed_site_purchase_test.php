@@ -33,6 +33,7 @@
  *
  * Run: php plugins/server_manager/tests/managed_site_purchase_test.php
  *
+ * @version 1.2 - the per-buyer limit: checkout refusal, hold at payment by account and card, Approve and Refuse
  * @version 1.1 - activation sets cvp_data_root_encrypted only where data root encryption is offered
  *                (specs/hosted_data_promise_disk_encryption.md D1a)
  */
@@ -613,5 +614,104 @@ if ($rdm) {
 	check($draft->get('cvp_domain') === 'msp-alt.com' && $draft->get('cvp_slug') === 'msp-alt-com',
 		'the provision\'s own domain and slug follow while no box exists');
 }
+
+
+// ---------------------------------------------------------------------------
+section('The per-buyer limit: checkout refuses past it; a paid order past it is held (hosted_abuse_response)');
+
+harness_set_setting_mem('server_manager_hosted_sites_per_buyer', '2');
+harness_set_setting_mem('server_manager_hosted_sites_limit_exempt', '');
+$lim_buyer = make_user('MspLimit' . $run);
+$lim_other = make_user('MspLimitOther' . $run);
+$_SESSION['usr_user_id'] = (int)$lim_buyer->key;
+$lim_card = 'fp_test_' . $run;
+CustomerCloudFulfillment::$fingerprint_stand_in = function ($order, $item) use (&$lim_card) { return $lim_card; };
+harness_defer(function () { CustomerCloudFulfillment::$fingerprint_stand_in = null; });
+
+/** One frozen draft for $who, its cart line, and the paid order for it. */
+$lim_buy = function ($who, string $domain) use ($managed, $managed_version, $provider) {
+	$r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_domain_source' => 'own', 'cvp_domain' => $domain)), $who);
+	$row = msp_register_provision($r['row']);
+	$req = new ManagedSiteRequirement();
+	$req->validate(array('managed_site' => (int)$row->key), $managed);
+	list($data) = $req->process(array('managed_site' => (int)$row->key), $managed, null, null);
+	return array($row, $data);
+};
+
+list($l1, $l1_data) = $lim_buy($lim_buyer, 'msp-limit-one-' . $run . '.com');
+check($provider->checkAvailability($managed, 1, 1, $l1_data) === null, 'a buyer with no hosted site passes checkout');
+list($o1, $i1) = msp_paid_line($lim_buyer, $managed, $managed_version, $l1_data);
+$provider->fulfill($lim_buyer, $managed, $i1, $o1, 1);
+$l1->load();
+check($l1->get('cvp_status') === 'ready' && $l1->get('cvp_card_fingerprint') === $lim_card,
+	'under the limit it activates, with the paying card\'s fingerprint recorded');
+
+list($l2, $l2_data) = $lim_buy($lim_buyer, 'msp-limit-two-' . $run . '.com');
+list($o2, $i2) = msp_paid_line($lim_buyer, $managed, $managed_version, $l2_data);
+$provider->fulfill($lim_buyer, $managed, $i2, $o2, 1);
+$l2->load();
+check($l2->get('cvp_status') === 'ready', 'the second site, at the limit of 2, activates too');
+
+list($l3, $l3_data) = $lim_buy($lim_buyer, 'msp-limit-three-' . $run . '.com');
+check($provider->checkAvailability($managed, 1, 1, $l3_data) === CustomerCloudFulfillment::limit_sentence(2),
+	'a third is refused at checkout, while declining is free, with the limit named');
+check($provider->checkAvailability($managed, 0, 1, $l3_data) === null,
+	'a server on the buyer\'s own cloud account is not ours, so it is not limited');
+harness_set_setting_mem('server_manager_hosted_sites_limit_exempt', '1, ' . (int)$lim_buyer->key);
+check($provider->checkAvailability($managed, 1, 1, $l3_data) === null, 'an account on the exempt list passes');
+harness_set_setting_mem('server_manager_hosted_sites_limit_exempt', '');
+
+// Two lines in one cart each passed checkout alone: activation counts again.
+MspFulfillment::$alerts = array();
+list($o3, $i3) = msp_paid_line($lim_buyer, $managed, $managed_version, $l3_data);
+$f = $provider->fulfill($lim_buyer, $managed, $i3, $o3, 1);
+$l3->load();
+check($l3->get('cvp_status') === 'held' && (int)($f['ref_id'] ?? 0) === (int)$l3->key,
+	'a paid order past the account limit is held, not built', $l3->get('cvp_status') . ' ' . $l3->get('cvp_error'));
+check(strpos((string)$l3->get('cvp_error'), 'account already has 2') !== false, 'the board says why');
+check(count(MspFulfillment::$alerts) === 1 && strpos(MspFulfillment::$alerts[0]['reason'], 'held') !== false,
+	'and a person is alerted with the order item');
+
+// The same card on another account.
+$_SESSION['usr_user_id'] = (int)$lim_other->key;
+list($c1, $c1_data) = $lim_buy($lim_other, 'msp-limit-card-' . $run . '.com');
+check($provider->checkAvailability($managed, 1, 1, $c1_data) === null, 'another account passes checkout: its card is not known yet');
+list($oc, $ic) = msp_paid_line($lim_other, $managed, $managed_version, $c1_data);
+$provider->fulfill($lim_other, $managed, $ic, $oc, 1);
+$c1->load();
+check($c1->get('cvp_status') === 'held' && strpos((string)$c1->get('cvp_error'), 'paying card already paid for') !== false,
+	'but a card that already paid for the limit on any account is held at payment', $c1->get('cvp_error'));
+$lim_card = '';
+list($c2, $c2_data) = $lim_buy($lim_other, 'msp-limit-paypal-' . $run . '.com');
+list($op, $ip) = msp_paid_line($lim_other, $managed, $managed_version, $c2_data);
+$provider->fulfill($lim_other, $managed, $ip, $op, 1);
+$c2->load();
+check($c2->get('cvp_status') === 'ready' && trim((string)$c2->get('cvp_card_fingerprint')) === '',
+	'a payment with no card (PayPal) is judged by the account alone: one held site is under the limit of 2', $c2->get('cvp_status'));
+
+$open = new MultiCustomerCloudProvision(array('open' => true, 'deleted' => false));
+$open_ids = array();
+foreach ($open as $o) { $open_ids[] = (int)$o->key; }
+check(in_array((int)$l3->key, $open_ids, true), 'a held order is on the board');
+$ready = new MultiCustomerCloudProvision(array('status' => 'ready', 'deleted' => false));
+$ready_ids = array();
+foreach ($ready as $o) { $ready_ids[] = (int)$o->key; }
+check(!in_array((int)$l3->key, $ready_ids, true), 'and not where the pipeline looks');
+
+$_SESSION['permission'] = 10;   // the board's admin
+CustomerCloudFulfillment::approve_held($l3, 1);
+$l3->load();
+check($l3->get('cvp_status') === 'ready' && $l3->get('cvp_mail_state') === 'pending' && trim((string)$l3->get('cvp_error')) === '',
+	'Approve releases it exactly as an activation under the limit');
+CustomerCloudFulfillment::refuse_held($c1, 1);
+$c1->load();
+check(!empty($c1->get('cvp_delete_time')), 'Refuse takes it off the board');
+$threw = false;
+try { CustomerCloudFulfillment::approve_held($l1, 1); } catch (RuntimeException $e) { $threw = true; }
+check($threw, 'only a held order can be approved');
+check(SmActionLevels::level('index', 'approve_held_provision') === 10 && SmActionLevels::level('index', 'refuse_held_provision') === 10,
+	'approving and refusing a held order is a superadmin decision');
+$_SESSION['permission'] = 0;
+$_SESSION['usr_user_id'] = (int)$buyer->key;
 
 harness_finish();

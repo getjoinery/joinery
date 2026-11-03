@@ -896,6 +896,53 @@ class StripeHelper {
 		return array('charge' => $charge, 'is_order_charge' => true, 'what' => 'the order\'s card payment');
 	}
 
+	/**
+	 * The Stripe fingerprint of the card that paid for an order, or null when
+	 * none can be found (PayPal, a free order, Stripe unreachable). The same
+	 * card reads the same fingerprint on every account, which is what makes a
+	 * per-card limit possible. Tried in order: the payment intent, the charge,
+	 * the line's subscription, then the Checkout session's intent or
+	 * subscription. Never throws.
+	 */
+	public function card_fingerprint_for_order($order, $order_item = null): ?string {
+		try {
+			$pm = null;
+			$pi_id = trim((string)$order->get('ord_stripe_payment_intent_id'));
+			if ($pi_id !== '') {
+				$pm = $this->client()->paymentIntents->retrieve($pi_id)->payment_method ?? null;
+			}
+			$charge_id = trim((string)$order->get('ord_stripe_charge_id'));
+			if (!$pm && $charge_id !== '') {
+				$charge = $this->client()->charges->retrieve($charge_id);
+				$fp = $charge->payment_method_details->card->fingerprint ?? null;
+				if (is_string($fp) && $fp !== '') { return $fp; }
+				$pm = $charge->payment_method ?? null;
+			}
+			$sub_id = $order_item ? trim((string)$order_item->get('odi_stripe_subscription_id')) : '';
+			if (!$pm && $sub_id !== '') {
+				$pm = $this->client()->subscriptions->retrieve($sub_id)->default_payment_method ?? null;
+			}
+			$session_id = trim((string)$order->get('ord_stripe_session_id'));
+			if (!$pm && $session_id !== '') {
+				$session = $this->client()->checkout->sessions->retrieve($session_id);
+				if (!empty($session->payment_intent)) {
+					$pm = $this->client()->paymentIntents->retrieve((string)$session->payment_intent)->payment_method ?? null;
+				} elseif (!empty($session->subscription)) {
+					$pm = $this->client()->subscriptions->retrieve((string)$session->subscription)->default_payment_method ?? null;
+				}
+			}
+			if (!$pm) {
+				return null;
+			}
+			$pm_obj = is_string($pm) ? $this->client()->paymentMethods->retrieve($pm) : $pm;
+			$fp = $pm_obj->card->fingerprint ?? null;
+			return (is_string($fp) && $fp !== '') ? $fp : null;
+		} catch (\Throwable $e) {
+			error_log('[StripeHelper] card_fingerprint_for_order ' . (int)$order->key . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
 	public function get_subscription($stripe_subscription_id){
 		$stripe_subscription = $this->client()->subscriptions->retrieve($stripe_subscription_id);
 		return $stripe_subscription;

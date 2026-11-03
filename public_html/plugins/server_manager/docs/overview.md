@@ -1039,6 +1039,9 @@ payment fails the activation closed: the row keeps the paid order item at
 `failed`, so it is on the operator's board, and the alert names the clash.
 Any refusal at `fulfill()` is logged and emailed to the alert recipient with
 the order item id — the order is paid, so it is a person's task.
+On the operator's account an order past the per-buyer limit is not activated but
+**held** (status `held`, nothing built) until a person presses **Approve** or
+**Refuse** on the board; see [Hosted tier § One buyer, a few sites](hosted_tier.md#what-the-buyer-sees).
 
 The **Drafts** phase of the provisioning umbrella (`SweepSiteDrafts`, first in
 the sequence) soft-deletes a `draft` whose last change is older than

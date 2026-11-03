@@ -46,6 +46,9 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.7 - the per-buyer limit on hosted sites (specs/hosted_abuse_response.md section 1): checkout refuses
+ *                one past the account's limit; at payment an order past the account's or the card's limit is
+ *                held for a person (status held, nothing built, no domain bought); approve_held() releases it
  * @version 1.6 - fulfill() names its receipt outcome, 'subscription', so the hosting receipt
  *                no longer reads as an event registration
  * @version 1.5 - an activated draft on the operator's account is born with its data root encrypted where
@@ -77,6 +80,12 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	const STALE_DRAFT_SENTENCE = 'You changed your site setup after adding it to the cart. '
 		. 'Remove it from the cart and continue to payment again.';
 
+	/** What the buyer reads at checkout when the account already has the limit. */
+	public static function limit_sentence(int $limit): string {
+		return 'This account already has ' . $limit . ' hosted site' . ($limit === 1 ? '' : 's')
+			. ', the most one account can have. Contact us if you need more.';
+	}
+
 	public function options(): array {
 		return array(
 			self::REF_CUSTOMER => 'Create the server in the buyer\'s own cloud account',
@@ -107,9 +116,19 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 */
 	public function checkAvailability(Product $product, int $ref, int $quantity, array $data = array()): ?string {
 		$session = SessionControl::get_instance();
-		$draft = ManagedSiteRequirement::draft_for_line($data, (int)$session->get_user_id());
+		$user_id = (int)$session->get_user_id();
+		$draft = ManagedSiteRequirement::draft_for_line($data, $user_id);
 		if ($draft === null) {
 			return self::STALE_DRAFT_SENTENCE;
+		}
+		// The per-buyer limit, while declining is free. The card is not known
+		// here; activation checks it, and the account again (two lines in one
+		// cart each pass this alone).
+		if (self::mode_for_ref($ref) === 'operator' && !CustomerCloudProvision::hosted_limit_exempt($user_id)) {
+			$limit = CustomerCloudProvision::hosted_site_limit();
+			if (CustomerCloudProvision::hosted_sites_held($user_id, '', (int)$draft->key)['account'] >= $limit) {
+				return self::limit_sentence($limit);
+			}
 		}
 		return null;
 	}
@@ -128,7 +147,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		// Anything that stops the activation is written down and alerted with
 		// the order item id, so a person can finish it.
 		try {
-			$provision = $this->activate_draft($user, $order_item, self::mode_for_ref($ref));
+			$provision = $this->activate_draft($user, $order_item, self::mode_for_ref($ref), $order);
 		} catch (\Throwable $e) {
 			$this->alert_activation_problem($user, $order_item, $e->getMessage());
 			$provision = null;
@@ -151,7 +170,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 * the row the first one activated. Anything else that is not exactly a
 	 * pending_payment draft owned by this buyer throws, and the caller alerts.
 	 */
-	private function activate_draft(User $user, OrderItem $order_item, string $hosting_mode): ?CustomerCloudProvision {
+	private function activate_draft(User $user, OrderItem $order_item, string $hosting_mode, ?Order $order = null): ?CustomerCloudProvision {
 		if (!$order_item->key || !$user->key) {
 			throw new RuntimeException('The order item or the buyer could not be loaded.');
 		}
@@ -208,6 +227,29 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		if (trim((string)$draft->get('cvp_buyer_email')) === '') {
 			$draft->set('cvp_buyer_email', (string)$user->get('usr_email'));
 		}
+		$over_limit = null;
+		if ($hosting_mode === 'operator') {
+			// The per-buyer limit, now that the card is known: past it, the paid
+			// order waits for a person (hosted_abuse_response section 1).
+			$fingerprint = '';
+			if ($order !== null) {
+				try {
+					$fingerprint = (string)(self::card_fingerprint($order, $order_item) ?? '');
+				} catch (\Throwable $e) {
+					error_log('CustomerCloudFulfillment: card fingerprint for order item #' . $order_item->key . ': ' . $e->getMessage());
+				}
+			}
+			$draft->set('cvp_card_fingerprint', $fingerprint !== '' ? $fingerprint : null);
+			$over_limit = self::over_limit_reason((int)$user->key, $fingerprint, (int)$draft->key);
+		}
+		if ($over_limit !== null) {
+			$draft->set('cvp_status', 'held');
+			$draft->set('cvp_error', 'Held: ' . $over_limit . '. Approve it on the board, or refund and cancel the order and Refuse it.');
+			$draft->save();
+			$draft->load();
+			$this->alert_activation_problem($user, $order_item, 'held for a person: ' . $over_limit);
+			return $draft;
+		}
 		if ($hosting_mode === 'operator') {
 			// Nothing to connect and nobody to ask: the instance is created in
 			// the operator's default cloud account (CustomerCloudProvision stamps it).
@@ -234,6 +276,73 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$this->file_domain_row($draft, $user, $order_item);
 		}
 		return $draft;
+	}
+
+	/** Tests only: stands in for Stripe when reading the paying card's fingerprint. */
+	public static $fingerprint_stand_in = null;
+
+	/** The paying card's fingerprint: the charge path's own helper, so a test's stand-in gateway answers. */
+	private static function card_fingerprint(Order $order, OrderItem $order_item): ?string {
+		if (is_callable(self::$fingerprint_stand_in)) {
+			return (self::$fingerprint_stand_in)($order, $order_item);
+		}
+		$stripe = function_exists('_cart_charge_gateway') ? _cart_charge_gateway('StripeHelper') : new StripeHelper();
+		return method_exists($stripe, 'card_fingerprint_for_order') ? $stripe->card_fingerprint_for_order($order, $order_item) : null;
+	}
+
+	/**
+	 * Why a paid hosted order is past the per-buyer limit, or null when it is
+	 * not: the account's other hosted sites, then the card's.
+	 */
+	public static function over_limit_reason(int $user_id, string $fingerprint, int $except_id): ?string {
+		if (CustomerCloudProvision::hosted_limit_exempt($user_id)) {
+			return null;
+		}
+		$limit = CustomerCloudProvision::hosted_site_limit();
+		$held = CustomerCloudProvision::hosted_sites_held($user_id, $fingerprint, $except_id);
+		if ($held['account'] >= $limit) {
+			return 'the buyer\'s account already has ' . $held['account'] . ' hosted site(s), the limit is ' . $limit;
+		}
+		if ($fingerprint !== '' && $held['card'] >= $limit) {
+			return 'the paying card already paid for ' . $held['card'] . ' hosted site(s) on any account, the limit is ' . $limit;
+		}
+		return null;
+	}
+
+	/**
+	 * A person releases a held order: it goes on exactly as an activation
+	 * under the limit would have (ready, mail owed, the domain row filed).
+	 */
+	public static function approve_held(CustomerCloudProvision $prov, int $by_user_id): void {
+		if ((string)$prov->get('cvp_status') !== 'held') {
+			throw new RuntimeException('Only a held provision can be approved.');
+		}
+		$prov->set('cvp_status', 'ready');
+		$prov->set('cvp_mail_state', 'pending');
+		$prov->set('cvp_error', null);
+		$prov->save();
+		$prov->load();
+		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' approved by user #' . $by_user_id);
+		if ((string)$prov->get('cvp_domain_source') === 'register') {
+			$user = new User((int)$prov->get('cvp_usr_user_id'), TRUE);
+			$order_item = new OrderItem((int)$prov->get('cvp_external_order_item_id'), TRUE);
+			(new self())->file_domain_row($prov, $user, $order_item);
+		}
+	}
+
+	/**
+	 * A person refuses a held order, after refunding and cancelling it on its
+	 * order page (nothing here moves money): the row leaves the board. It
+	 * built nothing, so nothing is left running.
+	 */
+	public static function refuse_held(CustomerCloudProvision $prov, int $by_user_id): void {
+		if ((string)$prov->get('cvp_status') !== 'held') {
+			throw new RuntimeException('Only a held provision can be refused.');
+		}
+		$prov->set('cvp_error', 'Refused by user #' . $by_user_id . ' (over the per-buyer limit).');
+		$prov->save();
+		$prov->soft_delete();
+		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' refused by user #' . $by_user_id);
 	}
 
 	/**

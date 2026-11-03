@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.60 - a held hosted order (over the per-buyer limit) offers Approve, Refuse and a link to its order
  * @version 1.59 - recent jobs leave out completed routine never-do checks
  * @version 1.58 - a holder owed a second-factor confirmation is offered it first, in place of Reveal and Retire, and comes
  *                 back to the real buttons; a click that still meets the confirmation says to click again
@@ -278,6 +279,33 @@ if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
 	$session->save_message(new DisplayMessage(
 		$prov->get('cvp_domain') . ' dismissed. It created nothing, so nothing is left running.',
 		'Dismissed', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	header('Location: /admin/server_manager'); exit;
+}
+
+// A paid hosted order held over the per-buyer limit (specs/hosted_abuse_response.md
+// section 1): a person approves it, and it goes on as any activation would, or
+// refuses it after refunding and cancelling it on its order page.
+if ($_POST && in_array(($_POST['action'] ?? ''), array('approve_held_provision', 'refuse_held_provision'), true)) {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+	try {
+		if (!$prov->key || $prov->get('cvp_delete_time')) {
+			throw new RuntimeException('That provision is no longer on the board.');
+		}
+		if ($_POST['action'] === 'approve_held_provision') {
+			CustomerCloudFulfillment::approve_held($prov, (int)$session->get_user_id());
+			$done = $prov->get('cvp_domain') . ' approved: it is built as any paid order would be.';
+		} else {
+			CustomerCloudFulfillment::refuse_held($prov, (int)$session->get_user_id());
+			$done = $prov->get('cvp_domain') . ' refused. It built nothing, so nothing is left running.';
+		}
+		$session->save_message(new DisplayMessage($done, 'Done', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	} catch (\Throwable $e) {
+		$session->save_message(new DisplayMessage($e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	}
 	header('Location: /admin/server_manager'); exit;
 }
 
@@ -1065,7 +1093,7 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 			<?php endif; ?>
 			<?php foreach ($inflight_provisions as $prov):
 				$pstatus = $prov->get('cvp_status');
-				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
+				$badge = ($pstatus === 'failed') ? 'danger' : (in_array($pstatus, array('pending_connect', 'held'), true) ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
 				$pw_state = (string)$prov->get('cvp_install_password');
 				$pw_summary = ProvisionCustomerCloud::install_password_summary($prov);
 				$perr = trim((string)$prov->get('cvp_error'));
@@ -1090,6 +1118,25 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 						}
 						if ($prov_auto): ?><span class="badge badge-subtle-success" title="<?php echo $prov_auto; ?> agent<?php echo $prov_auto === 1 ? '' : 's'; ?> on this machine approved automatically, matched against the keys its install showed.">auto-approved</span><?php endif; ?>
 						<?php if ($prov_host_id): ?><a href="#host-<?php echo $prov_host_id; ?>" class="svm-host-jump" title="Show this machine's host on the board">host</a><?php endif; ?>
+						<?php if ($pstatus === 'held'):
+							$held_order_item = new OrderItem((int)$prov->get('cvp_external_order_item_id'), TRUE);
+							$held_order_id = $held_order_item->key ? (int)$held_order_item->get('odi_ord_order_id') : 0; ?>
+							<form method="post" action="/admin/server_manager" id="approve_held_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+								<input type="hidden" name="action" value="approve_held_provision">
+								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+								<?php echo SmAdminCsrf::field(); ?>
+								<button type="button" class="btn btn-sm btn-outline-secondary"
+									onclick="<?php echo $confirm_submit('approve_held_' . (int)$prov->key, 'Approve ' . $prov->get('cvp_domain') . '? It is past the per-buyer limit; approving builds it (and registers its domain) as any paid order.'); ?>">Approve</button>
+							</form>
+							<form method="post" action="/admin/server_manager" id="refuse_held_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+								<input type="hidden" name="action" value="refuse_held_provision">
+								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+								<?php echo SmAdminCsrf::field(); ?>
+								<button type="button" class="btn btn-sm btn-outline-danger"
+									onclick="<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Refund the payment and cancel the subscription on its order page first: refusing moves no money, it only takes the order off this board.'); ?>">Refuse</button>
+							</form>
+							<?php if ($held_order_id): ?><a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $held_order_id; ?>" class="svm-host-jump">order</a><?php endif; ?>
+						<?php endif; ?>
 						<?php if (!$dismiss_blockers): ?>
 							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
 								<input type="hidden" name="action" value="dismiss_provision">

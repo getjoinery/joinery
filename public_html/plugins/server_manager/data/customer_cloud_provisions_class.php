@@ -42,6 +42,8 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.28 - cvp_card_fingerprint and status 'held': a paid hosted order over the per-buyer limit waits for a
+ *                 person (hosted_sites_held(), hosted_site_limit(); specs/hosted_abuse_response.md section 1)
  * @version 1.27 - cvp_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
  * @version 1.26 - install password state 'kept': the root password sealed to the holder's vault
  *                (cvp_root_pass_vault_sealed and the four sealing columns), cvp_root_access_offered;
@@ -258,6 +260,10 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_domain_quote_time'      => array('type'=>'timestamp(6)'),
 		'cvp_registrant_sealed'      => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
+		// The paying card's Stripe fingerprint (the same card on two accounts
+		// reads the same), recorded at activation for the per-card limit of a
+		// hosted site. Empty when the payment carried no card (PayPal).
+		'cvp_card_fingerprint'       => array('type'=>'varchar(64)'),
 		// The agents' keys as this plane watched the install produce them (16 hex): what a join is matched
 		// against for automatic approval, and consumed when it is approved (JoinAutoApproval).
 		// One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a).
@@ -413,7 +419,7 @@ class CustomerCloudProvision extends SystemBase {
 	}
 
 	/** The provision statuses still working toward a running site, or stuck. */
-	const OPEN_STATUSES = array('pending_connect', 'ready', 'booting', 'installing', 'failed');
+	const OPEN_STATUSES = array('pending_connect', 'ready', 'booting', 'installing', 'failed', 'held');
 
 	/**
 	 * The states a buyer's row passes through before any money moves. A row in
@@ -453,6 +459,44 @@ class CustomerCloudProvision extends SystemBase {
 			}
 		}
 		return null;
+	}
+
+	/** Hosted sites one buyer, or one card, may have at once (server_manager_hosted_sites_per_buyer). */
+	public static function hosted_site_limit(): int {
+		$n = (int)Globalvars::get_instance()->get_setting('server_manager_hosted_sites_per_buyer');
+		return $n > 0 ? $n : 3;
+	}
+
+	/** Whether this account is let past the per-buyer limit (server_manager_hosted_sites_limit_exempt). */
+	public static function hosted_limit_exempt(int $user_id): bool {
+		$list = (string)Globalvars::get_instance()->get_setting('server_manager_hosted_sites_limit_exempt');
+		return $user_id > 0 && in_array((string)$user_id, preg_split('/[\s,]+/', trim($list), -1, PREG_SPLIT_NO_EMPTY), true);
+	}
+
+	/**
+	 * How many hosted sites (on the operator's account) this buyer, and this
+	 * card, already hold: every row past payment that is not deleted, held
+	 * and failed ones included, since each is a site paid for. $except_id
+	 * leaves out the row being decided.
+	 *
+	 * @return array{account: int, card: int}
+	 */
+	public static function hosted_sites_held(int $user_id, string $fingerprint = '', int $except_id = 0): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$pre = "'" . implode("','", self::PRE_PAYMENT_STATUSES) . "'";
+		$base = "SELECT COUNT(*) FROM cvp_customer_cloud_provisions
+		          WHERE cvp_delete_time IS NULL AND cvp_hosting_mode = 'operator'
+		            AND cvp_status NOT IN ($pre) AND cvp_customer_cloud_provision_id <> ?";
+		$q = $db->prepare($base . ' AND cvp_usr_user_id = ?');
+		$q->execute(array($except_id, $user_id));
+		$account = (int)$q->fetchColumn();
+		$card = 0;
+		if ($fingerprint !== '') {
+			$q = $db->prepare($base . ' AND cvp_card_fingerprint = ?');
+			$q->execute(array($except_id, $fingerprint));
+			$card = (int)$q->fetchColumn();
+		}
+		return array('account' => $account, 'card' => $card);
 	}
 
 	// ------------------------------------------------------------------
