@@ -408,9 +408,9 @@ out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
 chk "not root and no fixture named: the tick leaves the kernel to root" \
     "$(cat "$PROC/kernel/yama/ptrace_scope"):$(printf '%s\n' "$out" | grep -c 'put back to')" "0:0"
 
-echo "== the tick holds the agent running where its switch is on (restart audit H5) =="
+echo "== the tick holds the agent running wherever it is installed (restart audit H5) =="
 AH="$T/agent_hold"
-mkdir -p "$AH/run/systemd/system" "$AH/etc/systemd/system" "$AH/etc/joinery-agent" "$AH/bin"
+mkdir -p "$AH/run/systemd/system" "$AH/etc/systemd/system" "$AH/bin"
 : > "$AH/etc/systemd/system/joinery-agent.service"
 # systemctl stub: is-enabled / is-active answer from files, enable / start write them.
 cat > "$AH/bin/systemctl" <<STUB
@@ -434,8 +434,8 @@ chk "running and enabled: no start, no enable, nothing said" \
 
 rm -f "$AH/active_state"
 out="$(hold_tick)"
-chk "stopped by hand with its switch on: started within the tick, and said" \
-    "$( [ -f "$AH/active_state" ] && echo running):$(printf '%s\n' "$out" | grep -c 'joinery-agent was not running though its switch is on; started')" "running:1"
+chk "stopped by hand: started within the tick, and said" \
+    "$( [ -f "$AH/active_state" ] && echo running):$(printf '%s\n' "$out" | grep -c 'joinery-agent was not running; started')" "running:1"
 
 rm -f "$AH/enabled_state"
 out="$(hold_tick)"
@@ -443,13 +443,11 @@ chk "disabled at boot: enabled again, and said" \
     "$( [ -f "$AH/enabled_state" ] && echo enabled):$(printf '%s\n' "$out" | grep -c 'nothing would start it after a reboot; enabled')" "enabled:1"
 
 rm -f "$AH/active_state" "$AH/enabled_state"
+mkdir -p "$AH/etc/joinery-agent"
 echo 0 > "$AH/etc/joinery-agent/enabled"
 out="$(hold_tick)"
-chk "switched off by its marker: left stopped and disabled" \
-    "$( [ -f "$AH/active_state" ] && echo running || echo stopped):$(grep -c -E '^(start|enable) ' "$AH/calls" 2>/dev/null || echo 0)" "stopped:0"
-echo 1 > "$AH/etc/joinery-agent/enabled"
-out="$(hold_tick)"
-chk "switched back on by its marker: started" "$( [ -f "$AH/active_state" ] && echo running)" "running"
+chk "an old off marker left on disk is not a switch: started and enabled" \
+    "$( [ -f "$AH/active_state" ] && echo running):$( [ -f "$AH/enabled_state" ] && echo enabled)" "running:enabled"
 
 rm -f "$AH/active_state"
 rm -rf "$AH/run/systemd"

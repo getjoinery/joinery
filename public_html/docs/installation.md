@@ -69,7 +69,7 @@ Nothing is asked that can be worked out. The site name comes from the domain (or
 
 There is no credentials file on this path — the owner already knows the password, because they chose it. Every other install writes one, since nobody chose that password.
 
-An instance built this way is entirely the deployer's: no agent, no registration, no enrollment, no outbound call beyond fetching the release archive.
+An instance built this way is entirely the deployer's: no registration, no enrollment, no outbound call beyond fetching the release archive. Its agent runs, as on every install, and connects to nothing until the owner joins a management node.
 
 **How it is put together.** The script hosted at Linode is a wrapper of about twenty lines: it declares the fields, fetches the release archive, and hands off to `maintenance_scripts/install_tools/linode_stackscript.sh` inside it. All the real logic lives in the archive, so it ships with every release and an instance created today installs what was published this morning — with nothing to update on the Linode side. The pasted wrapper is kept in the repo at `maintenance_scripts/install_tools/linode_stackscript_wrapper.sh` so it stays reviewable.
 

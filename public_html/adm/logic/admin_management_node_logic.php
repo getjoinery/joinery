@@ -12,6 +12,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 2.0 - the agent's on/off switch is gone: the agent runs on every machine, and joining a
+ *                management node is the owner's decision here
  * @version 1.9 - root_access_off: the owner turns emergency root access off, one-way (specs/implemented/beta_break_glass_root_access.md 4.2)
  * @version 1.8 - support_facts_on/off and support_reads_on/off: the Help panel's consent (support_chatbot.md)
  * @version 1.7 - the switch takes effect at the host converger's next tick, which counts it as a change (B24)
@@ -39,26 +41,6 @@ function admin_management_node_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
-
-	// Whether this machine runs an agent at all. Recorded here; acted on by the
-	// agent installer at the host converger's next tick (the switch is part of
-	// what it counts as a change), because a web request has no root and cannot
-	// install a service. The page says so rather than implying the switch took
-	// effect the moment it was flipped.
-	if (isset($input['action']) && $input['action'] === 'enable_agent') {
-		Setting::put('agent_enabled', '1');
-		return LogicResult::redirect('/admin/admin_management_node?agent=on');
-	}
-
-	// Turning the agent off is refused unless the words were typed; the page's
-	// dialog enforces it in the browser, this enforces it for everything else.
-	if (isset($input['action']) && $input['action'] === 'disable_agent') {
-		if (strtolower(trim((string)($input['confirm_text'] ?? ''))) !== 'disable agent') {
-			return LogicResult::redirect('/admin/admin_management_node?error=' . urlencode('The agent was left on: the confirmation words were not typed.'));
-		}
-		Setting::put('agent_enabled', '');
-		return LogicResult::redirect('/admin/admin_management_node?agent=off');
-	}
 
 	// Whether a connected management node may read this site's logs. The
 	// agent reads the same setting before every log word and refuses when it
@@ -164,7 +146,6 @@ function admin_management_node_logic(array $input): LogicResult {
 		'request'         => is_array($request) ? $request : null,
 		'state'           => is_array($state) ? $state : null,
 		'leave_request'   => is_array($leave) ? $leave : null,
-		'agent_enabled'   => admin_management_node_agent_enabled($settings),
 		'log_access'      => admin_management_node_log_access($settings),
 		'log_access_switched' => isset($input['logs']) ? (string)$input['logs'] : '',
 		'root_access_offered' => BetaPermissions::root_access_offered(),
@@ -175,50 +156,37 @@ function admin_management_node_logic(array $input): LogicResult {
 		'error'           => isset($input['error']) ? (string)$input['error'] : '',
 		'requested'       => !empty($input['requested']),
 		'cancelled'       => !empty($input['cancelled']),
-		'agent_switched'  => isset($input['agent']) ? (string)$input['agent'] : '',
 	]);
 }
 
 /**
  * Where the agent lands on every platform that runs one. The page reports
- * whether the switch has actually been acted on, and this file is the only
- * thing that knows the path.
+ * whether it has been installed yet, and this file is the only thing that
+ * knows the path.
  */
 define('ADMIN_MANAGEMENT_NODE_AGENT_BINARY', '/usr/local/bin/joinery-agent');
 
 /**
- * Is the agent switched on for this machine?
- */
-function admin_management_node_agent_enabled($settings): bool {
-	return admin_management_node_agent_switch_on((string)$settings->get_setting('agent_enabled'));
-}
-
-/**
- * May a connected management node read this site's logs? Same spellings as
- * the agent switch, because the agent reads this value with the same reader
- * it reads agent_enabled with (quiet.go switchOn), and one setting read two
- * ways is how a page and a machine come to disagree.
+ * May a connected management node read this site's logs? Read with the same
+ * spellings the agent reads it with (primitives.SettingOn), because one
+ * setting read two ways is how a page and a machine come to disagree.
  */
 function admin_management_node_log_access($settings): bool {
 	return admin_management_node_agent_switch_on((string)$settings->get_setting('agent_log_access'));
 }
 
 /**
- * Does a stored agent_enabled value mean on? Split from the reader above so a
- * caller holding the raw string — the CLI, which writes and then reports, and
- * cannot use a settings instance cached before its own write — asks the same
- * question the page does.
- *
- * The accepted spellings match install_agent.sh's, so a value written by
- * either side is read the same by both.
+ * Does a stored value of one of the agent's switches (agent_log_access) mean
+ * on? Split from the reader above so a caller holding the raw string asks the
+ * same question the page does. The accepted spellings match the agent's.
  */
 function admin_management_node_agent_switch_on(string $value): bool {
 	return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
 }
 
 /**
- * The command that installs the agent on this machine, for an admin who does
- * not want to wait for the next container start or upgrade to reach it.
+ * The command that installs the agent on this machine, for an admin whose
+ * agent has not appeared after the host converger's next run.
  *
  * A web request cannot run it — that is the whole reason the installer is a
  * root-moment script — so the page prints it rather than offering a button

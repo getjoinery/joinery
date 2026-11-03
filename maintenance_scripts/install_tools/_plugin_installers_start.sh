@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.50 - The agent runs wherever it is installed: the tick's hold no longer reads an
+#                on/off marker, and the change hash no longer reads the agent_enabled setting.
 # Version: 2.49 - A run that changed /etc/cron.d touches the folder in a later second before
 #                it exits, so cron reloads it: cron sees a change only by whole-second mtime,
 #                and a container's converger entry written in the second cron loaded was never
@@ -256,8 +258,7 @@
 #                Joinery instance, so gating it on a plugin being active meant
 #                it never reached a managed node at all — only management nodes,
 #                where server_manager happens to be turned on. What the agent
-#                does on a given machine is decided by the agent_enabled
-#                setting, which the installer reads (specs/agent_on_node_architecture.md).
+#                runs on every machine it is installed on (specs/agent_on_node_architecture.md).
 #                1.1 - Also installs declared PHP extensions when running as root.
 #                A plugin uploaded/installed AFTER the site image was built can
 #                declare requires.extensions the image never resolved; without
@@ -716,19 +717,16 @@ kernel_settings_hold() {
     done < <(kernel_settings_state)
 }
 
-# --- The agent runs wherever its switch is on (agent restart audit H5) --------
+# --- The agent runs wherever it is installed (agent restart audit H5) ---------
 # systemd restarts an agent that exits, and the cron keepalive starts one on a
 # machine without systemd. Neither starts an agent someone stopped
 # (`systemctl stop`), or one whose unit was disabled before a reboot: those
 # stayed down until the daily converge ran install_agent.sh, which also skips
 # when the database cannot be read. On a machine nobody logs into, that is a day
-# with no way in. The agent's off switch is the marker install_agent.sh and the
-# keepalive read (/etc/joinery-agent/enabled): absent is on, present and not 1 is
-# off. A switched-off agent is left alone. One systemctl call a tick when all is
-# well. JOINERY_AGENT_HOLD_ROOT points the paths at a fixture for the gate, with
+# with no way in. One systemctl call a tick when all is well. JOINERY_AGENT_HOLD_ROOT points the paths at a fixture for the gate, with
 # systemctl taken from PATH.
 agent_running_hold() {
-    local root="" marker unit now
+    local root="" unit now
     if [[ "$(id -u)" != "0" ]]; then
         [[ -n "${JOINERY_AGENT_HOLD_ROOT:-}" ]] || return 0
         root="${JOINERY_AGENT_HOLD_ROOT%/}"
@@ -736,10 +734,6 @@ agent_running_hold() {
     [[ -d "${root}/run/systemd/system" ]] || return 0
     unit="${root}/etc/systemd/system/joinery-agent.service"
     [[ -f "${unit}" ]] || return 0
-    marker="${root}/etc/joinery-agent/enabled"
-    if [[ -f "${marker}" && "$(cat "${marker}" 2>/dev/null)" != "1" ]]; then
-        return 0
-    fi
     now="$(date -u '+%Y-%m-%d %H:%M:%S')"
     if ! systemctl is-enabled --quiet joinery-agent 2>/dev/null; then
         if systemctl enable --quiet joinery-agent 2>/dev/null; then
@@ -750,7 +744,7 @@ agent_running_hold() {
     fi
     if ! systemctl is-active --quiet joinery-agent 2>/dev/null; then
         if systemctl start joinery-agent 2>/dev/null; then
-            echo "host converger: ${now} joinery-agent was not running though its switch is on; started"
+            echo "host converger: ${now} joinery-agent was not running; started"
         else
             echo "host converger: ${now} joinery-agent is not running and could not be started" >&2
         fi
@@ -1096,34 +1090,6 @@ read_active_plugins() {
             foreach ($q->fetchAll(PDO::FETCH_NUM) as $row) {
                 echo $row[0] . "\n";
             }
-        } catch (Exception $e) {
-            fwrite(STDERR, "db-unreachable\n");
-            exit(3);
-        }
-    ' "${CONFIG_FILE}" 2>/dev/null
-}
-
-# The site's settings that switch what a host installer does, as one line each
-# (name=value), for the change hash: install_agent.sh reads agent_enabled, and
-# a switch flipped on the site's page is a reason to converge now. Exit 3 when
-# the database cannot be read.
-read_host_switches() {
-    php -r '
-        $config = file_get_contents($argv[1]);
-        $val = function ($key) use ($config) {
-            return preg_match("/settings\[.".$key.".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
-        };
-        $name = $val("dbname");
-        $user = $val("dbusername");
-        $pass = $val("dbpassword");
-        $host = $val("dbhost") ?: "localhost";
-        if ($name === "" || $user === "") { fwrite(STDERR, "no-db-config\n"); exit(3); }
-        try {
-            $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
-                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
-            $q = $pdo->query("SELECT stg_value FROM stg_settings WHERE stg_name = \x27agent_enabled\x27");
-            $row = $q->fetch(PDO::FETCH_NUM);
-            echo "agent_enabled=" . ($row === false ? "" : (string)$row[0]) . "\n";
         } catch (Exception $e) {
             fwrite(STDERR, "db-unreachable\n");
             exit(3);
@@ -1504,7 +1470,6 @@ converge_hash() {
         # whether the site runs a plugin host (install_sandbox_host.sh).
         for m in "${PUBLIC_HTML}"/plugins/*/manifest.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
-        echo "${HOST_SWITCHES_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -1560,9 +1525,6 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
     # reached, whatever else this tick does or skips.
     agent_running_hold
     ACTIVE_PLUGINS_FOR_HASH="$(read_active_plugins 2>/dev/null || echo "db-unreachable")"
-    if [[ "${MACHINE}" == "0" ]]; then
-        HOST_SWITCHES_FOR_HASH="$(read_host_switches 2>/dev/null || echo "db-unreachable")"
-    fi
     CONVERGE_NOW_HASH="$(converge_hash)"
     last_hash="$(cat "${STAMP_FILE}" 2>/dev/null || true)"
     last_time="$(cut -d' ' -f1 "${LAST_FILE}" 2>/dev/null || echo 0)"

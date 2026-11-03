@@ -2484,9 +2484,8 @@
 		//
 		// Known limit: sudo strips the environment, so the runner's active-plugin
 		// lookup can lose PGPASSWORD on bare metal and find none. The CORE
-		// installers are unaffected — install_agent.sh reads the database through
-		// PHP and the site config rather than psql — so the agent converges
-		// either way. build_run_plugin_installers carries the password across
+		// installers are unaffected — install_agent.sh reads no database at
+		// all — so the agent converges either way. build_run_plugin_installers carries the password across
 		// explicitly when the plane dispatches this on its own.
 		$installers_runner = $full_site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
 		if (file_exists($installers_runner)) {

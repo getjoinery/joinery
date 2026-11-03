@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.41 - The agent runs on every site and Docker host: --enable-agent is accepted and changes
+#               nothing, --management-node=URL asks to join on its own, and a Docker site's agent
+#               installer runs inside its container at the end of the install
 #VERSION 3.40 - server requires Ubuntu 26.04 or later, compared as a version (spec post_quantum_sealing R8);
 #               the FPM php.ini gets ffi.enable=On
 #VERSION 3.39 - site --help names every backup provider, with the region or endpoint it asks for
@@ -700,9 +703,7 @@
 #   --admin-email=EMAIL    Address for the site's admin account (default none: it signs in as admin)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
-#   --enable-agent         Run the Joinery agent on this site (the binary is
-#                          installed either way; this starts it). Off by default.
-#   --management-node=URL  With --enable-agent: ask to join that management node
+#   --management-node=URL  Have the site's agent ask to join that management node
 #                          (a request its operator approves; nothing is enrolled here)
 #   --no-ssl               Skip automatic SSL certificate setup
 #   --themes               Download themes/plugins from distribution server
@@ -981,7 +982,7 @@ print_info() {
 }
 
 # The site agent's key, for the plane that built this machine. The agent stages its
-# key a moment after it is switched on and the join is lodged; agent_control.php
+# key a moment after it starts and the join is lodged; agent_control.php
 # --status prints it as "key fingerprint:" in groups of four. Waits up to 90
 # seconds, prints SITE_AGENT_KEY=<16 hex> when it appears, nothing when it does
 # not. A missing line only costs the automation of that join, never the install.
@@ -2788,11 +2789,11 @@ install_docker_host_agent() {
         return 0
     fi
 
-    if ! "$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir" --enable; then
+    if ! "$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir"; then
         print_warning "Host agent install did not complete; the Docker host is up. Re-run install_agent.sh to retry."
         return 0
     fi
-    print_success "Host agent installed and enabled"
+    print_success "Host agent installed and running"
 
     # The release's own support bundle, and with it the host converger: the
     # converge a bundle's arrival runs installs the converger's timer, which
@@ -4485,7 +4486,6 @@ do_site_create() {
     local PORT=""
     local ACTIVATE_THEME=""
     local WITH_TEST_SITE=false
-    local ENABLE_AGENT=false
     local MANAGEMENT_NODE_URL=""
     local NO_SSL=false
     local THEMES=""
@@ -4563,12 +4563,9 @@ do_site_create() {
                 shift
                 ;;
             --enable-agent)
-                # The agent binary lands on every install; this switches it ON.
-                # Off is the default because an install should not start a root
-                # service nobody asked for — but a site provisioned BY a
-                # management node is exactly the case where it was asked for,
-                # so that path passes this.
-                ENABLE_AGENT=true
+                # Accepted and changes nothing: the agent runs on every site.
+                # Management nodes pass it, since an older release's install.sh
+                # they may be installing reads it.
                 shift
                 ;;
             --no-ssl)
@@ -4684,8 +4681,7 @@ do_site_create() {
                 echo "                             JSON utils/install_dns_credential.php takes"
                 echo "  --activate THEME       Set active theme after installation"
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
-                echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
-                echo "  --management-node=URL  With --enable-agent: ask to join that management node"
+                echo "  --management-node=URL  Have the site's agent ask to join that management node"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
                 echo "  --dormant --copy-of=ID The target of a site copy: bare metal, alone on the"
                 echo "                         machine, or with --docker and its port a container on"
@@ -4835,14 +4831,6 @@ do_site_create() {
             exit 1
         fi
         export JOINERY_INSTALL_BUNDLE=none
-    fi
-
-    # What --enable-agent runs on the new site: switch the agent on and, given
-    # a management node, ask to join it in the same step. agent_control.php
-    # validates the URL; the join is a request the plane's operator approves.
-    local -a AGENT_CONTROL_ARGS=(--on)
-    if [ -n "$MANAGEMENT_NODE_URL" ]; then
-        AGENT_CONTROL_ARGS+=("--join=$MANAGEMENT_NODE_URL")
     fi
 
     # Validate required parameters
@@ -6073,21 +6061,23 @@ EOF
         echo "DORMANT_COPY_OF=${JOINERY_DORMANT_COPY_OF}"
     fi
 
-    # --enable-agent for a Docker site: the site's agent runs INSIDE the
-    # container (its join reads the site's own stg_settings), so it is enabled
-    # there, not on the host. The binary ships in the image; agent_control.php
-    # --on writes the setting and runs the installer in one step. Bare metal
-    # does the same on the host at the equivalent point. Without this the flag
-    # was silently dropped on the Docker path and the site came up unmanageable.
-    if [ "$ENABLE_AGENT" = true ]; then
-        print_step "Enabling the Joinery agent inside the container..."
-        if site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
-            print_success "Agent enabled inside $SITENAME${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL}"
-            if [ -n "$MANAGEMENT_NODE_URL" ]; then
-                emit_site_agent_key site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
-            fi
+    # A Docker site's agent runs INSIDE the container (its join reads the
+    # site's own stg_settings). Its installer runs there now, so the agent is
+    # up when the install ends rather than at the container's next start; given
+    # a management node, it is asked to join in the same step. agent_control.php
+    # validates the URL; the join is a request the plane's operator approves.
+    print_step "Starting the Joinery agent inside the container..."
+    if site_engine exec "$SITENAME" bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/install_agent.sh" "$SITENAME"; then
+        print_success "Agent running inside $SITENAME"
+    else
+        print_warning "The agent installer did not complete inside $SITENAME; the container's next start runs it again"
+    fi
+    if [ -n "$MANAGEMENT_NODE_URL" ]; then
+        if site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "--join=$MANAGEMENT_NODE_URL"; then
+            print_success "Asked to join $MANAGEMENT_NODE_URL"
+            emit_site_agent_key site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
         else
-            print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
+            print_warning "Could not ask to join $MANAGEMENT_NODE_URL; ask again from Admin → System → Management Node"
         fi
     fi
 
@@ -6367,16 +6357,15 @@ do_site_baremetal() {
         exit 1
     fi
 
-    # --enable-agent, before the installers run: the agent installer reads the
-    # setting, so writing it after would leave the binary installed and stopped
-    # until some later root moment. Setting::put refuses an undeclared name, so
-    # a typo here fails loudly instead of storing a row nothing reads.
-    if [ "$ENABLE_AGENT" = true ]; then
-        print_step "Enabling the Joinery agent for this site..."
-        if php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
-            print_success "Agent enabled${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL} — it starts with the host installers below"
+    # The join, before the installers run: the agent they start finds the
+    # request waiting. agent_control.php validates the URL; the join is a
+    # request the plane's operator approves.
+    if [ -n "$MANAGEMENT_NODE_URL" ]; then
+        print_step "Asking to join $MANAGEMENT_NODE_URL..."
+        if php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "--join=$MANAGEMENT_NODE_URL"; then
+            print_success "Asked to join $MANAGEMENT_NODE_URL — the agent starts with the host installers below"
         else
-            print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
+            print_warning "Could not ask to join $MANAGEMENT_NODE_URL; ask again from Admin → System → Management Node"
         fi
     fi
 
@@ -6384,7 +6373,7 @@ do_site_baremetal() {
     # agent installer is the core one, and matters when cloning from a site with
     # active plugins that need host services)
     bash "$SCRIPT_DIR/_plugin_installers_start.sh" "$SITENAME" || true
-    if [ "$ENABLE_AGENT" = true ] && [ -n "$MANAGEMENT_NODE_URL" ]; then
+    if [ -n "$MANAGEMENT_NODE_URL" ]; then
         emit_site_agent_key php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
     fi
 
@@ -6627,7 +6616,6 @@ show_help() {
     echo "                         JOINERY_DNS_CREDENTIAL. See './install.sh site --help'."
     echo "  --activate THEME       Activate specified theme after installation"
     echo "  --with-test-site       Also create a test site (bare-metal only)"
-    echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
     echo "  --no-ssl               Skip automatic SSL certificate setup"
     echo "  --docker               Force Docker mode"
     echo "  --bare-metal           Force bare-metal mode"

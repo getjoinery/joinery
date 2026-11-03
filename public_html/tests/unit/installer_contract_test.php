@@ -1644,34 +1644,22 @@ check(!isset($sm_manifest['host_installer']),
     'server_manager no longer declares the agent installer as its own',
     'a management node would run it twice: once as core, once as the plugin');
 
-// What the agent does on a given machine is one setting. An installer that
-// ignored it would turn a root service on everywhere at the next upgrade.
-check(strpos($agent_src, 'agent_enabled') !== false,
-    'the installer reads the agent_enabled setting');
-
-// The binary lands on every deployment; the setting decides only whether it
-// runs. Ordering carries that: converge the artifact first, then apply the
-// switch. Gating the install on the switch instead would mean a machine
-// switched on later has to fetch, decompress and verify an artifact at that
-// moment — and gets nothing at all if the tree it is running never shipped one.
+// The agent runs on every machine it is installed on. Nothing reads a setting
+// or a marker to decide otherwise: the installer, the cron keepalive and the
+// host runner's tick all start it unconditionally.
+check(strpos($agent_src, 'AGENT_ENABLED') === false && strpos($agent_src, 'read_setting') === false,
+    'the installer reads no on/off setting');
+check(strpos($agent_src, 'rm -f "$OLD_SWITCH_MARKER"') !== false,
+    'the installer removes any on/off marker an earlier installer left',
+    'an agent older than this one stops itself when that marker reads off');
+check(preg_match('/write_supervise_script\(\)[^}]*\/etc\/joinery-agent\/enabled/s', $agent_src) === 0,
+    'the cron keepalive starts the agent without reading a marker');
+check(strpos($runner_src, 'joinery-agent/enabled"') === false && strpos($runner_src, 'stg_name = \\x27agent_enabled') === false,
+    'the host runner holds the agent running without reading a switch');
 $converge_at = strpos($agent_src, 'converge_binary || true');
-$switch_at   = strpos($agent_src, 'if [ "$AGENT_ENABLED" != "1" ]');
-check($converge_at !== false && $switch_at !== false && $converge_at < $switch_at,
-    'the binary is installed before the switch is consulted, so off still means installed');
-
-// The switch is projected into a root-owned marker so the things that decide
-// whether the agent runs keep working when the database does not. The keepalive
-// is the one that matters: it runs every minute with no database at all, and a
-// keepalive that ignored the marker would restart an agent an operator switched
-// off, within the minute, forever.
-check(strpos($agent_src, 'MARKER_FILE=') !== false,
-    'the installer projects the switch into a marker file');
-$project_at = strpos($agent_src, '> "$MARKER_FILE"');
-check($project_at !== false && $project_at < $switch_at,
-    'projection happens before the switch is applied');
-check(preg_match('/write_supervise_script\(\)[^}]*\/etc\/joinery-agent\/enabled/s', $agent_src) === 1,
-    'the cron keepalive reads the marker before starting the agent',
-    'without this, off lasts under a minute');
+$start_at    = strpos($agent_src, "\nstart_agent\n");
+check($converge_at !== false && $start_at !== false && $converge_at < $start_at,
+    'the binary is converged before the agent is started');
 
 // A binary that was just installed must be STARTED, even though something is
 // already running — what is running is the previous version, and replacing a
@@ -1708,48 +1696,16 @@ check(strpos($upgrade_src, "\$root_prefix . 'bash ' . escapeshellarg(\$installer
     'the upgrade runs the host installers with its root prefix',
     'without it, a node whose SSH user is not root silently skips every installer');
 
-// install.sh --enable-agent is how a site provisioned by a management node
-// comes up running. It has to write the setting BEFORE the host installers run,
-// or the agent is installed and left stopped until some later root moment.
-$enable_at    = strpos($install_src, '"$ENABLE_AGENT" = true');
+// A management node passes --enable-agent to every release it installs, since
+// an older release's install.sh reads it; this one accepts it and goes on. The
+// join it asks for is lodged BEFORE the host installers run, so the agent they
+// start finds the request waiting.
+$join_at       = strpos($install_src, 'agent_control.php" "--join=$MANAGEMENT_NODE_URL"');
 $installers_at = strpos($install_src, '_plugin_installers_start.sh" "$SITENAME"');
 check(strpos($install_src, '--enable-agent)') !== false,
     'install.sh accepts --enable-agent');
-check($enable_at !== false && $installers_at !== false && $enable_at < $installers_at,
-    'and applies it before the host installers run');
-
-// Off has to mean stopped AND unsupervised. The cron keepalive restarts the
-// agent within a minute, so stopping without removing it reads to an operator
-// as the switch not working.
-check(preg_match('/stop_and_disable_agent\(\)[^}]*rm -f "\$CRON_FILE"/s', $agent_src) === 1,
-    'switching off removes the cron keepalive, not just the process');
-check(preg_match('/stop_and_disable_agent\(\)[^}]*systemctl disable/s', $agent_src) === 1,
-    'and disables the systemd unit where there is one');
-
-// Both sides read the same setting; both must read it the same way. Executed,
-// not pattern-matched: the shell's own case block against the PHP function.
-require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
-$switch_block = '';
-if (preg_match('/AGENT_ENABLED="\$\(printf.*?\nesac/s', $agent_src, $m)) {
-    $switch_block = $m[0];
-}
-check($switch_block !== '', 'the shell\'s reading of the switch is findable');
-
-$shell_reads_on = function (string $value) use ($switch_block): bool {
-    $script = 'AGENT_ENABLED="$1"' . "\n" . $switch_block . "\n" . 'echo "$AGENT_ENABLED"';
-    $path = tempnam(sys_get_temp_dir(), 'agentsw');
-    file_put_contents($path, $script);
-    $out = shell_exec('bash ' . escapeshellarg($path) . ' ' . escapeshellarg($value));
-    unlink($path);
-    return trim((string)$out) === '1';
-};
-
-foreach (['1', 'true', 'TRUE', 'True', 'yes', 'on', ' on ', '0', '', 'no', 'off', 'o n', 'nonsense'] as $value) {
-    check($shell_reads_on($value) === admin_management_node_agent_switch_on($value),
-        'the installer and the admin page agree on ' . var_export($value, true),
-        'shell: ' . var_export($shell_reads_on($value), true)
-            . ', php: ' . var_export(admin_management_node_agent_switch_on($value), true));
-}
+check($join_at !== false && $installers_at !== false && $join_at < $installers_at,
+    'and asks to join before the host installers run');
 
 section('The web user cannot write the code it runs (specs/read_only_tree.md)');
 
@@ -2885,13 +2841,11 @@ if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE
 	// unmodified probe would find it, correctly decide one is already running,
 	// and skip the launch — making the test pass for the wrong reason.
 	$body = str_replace('pgrep -x joinery-agent', 'pgrep -x ' . $fake_agent, $body);
-	$body = str_replace('/etc/joinery-agent/enabled', $tmp . '/enabled', $body);
 	$body = str_replace('/etc/joinery-agent/joinery-agent.env', $tmp . '/agent.env', $body);
 	$body = str_replace('/var/log/joinery-agent.log', $tmp . '/agent.log', $body);
 
 	file_put_contents($tmp . '/keepalive.sh', $body);
 	chmod($tmp . '/keepalive.sh', 0755);
-	file_put_contents($tmp . '/enabled', "1\n");
 	file_put_contents($tmp . '/agent.env', "");
 	// Records that it ran, and which descriptors it inherited. The listing is
 	// ls -l (targets, not bare numbers) because the observing shell parks its
@@ -3604,7 +3558,7 @@ check(count($siteless_callers) === 1 && strpos($siteless_callers[0], 'install.sh
     'install_agent.sh --siteless has exactly one caller, in install.sh', implode(', ', $siteless_callers));
 $docker_fn = substr($install_src, strpos($install_src, 'install_docker_host_agent() {'));
 $docker_fn = substr($docker_fn, 0, strpos($docker_fn, "\n}\n"));
-check(strpos($docker_fn, '"$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir" --enable') !== false,
+check(strpos($docker_fn, '"$SCRIPT_DIR/install_agent.sh" --siteless --dist-dir="$dist_dir"') !== false,
     'and that caller is the Docker install step, placing the agent from the tree it runs from');
 check(substr_count($install_src, 'install_docker_host_agent "$MGMT_NODE_URL" "$NODE_NAME"') === 2,
     'which both branches of install.sh docker run (fresh Docker, Docker already present)');

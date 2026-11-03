@@ -35,7 +35,7 @@
 
 set -u
 # This gate depends on the installer's root check to stop it. As root that check
-# passes and the installer RUNS: it wrote the run switch off, installed the
+# passes and the installer RUNS: it changed the agent's supervision, installed the
 # bundled binary and stopped the live agent on the dev box on 2026-09-02, killing
 # the publish that was running the suite. Never run as root, and say why.
 if [ "$(id -u)" = "0" ]; then

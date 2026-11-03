@@ -9,8 +9,7 @@
  * The node side of specs/agent_log_access.md: the owner's switch and the
  * one-time notice.
  *
- * The agent reads agent_log_access with the same reader it reads agent_enabled
- * with, so the two settings must be declared the same way; the switch is off
+ * The agent and the page read agent_log_access with the same spellings; the switch is off
  * until the owner turns it on (owner's decision 2026-10-28); and the notice is due under
  * exactly three stored facts and silent otherwise. The notice's acknowledgement
  * is a POST: nothing here writes on a page view.
@@ -18,6 +17,7 @@
  * Runs offline, no DB.
  * Run: php tests/unit/agent_log_access_test.php
  *
+ * @version 1.2 - the agent's on/off switch is gone; log access is the one switch here
  * @version 1.1 - agent_log_access defaults to off: the owner turns it on (specs/easy_signup_completion.md Q8)
  * @version 1.0
  */
@@ -36,14 +36,13 @@ foreach ($declared['settings'] as $s) { $by_name[$s['name']] = $s; }
 
 check(isset($by_name['agent_log_access']), 'agent_log_access is declared in settings.json');
 check(($by_name['agent_log_access']['default'] ?? null) === '', 'agent_log_access defaults to off: the owner turns it on, nothing ticks it for them');
-check(!empty($by_name['agent_log_access']['managed']), 'agent_log_access is a managed setting, set from the Management Node page like agent_enabled');
+check(!empty($by_name['agent_log_access']['managed']), 'agent_log_access is a managed setting, set from the Management Node page');
 check(isset($by_name['agent_log_access_notice_seen']), 'agent_log_access_notice_seen is declared');
 check(($by_name['agent_log_access_notice_seen']['default'] ?? null) === '', 'the notice flag defaults to empty: due until acknowledged');
-check(!empty($by_name['agent_enabled']['managed']) && !empty($by_name['agent_log_access']['managed']),
-	'both switches are declared the same way, because the agent reads both with one reader');
+check(!isset($by_name['agent_enabled']), 'there is no agent on/off setting: the agent runs on every machine');
 
 // ---------------------------------------------------------------------------
-section('B. The page reads the switch with the agent switch\'s spellings');
+section('B. The page reads the switch with the agent\'s spellings');
 
 foreach (array('1', 'true', 'yes', 'on', ' On ') as $v) {
 	check(admin_management_node_agent_switch_on($v), "'$v' reads as on");
@@ -51,7 +50,7 @@ foreach (array('1', 'true', 'yes', 'on', ' On ') as $v) {
 foreach (array('', '0', 'false', 'no', 'off', 'maybe') as $v) {
 	check(!admin_management_node_agent_switch_on($v), "'$v' reads as off");
 }
-check(function_exists('admin_management_node_log_access'), 'the page has a log-access reader beside the agent-enabled reader');
+check(function_exists('admin_management_node_log_access'), 'the page has a log-access reader');
 
 $logic_src = file_get_contents(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
 foreach (array('log_access_on', 'log_access_off', 'log_access_notice_seen') as $action) {

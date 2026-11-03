@@ -3,12 +3,13 @@
  * IncidentSourceAgentSilent — plane:agent_silent: a paired node's agent has
  * not checked in for two hours (incident_triage.md, Types; WP3).
  *
- * Read from mgn_agent_last_poll. An agent its owner switched off
- * (mgn_agent_quiet_time after its last check-in) is a decision, not an
- * outage, and opens nothing; nor does a node paired but never yet checked in.
+ * Read from mgn_agent_last_poll. A node this plane is deleting
+ * (mgn_agent_quiet_time after its last check-in) is silent on purpose and
+ * opens nothing; nor does a node paired but never yet checked in.
  * Critical: nothing can be done on the node through its agent while it is
  * silent, and the agent's own repairs are not running.
  *
+ * @version 1.1 - the deliberate silence is a node being deleted; no agent is switched off by its owner
  * @version 1.0
  */
 class IncidentSourceAgentSilent implements IncidentSource {
@@ -26,7 +27,7 @@ class IncidentSourceAgentSilent implements IncidentSource {
 			return null;
 		}
 		$last = trim((string)$node->get('mgn_agent_last_poll'));
-		if ($last === '' || self::switched_off($node)) {
+		if ($last === '' || self::being_deleted($node)) {
 			return null;
 		}
 		$ts = strtotime($last . ' UTC');
@@ -48,14 +49,14 @@ class IncidentSourceAgentSilent implements IncidentSource {
 		if (trim((string)$node->get('mgn_agent_public_key')) === '') {
 			return 'The node is no longer paired, so its agent is no longer expected to check in.';
 		}
-		if (self::switched_off($node)) {
-			return 'Its owner switched the agent off.';
+		if (self::being_deleted($node)) {
+			return 'The node is being deleted.';
 		}
 		return 'The agent checks in again.';
 	}
 
-	/** The owner switched the agent off after its last check-in. */
-	private static function switched_off(ManagedNode $node): bool {
+	/** This plane started deleting the node after its last check-in. */
+	private static function being_deleted(ManagedNode $node): bool {
 		$quiet = trim((string)$node->get('mgn_agent_quiet_time'));
 		$last = trim((string)$node->get('mgn_agent_last_poll'));
 		return $quiet !== '' && ($last === '' || strtotime($last . ' UTC') <= strtotime($quiet . ' UTC'));

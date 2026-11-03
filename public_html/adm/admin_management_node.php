@@ -8,6 +8,9 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.14 - The agent's on/off switch and the "Turn off the agent" card are gone: the agent runs on every machine,
+ *                 and the page is about joining a management node; What the agent does splits what it does on its own from what
+ *                 it does for a management node (it takes no backups); log access says it starts off
  * @version 1.13 - Emergency root access card beside log access, where the install offered it: on until the owner turns it off,
  *                 and then off for good (specs/implemented/beta_break_glass_root_access.md 4.2)
  * @version 1.12 - The Help panel card says when support_url is set but is not an https address
@@ -45,9 +48,7 @@ $session         = $page_vars['session'];
 $request         = $page_vars['request'];
 $state           = $page_vars['state'];
 $leave_request   = $page_vars['leave_request'];
-$agent_enabled   = $page_vars['agent_enabled'];
 $agent_installed = $page_vars['agent_installed'];
-$agent_switched  = $page_vars['agent_switched'];
 $log_access      = $page_vars['log_access'];
 $log_access_switched = $page_vars['log_access_switched'];
 $root_access_offered = $page_vars['root_access_offered'];
@@ -82,38 +83,13 @@ $status      = is_array($state) ? (string)($state['status'] ?? '') : '';
 $fingerprint = is_array($state) ? (string)($state['fingerprint'] ?? '') : '';
 $fpr_display = $fingerprint !== '' ? trim(chunk_split($fingerprint, 4, ' ')) : '';
 
-echo '<p class="text-muted" style="max-width:46rem;">The agent runs backups, upgrades and health checks on this machine. '
-   . 'Connecting it to a management node lets an administrator run those jobs from one dashboard. '
+echo '<p class="text-muted" style="max-width:46rem;">The agent looks after this machine: it watches its health and repairs what it can. '
+   . 'It connects to nothing on its own. Connecting it to a management node lets an administrator there run backups, upgrades and checks from one dashboard. '
    . 'No password or key is shared: the agent makes its own key, and an administrator approves it after matching the fingerprints.</p>';
-
-if ($agent_switched === 'on') {
-	echo '<div class="alert alert-info" role="alert">The agent is switched on for this machine.</div>';
-} elseif ($agent_switched === 'off') {
-	echo '<div class="alert alert-info" role="alert">The agent is switched off. It stops within a minute or two, at the host converger\'s next run; the agent itself stays installed.</div>';
-}
-
-// The agent comes first: with it off, everything below describes work this
-// machine has no way to carry out.
-if (!$agent_enabled) {
-	echo '<div class="alert alert-secondary" role="alert">'
-	   . '<strong>This machine is not running the agent.</strong> Nothing below takes effect until it is.'
-	   . '</div>';
-	echo '<form method="POST" action="' . $self . '">'
-	   . '<input type="hidden" name="action" value="enable_agent">'
-	   . '<button type="submit" class="btn btn-primary">Turn on the agent</button>'
-	   . '</form>';
-	echo '<p class="text-muted" style="max-width:46rem;margin-top:12px;">'
-	   . ($agent_installed
-		? 'Starts within a minute or two, at the host converger\'s next run.'
-		: 'Installs and starts within a minute or two, at the host converger\'s next run.')
-	   . ' Connecting to a management node is a separate step afterwards.</p>';
-	$page->admin_footer();
-	return;
-}
 
 if (!$agent_installed) {
 	echo '<div class="alert alert-warning" role="alert">'
-	   . '<strong>Switched on, not installed yet.</strong> It installs by itself at the host converger\'s next run, within a minute or two. If it has not after that, run this on the machine:'
+	   . '<strong>Not installed yet.</strong> It installs by itself at the host converger\'s next run, within a minute or two. If it has not after that, run this on the machine:'
 	   . '<div class="mt-2"><code>' . htmlspecialchars($installer_hint) . '</code></div>'
 	   . '</div>';
 }
@@ -209,14 +185,21 @@ echo '</div></div>';
 $bullets = 'list-style:disc;padding-left:1.25rem;margin:0 0 .75rem;';
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">What the agent does</h5>';
+echo '<p class="mb-1">On its own, connected or not:</p>';
 echo '<ul style="' . $bullets . '">'
-   . '<li>Takes and checks backups of this site</li>'
-   . '<li>Applies code upgrades and database updates</li>'
-   . '<li>Checks that the site, database and disk are healthy</li>'
-   . '<li>Restarts services and clears caches when something is stuck</li>'
+   . '<li>Checks that the web server, database and other services answer, and restarts one that is stuck</li>'
+   . '<li>Keeps the brute-force blocker (fail2ban) running</li>'
+   . '<li>Puts back the site\'s program files when they differ from the signed release</li>'
+   . '<li>Renews a certificate near expiry, and warns when the disk is nearly full</li>'
+   . '<li>Makes sure it comes back after a crash or a reboot</li>'
+   . '</ul>';
+echo '<p class="mb-1">For a connected management node:</p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>Applies code upgrades and security updates</li>'
+   . '<li>Reports health, disk and certificates to its dashboard</li>'
    . '<li>Copies or moves the site to another machine</li>'
    . '</ul>';
-echo '<p class="text-muted small mt-2 mb-0">These run here on their own. A connected management node can start the same jobs from its dashboard.</p>';
+echo '<p class="text-muted small mt-2 mb-0">When something needs a person, this admin shows a notice and the site\'s superadmins get an email; a connected management node shows it as an incident instead.</p>';
 echo '</div></div>';
 
 // ---- Log access -----------------------------------------------------------
@@ -231,7 +214,7 @@ if ($log_access_switched === 'on') {
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">Extra permissions: logs and host configuration <span class="badge ' . ($log_access ? 'bg-success' : 'bg-secondary') . '">' . ($log_access ? 'On' : 'Off') . '</span></h5>';
 echo '<p class="mb-2">Turning this on lets a connected management node read the files below, and only these. '
-   . 'On by default; it has no effect until this machine is connected.</p>';
+   . 'Off until you turn it on; it has no effect until this machine is connected.</p>';
 
 echo '<p class="mb-1"><strong>Site logs</strong> <span class="text-muted small">(last 200 lines, and the previous day\'s copy)</span></p>';
 echo '<ul style="' . $bullets . '">'
@@ -335,35 +318,5 @@ echo '<form method="POST" action="' . $self . '" class="d-inline"><input type="h
    . ($support_consent['live_reads'] ? 'Stop live reads' : 'Allow live reads') . '</button></form>';
 echo '</div></div>';
 }
-
-// ---- Turning the agent off: strongly discouraged, typed confirmation -------
-$consequence = $is_managed
-	? 'The management node will see this machine stop responding. Disconnect first for a clean ending.'
-	: 'Nothing will be able to run backups or upgrades here until it is turned back on.';
-
-echo '<div class="card border-danger mb-3" style="max-width:46rem;"><div class="card-body">';
-echo '<h5 class="card-title text-danger mb-2">Turn off the agent</h5>';
-echo '<p class="mb-2"><strong>Not recommended.</strong> With the agent off, this machine stops taking its own backups and '
-   . 'applying its own upgrades, and no management node can help it. Leave it on unless you have a specific reason.</p>';
-echo '<button type="button" class="btn btn-sm btn-outline-danger" id="agent-off-open">Turn off the agent…</button>';
-echo '</div></div>';
-
-echo '<dialog id="agent-off-dialog" style="max-width:30rem;border:1px solid #c00;border-radius:6px;padding:1.5rem;">'
-   . '<form method="POST" action="' . $self . '" id="agent-off-form">'
-   . '<input type="hidden" name="action" value="disable_agent">'
-   . '<h5 class="text-danger" style="margin-top:0;">Turn off the agent?</h5>'
-   . '<p>This machine will stop carrying out its own backups and upgrades. ' . htmlspecialchars($consequence) . '</p>'
-   . '<p>To confirm, type <strong>disable agent</strong> below.</p>'
-   . '<input type="text" name="confirm_text" id="agent-off-text" class="form-control" autocomplete="off" style="width:100%;margin-bottom:1rem;">'
-   . '<div style="display:flex;gap:8px;justify-content:flex-end;">'
-   . '<button type="button" class="btn btn-secondary" id="agent-off-cancel">Keep the agent on</button>'
-   . '<button type="submit" class="btn btn-danger" id="agent-off-go" disabled>Turn off the agent</button>'
-   . '</div></form></dialog>';
-echo '<script>(function(){'
-   . 'var d=document.getElementById("agent-off-dialog"),t=document.getElementById("agent-off-text"),g=document.getElementById("agent-off-go");'
-   . 'document.getElementById("agent-off-open").addEventListener("click",function(){t.value="";g.disabled=true;d.showModal();t.focus();});'
-   . 'document.getElementById("agent-off-cancel").addEventListener("click",function(){d.close();});'
-   . 't.addEventListener("input",function(){g.disabled=t.value.trim().toLowerCase()!=="disable agent";});'
-   . '})();</script>';
 
 $page->admin_footer();

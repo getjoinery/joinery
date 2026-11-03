@@ -466,8 +466,8 @@ $set(array('mgn_agent_last_poll' => gmdate('Y-m-d H:i:s', time() - 3 * 3600)));
 $v = $silent->evaluate($node);
 check($v !== null && $v['severity'] === 'critical', 'Three hours silent: critical', json_encode($v));
 $set(array('mgn_agent_quiet_time' => gmdate('Y-m-d H:i:s', time() - 2 * 3600)));
-check($silent->evaluate($node) === null && $silent->cleared_text($node) === 'Its owner switched the agent off.',
-	'Switched off by its owner after its last check-in: nothing, and the clear says why');
+check($silent->evaluate($node) === null && $silent->cleared_text($node) === 'The node is being deleted.',
+	'Being deleted after its last check-in: nothing, and the clear says why');
 $set(array('mgn_agent_quiet_time' => null, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_agent_public_key' => null));
 
 // ---------------------------------------------------------------------------

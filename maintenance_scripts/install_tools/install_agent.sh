@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
 # install_agent.sh - install or converge the joinery-agent on this machine from
-# the shipped agent_dist artifact, or stop it where it is switched off.
+# the shipped agent_dist artifact, and keep it running and supervised.
 #
+# Version: 2.14 - The agent runs on every machine this installs it on: no setting is read, the
+#           off branch is gone, any /etc/joinery-agent/enabled marker is removed, and the
+#           keepalive no longer reads one. --enable is accepted and changes nothing
 # Version: 2.13 - The keepalive restarts a hung agent: one running for more than three minutes whose
 #           /run/joinery-agent/alive has not been written for three minutes is aborted and started
 #           again (agent 1.89.0's liveness watch; agent restart audit H1)
@@ -66,12 +69,9 @@
 # why the artifact still lives in that plugin's tree - the plugin ships to every
 # node whether or not it is active there.
 #
-# The binary is installed unconditionally. Whether it RUNS is one setting,
-# agent_enabled, which ships off: on starts it and sets up supervision, off
-# stops it and takes the supervision away. Nothing about that setting connects
-# this machine to a management node - that is a separate, deliberate act on the
-# Management Node admin page. `install.sh --enable-agent` sets it at install
-# time, which is how a node provisioned from a management node comes up running.
+# The agent is installed and run on every machine this reaches. Running it
+# connects this machine to nothing: joining a management node is a separate,
+# deliberate act on the Management Node admin page.
 #
 # First install is handled here; every later version change is handled by the
 # agent itself (self-update with signature verification against its embedded
@@ -87,7 +87,7 @@
 # non-interactive, exit 0 when not applicable.
 #
 # Usage:  install_agent.sh SITENAME [SITE_ROOT]
-#         install_agent.sh --siteless --dist-dir=DIR [--enable]
+#         install_agent.sh --siteless --dist-dir=DIR
 #
 # The second form is for a machine the management node manages that hosts no
 # Joinery deployment — a mail relay, a Docker host (spec A13). Three things
@@ -105,18 +105,14 @@
 #                checked here, and publisher-signature enforcement begins at
 #                the agent's first self-update, against the key baked into the
 #                binary. Same trust model as any fresh box, stated above.
-#   --enable     because the run switch lives in a settings table this machine
-#                does not have. It is written here explicitly, OFF unless asked
-#                for: a missing marker reads as ON everywhere else, which is
-#                right for its one situation (an upgrade over an agent older
-#                than the marker) and cannot arise on a machine being installed
-#                for the first time.
+#
+# --enable is accepted and changes nothing: callers built against installers
+# that read it (install.sh docker, the live-proof run) still pass it.
 
 set -u
 
 SITELESS=0
 DIST_DIR_ARG=""
-SITELESS_ENABLE=0
 
 # Flags are pulled out and the positionals left in order, so every existing
 # caller — the Dockerfile CMD, install.sh, upgrade.php, _plugin_installers_start.sh —
@@ -127,7 +123,7 @@ POSITIONAL_SEEN=0
 for arg in "$@"; do
     case "$arg" in
         --siteless)   SITELESS=1 ;;
-        --enable)     SITELESS_ENABLE=1 ;;
+        --enable)     ;;
         --dist-dir=*) DIST_DIR_ARG="${arg#--dist-dir=}" ;;
         --*)
             echo "agent installer: unrecognised option $arg" >&2
@@ -196,9 +192,9 @@ CRON_FILE="/etc/cron.d/joinery-agent"
 LOG_FILE="/var/log/joinery-agent.log"
 ENV_DIR="/etc/joinery-agent"
 ENV_FILE="${ENV_DIR}/joinery-agent.env"
-# The projected switch. The setting lives in the site database; this file is its
-# one-way shadow, so the keepalive and the agent can honour it without one.
-MARKER_FILE="${ENV_DIR}/enabled"
+# Where earlier installers kept a run switch. Removed on every run; nothing
+# reads it.
+OLD_SWITCH_MARKER="${ENV_DIR}/enabled"
 # Written by the agent for exactly as long as it is running a job, and read
 # here to decide whether restarting it right now would destroy work. Pinned
 # identically in the agent's jobmarker.go.
@@ -209,80 +205,10 @@ say() { echo "agent installer: $*"; }
 [ "$(id -u)" = "0" ] || { say "not running as root - skipping"; exit 0; }
 if [ "$SITELESS" != "1" ]; then
     [ -f "$SITE_CONFIG" ] || { say "site not initialised yet - skipping"; exit 0; }
-    # Only the site path needs PHP: it reads the switch out of the site
-    # database through PDO. A siteless machine reads no database and parses its
-    # manifest without PHP, because a mail relay has none — provision_relay.sh
-    # installs postfix, rspamd and ufw, and PHP is not among them. Requiring it here would have made
-    # every siteless install exit 0 having done nothing, which reads as success.
-    command -v php >/dev/null 2>&1 || { say "php-cli not available - skipping"; exit 0; }
 fi
 
-# --- The switch --------------------------------------------------------------
-# One setting decides whether this machine runs an agent at all. Read it from
-# the site database, which is the only place that survives a container rebuild
-# (/etc comes back carrying image defaults; the database is on the config
-# volume). The value is deliberately read fresh at every root moment, so
-# flipping it and restarting the container is a complete operation.
-#
-# A database we cannot reach is not a decision: skip, changing nothing, rather
-# than reading silence as "off" and stopping a working agent.
-read_setting() {
-    php -r '
-        $config = file_get_contents($argv[1]);
-        $val = function ($key) use ($config) {
-            return preg_match("/settings\\[.".$key.".\\]\\s*=\\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
-        };
-        $name = $val("dbname");
-        $user = $val("dbusername");
-        $pass = $val("dbpassword");
-        $host = $val("dbhost") ?: "localhost";
-        if ($name === "" || $user === "") { fwrite(STDERR, "no-db-config\n"); exit(3); }
-        try {
-            $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
-                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
-            $q = $pdo->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = ?");
-            $q->execute([$argv[2]]);
-            $row = $q->fetch(PDO::FETCH_NUM);
-            echo $row === false ? "" : (string)$row[0];
-        } catch (Exception $e) {
-            fwrite(STDERR, "db-unreachable\n");
-            exit(3);
-        }
-    ' "$SITE_CONFIG" "$1" 2>/dev/null
-}
-
-if [ "$SITELESS" = "1" ]; then
-    # No settings table to read, so the switch is stated rather than projected.
-    # OFF unless --enable: markerSaysRun() treats a MISSING marker as on, which
-    # is correct for the single case it exists for — an upgrade over an agent
-    # installed before the marker existed — and would be the wrong default to
-    # inherit on a machine being installed for the first time, where it would
-    # start a root service nobody asked to start (A9).
-    AGENT_ENABLED="$SITELESS_ENABLE"
-elif ! AGENT_ENABLED="$(read_setting agent_enabled)"; then
-    say "could not read the agent_enabled setting - leaving this machine as it is"
-    exit 0
-fi
-
-# Read exactly as the PHP side reads it (admin_management_node_agent_switch_on):
-# lowercase, trim the ends only, then match the same four spellings. Two
-# readings of one setting is how a machine ends up disagreeing with the page
-# that configured it, so this is pinned by installer_contract_test.
-AGENT_ENABLED="$(printf '%s' "$AGENT_ENABLED" | tr '[:upper:]' '[:lower:]')"
-AGENT_ENABLED="${AGENT_ENABLED#"${AGENT_ENABLED%%[![:space:]]*}"}"
-AGENT_ENABLED="${AGENT_ENABLED%"${AGENT_ENABLED##*[![:space:]]}"}"
-
-case "$AGENT_ENABLED" in
-    1|true|yes|on) AGENT_ENABLED=1 ;;
-    *)             AGENT_ENABLED=0 ;;
-esac
-
-# Project it. Root moments are the cover for a machine whose agent is not running
-# to project for itself - a container that starts with the switch off must not
-# have a keepalive that starts the agent anyway.
 mkdir -p "$ENV_DIR"
-printf '%s\n' "$AGENT_ENABLED" > "$MARKER_FILE"
-chmod 644 "$MARKER_FILE"
+rm -f "$OLD_SWITCH_MARKER"
 
 # Supervision mode: systemd where it is actually running (PID 1), cron
 # otherwise (Docker containers, minimal hosts).
@@ -320,8 +246,7 @@ write_env_file() {
 write_supervise_script() {
     cat > "$SUPERVISE_PATH" <<'SUPERVISE'
 #!/bin/sh
-# joinery-agent cron keepalive: start the agent if it is not running AND this
-# machine is switched on.
+# joinery-agent cron keepalive: start the agent if it is not running.
 #
 # Every descriptor above stdio is closed before the agent is launched, and that
 # is not hygiene, it is a bug fix. This script runs from inside an upgrade — the
@@ -332,16 +257,7 @@ write_supervise_script() {
 # that node is refused with "Another upgrade is already running" by a lock whose
 # holder is the agent itself. Observed on two container nodes at 0.8.345; the
 # nodes under systemd were unaffected because systemd starts the agent with its
-# own descriptors. The marker is read, never the database - the keepalive
-# has to be right on a machine whose database is down, which is exactly when a
-# wrong answer would matter.
-#
-# A missing marker reads as on: an agent installed before the marker existed is
-# running legitimately, and a keepalive that refused to start it would switch off
-# working agents at upgrade.
-if [ -f /etc/joinery-agent/enabled ] && [ "$(cat /etc/joinery-agent/enabled 2>/dev/null)" != "1" ]; then
-    exit 0
-fi
+# own descriptors.
 # The liveness watch (agent restart audit H1). A running agent writes the time
 # to /run/joinery-agent/alive every half minute for as long as it is alive, and
 # stops when it is hung: its poll loop stuck, or a word running far past its own
@@ -527,27 +443,7 @@ running_is_stale() {
     esac
 }
 
-# Off means stopped and left stopped. The supervision has to go with it - a
-# cron keepalive would restart the agent within the minute, which would read as
-# the switch not working. The binary and the agent's identity stay: this is a
-# switch, not an uninstall, and deleting the identity would silently end a
-# pairing that turning the switch back on is expected to restore.
-stop_and_disable_agent() {
-    if [ "$INIT_MODE" = "systemd" ]; then
-        systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
-        systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    else
-        rm -f "$CRON_FILE"
-        pkill -x joinery-agent 2>/dev/null || true
-    fi
-}
-
 # --- Converge the binary -----------------------------------------------------
-# The binary lands on every deployment whether or not the agent is switched on.
-# Installing is not running: a machine that ships with the agent present can be
-# switched on later without needing the artifact fetched, decompressed and
-# verified at that moment, and an operator turning it on gets a service that
-# starts rather than one that has to be installed first.
 # Set by converge_binary when it actually replaces the binary on disk. A fresh
 # binary MUST be started, even though something is already running — what is
 # running is the OLD one, and the file changing under a live process does not
@@ -688,22 +584,10 @@ else
 fi
 write_env_file
 
-# --- Apply the switch --------------------------------------------------------
-
-if [ "$AGENT_ENABLED" != "1" ]; then
-    if agent_running; then
-        say "agent_enabled is off - stopping the agent and disabling its supervision"
-    else
-        # Already down. Converge supervision anyway: a stopped agent with a live
-        # cron entry is one minute from being a running one.
-        say "agent_enabled is off - agent not running"
-    fi
-    stop_and_disable_agent
-    exit 0
-fi
+# --- Run it ------------------------------------------------------------------
 
 if [ ! -x "$BINARY_PATH" ]; then
-    say "WARNING - agent_enabled is on but no agent binary is installed; nothing to start"
+    say "WARNING - no agent binary is installed; nothing to start"
     exit 0
 fi
 
@@ -751,7 +635,7 @@ fi
 # machine with a new binary on disk and an old one in memory, indefinitely — and
 # it did exactly that on this plane before this branch existed.
 if agent_running && [ "$BINARY_INSTALLED" = "0" ] && ! running_is_stale; then
-    say "agent_enabled is on - v$(installed_version) already running"
+    say "v$(installed_version) already running"
     exit 0
 fi
 

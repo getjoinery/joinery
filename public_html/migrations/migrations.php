@@ -1894,3 +1894,16 @@
 	$migration['migration_sql'] = "UPDATE vse_visitor_events SET vse_ip = NULL WHERE vse_ip IS NOT NULL";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// The agent runs on every machine, and agent_enabled is no longer declared:
+	// nothing in this release reads it. An agent binary from before this
+	// release still does, every few seconds, and stops itself when the row reads
+	// off or is missing. So the row is left in place and set on, and kept until
+	// no agent older than 1.106.0 remains. Skipped where it is already on or
+	// was never seeded.
+	$migration = array();
+	$migration['database_version'] = '229';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'agent_enabled' AND stg_value IS DISTINCT FROM '1') THEN 0 ELSE 1 END AS count";
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '1', stg_update_time = NOW() WHERE stg_name = 'agent_enabled' AND stg_value IS DISTINCT FROM '1'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

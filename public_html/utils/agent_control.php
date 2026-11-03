@@ -1,25 +1,23 @@
 <?php
 /**
- * CLI control of this machine's Joinery agent — the same three decisions the
- * Management Node admin page offers, for a shell (specs/agent_on_node_architecture.md).
+ * CLI control of this machine's Joinery agent's connection to a management
+ * node — the decisions the Management Node admin page offers, for a shell
+ * (specs/agent_on_node_architecture.md).
  *
- * Everything here writes a setting and nothing else. The agent's installer
- * reads the switch at the next root moment; the running agent reads the join
- * and leave requests within seconds. Nothing in this file needs root, holds a
+ * Everything here writes a setting and nothing else. The running agent reads
+ * the join and leave requests within seconds. Nothing in this file needs root, holds a
  * credential, or can enroll this machine anywhere on its own — a join is a
  * request, which an administrator on the management node still has to approve
  * after comparing key fingerprints.
  *
  * Usage:
  *   php utils/agent_control.php --status
- *   php utils/agent_control.php --on
- *   php utils/agent_control.php --off
  *   php utils/agent_control.php --join=https://manage.example.com
  *   php utils/agent_control.php --leave
  *
- * --on and --join may be given together: turn the agent on and ask to join in
- * one call, which is what a management node's remote enable does.
+ * The agent runs on every machine; there is no switch to turn it off.
  *
+ * @version 1.3 - --on and --off are gone: the agent runs on every machine
  * @version 1.2 - --join keeps a request for the same URL that has not been answered, so rerunning it
  *                (install.sh site passes it on every run) does not change the agent's staged key
  * @version 1.1 - --on/--off APPLY the switch (run the installer) rather than only recording it;
@@ -38,21 +36,14 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
 
-$options = getopt('', ['status', 'on', 'off', 'join::', 'leave', 'help']);
+$options = getopt('', ['status', 'join::', 'leave', 'help']);
 
 if ($options === false || isset($options['help']) || $options === []) {
-    echo "Control this machine's Joinery agent.\n\n";
-    echo "  --status              what the agent is set to do here\n";
-    echo "  --on                  run the agent on this machine\n";
-    echo "  --off                 stop running it\n";
+    echo "Connect this machine's Joinery agent to a management node.\n\n";
+    echo "  --status              what the agent is connected to here\n";
     echo "  --join=URL            ask to join that management node\n";
     echo "  --leave               disconnect from the management node\n";
     exit(isset($options['help']) ? 0 : 1);
-}
-
-if (isset($options['on']) && isset($options['off'])) {
-    fwrite(STDERR, "--on and --off contradict each other.\n");
-    exit(1);
 }
 
 /** One setting, straight from the database, so a read-after-write is truthful. */
@@ -65,64 +56,7 @@ function agent_control_setting(string $name): string {
     return $row === false ? '' : (string)$row[0];
 }
 
-/**
- * Apply the switch we just recorded, instead of only recording it.
- *
- * The setting is the decision; the installer is what carries it out — it
- * projects the marker, converges supervision, and starts or stops the process.
- * Writing the setting alone leaves the machine exactly as it was, which is how
- * this command came to report "on" on nine machines whose agents did not start:
- * the admin page at least prints the command to run, and the CLI silently did
- * half the job the page describes.
- *
- * Running the installer needs root. When this is run as root, do it and say what
- * happened. When it is not, print the command rather than implying the work is
- * done — an honest instruction beats a misleading success.
- */
-function agent_control_apply(): void {
-    $public_html = rtrim(PathHelper::getIncludePath(''), '/');
-    $site_root   = dirname($public_html);
-    $sitename    = basename($site_root);
-    $installer   = $site_root . '/maintenance_scripts/install_tools/install_agent.sh';
-
-    if (!is_file($installer)) {
-        echo "  note: the agent installer is not in this tree; the switch takes effect at the next root moment\n";
-        return;
-    }
-
-    if (function_exists('posix_geteuid') ? posix_geteuid() !== 0 : trim((string)shell_exec('id -u')) !== '0') {
-        echo "  the switch is recorded. Applying it needs root — run:\n";
-        echo "    sudo bash " . $installer . ' ' . $sitename . "\n";
-        return;
-    }
-
-    echo "  applying it now (running the agent installer as root):\n";
-    $output = [];
-    $exit = 0;
-    exec('bash ' . escapeshellarg($installer) . ' ' . escapeshellarg($sitename) . ' 2>&1', $output, $exit);
-    foreach ($output as $line) {
-        echo '    ' . $line . "\n";
-    }
-    if ($exit !== 0) {
-        echo "  WARNING: the installer exited " . $exit . "\n";
-    }
-}
-
 $changed = false;
-
-if (isset($options['on'])) {
-    Setting::put('agent_enabled', '1');
-    echo "agent: on\n";
-    agent_control_apply();
-    $changed = true;
-}
-
-if (isset($options['off'])) {
-    Setting::put('agent_enabled', '');
-    echo "agent: off\n";
-    agent_control_apply();
-    $changed = true;
-}
 
 if (isset($options['join'])) {
     $url     = trim((string)$options['join']);
@@ -158,13 +92,11 @@ if (isset($options['leave'])) {
 if (isset($options['status']) || $changed) {
     // Read back from the database, not from the settings instance: it was
     // loaded before the writes above and would report the old values.
-    $enabled = admin_management_node_agent_switch_on(agent_control_setting('agent_enabled'));
     $state   = json_decode(agent_control_setting('agent_join_state'), true);
     $join    = json_decode(agent_control_setting('agent_join_request'), true);
     $leave   = json_decode(agent_control_setting('agent_leave_request'), true);
 
     echo "\n";
-    echo "  agent enabled here: " . ($enabled ? 'yes' : 'no') . "\n";
     echo "  agent installed:    " . (file_exists(ADMIN_MANAGEMENT_NODE_AGENT_BINARY) ? 'yes' : 'no') . "\n";
     echo "  management node:    " . (is_array($state) && !empty($state['status'])
         ? $state['status'] . (empty($state['url']) ? '' : ' (' . $state['url'] . ')')

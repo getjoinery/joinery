@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.10 - the silence note is for a node being deleted: no agent is switched off by its operator
  * @version 1.9 - a join for a site in a container on a provisioned machine is not called refused (B102)
  * @version 1.8 - Move to another management node: the agent asks the other one to adopt the machine (move_to_plane)
  * @version 1.7 - a stored secret is a locked field with Reset; the separate Clear form is gone (clearing
@@ -97,25 +98,24 @@
 		}
 		echo '</div>';
 
-		// Silence has two meanings and only the node can tell them apart. A node
-		// whose agent was switched off says so before it stops; one that broke
-		// cannot. Comparing the two stamps rather than clearing either keeps a
-		// node that came back looking alive with no extra write.
+		// Silence has two meanings. A node this plane is deleting goes silent on
+		// purpose; one that broke does too. Comparing the two stamps rather than
+		// clearing either keeps a node that came back looking alive with no
+		// extra write.
 		$quiet_time = $node->get('mgn_agent_quiet_time');
-		$switched_off = $quiet_time && (!$node->get('mgn_agent_last_poll')
+		$being_deleted = $quiet_time && (!$node->get('mgn_agent_last_poll')
 			|| $node->get('mgn_agent_last_poll') <= $quiet_time);
 
-		if ($switched_off) {
+		if ($being_deleted) {
 			echo '<div class="alert alert-secondary py-2 small mb-2">'
-			   . '<strong>Switched off by the operator</strong> at ' . htmlspecialchars($node->get_local('mgn_agent_quiet_time'))
-			   . '. The agent told this management node before it stopped, so the silence since then is expected. '
-			   . 'The pairing still stands — it comes back when the agent is switched on there.</div>';
+			   . '<strong>Being deleted</strong> since ' . htmlspecialchars($node->get_local('mgn_agent_quiet_time'))
+			   . '. Its agent stops with it, so the silence since then is expected.</div>';
 		}
 
 		echo '<div class="mb-2 text-muted small">Last poll: '
 		   . ($agent_last_poll ? htmlspecialchars($agent_last_poll) : 'never — the agent has not reached this management node since it was connected')
 		   . '. A poll is how this management node sees the node is alive; nothing has to reach in.'
-		   . ($switched_off ? '' : ' A node that stops polling without saying it was switched off is unreachable — down, or broken.')
+		   . ($being_deleted ? '' : ' A node that stops polling is unreachable — down, or broken.')
 		   . '</div>';
 
 		// Restarting the agent is a PRIMITIVE and has no SSH equivalent, on
@@ -126,7 +126,7 @@
 		//
 		// The node may still refuse, and that is the primitive working: it
 		// restarts only when it can prove something will start it again.
-		if (Access::permits(10, $session) && !$switched_off && $node->get('mgn_agent_last_poll')) {
+		if (Access::permits(10, $session) && !$being_deleted && $node->get('mgn_agent_last_poll')) {
 			echo '<form method="post" action="' . $base_url . '" id="restart_agent_form" class="mb-3">'
 			   . '<input type="hidden" name="action" value="restart_agent">'
 			   . SmAdminCsrf::field()

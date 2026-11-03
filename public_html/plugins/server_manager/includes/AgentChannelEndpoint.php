@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.59 - the quiet endpoint is gone: no agent is switched off, so none says it is going quiet
  * @version 1.58 - the claim takes the node's X-Wing key and its agent key's signature (agent 1.99.0) and keeps it when verified
  *                (a new signature over the same key too); forgetAgent and approveJoin clear it
  * @version 1.57 - the channel's writes run as the server's own (server_initiated_write): no person is behind them
@@ -314,7 +315,7 @@ class AgentChannelEndpoint {
 	const SUGGESTED_POLL_INTERVAL = 15;
 
 	/** The endpoints a node's signature authenticates. join and join_status prove no node. */
-	const SIGNED_ENDPOINTS = ['claim', 'result', 'leave', 'quiet', 'artifact', 'job_status'];
+	const SIGNED_ENDPOINTS = ['claim', 'result', 'leave', 'artifact', 'job_status'];
 
 	/** The node this request's signature proved, once it has; 0 before. */
 	private static $signed_node = 0;
@@ -420,9 +421,6 @@ class AgentChannelEndpoint {
 					break;
 				case 'leave':
 					self::handle_leave($body);
-					break;
-				case 'quiet':
-					self::handle_quiet($body);
 					break;
 				case 'artifact':
 					self::handle_artifact($body);
@@ -2756,48 +2754,6 @@ class AgentChannelEndpoint {
 	 * plane-side Disconnect action and the node-initiated leave do exactly
 	 * this, so they cannot drift apart.
 	 */
-	/**
-	 * A node saying it is about to stop, because an operator switched its agent
-	 * off. Not a leave: the pairing stands, the key stays, and the node is
-	 * expected back — this only stops silence from being read as breakage.
-	 *
-	 * Without it a switched-off node and a dead one look identical from here:
-	 * both simply stop polling. The dashboard needs to tell an operator which
-	 * one they are looking at, and only the node knows.
-	 *
-	 * The acknowledgement matters as much as the record. The agent stops whether
-	 * or not this endpoint answers, but it keeps trying inside a bounded window
-	 * and replays later if it never lands — so what it needs back is a definite
-	 * "recorded", not merely a response from something at this address.
-	 */
-	private static function handle_quiet($body) {
-		$node = self::authenticate_node('/api/v1/agent/quiet', self::body_hash());
-		$in = self::validate($body, [
-			'node_id'    => ['type' => 'int', 'required' => true],
-			'quiet_time' => ['type' => 'string', 'max' => 32],
-		]);
-		if ((int)$in['node_id'] !== self::$stated_node) {
-			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
-		}
-
-		// The node's own clock, because the node is the one that knows when it
-		// stopped — a replayed goodbye can arrive long after the fact, and
-		// stamping it on arrival would date the silence to the wrong moment.
-		// Bounded to something sane so a bad clock cannot park a node's status
-		// in the future forever.
-		$quiet_time = trim((string)($in['quiet_time'] ?? ''));
-		$now = gmdate('Y-m-d H:i:s');
-		if ($quiet_time === '' || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $quiet_time)
-			|| $quiet_time > $now) {
-			$quiet_time = $now;
-		}
-
-		$node->set('mgn_agent_quiet_time', $quiet_time);
-		$node->save();
-
-		api_success(['acknowledged' => true, 'quiet_time' => $quiet_time], '', 200);
-	}
-
 	/**
 	 * Is a job this node holds still wanted? Answered for the node's own jobs
 	 * only. withdrawn is true when the job was cancelled or removed here (a site copy's
