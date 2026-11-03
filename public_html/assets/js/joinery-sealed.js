@@ -62,6 +62,8 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.17 - a committed rotation keeps the tab's resume halves for the new key to overwrite (no
+ *   drop racing the put, which asked for an unlock on the next page)
  * @version 1.16 - v1 retired (v1_key_retirement WP2): reads only v2.edgeseal.
  * @version 1.15 - with an account vault, browser-held scopes follow its server window while it is open
  *   (serverWindowOpenNow): no idle clock of their own then, and a page that loads with the window shut reopens
@@ -474,9 +476,10 @@ window.JoinerySealed = (function () {
 		(lockHandlers[scope] = lockHandlers[scope] || []).push(fn);
 	}
 
-	// opts.keepResume (pagehide only): drop the key from memory but keep the
-	// resume halves, so the next page in this tab reopens. Every other lock is
-	// a real one and forgets them.
+	// opts.keepResume (pagehide, and a committed rotation about to adopt its new
+	// key): drop the key from memory but keep the resume halves, so the next
+	// page in this tab reopens, or the new key's halves overwrite them. Every
+	// other lock is a real one and forgets them.
 	function lock(scope, opts) {
 		var s = sessions[scope];
 		delete sessions[scope];
@@ -757,12 +760,17 @@ window.JoinerySealed = (function () {
 		} finally {
 			// The old key is retired either way. A committed rotation leaves the
 			// new key open in its place, so the next page reads the vault without
-			// asking again; one that stopped holds nothing.
-			lock(scope);
+			// asking again; one that stopped holds nothing. The committed path
+			// keeps the tab's resume halves for adopt() to overwrite: dropping
+			// them sends a drop the put races, and a drop that lands second
+			// erases the new key's half. A put that fails leaves the old key's
+			// record, which resumeOne() discards by its public key.
 			if (committed) {
+				lock(scope, { keepResume: true });
 				newSession.label = st.label;
 				adopt(scope, newSession);
 			} else {
+				lock(scope);
 				newSession.lock();
 			}
 		}
