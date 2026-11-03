@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.1 - completed routine jobs (ManagementJob::ROUTINE_TYPES) are left out unless their type is picked
  * @version 1.0
  */
 
@@ -28,6 +29,9 @@
 	}
 	if (isset($_GET['job_type']) && $_GET['job_type']) {
 		$search_criteria['job_type'] = $_GET['job_type'];
+	} else {
+		// A completed routine check (every five minutes) would bury the rest.
+		$search_criteria['hide_routine'] = true;
 	}
 
 	$jobs = new MultiManagementJob($search_criteria, [$sort => $sdirection], $numperpage, $offset);

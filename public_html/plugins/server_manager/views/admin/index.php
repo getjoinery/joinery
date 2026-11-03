@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.59 - recent jobs leave out completed routine never-do checks
  * @version 1.58 - a holder owed a second-factor confirmation is offered it first, in place of Reveal and Retire, and comes
  *                 back to the real buttons; a click that still meets the confirmation says to click again
  * @version 1.57 - Reveal and Retire asked from a node page answer there (return_node)
@@ -467,7 +468,7 @@ $hosts = array_values(array_filter(iterator_to_array($hosts, false), function ($
 
 // Load recent jobs: the newest of the selected tab's nodes. A hidden node's
 // jobs are hidden with it unless removed sites are shown.
-$recent_jobs_opts = ['deleted' => false];
+$recent_jobs_opts = ['deleted' => false, 'hide_routine' => true];
 if (!$show_all) { $recent_jobs_opts['node_listed'] = true; }
 $recent_jobs_all = new MultiManagementJob($recent_jobs_opts, ['mjb_management_job_id' => 'DESC'], 200);
 $recent_jobs = [];

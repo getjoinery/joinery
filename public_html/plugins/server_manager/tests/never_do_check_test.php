@@ -15,6 +15,7 @@
  *
  * Run: php plugins/server_manager/tests/never_do_check_test.php
  *
+ * @version 1.1 - job lists hide its completed runs
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -169,5 +170,13 @@ section('The words and levels');
 check(SmActionLevels::level('node_detail', 'never_do_accept') === 10, 'accepting clears a security incident: superadmin');
 check(JobCommandBuilder::build_never_do_check_primitive(null) === array('primitive' => 'never_do_check', 'params' => array()),
 	'the job carries no parameters');
+
+section('Job lists');
+
+check(in_array('never_do_check', ManagementJob::ROUTINE_TYPES, true),
+	'the check is routine: its completed runs (every five minutes) are left out of job lists');
+check(in_array('never_do_check', ManagementJob::filterTypes(), true), 'and can still be picked as a type to see them');
+check(strpos(file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/node_detail_tabs/overview.php')),
+	"'hide_routine' => true") !== false, 'the node page\'s Recent jobs hides them');
 
 harness_finish();

@@ -4,6 +4,7 @@
  * Server Manager - Job History
  * URL: /admin/server_manager/jobs
  *
+ * @version 1.3 - completed routine jobs (ManagementJob::ROUTINE_TYPES) are left out unless their type is picked
  * @version 1.2 - a hidden site's jobs are left out unless ?show_all=1 (or the site is picked)
  * @version 1.1
  */
@@ -43,6 +44,9 @@ if (isset($_GET['status']) && $_GET['status']) {
 }
 if (isset($_GET['job_type']) && $_GET['job_type']) {
 	$search_criteria['job_type'] = $_GET['job_type'];
+} else {
+	// A completed routine check (every five minutes) would bury the rest.
+	$search_criteria['hide_routine'] = true;
 }
 
 $jobs = new MultiManagementJob($search_criteria, [$sort => $sdirection], $numperpage, $offset);

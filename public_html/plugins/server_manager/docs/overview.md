@@ -666,7 +666,7 @@ Nothing travels but paths, fingerprints, hashes, uids, ports and sizes: no key c
 
 What is held stays held until a person accepts it, even when a later report no longer shows it. An attacker who removes what they added does not remove the record of it. While anything is held, the `plane:never_do` incident is open (critical).
 
-The node page's **Security** box lists what is held, with when each was first seen, and what the machine is expected to have. **Accept** (superadmin, behind a confirm) is for when you or a job you ran made every change. It makes the machine's last report the baseline and clears the incident; what was accepted is written to the error log with the person's id. Each job keeps only counts, and its output is dropped. The state lives on the node row.
+The node page's **Security** box lists what is held, with when each was first seen, and what the machine is expected to have. **Accept** (superadmin, behind a confirm) is for when you or a job you ran made every change. It makes the machine's last report the baseline and clears the incident; what was accepted is written to the error log with the person's id. Each job keeps only counts, and its output is dropped. The state lives on the node row. Its completed runs are left out of job lists (the node page's Recent jobs, its Jobs tab, the Jobs page and the dashboard) unless **never do check** is picked as the type; a failed run still shows.
 
 What this does not see: a program that runs and exits between two checks and leaves nothing behind; an attacker who stays inside PHP; and a root attacker who stops the agent. The last shows as the agent going silent, not as a finding. The full design, with live exec auditing, is `specs/node_unexplained_root.md`.
 

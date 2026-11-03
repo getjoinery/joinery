@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.97 - Recent jobs leaves out completed routine never-do checks
  * @version 1.96 - a node being deleted reads "Being deleted", not "Switched off by its owner"
  * @version 1.95 - Never-do check in the Security box: what the machine holds unexplained, and Accept behind a confirm
  * @version 1.94 - Update/Delete relay open the Relay section on the mailbox Server tab
@@ -2576,7 +2577,7 @@
 	}
 
 	// ── Recent jobs ──
-	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key], ['mjb_management_job_id' => 'DESC'], 10);
+	$overview_jobs = new MultiManagementJob(['deleted' => false, 'node_id' => $node->key, 'hide_routine' => true], ['mjb_management_job_id' => 'DESC'], 10);
 	ob_start();
 	echo '<table class="table table-striped table-sm mb-0">';
 	echo '<thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Created</th><th>Duration</th></tr></thead>';

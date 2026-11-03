@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.46 - ROUTINE_TYPES and option hide_routine: a completed never_do_check (every five minutes)
+ *                 is left out of job lists unless its type is asked for (filterTypes offers it); a failed one still shows
  * @version 1.45 - largest_files joins LOG_EXCERPT_TYPES: its file names age out with the other excerpts
  * @version 1.44 - site_converger joins LOG_EXCERPT_TYPES: its converger log lines age out with the other excerpts
  * @version 1.43 - Re-run of a probe job (check_status by probe, edge_vs_origin) measures again and files a new completed
@@ -114,6 +116,13 @@ class ManagementJob extends SystemBase {
 	);
 
 	/** The job types whose result is a log excerpt and is pruned on the window above. */
+	/**
+	 * Jobs this plane runs on a short clock, whose completed rows would bury
+	 * every other job in a list (the never-do check, every five minutes). Lists
+	 * leave them out with hide_routine; a failed one still shows.
+	 */
+	const ROUTINE_TYPES = array('never_do_check');
+
 	const LOG_EXCERPT_TYPES = array('site_log', 'site_log_count', 'log_table_tail', 'unit_journal', 'file_head', 'site_converger', 'largest_files');
 
 	public static $field_specifications = array(
@@ -798,7 +807,7 @@ class ManagementJob extends SystemBase {
 			'check_status', 'host_report', 'host_converge', 'site_log', 'site_log_count', 'log_table_tail', 'edge_vs_origin',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
-			'backup_run',
+			'backup_run', 'never_do_check',
 		];
 		if ($include_publish) {
 			$types[] = 'publish_upgrade';
@@ -1001,6 +1010,11 @@ class MultiManagementJob extends SystemMultiBase {
 
 		if (isset($this->options['created_by'])) {
 			$filters['mjb_created_by'] = [$this->options['created_by'], PDO::PARAM_INT];
+		}
+
+		// Leave out the completed runs of a routine job (ROUTINE_TYPES).
+		if (!empty($this->options['hide_routine'])) {
+			$filters['(mjb_job_type'] = "NOT IN ('" . implode("','", ManagementJob::ROUTINE_TYPES) . "') OR mjb_status <> 'completed')";
 		}
 
 		// Leave out the jobs of nodes hidden from the dashboard.
