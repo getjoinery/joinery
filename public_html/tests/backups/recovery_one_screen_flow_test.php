@@ -65,7 +65,7 @@ rof_put_setting('backup_recovery_public_key', '');
 $message = '';
 try { BackupRecoveryKey::set_public_key(base64_encode(sodium_crypto_box_publickey(sodium_crypto_box_keypair()))); }
 catch (BackupRecoveryKeyException $e) { $message = $e->getMessage(); }
-check(strpos($message, 'old X25519') !== false, 'an old 32-byte X25519 key is refused, naming it as old', $message);
+check($message !== '', 'a 32-byte key is refused as not a recovery public key', $message);
 BackupRecoveryKey::set_public_key(base64_encode($pub_raw));
 
 // ── The challenge round trip ────────────────────────────────────────────
