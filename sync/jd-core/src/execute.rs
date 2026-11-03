@@ -4122,6 +4122,27 @@ fn seal_to_readers(
     Ok(Ok((wrapped, without_vault)))
 }
 
+/// The keys a `keys_needed` refusal asks for, wrapped by this device: each
+/// named file's key opened with the vault and sealed to each of its readers,
+/// as `{ file_id: { user_id: wrapped_file_key } }`. `None` when this device
+/// cannot answer for every file -- no vault key here, a file it holds no key
+/// for, a key that does not open, or a reader whose vault key is the old kind
+/// that cannot be sealed to -- in which case the refusal stands as it came.
+fn wrap_for_new_readers(env: &ExecEnv, files: &[jd_proto::KeysNeeded]) -> Option<Value> {
+    let vault = env.vault?;
+    let mut out = serde_json::Map::new();
+    for f in files {
+        let file_key = vault.open_file_key(f.wrapped_file_key.as_deref()?).ok()?;
+        let mut per_reader = serde_json::Map::new();
+        for (user_id, public_key) in &f.readers {
+            let sealed = jd_crypto::drive::wrap_file_key_to(&file_key, public_key).ok()?;
+            per_reader.insert(user_id.to_string(), Value::String(sealed));
+        }
+        out.insert(f.file_id.to_string(), Value::Object(per_reader));
+    }
+    Some(Value::Object(out))
+}
+
 fn encrypt_for_upload(
     env: &ExecEnv,
     entry: &Entry,
@@ -5485,7 +5506,25 @@ fn move_remote(
             0 => format!("{}-move{stage}", key_base(op)),
             n => format!("{}-move{stage}-n{n}", key_base(op)),
         };
-        env.api.action_idempotent("drive_move", body, &key)?;
+        match env.api.action_idempotent("drive_move", body.clone(), &key) {
+            Ok(_) => {}
+            // A Fortress move that changes who reads its files is refused until
+            // it carries their keys, naming each file, this device's own key to
+            // it and the readers to wrap it to. A device holding the vault key
+            // answers it and asks once more, under a key of its own (the body
+            // differs, so the refused request's key cannot be reused). A device
+            // that cannot -- no vault key here, a file it holds no key for, a
+            // reader whose key cannot be sealed to yet -- leaves the refusal
+            // standing, held until something changes, as before.
+            Err(p) => match p.keys_needed().and_then(|files| wrap_for_new_readers(env, &files)) {
+                Some(file_keys) => {
+                    let mut keyed = body;
+                    keyed["file_keys"] = file_keys;
+                    env.api.action_idempotent("drive_move", keyed, &format!("{key}-keyed"))?;
+                }
+                None => return Err(p.into()),
+            },
+        }
         if let Some(seen) = at.borrow_mut().as_mut() {
             seen.parent = to.parent;
         }

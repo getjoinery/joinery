@@ -288,6 +288,14 @@ struct ServerState {
     vault_holders: std::collections::BTreeSet<String>,
     index_requests: usize,
     probe_requests: usize,
+    /// Folders this account shared out, and with whom: the other readers of
+    /// everything under each. A Fortress file's key must be wrapped to every
+    /// one of them who has a Drive vault (`docs/drive_encryption.md`).
+    shared_out: BTreeMap<i64, std::collections::BTreeSet<i64>>,
+    /// Other readers' keys to each encrypted file, by file and then user: the
+    /// rows this account's own `wrapped_file_key` sits beside in the real
+    /// `fkg_file_key_grants`. Opaque blobs, as there.
+    reader_keys: BTreeMap<i64, BTreeMap<i64, String>>,
 }
 
 /// Code a scenario runs inside one of the server's calls.
@@ -614,6 +622,8 @@ impl MockServer {
                 vault_holders: std::collections::BTreeSet::new(),
                 index_requests: 0,
                 probe_requests: 0,
+                shared_out: BTreeMap::new(),
+                reader_keys: BTreeMap::new(),
             })),
             clock,
             during_upload: Arc::new(Mutex::new(None)),
@@ -800,6 +810,25 @@ impl MockServer {
         if user_id == OWNER_USER_ID && st.vault_key_generation == 0 {
             st.vault_key_generation = 1;
         }
+    }
+
+    /// Share a folder out to another user: they read everything under it.
+    pub fn share_folder_out(&self, folder: i64, user_id: i64) {
+        let mut st = self.state.lock().unwrap();
+        st.shared_out.entry(folder).or_default().insert(user_id);
+    }
+
+    /// Give another reader a key to an encrypted file, as the owner's browser
+    /// does when it shares the folder the file is in.
+    pub fn give_reader_key(&self, file_id: i64, user_id: i64, wrapped_file_key: &str) {
+        let mut st = self.state.lock().unwrap();
+        st.reader_keys.entry(file_id).or_default().insert(user_id, wrapped_file_key.to_string());
+    }
+
+    /// Another reader's key to an encrypted file, if they hold one.
+    pub fn reader_key(&self, file_id: i64, user_id: i64) -> Option<String> {
+        let st = self.state.lock().unwrap();
+        st.reader_keys.get(&file_id).and_then(|m| m.get(&user_id)).cloned()
     }
 
     /// The owner's vault secret was handed to this device at its link, so
@@ -1033,6 +1062,13 @@ impl MockServer {
             .filter(|f| !f.trashed)
             .find(|f| Self::folder_path(&st, f.id).as_deref() == Some(path))
             .map(|f| f.id)
+    }
+
+    /// The live files standing directly in a folder, by id (an encrypted
+    /// file's server name is its placeholder, so a path cannot find it).
+    pub fn file_ids_in(&self, folder: i64) -> Vec<i64> {
+        let st = self.state.lock().unwrap();
+        st.files.values().filter(|f| !f.trashed && f.folder == Some(folder)).map(|f| f.id).collect()
     }
 
     /// Destroy one folder outright, whatever state it is in. The single-entity
@@ -2185,6 +2221,60 @@ impl MockServer {
                 sha.as_deref(),
             ));
         }
+        // A Fortress move takes its files' keys with it (`drive_move_logic`):
+        // every file it carries must end up keyed for exactly its readers at
+        // the destination. Supplied keys must name exactly them; none supplied
+        // is fine when the holders already are them; anything else is refused
+        // as `keys_needed`, standing, naming what to wrap and to whom.
+        let mut rekeyed: Vec<(i64, BTreeMap<i64, String>)> = Vec::new();
+        if item_encrypted && !(t == "folder" && (Some(id) == dest || Self::is_descendant(&st, dest, id))) {
+            let files = if t == "folder" { Self::subtree(&st, id).1 } else { vec![id] };
+            let supplied = body.get("file_keys").and_then(Value::as_object);
+            let mut needed = Vec::new();
+            for fid in files {
+                let Some(f) = st.files.get(&fid) else { continue };
+                if !f.encrypted {
+                    continue;
+                }
+                let required = Self::readers_after_move(&st, f.folder, t, id, fid, dest);
+                let want: Vec<i64> = required.keys().copied().collect();
+                match supplied.and_then(|m| m.get(&fid.to_string())).and_then(Value::as_object) {
+                    Some(map) => {
+                        let given: BTreeMap<i64, String> = map
+                            .iter()
+                            .filter_map(|(k, v)| Some((k.parse::<i64>().ok()?, v.as_str()?.to_string())))
+                            .filter(|(uid, _)| *uid != OWNER_USER_ID)
+                            .collect();
+                        if given.keys().copied().collect::<Vec<i64>>() == want {
+                            rekeyed.push((fid, given));
+                            continue;
+                        }
+                    }
+                    None => {
+                        let have: Vec<i64> = st.reader_keys.get(&fid).map(|m| m.keys().copied().collect()).unwrap_or_default();
+                        if have == want {
+                            continue;
+                        }
+                    }
+                }
+                let readers: Vec<Value> = required
+                    .iter()
+                    .map(|(uid, pk)| json!({ "user_id": uid, "public_key": pk }))
+                    .collect();
+                needed.push(json!({ "file_id": fid, "wrapped_file_key": f.wrapped_file_key, "readers": readers }));
+            }
+            if !needed.is_empty() {
+                return Err(ApiRefusal {
+                    status: 422,
+                    errortype: "ActionError",
+                    message: "The people who can read this change, so its encrypted files need keys for them.".into(),
+                    data: json!({ "reason": "keys_needed", "standing": true, "files": needed }),
+                });
+            }
+        }
+        for (fid, keys) in rekeyed {
+            st.reader_keys.insert(fid, keys);
+        }
         if t == "folder" {
             // A folder inside itself detaches the whole subtree from the tree
             // and makes it unreachable — no listing walks into it, so it is
@@ -3172,6 +3262,44 @@ impl MockServer {
         }
         parts.reverse();
         Some(parts.join("/"))
+    }
+
+    /// A file's readers, other than the owner, once a move lands: everyone a
+    /// folder above it is shared out to, the chain read as it will stand (the
+    /// moved file, or the moved folder, under `dest`), each with their vault
+    /// public key. Readers with no vault are left out, as the platform leaves
+    /// them out: they cannot be given a key.
+    fn readers_after_move(
+        st: &ServerState,
+        folder: Option<i64>,
+        moved_type: &str,
+        moved_id: i64,
+        file_id: i64,
+        dest: Option<i64>,
+    ) -> BTreeMap<i64, String> {
+        let mut cur = if moved_type == "file" && file_id == moved_id { dest } else { folder };
+        let mut out = BTreeMap::new();
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 1000 {
+                break;
+            }
+            for uid in st.shared_out.get(&c).into_iter().flatten() {
+                if *uid == OWNER_USER_ID {
+                    continue;
+                }
+                if let Some(pk) = st.vault_public_keys.get(uid) {
+                    out.insert(*uid, pk.clone());
+                }
+            }
+            cur = if moved_type == "folder" && c == moved_id {
+                dest
+            } else {
+                st.folders.get(&c).and_then(|f| f.parent)
+            };
+        }
+        out
     }
 
     fn is_descendant(st: &ServerState, maybe_child: Option<i64>, ancestor: i64) -> bool {

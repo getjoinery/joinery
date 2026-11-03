@@ -4962,6 +4962,115 @@ fn a_sealed_file_moved_from_one_vault_to_another_is_an_ordinary_move() {
     assert_converged(&world);
 }
 
+/// A Fortress file moved into a vault shared with other people takes its key
+/// to them, and away from the people it left (S9: the platform refuses the
+/// move as `keys_needed`, naming each file's readers, until it carries their
+/// keys). The device holding the vault key answers the refusal by itself: the
+/// move lands, the new reader's key opens the file, the old reader's is gone,
+/// and nothing is held.
+#[test]
+fn a_vault_file_moved_to_a_vault_shared_with_someone_else_takes_its_key_along() {
+    let (world, private, out) = a_vault_of_two(9_970, &["holder"]);
+    let left = SimVault::new(9_971);
+    let joined = SimVault::new(9_972);
+    world.server.set_vault_public_key(2, &left.public_key_b64);
+    world.server.set_vault_public_key(3, &joined.public_key_b64);
+    world.server.share_folder_out(private, 2);
+    world.server.give_reader_key(out, 2, "the key the reader it leaves held");
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    world.server.share_folder_out(other, 3);
+    assert!(world.settle().is_some());
+
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Other/out.txt");
+    assert!(world.settle().is_some());
+
+    assert_eq!(server_folder_of(&world, out), Some(Some(other)), "the move did not go up");
+    let given = world.server.reader_key(out, 3).expect("the reader it joined holds no key");
+    assert!(
+        jd_crypto::drive::open_wrapped_file_key(&given, &joined.secret_key, &joined.public_key_b64).is_ok(),
+        "the key the new reader was given does not open with their vault"
+    );
+    assert_eq!(world.server.reader_key(out, 2), None, "the reader it left still holds a key");
+    assert!(held_issues(holder).is_empty(), "the move was held: {:?}", held_issues(holder));
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// The keyed move's answer is lost after the server took it. The device
+/// asks the server where the file stands, finds the move landed, and is done:
+/// no keyed request is sent again, so no key is reused for a different body.
+#[test]
+fn a_keyed_move_whose_answer_was_lost_is_asked_again_as_the_same_request() {
+    let (world, private, out) = a_vault_of_two(9_976, &["holder"]);
+    let left = SimVault::new(9_977);
+    let joined = SimVault::new(9_978);
+    world.server.set_vault_public_key(2, &left.public_key_b64);
+    world.server.set_vault_public_key(3, &joined.public_key_b64);
+    world.server.share_folder_out(private, 2);
+    world.server.give_reader_key(out, 2, "the key the reader it leaves held");
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    world.server.share_folder_out(other, 3);
+    assert!(world.settle().is_some());
+
+    let holder = world.device("holder");
+    holder.net.set_faults(NetFaults {
+        // A refused call keeps its answer, so the one lost is the keyed one.
+        lose_answer_to: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    let conflicts_before = world.server.key_conflicts();
+    holder.fs.user_rename("Private/out.txt", "Other/out.txt");
+    assert!(world.settle().is_some());
+
+    assert_eq!(holder.net.stats().dropped_after, 1, "the keyed answer was not lost");
+    assert_eq!(world.server.key_conflicts(), conflicts_before, "a key was reused for a different request");
+    assert_eq!(server_folder_of(&world, out), Some(Some(other)), "the move did not go up");
+    let given = world.server.reader_key(out, 3).expect("the reader it joined holds no key");
+    assert!(jd_crypto::drive::open_wrapped_file_key(&given, &joined.secret_key, &joined.public_key_b64).is_ok());
+    assert!(held_issues(holder).is_empty(), "the move was held: {:?}", held_issues(holder));
+    assert_converged(&world);
+}
+
+/// The same for a folder moved between two vaults shared with different
+/// people: every file under it is keyed for its new reader, and the reader
+/// it left keeps none.
+#[test]
+fn a_vault_folder_moved_to_a_vault_shared_with_someone_else_takes_every_key_along() {
+    let (world, private, _out) = a_vault_of_two(9_973, &["holder"]);
+    let left = SimVault::new(9_974);
+    let joined = SimVault::new(9_975);
+    world.server.set_vault_public_key(2, &left.public_key_b64);
+    world.server.set_vault_public_key(3, &joined.public_key_b64);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Private/Inner");
+    holder.fs.user_write("Private/Inner/a.txt", b"first file under the moved folder");
+    holder.fs.user_write("Private/Inner/b.txt", b"second file under the moved folder");
+    assert!(world.settle().is_some());
+    let inner = world.server.folder_id_at("Private/Inner").expect("the folder went up");
+    let files = world.server.file_ids_in(inner);
+    assert_eq!(files.len(), 2, "both files went up");
+    world.server.share_folder_out(private, 2);
+    for f in &files {
+        world.server.give_reader_key(*f, 2, "the key the reader it leaves held");
+    }
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    world.server.share_folder_out(other, 3);
+    assert!(world.settle().is_some());
+
+    holder.fs.user_rename("Private/Inner", "Other/Inner");
+    assert!(world.settle().is_some());
+
+    assert_eq!(world.server.folder_id_at("Other/Inner"), Some(inner), "the folder did not move on the server");
+    for f in &files {
+        let given = world.server.reader_key(*f, 3).expect("a file under the folder has no key for its new reader");
+        assert!(jd_crypto::drive::open_wrapped_file_key(&given, &joined.secret_key, &joined.public_key_b64).is_ok());
+        assert_eq!(world.server.reader_key(*f, 2), None, "the reader it left still holds a key");
+    }
+    assert!(held_issues(holder).is_empty(), "the move was held: {:?}", held_issues(holder));
+    assert_converged(&world);
+}
+
 /// A folder record knows which directory is its own (WP2 part b).
 ///
 /// After a pass every settled folder record carries its directory's id in

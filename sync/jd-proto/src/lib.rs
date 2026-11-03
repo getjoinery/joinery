@@ -39,6 +39,16 @@ pub const CLIENT_APP: &str = "joinery-sync-linux";
 /// the user installed.
 pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// One file a `keys_needed` refusal names (`ProtoError::keys_needed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeysNeeded {
+    pub file_id: i64,
+    /// This caller's own wrapped key to the file; `None` when they hold none.
+    pub wrapped_file_key: Option<String>,
+    /// Every reader the key must be wrapped to: (user id, vault public key).
+    pub readers: Vec<(i64, String)>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProtoError {
     /// The server answered with an error envelope. `errortype` is from the
@@ -192,6 +202,38 @@ impl ProtoError {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         })
+    }
+
+    /// The files a `keys_needed` refusal names, or `None` for any other answer.
+    ///
+    /// A Fortress move (or restore) that changes who can read its files is
+    /// refused until it carries each file's key wrapped to every reader at the
+    /// destination (`docs/drive_encryption.md`, Moves). The refusal says, per
+    /// file, this caller's own wrapped key and the readers with their public
+    /// keys, so a device holding the vault key can answer it by itself. A file
+    /// the caller holds no key for comes back with `wrapped_file_key: None`.
+    pub fn keys_needed(&self) -> Option<Vec<KeysNeeded>> {
+        let ProtoError::Api { data, .. } = self else {
+            return None;
+        };
+        if data.get("reason").and_then(Value::as_str) != Some("keys_needed") {
+            return None;
+        }
+        let files = data.get("files").and_then(Value::as_array)?;
+        let mut out = Vec::with_capacity(files.len());
+        for f in files {
+            let file_id = f.get("file_id").and_then(Value::as_i64)?;
+            let wrapped_file_key = f.get("wrapped_file_key").and_then(Value::as_str).map(str::to_owned);
+            let mut readers = Vec::new();
+            for r in f.get("readers").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
+                readers.push((
+                    r.get("user_id").and_then(Value::as_i64)?,
+                    r.get("public_key").and_then(Value::as_str)?.to_owned(),
+                ));
+            }
+            out.push(KeysNeeded { file_id, wrapped_file_key, readers });
+        }
+        Some(out)
     }
 
     /// The server says this refusal stands: the same request, against the
