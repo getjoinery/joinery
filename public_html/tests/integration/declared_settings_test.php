@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/declared_settings_test.php
  *
+ * @version 1.3 - the agent_enabled row is accepted while an agent that reads it is installed (AgentEnabledRow)
  * @version 1.2 - the user setting type: drawn as the user search picker, and refuses an id that is no user
  * @version 1.1
  */
@@ -64,6 +65,8 @@ $rows = $db->query("SELECT stg_name FROM stg_settings ORDER BY stg_name")->fetch
 $orphans = array();
 foreach ($rows as $name) {
 	if (Setting::isReservedName($name)) continue;
+	// Kept on purpose while an agent older than 1.106.0 still reads it.
+	if ($name === AgentEnabledRow::NAME && AgentEnabledRow::still_needed()) continue;
 	if (!SettingsDeclarations::isDeclared($name)) $orphans[] = $name;
 }
 check(empty($orphans),

@@ -880,6 +880,18 @@
 			// Non-fatal — individual settings will still get added via admin settings save
 		}
 
+		// Step: the agent_enabled row, no longer declared, goes once no agent on
+		// this machine reads it. Asked on every run, since a machine whose agent
+		// was older at the release that retired it keeps the row until then.
+		try {
+			$said = AgentEnabledRow::remove_when_safe();
+			if ($said !== '') {
+				echo htmlspecialchars($said) . "<br>\n";
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  agent_enabled check failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Seed core email templates from public_html/email_templates/.
 		// Adds a listed template the site has no row for; never changes one it
 		// has, and never brings back one it deleted.
