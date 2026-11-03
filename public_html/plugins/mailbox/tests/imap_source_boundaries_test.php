@@ -231,7 +231,7 @@ check(!$cap['ok'] && stripos((string)$cap['error'], 'no connected account') !== 
 
 // A feed in the state every feed is born in: disabled.
 $feed = new InboundImapAccount(NULL);
-$feed->set('iia_provider_key', 'gmail');
+$feed->set('iia_provider_key', 'imap_gmail');
 $feed->set('iia_iea_inbound_email_alias_id', (int)$feed_alias->key);
 $feed->set('iia_username', 'isb-feed@' . $imap_name);
 $feed->set('iia_label', 'isb fixture');

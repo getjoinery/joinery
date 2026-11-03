@@ -17,6 +17,8 @@
  *    is still tidied
  *  - a boards rule refuses (it used to return a result nobody read)
  *
+ * @version 1.1 - reads the mode a command-line run asks for (JOINERY_MODEL_RULES);
+ *                the trash case breaks its rule in the table, so it runs in either mode
  * @version 1.0
  */
 
@@ -30,6 +32,8 @@ harness_defer(function () use ($log, $previous_log) {
 	ini_set('error_log', (string)$previous_log);
 	@unlink($log);
 });
+
+$refusing = SystemBase::MODEL_RULES === 'refuse' || getenv('JOINERY_MODEL_RULES') === 'refuse';
 
 section('A broken rule is reached without prepare()');
 $code = new CouponCode(NULL);
@@ -46,7 +50,7 @@ if ($code->key) {
 	harness_register_row('ccd_coupon_codes', 'ccd_coupon_code_id', (int)$code->key);
 }
 $logged = is_file($log) ? (string)file_get_contents($log) : '';
-if (SystemBase::MODEL_RULES === 'refuse') {
+if ($refusing) {
 	check(!$saved, 'refuse mode: the save is refused');
 } else {
 	check($saved && $code->key, 'log mode: the save goes ahead');
@@ -98,14 +102,17 @@ section('A row going to the trash is not judged by the rules');
 $bad = new CouponCode(NULL);
 $bad->set('ccd_code', 'MRDEL' . strtoupper(bin2hex(random_bytes(4))));
 $bad->set('ccd_amount_discount', 5);
-$bad->set('ccd_percent_discount', 10);
 $bad->save();
 harness_register_row('ccd_coupon_codes', 'ccd_coupon_code_id', (int)$bad->key);
+// An old row that breaks a rule written since: the table holds both discounts.
+$db->prepare('UPDATE ccd_coupon_codes SET ccd_percent_discount = 10 WHERE ccd_coupon_code_id = ?')->execute(array((int)$bad->key));
+$bad = new CouponCode((int)$bad->key, true);
 $before = is_file($log) ? substr_count((string)file_get_contents($log), '[MODEL_RULES] CouponCode') : 0;
 if (isset(CouponCode::$field_specifications['ccd_delete_time'])) {
-	$bad->soft_delete();
+	$thrown = '';
+	try { $bad->soft_delete(); } catch (Throwable $e) { $thrown = $e->getMessage(); }
 	$after = is_file($log) ? substr_count((string)file_get_contents($log), '[MODEL_RULES] CouponCode') : 0;
-	check($after === $before, 'soft_delete() runs no model rule on a row that breaks one', "$before -> $after");
+	check($thrown === '' && $after === $before, 'soft_delete() runs no model rule on a row that breaks one', "$before -> $after $thrown");
 } else {
 	check(true, 'coupon codes have no soft delete here (skipped)');
 }

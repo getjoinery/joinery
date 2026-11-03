@@ -12,6 +12,7 @@
  *
  * @version 1.3 - the list of accounts a server can be created on is HeldCloudAccounts::targets(), ours and customers'
  * @version 1.2 - cca_account_name (the provider's own name for the account, read at connect)
+ * @version 1.2 - no provider check of its own: the column defaults to linode and may not be empty
  * @version 1.1 - grant_expired(): whether a stored grant can still be used, so pages can say so up front
  * @version 1.0
  */
@@ -67,9 +68,6 @@ class CustomerCloudAccount extends SystemBase {
 	function prepare() {
 		if (empty($this->get('cca_usr_user_id'))) {
 			throw new CustomerCloudAccountException('User is required.');
-		}
-		if (empty($this->get('cca_provider'))) {
-			throw new CustomerCloudAccountException('Provider is required.');
 		}
 	}
 

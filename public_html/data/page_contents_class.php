@@ -63,6 +63,9 @@ class PageContent extends SystemBase {
 	 *
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
+	// A component type must be an active one on the site; none is a plain block.
+	public static $test_fixture = array('values' => array('pac_com_component_id' => null), 'formats' => array('pac_location_name' => 'slug'));
+
 	public static $field_specifications = array(
 		'pac_page_content_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'pac_com_component_id' => array('type'=>'int4'),

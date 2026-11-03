@@ -58,6 +58,7 @@
  * get_included_files() so a violation logs its real cause rather than surfacing
  * later as a rotation refused for the wrong reason.
  *
+ * @version 1.4 - forgetActiveSet(): a plugin activated in this process joins registered()
  * @version 1.3
  * @changelog 1.3 - `client_reseals`: the client-custody scopes a consumer holds keys
  *   under, and unmetClientReseals() for a client-custody rotation's guard.
@@ -506,6 +507,15 @@ class VaultConsumers {
 	private static function normalizeName(string $name): string {
 		$name = strtolower(trim($name));
 		return preg_match('/^[a-z0-9_]{1,64}$/', $name) ? $name : '';
+	}
+
+	/**
+	 * Read the active set again: a plugin activated in this process is then
+	 * one of registered(). Registrations already made stand.
+	 */
+	public static function forgetActiveSet(): void {
+		self::$registry = null;
+		self::$all_declarations = null;
 	}
 
 	/** Drop every cache and attribution. Tests only. */

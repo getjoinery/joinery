@@ -151,6 +151,30 @@ check(in_array('keyless', PluginBootstraps::notLoaded(), true),
 $unmet = VaultConsumers::unmetObligations();
 check(isset($unmet['keyless']), 'and its reseal obligation still stands');
 
+// ---------------------------------------------------------------------------
+section('A plugin activated after the bootstraps loaded gets its own loaded');
+// ---------------------------------------------------------------------------
+// PluginManager::activate() then applies the plugin's content packs, which may
+// save rows naming what its bootstrap registers (a fulfilment provider).
+$late_bootstrap = PathHelper::getIncludePath('tests/vault/fixtures/late_bootstrap.php');
+$late_entry = function (bool $active) use ($late_bootstrap) {
+	return array('declaration' => null, 'active' => $active, 'bootstrap' => 'includes/bootstrap.php', 'path' => $late_bootstrap);
+};
+$probe_entry = array('declaration' => null, 'active' => true, 'bootstrap' => 'includes/bootstrap.php', 'path' => $probe_bootstrap);
+VaultUnlock::resetForTests();
+VaultConsumers::resetForTests();
+PluginBootstraps::resetForTests();
+VaultConsumers::setPluginDeclarationsForTests(array('probe' => $probe_entry, 'late' => $late_entry(false)));
+PluginBootstraps::load();
+check(UploadPurposeRegistry::get('harness_late_purpose') === null, 'an inactive plugin\'s bootstrap does not load');
+VaultConsumers::setPluginDeclarationsForTests(array('probe' => $probe_entry, 'late' => $late_entry(true)));
+PluginBootstraps::loadAfterActivation();
+check(UploadPurposeRegistry::get('harness_late_purpose') !== null, 'once it is activated, loadAfterActivation() loads it');
+$src = (string)file_get_contents(PathHelper::getIncludePath('includes/PluginManager.php'));
+check(strpos($src, 'PluginBootstraps::loadAfterActivation();') !== false
+	&& strpos($src, 'PluginBootstraps::loadAfterActivation();') < strpos($src, 'PluginContentPacks::apply_pending($name)'),
+	'PluginManager::activate() calls it before applying the content packs');
+
 VaultUnlock::resetForTests();
 VaultConsumers::resetForTests();
 

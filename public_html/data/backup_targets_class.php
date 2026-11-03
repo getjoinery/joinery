@@ -17,6 +17,7 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.11 - bkt_bucket is declared required, so the test generator fills it
  * @version 3.10 - credential_problem() refuses a Linode region that is not a cluster: Linode shows its regions as
  *                 us-ord, but a bucket lives in a numbered cluster (us-ord-10), and us-ord.linodeobjects.com
  *                 does not exist (specs/easy_signup_completion.md WP6)
@@ -93,7 +94,7 @@ class BackupTarget extends SystemBase {
 		'bkt_purpose'         => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'backups', 'allowed_values'=>array('backups', 'files')),
 		// allowed_values is StorageProvider::slugs(), set below the class: one provider list.
 		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array()),
-		'bkt_bucket'          => array('type'=>'varchar(255)'),
+		'bkt_bucket'          => array('type'=>'varchar(255)', 'required'=>true),
 		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
 		// The target's one credential. It never leaves the machine that owns
 		// the target: a site uses it directly, and a management node signs

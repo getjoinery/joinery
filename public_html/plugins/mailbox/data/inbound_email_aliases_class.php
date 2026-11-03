@@ -57,6 +57,12 @@ class InboundEmailAlias extends SystemBase {
 		'iea_ied_inbound_email_domain_id' => ['action' => 'permanent_delete'],
 	];
 
+	// A forwarding alias needs somewhere to forward; a handler alias only stores.
+	public static $test_fixture = array(
+		'values' => array('iea_delivery_mode' => 'forward', 'iea_destinations' => 'mt-dest@example.com', 'iea_handler' => null),
+		'formats' => array('iea_alias' => 'slug'),
+	);
+
 	public static $field_specifications = array(
 		'iea_inbound_email_alias_id'      => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'iea_ied_inbound_email_domain_id' => array('type'=>'int4', 'is_nullable'=>false),

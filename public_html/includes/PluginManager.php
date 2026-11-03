@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.19 - activate() loads the newly active plugin's bootstrap before its content packs save anything
  * @version 1.18 - a plugin's content packs (content_packs/{pack}/) land once per install: after its activation
  *                commits, and at sync for one not yet applied (PluginContentPacks)
  * @version 1.17 - getDependents() reads each installed plugin's live manifest; the stored dependency rows missed a depends added after activation, so store could be deactivated under event_manager; deactivation counts only active dependents
@@ -1264,6 +1265,9 @@ class PluginManager extends AbstractExtensionManager {
         if (SandboxPlugins::isSandboxed($name)) {
             return;
         }
+        // Its registrations exist before its content packs save anything
+        // that names them (a product sold through its fulfilment provider).
+        PluginBootstraps::loadAfterActivation();
         try {
             foreach (PluginContentPacks::apply_pending($name) as $message) {
                 error_log("Plugin activation ('$name'): " . $message);

@@ -35,6 +35,7 @@
  * VaultUnlock::capsForUser() treats as "the strictest window policy may be
  * missing" and fails CLOSED to the hardened caps.
  *
+ * @version 1.5 - loadAfterActivation(): a plugin activated in this process gets its bootstrap loaded; notLoaded() names each once
  * @version 1.4 - failed(): the bootstraps that threw, with their errors, for the deploy tier
  * @version 1.3 - a bootstrap that throws lands in notLoaded() with the error logged, never fatal
  *                to the request that loaded it (vault unlock among them)
@@ -55,6 +56,9 @@ class PluginBootstraps {
 	/** @var array<string,string> bootstraps that threw as they ran: consumer => the error. */
 	private static $failed = array();
 
+	/** @var array<string,true> bootstrap files this loader required, by real path. */
+	private static $required = array();
+
 	/**
 	 * Load every registered bootstrap — core consumers and active plugins — in
 	 * declared order. Lazy and idempotent; every registry read site may call it.
@@ -71,15 +75,25 @@ class PluginBootstraps {
 				error_log('[VaultConsumers] consumer "' . $name . '" declares a bootstrap that does not exist: '
 					. ($path === '' ? '(no top-level bootstrap key in plugin.json)' : $path)
 					. ' — unlock windows fail closed to the hardened caps until it is restored.');
-				self::$not_loaded[] = $name;
+				// Once, however many passes run (loadAfterActivation()).
+				if (!in_array($name, self::$not_loaded, true)) {
+					self::$not_loaded[] = $name;
+				}
 				continue;
 			}
 			$real = realpath($path);
+			if ($real !== false && isset(self::$required[$real])) {
+				// Loaded by an earlier pass of this loader (see loadAfterActivation()).
+				continue;
+			}
 			if ($real !== false && in_array($real, get_included_files(), true)) {
 				error_log('[VaultConsumers] consumer "' . $name . '" was already included outside '
 					. 'the plugin bootstrap loader; its hook registrations are not attributed to it and any '
 					. 'obligation it declares will read as unmet.');
 				continue;
+			}
+			if ($real !== false) {
+				self::$required[$real] = true;
 			}
 			VaultConsumers::beginLoading($name);
 			// A bootstrap only registers. Anything it prints (a stray line
@@ -149,11 +163,28 @@ class PluginBootstraps {
 		}
 	}
 
+	/**
+	 * After a plugin is activated in this process: load the bootstraps of
+	 * whatever is active now, so the newly active plugin's registrations (a
+	 * fulfilment provider, say) exist before anything the activation goes on
+	 * to save asks for them. Bootstraps already loaded do not run again.
+	 */
+	public static function loadAfterActivation(): void {
+		PluginHelper::forgetActiveSet();
+		VaultConsumers::forgetActiveSet();
+		if (!self::$loaded) {
+			return;
+		}
+		self::$loaded = false;
+		self::load();
+	}
+
 	/** Let the bootstraps load again. Tests only. */
 	public static function resetForTests(): void {
 		self::$loaded = false;
 		self::$not_loaded = array();
 		self::$failed = array();
+		self::$required = array();
 	}
 }
 ?>

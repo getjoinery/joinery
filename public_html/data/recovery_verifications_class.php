@@ -14,6 +14,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  *
  * Rows are append-only history: verifying again inserts, nothing updates.
  *
+ * @version 1.1.0 - rcv_method is a declared set; save() refuses anything else
  * @version 1.0.0
  */
 class RecoveryVerification extends SystemBase {
@@ -37,17 +38,11 @@ class RecoveryVerification extends SystemBase {
 		'rcv_recovery_verification_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
 		'rcv_item_key'    => array('access_class' => 'keys', 'type' => 'varchar(100)', 'is_nullable' => false, 'required' => true),
 		'rcv_usr_user_id' => array('type' => 'int4', 'is_nullable' => false, 'required' => true),
-		'rcv_method'      => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true),
+		'rcv_method'      => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
+		                           'allowed_values' => array(self::METHOD_CEREMONY, self::METHOD_DRY_RUN, self::METHOD_ATTESTED)),
 		'rcv_passed'      => array('type' => 'boolean', 'is_nullable' => false, 'default' => false),
 		'rcv_verify_time' => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
-
-	public function prepare() {
-		$method = (string)$this->get('rcv_method');
-		if (!in_array($method, array(self::METHOD_CEREMONY, self::METHOD_DRY_RUN, self::METHOD_ATTESTED), true)) {
-			throw new Exception('Unknown verification method: ' . $method);
-		}
-	}
 
 	/** Append a ledger row. Returns the saved model. */
 	public static function record($item_key, $method, $user_id, $passed) {
@@ -57,7 +52,6 @@ class RecoveryVerification extends SystemBase {
 		$row->set('rcv_usr_user_id', (int)$user_id);
 		$row->set('rcv_passed', (bool)$passed);
 		$row->set('rcv_verify_time', gmdate('Y-m-d H:i:s'));
-		$row->prepare();
 		$row->save();
 		return $row;
 	}

@@ -127,6 +127,8 @@ class InboundEmailDomain extends SystemBase {
 	/** The three consent values, least to most permissive. */
 	const CONSENTS = array(self::CONSENT_LOCAL, self::CONSENT_TRUSTED, self::CONSENT_CLOUD);
 
+	public static $test_fixture = array('formats' => array('ied_domain' => 'domain', 'ied_catch_all_address' => 'email', 'ied_forwarding_subdomain' => 'domain'));
+
 	public static $field_specifications = array(
 		'ied_inbound_email_domain_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ied_domain'            => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),

@@ -12,6 +12,7 @@
  * needs no registration here — CalendarItemSourceRegistry auto-discovers it by
  * scanning plugin item-source directories.
  *
+ * @version 1.1.0 - the event_registration fulfilment provider registers from includes/bootstrap.php
  * @version 1.0.0
  */
 
@@ -66,11 +67,6 @@ MessageContextRegistry::register('event', function (int $id): ?array {
 		'url'   => '/plugins/event_manager/admin/admin_event?evt_event_id=' . $event->key,
 	];
 });
-
-// ---- Product fulfillment: event registration (the store↔event_manager seam) ----
-require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
-require_once(PathHelper::getIncludePath('plugins/event_manager/includes/fulfillment_providers/EventRegistrationFulfillment.php'));
-FulfillmentRegistry::register(new EventRegistrationFulfillment());
 
 // ---- Profile dashboard sections: upcoming events + pending surveys ----
 // The web profile and the native-app dashboard summary iterate this registry;

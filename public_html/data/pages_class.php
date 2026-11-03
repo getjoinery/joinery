@@ -54,6 +54,9 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	 * 
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
+	// A template must exist on the site; none is a page without one.
+	public static $test_fixture = array('values' => array('pag_template' => null), 'formats' => array('pag_link' => 'slug'));
+
 	public static $field_specifications = array(
 	    'pag_page_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'pag_title' => array('type'=>'varchar(255)'),

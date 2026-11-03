@@ -529,6 +529,8 @@ class ModelTester {
                 }
             }
             
+            $test_data = $this->keep_one_of($test_data, $all_fields);
+
             foreach ($test_data as $test_field => $value) {
                 $model1->set($test_field, $value);
             }
@@ -953,6 +955,12 @@ class ModelTester {
             return $allowed[$index % count($allowed)];
         }
 
+        // A field whose rules want a shape (a link name, an address, a domain).
+        $format = $this->field_format($field);
+        if ($format !== null) {
+            return $this->formatted_value($field, $format, (string)$index);
+        }
+
         // Handle different field types with index support.
         // 'char' matches varchar(n), character(n), and char(n).
         if (strpos($type, 'char') !== false) {
@@ -999,6 +1007,47 @@ class ModelTester {
     /**
      * Generate varchar value based on field name and constraints
      */
+    /**
+     * The shape a field's own rules ask of its value, so generated values pass
+     * them: 'slug' (lower-case letters, digits, single dashes), 'email' or
+     * 'domain'. A model names its fields in $test_fixture['formats']; any text
+     * column named like an email address is 'email' without being named.
+     */
+    protected function field_format($field) {
+        $model_class = $this->model_class;
+        // A declared set of values says it all: its members are the shape.
+        if (!empty($model_class::$field_specifications[$field]['allowed_values'])) {
+            return null;
+        }
+        if (property_exists($model_class, 'test_fixture')
+            && isset($model_class::$test_fixture['formats'][$field])) {
+            return $model_class::$test_fixture['formats'][$field];
+        }
+        $type = strtolower($model_class::$field_specifications[$field]['type'] ?? '');
+        if (strpos(strtolower($field), 'email') !== false && strpos($type, 'char') !== false) {
+            return 'email';
+        }
+        return null;
+    }
+
+    /** A unique value of $format for $field; $variant makes a second, different one. */
+    protected function formatted_value($field, $format, $variant) {
+        $spec = $this->model_class::$field_specifications[$field] ?? [];
+        $max = preg_match('/\((\d+)\)/', (string)($spec['type'] ?? ''), $m) ? (int)$m[1] : 255;
+        $token = strtolower(preg_replace('/[^a-z0-9]/i', '', $variant) . bin2hex(random_bytes(5)));
+        switch ($format) {
+            case 'slug':
+                return substr('mt-' . $token, 0, $max);
+            case 'domain':
+                return substr('mt-' . $token, 0, max(1, $max - 8)) . '.example';
+            case 'url':
+                return 'https://example.com/' . substr('mt-' . $token, 0, max(1, $max - 20));
+            case 'email':
+                return substr('mt-' . $token, 0, max(1, $max - 12)) . '@example.com';
+        }
+        throw new Exception("Unknown test_fixture format '$format' for field $field");
+    }
+
     protected function generate_varchar_value($field, $type, $index = 0) {
         // Extract max length from type like "varchar(100)" or "character(64)"
         preg_match('/\\((\\d+)\\)/', $type, $matches);
@@ -1466,6 +1515,49 @@ class ModelTester {
         return $probe ? $probe->get($field) : $value;
     }
 
+    /**
+     * A model whose row holds exactly one of a group of fields (a board member
+     * is a person or a group) names each group in $test_fixture['one_of'].
+     * Keeps the group member among $wanted, else the first one holding a
+     * value, and empties the rest.
+     */
+    protected function keep_one_of(array $data, array $wanted) {
+        $model_class = $this->model_class;
+        if (!property_exists($model_class, 'test_fixture') || empty($model_class::$test_fixture['one_of'])) {
+            return $data;
+        }
+        foreach ($model_class::$test_fixture['one_of'] as $group) {
+            $keep = null;
+            foreach ($group as $f) {
+                if (in_array($f, $wanted, true)) { $keep = $f; break; }
+            }
+            if ($keep === null) {
+                foreach ($group as $f) {
+                    if (isset($data[$f]) && $data[$f] !== '') { $keep = $f; break; }
+                }
+            }
+            foreach ($group as $f) {
+                if ($f !== $keep) { $data[$f] = null; }
+            }
+        }
+        return $data;
+    }
+
+    /** Whether a fresh row holding $values passes the model's own rules. */
+    protected function rules_pass(array $values) {
+        $class = $this->model_class;
+        try {
+            $probe = new $class(NULL);
+            foreach ($values as $f => $v) {
+                $probe->set($f, $v);
+            }
+            $probe->prepare();
+            return true;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     protected function find_updateable_field($model) {
         $model_class = $this->model_class;
 
@@ -1527,6 +1619,11 @@ class ModelTester {
         $spec = $model_class::$field_specifications[$field] ?? [];
         $type = strtolower($spec['type'] ?? 'varchar(255)');
 
+        $format = $this->field_format($field);
+        if ($format !== null) {
+            return $this->formatted_value($field, $format, 'diff');
+        }
+
         // A declared enum can only vary to another member of the set. A
         // single-member set has no different legal value — return the value
         // unchanged rather than something the model must reject.
@@ -1580,6 +1677,11 @@ class ModelTester {
         $model_class = $this->model_class;
         $spec = $model_class::$field_specifications[$field] ?? [];
         $type = $spec['type'] ?? 'varchar(255)';
+
+        $format = $this->field_format($field);
+        if ($format !== null) {
+            return $this->formatted_value($field, $format, 'upd');
+        }
 
         // A declared enum: the update value must be a different member of the
         // set. A single-member set has none — null signals the caller to skip
@@ -2034,6 +2136,10 @@ class ModelTester {
             
             if (is_numeric($saved_value)) {
                 $this->test_pass("Field $field converted non-numeric input to numeric value: $saved_value");
+            } elseif ($saved_value === null || $saved_value === '') {
+                // The model's own rule cleared the value (a size with no
+                // operator means nothing): nothing non-numeric was stored.
+                $this->test_pass("Field $field: the model's rule cleared the non-numeric input");
             } else {
                 $this->test_fail_no_throw("Field $field accepted non-numeric value without conversion - stored: '$saved_value' (should be numeric or rejected)");
             }
@@ -2146,6 +2252,13 @@ class ModelTester {
                 return;
             }
             
+            // The column may be empty, but the model's rule wants it in this
+            // row (a board member is a person or a group): when the same row
+            // with the field filled passes the rules, the refusal is the rule.
+            if ($this->rules_pass($test_data) && !$this->rules_pass(array_merge($test_data, array($field => null)))) {
+                $this->test_warn("Field $field may be empty in the schema; the model's rule needs it in this row: " . $e->getMessage());
+                return;
+            }
             $this->test_fail_no_throw("Field $field should accept null values but threw: " . $e->getMessage());
         }
     }

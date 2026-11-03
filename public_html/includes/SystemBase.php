@@ -3295,7 +3295,10 @@ abstract class SystemBase {
 		try {
 			$this->prepare();
 		} catch (Throwable $e) {
-			if (static::MODEL_RULES === 'refuse') {
+			// A command-line run may ask for refusal ahead of the flip
+			// (JOINERY_MODEL_RULES=refuse) to find what the flip would break.
+			if (static::MODEL_RULES === 'refuse'
+				|| (PHP_SAPI === 'cli' && getenv('JOINERY_MODEL_RULES') === 'refuse')) {
 				throw $e;
 			}
 			$where = PHP_SAPI === 'cli' ? 'cli ' . ($_SERVER['argv'][0] ?? '?')

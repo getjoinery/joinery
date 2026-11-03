@@ -914,7 +914,7 @@ declares in `pro_fulfillment_provider`:
 - **`customer_cloud`**: the buyer's site runs on its own cloud instance. A
   product opts in by picking **Customer cloud server** in the product-edit
   Purchase grants picker (`CustomerCloudFulfillment`, registered with the
-  store's FulfillmentRegistry from serve.php); that stamps the provider value
+  store's FulfillmentRegistry from the plugin bootstrap); that stamps the provider value
   and contributes the one checkout requirement the line carries — the id of
   the site the buyer configured beforehand (see **The buyer configures first**
   below). The reference picked beside it decides **whose cloud account the

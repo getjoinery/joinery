@@ -499,7 +499,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			$last_name = strip_tags(trim($last_name));
 			$user->set('usr_last_name', $last_name !== '' ? $last_name : null);
 			$user->set('usr_password', $temp_password_hashed);	
-			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR']);
+			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR'] ?? null);
 			if(!empty($data['usr_nickname'])){
 				$user->set('usr_nickname', strip_tags(trim($data['usr_nickname'])));
 			}		
@@ -1788,8 +1788,10 @@ class MultiUser extends SystemMultiBase {
         }
 
         if (isset($this->options['user_id_list'])) {
-            if(count($this->options['user_id_list'])) {
-                $filters['usr_user_id'] = 'IN ('.implode(',', $this->options['user_id_list']).')';
+            // Ids only: each is made a number before it reaches the SQL.
+            $ids = array_map('intval', (array)$this->options['user_id_list']);
+            if(count($ids)) {
+                $filters['usr_user_id'] = 'IN ('.implode(',', $ids).')';
             }
         }
 
@@ -1841,7 +1843,11 @@ class MultiUser extends SystemMultiBase {
         }
 
         if (isset($this->options['permission_range'])) {
-            $filters['usr_permission'] = '>= '.$this->options['permission_range'][0].' AND usr_permission <= '.$this->options['permission_range'][1];
+            // A [low, high] pair of levels, each made a number before it reaches the SQL.
+            $range = array_values((array)$this->options['permission_range']);
+            $low = (int)($range[0] ?? 0);
+            $high = (int)($range[1] ?? $low);
+            $filters['usr_permission'] = '>= '.$low.' AND usr_permission <= '.$high;
         }
 
         if (isset($this->options['user_name_fulltext'])) {

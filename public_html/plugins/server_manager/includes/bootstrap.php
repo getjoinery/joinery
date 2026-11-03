@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.24 - the customer_cloud fulfilment provider registers here, so every save of a product knows it
  * @version 1.23 - plane:break_glass_attention and plane:break_glass_no_holder, and the vault re-seal of kept root passwords
  *                (CustomerCloudProvision), so a key rotation of the holder's vault re-wraps them
  *                (specs/implemented/beta_break_glass_root_access.md 3.3, 3.7)
@@ -70,5 +71,15 @@ VaultUnlock::onReseal(VaultUnlock::modelReseal(array(CustomerCloudProvision::cla
 // its monthly ceiling.
 if (class_exists('CostGuard') && method_exists('CostGuard', 'registerUsageCounter')) {
 	CostGuard::registerUsageCounter('incident_analysis', array('IncidentAnalyst', 'usage_since'));
+}
+
+// Product fulfilment: customer-cloud server (the store and server_manager
+// seam), when the store plugin is active. Picking it on a product is the
+// entire product-side setup for cloud hosting: the provider contributes the
+// one requirement its line carries (ManagedSiteRequirement, the site the
+// buyer configured on /profile/server_manager/configure).
+if (class_exists('FulfillmentRegistry')) {
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
+	FulfillmentRegistry::register(new CustomerCloudFulfillment());
 }
 ?>

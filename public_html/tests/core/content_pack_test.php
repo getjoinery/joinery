@@ -44,10 +44,6 @@ $_SESSION['loggedin'] = 1;
 $_SESSION['usr_user_id'] = (int)$admin->key;
 $_SESSION['permission'] = 10;
 
-// Providers register from each plugin's serve.php on a web request, which a
-// CLI test never makes.
-FulfillmentRegistry::register(new CustomerCloudFulfillment());
-
 /** Delete every product this run made, live or not, with its versions. */
 harness_defer(function () use ($run) {
 	$db = DbConnector::get_instance()->get_db_link();

@@ -138,6 +138,7 @@ try {
 		$f = new InboundEmailFilter(NULL);
 		$f->set('ief_ied_inbound_email_domain_id', (int)$route->key);
 		$f->set('ief_iea_inbound_email_alias_id', (int)$stored->key);
+		$f->set('ief_match_from', 'route-sender@example.test');
 		$f->set('ief_action_forward_to', 'route-filter@example.test');
 		$f->save();
 		check(InboundEmailHealth::forwardingInUse(), 'a filter with a Forward to action does');

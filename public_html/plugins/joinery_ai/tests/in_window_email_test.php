@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=in_window_email
  *
+ * @version 1.5 - the consent check gets an unsaved recipe (saving one runs that rule); no clean-up empties a protected mailbox
  * @version 1.4 - X-Wing test vault
  * @version 1.3
  */
@@ -102,10 +103,9 @@ function iw_alias(int $domain_id, string $local, int $holder_id): InboundEmailAl
 	$alias->save();
 	$alias->load();
 	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', intval($alias->key));
+	// Its grants go with the alias row (a cascade); a protected mailbox may
+	// never be left with no member, so they are not emptied first.
 	InboundEmailMailboxGrant::sync_for_alias($alias->key, array($holder_id));
-	harness_defer(function () use ($alias) {
-		InboundEmailMailboxGrant::sync_for_alias($alias->key, array());
-	});
 	return $alias;
 }
 
@@ -127,7 +127,8 @@ function iw_message(int $domain_id, int $alias_id, string $subject, string $body
 	return intval($msg->key);
 }
 
-function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
+/** A pipeline recipe on the address; $save false leaves it unsaved, for a check made before saving. */
+function iw_recipe(int $owner_id, string $job_id, string $address, bool $save = true): Recipe {
 	$recipe = new Recipe(NULL);
 	$recipe->set('rcp_name', 'HarnessTest iw ' . bin2hex(random_bytes(3)));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
@@ -140,6 +141,9 @@ function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
 	// sections below assert (specs/recipe_run_scheduling.md).
 	$recipe->set('rcp_schedule_frequency', RecipeSchedule::FREQ_ARRIVAL);
 	$recipe->set('rcp_allow_tainted_writes', true);
+	if (!$save) {
+		return $recipe;
+	}
 	$recipe->save();
 	$recipe->load();
 	harness_register_row('rcp_recipes', 'rcp_recipe_id', intval($recipe->key));
@@ -914,7 +918,7 @@ try {
 	$message = '';
 	try {
 		$job->validateConfig(array('mailbox_aliases' => array($closed_address)),
-			iw_recipe($owner_id, 'email_triage', $closed_address));
+			iw_recipe($owner_id, 'email_triage', $closed_address, false));
 	} catch (InvalidArgumentException $e) {
 		$refused = true;
 		$message = $e->getMessage();
@@ -930,7 +934,7 @@ try {
 	$accepted = true;
 	try {
 		$job->validateConfig(array('mailbox_aliases' => array($closed_address)),
-			iw_recipe($owner_id, 'email_triage', $closed_address));
+			iw_recipe($owner_id, 'email_triage', $closed_address, false));
 	} catch (InvalidArgumentException $e) {
 		$accepted = false;
 		$message = $e->getMessage();

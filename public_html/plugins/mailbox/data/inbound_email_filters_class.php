@@ -98,6 +98,9 @@ class InboundEmailFilter extends SystemBase {
 		'ief_ied_inbound_email_domain_id' => array('action' => 'permanent_delete'),
 	);
 
+	// A filter needs at least one criterion.
+	public static $test_fixture = array('values' => array('ief_match_from' => 'mt-sender@example.com'), 'formats' => array('ief_action_forward_to' => 'email'));
+
 	public static $field_specifications = array(
 		'ief_inbound_email_filter_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		// Scope: a filter belongs to a mailbox (alias). NULL alias = domain-wide,

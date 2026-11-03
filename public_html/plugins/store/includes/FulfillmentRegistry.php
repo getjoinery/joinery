@@ -8,11 +8,13 @@
  * fulfillment provider key + a reference id, and the provider supplies the
  * admin picker, any extra purchase-time requirements, and the fulfill() action
  * run on successful purchase. Event_manager registers the `event_registration`
- * provider.
+ * provider from its plugin bootstrap.
  *
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
+ * @version 1.4.0 - register(), get() and all() load the plugin bootstraps first, where providers register, so
+ *                  a command-line run knows them too
  * @version 1.3.0 - cartRefusal(): one place asks every line's provider whether it can still be
  *                  delivered, so the checkout page asks before a hosted payment session exists and
  *                  the charge asks again only while declining is still free
@@ -76,16 +78,21 @@ class FulfillmentRegistry {
 
     /** Register a provider. Idempotent (last-wins by key). */
     public static function register(FulfillmentProvider $provider): void {
+        // The plugins' own providers first, so one registered later (a test
+        // double) replaces them rather than being replaced.
+        self::loadBootstraps();
         self::$providers[$provider->key()] = $provider;
     }
 
     /** Get a provider by key, or null. */
     public static function get(string $key): ?FulfillmentProvider {
+        self::loadBootstraps();
         return self::$providers[$key] ?? null;
     }
 
     /** All registered providers, registration order. */
     public static function all(): array {
+        self::loadBootstraps();
         return array_values(self::$providers);
     }
 
@@ -132,8 +139,23 @@ class FulfillmentRegistry {
 
     /** Register core-visible fulfillment providers. */
     public static function registerCoreDefaults(): void {
-        // No core fulfillment providers. The event_registration provider
-        // registers from event_manager's serve.php when that plugin is active.
+        // No core fulfillment providers. Plugins register theirs from their
+        // bootstrap, which loadBootstraps() pulls in before any lookup.
+    }
+
+    /**
+     * Each active plugin's bootstrap, where providers register: once per
+     * request or command (PluginBootstraps::load() is idempotent), so a page,
+     * a cron task and a product save all see the same providers.
+     */
+    private static function loadBootstraps(): void {
+        if (class_exists('PluginBootstraps')) {
+            try {
+                PluginBootstraps::load();
+            } catch (\Throwable $e) {
+                error_log('[FulfillmentRegistry] plugin bootstraps failed to load: ' . $e->getMessage());
+            }
+        }
     }
 
     /** Clear the registry (tests only). */

@@ -102,6 +102,8 @@ class Product extends SystemBase {
 	 * 
 	 * Note: Timestamp fields are auto-detected based on type for smart_get() and export_as_array()
 	 */
+	public static $test_fixture = array('formats' => array('pro_link' => 'slug'));
+
 	public static $field_specifications = array(
 	    'pro_product_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'pro_name' => array('type'=>'varchar(255)', 'required'=>true),
@@ -857,9 +859,8 @@ public function get_requirement_info($output='text') {
 
 		// The rules below were the product form's alone, so a write from
 		// anywhere else (the API, a content pack) could skip them. Each checks
-		// a value only when this save changes it: a stored row that predates a
-		// rule still saves untouched, and the fulfilment registry, which only a
-		// web request fills, is not asked about a key nobody is changing.
+		// a value only when this save changes it, so a stored row that predates
+		// a rule still saves untouched.
 		$link = (string)$this->get('pro_link');
 		if($link !== '' && $this->value_changes('pro_link') && $link !== SystemBase::slug_form($link)){
 			throw new SystemDisplayableError('A product link may hold only lower-case letters, digits and single dashes, like "'

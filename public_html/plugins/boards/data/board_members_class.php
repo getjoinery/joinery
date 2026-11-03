@@ -21,6 +21,10 @@ class BoardMember extends SystemBase {
 	const ROLE_EDITOR = 'editor';
 	const ROLE_VIEWER = 'viewer';
 
+	// A member is one person or one group: the generator fills the person.
+	public static $test_fixture = array('values' => array('bbm_grp_group_id' => null), 'generate' => array('bbm_usr_user_id'),
+		'one_of' => array(array('bbm_usr_user_id', 'bbm_grp_group_id')));
+
 	public static $field_specifications = array(
 		'bbm_board_member_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
 		'bbm_bbd_board_id'    => array('type' => 'int8', 'is_nullable' => false, 'required' => true, 'index' => true,

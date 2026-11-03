@@ -17,6 +17,10 @@ class BoardAttachment extends SystemBase {
 	public static $access_class = 'content';
 	public static $pkey_column = 'bat_attachment_id';
 
+	// An attachment is a file or a link: the generator makes the link.
+	public static $test_fixture = array('values' => array('bat_fil_file_id' => null), 'generate' => array('bat_url'), 'formats' => array('bat_url' => 'url'),
+		'one_of' => array(array('bat_fil_file_id', 'bat_url')));
+
 	public static $field_specifications = array(
 		'bat_attachment_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
 		'bat_bcd_card_id'   => array('type' => 'int8', 'is_nullable' => false, 'required' => true, 'index' => true,

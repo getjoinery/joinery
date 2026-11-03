@@ -661,7 +661,14 @@ class MultiModelTester extends ModelTester {
             }
 
             // Create Multi instance with the supported filter
-            $multi = new $this->multi_class([$filter_option => $test_value]);
+            // A *_list option takes a list of values, a *_range option a [low, high] pair.
+            $option_value = $test_value;
+            if (substr($filter_option, -5) === '_list') {
+                $option_value = array($test_value);
+            } elseif (substr($filter_option, -6) === '_range') {
+                $option_value = array($test_value, $test_value);
+            }
+            $multi = new $this->multi_class([$filter_option => $option_value]);
 
             // Add timeout protection for filtered load
             try {

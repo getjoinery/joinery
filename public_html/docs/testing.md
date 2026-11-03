@@ -903,8 +903,20 @@ values are invalid). `update_field` names the field the CRUD update step
 modifies, for models whose first spec-order field is enum-validated. `generate`
 lists optional fields the tester fills anyway, for a rule that spans fields:
 `User` lists `usr_email`, since an account needs an email or a username and
-neither is required alone. Declare a fixture only when the field specs
-genuinely cannot express the rule.
+neither is required alone. `formats` names the shape a field's rules ask for,
+so every generated value (and every changed one) has it: `slug` (lower-case
+letters, digits, single dashes), `email`, `domain` or `url`; each value is
+unique. A text column named like an email address is `email` without being
+named. `one_of` lists groups of fields a row holds exactly one of (a board
+member is a person or a group): a check that needs one of them filled empties
+the rest. `self_filled` lists required fields the model's own save() supplies.
+Declare a fixture only when the field specs genuinely cannot express the rule.
+
+The model suites build every row through `save()`, which runs the model's own
+rules (`prepare()`). A row the rules refuse fails the check that built it, so a
+fixture is how a model's test data meets its rules. A command-line run with
+`JOINERY_MODEL_RULES=refuse` in its environment refuses rule-breaking saves
+even while `SystemBase::MODEL_RULES` is `log`.
 
 ## Plugin tests
 

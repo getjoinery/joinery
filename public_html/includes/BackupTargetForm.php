@@ -28,6 +28,7 @@
  *                           to this site's name; saved by CloudStorageLifecycle,
  *                           whose check proves the bucket private
  *
+ * @version 1.6 - the bucket is marked required in every mode, as the target itself always required it
  * @version 1.5 - a new target's lock days start at the suggested figure (retention plus full-backup interval, 35 at the
  *                shipped settings) instead of 0; a provider that takes no lock still saves 0
  * @version 1.4 - lock days for a backup target on a provider that takes object lock, part of the location (F8)
@@ -98,7 +99,7 @@ class BackupTargetForm {
 			'disabled' => $locked !== '',
 			'visibility_rules' => self::visibility_rules($files || $wizard),
 		));
-		$fw->textinput('bkt_bucket', 'Bucket', array('required' => $wizard || $files, 'readonly' => $locked !== '',
+		$fw->textinput('bkt_bucket', 'Bucket', array('required' => true, 'readonly' => $locked !== '',
 			'value' => $target ? (string)$target->get('bkt_bucket') : '',
 			'helptext' => $files
 				? 'A private bucket used for nothing else; not a backup bucket. Save refuses a bucket anyone can read.'
