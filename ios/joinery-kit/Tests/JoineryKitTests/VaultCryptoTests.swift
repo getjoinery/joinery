@@ -62,14 +62,15 @@ final class VaultCryptoTests: XCTestCase {
         XCTAssertThrowsError(try VaultCrypto.open(sealed: sealed, secret: try VaultCrypto.newKeypair().seed))
     }
 
-    func testSealingToAnOldKeyIsRefusedAndNamesTheRotation() {
-        let old = VaultCrypto.b64(Data(repeating: 9, count: 32))
-        XCTAssertTrue(VaultCrypto.isOldPublicKey(old))
-        XCTAssertThrowsError(try VaultCrypto.seal(Data([1]), toPublicKey: old)) { error in
-            XCTAssertEqual(error as? VaultCrypto.Failure, .oldKey)
-            XCTAssertTrue(error.localizedDescription.contains("rotate"))
+    func testOnlyXWingKeysSealOrDerive() {
+        let short = VaultCrypto.b64(Data(repeating: 9, count: 32))
+        XCTAssertThrowsError(try VaultCrypto.seal(Data([1]), toPublicKey: short)) { error in
+            XCTAssertEqual(error as? VaultCrypto.Failure, .malformed("a public key is 1216 bytes"))
         }
         XCTAssertThrowsError(try VaultCrypto.publicKey(fromSecret: Data(repeating: 1, count: 48)), "a 48-byte secret is not a seed")
+        XCTAssertTrue(VaultCrypto.isUnsealablePublicKey(short))
+        XCTAssertFalse(VaultCrypto.isUnsealablePublicKey(try VaultCrypto.newKeypair().publicKey))
+        XCTAssertFalse(VaultCrypto.isUnsealablePublicKey(nil))
     }
 
     // MARK: edge_vector.json

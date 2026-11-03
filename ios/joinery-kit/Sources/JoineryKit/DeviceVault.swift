@@ -345,9 +345,9 @@ public final class DeviceVault: ObservableObject {
             retired = true
             return false
         }
-        // A key from before X-Wing opens nothing a vault now seals: it goes,
-        // and the banner asks for the rotated key to be handed over.
-        if VaultCrypto.isOldPublicKey(storedPublicKey) {
+        // A stored vault key this app cannot seal with opens nothing: it goes,
+        // and the banner asks for the key to be handed over again.
+        if VaultCrypto.isUnsealablePublicKey(storedPublicKey) {
             forget()
             retired = true
             return false

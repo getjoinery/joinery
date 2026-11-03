@@ -88,8 +88,7 @@ public final class DeviceKeyStore: @unchecked Sendable {
 
     // MARK: Accounts
 
-    // The account names predate X-Wing; a key stored under them from before
-    // it is told apart by its public half's size (devicePublicKey()).
+    // Account names are stored identifiers: renaming one orphans the key under it.
     static let devicePublic = "device.x25519.public"
     static let deviceSecret = "device.x25519.secret"
     static let domainState = "device.biometry.domainstate"
@@ -162,15 +161,15 @@ public final class DeviceKeyStore: @unchecked Sendable {
 
     // MARK: The device key
 
-    /// The device's public key, creating the pair on first use, again when
-    /// the old one's secret can no longer be opened (a new face or finger), and
-    /// again when the stored pair is from before X-Wing (a 32-byte public key,
-    /// which nothing seals to). Kept across sign-out so a re-enrollment approves
-    /// the same key; wiped on unlink.
+    /// The device's public key, creating the pair on first use, again when the
+    /// old one's secret can no longer be opened (a new face or finger), and again
+    /// when the stored public half is not one this app can seal with (not 1216
+    /// bytes). Kept across sign-out so a re-enrollment approves the same key;
+    /// wiped on unlink.
     public func devicePublicKey() throws -> String {
         if let existing = read(Self.devicePublic, context: nil, gated: false).data, !deviceSecretGone {
             let pub = String(decoding: existing, as: UTF8.self)
-            if !VaultCrypto.isOldPublicKey(pub) { return pub }
+            if !VaultCrypto.isUnsealablePublicKey(pub) { return pub }
         }
         // A pair is minted only with the enrollment's state in hand, so a later
         // change can always be told from an unknown (X2).

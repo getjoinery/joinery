@@ -99,14 +99,16 @@ class VaultCryptoTest {
     }
 
     @Test
-    fun sealingToAnOldKeyIsRefusedAndNamesTheRotation() {
-        val old = VaultCrypto.b64encode(ByteArray(32) { 9 })
-        assertTrue(VaultCrypto.isOldPublicKey(old))
+    fun onlyAnXWingKeyIsSealedTo() {
+        val short = VaultCrypto.b64encode(ByteArray(32) { 9 })
+        assertTrue(VaultCrypto.isUnsealablePublicKey(short))
+        assertFalse(VaultCrypto.isUnsealablePublicKey(VaultCrypto.generateKeypair().publicKeyB64))
+        assertFalse(VaultCrypto.isUnsealablePublicKey(null))
         try {
-            VaultCrypto.sealToPublicKey(byteArrayOf(1), old)
+            VaultCrypto.sealToPublicKey(byteArrayOf(1), short)
             fail("a 32-byte key must be refused")
         } catch (e: VaultCryptoException) {
-            assertTrue(e.message!!.contains("rotate"))
+            assertTrue(e.message!!.contains("1216"))
         }
     }
 

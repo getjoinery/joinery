@@ -286,7 +286,7 @@ class DeviceKeys(
                 resetV1(app, prefs)
                 val store = WrappedSecretStore(java.io.File(app.noBackupFilesDir, "joinery_fortress_v2"),
                     KeystoreMasterGuard("joinery.fortress.master.v2"))
-                resetPreXWing(store, prefs)
+                resetUnsealableKeys(store, prefs)
                 val keys = DeviceKeys(store = store, prefs = prefs)
                 shared = keys
                 HeldKeysLifecycle.install(keys.held)
@@ -320,14 +320,14 @@ class DeviceKeys(
         }
 
         /**
-         * Keys from before X-Wing (a 32-byte device or vault public key) open
-         * nothing any vault now seals: an install that holds them starts over,
-         * as a v1 install does, and the next enrollment mints an X-Wing device
-         * key (specs/post_quantum_sealing.md WP6). True when there was one.
+         * A recorded device or vault public key this app cannot seal with (not
+         * 1216 bytes) opens nothing: an install that holds one starts over, as
+         * a v1 install does, and the next enrollment mints a device key. True
+         * when there was one.
          */
-        internal fun resetPreXWing(store: SecretStore, prefs: KeyValueStore): Boolean {
+        internal fun resetUnsealableKeys(store: SecretStore, prefs: KeyValueStore): Boolean {
             val old = prefs.keys().filter { it.startsWith("fortress.") && it.endsWith(".pub") }
-                .any { VaultCrypto.isOldPublicKey(prefs.get(it)) }
+                .any { VaultCrypto.isUnsealablePublicKey(prefs.get(it)) }
             if (!old) return false
             store.deleteAll()
             prefs.keys().filter { it.startsWith("fortress.") }.forEach { prefs.put(it, null) }

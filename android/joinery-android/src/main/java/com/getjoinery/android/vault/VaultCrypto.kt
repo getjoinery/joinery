@@ -83,9 +83,10 @@ object VaultCrypto {
      *  it, so the two can never be out of step. */
     fun publicKeyFromSecret(seed: ByteArray): String = b64encode(XWing.publicKey(seed))
 
-    /** True for a public key from before X-Wing (32 bytes): nothing seals to it. */
-    fun isOldPublicKey(publicB64: String?): Boolean =
-        publicB64 != null && (publicB64.trim().decodeBase64()?.size ?: 0) == 32
+    /** True for a stored public key this app cannot seal with (present, but
+     *  not 1216 bytes): whatever install holds it starts over. */
+    fun isUnsealablePublicKey(publicB64: String?): Boolean =
+        publicB64 != null && (publicB64.trim().decodeBase64()?.size ?: 0) != XWing.PUBLIC_KEY_BYTES
 
     // MARK: Sealing
 
@@ -103,13 +104,9 @@ object VaultCrypto {
         }
     }
 
-    /** Seal [data] to a 1216-byte X-Wing public key (std base64). A 32-byte
-     *  key is from before X-Wing and is refused: its owner rotates it first. */
+    /** Seal [data] to a 1216-byte X-Wing public key (std base64). */
     fun sealToPublicKey(data: ByteArray, recipientPublicB64: String): String {
         val recipient = b64decode(recipientPublicB64)
-        if (recipient.size == 32) {
-            throw VaultCryptoException("That vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it.")
-        }
         if (recipient.size != XWing.PUBLIC_KEY_BYTES) throw VaultCryptoException("A public key is 1216 bytes.")
         return b64encode(sealWith(data, recipient, SCOPE_DEK, null, randomBytes(12)))
     }

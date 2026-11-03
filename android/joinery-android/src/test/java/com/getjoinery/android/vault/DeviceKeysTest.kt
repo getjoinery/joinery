@@ -54,16 +54,16 @@ class DeviceKeysTest {
     }
 
     @Test
-    fun anInstallHoldingPreXWingKeysStartsOver() {
+    fun anInstallHoldingAnUnsealableKeyStartsOver() {
         val (k, store, prefs) = keys()
         val (sealed, pub) = handoff(k.ensureDeviceKey())
         k.acceptHandoff("mail", sealed, listOf(pub))
         // An X-Wing install is left alone.
-        assertFalse(DeviceKeys.resetPreXWing(store, prefs))
+        assertFalse(DeviceKeys.resetUnsealableKeys(store, prefs))
         assertTrue(k.holds("mail"))
-        // A device key recorded before X-Wing (32 bytes) wipes everything.
+        // A recorded device key that is not 1216 bytes wipes everything.
         prefs.put("fortress.device.pub", VaultCrypto.b64encode(ByteArray(32) { 3 }))
-        assertTrue(DeviceKeys.resetPreXWing(store, prefs))
+        assertTrue(DeviceKeys.resetUnsealableKeys(store, prefs))
         assertTrue(store.names().isEmpty())
         assertTrue(prefs.keys().none { it.startsWith("fortress.") })
     }

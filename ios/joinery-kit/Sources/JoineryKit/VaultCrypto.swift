@@ -30,8 +30,6 @@ public enum VaultCrypto {
     public enum Failure: Error, Equatable {
         case malformed(String)
         case openFailed
-        /// A 32-byte (pre-X-Wing) public key: nothing seals to it.
-        case oldKey
     }
 
     // MARK: Base64
@@ -66,10 +64,11 @@ public enum VaultCrypto {
         b64(try xwingKey(seed: seed).publicKey.rawRepresentation)
     }
 
-    /// True for a public key from before X-Wing (32 bytes).
-    public static func isOldPublicKey(_ b64: String?) -> Bool {
-        guard let b64, let d = Data(base64Encoded: b64) else { return false }
-        return d.count == 32
+    /// True for a stored public key this app cannot seal with (present, but
+    /// not 1216 bytes): whatever pair holds it is remade.
+    public static func isUnsealablePublicKey(_ b64: String?) -> Bool {
+        guard let b64 else { return false }
+        return Data(base64Encoded: b64)?.count != publicKeyBytes
     }
 
     // MARK: Seal / open (key handoff and row DEKs)
@@ -79,12 +78,10 @@ public enum VaultCrypto {
                                info: Data((sealInfo + scope).utf8), outputByteCount: 32)
     }
 
-    /// Seal `data` to a base64 1216-byte X-Wing public key. A 32-byte key is
-    /// from before X-Wing and is refused: its owner rotates it first. `iv` is a
-    /// test seam.
+    /// Seal `data` to a base64 1216-byte X-Wing public key. `iv` is a test
+    /// seam.
     public static func seal(_ data: Data, toPublicKey recipientB64: String, iv: Data? = nil) throws -> String {
         let recipientBytes = try unb64(recipientB64)
-        if recipientBytes.count == 32 { throw Failure.oldKey }
         guard recipientBytes.count == publicKeyBytes else { throw Failure.malformed("a public key is 1216 bytes") }
         let recipient = try XWingMLKEM768X25519.PublicKey(rawRepresentation: recipientBytes)
         let enc = try recipient.encapsulate()
@@ -247,17 +244,6 @@ public enum VaultCrypto {
         var b = [UInt8](repeating: 0, count: bytes)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes, &b)
         return b.map { String(format: "%02x", $0) }.joined()
-    }
-}
-
-extension VaultCrypto.Failure: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .oldKey:
-            return "That vault key is an old (pre-X-Wing) key; its owner must rotate it on the Security page before anything can be sealed to it."
-        default:
-            return nil
-        }
     }
 }
 
