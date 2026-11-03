@@ -9,6 +9,7 @@
  * person presses Accept on the node page: an attacker who removes what they
  * added does not clear it.
  *
+ * @version 1.1 - Then points at Mark safe on the incident page
  * @version 1.0
  */
 class IncidentSourceNeverDo implements IncidentSource {
@@ -35,13 +36,13 @@ class IncidentSourceNeverDo implements IncidentSource {
 			'detail'   => array(
 				'What'  => implode('; ', $lines),
 				'Why'   => 'Nothing on a machine Joinery runs does this, and no upgrade, installer or other job of this management node ran when it appeared. It is how a break-in keeps its way back in.',
-				'Then'  => 'If you or a job you ran did this, press Accept on the node page (Overview, Never-do check). If not, treat the machine as compromised: do not accept it, keep the evidence, and replace the machine.',
+				'Then'  => 'If you or a job you ran did this, or it is a known false alarm, press Mark safe on this page, in the Security sentinel box (Resolve alone does not clear it). If not, treat the machine as compromised: do not mark it safe, keep the evidence, and replace the machine.',
 			),
 		);
 	}
 
 	public function cleared_text(ManagedNode $node): string {
-		return 'Accepted on the node page: nothing unexplained is held.';
+		return 'Marked safe: nothing unexplained is held.';
 	}
 }
 ?>

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.98 - the never-do box reads Security sentinel: suspicious activity, its button Mark safe (not red)
  * @version 1.97 - Recent jobs leaves out completed routine never-do checks
  * @version 1.96 - a node being deleted reads "Being deleted", not "Switched off by its owner"
  * @version 1.95 - Never-do check in the Security box: what the machine holds unexplained, and Accept behind a confirm
@@ -2433,7 +2434,7 @@
 		if (JobCommandBuilder::has_primitive($node, 'never_do_check')) {
 			$nd = NeverDoCheck::state($node);
 			echo '<div class="svm-span-all"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase mb-2">Never-do check</div>';
+			echo '<div class="text-muted small text-uppercase mb-2">Security sentinel: suspicious activity</div>';
 			if ($nd === null) {
 				echo '<div class="text-muted">Not checked yet: the machine is asked every five minutes.</div>';
 			} else {
@@ -2450,12 +2451,12 @@
 							. htmlspecialchars(gmdate('Y-m-d H:i', (int)$u['seen'])) . ' UTC)</span></li>';
 					}
 					echo '</ul>';
-					$nd_ask = 'Accept these as yours? Only if you, or a job you ran, made every one of these changes. '
+					$nd_ask = 'Mark these as safe? Only if you, or a job you ran, made every one of these changes, or they are a known false alarm. '
 						. 'The machine\'s lists as it last reported them become what is expected, and the incident clears. '
-						. 'If you did not make them, do not accept: treat the machine as broken into.';
-					echo '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
+						. 'If you did not make them, do not mark them safe: treat the machine as broken into.';
+					echo '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 svm-fs-075"'
 						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
-						. ', function(){ document.getElementById(\'nodeActionNeverDoAccept\').submit(); })">Accept</button>';
+						. ', function(){ document.getElementById(\'nodeActionNeverDoAccept\').submit(); })">Mark safe</button>';
 				} else {
 					echo '<div>Nothing unexplained.</div>';
 				}
@@ -2468,7 +2469,7 @@
 				echo '<div class="small text-muted mt-2">Expected: ' . htmlspecialchars(implode(' · ', $nd_counts))
 					. '. Checked ' . ($nd_at ? htmlspecialchars(gmdate('Y-m-d H:i', $nd_at)) . ' UTC' : 'never')
 					. (!empty($nd['partial']) ? '; the last check could not read everything, so its lists were not compared' : '')
-					. (!empty($nd['accepted_at']) ? '; last accepted ' . htmlspecialchars(gmdate('Y-m-d H:i', (int)$nd['accepted_at'])) . ' UTC' : '')
+					. (!empty($nd['accepted_at']) ? '; last marked safe ' . htmlspecialchars(gmdate('Y-m-d H:i', (int)$nd['accepted_at'])) . ' UTC' : '')
 					. '.</div>';
 			}
 			echo '</div></div>';

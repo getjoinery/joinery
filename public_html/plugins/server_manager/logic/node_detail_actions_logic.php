@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.87 - never_do_accept says Marked safe
  * @version 1.86 - never_do_accept: the never-do check's held changes accepted as the person's own (level 10)
  * @version 1.85 - v1_census removed with the v1 code
  * @version 1.84 - v1_census: what a site still holds on an old X25519 key (Diagnostics; agent 1.103.0; TEMPORARY)
@@ -670,7 +671,7 @@ class NodeDetailActions {
 				// accepted goes to the error log so it outlives the state.
 				$nd = NeverDoCheck::state($node);
 				if (!$nd || empty($nd['unexplained'])) {
-					self::fail($session, $page_regex, 'The never-do check holds nothing on this machine.');
+					self::fail($session, $page_regex, 'The security sentinel holds nothing on this machine.');
 					return $base_url;
 				}
 				foreach ($nd['unexplained'] as $u) {
@@ -679,8 +680,8 @@ class NodeDetailActions {
 				$node->set('mgn_never_do', json_encode(NeverDoCheck::accept($nd, (int)$uid, time())));
 				$node->save();
 				$session->save_message(new DisplayMessage(
-					'Accepted with your name. The machine\'s lists as it last reported them are what is expected now; the incident clears on the next pass.',
-					'Accepted', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+					'Marked safe, with your name. The machine\'s lists as it last reported them are what is expected now; the incident clears on the next pass.',
+					'Marked safe', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 				return $base_url;
 			}
 
