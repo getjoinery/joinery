@@ -97,6 +97,28 @@ kill "$SLEEPER_PID" 2>/dev/null; wait "$SLEEPER_PID" 2>/dev/null; SLEEPER_PID=""
 TMPDIR="$T" bash "$SCRIPT" > "$T/after.json" 2>/dev/null
 chk "once it stops it is not reported" "$(jv "$T/after.json" findings.scratch_programs lines | grep -c "$SCRATCH/sleep")" "0"
 
+echo "=== A merged-/usr path matches its package under either name ==="
+# fuse3 on Ubuntu 24.04 lists /bin/fusermount3; the walk finds /usr/bin/fusermount3.
+eval "$(sed -n '/^usr_twins()/,/^}/p' "$SCRIPT")"
+merged=(bin sbin lib)
+chk "a .list path gains its /usr twin" \
+    "$(printf '/bin/fusermount3\n' | usr_twins / | grep -cx '/usr/bin/fusermount3')" "1"
+chk "a /usr path gains its old twin" \
+    "$(printf '/usr/sbin/x\n' | usr_twins / | grep -cx '/sbin/x')" "1"
+chk "an .md5sums line keeps its sum on the twin" \
+    "$(printf 'abc bin/fusermount3\n' | usr_twins "" | grep -cx 'abc usr/bin/fusermount3')" "1"
+chk "a path outside the merged dirs gains nothing" "$(printf '/etc/y\n' | usr_twins / | wc -l)" "1"
+merged=()
+chk "on a machine that is not merged nothing gains a twin" "$(printf '/bin/x\n' | usr_twins / | wc -l)" "1"
+
+echo "=== Container image layers are not walked ==="
+for d in /var/lib/docker /var/lib/containerd /var/lib/containers; do
+    chk "the walk prunes $d" "$(grep -c -- "-path $d " "$SCRIPT")" "1"
+done
+for d in containers containerd; do
+    chk "the walk prunes a rootless engine's $d" "$(grep -c -- "-path '\*/.local/share/$d'" "$SCRIPT")" "1"
+done
+
 echo
 echo "never_do_check gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

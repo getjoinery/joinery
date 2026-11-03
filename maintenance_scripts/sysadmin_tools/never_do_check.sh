@@ -4,6 +4,8 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.1 - skips containerd's image layers (rootful and rootless); a merged-/usr path matches its
+#                package under either name.
 # Version: 1.0 - the never_do_check observe word (agent 1.106.0). The agent runs
 #                this file as root, verified against the release manifest, with
 #                no argv and no stdin; the management node asks every five
@@ -72,9 +74,32 @@ json_list() {  # NAME FILE CAP
     printf ']'
 }
 
-# Every file a package installed, and every packaged file's md5.
-cat /var/lib/dpkg/info/*.list 2>/dev/null | sort -u > "$T/pkgfiles"
-awk '{ $1 = $1; print }' /var/lib/dpkg/info/*.md5sums 2>/dev/null > "$T/pkgmd5"
+# Every file a package installed, and every packaged file's md5. On a
+# merged-/usr machine /bin is a link to usr/bin, and a package built before the
+# merge names its file /bin/x where a walk finds /usr/bin/x (fuse3 on Ubuntu
+# 24.04 lists /bin/fusermount3), so each such path is recorded under both names.
+merged=()
+for d in bin sbin lib lib32 lib64 libx32; do
+    [[ -L "/$d" && "$(readlink "/$d")" == "usr/$d" ]] && merged+=("$d")
+done
+usr_twins() {  # PREFIX: "/" for .list paths, "" for .md5sums paths
+    awk -v pre="$1" -v dirs="${merged[*]}" '
+        BEGIN { n = split(dirs, d, " ") }
+        { print
+          for (i = 1; i <= n; i++) {
+              a = pre d[i] "/"; b = pre "usr/" d[i] "/"
+              if (index(line_of($0), a) == 1) { print swap($0, a, b); break }
+              if (index(line_of($0), b) == 1) { print swap($0, b, a); break }
+          } }
+        function line_of(s) { return pre == "" ? substr(s, index(s, " ") + 1) : s }
+        function swap(s, from, to,    p) {
+            if (pre != "") return to substr(s, length(from) + 1)
+            p = index(s, " ")
+            return substr(s, 1, p) to substr(s, p + length(from) + 1)
+        }'
+}
+cat /var/lib/dpkg/info/*.list 2>/dev/null | usr_twins / | sort -u > "$T/pkgfiles"
+awk '{ $1 = $1; print }' /var/lib/dpkg/info/*.md5sums 2>/dev/null | usr_twins "" > "$T/pkgmd5"
 is_packaged() { grep -Fxq -- "$1" "$T/pkgfiles"; }
 hash16() { sha256sum -- "$1" 2>/dev/null | cut -c1-16; }
 
@@ -116,8 +141,9 @@ if (( ${#mounts[@]} )); then
     # Container image layers hold their images' own setuid programs; what
     # runs in a container is the container engine's business, not this list's.
     timeout "$FIND_TIMEOUT" "${nice_cmd[@]}" find "${mounts[@]}" -xdev \
-        \( -path /proc -o -path /sys -o -path /var/lib/docker -o -path /var/lib/containers \
-           -o -path '*/.local/share/containers' -o -path /snap \) -prune \
+        \( -path /proc -o -path /sys -o -path /var/lib/docker -o -path /var/lib/containerd \
+           -o -path /var/lib/containers \
+           -o -path '*/.local/share/containers' -o -path '*/.local/share/containerd' -o -path /snap \) -prune \
         -o -type f -perm /6000 -print 2>/dev/null | sort -u > "$T/setuid"
     (( ${PIPESTATUS[0]} == 0 )) || partial=true
     while IFS= read -r f; do
