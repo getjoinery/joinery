@@ -1050,8 +1050,8 @@ joinery-agent data-root unseal --sidecar /srv/joinery.img.recovery \
 ```
 
 The agent carries its own X-Wing, on Go's standard-library ML-KEM, so this needs
-nothing else installed; it opens a version-1 copy with the old key the same
-way. See [Encrypted Data Root](encrypted_data_root.md).
+nothing else installed; it opens only a version-2 copy. See
+[Encrypted Data Root](encrypted_data_root.md).
 
 ## Recovery key setup
 

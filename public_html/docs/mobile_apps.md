@@ -788,9 +788,8 @@ under a Keystore AES-GCM key that needs strong biometrics, is invalidated by a
 new enrollment, and is StrongBox-backed where the phone has one
 (`BiometricPrompt`). iOS seals and opens with CryptoKit's `XWingMLKEM768X25519`,
 which is why the apps need iOS 26; Android with Bouncy Castle's ML-KEM-768 and
-Tink's X25519, HKDF and AES-GCM. An install still holding a 32-byte X25519
-device or vault key from before post-quantum sealing discards it and enrolls
-again. A stolen phone
+Tink's X25519, HKDF and AES-GCM. An install holding a device or vault key
+that is not a 1216-byte X-Wing key discards it and enrolls again. A stolen phone
 yields nothing without the owner's face or finger; a new fingerprint or face
 invalidates the stored key.
 
