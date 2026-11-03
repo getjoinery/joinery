@@ -4,6 +4,10 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.3 - the setuid walk skips each container engine's storage where its own configuration puts it
+#                (Docker and Podman on the data root) and the site engine's build tree.
+# Version: 1.2 - a port is named after the holder with the lowest pid, not whichever ss lists first
+#                (a postfix master and its smtpd children flapped one port between two names).
 # Version: 1.1 - skips containerd's image layers (rootful and rootless); a merged-/usr path matches its
 #                package under either name.
 # Version: 1.0 - the never_do_check observe word (agent 1.106.0). The agent runs
@@ -120,6 +124,22 @@ jail_is_shipped() {
 # findings
 # ---------------------------------------------------------------------------
 
+# Where the setuid walk does not go: the kernel's own trees, and every place
+# a container engine or our image build keeps whole filesystem trees. Their
+# images carry their own setuid programs (su, passwd, crontab); what runs in a
+# container is the engine's business, not this list's. An engine's storage is
+# read from its own configuration, wherever the install put it (Docker and the
+# site engine move it onto the data root), beside the engines' defaults.
+walk_skips() {
+    printf '%s\n' /proc /sys /snap /var/lib/docker /var/lib/containerd /var/lib/containers \
+        /var/lib/joinery-site-engine-build '/var/tmp/site-engine-build.*' \
+        '*/.local/share/containers' '*/.local/share/containerd'
+    sed -n 's/.*"data-root"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/docker/daemon.json 2>/dev/null
+    sed -n 's/^[[:space:]]*graphroot[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+        /etc/containers/storage.conf /usr/share/containers/storage.conf 2>/dev/null
+    sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' /etc/containerd/config.toml 2>/dev/null
+}
+
 # Setuid and setgid programs on every local filesystem that allows them.
 : > "$T/setuid_unpackaged"; : > "$T/setuid_modified"
 # Each filesystem once, from its own top: a data root bind-mounted in ten
@@ -138,12 +158,14 @@ done < /proc/self/mountinfo
 if (( ${#mounts[@]} )); then
     nice_cmd=(nice -n 19)
     command -v ionice >/dev/null 2>&1 && nice_cmd=(ionice -c 3 nice -n 19)
-    # Container image layers hold their images' own setuid programs; what
-    # runs in a container is the container engine's business, not this list's.
+    prune_expr=()
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        (( ${#prune_expr[@]} )) && prune_expr+=(-o)
+        prune_expr+=(-path "$d")
+    done < <(walk_skips)
     timeout "$FIND_TIMEOUT" "${nice_cmd[@]}" find "${mounts[@]}" -xdev \
-        \( -path /proc -o -path /sys -o -path /var/lib/docker -o -path /var/lib/containerd \
-           -o -path /var/lib/containers \
-           -o -path '*/.local/share/containers' -o -path '*/.local/share/containerd' -o -path /snap \) -prune \
+        \( "${prune_expr[@]}" \) -prune \
         -o -type f -perm /6000 -print 2>/dev/null | sort -u > "$T/setuid"
     (( ${PIPESTATUS[0]} == 0 )) || partial=true
     while IFS= read -r f; do
@@ -273,13 +295,20 @@ sort -u -o "$T/startup" "$T/startup"
 # ephemeral range is a program's own pick and changes at every start, so it
 # reads "eph" and the program carries the meaning.
 read -r eph_lo eph_hi < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || { eph_lo=32768; eph_hi=60999; }
+# ss lists every process holding a socket, in no fixed order (a master and
+# the children it forks share it), so a port is named after the holder with
+# the lowest pid: the one that opened it.
+port_holder() {  # the ss users:(...) field
+    printf '%s' "$1" | grep -o '("[^"]*",pid=[0-9]*' \
+        | sed 's/^("\([^"]*\)",pid=\([0-9]*\)$/\2 \1/' | sort -n | awk 'NR==1 { print $2 }'
+}
 : > "$T/ports"
 if command -v ss >/dev/null 2>&1; then
     ss -Hltnp 2>/dev/null | while read -r _state _rq _sq local _peer proc; do
         port="${local##*:}"; addr="${local%:*}"; addr="${addr//[\[\]]/}"
         [[ "$port" =~ ^[0-9]+$ ]] || continue
         (( port >= eph_lo && port <= eph_hi )) && port=eph
-        prog="$(printf '%s' "$proc" | sed -n 's/^users:(("\([^"]*\)".*/\1/p')"
+        prog="$(port_holder "$proc")"
         printf 'tcp %s:%s %s\n' "$(safe "$addr")" "$port" "$(safe "${prog:-unknown}")"
     done | sort -u > "$T/ports"
 fi

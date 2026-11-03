@@ -12,7 +12,8 @@
 # § 5.1). This gate pins its contract: it takes nothing, an argument changes
 # nothing, the object has its keys, every item keeps only safe characters, a
 # port in the ephemeral range reads eph, a run that is not root says partial,
-# a program run from /tmp is seen while it runs, and nothing writes.
+# a program run from /tmp is seen while it runs, a port is named after the
+# holder that opened it, and nothing writes.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -111,13 +112,29 @@ chk "a path outside the merged dirs gains nothing" "$(printf '/etc/y\n' | usr_tw
 merged=()
 chk "on a machine that is not merged nothing gains a twin" "$(printf '/bin/x\n' | usr_twins / | wc -l)" "1"
 
+echo "=== A port is named after the holder that opened it ==="
+eval "$(sed -n '/^port_holder()/,/^}/p' "$SCRIPT")"
+chk "a postfix master and its smtpd child read as master, whichever ss lists first" \
+    "$(port_holder 'users:(("smtpd",pid=2043,fd=6),("master",pid=980,fd=13))')" "master"
+chk "and the other way round" \
+    "$(port_holder 'users:(("master",pid=980,fd=13),("smtpd",pid=2043,fd=6))')" "master"
+chk "one holder is that holder" "$(port_holder 'users:(("sshd",pid=711,fd=3))')" "sshd"
+chk "no holder (not root) is empty" "$(port_holder '')" ""
+
 echo "=== Container image layers are not walked ==="
-for d in /var/lib/docker /var/lib/containerd /var/lib/containers; do
-    chk "the walk prunes $d" "$(grep -c -- "-path $d " "$SCRIPT")" "1"
+eval "$(sed -n '/^walk_skips()/,/^}/p' "$SCRIPT")"
+SKIPS="$(walk_skips)"
+for d in /var/lib/docker /var/lib/containerd /var/lib/containers /var/lib/joinery-site-engine-build \
+         '*/.local/share/containers' '*/.local/share/containerd'; do
+    chk "the walk skips $d" "$(printf '%s\n' "$SKIPS" | grep -cxF -- "$d")" "1"
 done
-for d in containers containerd; do
-    chk "the walk prunes a rootless engine's $d" "$(grep -c -- "-path '\*/.local/share/$d'" "$SCRIPT")" "1"
-done
+# An engine's storage moved by its own configuration is read from it.
+FAKE="$T/etc"; mkdir -p "$FAKE/docker" "$FAKE/containers"
+printf '{\n  "data-root": "/srv/joinery/docker",\n  "userns-remap": "default"\n}\n' > "$FAKE/docker/daemon.json"
+printf '[storage]\ndriver = "overlay"\ngraphroot = "/srv/joinery/containers/storage"\n' > "$FAKE/containers/storage.conf"
+MOVED="$(eval "$(sed -n '/^walk_skips()/,/^}/p' "$SCRIPT" | sed "s#/etc/docker/#$FAKE/docker/#; s#/etc/containers/#$FAKE/containers/#")"; walk_skips)"
+chk "Docker's data-root from daemon.json" "$(printf '%s\n' "$MOVED" | grep -cxF /srv/joinery/docker)" "1"
+chk "Podman's graphroot from storage.conf" "$(printf '%s\n' "$MOVED" | grep -cxF /srv/joinery/containers/storage)" "1"
 
 echo
 echo "never_do_check gate: $passed passed, $failed failed"
