@@ -1907,3 +1907,14 @@
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '1', stg_update_time = NOW() WHERE stg_name = 'agent_enabled' AND stg_value IS DISTINCT FROM '1'";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// The agent_enabled row goes, one release after 229 set it on: every agent
+	// is 1.106.0 or newer by then, and a failed upgrade rolls back only as far
+	// as a release that does not read it. The file keeps the row on a machine
+	// whose installed agent is still older, since that agent stops without it.
+	$migration = array();
+	$migration['database_version'] = '230';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'agent_enabled') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'remove_agent_enabled_setting.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
