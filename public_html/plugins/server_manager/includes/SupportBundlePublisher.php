@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.38 - carries never_do_check.sh, the machine word of agent 1.106.0 (the never-do list)
  * @version 1.37 - carries site_converger.sh, the machine word of agent 1.98.0 that reads whether a site
  *                container's converger is running
  * @version 1.36 - carries _host_restrictions.sh, which host_housekeeping.sh reads before it treats a tree that
@@ -228,6 +229,9 @@ class SupportBundlePublisher {
 		// machine's, and a host agent turns root login off from the bundle.
 		// Sources nothing.
 		'maintenance_scripts/sysadmin_tools/disable_root_login.sh',
+		// never_do_check (agent 1.106.0): the never-do list is the machine's,
+		// asked of every host every five minutes. Sources nothing.
+		'maintenance_scripts/sysadmin_tools/never_do_check.sh',
 		// net_health and web_workers (agent 1.93.0): whether a Docker host
 		// drops packets or connections, and its web tier's workers (none of
 		// its own: the word says so). Both source nothing.

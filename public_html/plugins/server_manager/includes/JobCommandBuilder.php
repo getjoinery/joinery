@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.157 - build_never_do_check (agent 1.106.0): the never-do list, no parameters
  * @version 1.156 - build_v1_census removed with the v1 code (v1_key_retirement WP2)
  * @version 1.155 - build_v1_census (agent 1.103.0): what a site still holds on an old X25519 key, no parameters; TEMPORARY (v1_key_retirement)
  * @version 1.154 - build_site_converger: no machine log-switch check, the site's own switch decides (agent 1.102.0);
@@ -3479,6 +3480,26 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * The never-do list (agent 1.106.0, specs/node_unexplained_root.md § 5.1):
+	 * what has no legitimate source on the machine, and the lists this plane
+	 * compares (NeverDoCheck). PRIMITIVE ONLY, and it takes nothing. Asked
+	 * every five minutes by the uptime pass; no log-access check: it carries
+	 * fingerprints, paths and sizes, never content.
+	 */
+	public static function build_never_do_check($node) {
+		if (!self::has_primitive($node, 'never_do_check')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run the never-do check. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['never_do_check']));
+		}
+		return self::build_never_do_check_primitive($node);
+	}
+
+	public static function build_never_do_check_primitive($node) {
+		return ['primitive' => 'never_do_check', 'params' => []];
+	}
+
+	/**
 	 * Whether the machine is dropping packets or connections (agent 1.93.0,
 	 * specs/slow_request_diagnosis_words.md WP2): kernel counters read twice
 	 * ten seconds apart, the connection table, the web ports' connections by
@@ -4119,12 +4140,12 @@ class JobCommandBuilder {
 	 *
 	 * The node may refuse, and a refusal here is the primitive working. It
 	 * restarts only when it can prove something will start it again — systemd
-	 * supervising this process, or the cron keepalive installed and switched on.
+	 * supervising this process, or the cron keepalive installed.
 	 * An agent that exits under no supervisor does not come back, and after the
 	 * Phase 3 cutover there is no SSH key left to go and start it with. That
 	 * decision is the node's because the node is the only party that can see the
-	 * answer: this plane cannot read /etc/joinery-agent/enabled, and a plane that
-	 * guessed would be guessing about whether it is about to lose the node.
+	 * answer: this plane cannot read the node's supervision files, and a plane
+	 * that guessed would be guessing about whether it is about to lose the node.
 	 */
 	public static function build_restart_agent($node) {
 		if (!self::has_primitive($node, 'restart_agent')) {

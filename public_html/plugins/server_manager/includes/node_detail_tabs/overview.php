@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.96 - a node being deleted reads "Being deleted", not "Switched off by its owner"
+ * @version 1.95 - Never-do check in the Security box: what the machine holds unexplained, and Accept behind a confirm
  * @version 1.94 - Update/Delete relay open the Relay section on the mailbox Server tab
  * @version 1.93 - a machine with no site says whose logs it reads; its mail gateway offers no Why? (unit_journal_readable_units_for)
  * @version 1.92 - Why? and Clear are offered for a unit this node's agent accepts (unit_journal_units_for)
@@ -224,6 +226,7 @@
 </form>
 <?php foreach (['nodeActionRebootMachine' => 'reboot_machine',
 	'nodeActionDisableRootLogin' => 'disable_root_login',
+	'nodeActionNeverDoAccept' => 'never_do_accept',
 	'nodeActionInstallSecurityUpdates' => 'install_security_updates',
 	'nodeActionRefreshSiteContainers' => 'refresh_site_containers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -684,7 +687,7 @@
 		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
 			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
-			'install_security_updates', 'net_health', 'web_workers', 'disable_root_login'];
+			'install_security_updates', 'net_health', 'web_workers', 'disable_root_login', 'never_do_check'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
@@ -2137,10 +2140,10 @@
 		// Checking in
 		$last_poll = $node->get('mgn_agent_last_poll');
 		$quiet_time = $node->get('mgn_agent_quiet_time');
-		$switched_off = $quiet_time && (!$last_poll || $last_poll <= $quiet_time);
+		$being_deleted = $quiet_time && (!$last_poll || $last_poll <= $quiet_time);
 		$age = $last_poll ? time() - strtotime($last_poll . ' UTC') : null;
-		if ($switched_off) {
-			$conn = array('Switched off by its owner', 'secondary');
+		if ($being_deleted) {
+			$conn = array('Being deleted', 'secondary');
 		} elseif ($age === null) {
 			$conn = array('Has not checked in yet', 'warning');
 		} elseif ($age < 900) {
@@ -2422,6 +2425,53 @@
 			echo '<div class="small text-muted mt-2">' . htmlspecialchars(implode(' · ', $parts)) . '</div>';
 		}
 		echo '</div></div>';
+
+		// The never-do list (NeverDoCheck, specs/node_unexplained_root.md § 5.1):
+		// what has no legitimate source here, and what changed that no job of
+		// this plane explains. Held until a person accepts it.
+		if (JobCommandBuilder::has_primitive($node, 'never_do_check')) {
+			$nd = NeverDoCheck::state($node);
+			echo '<div class="svm-span-all"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Never-do check</div>';
+			if ($nd === null) {
+				echo '<div class="text-muted">Not checked yet: the machine is asked every five minutes.</div>';
+			} else {
+				$nd_held = is_array($nd['unexplained'] ?? null) ? $nd['unexplained'] : array();
+				$nd_at = (int)($nd['checked_at'] ?? 0);
+				if ($nd_held) {
+					$sec_tone = 'bad';
+					$sec_bits[] = count($nd_held) . ' unexplained change' . (count($nd_held) === 1 ? '' : 's') . ' on the machine';
+					echo '<div class="text-danger"><strong>' . count($nd_held) . ' unexplained</strong>: nothing on a machine Joinery runs does this, '
+						. 'and no job of this management node ran when it appeared.</div>';
+					echo '<ul class="small mt-2 mb-2">';
+					foreach ($nd_held as $u) {
+						echo '<li>' . htmlspecialchars(NeverDoCheck::describe($u)) . ' <span class="text-muted">(first seen '
+							. htmlspecialchars(gmdate('Y-m-d H:i', (int)$u['seen'])) . ' UTC)</span></li>';
+					}
+					echo '</ul>';
+					$nd_ask = 'Accept these as yours? Only if you, or a job you ran, made every one of these changes. '
+						. 'The machine\'s lists as it last reported them become what is expected, and the incident clears. '
+						. 'If you did not make them, do not accept: treat the machine as broken into.';
+					echo '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
+						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
+						. ', function(){ document.getElementById(\'nodeActionNeverDoAccept\').submit(); })">Accept</button>';
+				} else {
+					echo '<div>Nothing unexplained.</div>';
+				}
+				$nd_base = is_array($nd['baseline'] ?? null) ? $nd['baseline'] : array();
+				$nd_counts = array();
+				foreach (array('ssh_keys' => 'SSH keys', 'accounts' => 'login accounts', 'sudoers' => 'sudoers files',
+						'startup' => 'unit and cron files', 'ports' => 'listening ports') as $k => $label) {
+					$nd_counts[] = count(is_array($nd_base[$k] ?? null) ? $nd_base[$k] : array()) . ' ' . $label;
+				}
+				echo '<div class="small text-muted mt-2">Expected: ' . htmlspecialchars(implode(' · ', $nd_counts))
+					. '. Checked ' . ($nd_at ? htmlspecialchars(gmdate('Y-m-d H:i', $nd_at)) . ' UTC' : 'never')
+					. (!empty($nd['partial']) ? '; the last check could not read everything, so its lists were not compared' : '')
+					. (!empty($nd['accepted_at']) ? '; last accepted ' . htmlspecialchars(gmdate('Y-m-d H:i', (int)$nd['accepted_at'])) . ' UTC' : '')
+					. '.</div>';
+			}
+			echo '</div></div>';
+		}
 		echo '</div>';
 		$status_rows[] = array('title' => 'Security', 'tone' => $sec_tone,
 			'summary' => htmlspecialchars(ucfirst(implode(' · ', $sec_bits))), 'body' => ob_get_clean());

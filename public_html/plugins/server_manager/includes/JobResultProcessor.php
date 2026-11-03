@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.121 - process_never_do_check: the never-do list folded into its node (NeverDoCheck), the job keeping counts only
  * @version 1.120 - sanitise_v1_census removed with the v1 code (v1_key_retirement WP2); parse_backup_keys_tokens
  *   reads the two kinds only (no x25519, retired count or old epochs); the host report keeps
  *   an X-Wing break-glass box (box_sealed up to 4096 characters, it was cut at 400); relay_status's
@@ -3698,6 +3699,35 @@ HTML;
 			];
 		}
 		return ['read' => true, 'sockets' => $out, 'truncated' => ($d['truncated'] ?? false) === true];
+	}
+
+	/**
+	 * A never_do_check job's result (agent 1.106.0): folded into its node by
+	 * NeverDoCheck, which keeps the baseline and what it holds unexplained.
+	 * The job keeps only counts, and its output is dropped: it runs every five
+	 * minutes, and what matters is already on the node row.
+	 */
+	private static function process_never_do_check($job) {
+		$report = NeverDoCheck::sanitise(self::script_json($job));
+		$summary = array('read' => $report !== null);
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if ($report !== null && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				$state = NeverDoCheck::record($node, $report, time());
+				$summary['unexplained'] = count($state['unexplained']);
+				$summary['partial'] = $state['partial'];
+				foreach (NeverDoCheck::INVENTORY as $k) {
+					$summary['counts'][$k] = count($report['inventory'][$k]);
+				}
+			} catch (\Throwable $e) {
+				error_log('[NeverDoCheck] node ' . $node_id . ': ' . $e->getMessage());
+				$summary['error'] = 'not recorded';
+			}
+		}
+		$job->set('mjb_result', json_encode($summary));
+		$job->set('mjb_output', null);
+		$job->save();
 	}
 
 	private static function process_listening_sockets($job) {

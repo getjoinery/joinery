@@ -27,6 +27,7 @@
 .svm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
 .svm-span-2 { grid-column: span 2; }
 @media (max-width: 600px) { .svm-span-2 { grid-column: auto; } }
+.svm-span-all { grid-column: 1 / -1; }
 /* Health bars: a track with marks at 75% and 90%, the amber and red lines. */
 .svm-gauge { position: relative; height: 10px; border-radius: 5px; background: #e9ecef; overflow: hidden; }
 .svm-gauge::before, .svm-gauge::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px;

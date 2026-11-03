@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.6 - never_do_accept clears a security incident (10)
  * @version 1.5 - v1_census removed with the v1 code
  * @version 1.4 - v1_census is a look (7); TEMPORARY (v1_key_retirement)
  * @version 1.3 - relay_status is a look (7)
@@ -44,7 +45,7 @@ final class SmActionLevels {
 			'restore_database' => 10, 'restore_project' => 10, 'restore_chain' => 10, 'move_backup_storage' => 10,
 			'adopt_cloud_server' => 10, 'save_api_credential' => 10, 'approve_join' => 10, 'reject_join' => 10,
 			'unpair_agent' => 10, 'delete_node' => 10, 'decommission_node' => 10, 'remove_site_certificate' => 10,
-			'purge_node' => 10, 'restore_node' => 10,
+			'purge_node' => 10, 'restore_node' => 10, 'never_do_accept' => 10,
 			'copy_new_server' => 10, 'copy_own_server' => 10, 'copy_on_host' => 10, 'copy_approve_join' => 10,
 			'copy_again' => 10, 'copy_discard' => 10, 'copy_switch' => 10, 'copy_move' => 10,
 			'copy_retry_start' => 10, 'copy_retry_settle' => 10, 'copy_go_back' => 10, 'copy_finish' => 10,

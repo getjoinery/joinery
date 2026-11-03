@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+#
+# never_do_check.sh - the never-do list of specs/node_unexplained_root.md
+# (section 5.1), as ONE JSON object on stdout: the things that have no
+# legitimate source on a machine Joinery runs, checked as they stand now.
+#
+# Version: 1.0 - the never_do_check observe word (agent 1.106.0). The agent runs
+#                this file as root, verified against the release manifest, with
+#                no argv and no stdin; the management node asks every five
+#                minutes (RunNodeUptimeChecks).
+#
+# TWO HALVES, and the difference between them is the whole design:
+#
+#   findings   wrong on sight, no history needed: a setuid program no package
+#              installed or one a package installed and something changed, an
+#              account other than root with uid 0, a kernel tainted by an
+#              out-of-tree, unsigned or forced module, a program running from
+#              /tmp, /var/tmp, /dev/shm or from memory, a root program whose
+#              file is gone, /etc/ld.so.preload with anything in it.
+#   inventory  lists that are only wrong when they CHANGE: SSH keys, login
+#              accounts, sudoers, the files that start things (systemd units,
+#              cron), listening TCP ports, and the size of the login logs.
+#              This machine keeps no memory of them: the management node
+#              keeps the last accepted list and compares (IncidentSourceNeverDo),
+#              so an attacker who owns the machine cannot rewrite what it was.
+#
+# THE CONTRACT, which tests/integration/never_do_check_gate.sh pins:
+#
+#   - It takes NOTHING. No argument changes what it reads.
+#   - READ ONLY. Every command reads; nothing is written but its own temp dir.
+#   - It never prints content: a key is its fingerprint (never its comment), a
+#     file is its path and the first 16 hex of its sha256, a process is its
+#     uid and program path (never its arguments), a log is its inode and size.
+#     Every string is reduced to [A-Za-z0-9._/@:+=,*%-] and capped.
+#   - Bounded: every list is capped and says so (truncated), the setuid walk
+#     has a time limit and a walk that did not finish says so (partial).
+#   - Run as a user other than root it still answers, marked partial: it
+#     cannot read other users' processes or homes.
+#
+# Runs on: Ubuntu/Debian (dpkg, iproute2, coreutils, findutils, openssh-client).
+
+set -u
+export LC_ALL=C
+
+MAX_ITEMS=400           # entries kept in any inventory list
+MAX_FINDINGS=20         # entries kept in any findings list
+MAX_STR=200             # characters kept of any string
+FIND_TIMEOUT=150        # seconds for the whole setuid walk
+
+safe() {
+    local drop='[^A-Za-z0-9._/@:+=,*%-]' s
+    s="${1//$drop/?}"
+    printf '%s' "${s:0:$MAX_STR}"
+}
+
+T="$(mktemp -d)"
+trap 'rm -rf "${T:?}"' EXIT
+partial=false
+[[ "$(id -u)" == 0 ]] || partial=true
+
+# A JSON array from a file of lines (already safe), capped. Runs in a
+# command substitution, so which lists were cut is counted by note_cap first.
+json_list() {  # NAME FILE CAP
+    local file="$2" cap="$3" first=1 line
+    printf '['
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        (( first )) || printf ','
+        first=0
+        printf '"%s"' "$line"
+    done < <(awk -v n="$cap" 'NF && NR<=n' "$file")
+    printf ']'
+}
+
+# Every file a package installed, and every packaged file's md5.
+cat /var/lib/dpkg/info/*.list 2>/dev/null | sort -u > "$T/pkgfiles"
+awk '{ $1 = $1; print }' /var/lib/dpkg/info/*.md5sums 2>/dev/null > "$T/pkgmd5"
+is_packaged() { grep -Fxq -- "$1" "$T/pkgfiles"; }
+hash16() { sha256sum -- "$1" 2>/dev/null | cut -c1-16; }
+
+SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+jail_is_shipped() {
+    local have shipped
+    have="$(sha256sum -- "$1" 2>/dev/null | cut -d' ' -f1)"
+    [[ -n "$have" ]] || return 1
+    for shipped in "$SITE_ROOT"/maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-"$(uname -m)" \
+                   /var/www/html/*/maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-"$(uname -m)"; do
+        [[ -f "$shipped" ]] || continue
+        [[ "$(sha256sum -- "$shipped" 2>/dev/null | cut -d' ' -f1)" == "$have" ]] && return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# findings
+# ---------------------------------------------------------------------------
+
+# Setuid and setgid programs on every local filesystem that allows them.
+: > "$T/setuid_unpackaged"; : > "$T/setuid_modified"
+# Each filesystem once, from its own top: a data root bind-mounted in ten
+# places is one walk, not ten (mountinfo field 4 is the root within the fs).
+mounts=()
+declare -A seen_dev=()
+while read -r _id _parent devno root mnt opts rest; do
+    fstype="${rest#*- }"; fstype="${fstype%% *}"
+    case "$fstype" in ext2|ext3|ext4|xfs|btrfs|f2fs|jfs|reiserfs|zfs) ;; *) continue ;; esac
+    [[ "$root" == / ]] || continue
+    [[ ",$opts," == *,nosuid,* ]] && continue
+    [[ -n "${seen_dev[$devno]:-}" ]] && continue
+    seen_dev[$devno]=1
+    mounts+=("$(printf '%b' "$mnt")")
+done < /proc/self/mountinfo
+if (( ${#mounts[@]} )); then
+    nice_cmd=(nice -n 19)
+    command -v ionice >/dev/null 2>&1 && nice_cmd=(ionice -c 3 nice -n 19)
+    # Container image layers hold their images' own setuid programs; what
+    # runs in a container is the container engine's business, not this list's.
+    timeout "$FIND_TIMEOUT" "${nice_cmd[@]}" find "${mounts[@]}" -xdev \
+        \( -path /proc -o -path /sys -o -path /var/lib/docker -o -path /var/lib/containers \
+           -o -path '*/.local/share/containers' -o -path /snap \) -prune \
+        -o -type f -perm /6000 -print 2>/dev/null | sort -u > "$T/setuid"
+    (( ${PIPESTATUS[0]} == 0 )) || partial=true
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        # The parser jail's launcher is ours and setuid by design; it is
+        # explained only while its bytes are the prebuilt a signed site tree on
+        # this machine ships (install_parser_jail.sh copies it byte for byte).
+        if [[ "$f" == /usr/local/sbin/joinery-jail ]] && jail_is_shipped "$f"; then
+            continue
+        fi
+        if ! is_packaged "$f"; then
+            safe "$f" >> "$T/setuid_unpackaged"; echo >> "$T/setuid_unpackaged"
+            continue
+        fi
+        want="$(awk -v p="${f#/}" '$2 == p { print $1; exit }' "$T/pkgmd5")"
+        if [[ -n "$want" ]]; then
+            have="$(md5sum -- "$f" 2>/dev/null | cut -d' ' -f1)"
+            if [[ -n "$have" && "$have" != "$want" ]]; then
+                safe "$f" >> "$T/setuid_modified"; echo >> "$T/setuid_modified"
+            fi
+        fi
+    done < "$T/setuid"
+fi
+
+# Accounts other than root with uid 0.
+awk -F: '$3 == "0" && $1 != "root" { print $1 }' /etc/passwd 2>/dev/null \
+    | while IFS= read -r a; do safe "$a"; echo; done > "$T/uid0"
+
+# Kernel taint by a module: F forced (bit 1), O out-of-tree (12), E unsigned (13).
+taint="$(cat /proc/sys/kernel/tainted 2>/dev/null)"
+taint_flags=""
+if [[ "$taint" =~ ^[0-9]+$ ]]; then
+    (( (taint >> 1) & 1 ))  && taint_flags+="F"
+    (( (taint >> 12) & 1 )) && taint_flags+="O"
+    (( (taint >> 13) & 1 )) && taint_flags+="E"
+fi
+
+# Programs running from a scratch directory or from memory, and root programs
+# whose file is gone. A process is its uid and program path, never its argv
+# beyond the script an interpreter was handed.
+: > "$T/tmp_programs"; : > "$T/deleted_root"
+scratch='^(/tmp/|/var/tmp/|/dev/shm/|/memfd:)'
+for p in /proc/[0-9]*; do
+    exe="$(readlink "$p/exe" 2>/dev/null)" || continue
+    [[ -n "$exe" ]] || continue
+    uid="$(awk '/^Uid:/ { print $3; exit }' "$p/status" 2>/dev/null)"
+    [[ -n "$uid" ]] || continue
+    # runc copies itself into memory to start a container (CVE-2019-5736).
+    [[ "$exe" == /memfd:runc_cloned* ]] && continue
+    if [[ "$exe" =~ $scratch ]]; then
+        printf '%s %s\n' "$uid" "$(safe "$exe")" >> "$T/tmp_programs"
+        continue
+    fi
+    case "$(basename -- "$exe")" in
+        sh|bash|dash|zsh|python*|perl*|php*|ruby*|node)
+            arg1="$(tr '\0' '\n' < "$p/cmdline" 2>/dev/null | sed -n 2p)"
+            if [[ "$arg1" =~ $scratch ]]; then
+                printf '%s %s %s\n' "$uid" "$(safe "$exe")" "$(safe "$arg1")" >> "$T/tmp_programs"
+            fi
+            ;;
+    esac
+    if [[ "$uid" == 0 && "$exe" == *" (deleted)" ]]; then
+        # A program an update replaced still has a file at its path; one that
+        # removed itself does not.
+        orig="${exe% (deleted)}"
+        [[ -e "$orig" ]] || printf '%s\n' "$(safe "$orig")" >> "$T/deleted_root"
+    fi
+done
+sort -u -o "$T/tmp_programs" "$T/tmp_programs"
+sort -u -o "$T/deleted_root" "$T/deleted_root"
+
+# /etc/ld.so.preload loads its libraries into every program: a classic rootkit.
+preload=""
+if [[ -s /etc/ld.so.preload ]]; then
+    preload="$(grep -v '^[[:space:]]*#' /etc/ld.so.preload | tr -s ' \n' ',' | sed 's/^,//; s/,$//')"
+    [[ -n "$preload" ]] && preload="$(safe "$preload")"
+fi
+
+# ---------------------------------------------------------------------------
+# inventory
+# ---------------------------------------------------------------------------
+
+# SSH keys: "user SHA256:..." for every key in every account's authorized_keys.
+: > "$T/ssh_keys"
+while IFS=: read -r user _ _ _ _ home _; do
+    for f in "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"; do
+        [[ -f "$f" ]] || continue
+        ssh-keygen -lf "$f" 2>/dev/null | awk '{ print $2 }' \
+            | while IFS= read -r fp; do printf '%s %s\n' "$(safe "$user")" "$(safe "$fp")"; done >> "$T/ssh_keys"
+    done
+done < /etc/passwd
+sort -u -o "$T/ssh_keys" "$T/ssh_keys"
+
+# Accounts that can log in: "name uid shell".
+awk -F: '$7 !~ /(nologin|false|sync|halt|shutdown)$/ && $7 != "" { print $1 " " $3 " " $7 }' /etc/passwd 2>/dev/null \
+    | while read -r n u s; do printf '%s %s %s\n' "$(safe "$n")" "$(safe "$u")" "$(safe "$s")"; done \
+    | sort -u > "$T/accounts"
+
+# sudoers: "path hash".
+: > "$T/sudoers"
+for f in /etc/sudoers /etc/sudoers.d/*; do
+    [[ -f "$f" ]] || continue
+    printf '%s %s\n' "$(safe "$f")" "$(hash16 "$f")" >> "$T/sudoers"
+done
+sort -u -o "$T/sudoers" "$T/sudoers"
+
+# What starts things: unit files and cron, except what a package installed.
+# A file is "path hash", a link (an enabled unit) is "path -> target".
+: > "$T/startup"
+startup_entry() {
+    local f="$1"
+    if [[ -L "$f" ]]; then
+        printf '%s -> %s\n' "$(safe "$f")" "$(safe "$(readlink "$f")")"
+    elif [[ -f "$f" ]]; then
+        is_packaged "$f" && return 0
+        printf '%s %s\n' "$(safe "$f")" "$(hash16 "$f")"
+    fi
+}
+while IFS= read -r f; do startup_entry "$f"; done < <(
+    find /etc/systemd/system /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly \
+         /etc/cron.monthly /var/spool/cron/crontabs -maxdepth 3 \( -type f -o -type l \) 2>/dev/null
+    for f in /etc/crontab /etc/rc.local; do [[ -e "$f" ]] && echo "$f"; done
+) >> "$T/startup"
+sort -u -o "$T/startup" "$T/startup"
+
+# Listening TCP ports: "tcp address:port program". A port in the kernel's
+# ephemeral range is a program's own pick and changes at every start, so it
+# reads "eph" and the program carries the meaning.
+read -r eph_lo eph_hi < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || { eph_lo=32768; eph_hi=60999; }
+: > "$T/ports"
+if command -v ss >/dev/null 2>&1; then
+    ss -Hltnp 2>/dev/null | while read -r _state _rq _sq local _peer proc; do
+        port="${local##*:}"; addr="${local%:*}"; addr="${addr//[\[\]]/}"
+        [[ "$port" =~ ^[0-9]+$ ]] || continue
+        (( port >= eph_lo && port <= eph_hi )) && port=eph
+        prog="$(printf '%s' "$proc" | sed -n 's/^users:(("\([^"]*\)".*/\1/p')"
+        printf 'tcp %s:%s %s\n' "$(safe "$addr")" "$port" "$(safe "${prog:-unknown}")"
+    done | sort -u > "$T/ports"
+fi
+
+# The login logs: "path inode size". Rotation makes a new file (a new inode);
+# the same inode getting smaller is a log someone cut.
+: > "$T/logs"
+for f in /var/log/wtmp /var/log/btmp /var/log/lastlog /var/log/auth.log; do
+    [[ -f "$f" ]] || continue
+    stat -c '%n %i %s' -- "$f" 2>/dev/null >> "$T/logs"
+done
+
+# ---------------------------------------------------------------------------
+# the object
+# ---------------------------------------------------------------------------
+truncated_lists=""
+note_cap() {  # NAME FILE CAP
+    local n
+    n="$(grep -c . "$2" 2>/dev/null)"
+    (( ${n:-0} > $3 )) && truncated_lists+="${truncated_lists:+,}\"$1\""
+    return 0
+}
+for x in setuid_unpackaged setuid_modified scratch_programs deleted_root_programs logs; do
+    case $x in
+        setuid_unpackaged|setuid_modified) f="$T/$x" ;;
+        scratch_programs) f="$T/tmp_programs" ;;
+        deleted_root_programs) f="$T/deleted_root" ;;
+        logs) f="$T/logs" ;;
+    esac
+    note_cap "$x" "$f" "$MAX_FINDINGS"
+done
+note_cap uid0_accounts "$T/uid0" "$MAX_FINDINGS"
+for x in ssh_keys accounts sudoers startup ports; do note_cap "$x" "$T/$x" "$MAX_ITEMS"; done
+
+printf '{"findings":{'
+printf '"setuid_unpackaged":%s,' "$(json_list setuid_unpackaged "$T/setuid_unpackaged" "$MAX_FINDINGS")"
+printf '"setuid_modified":%s,' "$(json_list setuid_modified "$T/setuid_modified" "$MAX_FINDINGS")"
+printf '"uid0_accounts":%s,' "$(json_list uid0_accounts "$T/uid0" "$MAX_FINDINGS")"
+printf '"kernel_taint":"%s",' "$taint_flags"
+printf '"scratch_programs":%s,' "$(json_list scratch_programs "$T/tmp_programs" "$MAX_FINDINGS")"
+printf '"deleted_root_programs":%s,' "$(json_list deleted_root_programs "$T/deleted_root" "$MAX_FINDINGS")"
+printf '"ld_preload":"%s"' "$preload"
+printf '},"inventory":{'
+printf '"ssh_keys":%s,' "$(json_list ssh_keys "$T/ssh_keys" "$MAX_ITEMS")"
+printf '"accounts":%s,' "$(json_list accounts "$T/accounts" "$MAX_ITEMS")"
+printf '"sudoers":%s,' "$(json_list sudoers "$T/sudoers" "$MAX_ITEMS")"
+printf '"startup":%s,' "$(json_list startup "$T/startup" "$MAX_ITEMS")"
+printf '"ports":%s,' "$(json_list ports "$T/ports" "$MAX_ITEMS")"
+printf '"logs":%s' "$(json_list logs "$T/logs" "$MAX_FINDINGS")"
+printf '},"truncated":[%s],' "$truncated_lists"
+printf '"partial":%s,' "$partial"
+printf '"generated_at":%s}\n' "$(date -u +%s)"
+exit 0

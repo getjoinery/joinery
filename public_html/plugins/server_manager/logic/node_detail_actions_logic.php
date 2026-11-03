@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.86 - never_do_accept: the never-do check's held changes accepted as the person's own (level 10)
  * @version 1.85 - v1_census removed with the v1 code
  * @version 1.84 - v1_census: what a site still holds on an old X25519 key (Diagnostics; agent 1.103.0; TEMPORARY)
  * @version 1.83 - relay_status: this site's view of its mail relay (Diagnostics; agent 1.101.0)
@@ -217,6 +218,7 @@ class NodeDetailActions {
 		'relay_status'             => 'diagnostics',
 		'reboot_machine'           => 'overview',
 		'disable_root_login'       => 'overview',
+		'never_do_accept'          => 'overview',
 		'reset_failed_unit'        => 'overview',
 		'restart_unit'             => 'overview',
 		'move_to_plane'            => 'api_keys',
@@ -659,6 +661,26 @@ class NodeDetailActions {
 				$session->save_message(new DisplayMessage(
 					'Recorded with your name. Its next ask is answered, if nothing new has happened to it since.',
 					'Excused', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
+			}
+
+			case 'never_do_accept': {
+				// A person says every change the never-do check holds is theirs
+				// (NeverDoCheck). Recorded with their name, and what was
+				// accepted goes to the error log so it outlives the state.
+				$nd = NeverDoCheck::state($node);
+				if (!$nd || empty($nd['unexplained'])) {
+					self::fail($session, $page_regex, 'The never-do check holds nothing on this machine.');
+					return $base_url;
+				}
+				foreach ($nd['unexplained'] as $u) {
+					error_log('[NeverDoCheck] node ' . (int)$node->key . ' accepted by user ' . (int)$uid . ': ' . NeverDoCheck::describe($u));
+				}
+				$node->set('mgn_never_do', json_encode(NeverDoCheck::accept($nd, (int)$uid, time())));
+				$node->save();
+				$session->save_message(new DisplayMessage(
+					'Accepted with your name. The machine\'s lists as it last reported them are what is expected now; the incident clears on the next pass.',
+					'Accepted', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 				return $base_url;
 			}
 

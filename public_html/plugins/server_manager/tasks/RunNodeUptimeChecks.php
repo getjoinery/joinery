@@ -22,6 +22,8 @@
  * still answers with its placeholder, as the certificate incident's evidence
  * (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.19 - queues never_do_check every NEVER_DO_REFRESH_SECONDS on every machine whose agent offers it
+ *                 (NeverDoCheck, node_unexplained_root first slice)
  * @version 2.18 - an origin answering with a self-signed certificate (the placeholder, which names the site and so
  *                 covered it) is its own problem, 'placeholder', with the time it was first seen; its ten-year expiry
  *                 is not stored (B112)
@@ -103,6 +105,13 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * yet seen to have happened, or once its machine has said it opened since.
 	 */
 	const REBOOT_REFRESH_SECONDS = 120;
+
+	/**
+	 * How often a machine is asked for the never-do check. A little under five
+	 * minutes, so the every-minute pass asks on the fifth minute rather than
+	 * the sixth.
+	 */
+	const NEVER_DO_REFRESH_SECONDS = 270;
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
@@ -280,6 +289,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$words = [
 			'check_status' => null,
 			'host_report'  => 'mgn_last_host_report_time',
+			// The never-do list (NeverDoCheck): every five minutes, so a
+			// program running from /tmp is seen while it runs.
+			'never_do_check' => 'mgn_never_do_time',
 		];
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_enabled') || $node->get('mgn_delete_time')) {
@@ -295,7 +307,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				if (!JobCommandBuilder::has_primitive($node, $word)) {
 					continue;
 				}
-				$window = self::STATUS_REFRESH_SECONDS;
+				$window = $word === 'never_do_check' ? self::NEVER_DO_REFRESH_SECONDS : self::STATUS_REFRESH_SECONDS;
 				if ($word === 'host_report') {
 					if (JobResultProcessor::reboot_awaited($node) || DataRootEscrowSync::opened_since_report($node)
 							|| IncidentSourceDataRootStopped::report_wanted($node)) {

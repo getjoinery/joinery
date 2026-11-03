@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.73 - mgn_agent_quiet_time means a node this plane is deleting; no agent says it is switched off
+ * @version 1.72 - mgn_never_do / mgn_never_do_time: the never-do check's baseline, the items it holds unexplained
+ *                 and when the machine last answered (NeverDoCheck)
  * @version 1.71 - mgn_agent_kem_public_key and mgn_agent_kem_signature: the node's own X-Wing key, signed by its agent key
  * @version 1.70 - mgn_backup_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
  * @version 1.69 - mgn_agent_test_build also marks the site copy live test's nodes (SiteCopyLiveRun): the test cloud's
@@ -157,7 +160,7 @@ class ManagedNode extends SystemBase {
 	public static $access_class = 'config';
 	public static $pkey_column = 'mgn_managed_node_id';
 
-	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report', 'mgn_cert_problem');
+	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy', 'mgn_last_host_report', 'mgn_cert_problem', 'mgn_never_do');
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_managed_host_id' => ['action' => 'null'],
@@ -194,6 +197,12 @@ class ManagedNode extends SystemBase {
 		// site, host_report is the machine, and the shapes stay apart.
 		'mgn_last_host_report'      => array('type'=>'jsonb'),
 		'mgn_last_host_report_time' => array('type'=>'timestamp(6)'),
+		// The never-do check (NeverDoCheck): the machine's accepted lists, the
+		// items held unexplained until a person accepts them, and when it last
+		// answered. Kept here, never on the machine, so a machine's attacker
+		// cannot rewrite what it used to be.
+		'mgn_never_do'              => array('type'=>'jsonb'),
+		'mgn_never_do_time'         => array('type'=>'timestamp(6)'),
 		'mgn_api_public_key'      => array('type'=>'varchar(255)'),
 		// A SecretBox blob (API_SECRET_LOCATOR), never plain text: api_secret_key() opens it.
 		'mgn_api_secret_key'      => array('access_class' => 'keys', 'type'=>'text'),
@@ -404,11 +413,11 @@ class ManagedNode extends SystemBase {
 		// ajr_agent_join_requests; the moment of approval is what sets the
 		// key above and the time below.
 		'mgn_agent_paired_time'        => array('type'=>'timestamp(6)'),
-		// When the node last said it was going quiet — an operator switched its
-		// agent off there. Distinguishes a deliberate silence from a broken one,
-		// which is otherwise indistinguishable from here: both just stop polling.
-		// Compared against mgn_agent_last_poll rather than cleared, so a node that
-		// comes back needs no second write to look alive again.
+		// When this plane started deleting the node (its decommission): its agent
+		// dies with it, and that silence is deliberate. Distinguishes it from a
+		// broken node, which is otherwise indistinguishable from here: both just
+		// stop polling. Compared against mgn_agent_last_poll rather than cleared,
+		// so a node that comes back needs no second write to look alive again.
 		'mgn_agent_quiet_time'         => array('type'=>'timestamp(6)'),
 		// When the node's agent said goodbye (the leave call), and the
 		// management node it moved to when that was a move this plane asked

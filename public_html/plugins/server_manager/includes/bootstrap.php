@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.25 - plane:never_do: the never-do list's unexplained items (node_unexplained_root first slice)
  * @version 1.24 - the customer_cloud fulfilment provider registers here, so every save of a product knows it
  * @version 1.23 - plane:break_glass_attention and plane:break_glass_no_holder, and the vault re-seal of kept root passwords
  *                (CustomerCloudProvision), so a key rotation of the holder's vault re-wraps them
@@ -60,7 +61,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceCloudAccountKey', 'IncidentSourceDataRootStopped', 'IncidentSourceKernelWarning',
 	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers',
 	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing',
-	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder') as $incident_source) {
+	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder', 'IncidentSourceNeverDo') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // A kept root password is sealed to its holder's vault (beta_break_glass_root_access
