@@ -4997,6 +4997,31 @@ fn a_vault_file_moved_to_a_vault_shared_with_someone_else_takes_its_key_along() 
     assert_converged(&world);
 }
 
+/// A Fortress file moved out of a shared vault into one nobody else reads:
+/// its readers shrink to none. The server still names the file, with no
+/// readers; the client sends an empty set of keys for it, the move lands, and
+/// the reader it left no longer holds a key.
+#[test]
+fn a_vault_file_moved_to_a_vault_nobody_else_reads_takes_its_key_away() {
+    let (world, private, out) = a_vault_of_two(9_979, &["holder"]);
+    let left = SimVault::new(9_980);
+    world.server.set_vault_public_key(2, &left.public_key_b64);
+    world.server.share_folder_out(private, 2);
+    world.server.give_reader_key(out, 2, "the key the reader it leaves held");
+    let other = world.server.seed_encrypted_folder(None, "Other");
+    assert!(world.settle().is_some());
+
+    let holder = world.device("holder");
+    holder.fs.user_rename("Private/out.txt", "Other/out.txt");
+    assert!(world.settle().is_some());
+
+    assert_eq!(server_folder_of(&world, out), Some(Some(other)), "the move did not go up");
+    assert_eq!(world.server.reader_key(out, 2), None, "the reader it left still holds a key");
+    assert!(held_issues(holder).is_empty(), "the move was held: {:?}", held_issues(holder));
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
 /// The keyed move's answer is lost after the server took it. The device
 /// asks the server where the file stands, finds the move landed, and is done:
 /// no keyed request is sent again, so no key is reused for a different body.

@@ -237,7 +237,9 @@ files (`File::is_encrypted()` is the gate):
   one write. Sent without them, a move that changes any file's readers is
   refused as `keys_needed` (standing), naming each file, the caller's own
   wrapped key and the readers to wrap to; nothing moves. The browser wraps and
-  sends the move again. A move whose files' key holders already match their
+  sends the move again, and so does the sync client on a computer holding the
+  vault key, under a request key of its own; a computer that cannot wrap holds
+  the refusal like any standing one. A move whose files' key holders already match their
   readers at the destination needs no keys. Whoever may make the move
   supplies the keys, an editor included; the owner's own key is never
   written by a move or a key sync.

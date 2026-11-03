@@ -725,8 +725,11 @@ and `move_into_self` plan the work again from what is there, a trash answered
 `drive_disabled`, `signed_out`, `action_failed`) is tried again on the
 backoff, `vault_needed` is held like a standing refusal (only an unlock
 window lifts it, a window belongs to a browser session, and this computer
-never holds one), and anything else keeps its status's reading, held where it
-stands. Each action refused is held on its own, so a file with two things
+never holds one), `keys_needed` on a move is answered once (the client opens
+the vault, wraps each named file's key to the readers named, and sends the move
+again under the request key with `-keyed` added) and held like a standing
+refusal when it cannot be, and anything else keeps its status's reading, held
+where it stands. Each action refused is held on its own, so a file with two things
 refused (a Private file edited here and carried out: its move and its new
 contents) asks about neither again until something it was asked about moves.
 A refusal with no reason from such a server is withdrawn and planned
@@ -1016,7 +1019,9 @@ names as a rename made on both sides. The rename says which blob it was sealed
 from (`from_metadata_sha256`), so a rename or a new version that another device
 lands before it arrives refuses it with `moved_since`. A move alone reseals
 nothing. Moving a file *within* a vault is an ordinary `drive_move` on ids:
-nothing re-encrypts. A vault folder's own name is plaintext on the server and
+nothing re-encrypts. A move into a vault shared with other people changes who
+must hold each file's key, and the server answers `keys_needed`: the client
+wraps the keys to the new readers and sends the move again with them. A vault folder's own name is plaintext on the server and
 renames normally.
 
 **Crossing the boundary is not a move.** The server holds no key, so it cannot
