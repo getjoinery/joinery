@@ -43,6 +43,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.8 - a source that is an IncidentSourceEveryOccurrenceNew opens anew, even within the hour after Ignored
  * @version 1.7 - a node whose alerts are off tells nobody (ManagedNode::sends_alerts()); this suite's node has them on
  * @version 1.6 - the incident signal is addressed by its declared audience, not a recipient list
  * @version 1.5 - a full pass leaves fixture nodes alone, removed nodes kept in it; fixture node names carry the
@@ -329,6 +330,37 @@ check($c['cleared'] === 0 && count($w) === 1 && $w[0]->is_open(), 'A source that
 ReconcilerTestWarning::$throws = false;
 ReconcilerTestWarning::$holds = false;
 $pass(array($warn->name() => $warn));
+
+// ---------------------------------------------------------------------------
+section('A source whose every occurrence is new never reopens');
+
+class ReconcilerTestEveryNew implements IncidentSourceEveryOccurrenceNew {
+	public static $holds = true;
+	public function name(): string { return 'plane:harness_every_new'; }
+	public function evaluate(ManagedNode $node): ?array {
+		return self::$holds ? array('title' => 'A harness finding', 'severity' => 'critical', 'detail' => array('x' => 1)) : null;
+	}
+	public function cleared_text(ManagedNode $node): string { return 'marked safe'; }
+}
+$every = new ReconcilerTestEveryNew();
+$signals = array();
+$pass(array($every->name() => $every));
+$e = $incidents('plane:harness_every_new');
+if ($e) {
+	IncidentTriage::set($e[0], IncidentRecord::TRIAGE_IGNORED, (int)make_user('rec3_' . bin2hex(random_bytes(3)), 10)->key);
+}
+ReconcilerTestEveryNew::$holds = false;
+$pass(array($every->name() => $every));
+ReconcilerTestEveryNew::$holds = true;
+$signals = array();
+$c = $pass(array($every->name() => $every));
+$e = $incidents('plane:harness_every_new');
+check($c['opened'] === 1 && $c['reopened'] === 0 && count($e) === 2 && $e[1]->triage() === IncidentRecord::TRIAGE_NEW
+	&& count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_CRITICAL,
+	'Back within the hour, even after Ignored, it is a new incident and they are told', json_encode($c));
+check(new IncidentSourceNeverDo() instanceof IncidentSourceEveryOccurrenceNew, 'The never-do list is such a source');
+ReconcilerTestEveryNew::$holds = false;
+$pass(array($every->name() => $every));
 
 // ---------------------------------------------------------------------------
 section('A node whose alerts are off opens its incidents and tells nobody');

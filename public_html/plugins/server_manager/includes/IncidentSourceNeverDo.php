@@ -9,10 +9,12 @@
  * person presses Accept on the node page: an attacker who removes what they
  * added does not clear it.
  *
+ * @version 1.2 - every occurrence is its own incident (IncidentSourceEveryOccurrenceNew): what is held after
+ *                 Mark safe is new on the machine, never folded into the cleared incident
  * @version 1.1 - Then points at Mark safe on the incident page
  * @version 1.0
  */
-class IncidentSourceNeverDo implements IncidentSource {
+class IncidentSourceNeverDo implements IncidentSourceEveryOccurrenceNew {
 
 	const NAME = 'plane:never_do';
 

@@ -447,11 +447,10 @@ check($supervision_at !== false && $supervision_at > $binary_pass_at,
 check($start_at !== false && $start_at > $binary_pass_at,
 	'and the agent is started from there, not from the install branch');
 
-// The env file specifically: written on every run, before the switch is even
-// consulted, because a machine that is switched on later needs it already there.
-$env_at    = strpos($installer_src, "\nwrite_env_file\n");
-$switch_at = strpos($installer_src, 'if [ "$AGENT_ENABLED" != "1" ]');
-check($env_at !== false && $switch_at !== false && $env_at < $switch_at,
-	'the env file is written whether or not the agent runs here');
+// The env file specifically: written on every run, after the binary pass and
+// before supervision and start, so a running agent always has it.
+$env_at = strpos($installer_src, "\nwrite_env_file\n");
+check($env_at !== false && $env_at > $binary_pass_at && $env_at < $supervision_at && $env_at < $start_at,
+	'the env file is written on every run, before the agent is supervised and started');
 
 harness_finish();

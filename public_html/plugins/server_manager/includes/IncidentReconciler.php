@@ -6,7 +6,8 @@
  * For each registered IncidentSource and each operational node, every tick:
  *   - the condition holds and no incident of that source is active: open one,
  *     or reopen the newest if it cleared within REOPEN_WINDOW (flapping is
- *     one incident, not one per flap), and tell the superadmins;
+ *     one incident, not one per flap), and tell the superadmins; a source
+ *     that is an IncidentSourceEveryOccurrenceNew always opens a new one;
  *   - it holds and one is active: refresh its title, severity and detail when
  *     they changed, with no event and no notice;
  *   - it is gone and one is active: clear it, with an event.
@@ -46,6 +47,7 @@
  * whose alerts are off (ManagedNode::sends_alerts()) sends neither: its
  * incidents open and wait in the inbox.
  *
+ * @version 1.11 - a source that is an IncidentSourceEveryOccurrenceNew is never reopened: each occurrence opens anew
  * @version 1.10 - the notification carries the incident's evidence (detail), so the email says what was seen
  * @version 1.9 - a node whose alerts are off (ManagedNode::sends_alerts(): a test cloud box unless turned on)
  *                opens its incidents and tells nobody
@@ -132,7 +134,8 @@ class IncidentReconciler {
 					}
 					$active = IncidentRecord::open_for((int)$node->key, $source->name());
 					if ($verdict !== null && $active === null) {
-						$counts[self::open_or_reopen($node, $source->name(), $verdict)]++;
+						$counts[self::open_or_reopen($node, $source->name(), $verdict,
+							$source instanceof IncidentSourceEveryOccurrenceNew)]++;
 					} elseif ($verdict !== null) {
 						if (self::refresh($active, $verdict)) {
 							$counts['refreshed']++;
@@ -272,12 +275,16 @@ class IncidentReconciler {
 		return $returned;
 	}
 
-	/** Open a new incident, or reopen one that cleared within the window. Returns 'opened' or 'reopened'. */
-	private static function open_or_reopen(ManagedNode $node, string $source, array $verdict): string {
+	/**
+	 * Open a new incident, or reopen one that cleared within the window, unless
+	 * $always_new (the source says every occurrence is its own incident).
+	 * Returns 'opened' or 'reopened'.
+	 */
+	private static function open_or_reopen(ManagedNode $node, string $source, array $verdict, bool $always_new = false): string {
 		$now = gmdate('Y-m-d H:i:s');
 		$node_id = (int)$node->key;
 		$recent = null;
-		foreach (new MultiIncidentRecord(array('node_id' => $node_id, 'source' => $source, 'status' => IncidentRecord::STATUS_CLOSED, 'deleted' => false),
+		foreach ($always_new ? array() : new MultiIncidentRecord(array('node_id' => $node_id, 'source' => $source, 'status' => IncidentRecord::STATUS_CLOSED, 'deleted' => false),
 			array('inc_incident_record_id' => 'DESC'), 1) as $row) {
 			$recent = $row;
 		}
