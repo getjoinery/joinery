@@ -42,6 +42,7 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.22 - window metadata is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.21
  * @changelog 1.21 - VaultRotationOwedException and arm()'s old-key refusal removed: every key is X-Wing
  * @changelog 1.20 - noteClientContentRead(): serving content the browser opens counts as a content read
@@ -396,7 +397,7 @@ class VaultUnlock {
 			if (!apcu_exists(self::apcuKey($sid, $user_id, 'user'))) {
 				continue;
 			}
-			$meta = apcu_fetch(self::metaKey($sid, $user_id, 'user'), $ok);
+			$meta = ApcuStore::fetch(self::metaKey($sid, $user_id, 'user'), $ok);
 			$ends_at = null;
 			if ($ok && is_array($meta)) {
 				$now = time();
@@ -685,7 +686,7 @@ class VaultUnlock {
 	/** Update one metadata timestamp field to now, preserving the rest + TTL. */
 	private static function stampMeta(string $sid, int $user_id, string $scope, string $field): void {
 		$mkey = self::metaKey($sid, $user_id, $scope);
-		$meta = apcu_fetch($mkey, $ok);
+		$meta = ApcuStore::fetch($mkey, $ok);
 		if (!$ok || !is_array($meta)) {
 			return;
 		}
@@ -700,7 +701,7 @@ class VaultUnlock {
 	 * (a legacy window or a non-capped consumer is never force-ended here).
 	 */
 	private static function endedByPolicy(string $sid, int $user_id, string $scope): bool {
-		$meta = apcu_fetch(self::metaKey($sid, $user_id, $scope), $ok);
+		$meta = ApcuStore::fetch(self::metaKey($sid, $user_id, $scope), $ok);
 		if (!$ok || !is_array($meta)) {
 			return false;
 		}
@@ -738,7 +739,7 @@ class VaultUnlock {
 	 */
 	public static function lock(int $user_id, string $session_id, string $scope = 'user',
 			string $reason = VaultAudit::REASON_EXPLICIT_LOCK, bool $audit = true): void {
-		$meta = apcu_fetch(self::metaKey($session_id, $user_id, $scope), $had_meta);
+		$meta = ApcuStore::fetch(self::metaKey($session_id, $user_id, $scope), $had_meta);
 		$was_open = apcu_exists(self::apcuKey($session_id, $user_id, $scope));
 
 		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
@@ -897,7 +898,7 @@ class VaultUnlock {
 			// reported closed.
 			$sid = self::currentSessionIdOrNull();
 			$marker = self::borrowMarkerKey($sid, $user_id, $scope);
-			$armed = apcu_fetch($marker, $had_marker);
+			$armed = ApcuStore::fetch($marker, $had_marker);
 			if (!$had_marker) {
 				return;
 			}

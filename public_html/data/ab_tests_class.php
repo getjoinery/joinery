@@ -12,6 +12,8 @@
  *   AppBridgeToken's alone (specs/implemented/shared_prefixes_first_three.md)
  * @version 1.2 - AbTestVersionsPanel's actions need the right to edit the entity, not
  *   level 5 (spec declared_permissions)
+ * @version 1.3 - crown and cache invalidation build the row's entity class only when it
+ *   declares $ab_testable (unseal_daemon.md C3)
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -287,7 +289,8 @@ class AbTest extends SystemBase {
 		if (!$variant->key) return;
 
 		$class = $test->get('abx_entity_type');
-		if (!class_exists($class)) return;
+		// The row names the class built below: only a model that opted in.
+		if (!class_exists($class) || empty($class::$ab_testable)) return;
 		$entity_id = (int)$test->get('abx_entity_id');
 		$entity = new $class($entity_id, true);
 		if (!$entity->key) return;
@@ -313,7 +316,7 @@ class AbTest extends SystemBase {
 	 */
 	public static function invalidate_cache_for_test(AbTest $test) {
 		$class = $test->get('abx_entity_type');
-		if (!class_exists($class)) {
+		if (!class_exists($class) || empty($class::$ab_testable)) {
 			StaticPageCache::clearAll();
 			return;
 		}

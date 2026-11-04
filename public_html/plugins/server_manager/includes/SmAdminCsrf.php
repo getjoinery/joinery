@@ -10,6 +10,7 @@
  * The token is session-scoped and long-lived (not one-time), which is the
  * standard CSRF model: the secret is bound to the session, not the form.
  *
+ * @version 1.1 - its session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 1.0
  */
 
@@ -19,7 +20,7 @@ class SmAdminCsrf {
 	/** The session token, minted on first use. */
 	public static function token() {
 		if (session_status() !== PHP_SESSION_ACTIVE) {
-			@session_start();
+			@SessionGuard::start();
 		}
 		if (empty($_SESSION['sm_admin_csrf'])) {
 			$_SESSION['sm_admin_csrf'] = bin2hex(random_bytes(32));

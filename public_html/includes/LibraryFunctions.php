@@ -1457,7 +1457,14 @@ class LibraryFunctions {
 			
 			// If plugin_filter is specified, only load that plugin
 			if ($options['plugin_filter']) {
-				$plugins = array($options['plugin_filter']);
+				// The name becomes a directory whose files are required, and
+				// callers pass names read from plg_plugins rows (unseal_daemon.md C3).
+				if (PluginHelper::isPluginName($options['plugin_filter'])) {
+					$plugins = array($options['plugin_filter']);
+				} else {
+					error_log('discover_model_classes: refused plugin_filter ' . json_encode($options['plugin_filter']) . ': not a plugin name');
+					$plugins = array();
+				}
 			} else {
 				$plugins = LibraryFunctions::list_plugins($plugin_dir);
 			}

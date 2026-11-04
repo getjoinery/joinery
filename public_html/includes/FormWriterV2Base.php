@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.31.4 - its fallback session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 2.31.3 - hiddeninput: a plain second argument is the value (it was dropped, sending the field empty)
  * @version 2.31.2 - the validator's own debug follows the 'debug' option too (it was always on)
  * @version 2.31.1 - validation details reach the browser console only with the 'debug' option; the uploader's debug logs are gone
@@ -328,7 +329,7 @@ abstract class FormWriterV2Base {
     protected function initializeCSRF() {
         // Start session if not already started
         if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+            SessionGuard::start();
         }
 
         // Default CSRF to true for POST, false for GET if not specified

@@ -21,6 +21,8 @@
  * and a plugin's dynamic route inside /admin/ names its view file. An
  * inactive plugin's pages are not served, so they map to no file.
  *
+ * @version 1.3 - the menu cache is read through ApcuStore::fetch() (unseal_daemon.md C4)
+ * @version 1.2 - the level that opens a page is read from its file, never APCu (unseal_daemon.md C3)
  * @version 1.1
  */
 final class AdminPageAccess {
@@ -30,6 +32,8 @@ final class AdminPageAccess {
 
 	/** @var array file => level, for this request */
 	private static $levels = array();
+	/** Levels for drawing menus, possibly from APCu; never read by levelForFile(). */
+	private static $display_levels = array();
 
 	/** Whether a request path is in an admin URL family. */
 	public static function isAdminPath(string $path): bool {
@@ -75,23 +79,40 @@ final class AdminPageAccess {
 	}
 
 	/**
-	 * The level a page file needs: its header's (undeclared or malformed is 10).
-	 * Cached by the file's mtime in APCu where it is there, else per request.
+	 * The level a page file needs: its header's (undeclared or malformed is 10),
+	 * read from the file itself and remembered for the request. This is the
+	 * answer that lets someone in, so it never comes from APCu: the pool writes
+	 * APCu, and a stored 0 would open the page to anyone (unseal_daemon.md C3).
 	 */
 	public static function levelForFile(string $rel): int {
 		if (isset(self::$levels[$rel])) {
 			return self::$levels[$rel];
 		}
+		return self::$levels[$rel] = self::headerLevel($rel);
+	}
+
+	/**
+	 * The same level for drawing a menu, cached by the file's mtime in APCu
+	 * where it is there. A wrong cached value shows or hides a link and nothing
+	 * else; opening the page asks levelForFile().
+	 */
+	private static function displayLevelForFile(string $rel): int {
+		if (isset(self::$levels[$rel])) {
+			return self::$levels[$rel];
+		}
+		if (isset(self::$display_levels[$rel])) {
+			return self::$display_levels[$rel];
+		}
 		$path = PathHelper::getIncludePath($rel);
 		$key = 'joinery_admin_page_level:' . md5($path . '|' . (int)@filemtime($path));
 		$apcu = function_exists('apcu_fetch') && (PHP_SAPI !== 'cli' || ini_get('apc.enable_cli'));
 		if ($apcu) {
-			$hit = apcu_fetch($key, $ok);
-			if ($ok) return self::$levels[$rel] = (int)$hit;
+			$hit = ApcuStore::fetch($key, $ok);
+			if ($ok && is_int($hit)) return self::$display_levels[$rel] = $hit;
 		}
 		$level = self::headerLevel($rel);
 		if ($apcu) apcu_store($key, $level, 3600);
-		return self::$levels[$rel] = $level;
+		return self::$display_levels[$rel] = $level;
 	}
 
 	/** The level a page file's header alone declares; undeclared or malformed is 10. */
@@ -137,11 +158,13 @@ final class AdminPageAccess {
 		if (!self::isAdminPath($path)) {
 			return 0;
 		}
-		return self::levelForPath($path) ?? self::UNDECLARED_LEVEL;
+		$file = self::fileForPath($path);
+		return $file === null ? self::UNDECLARED_LEVEL : self::displayLevelForFile($file);
 	}
 
 	/** Forget the per-request cache (tests). */
 	public static function reset(): void {
 		self::$levels = array();
+		self::$display_levels = array();
 	}
 }

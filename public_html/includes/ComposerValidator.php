@@ -11,6 +11,7 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
+ * @version 1.7 - a composerAutoLoad that PathHelper refuses is a validate() warning: it is never loaded
  * @version 1.6 - a plugin's packages install with --no-plugins: no package code runs as root, whatever allow-plugins lists
  * @version 1.5 - composer runs under umask 022: what it writes into vendor/ is never group- or world-writable,
  *                whatever the caller's umask (a deploy's read-only-tree gate reverted a release over it)
@@ -34,7 +35,13 @@ class ComposerValidator {
      */
     public function __construct($vendor_path = null) {
         $this->composerPath = $vendor_path !== null ? $vendor_path : PathHelper::getComposerVendorPath();
+        // A setting PathHelper refuses is never loaded (it falls back to
+        // ../vendor/); validate() says so as a warning.
+        $this->refused = $vendor_path !== null ? null : PathHelper::composerSettingProblem();
     }
+
+    /** Why PathHelper refused the configured path, or null. */
+    private $refused = null;
 
     /**
      * Run all validation checks
@@ -81,6 +88,9 @@ class ComposerValidator {
      * Check if composer path is configured
      */
     private function validateComposerPathConfigured() {
+        if ($this->refused !== null) {
+            $this->warnings[] = $this->refused;
+        }
         if (empty($this->composerPath)) {
             $this->errors[] = "composerAutoLoad setting is not configured in database";
             return false;

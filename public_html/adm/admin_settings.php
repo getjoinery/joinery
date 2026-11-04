@@ -196,7 +196,10 @@
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 
 		if ($run_validation) {
-			$composer_path = $settings->get_setting('composerAutoLoad');
+			$composer_path = PathHelper::getComposerVendorPath();
+			if (($composer_problem = PathHelper::composerSettingProblem()) !== null) {
+				echo '<p class="jy-text-danger">' . htmlspecialchars($composer_problem) . '</p>';
+			}
 			if ($composer_path && !empty(trim($composer_path))) {
 				$autoload_path = rtrim($composer_path, '/') . '/autoload.php';
 				$composer_lock = rtrim($composer_path, '/') . '/../composer.lock';

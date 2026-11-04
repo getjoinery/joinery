@@ -46,8 +46,33 @@ class PathHelper {
         if (self::$composer_vendor_override !== null) {
             return self::$composer_vendor_override;
         }
-        $settings = Globalvars::get_instance();
-        return self::getBasePath() . $settings->get_setting('composerAutoLoad');
+        $problem = self::composerSettingProblem();
+        if ($problem !== null) {
+            // Never the stored path: the site's own vendor tree, the default.
+            if (!self::$composer_problem_logged) {
+                self::$composer_problem_logged = true;
+                error_log('PathHelper: ' . $problem);
+            }
+            return self::getBasePath() . '../vendor/';
+        }
+        return self::getBasePath() . (string)Globalvars::get_instance()->get_setting('composerAutoLoad');
+    }
+
+    private static $composer_problem_logged = false;
+
+    /**
+     * What is wrong with the composerAutoLoad setting, or null when it is
+     * ../vendor/ or vendor/. The value is handed to require, and the database
+     * can be written without the settings form's check, so the sink holds the
+     * same rule (settings.json, unseal_daemon.md C3). A refused value is never
+     * loaded; Composer comes from ../vendor/ and ComposerValidator reports it.
+     */
+    public static function composerSettingProblem(): ?string {
+        $setting = (string)Globalvars::get_instance()->get_setting('composerAutoLoad');
+        if (preg_match('#^(?:\.\./)?vendor/\z#', $setting) === 1) {
+            return null;
+        }
+        return "composerAutoLoad must be ../vendor/ or vendor/; ignoring '" . $setting . "' and loading Composer from ../vendor/";
     }
 
     /**

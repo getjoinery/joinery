@@ -523,7 +523,7 @@ check(isset($_SESSION['totp_pending_expires']) && $_SESSION['totp_pending_expire
 
 // The code page finishes it. Spending the code is a write made before anyone is
 // signed in, so the model's own check must let it through or no factor works.
-require_once(Globalvars::get_instance()->get_setting('composerAutoLoad') . 'autoload.php');
+require_once(PathHelper::getComposerAutoloadPath());
 $res = harness_call_logic('logic/verify_totp_logic.php', 'verify_totp_logic',
 	array('totp_code' => \OTPHP\TOTP::createFromSecret('JBSWY3DPEHPK3PXP')->at(time())), 'POST');
 check(!empty($_SESSION['loggedin']) && (int)($_SESSION['usr_user_id'] ?? 0) === (int)$totp_user->key,

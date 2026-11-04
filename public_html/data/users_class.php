@@ -1110,9 +1110,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			return false;
 		}
 
-		$settings = Globalvars::get_instance();
-		$composer_path = $settings->get_setting('composerAutoLoad');
-		require_once($composer_path . 'autoload.php');
+		require_once(PathHelper::getComposerAutoloadPath());
 
 		$totp = \OTPHP\TOTP::createFromSecret($secret);
 

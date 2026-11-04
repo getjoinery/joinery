@@ -13,6 +13,7 @@
 /**
  * Joinery changes to the upstream class:
  *
+ * @version 2.3 - its session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 2.2 - get_full_url() asks LibraryFunctions::isSecure(), which believes X-Forwarded-Proto
  *                only from a proxy we know
  * @version 2.1 - refuses an upload past the site's disk allowance on a shared host (DiskAllowance)
@@ -200,7 +201,7 @@ class UploadHandler
     }
 
     protected function get_user_id() {
-        @session_start();
+        @SessionGuard::start();
         return session_id();
     }
 

@@ -30,6 +30,7 @@
  *    Client-custody content has no server-resolvable key and can never gain a
  *    grant.
  *
+ * @version 1.1 - grants are read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.0
  */
 
@@ -93,7 +94,7 @@ class FileServeGrant {
 		}
 		$value = false;
 		if (function_exists('apcu_store')) {
-			$value = apcu_fetch(self::storeKey($token));
+			$value = ApcuStore::fetch(self::storeKey($token));
 		}
 		if ($value === false) {
 			$value = self::$mem[$token] ?? false;

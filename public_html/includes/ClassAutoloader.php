@@ -16,6 +16,7 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.8.0 - the map is read from APCu through ApcuStore::fetch(): a planted object is never built (unseal_daemon.md C4)
  * @version 1.7.0 - a mapped path is required only when it is a .php file whose real path lies under core
  *   includes/ or data/, or a plugin's includes/ or data/ (v1_key_retirement C1, 11-02). The map is data the
  *   web user writes (APCu, cache/class_map.json), so without the check a planted map entry named the file
@@ -752,7 +753,10 @@ class ClassAutoloader {
 
 		if (self::apcu_available()) {
 			$ok = false;
-			$value = apcu_fetch(self::cache_key(), $ok);
+			// The read itself must not load a class, and ApcuStore cannot be
+			// autoloaded from inside the autoloader's own cache read.
+			require_once(__DIR__ . '/ApcuStore.php');
+			$value = ApcuStore::fetch(self::cache_key(), $ok);
 			if (!$ok) {
 				$value = null;
 			}

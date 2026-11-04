@@ -19,6 +19,7 @@
  * GET; Strict would withhold the cookie, start a fresh session, find no entry,
  * and fail every flow.
  *
+ * @version 1.1 - its session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 1.0
  */
 class OAuth2State {
@@ -97,7 +98,7 @@ class OAuth2State {
         if (session_status() !== PHP_SESSION_ACTIVE) {
             // SessionControl normally has the session open by this point; guard
             // for direct/test contexts.
-            @session_start();
+            @SessionGuard::start();
         }
         if (!isset($_SESSION[self::SESSION_KEY]) || !is_array($_SESSION[self::SESSION_KEY])) {
             $_SESSION[self::SESSION_KEY] = [];

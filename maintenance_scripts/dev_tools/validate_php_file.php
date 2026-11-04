@@ -231,7 +231,8 @@ class MethodExistenceTest {
         // resolve. The composerAutoLoad setting holds the vendor dir path
         // relative to public_html; fall back to the conventional location.
         try {
-            $vendor_dir = Globalvars::get_instance()->get_setting('composerAutoLoad');
+            // PathHelper refuses a setting outside the vendor tree.
+            $vendor_dir = substr(PathHelper::getComposerVendorPath(), strlen(PathHelper::getBasePath()));
         } catch (Throwable $e) {
             $vendor_dir = null;
         }

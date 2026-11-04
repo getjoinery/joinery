@@ -5,6 +5,7 @@ require_once(__DIR__ . '/ComponentBase.php');
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
  *
+ * @version 1.6.0 - isPluginName() and activePluginRows(): a plg_plugins row whose name is not a folder name is never active and never becomes a path (unseal_daemon.md C3)
  * @version 1.5.0 - validate() refuses a menu entry's 'permission': who sees an entry is who may open its page
  * @version 1.4.0 - getAvailablePlugins() skips a sandboxed plugin's folder (SandboxPlugins): it has no
  *   plugin.json and nothing in it is loaded natively. isActiveOfEitherKind() for the few questions about any plugin
@@ -88,7 +89,7 @@ class PluginHelper extends ComponentBase {
             $dblink = DbConnector::get_instance()->get_db_link();
             $q = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
             foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $name) {
-                $set[$name] = true;
+                if (self::isPluginName($name)) $set[$name] = true;
             }
         } catch (PDOException $e) {
             return [];
@@ -116,7 +117,7 @@ class PluginHelper extends ComponentBase {
                 $q = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
                 $set = [];
                 foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $name) {
-                    $set[$name] = true;
+                    if (self::isPluginName($name)) $set[$name] = true;
                 }
                 self::$active_set = $set;
             } catch (Throwable $e) {
@@ -378,8 +379,7 @@ class PluginHelper extends ComponentBase {
         require_once(PathHelper::getIncludePath('data/plugins_class.php'));
 
         // Get all active plugins
-        $plugins = new MultiPlugin(['plg_active' => 1]);
-        $plugins->load();
+        $plugins = self::activePluginRows();
 
         $warnings = [];
         foreach ($plugins as $plugin) {
@@ -545,6 +545,36 @@ class PluginHelper extends ComponentBase {
     /**
      * Check if a plugin is active (static convenience method)
      */
+    /**
+     * Whether a string can name a plugin: a plain folder name. A plugin's name
+     * is prefixed onto files that get required (sync.php, data/*_class.php),
+     * and a plg_plugins row can be written without the installer's check, so
+     * every name read from a row is held to this before it becomes a path
+     * (unseal_daemon.md C3).
+     */
+    public static function isPluginName($name): bool {
+        return is_string($name) && preg_match('/^[A-Za-z0-9_-]+\z/', $name) === 1;
+    }
+
+    /**
+     * The active plg_plugins rows whose name is a plugin name. A row that is
+     * not is logged and left out: nothing is built from it.
+     *
+     * @return Plugin[]
+     */
+    public static function activePluginRows(): array {
+        $rows = array();
+        foreach (new MultiPlugin(['plg_active' => 1]) as $row) {
+            $name = $row->get('plg_name');
+            if (!self::isPluginName($name)) {
+                error_log('[plugins] an active plg_plugins row names ' . json_encode($name) . ', which is not a plugin name; it is skipped');
+                continue;
+            }
+            $rows[] = $row;
+        }
+        return $rows;
+    }
+
     public static function isPluginActive($pluginName) {
         try {
             $plugin = self::getInstance($pluginName);

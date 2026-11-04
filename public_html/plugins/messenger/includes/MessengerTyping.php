@@ -13,6 +13,7 @@
  * With APCu unavailable the indicator simply never appears — the feature
  * degrades to nothing rather than falling back to a table nobody wants.
  *
+ * @version 1.0.1 - typing state is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.0.0
  */
 
@@ -99,7 +100,7 @@ class MessengerTyping {
 
 	protected static function read($key): array {
 		$ok    = false;
-		$state = apcu_fetch($key, $ok);
+		$state = ApcuStore::fetch($key, $ok);
 		return ($ok && is_array($state)) ? $state : array();
 	}
 }

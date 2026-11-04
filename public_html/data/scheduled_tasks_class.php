@@ -5,6 +5,7 @@
  * Data model for the scheduled tasks system. Rows are created when
  * an admin activates a discovered task, not via migrations.
  *
+ * @version 1.4.1 - resolve_task_file() requires a class name (unseal_daemon.md C3)
  * @version 1.4.0
  */
 
@@ -219,6 +220,12 @@ class ScheduledTask extends SystemBase {
 	public function resolve_task_file() {
 		$class_name = $this->get('sct_task_class');
 		if (!$class_name) {
+			return null;
+		}
+		// A class name and nothing else: it becomes a require path below, and
+		// the row can be written without the admin form (unseal_daemon.md C3).
+		if (!is_string($class_name) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*\z/', $class_name) !== 1) {
+			error_log('[scheduled_tasks] task ' . $this->key . ' names ' . json_encode($class_name) . ', which is not a class name; it does not run');
 			return null;
 		}
 

@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.27 - sessions start through SessionGuard::start() (unseal_daemon.md C4)
  * @version 1.26 - get_formfields()/get_formfields_array() unserialize with allowed_classes => false: the
  *                fields are strings and arrays, and an object planted in the session must not run its
  *                magic methods in the reader's request (v1_key_retirement C2)
@@ -234,7 +235,7 @@ class SessionControl{
 			'httponly' => true,
 			'samesite' => 'Lax',
 		]);
-		session_start();
+		SessionGuard::start();
 		self::shadow_verify_form_csrf();
 		if(!isset($_SESSION['saved_messages'])) {
 			$_SESSION['saved_messages'] = array();
@@ -290,7 +291,7 @@ class SessionControl{
 		if (php_sapi_name() === 'cli' || session_status() === PHP_SESSION_ACTIVE) {
 			return;
 		}
-		session_start(['use_cookies' => 0]);
+		SessionGuard::start(['use_cookies' => 0]);
 	}
 
 	public function send_emails() {

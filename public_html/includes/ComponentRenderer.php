@@ -20,6 +20,7 @@
  *   echo ComponentRenderer::render_component($component_instance);
  *
  * @see /specs/page_component_system.md
+ * @version 1.6.1 - a component type's template path and logic function are bounded at the sink (unseal_daemon.md C3)
  * @version 1.6.0
  */
 
@@ -194,9 +195,21 @@ class ComponentRenderer {
 			return self::debug_output("Component type has no template file configured", $debug_label);
 		}
 
+		// The row names a file to require, and the database can be written
+		// without ThemeManager's scan, so only the shape the scan writes is
+		// required: a components folder in core, a theme or a plugin
+		// (unseal_daemon.md C3).
 		if (strpos($template_file, '/') !== false) {
+			if (!self::isComponentTemplatePath($template_file)) {
+				error_log("ComponentRenderer: refused template path '{$template_file}' for {$debug_label}: not a components folder file");
+				return self::debug_output("Template file refused: {$template_file}", $debug_label);
+			}
 			$template_path = PathHelper::getIncludePath($template_file);
 		} else {
+			if (preg_match('/^[A-Za-z0-9_-]+\.php\z/', $template_file) !== 1) {
+				error_log("ComponentRenderer: refused template file '{$template_file}' for {$debug_label}: not a file name");
+				return self::debug_output("Template file refused: {$template_file}", $debug_label);
+			}
 			$template_path = PathHelper::getThemeFilePath($template_file, 'views/components');
 		}
 		if (!file_exists($template_path)) {
@@ -356,7 +369,21 @@ class ComponentRenderer {
 	 * @param string $slug For debug output
 	 * @return array Data for the template
 	 */
+	/**
+	 * Whether a component type's template path is one ThemeManager's scan
+	 * writes: views/components/NAME.php, under core, a theme or a plugin.
+	 */
+	public static function isComponentTemplatePath(string $path): bool {
+		return preg_match('#^(?:(?:theme|plugins)/[A-Za-z0-9_-]+/)?views/components/[A-Za-z0-9_-]+\.php\z#', $path) === 1;
+	}
+
 	protected static function load_component_data($logic_function, $config, $slug = '') {
+		// A function name and nothing else: the row's value becomes a require
+		// path and a call (unseal_daemon.md C3).
+		if (!is_string($logic_function) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*\z/', $logic_function) !== 1) {
+			error_log("ComponentRenderer: refused logic function " . json_encode($logic_function) . ": not a function name");
+			return array();
+		}
 		$logic_file = 'logic/components/' . $logic_function . '.php';
 		$full_path = PathHelper::getIncludePath($logic_file);
 

@@ -11,8 +11,7 @@ function security_logic(array $input): LogicResult{
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
-	$composer_path = $settings->get_setting('composerAutoLoad');
-	require_once($composer_path . 'autoload.php');
+	require_once(PathHelper::getComposerAutoloadPath());
 
 	$user = new User($session->get_user_id(), TRUE);
 

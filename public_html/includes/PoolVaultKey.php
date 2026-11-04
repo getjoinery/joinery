@@ -22,6 +22,7 @@
  * the window slot is `v2.` + base64url(seed); anything else (an untagged
  * X25519 secret included) is refused as malformed.
  *
+ * @version 1.4 - the pool-held key is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.3 - X-Wing only: the untagged (X25519) form is refused; wrappedForm() takes no version
  * @version 1.2 - v2 keys: open() mints an X-Wing seed; the wrapped and slot
  *   forms carry the version; version(); unseal() opens with it
@@ -147,7 +148,7 @@ final class PoolVaultKey implements VaultKey {
 
 	/** The key a session's window slot holds, or null when the slot is empty. */
 	public static function fromSlot(string $apcu_key): ?PoolVaultKey {
-		$value = apcu_fetch($apcu_key, $success);
+		$value = ApcuStore::fetch($apcu_key, $success);
 		if (!$success || !is_string($value) || $value === '') {
 			return null;
 		}

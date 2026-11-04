@@ -28,6 +28,7 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.9 - the APCu read is ApcuStore::fetch()
  * @version 1.8 - the poisoned lookup follows an ordinary miss, which used to spend the rebuild (reviewer2 B1);
  *               a planted entry whose file is not written yet is healed too (B5); scratch removed on exit
  * @version 1.7 - a map entry outside the tree's includes/ and data/, or not a .php file, is never
@@ -144,7 +145,7 @@ section('A cached map is one site\'s and one plugin set\'s (B47)');
 // resolving: a map that did not have them stood in the shared cache. Two holes
 // let that happen, and both are closed here.
 check(preg_match('/function cache_key\(\).*?md5\(PathHelper::getSiteRoot\(\)\)/s', $src) === 1
-	&& strpos($src, 'apcu_fetch(self::cache_key()') !== false && strpos($src, 'apcu_store(self::cache_key()') !== false,
+	&& strpos($src, 'ApcuStore::fetch(self::cache_key()') !== false && strpos($src, 'apcu_store(self::cache_key()') !== false,
 	'the APCu key names the site: every site on a host shares one PHP-FPM pool, and two sites on one release fingerprint alike');
 check(strpos($src, "'plugins'  => self::\$plugins") !== false,
 	'the cached map carries the active plugins it was built for');

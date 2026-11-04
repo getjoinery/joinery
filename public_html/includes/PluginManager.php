@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.20 - sync, syncTables, the namespace check and activation's hook pass iterate PluginHelper::activePluginRows(); runSyncHook() refuses a name that is not a plugin name (unseal_daemon.md C3)
  * @version 1.19 - activate() loads the newly active plugin's bootstrap before its content packs save anything
  * @version 1.18 - a plugin's content packs (content_packs/{pack}/) land once per install: after its activation
  *                commits, and at sync for one not yet applied (PluginContentPacks)
@@ -1072,9 +1073,7 @@ class PluginManager extends AbstractExtensionManager {
         // it we are on is not a detail this should depend on.
         $hook_targets = array($name);
         try {
-            $active_now = new MultiPlugin(['plg_active' => 1]);
-            $active_now->load();
-            foreach ($active_now as $active_plugin) {
+            foreach (PluginHelper::activePluginRows() as $active_plugin) {
                 $active_name = (string)$active_plugin->get('plg_name');
                 if ($active_name !== '' && !in_array($active_name, $hook_targets, true)) {
                     $hook_targets[] = $active_name;
@@ -1630,9 +1629,7 @@ class PluginManager extends AbstractExtensionManager {
         // Core first, then each active plugin.
         $collect('core', $base);
 
-        $active_plugins = new MultiPlugin(['plg_active' => 1]);
-        $active_plugins->load();
-        foreach ($active_plugins as $plugin) {
+        foreach (PluginHelper::activePluginRows() as $plugin) {
             $plugin_name = $plugin->get('plg_name');
             $collect($plugin_name, $base . 'plugins/' . $plugin_name);
         }
@@ -1658,8 +1655,7 @@ class PluginManager extends AbstractExtensionManager {
         $database_updater = new DatabaseUpdater(false, true /* upgrade */, false);
         $messages = array();
         $errors = array();
-        $active_plugins = new MultiPlugin(['plg_active' => 1]);
-        foreach ($active_plugins as $plugin) {
+        foreach (PluginHelper::activePluginRows() as $plugin) {
             $plugin_name = $plugin->get('plg_name');
             $table_result = $database_updater->runPluginTablesOnly($plugin_name);
             foreach (($table_result['messages'] ?? []) as $m) {
@@ -1729,8 +1725,7 @@ class PluginManager extends AbstractExtensionManager {
         require_once(PathHelper::getIncludePath('includes/DatabaseUpdater.php'));
         require_once(PathHelper::getIncludePath('data/plugins_class.php'));
         $database_updater = new DatabaseUpdater(false, true /* upgrade */, false);
-        $active_plugins = new MultiPlugin(['plg_active' => 1]);
-        $active_plugins->load();
+        $active_plugins = PluginHelper::activePluginRows();
         $table_messages = [];
         $migration_messages = [];
         $migrations_run = [];
@@ -1915,6 +1910,10 @@ class PluginManager extends AbstractExtensionManager {
      * @return string[] messages from the hook
      */
     public function runSyncHook($plugin_name) {
+        if (!PluginHelper::isPluginName($plugin_name)) {
+            error_log('sync.php hook refused for ' . json_encode($plugin_name) . ': not a plugin name');
+            return array();
+        }
         $sync_file = PathHelper::getAbsolutePath("plugins/{$plugin_name}/sync.php");
         if (!file_exists($sync_file)) return array();
 

@@ -15,6 +15,7 @@
  * token is SecretBox-encrypted on top of that, because a session file is a file
  * and a refresh token is a standing credential.
  *
+ * @version 1.1 - its session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 1.0
  */
 
@@ -91,7 +92,7 @@ class ImapConnectStash {
 
 	private static function ensureSession(): void {
 		if (session_status() !== PHP_SESSION_ACTIVE) {
-			@session_start();
+			@SessionGuard::start();
 		}
 	}
 }

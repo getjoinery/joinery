@@ -20,8 +20,7 @@ require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
 
 // PasskeyService pulls in the WebAuthn library, which needs the composer
 // autoloader (registered globally in web requests, not in the CLI harness).
-$__autoload = Globalvars::get_instance()->get_setting('composerAutoLoad');
-if ($__autoload) { require_once(PathHelper::getIncludePath($__autoload . 'autoload.php')); }
+require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 require_once(PathHelper::getIncludePath('plugins/vault/data/vault_entries_class.php'));
 require_once(PathHelper::getIncludePath('plugins/vault/data/vault_keyring_class.php'));
