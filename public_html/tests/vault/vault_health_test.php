@@ -12,6 +12,8 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.10 - the RAM store row counts among the host facts, its branches driven from fixtures,
+ *                 including a store that cannot follow a reload (OPcache read from php-fpm -i)
  * @version 1.9 - a failed plugin installer is named with the Plugins page; a failed core installer names its
  *                log; neither offers the converger reinstall (plugin_installer_from_the_browser.md D5)
  * @version 1.8 - encrypt_offer refuses while the provider's own disk encryption is on (provider_layer, B114)
@@ -30,10 +32,27 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
+section('RAM store');
+$r = VaultHealth::checkRamStore(['ok' => true, 'dir' => '/dev/shm/joinery-33-x', 'reason' => null]);
+check($r['key'] === 'ram_store' && $r['state'] === 'verified', 'a usable store directory is verified');
+$r = VaultHealth::checkRamStore(['ok' => false, 'dir' => '/dev/shm/joinery-33-x', 'reason' => '/dev/shm/joinery-33-x is owned by uid 1001, not 33']);
+check($r['state'] === 'unmet' && strpos($r['reason'], '/dev/shm/joinery-33-x') !== false && strpos($r['reason'], 'uid 1001') !== false,
+	'a refused store is unmet, naming the directory and the reason', $r['reason']);
+$r = VaultHealth::checkRamStore(['ok' => true, 'dir' => '/dev/shm/joinery-33-x', 'reason' => null], 'OPcache\'s start time is not readable');
+check($r['state'] === 'unmet' && strpos($r['reason'], 'The store works, but OPcache') !== false && strpos($r['reason'], 'restrict_api empty') !== false,
+	'a store that cannot follow a reload is unmet, with the fix', $r['reason']);
+check(VaultHealth::checkRamStore(['ok' => true, 'dir' => 'd', 'reason' => null], false)['state'] === 'verified', 'no lifetime problem, verified');
+$on = ['opcache.enable => On => On', 'opcache.restrict_api => no value => no value'];
+check(VaultHealth::parseFpmOpcache($on) === false, 'php-fpm -i with OPcache on and restrict_api empty is fine');
+check(strpos((string)VaultHealth::parseFpmOpcache(['opcache.enable => Off => Off']), 'OPcache off') !== false, 'OPcache off for PHP-FPM is a problem');
+check(strpos((string)VaultHealth::parseFpmOpcache(['opcache.enable => On => On', 'opcache.restrict_api => /var/www/x => /var/www/x']), 'restrict_api') !== false,
+	'opcache.restrict_api set is a problem');
+check(VaultHealth::parseFpmOpcache([]) === false, 'no lines, nothing claimed');
+
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 10 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
-	'runAll reports the ten host facts, and the data root\'s break-glass copy where it is encrypted');
+check(count($checks) === 11 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
+	'runAll reports the eleven host facts, and the data root\'s break-glass copy where it is encrypted');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;

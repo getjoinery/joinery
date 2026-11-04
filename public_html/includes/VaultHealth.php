@@ -22,6 +22,10 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.15 - a row for the RAM store (includes/RamStore.php): its directory is on tmpfs, ours, and
+ *                 0700, or the store refuses and no window can open (strategy/object_free_window_store.md);
+ *                 from the CLI, every user's directory for the site, each against the uid its name claims;
+ *                 unmet too when a reload would not end windows (OPcache off or restricted, or not PHP-FPM)
  * @version 1.14 - a row for post-quantum sealing: PHP-FPM reaches ML-KEM through FFI to OpenSSL 3.5,
  *                 read from php-fpm -i when run from the CLI; advice by cause (specs/post_quantum_sealing.md R4)
  * @version 1.13 - a failed or refused installer names the plugin and the Plugins page, or, for a core
@@ -68,6 +72,7 @@ class VaultHealth {
 	public static function runAll(): array {
 		$checks = [
 			self::checkApcuAnonymous(),
+			self::checkRamStore(),
 			self::checkCoredumpsDisabled(),
 			self::checkExceptionArgs(),
 			self::checkSwapSafe(),
@@ -161,14 +166,35 @@ class VaultHealth {
 		if (count($enabled) === 1 && preg_match('/php(\d+\.\d+)-fpm\.conf$/', $enabled[0], $m)) {
 			$version = $m[1];
 		}
+		$lines = self::fpmInfoLines($version);
+		return $lines === false ? false : self::parseFpmFfi($lines);
+	}
+
+	/**
+	 * `php-fpmX.Y -i` for the version Apache hands requests to (the CLI's own
+	 * when there is none), read once per process: [] when it fails, false when
+	 * there is no such binary.
+	 */
+	private static function fpmInfoLines(?string $version = null) {
+		static $cache = [];
+		if ($version === null) {
+			$version = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+			$enabled = glob('/etc/apache2/conf-enabled/php*-fpm.conf') ?: [];
+			if (count($enabled) === 1 && preg_match('/php(\d+\.\d+)-fpm\.conf$/', $enabled[0], $m)) {
+				$version = $m[1];
+			}
+		}
+		if (array_key_exists($version, $cache)) {
+			return $cache[$version];
+		}
 		$bin = '/usr/sbin/php-fpm' . $version;
 		if (!is_executable($bin) || !function_exists('exec')) {
-			return false;
+			return $cache[$version] = false;
 		}
 		$out = [];
 		$rc = 1;
 		@exec(escapeshellarg($bin) . ' -i 2>/dev/null', $out, $rc);
-		return self::parseFpmFfi($rc === 0 ? $out : []);
+		return $cache[$version] = ($rc === 0 ? $out : []);
 	}
 
 	/** The FFI lines of a `php-fpm -i` listing; false when it has none. */
@@ -419,6 +445,74 @@ class VaultHealth {
 		}
 		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 			'reason' => 'apc.mmap_file_mask is set to "' . $mask . '" - APCu is backed by a file on disk, not anonymous memory.'];
+	}
+
+	/**
+	 * The RAM store (includes/RamStore.php) holds what a window needs between
+	 * requests. Its directory must be on tmpfs, a real directory owned by the
+	 * web user, and mode 0700; otherwise the store refuses and no window can
+	 * open. A web request checks its own directory. The CLI runs as someone
+	 * else, so it checks every user's directory this site has, each against
+	 * the uid its name claims (another account that made the web user's
+	 * directory first is caught), and creates none; with none yet, the
+	 * filesystem alone is judged.
+	 *
+	 * Windows end at a PHP-FPM reload because the store names their directory
+	 * after the master's OPcache segment; with OPcache off or
+	 * opcache.restrict_api set (read from php-fpm -i in the CLI), or a web
+	 * server that is not PHP-FPM, that promise is gone and the row says so.
+	 *
+	 * @param array|null $status Injected for tests: RamStore::status()'s shape.
+	 * @param string|false|null $lifetime Injected for tests: the lifetime problem, false for none.
+	 */
+	public static function checkRamStore(?array $status = null, $lifetime = null): array {
+		$key = 'ram_store';
+		$label = 'The RAM store is on tmpfs and private to the web user';
+		if ($status === null) {
+			$status = PHP_SAPI === 'cli' ? self::ramStoreCliStatus() : RamStore::status();
+		}
+		if ($lifetime === null) {
+			$lifetime = PHP_SAPI === 'cli' ? self::parseFpmOpcache(self::fpmInfoLines() ?: []) : RamStore::lifetimeProblem();
+		}
+		if (!empty($status['ok']) && is_string($lifetime) && $lifetime !== '') {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+				'reason' => 'The store works, but ' . $lifetime . '. Turn OPcache on for PHP-FPM and leave opcache.restrict_api empty.'];
+		}
+		if (!empty($status['ok'])) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => 'The store refuses ' . ($status['dir'] ?? 'its directory') . ': ' . ($status['reason'] ?? 'unknown reason')
+				. '. No vault window can open until it is fixed. If another account made the directory, remove it; '
+				. 'if /dev/shm is not tmpfs, mount it as tmpfs.'];
+	}
+
+	/**
+	 * From php-fpm -i lines: why a reload would not end windows (OPcache off,
+	 * or opcache.restrict_api set, for PHP-FPM), or false when it would or the
+	 * lines say nothing.
+	 */
+	public static function parseFpmOpcache(array $lines) {
+		foreach ($lines as $line) {
+			if (preg_match('/^opcache\.enable\s*=>\s*(\S+)/', $line, $m) && strcasecmp($m[1], 'On') !== 0 && $m[1] !== '1') {
+				return 'PHP-FPM runs with OPcache off: a reload does not end vault windows, only a restart does';
+			}
+			if (preg_match('/^opcache\.restrict_api\s*=>\s*(.*?)\s*=>/', $line, $m) && $m[1] !== '' && $m[1] !== 'no value') {
+				return 'PHP-FPM sets opcache.restrict_api, so the store cannot read OPcache\'s start time: a reload does not end vault windows, only a restart does';
+			}
+		}
+		return false;
+	}
+
+	/** RamStore::status()'s shape for the site's existing directories, read from the CLI. */
+	private static function ramStoreCliStatus(): array {
+		foreach (RamStore::siteDirectories() as $dir => $uid) {
+			$reason = RamStore::checkDirectory($dir, $uid);
+			if ($reason !== null) {
+				return ['ok' => false, 'dir' => $dir, 'reason' => $reason];
+			}
+		}
+		return RamStore::status(false);
 	}
 
 	/**

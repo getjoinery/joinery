@@ -211,6 +211,12 @@ function harness_boot(array $overrides = array()) {
 	// alive. See harness_hold_run_lock().
 	harness_hold_run_lock();
 
+	// Before any fixture exists: this run's own RAM store. The /tests/
+	// dashboard runs suites as the web user against the real database, so
+	// the default directory would be the live site's, and a vault suite
+	// closing windows would close real ones. See harness_ram_store().
+	harness_ram_store();
+
 	// Mark this process for cheap password hashing. Argon2id at production
 	// parameters is 64 MB and ~0.5s PER HASH on the dev box, and suites paid
 	// it for every fixture user, sign-in attempt, and 2FA backup-code set (ten
@@ -567,6 +573,56 @@ function harness_sweep_scratch($base) {
 		}
 		harness_remove_tree($d);
 	}
+}
+
+/**
+ * Point RamStore at this run's own directory, /dev/shm/joinery-{euid}-test-
+ * {run_token} (the store refuses anything but tmpfs, so it cannot live under
+ * the run's cache/tests scratch), removed with every entry zeroed when the run
+ * ends. A directory a dead run left is removed the same way. Returns the path.
+ */
+function harness_ram_store() {
+	$h = &$GLOBALS['__harness'];
+	$prefix = '/dev/shm/joinery-' . (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) . '-test-';
+	foreach (glob($prefix . '*', GLOB_ONLYDIR) ?: array() as $d) {
+		$token = substr($d, strlen($prefix));
+		$state = $token === $h['run_token'] || is_link($d) ? 'live' : harness_run_token_state($token);
+		if ($state === 'dead' || ($state === 'unknown' && (int)@filemtime($d) < time() - 86400)) {
+			harness_remove_ram_store($d);
+		}
+	}
+	$dir = $prefix . $h['run_token'];
+	RamStore::useDirectory($dir);
+	if (empty($h['ram_store_deferred'])) {
+		$h['ram_store_deferred'] = true;
+		harness_defer(function () use ($dir) {
+			harness_remove_ram_store($dir);
+		});
+	}
+	return $dir;
+}
+
+/** Remove a RAM store directory, zeroing each entry before it goes. */
+function harness_remove_ram_store($dir) {
+	if (is_link($dir) || !is_dir($dir)) {
+		return;
+	}
+	foreach (scandir($dir) ?: array() as $entry) {
+		$path = $dir . '/' . $entry;
+		if ($entry === '.' || $entry === '..') {
+			continue;
+		}
+		if (!is_link($path) && is_dir($path)) {
+			harness_remove_ram_store($path);
+			continue;
+		}
+		if (!is_link($path) && is_file($path) && ($size = filesize($path)) > 0 && ($fh = @fopen($path, 'r+b'))) {
+			fwrite($fh, str_repeat("\0", $size));
+			fclose($fh);
+		}
+		@unlink($path);
+	}
+	@rmdir($dir);
 }
 
 /** Remove a directory and everything in it, not following links out of it. */

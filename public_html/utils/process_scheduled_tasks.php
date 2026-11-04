@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.6 - each pass sweeps the RAM store: expired entries nobody read and the generations of
+ *   processes that have ended (includes/RamStore.php); a store not made yet is left alone
  * @version 2.5 - a task's row is read again once its lock is held, and a task another pass ran
  *   since this pass began is skipped: a pass held up by a slow task ran the daily tasks twice
  * @version 2.4 - the shutdown recorder rolls back a transaction the dying task left open before it
@@ -110,6 +112,15 @@ try {
 	Setting::put('scheduled_tasks_last_cron_run', $timestamp);
 } catch (Throwable $e) {
 	echo "[$timestamp] Warning: Could not update heartbeat setting: " . $e->getMessage() . "\n";
+}
+
+// The RAM store's entries expire by time and its lifetime-bound ones end with
+// their process; a pass removes what nobody read since. It never creates the
+// store (a site with no window yet has none).
+try {
+	RamStore::sweep();
+} catch (Throwable $e) {
+	echo "[$timestamp] Warning: RAM store sweep failed: " . $e->getMessage() . "\n";
 }
 
 // Reconcile rows against the filesystem before anything tries to run them.
