@@ -42,6 +42,8 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.23 - lockAll() and lockBorrowed() iterate APCu by key only (APC_ITER_KEY): the
+ *   default format rebuilds every entry's value, around ApcuStore's guard (unseal_daemon.md C4)
  * @version 1.22 - window metadata is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.21
  * @changelog 1.21 - VaultRotationOwedException and arm()'s old-key refusal removed: every key is X-Wing
@@ -430,7 +432,7 @@ class VaultUnlock {
 		$pattern = '/^vault:' . preg_quote(self::CREDENTIAL_SLOT_PREFIX, '/') . '(\d+):'
 			. preg_quote((string)$user_id, '/') . ':([^:]*)$/';
 		$slots = array();
-		foreach (new APCUIterator($pattern) as $entry) {
+		foreach (new APCUIterator($pattern, APC_ITER_KEY) as $entry) {
 			if (preg_match($pattern, (string)$entry['key'], $m)) {
 				$slots[] = array(self::CREDENTIAL_SLOT_PREFIX . $m[1], $m[2]);
 			}
@@ -777,7 +779,7 @@ class VaultUnlock {
 			// borrowed slot's armed marker (vaultbrw:).
 			$pattern = '/^vault(?:meta|brw)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
 			$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
-			foreach (new APCUIterator($pattern) as $entry) {
+			foreach (new APCUIterator($pattern, APC_ITER_KEY) as $entry) {
 				// One row per (session, scope) rather than a single summary: a
 				// credential event that closes three devices at once should read
 				// as three windows ending, which is what it was.

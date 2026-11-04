@@ -23,10 +23,13 @@
  *    back whole;
  *  - ApcuStore::fetch() refuses an entry holding any object, never loads a
  *    planted class, and deletes the entry; plain values read as before;
- *  - no production code calls session_start() or apcu_fetch() around them.
+ *  - no production code calls session_start() or apcu_fetch() around them,
+ *    and every APCUIterator asks for keys only: its default format rebuilds
+ *    each matched entry's value, with no guard in front at all.
  *
  * Run: php tests/security/stored_object_guards_test.php
  *
+ * @version 1.1 - an APCUIterator without APC_ITER_KEY fails the scan
  * @version 1.0
  */
 
@@ -118,6 +121,7 @@ if (($got['apcu'] ?? null) === false) {
 
 section('Nothing in production reads around the guards');
 $around = array('session_start(' => array(), 'apcu_fetch(' => array());
+$iterators_reading_values = array();
 $root = PathHelper::getRootDir();
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 foreach ($it as $f) {
@@ -134,8 +138,16 @@ foreach ($it as $f) {
 	foreach (array_keys($around) as $fn) {
 		if (preg_match('/(?<![\w:>$])' . preg_quote($fn, '/') . '/', $code)) $around[$fn][] = $rel;
 	}
+	// An iterator's value is unserialized by APCu itself, with every class
+	// allowed and no autoload guard: only a key-only iteration never builds one.
+	if (preg_match_all('/new\s+\\\\?APCUIterator\s*\(([^;]*)\)\s*(?:as|\)|;)/', $code, $m)) {
+		foreach ($m[1] as $args) {
+			if (strpos($args, 'APC_ITER_KEY') === false) $iterators_reading_values[] = $rel;
+		}
+	}
 }
 check($around['session_start('] === array('includes/SessionGuard.php'), 'session_start() is called only by SessionGuard', implode(', ', $around['session_start(']));
 check($around['apcu_fetch('] === array('includes/ApcuStore.php'), 'apcu_fetch() is called only by ApcuStore', implode(', ', $around['apcu_fetch(']));
+check($iterators_reading_values === array(), 'every APCUIterator in production asks for keys only (APC_ITER_KEY)', implode(', ', $iterators_reading_values));
 
 harness_finish();
