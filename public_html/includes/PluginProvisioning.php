@@ -23,6 +23,9 @@
  * (tasks/PluginHealthReport.php) and its result recorded, so a management
  * node reads it with the rest of the node's status. See recordFleetReport().
  *
+ * @version 1.8 - the fleet report carries core's Composer check (composerCheck: the composerAutoLoad setting
+ *                accepted, and ComposerValidator finding the loaded vendor tree whole), so a node carrying a
+ *                refused path or a broken vendor tree says so to its management node without a shell
  * @version 1.7 - an unmet check names the plugin's own installer (`fixed_by_installer`), never a script
  *                path to run by hand; a declaration still carrying `script`, or naming the installer on a
  *                plugin that has none, is an error (plugin_installer_from_the_browser.md D3)
@@ -101,9 +104,10 @@ class PluginProvisioning {
      *                 ['plugin', 'key', 'label', 'state', 'reason'], ...]]
      */
     public static function runFleetReport() {
-        // Core's own first: the site can send mail. Not a plugin's, so it is
-        // listed under the name core, and first so the cap never drops it.
-        $checks = [self::outboundMailCheck()];
+        // Core's own first: the site can send mail, and its Composer libraries
+        // load. Not a plugin's, so they are listed under the name core, and
+        // first so the cap never drops them.
+        $checks = [self::outboundMailCheck(), self::composerCheck()];
         foreach (self::getProvisioners() as $plugin => $provisioners) {
             foreach ($provisioners as $declaration) {
                 if (!is_array($declaration) || empty($declaration['key'])
@@ -172,6 +176,58 @@ class PluginProvisioning {
         }
         $out['state'] = 'error';
         $out['reason'] = mb_substr(ucfirst(implode('; and ', $why)) . '. Nothing this site sends leaves it. Set one up in the email settings.', 0, self::FLEET_REASON_MAX);
+        return $out;
+    }
+
+    /**
+     * Whether this site's Composer libraries load from the path its settings
+     * name: the composerAutoLoad setting is one PathHelper accepts, and the
+     * vendor tree the site loads (ComposerValidator: autoload.php, every
+     * required package at composer.lock's version, every active plugin's
+     * declared packages) is whole. A refused setting alone is `unmet`: the
+     * site runs, since PathHelper loads ../vendor/ in its place, but the
+     * setting says something else and someone should set it right. A broken
+     * vendor tree is `error`, in the validator's own words. Reported to a
+     * management node with the plugin checks, where either fails the node's
+     * health; it is how a node that still carries an old vendor path, or a
+     * tree an upgrade left short, says so without a shell.
+     *
+     * A path is configuration, not a secret, so the refused value is named.
+     * The validator reads composer.json, composer.lock and the vendor tree's
+     * installed.json and runs no command, which is why this can run hourly.
+     *
+     * $problem is PathHelper::composerSettingProblem()'s answer (a string, or
+     * null for none) and $validator the validator to read, in place of the
+     * site's own (a test).
+     */
+    public static function composerCheck($problem = false, ?ComposerValidator $validator = null): array {
+        $out = ['plugin' => 'core', 'key' => 'composer', 'label' => 'The Composer path and libraries are right', 'state' => 'verified', 'reason' => ''];
+        if ($problem === false) {
+            $problem = PathHelper::composerSettingProblem();
+        }
+        $problem = $problem === null ? null : (string)$problem;
+        $errors = array();
+        try {
+            $validator = $validator ?? new ComposerValidator();
+            if (!$validator->validate()) {
+                $errors = array_values(array_filter(array_map('strval', (array)$validator->getErrors()), 'strlen'));
+                if (!$errors) {
+                    $errors = array('the Composer libraries did not validate, and the validator gave no reason');
+                }
+            }
+        } catch (Throwable $e) {
+            $errors = array('the Composer check itself failed: ' . $e->getMessage());
+        }
+        if ($errors) {
+            $out['state'] = 'error';
+            $why = ($problem !== null ? $problem . '. ' : '') . 'Composer libraries: ' . implode('; ', $errors);
+            $out['reason'] = mb_substr($why, 0, self::FLEET_REASON_MAX);
+            return $out;
+        }
+        if ($problem !== null) {
+            $out['state'] = 'unmet';
+            $out['reason'] = mb_substr($problem . '. The site runs on ../vendor/; set the Composer path to ../vendor/ in the settings so the setting says what loads.', 0, self::FLEET_REASON_MAX);
+        }
         return $out;
     }
 
