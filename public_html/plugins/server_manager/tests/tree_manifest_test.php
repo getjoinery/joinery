@@ -142,6 +142,17 @@ check(strpos($publisher_src, "exec(sprintf('rsync -av --exclude=.git --exclude=.
 	'so the publisher\'s maintenance_scripts copy leaves .git and .gitignore behind',
 	'the archive shipped a .gitignore its signed manifest did not list');
 
+// After a site's first logged release every node requires the log, so a
+// publish that could not log refuses instead of shipping a release every node
+// refuses (release_key_rotation rehearsal B3).
+check(strpos($publisher_src, "if (!\$republish && !\$logs_release && ReleaseStatementPublisher::previous() !== null) {") !== false,
+	'a publish that would not be logged, after one that was, refuses');
+// The origin is never upgraded, so its own logged publish records the set it
+// installs, as root (rehearsal B2).
+check(strpos($publisher_src, "\$own_set = PackageSignature::persistProvenKeys(array('trust' => array(") !== false
+	&& strpos($publisher_src, "'set_by'         => \$version,") !== false,
+	'a logged publish records this site\'s own trusted set');
+
 section('The signature verifies, and is checked before it ships');
 
 $keys = tm_keys();
@@ -184,6 +195,18 @@ check(TreeManifestPublisher::maySign(null, $own, true)['may_sign'],
 	'a bundle that predates the key record, on the box that holds the source: it was built here, sign');
 check(!TreeManifestPublisher::maySign(null, $own, false)['may_sign'],
 	'a bundle that predates the key record, on a box without the source: it was received, do not sign');
+
+// A key rotation's step 4 (specs/release_key_rotation.md R5): the bundle was
+// built with the old key and trusts the new one, which this site now holds.
+$old = 'OLD_KEY_B64';
+check(TreeManifestPublisher::maySign($old, $own, true, array($old, $own))['may_sign'],
+	'a bundle built with the old key that trusts this site\'s new one, on the box with the source: sign (rotation)');
+check(!TreeManifestPublisher::maySign($old, $own, false, array($old, $own))['may_sign'],
+	'the same bundle on a box without the source: it was received, do not sign');
+check(!TreeManifestPublisher::maySign($upstream, $own, true, array($upstream))['may_sign'],
+	'a bundle that does not trust this site\'s key, even with the source here: never sign');
+check(!TreeManifestPublisher::maySign($old, '', true, array($old, ''))['may_sign'],
+	'no key of its own: nothing to sign with');
 
 section('A site that may not sign carries the received manifest forward');
 

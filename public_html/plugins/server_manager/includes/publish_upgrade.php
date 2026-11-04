@@ -547,6 +547,15 @@
 		// that cannot sign its own manifests, since the statement goes into them.
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
 		$logs_release = !$republish && TreeManifestPublisher::signsItsOwnTree($full_site_dir);
+		// Once a release from here is logged, every node requires the log, so
+		// a release that would not be logged is one every node refuses. Say so
+		// now rather than ship it (release_key_rotation rehearsal B3).
+		if (!$republish && !$logs_release && ReleaseStatementPublisher::previous() !== null) {
+			publish_output("\nRefusing to publish {$version} — this site cannot sign its own manifests now: its key "
+				. '(config/agent_signing_key) neither built the agent bundle it ships nor is trusted by it. The release would carry '
+				. 'no release statement, and every node requires one since this site logged its first release. Nothing has been written.');
+			exit(1);
+		}
 		$previous_statement = null;
 		$statement_key = null;
 		$log_client = null;
@@ -1557,6 +1566,33 @@
 			. " ({$agent_bundle['status']})");
 
 		publish_output("\nAll archives created successfully!");
+
+		// This site's own trusted set is the one its logged release installs.
+		// Nothing upgrades the origin, so no verdict of an install ever writes
+		// its record, and without this its key files keep the keys of its own
+		// install, retired ones included, and its node row says its keys
+		// differ for good after a rotation (release_key_rotation rehearsal
+		// B2). The statement was verified against exactly these keys and this
+		// authority above. Root only, as every writer of the set is (F3).
+		if ($logs_release && is_array($keys_installed)) {
+			if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+				try {
+					$own_set = PackageSignature::persistProvenKeys(array('trust' => array(
+						'release_keys'   => $keys_installed['release_keys'],
+						'statement_keys' => $keys_installed['statement_keys'],
+						'authority'      => $keys_authority,
+						'set_by'         => $version,
+					)), $full_site_dir);
+					foreach ($own_set as $line) {
+						publish_output("Release keys this site holds: {$line}");
+					}
+				} catch (Exception $e) {
+					publish_output("Warning: this site's own trusted set was not recorded: " . $e->getMessage());
+				}
+			} else {
+				publish_output("This site's own trusted set was not recorded: only root writes it. Publish as root to record it.");
+			}
+		}
 
 		// =====================================================
 		// The management node is a node too: converge its host installers

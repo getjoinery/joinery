@@ -49,6 +49,9 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.8 - maySign(): on the box that builds the agent, a bundle built with another key that trusts
+ *                this site's key may be signed over (a key rotation's step 4); authority() and signsItsOwnTree()
+ *                pass the bundle's baked release keys (release_key_rotation rehearsal B3)
  * @version 1.7 - write() takes $to_dir: the live tree's manifest is built from the release's build
  *                directory (the commit) and written into the live tree, so this site's own agent
  *                trusts what was released and not an uncommitted edit sitting beside it
@@ -90,7 +93,7 @@ class TreeManifestPublisher {
 		$bundle_key = AgentDistPublisher::bundleSigningKey($full_site_dir);
 		$src = AgentDistPublisher::sourcePath();
 		$builds_here = is_dir($src) && file_exists($src . '/main.go');
-		$verdict = self::maySign($bundle_key, $keys['public_b64'], $builds_here);
+		$verdict = self::maySign($bundle_key, $keys['public_b64'], $builds_here, self::bundleTrusts($full_site_dir));
 		return array(
 			'may_sign'       => $verdict['may_sign'],
 			'keys'           => $verdict['may_sign'] ? $keys : null,
@@ -111,16 +114,36 @@ class TreeManifestPublisher {
 		$src = AgentDistPublisher::sourcePath();
 		$verdict = self::maySign(AgentDistPublisher::bundleSigningKey($full_site_dir),
 			$public === false ? '' : trim($public),
-			is_dir($src) && file_exists($src . '/main.go'));
+			is_dir($src) && file_exists($src . '/main.go'), self::bundleTrusts($full_site_dir));
 		return $verdict['may_sign'];
 	}
 
-	/** The rule behind authority(), pure so it can be asserted directly. */
-	public static function maySign($bundle_key_b64, $own_public_b64, $builds_here) {
+	/** The release keys the shipped agent bundle's binaries trust (baked in at their build), base64. */
+	private static function bundleTrusts($full_site_dir): array {
+		$manifest = AgentDistPublisher::readManifest(rtrim($full_site_dir, '/') . '/public_html/agent_dist');
+		return is_array($manifest) ? AgentDistPublisher::bakedReleaseKeys($manifest) : array();
+	}
+
+	/**
+	 * The rule behind authority(), pure so it can be asserted directly.
+	 *
+	 * $bundle_trusts is the release keys the shipped bundle's binaries were
+	 * built to trust. On the box that builds the agent, a bundle built with
+	 * another key that already trusts this site's is a key rotation's: the
+	 * release before switched keys introduced this one (specs/
+	 * release_key_rotation.md R5 step 4), and this publish rebuilds the agent
+	 * under it. A bundle that does not trust it was received from elsewhere.
+	 */
+	public static function maySign($bundle_key_b64, $own_public_b64, $builds_here, array $bundle_trusts = array()) {
 		if ($bundle_key_b64 !== null && $bundle_key_b64 !== '') {
 			if ($bundle_key_b64 === $own_public_b64) {
 				return array('may_sign' => true,
 					'reason' => 'Tree manifests: signing with this site\'s key, which built the agent bundle it ships');
+			}
+			if ($builds_here && $own_public_b64 !== '' && in_array($own_public_b64, $bundle_trusts, true)) {
+				return array('may_sign' => true,
+					'reason' => 'Tree manifests: signing with this site\'s key, which the agent bundle it ships trusts '
+						. '(it was built with the key before it; this publish builds the agent again under this one)');
 			}
 			return array('may_sign' => false,
 				'reason' => 'Tree manifests: this site cannot sign - the agent bundle it ships was built with '
