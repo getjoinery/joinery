@@ -430,6 +430,29 @@ if ($manifest_body !== false && $signature_b64 !== false) {
 		'listed: ' . implode(', ', $listed) . ' / declared: ' . implode(', ', $declared));
 }
 
+section('A key rotation builds the bundle again, though no file changed');
+
+// release_key_rotation rehearsal B4: after step 4 every machine has retired the
+// old key, so a bundle the old key signed is refused there, files unchanged.
+$before = SupportBundlePublisher::publish($site);
+check($before['status'] === 'skipped', 'nothing changed: nothing rebuilt', $before['message']);
+@unlink($site . '/config/agent_signing_key');
+@unlink($site . '/config/agent_signing_key.pub');
+$new_keys = AgentDistPublisher::ensureKeys($site . '/config');
+$rotated = SupportBundlePublisher::publish($site);
+check($rotated['status'] === 'built', 'a new signing key builds the bundle again', $rotated['message']);
+check($rotated['version'] === $before['version'], 'the version stays a fact about the content',
+	"{$before['version']} then {$rotated['version']}");
+$sig_after = base64_decode(SupportBundlePublisher::bundledSignature($tarball), true);
+$re = $site . '/re_extracted';
+mkdir($re, 0755, true);
+exec(sprintf('tar -xzf %s -C %s 2>&1', escapeshellarg($tarball), escapeshellarg($re)));
+check($sig_after !== false && sodium_crypto_sign_verify_detached($sig_after,
+		(string)@file_get_contents($re . '/' . TreeManifestPublisher::MANIFEST_NAME), $new_keys['public']),
+	'the rebuilt bundle is signed by the new key');
+$again = SupportBundlePublisher::publish($site);
+check($again['status'] === 'skipped', 'and is left alone after that', $again['message']);
+
 exec('rm -rf ' . escapeshellarg($site));
 
 harness_finish();

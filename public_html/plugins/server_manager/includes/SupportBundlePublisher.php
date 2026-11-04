@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.39 - a bundle whose files are unchanged is built again when another key signed it (a key
+ *                rotation's step 4): bundledSignature() (release_key_rotation rehearsal B4)
  * @version 1.38 - carries never_do_check.sh, the machine word of agent 1.106.0 (the never-do list)
  * @version 1.37 - carries site_converger.sh, the machine word of agent 1.98.0 that reads whether a site
  *                container's converger is running
@@ -439,7 +441,14 @@ class SupportBundlePublisher {
 
 			$version = substr(hash_file('sha256', $manifest['manifest']), 0, 16);
 			$current = self::installedVersion($dist_dir);
-			if ($current === $version && file_exists($dist_dir . '/' . self::BUNDLE_NAME)) {
+			// The same files are not the same bundle when another key signed
+			// them: after a key rotation the bundle built with the old key is
+			// refused by every machine that has retired it (release_key_rotation
+			// rehearsal B4). An Ed25519 signature is deterministic, so the same
+			// body under the same key gives the same bytes.
+			$signed_here = trim((string)@file_get_contents($staging . '/' . TreeManifestPublisher::SIGNATURE_NAME));
+			if ($current === $version && file_exists($dist_dir . '/' . self::BUNDLE_NAME)
+					&& self::bundledSignature($dist_dir . '/' . self::BUNDLE_NAME) === $signed_here) {
 				self::rrmdir($staging);
 				$msg = "Support bundle: {$version} already bundled - unchanged";
 				$say($msg);
@@ -499,6 +508,17 @@ class SupportBundlePublisher {
 			$say($msg);
 			return self::result('carried', $msg, self::installedVersion($dist_dir), 0);
 		}
+	}
+
+	/** The manifest signature inside a bundle tarball, trimmed, or '' when it cannot be read. */
+	public static function bundledSignature($tarball) {
+		if (!is_file($tarball)) {
+			return '';
+		}
+		$out = array();
+		exec(sprintf('tar -xzOf %s %s 2>/dev/null', escapeshellarg($tarball),
+			escapeshellarg('./' . TreeManifestPublisher::SIGNATURE_NAME)), $out, $exit_code);
+		return $exit_code === 0 ? trim(implode("\n", $out)) : '';
 	}
 
 	/** The version of the bundle already in agent_dist, or null. */
