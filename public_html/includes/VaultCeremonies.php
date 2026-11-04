@@ -30,6 +30,9 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.12 - a ceremony that opens a window checks the window store first (requireWindowStore()),
+ *   so a refusing host spends no recovery code and writes no vault; a window that fails to open
+ *   after the work is saved is logged, not reported as a failed ceremony
  * @version 1.11 - X-Wing only: an interrupted rotation always completes into its own generation; no old-root check
  * @version 1.10 - withDrainLock(): the chain sweep (VaultChainSweep) takes the member's drain lock, so it never runs
  *               beside a rotation's re-seal
@@ -175,6 +178,9 @@ class VaultCeremonies {
 		if ($existing->count_all() > 0) {
 			throw new VaultCeremonyException('Your vault is already set up.');
 		}
+		if ($open_window) {
+			self::requireWindowStore();
+		}
 		// A vault with no passkey wrapping is the compatibility fallback for an
 		// account whose every credential has failed a real derivation. The
 		// check lives HERE rather than in the caller so no route into the
@@ -252,7 +258,7 @@ class VaultCeremonies {
 		}
 
 		if ($open_window) {
-			VaultUnlock::arm($user->key, $opened['key'], UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_SETUP);
+			self::armAfterCommit($user, $opened['key'], VaultAudit::VIA_SETUP);
 		}
 
 		return [
@@ -301,6 +307,9 @@ class VaultCeremonies {
 		}
 		$this->lock_handed_off = false;
 		try {
+			if ($open_window) {
+				self::requireWindowStore();
+			}
 			return $this->rotateLocked($user, $vault, $passkey_credential_id, $passkey_label, $kek, $passphrase_kek,
 				$code_set, $root_unlockers, $open_window);
 		} finally {
@@ -466,7 +475,7 @@ class VaultCeremonies {
 		// window opens on the new key now, because the session is written before
 		// the answer goes; the re-seal follows the answer.
 		if ($open_window) {
-			VaultUnlock::arm($user->key, $new_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_ROTATE);
+			self::armAfterCommit($user, $new_key, VaultAudit::VIA_ROTATE);
 		}
 
 		$new_public = $new_key->publicKey();
@@ -598,7 +607,7 @@ class VaultCeremonies {
 		}
 
 		if ($open_window && $current_key !== null) {
-			VaultUnlock::arm($user->key, $current_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_REENROLL);
+			self::armAfterCommit($user, $current_key, VaultAudit::VIA_REENROLL);
 		}
 
 		$current_public = (string)$vault->get('uev_public_key');
@@ -892,6 +901,9 @@ class VaultCeremonies {
 		if (strlen($kek) !== 32) {
 			throw new VaultCeremonyException('That key is not in the expected form. Reload the page and try again.');
 		}
+		if ($open_window) {
+			self::requireWindowStore(); // before the code is spent
+		}
 
 		$wrappings = new MultiUserEncryptionWrapping([
 			'vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_RECOVERY, 'is_used' => false,
@@ -916,7 +928,15 @@ class VaultCeremonies {
 		require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
 		VaultClientCustody::forgetDevices((int)$user->key);
 		if ($open_window) {
-			VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_RECOVERY);
+			try {
+				VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_RECOVERY);
+			} catch (VaultStoreUnavailableException $e) {
+				// Checked usable above, so a write failed since (tmpfs full). The
+				// code is spent and the other windows are closed: say exactly that.
+				error_log('Vault recovery: the code for user ' . $user->key . ' was used but no window opened: ' . $e->getMessage());
+				throw new VaultCeremonyException('Your recovery code worked and has been used, but the vault could not be '
+					. 'opened on this server: ' . $e->getMessage());
+			}
 		}
 
 		$remaining = new MultiUserEncryptionWrapping([
@@ -1032,6 +1052,7 @@ class VaultCeremonies {
 			// look: the server never takes either.
 			throw new VaultCeremonyException('This page is out of date. Reload it and try again.');
 		}
+		self::requireWindowStore(); // before a recovery code is spent below
 
 		if (isset($unlocker_input['credential']) && is_array($unlocker_input['credential'])) {
 			self::assertNoSecondPrfOutput($unlocker_input['credential']);
@@ -1094,8 +1115,34 @@ class VaultCeremonies {
 			throw new VaultCeremonyException('Confirm with your passkey, passphrase or a recovery code to continue.');
 		}
 
-		VaultUnlock::arm((int)$user->key, $probe['key'], UserEncryptionVault::SCOPE_USER, null, $via);
+		self::armAfterCommit($user, $probe['key'], $via);
 		return ['key' => $probe['key'], 'wrappings' => $probe['wrappings']];
+	}
+
+	/**
+	 * Refuse a ceremony that will open a window, before it spends or writes
+	 * anything, when this host's window store refuses (VaultUnlock::assertStoreUsable()).
+	 */
+	private static function requireWindowStore(): void {
+		try {
+			VaultUnlock::assertStoreUsable();
+		} catch (VaultStoreUnavailableException $e) {
+			throw new VaultCeremonyException($e->getMessage());
+		}
+	}
+
+	/**
+	 * Open the window after a ceremony's work is saved. The store was usable a
+	 * moment ago (requireWindowStore()); if a write fails now the ceremony still
+	 * stands, so it is reported in the log and the person unlocks again later,
+	 * rather than told that saved work failed.
+	 */
+	private static function armAfterCommit(User $user, VaultKey $key, string $via): void {
+		try {
+			VaultUnlock::arm((int)$user->key, $key, UserEncryptionVault::SCOPE_USER, null, $via);
+		} catch (VaultStoreUnavailableException $e) {
+			error_log('VaultCeremonies: ' . $via . ' for user ' . $user->key . ' is saved but no window opened: ' . $e->getMessage());
+		}
 	}
 
 	/**

@@ -96,7 +96,7 @@ function dlv_converge($folder_id) {
 $owner = make_user('drvlc_owner');
 $other = make_user('drvlc_other');
 $kp = vault_fixture_server_vault((int)$owner->key);
-$window_ok = $has_session && vault_apcu_usable();
+$window_ok = $has_session;
 // Made before anything decrypts: a process that has opened sealed content may
 // not write long values (the TOTP secret) into an unsealed table.
 $twofa = make_user('drvlc_2fa');
@@ -183,7 +183,7 @@ check($r->error !== null && stripos((string)$r->error, 'Unlock your vault') !== 
 	&& dlv_level($tree->key) === ProtectionLevel::PRIVATE_,
 	'with the window closed the lowering is refused and nothing flips', (string)$r->error);
 if (!$window_ok) {
-	harness_skip('window-open lowering', 'APCu/session unavailable (run with -d apc.enable_cli=1)');
+	harness_skip('window-open lowering', 'no session');
 } else {
 	vault_fixture_open_window((int)$owner->key, $kp['secret'], 'user', array('idle' => null, 'absolute' => null));
 	$r = dlv_change($tree->key, ProtectionLevel::STANDARD);

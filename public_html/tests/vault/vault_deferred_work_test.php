@@ -10,10 +10,6 @@ harness_boot();
 require_once(__DIR__ . '/../lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 tests/vault/vault_deferred_work_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();
@@ -135,20 +131,20 @@ vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => n
 
 // Age the clock to well inside the cap: still open, but clearly not "now".
 $aged = time() - 500;
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 $meta['content'] = $aged;
-apcu_store($meta_key, $meta, 3600);
+vault_store_put($meta_key, $meta);
 
 VaultDeferredWork::drain($uid, $scope, 1.0);
 check($bg['done'] === 2, 'the drain read the key and did its work');
 
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 check((int)$meta['content'] === $aged,
 	'the drain did NOT refresh the idle clock (' . (time() - (int)$meta['content']) . 's old, expected ~500s)');
 
 // And the cap still bites on schedule afterwards.
 $meta['content'] = time() - 1200;
-apcu_store($meta_key, $meta, 3600);
+vault_store_put($meta_key, $meta);
 $res = VaultDeferredWork::drain($uid, $scope, 1.0);
 check($res['locked'] === true, 'once the cap is exceeded a drain reports locked');
 check(!VaultUnlock::isOpen($uid), 'and the window really ended');
@@ -170,12 +166,12 @@ check(!VaultUnlock::isActivitySuppressed(), 'suppression is restored even when t
 
 section('An ordinary read still counts as activity');
 vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 $meta['content'] = time() - 300;
-apcu_store($meta_key, $meta, 3600);
+vault_store_put($meta_key, $meta);
 $got = VaultUnlock::secretKey($uid, $scope);
 check($got instanceof VaultKey && $got->id() === $key_id, 'a normal read succeeds');
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 check(time() - (int)$meta['content'] < 5, 'and it refreshed the content stamp');
 
 harness_finish();

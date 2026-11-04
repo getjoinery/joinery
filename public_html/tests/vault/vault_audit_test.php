@@ -9,10 +9,6 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/../lib/vault_fixtures.php');
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 tests/vault/vault_audit_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();
@@ -87,38 +83,38 @@ section('Each policy cap reports its own reason');
 
 vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => 1), VaultAudit::VIA_PASSPHRASE);
 $meta_key = 'vaultmeta:' . $sid . ':' . $uid . ':' . $scope;
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 $meta['armed'] = time() - 3600;           // armed an hour ago, absolute cap is 1s
-apcu_store($meta_key, $meta, 600);
+vault_store_put($meta_key, $meta);
 check(!VaultUnlock::isOpen($uid), 'the absolute cap ends the window');
 check(strpos(last_row($uid)['evl_note'], 'reason=' . VaultAudit::REASON_ABSOLUTE_CAP) !== false,
 	'and names the absolute cap');
 
 vault_fixture_open_window($uid, $secret, $scope, array('idle' => 1, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 $meta['content'] = time() - 3600;         // no content decrypt for an hour, idle cap is 1s
-apcu_store($meta_key, $meta, 600);
+vault_store_put($meta_key, $meta);
 check(!VaultUnlock::isOpen($uid), 'the idle cap ends the window');
 check(strpos(last_row($uid)['evl_note'], 'reason=' . VaultAudit::REASON_IDLE_CAP) !== false,
 	'and names the idle cap');
 
 vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSPHRASE);
 VaultUnlock::heartbeat($uid, $scope);
-$meta = apcu_fetch($meta_key);
+$meta = vault_store_get($meta_key);
 $meta['hb'] = time() - (VaultUnlock::HEARTBEAT_MAX_STALE_SECONDS + 60);
-apcu_store($meta_key, $meta, 600);
+vault_store_put($meta_key, $meta);
 check(!VaultUnlock::isOpen($uid), 'a stale heartbeat ends the window');
 check(strpos(last_row($uid)['evl_note'], 'reason=' . VaultAudit::REASON_HEARTBEAT_STALE) !== false,
 	'and names the stale heartbeat');
 
-section('An APCu expiry is noticed by the next read');
+section('A store expiry is noticed by the next read');
 
 // The case nothing else can report: no cap fired, no lock was called — the
-// entry simply aged out of the cache, which runs no code of its own.
+// entry simply aged out of the store, which runs no code of its own.
 vault_fixture_open_window($uid, $secret, $scope, array('idle' => null, 'absolute' => null), VaultAudit::VIA_PASSKEY);
 $before = count(audit_rows($uid));
-apcu_delete('vault:' . $sid . ':' . $uid . ':' . $scope);
-apcu_delete($meta_key);
+vault_store_delete('vault:' . $sid . ':' . $uid . ':' . $scope);
+vault_store_delete($meta_key);
 check(!VaultUnlock::isOpen($uid), 'the window reads as closed');
 $row = last_row($uid);
 check(count(audit_rows($uid)) === $before + 1, 'exactly one row for the expiry');
@@ -149,8 +145,8 @@ check(count(audit_rows($uid)) === $before,
 section('A credential event closes every session it wipes');
 
 $other = 'other-session-' . bin2hex(random_bytes(4));
-apcu_store('vault:' . $other . ':' . $uid . ':' . $scope, $secret, 600);
-apcu_store('vaultmeta:' . $other . ':' . $uid . ':' . $scope,
+vault_store_put('vault:' . $other . ':' . $uid . ':' . $scope, PoolVaultKey::wrappedForm($secret), 600);
+vault_store_put('vaultmeta:' . $other . ':' . $uid . ':' . $scope,
 	array('armed' => time() - 120, 'content' => time(), 'hb' => null,
 	      'idle_cap' => null, 'abs_cap' => null), 600);
 

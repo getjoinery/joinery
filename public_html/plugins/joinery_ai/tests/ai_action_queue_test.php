@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_action_queue_test.php
  *
+ * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3 - X-Wing test vault, minted outside the hot state
  * @version 1.2 - Past: approve after a decline or a failure; labelled calendar card fields
  * @version 1.1 - a sealed recipe proposal approved in-window lands; the card states a failure plainly
@@ -55,7 +56,7 @@ $db = DbConnector::get_instance()->get_db_link();
 // Session + APCu availability must be established BEFORE the harness prints
 // anything — session_start() refuses once output has been sent, and the
 // in-window sealed-card checks below need both.
-$aq_window_capable = vault_apcu_usable() && vault_ensure_session();
+$aq_window_capable = vault_ensure_session();
 
 $owner = make_user('AqOwner', 10);
 $owner_id = intval($owner->key);

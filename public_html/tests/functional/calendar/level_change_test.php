@@ -121,7 +121,7 @@ $twofa->enable_totp('JBSWY3DPEHPK3PXP');
 $twofa->save();
 $kp = vault_fixture_server_vault((int)$owner->key);
 vault_fixture_server_vault((int)$twofa->key);
-$window_ok = $has_session && vault_apcu_usable();
+$window_ok = $has_session;
 $WIN = array('2031-03-01 00:00:00', '2031-04-01 00:00:00');
 
 // ---------------------------------------------------------------------------
@@ -223,7 +223,7 @@ check($r->error !== null && stripos((string)$r->error, 'Unlock your vault') !== 
 	'with the window closed: refused, the level and every row untouched', (string)$r->error);
 
 if (!$window_ok) {
-	harness_skip('in-window paths', 'no session or no APCu on this CLI');
+	harness_skip('in-window paths', 'no session on this CLI');
 } else {
 	vault_fixture_open_window((int)$owner->key, $kp['secret']);
 	$feed = cal_feed((int)$owner->key, $WIN[0], $WIN[1]);

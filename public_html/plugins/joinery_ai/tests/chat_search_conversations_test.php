@@ -8,7 +8,7 @@
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('tests/lib/vault_fixtures.php'));   // vault_apcu_usable(), vault_ensure_session()
+require_once(PathHelper::getIncludePath('tests/lib/vault_fixtures.php'));   // vault_ensure_session()
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('joinery_ai')) { harness_skip('joinery_ai plugin inactive'); harness_finish(); }
@@ -230,8 +230,8 @@ check(stripos($out_remote_text, 'protected conversations') !== false, 'the fixed
 // ==========================================================================
 // Surfaced (local + open vault) path — needs an unlock window (APCu + session).
 section('Surfaced protected path (local + vault open)');
-if (!vault_apcu_usable() || !$has_session || session_id() === '') {
-    harness_skip('APCu/session unavailable (run with -d apc.enable_cli=1) — surfaced protected path skipped');
+if (!$has_session || session_id() === '') {
+    harness_skip('no session — surfaced protected path skipped');
 } else {
     vault_fixture_open_window($uidA, $kp['secret'], UserEncryptionVault::SCOPE_USER);
 

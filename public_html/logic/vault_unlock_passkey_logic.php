@@ -110,6 +110,8 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 		}
 	} catch (VaultClientCustodyException $e) {
 		return LogicResult::error($e->getMessage());
+	} catch (VaultStoreUnavailableException $e) {
+		return LogicResult::error($e->getMessage());
 	} catch (Exception $e) {
 		return LogicResult::error('Could not unlock your vault with this passkey.');
 	}
@@ -149,6 +151,7 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 	]);
 }
 
+// @version 1.5 - a window store that refuses reads as its own reason, not a failed passkey
 // @version 1.4 - no rotation_required answer: every vault key is X-Wing
 // @version 1.3 - a passkey unlock keeps the retired keys its output still opens (VaultPreviousKeys::adoptRetired)
 // @version 1.2 - a vault on an old X25519 key answers rotation_required with the rotation link (post_quantum_sealing R7)

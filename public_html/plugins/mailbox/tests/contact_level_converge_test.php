@@ -32,8 +32,8 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContact
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxProtectionLevel.php'));
 require_once(PathHelper::getIncludePath('includes/ProtectionLevelPicker.php'));
 
-if (!($has_session && vault_apcu_usable())) {
-	harness_skip('contact level converge', 'needs a session and APCu on this CLI (every conversion runs in a window)');
+if (!($has_session)) {
+	harness_skip('contact level converge', 'needs a session on this CLI (every conversion runs in a window)');
 	harness_finish();
 }
 

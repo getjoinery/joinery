@@ -47,7 +47,7 @@ $friend = make_user('drvpriv_friend');
 $kp = vault_fixture_server_vault((int)$owner->key);
 $vault_id = $kp['id'];
 
-$window_ok = vault_apcu_usable() && vault_ensure_session();
+$window_ok = vault_ensure_session();
 
 /** Open the owner's window for the in-process reads. */
 function drvpriv_unlock($owner_id, $secret) {

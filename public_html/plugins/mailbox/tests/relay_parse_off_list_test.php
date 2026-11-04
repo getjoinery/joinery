@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php db --filter=relay_parse_off_list
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
@@ -32,10 +33,6 @@ harness_boot();
 
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 plugins/mailbox/tests/relay_parse_off_list_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

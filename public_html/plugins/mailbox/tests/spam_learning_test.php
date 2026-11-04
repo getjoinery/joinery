@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php test-db --filter=spam_learning
  *
+ * @version 2.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 2.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 2.1 - status(): the counts spam_learning_status carries, by what became of each correction
  * @version 2.0 - the in-core corpus; replaces the rspamd stub test
@@ -342,8 +343,8 @@ try {
 
 	// -----------------------------------------------------------------------
 	section('sealed: fingerprint at ingest, teaching in the window');
-	if (!vault_apcu_usable() || !vault_ensure_session()) {
-		harness_skip('sealed section: no APCu or no CLI session here, so no unlock window can open', 'run through tests/run.php');
+	if (!vault_ensure_session()) {
+		harness_skip('sealed section: no CLI session here, so no unlock window can open', 'run through tests/run.php');
 	} else {
 		$owner = make_user('SlOwner');
 		$owner_id = intval($owner->key);

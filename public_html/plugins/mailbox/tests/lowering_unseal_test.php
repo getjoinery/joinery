@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php db --filter=lowering_unseal
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
@@ -36,10 +37,6 @@ require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 plugins/mailbox/tests/lowering_unseal_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

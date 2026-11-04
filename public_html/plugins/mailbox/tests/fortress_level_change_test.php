@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_level_change
  *
+ * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - B22, B24, B25 (review 2026-09-28)
  * @version 1.0
@@ -46,8 +47,8 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-if (!vault_apcu_usable() || !vault_ensure_session()) {
-	harness_skip('APCu or a session is unavailable, so no unlock window can open');
+if (!vault_ensure_session()) {
+	harness_skip('no session, so no unlock window can open');
 	harness_finish();
 }
 

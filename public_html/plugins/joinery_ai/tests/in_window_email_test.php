@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=in_window_email
  *
+ * @version 1.6 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.5 - the consent check gets an unsaved recipe (saving one runs that rule); no clean-up empties a protected mailbox
  * @version 1.4 - X-Wing test vault
  * @version 1.3
@@ -61,10 +62,6 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJob
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeWorkerSpawner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/tasks/RecipeDispatcher.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 plugins/joinery_ai/tests/in_window_email_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

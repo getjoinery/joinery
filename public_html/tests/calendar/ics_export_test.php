@@ -256,8 +256,8 @@ VaultUnlock::close((int)$c->key);
 $r = exp_download();
 check($r->error !== null && !empty($r->data['locked']) && stripos((string)$r->error, 'unlock') !== false && empty($r->data['content']),
 	'with the window closed: refused as locked, nothing in it', (string)$r->error);
-if (!$has_session || !vault_apcu_usable()) {
-	harness_skip('in-window download', 'no session or no APCu on this CLI');
+if (!$has_session) {
+	harness_skip('in-window download', 'no session on this CLI');
 } else {
 	vault_fixture_open_window((int)$c->key, $kp['secret']);
 	$r = exp_download();

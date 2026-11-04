@@ -36,6 +36,8 @@
  *
  * Specified in strategy/object_free_window_store.md.
  *
+ * @version 1.2 - INCLUDE_EXPIRED for keys(), so a wipe by name reaches an expired entry; info(): a live entry's identity and expiry, so a reader can keep what it read
+ *                for as long as the file is the same one (VaultUnlock's request memo)
  * @version 1.1 - reviewer2 B1-B8: the generation's fourth part is OPcache's start time (APCu's moves on a
  *                clear or a full expunge); set() zeroes the value it replaces; a half-zeroed read is a
  *                quiet miss; a process whose stat is unreadable is judged by kill(0); a web SAPI other
@@ -48,6 +50,9 @@ final class RamStore {
 
 	/** Bound to the PHP-FPM master's lifetime (or, outside PHP-FPM, this process's). */
 	const LIFETIME = 1;
+
+	/** keys() only: list expired names too, for a caller that deletes what it finds. */
+	const INCLUDE_EXPIRED = 2;
 
 	const KEY_PATTERN = '/^[A-Za-z0-9_~-][A-Za-z0-9:_.,~-]{0,199}$/';
 
@@ -178,6 +183,27 @@ final class RamStore {
 		return @touch($path, time() + $ttl);
 	}
 
+	/**
+	 * A live entry's identity and expiry, read from its name alone (no open):
+	 * ['id' => string, 'expires' => int], or null when there is none. The id
+	 * changes whenever set() writes the key again (a new file: tmpfs numbers
+	 * inodes from a counter that only goes up), so a caller holding a value it
+	 * read can tell whether that value is still the current one. touch() keeps
+	 * the id.
+	 */
+	public static function info(string $key, int $flags = 0): ?array {
+		$path = self::path($key, $flags);
+		if ($path === null) {
+			return null;
+		}
+		clearstatcache(true, $path);
+		$st = @lstat($path);
+		if ($st === false || ($st['mode'] & 0170000) !== 0100000 || $st['mtime'] <= time()) {
+			return null;
+		}
+		return array('id' => $st['dev'] . ':' . $st['ino'], 'expires' => (int)$st['mtime']);
+	}
+
 	public static function exists(string $key, int $flags = 0): bool {
 		$path = self::path($key, $flags);
 		return $path !== null && self::live($path);
@@ -195,6 +221,8 @@ final class RamStore {
 
 	/**
 	 * The live keys that begin with $prefix, by name. Never opens an entry.
+	 * With INCLUDE_EXPIRED, also those past their expiry that no read or sweep
+	 * has removed yet: a caller wiping by name zeroes those too.
 	 * @return string[]
 	 */
 	public static function keys(string $prefix, int $flags = 0): array {
@@ -209,7 +237,8 @@ final class RamStore {
 				continue;
 			}
 			$st = @lstat($dir . '/' . $name);
-			if ($st !== false && ($st['mode'] & 0170000) === 0100000 && $st['mtime'] > $now) {
+			if ($st !== false && ($st['mode'] & 0170000) === 0100000
+					&& ($st['mtime'] > $now || ($flags & self::INCLUDE_EXPIRED))) {
 				$out[] = $name;
 			}
 		}

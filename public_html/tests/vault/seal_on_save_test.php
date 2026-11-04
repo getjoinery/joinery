@@ -26,8 +26,8 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-if (!vault_apcu_usable() || !vault_ensure_session()) {
-	harness_skip('APCu/session unavailable, so no unlock window can be held in CLI');
+if (!vault_ensure_session()) {
+	harness_skip('no session, so no unlock window can be held in CLI');
 	harness_finish();
 }
 

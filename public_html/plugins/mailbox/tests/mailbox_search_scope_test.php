@@ -27,8 +27,9 @@
  *    with no grant and no vault searches Postgres only and is never told to
  *    unlock.
  *
- * Run: php -d apc.enable_cli=1 plugins/mailbox/tests/mailbox_search_scope_test.php
+ * Run: php plugins/mailbox/tests/mailbox_search_scope_test.php
  *
+ * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - list rows: senders across the thread, snippet from the newest body, HTML only without a plain part
  * @version 1.0
@@ -49,11 +50,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxViewer.
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 plugins/mailbox/tests/mailbox_search_scope_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

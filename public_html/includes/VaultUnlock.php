@@ -6,7 +6,7 @@
  * user's vault secret key into a bounded, idle-extended window. What a
  * consumer gets back is a VaultKey — an object that opens per-item DEKs and
  * tells its public half, and has no getter for the bytes (specs/unseal_daemon.md
- * § The PHP seam). Today the bytes sit in APCu behind that object
+ * § The PHP seam). Today the bytes sit in the window store behind that object
  * (PoolVaultKey); the unseal daemon replaces the object, not the callers.
  * Every server-custody consumer of that scope shares the SAME window — mail
  * and chat both read `VaultUnlock::secretKey($user_id)` and both see it open
@@ -15,10 +15,22 @@
  * reads every consumer's in-window content, not just one) — see
  * docs/sealed_vault.md § One unlock opens everything.
  *
- * The window is keyed to the browser session (APCu key
+ * The window is keyed to the browser session (store key
  * `vault:{session_id}:{user_id}:{scope}`), so it never survives past the
- * session that opened it, and every read re-stores the value (activity
- * extension) so an active user is never dropped mid-window. Ending the
+ * session that opened it, and a read extends it (activity extension) so an
+ * active user is never dropped mid-window.
+ *
+ * THE STORE. Every window entry (the key slot, its metadata `vaultmeta:`, a
+ * borrowed slot's marker `vaultbrw:`, a close tombstone `vaultclosed:`) is a
+ * RamStore entry bound to the PHP-FPM master's lifetime: JSON files in RAM,
+ * which cannot hold an object, so nothing planted there runs when a later
+ * request reads it; and a PHP-FPM restart or reload ends every window, a
+ * deploy none (strategy/object_free_window_store.md). The open-window marker
+ * cron reads (`vaultwin:`) is a plain entry, since cron has no PHP-FPM master.
+ * A store that refuses (VaultStoreUnavailableException) means no window opens.
+ * Within one request the slot and its metadata are read once and the window is
+ * extended once (windowState(), account()); a file that changed since it was
+ * read is read again, so the memo never hides a lock or a cap. Ending the
  * window before the idle timeout — an explicit "lock", a credential event, a
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
@@ -42,6 +54,10 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.24 - windows live in RamStore, bound to the PHP-FPM master (strategy/
+ *   object_free_window_store.md WP2): no APCu read of a window remains; lockAll() and
+ *   lockBorrowed() list names; the open-window marker is a store entry; one read and one
+ *   extension per request; arm() throws VaultStoreUnavailableException when the store refuses
  * @version 1.23 - lockAll() and lockBorrowed() iterate APCu by key only (APC_ITER_KEY): the
  *   default format rebuilds every entry's value, around ApcuStore's guard (unseal_daemon.md C4)
  * @version 1.22 - window metadata is read through ApcuStore::fetch() (unseal_daemon.md C4)
@@ -105,6 +121,10 @@ class VaultLockedException extends Exception {}
  *  The API export is the one place that catches it, to hand the stored
  *  ciphertext to that browser (SystemBase::export_for_api()). */
 class VaultSealedForBrowserException extends RuntimeException {}
+
+/** Thrown by arm() when the window store refuses on this host (RamStore): no
+ *  window can open, and the reason is in the log and on the vault health page. */
+class VaultStoreUnavailableException extends RuntimeException {}
 
 require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 require_once(PathHelper::getIncludePath('includes/PoolVaultKey.php'));
@@ -185,6 +205,19 @@ class VaultUnlock {
 	const CREDENTIAL_SLOT_PREFIX = '~apk';
 
 	/**
+	 * @var array<string, array> the windows this request has read, by slot key:
+	 *   key (PoolVaultKey), slot_id and meta_id (RamStore::info() ids of the
+	 *   files as read), meta, accounted (when this process last extended it),
+	 *   seen (when it was last asked for: an entry not asked for in
+	 *   ACCOUNT_EVERY_SECONDS is dropped, so a long process does not keep keys
+	 *   of windows that closed elsewhere).
+	 */
+	private static $memo = array();
+
+	/** A request extends a window at most once in this many seconds (account()). */
+	const ACCOUNT_EVERY_SECONDS = 60;
+
+	/**
 	 * Load every plugin bootstrap and core consumer bootstrap — lazy, once per
 	 * request, called by every code path that needs a consumer's hooks live: the
 	 * File decrypt-hook resolution (File::serve_from_path()), the rotation
@@ -249,14 +282,13 @@ class VaultUnlock {
 		}
 		$sid = self::currentSessionId();
 		$now = time();
-		$key->storeInSlot(self::apcuKey($sid, $user_id, $scope), self::idleSeconds());
-		apcu_store(self::metaKey($sid, $user_id, $scope), array(
+		self::storeWindow($key, $sid, $user_id, $scope, array(
 			'armed'      => $now,
 			'content'    => $now,           // last content decrypt (idle cap basis)
 			'hb'         => null,           // heartbeat: null until a surface monitors
 			'idle_cap'   => $caps['idle'] ?? null,
 			'abs_cap'    => $caps['absolute'] ?? null,
-		), self::idleSeconds());
+		));
 		self::touchWindowMarker($user_id, $scope);
 		self::rememberOpen($user_id, $scope, $via, $now);
 		VaultAudit::opened($user_id, $scope, $via, $caps, $sid);
@@ -268,6 +300,39 @@ class VaultUnlock {
 		if ($scope === 'user' && self::$credential_window === null) {
 			self::armBorrowers($user_id, $key, $caps, $now);
 		}
+	}
+
+	/**
+	 * Write a window's key slot and metadata. Throws, leaving no window, when
+	 * the store refuses: an unlock then reports the vault service unavailable.
+	 */
+	private static function storeWindow(PoolVaultKey $key, string $sid, int $user_id, string $scope, array $meta): void {
+		$slot = self::slotKey($sid, $user_id, $scope);
+		unset(self::$memo[$slot]);
+		if (!$key->storeInSlot($slot, self::idleSeconds())
+				|| !RamStore::set(self::metaKey($sid, $user_id, $scope), $meta, self::idleSeconds(), RamStore::LIFETIME)) {
+			RamStore::delete($slot, RamStore::LIFETIME);
+			throw new VaultStoreUnavailableException(self::storeMessage(RamStore::status()));
+		}
+	}
+
+	/**
+	 * Throw VaultStoreUnavailableException when no window could be stored here.
+	 * A ceremony that spends or writes something before it arms (a recovery
+	 * code, a rotation, a new vault) asks first, so a host whose store refuses
+	 * turns it away before anything is used up.
+	 */
+	public static function assertStoreUsable(): void {
+		$status = RamStore::status();
+		if (!$status['ok']) {
+			throw new VaultStoreUnavailableException(self::storeMessage($status));
+		}
+	}
+
+	private static function storeMessage(array $status): string {
+		return 'The vault cannot be unlocked on this server right now: '
+			. ($status['ok'] ? 'its memory store could not be written' : 'its memory store is refused (' . $status['reason'] . ')')
+			. '. The site operator can see the reason on the vault health check.';
 	}
 
 	/**
@@ -286,18 +351,29 @@ class VaultUnlock {
 		}
 		foreach (self::borrowingCredentials($user_id) as $credential) {
 			$sid = self::CREDENTIAL_SLOT_PREFIX . $credential['id'];
-			$key->storeInSlot(self::apcuKey($sid, $user_id, 'user'), self::idleSeconds());
-			apcu_store(self::metaKey($sid, $user_id, 'user'), array(
-				'armed'    => $now,
-				'content'  => $now,
-				'hb'       => null,             // no heartbeat ever applies to a borrowed slot
-				'idle_cap' => $caps['idle'] ?? null,
-				'abs_cap'  => $caps['absolute'] ?? null,
-			), self::idleSeconds());
+			// The person's own window is open already. A borrowed slot the store
+			// will not take is skipped, not the unlock undone: that program asks
+			// again and gets the locked answer, as it would after an expiry.
+			try {
+				self::storeWindow($key, $sid, $user_id, 'user', array(
+					'armed'    => $now,
+					'content'  => $now,
+					'hb'       => null,             // no heartbeat ever applies to a borrowed slot
+					'idle_cap' => $caps['idle'] ?? null,
+					'abs_cap'  => $caps['absolute'] ?? null,
+				));
+			} catch (VaultStoreUnavailableException $e) {
+				error_log('VaultUnlock::armBorrowers: app credential ' . $credential['id'] . ' of user ' . $user_id
+					. ' not armed: ' . $e->getMessage());
+				continue;
+			}
 			// Remembered so an expiry nobody saw happen is still written down by
 			// the credential's next request (observeClosed()).
-			apcu_store(self::borrowMarkerKey($sid, $user_id, 'user'), $now,
-				max(self::idleSeconds(), (int)($caps['absolute'] ?? 0)) + self::CLOSE_TOMBSTONE_SECONDS);
+			if (!RamStore::set(self::borrowMarkerKey($sid, $user_id, 'user'), $now,
+					max(self::idleSeconds(), (int)($caps['absolute'] ?? 0)) + self::CLOSE_TOMBSTONE_SECONDS, RamStore::LIFETIME)) {
+				error_log('VaultUnlock::armBorrowers: no armed marker for app credential ' . $credential['id'] . ' of user '
+					. $user_id . ': its expiry will not reach the audit log');
+			}
 			VaultAudit::opened($user_id, 'user', VaultAudit::VIA_APP_BORROW, $caps, $sid);
 		}
 	}
@@ -369,18 +445,14 @@ class VaultUnlock {
 			throw new RuntimeException('VaultUnlock::touchActivity: only a borrowing app credential\'s request may count its checks as activity.');
 		}
 		$sid = self::currentSessionIdOrNull();
-		$slot = self::apcuKey($sid, $user_id, $scope);
-		$key = PoolVaultKey::fromSlot($slot);
-		if ($key === null) {
+		if (self::windowState($sid, $user_id, $scope) === null) {
 			self::observeClosed($user_id, $scope);
 			return false;
 		}
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return false;
 		}
-		$key->storeInSlot($slot, self::idleSeconds());
-		self::touchWindowMarker($user_id, $scope);
-		self::stampMeta($sid, $user_id, $scope, 'content');
+		self::account($sid, $user_id, $scope);
 		return true;
 	}
 
@@ -396,10 +468,10 @@ class VaultUnlock {
 		$out = array();
 		foreach (self::borrowingCredentials($user_id) as $credential) {
 			$sid = self::CREDENTIAL_SLOT_PREFIX . $credential['id'];
-			if (!apcu_exists(self::apcuKey($sid, $user_id, 'user'))) {
+			if (!RamStore::exists(self::slotKey($sid, $user_id, 'user'), RamStore::LIFETIME)) {
 				continue;
 			}
-			$meta = ApcuStore::fetch(self::metaKey($sid, $user_id, 'user'), $ok);
+			$meta = RamStore::get(self::metaKey($sid, $user_id, 'user'), $ok, RamStore::LIFETIME);
 			$ends_at = null;
 			if ($ok && is_array($meta)) {
 				$now = time();
@@ -426,14 +498,11 @@ class VaultUnlock {
 	 * means "lock my mail", wherever it is being read.
 	 */
 	public static function lockBorrowed(int $user_id, string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
-		if (!class_exists('APCUIterator') || !function_exists('apcu_enabled') || !apcu_enabled()) {
-			return;
-		}
 		$pattern = '/^vault:' . preg_quote(self::CREDENTIAL_SLOT_PREFIX, '/') . '(\d+):'
 			. preg_quote((string)$user_id, '/') . ':([^:]*)$/';
 		$slots = array();
-		foreach (new APCUIterator($pattern, APC_ITER_KEY) as $entry) {
-			if (preg_match($pattern, (string)$entry['key'], $m)) {
+		foreach (RamStore::keys('vault:' . self::CREDENTIAL_SLOT_PREFIX, RamStore::LIFETIME | RamStore::INCLUDE_EXPIRED) as $name) {
+			if (preg_match($pattern, $name, $m)) {
 				$slots[] = array(self::CREDENTIAL_SLOT_PREFIX . $m[1], $m[2]);
 			}
 		}
@@ -448,7 +517,7 @@ class VaultUnlock {
 		self::lock($user_id, self::CREDENTIAL_SLOT_PREFIX . $key_id, 'user', $reason);
 	}
 
-	/** APCu key remembering that a borrowed slot was armed (see observeClosed()). */
+	/** Store key remembering that a borrowed slot was armed (see observeClosed()). */
 	private static function borrowMarkerKey(string $session_id, int $user_id, string $scope): string {
 		return 'vaultbrw:' . $session_id . ':' . $user_id . ':' . $scope;
 	}
@@ -553,7 +622,7 @@ class VaultUnlock {
 		if ($sid === null) {
 			return false;
 		}
-		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		if (self::windowState($sid, $user_id, $scope) === null) {
 			self::observeClosed($user_id, $scope);
 			return false;
 		}
@@ -563,8 +632,9 @@ class VaultUnlock {
 	/**
 	 * The in-window vault key, or null when locked. Every content read calls
 	 * this and treats null as "locked" — a one-tap unlock prompt, never an
-	 * error. Re-stores on every fetch (activity extension) and stamps the
-	 * content-decrypt time the hardened idle cap measures from.
+	 * error. Extends the window (activity extension) and stamps the
+	 * content-decrypt time the hardened idle cap measures from, once per
+	 * request (account()).
 	 *
 	 * The key comes back as a VaultKey: hand it to VaultCrypto::openItemDek()
 	 * or read publicKey(); there is nothing else to do with it. Code that only
@@ -575,12 +645,12 @@ class VaultUnlock {
 		if ($sid === null) {
 			return null; // no session (a CLI/cron reader) can never hold a window - locked, not an error
 		}
-		$slot = self::apcuKey($sid, $user_id, $scope);
-		$key = PoolVaultKey::fromSlot($slot);
-		if ($key === null) {
+		$state = self::windowState($sid, $user_id, $scope);
+		if ($state === null) {
 			self::observeClosed($user_id, $scope);
 			return null;
 		}
+		$key = $state['key'];
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return null;
 		}
@@ -589,9 +659,7 @@ class VaultUnlock {
 		// above still applied — suppression skips the accounting, never the
 		// policy (see $activity_suppressed).
 		if (!self::$activity_suppressed) {
-			$key->storeInSlot($slot, self::idleSeconds());
-			self::touchWindowMarker($user_id, $scope);
-			self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
+			self::account($sid, $user_id, $scope); // this fetch IS a content decrypt
 		}
 		// Every open of sealed content needs this key first, so this is where the
 		// hot-turn rule learns whose content the process could be holding. It does
@@ -625,18 +693,14 @@ class VaultUnlock {
 			return false;
 		}
 		$scope = UserEncryptionVault::SCOPE_USER;
-		$slot = self::apcuKey($sid, $user_id, $scope);
-		$key = PoolVaultKey::fromSlot($slot);
-		if ($key === null) {
+		if (self::windowState($sid, $user_id, $scope) === null) {
 			self::observeClosed($user_id, $scope);
 			return false;
 		}
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return false;
 		}
-		$key->storeInSlot($slot, self::idleSeconds());
-		self::touchWindowMarker($user_id, $scope);
-		self::stampMeta($sid, $user_id, $scope, 'content');
+		self::account($sid, $user_id, $scope);
 		return true;
 	}
 
@@ -668,7 +732,7 @@ class VaultUnlock {
 		// The beat is normally what NOTICES an expiry: it is the only thing
 		// still asking once the human has gone, so it closes the audit trail
 		// within one beat interval rather than whenever someone next visits.
-		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		if (self::windowState($sid, $user_id, $scope) === null) {
 			self::observeClosed($user_id, $scope);
 			return false;
 		}
@@ -680,20 +744,99 @@ class VaultUnlock {
 		return true;
 	}
 
-	/** APCu key for a window's arming/heartbeat metadata (companion to apcuKey). */
+	/** Store key for a window's arming/heartbeat metadata (companion to slotKey). */
 	private static function metaKey(string $session_id, int $user_id, string $scope): string {
 		return 'vaultmeta:' . $session_id . ':' . $user_id . ':' . $scope;
 	}
 
-	/** Update one metadata timestamp field to now, preserving the rest + TTL. */
-	private static function stampMeta(string $sid, int $user_id, string $scope, string $field): void {
+	/**
+	 * The open window for (session, user, scope), as this request last read it:
+	 * ['key' => PoolVaultKey, 'meta' => ?array, ...], or null when there is
+	 * none. Each call costs two stats; a slot or metadata file that is not the
+	 * one read before (a lock, a re-arm, another request's stamp) is read
+	 * again, so what comes back is always the current window.
+	 */
+	private static function windowState(?string $sid, int $user_id, string $scope): ?array {
+		if ($sid === null) {
+			return null;
+		}
+		$slot = self::slotKey($sid, $user_id, $scope);
+		$now = time();
+		foreach (self::$memo as $other => $entry) {
+			if ($other !== $slot && $now - $entry['seen'] >= self::ACCOUNT_EVERY_SECONDS) {
+				unset(self::$memo[$other]);
+			}
+		}
+		$slot_info = RamStore::info($slot, RamStore::LIFETIME);
+		if ($slot_info === null) {
+			unset(self::$memo[$slot]);
+			return null;
+		}
+		$state = self::$memo[$slot] ?? null;
+		if ($state === null || $state['slot_id'] !== $slot_info['id']) {
+			$key = PoolVaultKey::fromSlot($slot);
+			if ($key === null) {
+				unset(self::$memo[$slot]);
+				return null;
+			}
+			$state = array('key' => $key, 'slot_id' => $slot_info['id'], 'meta_id' => null, 'meta' => null, 'accounted' => 0);
+		}
 		$mkey = self::metaKey($sid, $user_id, $scope);
-		$meta = ApcuStore::fetch($mkey, $ok);
-		if (!$ok || !is_array($meta)) {
+		$meta_info = RamStore::info($mkey, RamStore::LIFETIME);
+		$meta_id = $meta_info === null ? null : $meta_info['id'];
+		if ($meta_id !== $state['meta_id'] || ($meta_id !== null && $state['meta'] === null)) {
+			$meta = $meta_id === null ? null : RamStore::get($mkey, $ok, RamStore::LIFETIME);
+			$state['meta'] = ($meta_id !== null && $ok && is_array($meta)) ? $meta : null;
+			$state['meta_id'] = $meta_id;
+		}
+		$state['seen'] = $now;
+		self::$memo[$slot] = $state;
+		return $state;
+	}
+
+	/**
+	 * Count a content read: extend the slot, the open-window marker and the
+	 * metadata to a full idle time, and stamp the content time the idle cap
+	 * measures from. Once per request (within ACCOUNT_EVERY_SECONDS), unless
+	 * the stored content stamp is older than this request's last extension:
+	 * then something wrote it back, and the read counts again.
+	 */
+	private static function account(string $sid, int $user_id, string $scope): void {
+		$slot = self::slotKey($sid, $user_id, $scope);
+		$state = self::$memo[$slot] ?? null;
+		if ($state === null) {
 			return;
 		}
+		$now = time();
+		$content = (int)($state['meta']['content'] ?? 0);
+		if ($state['accounted'] > 0 && $now - $state['accounted'] < self::ACCOUNT_EVERY_SECONDS
+				&& $content >= $state['accounted']) {
+			return;
+		}
+		RamStore::touch($slot, self::idleSeconds(), RamStore::LIFETIME);
+		self::touchWindowMarker($user_id, $scope);
+		self::stampMeta($sid, $user_id, $scope, 'content');
+		if (isset(self::$memo[$slot])) {
+			self::$memo[$slot]['accounted'] = $now;
+		}
+	}
+
+	/** Update one metadata timestamp field to now, preserving the rest, for a full idle time. */
+	private static function stampMeta(string $sid, int $user_id, string $scope, string $field): void {
+		$state = self::windowState($sid, $user_id, $scope);
+		if ($state === null || !is_array($state['meta'])) {
+			return;
+		}
+		$meta = $state['meta'];
 		$meta[$field] = time();
-		apcu_store($mkey, $meta, self::idleSeconds());
+		$mkey = self::metaKey($sid, $user_id, $scope);
+		if (!RamStore::set($mkey, $meta, self::idleSeconds(), RamStore::LIFETIME)) {
+			return;
+		}
+		$slot = self::slotKey($sid, $user_id, $scope);
+		$info = RamStore::info($mkey, RamStore::LIFETIME);
+		self::$memo[$slot]['meta'] = $meta;
+		self::$memo[$slot]['meta_id'] = $info === null ? null : $info['id'];
 	}
 
 	/**
@@ -703,8 +846,9 @@ class VaultUnlock {
 	 * (a legacy window or a non-capped consumer is never force-ended here).
 	 */
 	private static function endedByPolicy(string $sid, int $user_id, string $scope): bool {
-		$meta = ApcuStore::fetch(self::metaKey($sid, $user_id, $scope), $ok);
-		if (!$ok || !is_array($meta)) {
+		$state = self::windowState($sid, $user_id, $scope);
+		$meta = $state === null ? null : $state['meta'];
+		if (!is_array($meta)) {
 			return false;
 		}
 		$now = time();
@@ -741,12 +885,14 @@ class VaultUnlock {
 	 */
 	public static function lock(int $user_id, string $session_id, string $scope = 'user',
 			string $reason = VaultAudit::REASON_EXPLICIT_LOCK, bool $audit = true): void {
-		$meta = ApcuStore::fetch(self::metaKey($session_id, $user_id, $scope), $had_meta);
-		$was_open = apcu_exists(self::apcuKey($session_id, $user_id, $scope));
+		$slot = self::slotKey($session_id, $user_id, $scope);
+		$meta = RamStore::get(self::metaKey($session_id, $user_id, $scope), $had_meta, RamStore::LIFETIME);
+		$was_open = RamStore::exists($slot, RamStore::LIFETIME);
 
-		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
-		apcu_delete(self::metaKey($session_id, $user_id, $scope));
-		apcu_delete(self::borrowMarkerKey($session_id, $user_id, $scope));
+		unset(self::$memo[$slot]);
+		RamStore::delete($slot, RamStore::LIFETIME);
+		RamStore::delete(self::metaKey($session_id, $user_id, $scope), RamStore::LIFETIME);
+		RamStore::delete(self::borrowMarkerKey($session_id, $user_id, $scope), RamStore::LIFETIME);
 		// Wiping the window has to take the DEKs unwrapped under it as well, or a
 		// process that locked mid-request would still hold keys that open content.
 		// Cleared wholesale, not per user: this runs once at lock, and rebuilding
@@ -770,27 +916,29 @@ class VaultUnlock {
 
 	/** Wipe every scope's window, across every session, for a user (e.g. on password change). */
 	public static function lockAll(int $user_id, string $reason = VaultAudit::REASON_CREDENTIAL_EVENT): void {
-		// APCUIterator's constructor THROWS where APCu is disabled (a CLI
-		// process without apc.enable_cli) — and a disabled store holds no
-		// windows to wipe, so skipping it is correct, not lossy.
 		$closed = array();
-		if (class_exists('APCUIterator') && function_exists('apcu_enabled') && apcu_enabled()) {
-			// The window keys (vault:), their metadata (vaultmeta:), and a
-			// borrowed slot's armed marker (vaultbrw:).
-			$pattern = '/^vault(?:meta|brw)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
-			$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
-			foreach (new APCUIterator($pattern, APC_ITER_KEY) as $entry) {
-				// One row per (session, scope) rather than a single summary: a
-				// credential event that closes three devices at once should read
-				// as three windows ending, which is what it was.
-				if (preg_match($window, (string)$entry['key'], $m)) {
-					$closed[] = array($m[1], $m[2]);
-				}
-				apcu_delete($entry['key']);
+		// The window keys (vault:), their metadata (vaultmeta:), and a borrowed
+		// slot's armed marker (vaultbrw:), found by name: no entry is opened.
+		// Expired ones too: a slot past its expiry still holds the key until a
+		// sweep zeroes it, and a credential event must not walk past it.
+		$pattern = '/^vault(?:meta|brw)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
+		$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
+		foreach (RamStore::keys('vault', RamStore::LIFETIME | RamStore::INCLUDE_EXPIRED) as $name) {
+			if (!preg_match($pattern, $name)) {
+				continue;
 			}
+			// One row per (session, scope) rather than a single summary: a
+			// credential event that closes three devices at once should read
+			// as three windows ending, which is what it was. An expired slot
+			// ended by expiry, not by this event: wiped, not reported.
+			if (preg_match($window, $name, $m) && RamStore::info($name, RamStore::LIFETIME) !== null) {
+				$closed[] = array($m[1], $m[2]);
+			}
+			RamStore::delete($name, RamStore::LIFETIME);
 		}
-		foreach (glob('/dev/shm/vault_window_' . $user_id . '_*') ?: array() as $marker) {
-			@unlink($marker); // every scope's window is gone — the markers with them
+		self::$memo = array();
+		foreach (RamStore::keys('vaultwin:' . $user_id . ':') as $marker) {
+			RamStore::delete($marker); // every scope's window is gone — the markers with them
 		}
 		foreach ($closed as $pair) {
 			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0]);
@@ -806,45 +954,40 @@ class VaultUnlock {
 	 * InboundMailboxSearchIndex::sweepWorkingCopies()): a disposable working copy tied to $user_id
 	 * can be reclaimed once no session's window still covers it.
 	 *
-	 * The signal is the /dev/shm window marker, NOT APCu: the sweep runs under
-	 * the CLI cron SAPI, whose APCu segment is separate per process — the web
-	 * workers' vault:* entries are invisible there. The marker file (no secret,
-	 * just existence + a future mtime stamped by open()/secretKey()) is visible
-	 * to every process on the host, exactly like the working copies it guards.
-	 * A single-session lock() leaves the marker (another session may hold a
+	 * The signal is the open-window marker, a plain store entry, NOT the window
+	 * itself: the sweep runs under cron, which has no PHP-FPM master and so
+	 * never sees the web's lifetime-bound entries. The marker (no secret, just
+	 * existence and an expiry stamped by arm() and each content read) sits at
+	 * the top of the site's store, where every process of the web user finds
+	 * it. A single-session lock() leaves the marker (another session may hold a
 	 * window), so it can outlive an explicit lock by up to one idle interval —
 	 * the sweep is at worst delayed, never wrong.
 	 */
 	public static function hasAnyOpenWindow(int $user_id, string $scope = 'user'): bool {
-		$marker = self::windowMarkerPath($user_id, $scope);
-		$mtime = @filemtime($marker);
-		if ($mtime === false) {
-			return false;
-		}
-		if ($mtime <= time()) {
-			@unlink($marker); // expired — reclaim opportunistically
-			return false;
-		}
-		return true;
+		RamStore::get(self::windowMarkerKey($user_id, $scope), $open); // an expired marker is reclaimed
+		return $open;
 	}
 
 	/** The cross-process open-window marker (see hasAnyOpenWindow()). */
-	private static function windowMarkerPath(int $user_id, string $scope): string {
+	private static function windowMarkerKey(int $user_id, string $scope): string {
 		$scope_safe = preg_replace('/[^a-z0-9_]/i', '_', $scope);
-		return '/dev/shm/vault_window_' . $user_id . '_' . $scope_safe;
+		return 'vaultwin:' . $user_id . ':' . $scope_safe;
 	}
 
-	/** Stamp the marker with the window's current expiry (mtime = now + idle TTL). */
+	/** Extend the marker to the window's current expiry (now + idle TTL). */
 	private static function touchWindowMarker(int $user_id, string $scope): void {
-		@touch(self::windowMarkerPath($user_id, $scope), time() + self::idleSeconds());
+		$marker = self::windowMarkerKey($user_id, $scope);
+		if (!RamStore::touch($marker, self::idleSeconds())) {
+			RamStore::set($marker, 1, self::idleSeconds());
+		}
 	}
 
 	// ---- Audit bookkeeping (docs/sealed_vault.md § The audit log) ----
 	//
 	// A window can end three ways, and only two of them run any code: an
 	// explicit lock and a policy cap both go through lock(), which writes the
-	// row itself. The third — the APCu entry simply aging out — happens inside
-	// the cache with nothing to hook. So the closing row for an expiry has to be
+	// row itself. The third — the store entry simply aging out — happens with
+	// nothing to hook. So the closing row for an expiry has to be
 	// written by whoever NOTICES, which means the session has to remember that
 	// it had a window at all. That is what these three helpers carry.
 
@@ -882,12 +1025,12 @@ class VaultUnlock {
 			self::forgetOpen($user_id, $scope);
 			return;
 		}
-		apcu_store(self::tombstoneKey($session_id, $user_id, $scope), $reason, self::CLOSE_TOMBSTONE_SECONDS);
+		RamStore::set(self::tombstoneKey($session_id, $user_id, $scope), $reason, self::CLOSE_TOMBSTONE_SECONDS, RamStore::LIFETIME);
 	}
 
 	/**
 	 * This session's window key is gone. If something already logged the close,
-	 * consume its tombstone and stay quiet; otherwise this is the APCu entry
+	 * consume its tombstone and stay quiet; otherwise this is the store entry
 	 * aging out, which nothing else will ever report.
 	 *
 	 * Costs nothing on the common path: a session that never opened a window has
@@ -896,18 +1039,18 @@ class VaultUnlock {
 	private static function observeClosed(int $user_id, string $scope): void {
 		if (self::$credential_window !== null) {
 			// A borrowed slot has no PHP session to remember it by; arming left a
-			// marker in the pool instead. Present means armed and not yet
+			// marker in the store instead. Present means armed and not yet
 			// reported closed.
 			$sid = self::currentSessionIdOrNull();
 			$marker = self::borrowMarkerKey($sid, $user_id, $scope);
-			$armed = ApcuStore::fetch($marker, $had_marker);
+			$armed = RamStore::get($marker, $had_marker, RamStore::LIFETIME);
 			if (!$had_marker) {
 				return;
 			}
-			apcu_delete($marker);
+			RamStore::delete($marker, RamStore::LIFETIME);
 			$tombstone = self::tombstoneKey($sid, $user_id, $scope);
-			if (apcu_exists($tombstone)) {
-				apcu_delete($tombstone);
+			if (RamStore::exists($tombstone, RamStore::LIFETIME)) {
+				RamStore::delete($tombstone, RamStore::LIFETIME);
 				return;
 			}
 			VaultAudit::closed($user_id, $scope, VaultAudit::REASON_IDLE_EXPIRED, $sid,
@@ -922,8 +1065,8 @@ class VaultUnlock {
 		$record = self::forgetOpen($user_id, $scope);
 		if ($sid !== null) {
 			$tombstone = self::tombstoneKey($sid, $user_id, $scope);
-			if (apcu_exists($tombstone)) {
-				apcu_delete($tombstone);
+			if (RamStore::exists($tombstone, RamStore::LIFETIME)) {
+				RamStore::delete($tombstone, RamStore::LIFETIME);
 				return; // lock()/lockAll() already wrote the row, with the real reason
 			}
 		}
@@ -1415,7 +1558,8 @@ class VaultUnlock {
 		}
 	}
 
-	private static function apcuKey(string $session_id, int $user_id, string $scope): string {
+	/** Store key for a window's key slot. */
+	private static function slotKey(string $session_id, int $user_id, string $scope): string {
 		return 'vault:' . $session_id . ':' . $user_id . ':' . $scope;
 	}
 
@@ -1445,6 +1589,7 @@ class VaultUnlock {
 		self::$window_cap_providers = array();
 		self::$activity_suppressed = false;
 		self::$credential_window = null;
+		self::$memo = array();
 		if (session_status() === PHP_SESSION_ACTIVE) {
 			unset($_SESSION['vault_windows']);
 		}

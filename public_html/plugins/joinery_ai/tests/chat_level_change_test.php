@@ -105,7 +105,7 @@ $twofa->enable_totp('JBSWY3DPEHPK3PXP');
 $twofa->save();
 $kp = vault_fixture_server_vault((int)$owner->key);
 vault_fixture_server_vault((int)$twofa->key);
-$window_ok = $has_session && vault_apcu_usable();
+$window_ok = $has_session;
 
 // ---------------------------------------------------------------------------
 section('Who and which levels');
@@ -160,7 +160,7 @@ check($r->error !== null && stripos((string)$r->error, 'Unlock your vault') !== 
 	&& $st['level'] === AiConversation::LEVEL_PRIVATE && $st['sealed'] === 4,
 	'with the window closed the lowering is refused and nothing changes', (string)$r->error);
 if (!$window_ok) {
-	harness_skip('window-open lowering', 'APCu/session unavailable (run with -d apc.enable_cli=1)');
+	harness_skip('window-open lowering', 'no session');
 } else {
 	vault_fixture_open_window((int)$owner->key, $kp['secret'], UserEncryptionVault::SCOPE_USER);
 	$r = clc_set_level($chat, AiConversation::LEVEL_STANDARD);
@@ -216,7 +216,7 @@ ChatConversationLevel::drain((int)$owner->key, microtime(true) + 60);
 check(!ChatConversationLevel::hasWork((int)$owner->key), 'once everything is at its promise there is no deferred work');
 
 if (!$window_ok) {
-	harness_skip('a lowered chat still holding sealed turns', 'APCu/session unavailable (run with -d apc.enable_cli=1)');
+	harness_skip('a lowered chat still holding sealed turns', 'no session');
 } else {
 	vault_fixture_open_window((int)$owner->key, $kp['secret'], UserEncryptionVault::SCOPE_USER);
 	$r = clc_set_level($halt, AiConversation::LEVEL_STANDARD);   // one pass of 61 rows

@@ -32,8 +32,9 @@
  *  - The download page renders over HTTP; the endpoint refuses a build that
  *    is not ready, and anyone but the owner.
  *
- * Run: php -d apc.enable_cli=1 plugins/mailbox/tests/mail_export_test.php
+ * Run: php plugins/mailbox/tests/mail_export_test.php
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - Status and X-Mozilla-Status carry read and starred for mail programs (B70)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -439,8 +440,8 @@ check(array_keys($after) === array_keys($before), 'and nothing else came back');
 // ── Private ─────────────────────────────────────────────────────────────────
 section('Private: built only in the window, sealed at rest');
 
-if (!($has_session && vault_apcu_usable())) {
-	harness_skip('Private export', 'needs a session and APCu on this CLI (the build opens a window)');
+if (!($has_session)) {
+	harness_skip('Private export', 'needs a session on this CLI (the build opens a window)');
 } else {
 	$pv = make_user('MailExportPriv' . $suffix, 5);
 	$pid = (int)$pv->key;

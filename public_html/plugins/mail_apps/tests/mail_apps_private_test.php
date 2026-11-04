@@ -19,8 +19,9 @@
  *  - a deleted notice stays deleted until the lock lifts
  *  - checks count as activity: countCheckAsActivity() keeps the slot alive
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_private_test.php
+ * Run: php plugins/mail_apps/tests/mail_apps_private_test.php
  *
+ * @version 1.1 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -32,10 +33,6 @@ if (!class_exists('MailAppContext')) {
 }
 require_once(__DIR__ . '/lib/mail_apps_fixtures.php');
 harness_set_setting_mem('mail_apps_enabled', '1'); // the purpose's switch (AppAccess requiresSetting)
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run with php -d apc.enable_cli=1');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

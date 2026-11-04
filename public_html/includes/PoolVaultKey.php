@@ -6,7 +6,8 @@
  *
  * This is the path the safe-tier tests run on, and the path on a box where
  * the unseal daemon was never installed. The secret bytes live inside this
- * object and in the session's APCu window slot, and nowhere else: there is no
+ * object and in the session's window slot (a RamStore entry bound to the
+ * PHP-FPM master's lifetime), and nowhere else: there is no
  * getter, __debugInfo() shows the id only, and the object refuses to be
  * serialized. tests/vault/sealed_read_paths_test.php pins SealedBox's
  * asymmetric-open, key-wrap and keypair primitives to this file, so the raw
@@ -15,13 +16,16 @@
  * The four things it can do map onto the daemon's four operations:
  * open() is `open` (unwrap-or-mint, then wrap under the presented list),
  * unseal() is `unwrap`, and the two slot methods are what `close`/`status`
- * become when the window store is APCu rather than a process — VaultUnlock is
- * their only caller.
+ * become when the window store is RamStore rather than a process — VaultUnlock
+ * is their only caller.
  *
  * The key is an X-Wing seed. The form wrapped under an unlocker and stored in
  * the window slot is `v2.` + base64url(seed); anything else (an untagged
  * X25519 secret included) is refused as malformed.
  *
+ * @version 1.5 - the window slot is a RamStore entry (strategy/object_free_window_store.md): JSON
+ *   cannot hold an object, so nothing planted in the slot runs when it is read; storeInSlot()
+ *   reports a store that refused
  * @version 1.4 - the pool-held key is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.3 - X-Wing only: the untagged (X25519) form is refused; wrappedForm() takes no version
  * @version 1.2 - v2 keys: open() mints an X-Wing seed; the wrapped and slot
@@ -144,20 +148,34 @@ final class PoolVaultKey implements VaultKey {
 		return $out;
 	}
 
-	// ---- The APCu window slot. VaultUnlock is the only caller of these two. ----
+	// ---- The window slot. VaultUnlock is the only caller of these two. ----
 
-	/** The key a session's window slot holds, or null when the slot is empty. */
-	public static function fromSlot(string $apcu_key): ?PoolVaultKey {
-		$value = ApcuStore::fetch($apcu_key, $success);
-		if (!$success || !is_string($value) || $value === '') {
+	/**
+	 * The key a session's window slot holds, or null when the slot is empty.
+	 * A slot holding anything but a key in its slot form reads as empty.
+	 */
+	public static function fromSlot(string $slot): ?PoolVaultKey {
+		$value = RamStore::get($slot, $success, RamStore::LIFETIME);
+		if (!$success) {
 			return null;
 		}
-		return new self($value);
+		try {
+			if (is_string($value)) {
+				return new self($value);
+			}
+		} catch (RuntimeException $e) {
+		}
+		RamStore::delete($slot, RamStore::LIFETIME);
+		return null;
 	}
 
-	/** Put (or re-put, extending the TTL) this key into a session's window slot. */
-	public function storeInSlot(string $apcu_key, int $ttl_seconds): void {
-		apcu_store($apcu_key, $this->stored(), $ttl_seconds);
+	/**
+	 * Put this key into a session's window slot for $ttl_seconds. Written once
+	 * per window: extending it is RamStore::touch(), which rewrites nothing.
+	 * False when the store refused (no store on this host): the window is not open.
+	 */
+	public function storeInSlot(string $slot, int $ttl_seconds): bool {
+		return RamStore::set($slot, $this->stored(), $ttl_seconds, RamStore::LIFETIME);
 	}
 
 	/** A dump shows the id, never the bytes. */

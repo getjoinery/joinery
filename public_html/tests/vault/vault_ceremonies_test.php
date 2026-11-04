@@ -18,7 +18,7 @@ if (!extension_loaded('sodium')) {
 // Session must start before the harness emits any output (CLI sessions
 // cannot start once headers/output are sent) — capture window availability
 // now for the kill-switch section at the bottom.
-$apcu = vault_apcu_usable() && vault_ensure_session();
+$has_session = vault_ensure_session();
 
 $box = new SealedBox();
 $ceremonies = new VaultCeremonies();
@@ -198,7 +198,7 @@ $root_twin_used = function (int $root_id, int $index) {
 	}
 	return null;
 };
-$res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][1], $fx['root_salt']), $apcu);
+$res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][1], $fx['root_salt']), $has_session);
 check($res['regenerate_recommended'] === false, 'plenty of codes left: no regenerate nag');
 check(is_array($res['root_wrapping']), 'the code\'s root twin comes back for the browser');
 check(is_array($res['root_wrapping']) && vault_fixture_unwrap($res['root_wrapping']['wrapped_secret_key'],
@@ -228,17 +228,40 @@ $res = $ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlock
 check($res['regenerate_recommended'] === true, 'fewer than 3 unused codes recommends regeneration');
 
 section('Recovery kill-switch');
-if (!$apcu) {
-	harness_skip('APCu unavailable', 'kill-switch ordering needs a live window store; run with -d apc.enable_cli=1');
+if (!$has_session) {
+	harness_skip('no CLI session', 'kill-switch ordering needs a window');
 } else {
 	$uid = (int)$fx['user']->key;
 	// A pre-existing window on another session (the thief's, say).
-	apcu_store('vault:stolen-session:' . $uid . ':user', 'stolen-secret', 3600);
+	vault_store_put('vault:stolen-session:' . $uid . ':user', 'stolen-secret');
 	$ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][5], $fx['root_salt']), true);
-	check(apcu_fetch('vault:stolen-session:' . $uid . ':user') === false, 'every pre-existing window died first');
+	check(vault_store_get('vault:stolen-session:' . $uid . ':user') === null, 'every pre-existing window died first');
 	check(VaultUnlock::isOpen($uid), 'and a fresh window opened for the recovering session only');
 	VaultUnlock::lockAll($uid);
 }
+
+section('A host whose window store refuses spends nothing');
+$count_unused = function () use ($fx) {
+	$n = 0;
+	foreach (vault_live_wrappings((int)$fx['vault']->key) as $w) {
+		if ($w->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_RECOVERY && !$w->get('uew_is_used')) { $n++; }
+	}
+	return $n;
+};
+$unused_before = $count_unused();
+$store_dir = RamStore::directory();
+RamStore::useDirectory(__DIR__ . '/no-store-here'); // on disk, not tmpfs: refused
+$refusal = null;
+try {
+	$ceremonies->unlockWithRecoveryKek($fx['user'], $fx['vault'], VaultUnlockerKdf::codeKekAccount($fx['recovery_codes'][0], $fx['root_salt']), true);
+} catch (VaultCeremonyException $e) {
+	$refusal = $e->getMessage();
+}
+RamStore::useDirectory($store_dir);
+check($refusal !== null && strpos($refusal, 'cannot be unlocked on this server') !== false,
+	'a recovery unlock is refused with the store\'s reason', (string)$refusal);
+check($count_unused() === $unused_before && $unused_before > 0, 'and the code is not spent');
+check(!is_dir(__DIR__ . '/no-store-here'), 'and no directory was made on disk');
 
 section('Cross-user ownership guard');
 // A (user, vault) pair from different users must be refused at the ceremony
@@ -271,8 +294,8 @@ check($threw === '', 'one with the first output only passes');
 section('Enrolment presents a fresh unlocker (openWithUnlocker, spec B1)');
 // A wrapping is produced only in the request that presented a real unlocker;
 // the window that results is the session's.
-if (!$apcu) {
-	harness_skip('APCu unavailable', 'openWithUnlocker arms a window; run with -d apc.enable_cli=1');
+if (!$has_session) {
+	harness_skip('no CLI session', 'openWithUnlocker arms a window');
 } else {
 	$ex = vault_fixture_vault('CerEnrol', 'the enrolment phrase, long enough', 5);
 	$euser = $ex['user'];

@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=messenger_sealed
  *
+ * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3 - X-Wing test vaults
  * @version 1.2 - Nothing leaves unsealed add-on, picker add-ons, fold migration
  * @version 1.1 - permanent delete of a room removes its key grants (the FK rule, exercised)
@@ -50,11 +51,6 @@ require_once(PathHelper::getIncludePath('data/conversation_key_grants_class.php'
 require_once(PathHelper::getIncludePath('data/messages_class.php'));
 require_once(PathHelper::getIncludePath('plugins/messenger/includes/Messenger.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 plugins/messenger/tests/messenger_sealed_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

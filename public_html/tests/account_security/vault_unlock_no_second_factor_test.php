@@ -29,10 +29,6 @@ if (!vault_ensure_session()) {
 	harness_skip('vault unlock suite', 'no session could be started on the CLI');
 	harness_finish();
 }
-if (!vault_apcu_usable()) {
-	harness_skip('vault unlock suite', 'an unlock arms a window; run with -d apc.enable_cli=1');
-	harness_finish();
-}
 
 harness_set_setting_mem('passkeys_enabled', '1');
 harness_set_setting_mem('email_dry_run', '1');

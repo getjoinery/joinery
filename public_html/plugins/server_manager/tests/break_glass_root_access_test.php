@@ -35,6 +35,7 @@
  *
  * Rows go to the test database and are deleted.
  *
+ * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - a Docker host's own node is the machine, not a container (live check 2026-10-25)
  * @version 1.1 - disable_root_login's builder and result (WP4)
  * @version 1.0
@@ -54,8 +55,8 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-if (!vault_apcu_usable() || !vault_ensure_session()) {
-	harness_skip('APCu/session unavailable, so no unlock window can be held in CLI');
+if (!vault_ensure_session()) {
+	harness_skip('no session, so no unlock window can be held in CLI');
 	harness_finish();
 }
 

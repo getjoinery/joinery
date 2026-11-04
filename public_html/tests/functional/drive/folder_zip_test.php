@@ -26,6 +26,7 @@
  *
  * Run:  php tests/run.php db --only=tests/functional/drive/folder_zip_test.php
  *
+ * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - the CLI session starts before any output, so the Private checks run every time
  * @version 1.1 - the note never takes a real file's name (R5)
  * @version 1.0
@@ -273,7 +274,7 @@ check($threw, 'and plan() refuses it outright');
 section('a Private folder');
 
 $kp = vault_fixture_server_vault((int)$owner->key);
-$window_ok = vault_apcu_usable() && vault_ensure_session();
+$window_ok = vault_ensure_session();
 $pfolder = zt_folder($owner->key, 'Private ' . $tag, $made_folders, null, ProtectionLevel::PRIVATE_);
 $secret_text = 'Sealed contents ' . $tag . ' ' . str_repeat('quiet words ', 300);
 $src = tempnam(sys_get_temp_dir(), 'zt_seal_');

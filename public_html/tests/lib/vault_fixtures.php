@@ -281,16 +281,21 @@ function vault_fixture_dummy_key(): VaultKey {
 	return vault_fixture_key((new SealedBox())->generateKeypair()['secret']);
 }
 
-/** True when APCu actually works in this process (CLI needs apc.enable_cli=1). */
-function vault_apcu_usable(): bool {
-	if (!function_exists('apcu_store')) {
-		return false;
+/** A window entry (vault:, vaultmeta:, vaultbrw:, vaultclosed:) as VaultUnlock stores it, or null. */
+function vault_store_get(string $key) {
+	$value = RamStore::get($key, $ok, RamStore::LIFETIME);
+	return $ok ? $value : null;
+}
+
+/** Write a window entry directly, as another session or request would have. */
+function vault_store_put(string $key, $value, int $ttl = 3600): void {
+	if (!RamStore::set($key, $value, $ttl, RamStore::LIFETIME)) {
+		throw new RuntimeException('vault_store_put: the store refused ' . $key);
 	}
-	$probe = 'vault_test_probe_' . getmypid();
-	apcu_store($probe, 1, 30);
-	$ok = apcu_fetch($probe) === 1;
-	apcu_delete($probe);
-	return $ok;
+}
+
+function vault_store_delete(string $key): void {
+	RamStore::delete($key, RamStore::LIFETIME);
 }
 
 /** Ensure a session id exists so VaultUnlock window calls work in CLI. */

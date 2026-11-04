@@ -22,18 +22,16 @@
  *  - signing out of the website session does not end it
  *  - borrowedWindows() lists the open slot for the lock chip, with its end
  *
- * Run: php -d apc.enable_cli=1 tests/vault/vault_borrowed_unlock_test.php
+ * Run: php tests/vault/vault_borrowed_unlock_test.php
  *
+ * @version 1.2 - a borrower the store will not take is skipped (reviewer2 B2)
+ * @version 1.1 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/../lib/vault_fixtures.php');
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process', 'run manually: php -d apc.enable_cli=1 tests/vault/vault_borrowed_unlock_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();
@@ -185,4 +183,26 @@ VaultUnlock::lockAll($uid);
 check(!VaultUnlock::isOpen($uid), 'lockAll closes it');
 
 $as(null);
+section('A borrowed slot the store will not take does not undo the unlock');
+$as(null);
+VaultUnlock::lockAll($uid);
+// A directory where the phone's slot file would go: the store cannot write it.
+$blocked = RamStore::directory() . '/' . RamStore::generation() . '/vault:' . VaultUnlock::CREDENTIAL_SLOT_PREFIX . $phone->key . ':' . $uid . ':user';
+@mkdir(dirname($blocked), 0700, true);
+mkdir($blocked, 0700);
+$threw = false;
+try {
+	vault_fixture_open_window($uid, $kp['secret'], 'user', array('idle' => null, 'absolute' => 3600), VaultAudit::VIA_PASSKEY);
+} catch (Throwable $e) {
+	$threw = true;
+}
+check(!$threw && VaultUnlock::isOpen($uid), 'the person\'s unlock stands');
+$as($laptop);
+check(VaultUnlock::isOpen($uid), 'the other borrower is armed');
+$as($phone);
+check(!VaultUnlock::isOpen($uid), 'the blocked one is skipped, locked');
+$as(null);
+rmdir($blocked);
+VaultUnlock::lockAll($uid);
+
 harness_finish();

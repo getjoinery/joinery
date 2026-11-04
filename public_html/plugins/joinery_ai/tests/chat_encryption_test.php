@@ -8,7 +8,7 @@
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('tests/lib/vault_fixtures.php'));   // vault_apcu_usable(), vault_ensure_session()
+require_once(PathHelper::getIncludePath('tests/lib/vault_fixtures.php'));   // vault_ensure_session()
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 if (!PluginHelper::isPluginActive('joinery_ai')) { harness_skip('joinery_ai plugin inactive'); harness_finish(); }
@@ -498,8 +498,8 @@ check($old_fails, 'the old key no longer opens the re-sealed DEK');
 
 // ---- In-window decrypt via the get() hook (needs APCu) -------------------
 section('In-window decrypt (get() hook)');
-if (!vault_apcu_usable() || !$has_session || session_id() === '') {
-    harness_skip('APCu/session unavailable (run with -d apc.enable_cli=1) — window-based decrypt path skipped');
+if (!$has_session || session_id() === '') {
+    harness_skip('no session — window-based decrypt path skipped');
 } else {
     // Open the window with the CURRENT (gen-2) secret, since rotation moved the DEKs.
     vault_fixture_open_window($uid, $kp2['secret'], UserEncryptionVault::SCOPE_USER);

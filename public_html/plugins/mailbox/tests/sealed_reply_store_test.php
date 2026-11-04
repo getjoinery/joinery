@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php db --only=plugins/mailbox/tests/sealed_reply_store_test.php
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -48,11 +49,6 @@ if (!extension_loaded('sodium')) {
 }
 // Reading the sealed original needs a real unlock window, which lives in APCu
 // against a session id.
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 plugins/mailbox/tests/sealed_reply_store_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php db --filter=mailbox_attachment_byte_custody
  *
+ * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3
  * @changelog 1.3 - D3: a stored copy that lists no attachments under an archive
  *   copy that has some is named in the ledger, not accepted as a clean duplicate.
@@ -49,11 +50,6 @@ if (!extension_loaded('sodium')) {
 // Reading sealed bytes needs a real unlock window, which lives in APCu against a
 // session id. Writing them does not — which is the point of the sealed-with-the-
 // vault-locked check above, and why that one never needs either of these.
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 plugins/mailbox/tests/attachment_byte_custody_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

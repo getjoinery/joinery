@@ -20,6 +20,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_server_readers
  *
+ * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - the calendar tool's source() states a line and a field value
  */
@@ -32,8 +33,8 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-if (!vault_apcu_usable() || !vault_ensure_session()) {
-	harness_skip('APCu/session unavailable, so no unlock window can be held in CLI');
+if (!vault_ensure_session()) {
+	harness_skip('no session, so no unlock window can be held in CLI');
 	harness_finish();
 }
 harness_test_mode();

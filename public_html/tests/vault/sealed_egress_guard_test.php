@@ -36,6 +36,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_egress_guard
  *
+ * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3 - v2 (X-Wing) seal and edge-seal prefixes count as sealed
  * @version 1.2 - consentToValues() and contentFree()
  * @version 1.1 - integer id lists pass at any length
@@ -52,11 +53,6 @@ require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 tests/vault/sealed_egress_guard_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

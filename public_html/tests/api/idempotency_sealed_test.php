@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php db --filter=idempotency_sealed
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - X-Wing test vault
  * @version 1.0
  */
@@ -43,11 +44,6 @@ require_once(PathHelper::getIncludePath('includes/ApiLogicEndpoint.php'));
 require_once(PathHelper::getIncludePath('data/api_idempotency_keys_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
-if (!vault_apcu_usable()) {
-	harness_skip('APCu unavailable in this process',
-		'run manually: php -d apc.enable_cli=1 tests/api/idempotency_sealed_test.php');
-	harness_finish();
-}
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');
 	harness_finish();

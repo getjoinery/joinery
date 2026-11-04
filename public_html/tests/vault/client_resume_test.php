@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php test-db --filter=client_resume
  *
+ * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - the account vault's window gates a half
  * @version 1.0
  */
@@ -132,20 +133,16 @@ try {
 	$tab_c = bin2hex(random_bytes(16));
 	$c = $share();
 	VaultClientResume::put($acct_id, 'drive', $tab_c, $c);
-	if (!vault_apcu_usable()) {
-		harness_skip('APCu is off in this CLI, so no window can open');
-	} else {
-		vault_fixture_open_window($acct_id, $server['secret']);
-		check((VaultClientResume::get($acct_id, 'drive', $tab_c)['share'] ?? null) === $c,
-			'the window open: the half is answered');
-		VaultUnlock::lock($acct_id, session_id());
-		check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
-			'the window ended: nothing is answered, so no tab reopens the vault on its own');
-		vault_fixture_open_window($acct_id, $server['secret']);
-		check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
-			'and the half was dropped, not kept for the next window');
-		VaultUnlock::lock($acct_id, session_id());
-	}
+	vault_fixture_open_window($acct_id, $server['secret']);
+	check((VaultClientResume::get($acct_id, 'drive', $tab_c)['share'] ?? null) === $c,
+		'the window open: the half is answered');
+	VaultUnlock::lock($acct_id, session_id());
+	check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
+		'the window ended: nothing is answered, so no tab reopens the vault on its own');
+	vault_fixture_open_window($acct_id, $server['secret']);
+	check(VaultClientResume::get($acct_id, 'drive', $tab_c) === null,
+		'and the half was dropped, not kept for the next window');
+	VaultUnlock::lock($acct_id, session_id());
 	VaultClientResume::drop();
 
 	// ---------------------------------------------------------------- the action

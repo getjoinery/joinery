@@ -126,7 +126,7 @@ check($r['status'] === ProtectionLevelChange::REFUSED && stripos($r['error'], 'U
 $s = $fresh();
 $r = ProtectionLevelChange::change($s, ProtectionLevel::PRIVATE_, (int)$holder->key);
 check($r['status'] === ProtectionLevelChange::OK, 'raising needs no window (sealing takes only the public key)');
-if (vault_apcu_usable() && $has_session && session_id() !== '') {
+if ($has_session && session_id() !== '') {
 	vault_fixture_open_window((int)$holder->key, $kp['secret'], UserEncryptionVault::SCOPE_USER);
 	$s = $fresh();
 	$s->current = ProtectionLevel::PRIVATE_;
@@ -134,7 +134,7 @@ if (vault_apcu_usable() && $has_session && session_id() !== '') {
 	check($r['status'] === ProtectionLevelChange::OK, 'with the window open the lowering goes through');
 	VaultUnlock::close((int)$holder->key, UserEncryptionVault::SCOPE_USER);
 } else {
-	harness_skip('window-open lowering', 'APCu/session unavailable (run with -d apc.enable_cli=1)');
+	harness_skip('window-open lowering', 'no session');
 }
 
 // ---------------------------------------------------------------------------

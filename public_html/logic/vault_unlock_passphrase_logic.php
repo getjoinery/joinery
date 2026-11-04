@@ -39,7 +39,11 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 		return LogicResult::error($e->getMessage());
 	}
 
-	VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
+	try {
+		VaultUnlock::arm($user->key, $key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
+	} catch (VaultStoreUnavailableException $e) {
+		return LogicResult::error($e->getMessage());
+	}
 	RequestLogger::log('vault_unlock_passphrase', 'verify', true, ['user_id' => $user->key]);
 
 	return LogicResult::render(['unlocked' => true]);

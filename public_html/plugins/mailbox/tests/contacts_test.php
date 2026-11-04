@@ -42,6 +42,7 @@
  *    one; an import into it then says locked rather than counting what never landed.
  *  - A row whose write fails is skipped and counted so; the rows after it still land.
  *
+ * @version 2.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 2.3 - export round trip and sealed export; CSV and vCard import fixes
  * @version 2.2 - updateContact(); manualAdd() with a separate name
  * @version 2.1 - sealing follows the domain's posture, not vault possession alone
@@ -533,8 +534,8 @@ check($res['imported'] === 1 && $as_map($svc->listForMailbox($yu, $work_alias, n
 // A sealed store reads only in an open window. With it shut the list is locked,
 // which contacts_export refuses rather than handing over an empty file.
 section('Export from a sealed store');
-if (!($has_session && vault_apcu_usable())) {
-	harness_skip('sealed export', 'needs a session and APCu on this CLI (the export reads in a window)');
+if (!($has_session)) {
+	harness_skip('sealed export', 'needs a session on this CLI (the export reads in a window)');
 } else {
 	// A request of its own, which starts cold (see the export round trip above).
 	SealedEgressGuard::reset();
