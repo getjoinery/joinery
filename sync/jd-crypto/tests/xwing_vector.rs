@@ -77,16 +77,14 @@ fn a_fresh_keypair_is_a_seed_and_round_trips() {
 }
 
 #[test]
-fn an_old_key_is_refused_for_sealing_and_opening() {
-    let old = jd_crypto::pkcs8::encode(&[9u8; 32]);
-    let old_public = vault::public_key_from_secret_key(&old).unwrap();
-    assert_eq!(b64::decode(&old_public).unwrap().len(), 32);
-    let err = vault::seal_to_public_key(b"x", &old_public).unwrap_err();
-    assert!(matches!(err, CryptoError::OldKey));
-    assert!(err.to_string().contains("old"), "{err}");
-    // Opening with it is refused the same way, with the PKCS#8 secret or the
-    // raw scalar: nothing opens a v1 seal.
-    let blob = b64::encode(&[0u8; 32 + 12 + 16]);
-    assert!(matches!(vault::open_from_secret_key(&blob, &old, &old_public), Err(CryptoError::OldKey)));
-    assert!(matches!(vault::open_from_secret_key(&blob, &[9u8; 32], &old_public), Err(CryptoError::OldKey)));
+fn only_x_wing_keys_seal_open_or_derive() {
+    // A 32-byte public key is not a key to seal to or open with: malformed,
+    // like any other wrong length.
+    let short_public = b64::encode(&[9u8; 32]);
+    let err = vault::seal_to_public_key(b"x", &short_public).unwrap_err();
+    assert!(matches!(err, CryptoError::Malformed(_)), "{err}");
+    let blob = b64::encode(&[0u8; 1120 + 12 + 16]);
+    assert!(matches!(vault::open_from_secret_key(&blob, &[9u8; 32], &short_public), Err(CryptoError::Malformed(_))));
+    // A 48-byte secret has no public key: only a 32-byte seed does.
+    assert!(matches!(vault::public_key_from_secret_key(&[9u8; 48]), Err(CryptoError::Malformed(_))));
 }

@@ -3,7 +3,7 @@
 //! tests/functional/drive/sync_crypto_parity_gate.sh (public_html).
 
 use jd_crypto::drive::{self, FileKey, FileMetadata, CHUNK_BYTES};
-use jd_crypto::{pkcs8, vault};
+use jd_crypto::vault;
 
 fn patterned(len: usize, mul: usize, add: usize) -> Vec<u8> {
     (0..len).map(|i| ((i * mul + add) & 0xff) as u8).collect()
@@ -162,9 +162,9 @@ fn sealed_box_round_trips_and_refuses_other_keypairs() {
         Ok(_) => panic!("opened with another key named as its public half"),
     };
     assert!(err.to_string().contains("not this secret key's"), "{err}");
-    // An old 32-byte key named as the public half is refused.
-    let old_public = vault::public_key_from_secret_key(&jd_crypto::pkcs8::encode(&[3u8; 32])).unwrap();
-    assert!(drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &old_public).is_err());
+    // A 32-byte key named as the public half is refused.
+    let short_public = jd_crypto::b64::encode(&[3u8; 32]);
+    assert!(drive::open_wrapped_file_key(&wrapped, &kp.secret_key, &short_public).is_err());
 }
 
 #[test]
@@ -189,9 +189,9 @@ fn a_public_key_derived_from_a_secret_key_is_the_one_it_was_generated_with() {
 #[test]
 fn deriving_a_public_key_from_something_that_is_not_a_secret_key_fails() {
     assert!(vault::public_key_from_secret_key(b"not a key").is_err());
-    // 31 and 47 bytes: a seed and an old PKCS#8 secret, each one short.
+    // Only a 32-byte seed has a public key: one short, one long.
     assert!(vault::public_key_from_secret_key(&[7u8; 31]).is_err());
-    assert!(vault::public_key_from_secret_key(&[7u8; 47]).is_err());
+    assert!(vault::public_key_from_secret_key(&[7u8; 48]).is_err());
 }
 
 #[test]
@@ -227,16 +227,6 @@ fn passphrase_kek_is_deterministic_and_salt_sensitive() {
     assert_eq!(a, b);
     let c = vault::kek_from_passphrase("correct horse", "b3RoZXJzYWx0", &params).unwrap();
     assert_ne!(a, c);
-}
-
-#[test]
-fn pkcs8_wraps_and_unwraps_the_raw_scalar() {
-    let raw = [42u8; 32];
-    let der = pkcs8::encode(&raw);
-    assert_eq!(der.len(), 48);
-    assert_eq!(pkcs8::decode(&der).unwrap(), raw);
-    assert!(pkcs8::decode(&der[..47]).is_err());
-    assert!(pkcs8::decode(&[0u8; 48]).is_err());
 }
 
 #[test]

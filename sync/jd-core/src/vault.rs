@@ -1,6 +1,6 @@
 //! The key this device holds for encrypted folders, and what it can open.
 //!
-//! Encrypted Drive content is sealed to a **vault** — an X25519 keypair whose
+//! Encrypted Drive content is sealed to a **vault** — an X-Wing keypair whose
 //! secret half never leaves the user's own machines. Every encrypted file has
 //! its own random content key, and each reader gets that content key sealed to
 //! their vault (a *grant*, `wrapped_file_key`). So opening a file is two steps:
@@ -47,8 +47,7 @@ pub type VaultResult<T> = Result<T, VaultError>;
 /// This device's copy of the Drive vault identity.
 pub struct Vault {
     /// The 32-byte X-Wing seed, as the browser wraps it and the ceremony hands
-    /// it over (48-byte X25519 PKCS#8 for a vault its owner has not rotated).
-    /// Wrapped so it is wiped when the daemon stops rather than left in a freed
+    /// it over. Wrapped so it is wiped when the daemon stops rather than left in a freed
     /// page.
     secret_key: Zeroizing<Vec<u8>>,
     public_key_b64: String,
@@ -190,6 +189,12 @@ mod tests {
         // cannot open.
         assert!(matches!(
             Vault::from_secret_key(b"truncated"),
+            Err(VaultError::Unusable(_))
+        ));
+        // A 48-byte secret (the length of a pre-X-Wing PKCS#8 key) is not a
+        // seed: refused here, not taken and then failing every open.
+        assert!(matches!(
+            Vault::from_secret_key(&[4u8; 48]),
             Err(VaultError::Unusable(_))
         ));
     }

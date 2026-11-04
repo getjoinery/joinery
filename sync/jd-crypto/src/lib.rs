@@ -23,7 +23,6 @@
 
 pub mod b64;
 pub mod drive;
-pub mod pkcs8;
 pub mod vault;
 pub mod xwing;
 
@@ -41,9 +40,6 @@ pub enum CryptoError {
     Kdf(&'static str),
     #[error("non-contributory X25519 shared secret")]
     BadPublicKey,
-    /// A 32-byte X25519 key: nothing seals to or opens with one.
-    #[error("that vault key is an old (pre-X-Wing) key, which nothing seals to or opens any more")]
-    OldKey,
     #[error("metadata JSON: {0}")]
     Json(#[from] serde_json::Error),
 }

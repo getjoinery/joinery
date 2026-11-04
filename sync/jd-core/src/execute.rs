@@ -4083,11 +4083,10 @@ impl<W: Write> Write for Tallied<W> {
 /// a key payload on that path: minting a fresh key would leave the new content
 /// readable only by this device, behind grants that all wrap the old one.
 /// Seal a new file's key to every reader `drive_public_keys` named: the grants,
-/// and how many readers have no Drive vault (counted, not sealed to).
-///
-/// A reader whose vault key is the old (pre-X-Wing) kind cannot be sealed to.
-/// Their rotation changes that, so the upload waits for it (`Retry`) rather
-/// than being dropped as unfixable.
+/// and how many readers have no Drive vault (counted, not sealed to). A
+/// public key that is not an X-Wing key is a broken server answer (Contract):
+/// the upload stops for every reader rather than waiting on a key that cannot
+/// change, the deliberate cost of one bad key.
 fn seal_to_readers(
     file_key: &jd_crypto::drive::FileKey,
     list: &[Value],
@@ -4102,13 +4101,6 @@ fn seal_to_readers(
             Some(public_key) if !public_key.is_empty() => {
                 match jd_crypto::drive::wrap_file_key_to(file_key, public_key) {
                     Ok(sealed) => wrapped.push((user_id, sealed)),
-                    Err(jd_crypto::CryptoError::OldKey) => {
-                        return Ok(Err(OpOutcome::Retry(
-                            "someone who can read this folder has not yet replaced their vault key \
-                             (Security page); this file uploads once they have"
-                                .into(),
-                        )))
-                    }
                     Err(e) => return Err(ExecError::Contract(format!("sealing a file key: {e}"))),
                 }
             }
@@ -4126,8 +4118,8 @@ fn seal_to_readers(
 /// named file's key opened with the vault and sealed to each of its readers,
 /// as `{ file_id: { user_id: wrapped_file_key } }`. `None` when this device
 /// cannot answer for every file -- no vault key here, a file it holds no key
-/// for, a key that does not open, or a reader whose vault key is the old kind
-/// that cannot be sealed to -- in which case the refusal stands as it came.
+/// for, a key that does not open, or a reader key that cannot be sealed to --
+/// in which case the refusal stands as it came.
 fn wrap_for_new_readers(env: &ExecEnv, files: &[jd_proto::KeysNeeded]) -> Option<Value> {
     let vault = env.vault?;
     let mut out = serde_json::Map::new();
@@ -9032,13 +9024,13 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
 
-    /// A reader still on an old vault key holds the upload back for their
-    /// rotation (Retry), never drops it; a reader with no vault is counted.
+    /// Each reader with an X-Wing key is sealed to and a reader with no vault
+    /// is counted. A 32-byte key is a broken answer (Contract), never a Retry
+    /// that waits forever for a rotation.
     #[test]
-    fn a_reader_on_an_old_vault_key_holds_the_upload_until_they_rotate() {
+    fn a_reader_key_that_is_not_x_wing_is_a_contract_error_not_a_wait() {
         let fk = jd_crypto::drive::FileKey::generate();
         let current = jd_crypto::vault::generate_vault_keypair();
-        let old = jd_crypto::vault::public_key_from_secret_key(&jd_crypto::pkcs8::encode(&[4u8; 32])).unwrap();
         let readers = vec![
             json!({ "user_id": 1, "public_key": current.public_key_b64 }),
             json!({ "user_id": 2, "public_key": "" }),
@@ -9046,12 +9038,9 @@ mod tests {
         let (sealed, without) = seal_to_readers(&fk, &readers).unwrap().unwrap();
         assert_eq!((sealed.len(), sealed[0].0, without), (1, 1, 1));
 
-        let mut with_old = readers.clone();
-        with_old.push(json!({ "user_id": 3, "public_key": old }));
-        match seal_to_readers(&fk, &with_old).unwrap() {
-            Err(OpOutcome::Retry(m)) => assert!(m.contains("vault key"), "{m}"),
-            other => panic!("expected Retry, got {other:?}"),
-        }
+        let mut with_short = readers.clone();
+        with_short.push(json!({ "user_id": 3, "public_key": jd_crypto::b64::encode(&[4u8; 32]) }));
+        assert!(matches!(seal_to_readers(&fk, &with_short), Err(ExecError::Contract(_))));
 
         let broken = vec![json!({ "user_id": 4, "public_key": "AAAA" })];
         assert!(matches!(seal_to_readers(&fk, &broken), Err(ExecError::Contract(_))));

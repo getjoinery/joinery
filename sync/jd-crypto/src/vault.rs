@@ -11,17 +11,14 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use hkdf::Hkdf;
 use rand_core::{CryptoRng, OsRng, RngCore};
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{b64, pkcs8, xwing, CryptoError, Result};
+use crate::{b64, xwing, CryptoError, Result};
 
 /// HKDF info of a v2 seal: this prefix, then the scope (R2).
 const V2_INFO_PREFIX: &[u8] = b"joinery-seal:v2:";
 /// The scope of every key seal the sync client writes or opens.
 pub const SCOPE_DEK: &str = "dek";
-/// An old X25519 public key's length: refused for sealing and opening.
-pub const OLD_PUBLIC_BYTES: usize = 32;
 
 /// Argon2id defaults — must match `VaultCrypto.DEFAULT_KDF_PARAMS`
 /// (RFC 9106 second recommendation / Bitwarden default). `mem` is KiB.
@@ -72,23 +69,18 @@ pub fn generate_vault_keypair_with_rng<R: RngCore + CryptoRng>(mut rng: R) -> Va
 
 /// The public half of a vault secret key, recomputed from the secret itself.
 ///
-/// A holder of the secret key needs the public one too: the opener chooses the
-/// opener checks the seal names it. Derived rather than
+/// A holder of the secret key needs the public one too: the opener checks the
+/// seal names it. Derived rather than
 /// stored alongside: a pair carried as two fields can be got out of step by a
 /// bad write or a stale config, and the symptom is every unwrap failing with an
 /// opaque decryption error that names nothing.
 ///
-/// A 32-byte secret is an X-Wing seed. A 48-byte one is an older X25519
-/// PKCS#8 secret: its 32-byte public key is worked out, and nothing seals to
-/// or opens with it.
+/// The secret is the 32-byte X-Wing seed; anything else is refused.
 pub fn public_key_from_secret_key(secret_key: &[u8]) -> Result<String> {
-    if secret_key.len() == xwing::SEED_BYTES {
-        return Ok(b64::encode(&xwing::public_key(secret_key)?));
+    if secret_key.len() != xwing::SEED_BYTES {
+        return Err(CryptoError::Malformed("a vault secret key is a 32-byte seed"));
     }
-    let mut scalar = pkcs8::decode(secret_key)?;
-    let secret = StaticSecret::from(scalar);
-    scalar.zeroize();
-    Ok(b64::encode(PublicKey::from(&secret).as_bytes()))
+    Ok(b64::encode(&xwing::public_key(secret_key)?))
 }
 
 // ---- KEK derivation (one per unlocker type) --------------------------------
@@ -251,7 +243,7 @@ pub fn open_v2(raw: &[u8], seed: &[u8], scope: &str) -> Result<Vec<u8>> {
 }
 
 /// Seal bytes to a recipient's 1216-byte X-Wing public key, scope 'dek'.
-/// Anyone can seal. A 32-byte (X25519) key is refused as an old key.
+/// Anyone can seal.
 pub fn seal_to_public_key(data: &[u8], recipient_public_key_b64: &str) -> Result<String> {
     seal_to_public_key_with_rng(data, recipient_public_key_b64, OsRng)
 }
@@ -262,9 +254,6 @@ pub fn seal_to_public_key_with_rng<R: RngCore + CryptoRng>(
     mut rng: R,
 ) -> Result<String> {
     let recipient = b64::decode(recipient_public_key_b64)?;
-    if recipient.len() == OLD_PUBLIC_BYTES {
-        return Err(CryptoError::OldKey);
-    }
     if recipient.len() != xwing::PUBLIC_KEY_BYTES {
         return Err(CryptoError::Malformed("that is not a public key to seal to"));
     }
@@ -278,8 +267,7 @@ pub fn seal_to_public_key_with_rng<R: RngCore + CryptoRng>(
 }
 
 /// Open a key seal (scope 'dek') sealed to the 1216-byte
-/// `recipient_public_key_b64` with its 32-byte seed. A 32-byte (X25519) key is
-/// refused as an old key.
+/// `recipient_public_key_b64` with its 32-byte seed.
 ///
 /// The open first checks that the named public key is the seed's own, as
 /// `SealedBox::openEdge()` does. X-Wing already binds the ciphertext to the
@@ -293,9 +281,6 @@ pub fn open_from_secret_key(
 ) -> Result<Vec<u8>> {
     let raw = b64::decode(sealed_b64)?;
     let recipient = b64::decode(recipient_public_key_b64)?;
-    if recipient.len() == OLD_PUBLIC_BYTES {
-        return Err(CryptoError::OldKey);
-    }
     if recipient.len() != xwing::PUBLIC_KEY_BYTES {
         return Err(CryptoError::Malformed("that is not a public key"));
     }
