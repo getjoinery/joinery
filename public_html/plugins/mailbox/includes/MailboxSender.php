@@ -53,6 +53,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.29 - attachment rows are marked ima_inline_by_body: decided by the body they were written with (B5)
  * @version 1.28 - a sent Fortress draft's delete runs as rule_checked_write() (loadDraftInScope checked it)
  * @version 1.27 - a carried-over header keeps its raw UTF-8 (MailHeaderText, B30)
  * @version 1.26 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
@@ -1709,6 +1710,7 @@ class MailboxSender {
 			'ima_mime_part'    => $part_id,
 			'ima_content_id'   => $for_browser ? '' : $content_id,
 			'ima_is_inline'    => $inline,
+			'ima_inline_by_body' => true, // decided by the body it was written with
 			'ima_fil_file_id'  => (int)$file->key,
 			'ima_is_sealed'    => $sealing,
 		));

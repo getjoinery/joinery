@@ -601,22 +601,12 @@ public enum MailMime {
     /// angle brackets trimmed (the browser's MailboxMime.inlineIds).
     public static func inlineIDs(_ html: String) -> Set<String> {
         var ids = Set<String>()
-        let chars = Array(html)
-        let lower = Array(html.lowercased())
-        var i = 0
-        while i + 4 <= lower.count {
-            if lower[i] == "c" && lower[i + 1] == "i" && lower[i + 2] == "d" && lower[i + 3] == ":" {
-                var j = i + 4
-                while j < chars.count && !"\"' \t\r\n>".contains(chars[j]) && !chars[j].isWhitespace { j += 1 }
-                if j > i + 4 {
-                    let value = String(chars[(i + 4)..<j])
-                    let id = trimEdges(value.removingPercentEncoding ?? value)
-                    if !id.isEmpty { ids.insert(id) }
-                }
-                i = j
-            } else {
-                i += 1
-            }
+        guard let re = try? NSRegularExpression(pattern: "cid:([^\"'\\s>]+)", options: [.caseInsensitive]) else { return ids }
+        let ns = html as NSString
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            let value = ns.substring(with: m.range(at: 1))
+            let id = trimEdges(value.removingPercentEncoding ?? value)
+            if !id.isEmpty { ids.insert(id) }
         }
         return ids
     }

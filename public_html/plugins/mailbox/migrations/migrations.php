@@ -1673,4 +1673,43 @@ return [
 			return true;
 		},
 	],
+	[
+		// inl_001 skipped a message that names a sealed owner but whose body is
+		// not sealed: a draft whose sealed key is held but whose From moved to a
+		// standard mailbox (bootstrap 1.30). Its body is readable, and
+		// InlineFlagBackfill takes only sealed bodies, so decide its rows here.
+		'id' => 'inl_002_inline_flag_by_body_plaintext_held_key',
+		'version' => '1.144.30',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InlineParts.php'));
+			$db = $dbconnector->get_db_link();
+			if (!$db->query("SELECT 1 FROM information_schema.columns WHERE table_name = 'ima_inbound_message_attachments'
+					AND column_name = 'ima_inline_by_body'")->fetchColumn()) {
+				echo "inl_002: the ima_inline_by_body column is not there yet; nothing decided.\n";
+				return false;
+			}
+			$ids = $db->query("SELECT DISTINCT a.ima_iem_inbound_email_message_id
+				FROM ima_inbound_message_attachments a
+				JOIN iem_inbound_email_messages m ON m.iem_inbound_email_message_id = a.ima_iem_inbound_email_message_id
+				WHERE a.ima_inline_by_body IS NULL AND m.iem_content_sealed IS NOT TRUE
+				  AND m.iem_sealed_owner_user_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+			$body = $db->prepare('SELECT iem_body_html FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+			$rows = $db->prepare('SELECT ima_inbound_message_attachment_id AS id, ima_content_id AS cid
+				FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ? AND ima_inline_by_body IS NULL');
+			$set = $db->prepare('UPDATE ima_inbound_message_attachments SET ima_is_inline = ?, ima_inline_by_body = true
+				WHERE ima_inbound_message_attachment_id = ?');
+			$decided = 0;
+			foreach ($ids as $mid) {
+				$body->execute(array(intval($mid)));
+				$shown = InlineParts::referencedIds((string)$body->fetchColumn());
+				$rows->execute(array(intval($mid)));
+				foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
+					$set->execute(array(InlineParts::isInline((string)$r['cid'], $shown) ? 't' : 'f', intval($r['id'])));
+					$decided++;
+				}
+			}
+			echo "inl_002: $decided attachment row(s) on " . count($ids) . " plaintext message(s) with a held sealed key decided by their body.\n";
+			return true;
+		},
+	],
 ];

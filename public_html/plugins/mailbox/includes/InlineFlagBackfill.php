@@ -12,10 +12,15 @@
  * image without bytes of its own is then InlineImageBackfill's to adopt, which
  * is registered after this one.
  *
+ * A message whose content is not sealed (a draft whose sealed key is held
+ * but whose body is plaintext, bootstrap 1.30) has a readable body, so the
+ * migration inl_002 decides it, not this.
+ *
  * Fortress rows are never touched: their Content-ID is blank on the server
  * (the manifest is sealed to the person's devices), and the browser decides
  * inline from the opened body each time it shows one.
  *
+ * @version 1.1 - counts rows decided, not changed; a body that cannot be opened keeps its flags (reviewer2 B1)
  * @version 1.0
  */
 
@@ -52,7 +57,12 @@ class InlineFlagBackfill {
 		return (bool)$stmt->fetchColumn();
 	}
 
-	/** Decide up to $max messages' rows. Returns how many rows changed their flag. */
+	/**
+	 * Decide up to $max messages' rows. Returns how many rows were decided
+	 * (changed or not), so a drain keeps going while rows remain: most
+	 * pre-rule flags were already right, and counting only changes would end
+	 * each pass after one slice.
+	 */
 	public static function drainForUser(int $user_id, VaultKey $key, int $max = self::DEFAULT_MAX,
 			?float $deadline = null): int {
 		if ($user_id <= 0) {
@@ -67,7 +77,7 @@ class InlineFlagBackfill {
 			  WHERE " . self::candidateWhere() . "
 			  ORDER BY 1 DESC LIMIT " . intval($max));
 		$stmt->execute(array($user_id));
-		$changed = 0;
+		$decided = 0;
 		foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $msg_id) {
 			if ($deadline !== null && microtime(true) >= $deadline) {
 				break;
@@ -75,19 +85,27 @@ class InlineFlagBackfill {
 			try {
 				// One message is one unit for the hot-turn rule: its body opens
 				// this owner's scope, and nothing it decrypts outlives the unit.
-				$changed += SealedEgressGuard::isolate(function () use ($msg_id) {
+				$decided += SealedEgressGuard::isolate(function () use ($msg_id) {
 					return self::decideMessage(intval($msg_id));
 				});
 			} catch (VaultLockedException $e) {
 				break; // the window closed mid-drain: stop, never an error
 			} catch (\Throwable $e) {
-				error_log('InlineFlagBackfill: could not decide message ' . intval($msg_id) . ': ' . $e->getMessage());
+				// A body that cannot be opened for any other reason (a corrupt
+				// row, a key it was not sealed to) keeps its stored flags and is
+				// marked decided, so it is tried once and never starves the
+				// older messages behind it.
+				error_log('InlineFlagBackfill: could not open message ' . intval($msg_id)
+					. ', its stored inline flags stand: ' . $e->getMessage());
+				$db->prepare("UPDATE ima_inbound_message_attachments SET ima_inline_by_body = true
+					WHERE ima_iem_inbound_email_message_id = ? AND ima_inline_by_body IS NULL")->execute(array(intval($msg_id)));
+				$decided++;
 			}
 		}
-		return $changed;
+		return $decided;
 	}
 
-	/** Open one message's body and decide each undecided row with a Content-ID. */
+	/** Open one message's body and decide each undecided row with a Content-ID; returns how many. */
 	private static function decideMessage(int $msg_id): int {
 		$msg = new InboundEmailMessage($msg_id, TRUE);
 		if (!$msg->key) {
@@ -101,14 +119,11 @@ class InlineFlagBackfill {
 		$rows->execute(array($msg_id));
 		$set = $db->prepare('UPDATE ima_inbound_message_attachments
 			SET ima_is_inline = ?, ima_inline_by_body = true WHERE ima_inbound_message_attachment_id = ?');
-		$changed = 0;
+		$decided = 0;
 		foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
-			$inline = InlineParts::isInline((string)$r['cid'], $shown);
-			$set->execute(array($inline ? 't' : 'f', intval($r['id'])));
-			if ($inline !== (bool)$r['inline']) {
-				$changed++;
-			}
+			$set->execute(array(InlineParts::isInline((string)$r['cid'], $shown) ? 't' : 'f', intval($r['id'])));
+			$decided++;
 		}
-		return $changed;
+		return $decided;
 	}
 }

@@ -30,6 +30,7 @@
  * offset: PHP drops every upload past max_file_uploads (20 on this stack), and
  * a newsletter with more inline images than that is ordinary (B37).
  *
+ * @version 1.8 - attachment rows are marked ima_inline_by_body: decided by the body they were written with (B5)
  * @version 1.7 - a refused parse removes its own part Files as rule_checked_write() (standing() checked the owner)
  * @version 1.6 - the device parse's auth verdicts carry the stored DMARC policy (iem_dmarc_policy)
  * @version 1.5 - the device parse records the spam reason and meta tokens; a reply noted at pull time is honoured
@@ -387,6 +388,7 @@ class MailboxFortressParse {
 			'ima_mime_part'    => $u['mime_part'],
 			'ima_content_id'   => '',
 			'ima_is_inline'    => $u['inline'],
+			'ima_inline_by_body' => true, // decided by the body it was written with
 			'ima_fil_file_id'  => (int)$file->key,
 			'ima_is_sealed'    => true,
 		));

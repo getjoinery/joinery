@@ -1431,9 +1431,8 @@ unsealed mail by the plugin migration `inl_001_inline_flag_by_body`, and sealed
 
 **Inline images are body content and are always file-backed.** The reader's
 cid: rewrite (`MailboxService::resolveInlineImages()`) serves only file-backed
-rows, so the IMAP ingest fetches the bytes of each image part with a Content-ID
-(5 MB cap) beside the body fetches, before the body is decoded, and adopts those
-of the rows it marks inline at store time
+rows, so the IMAP ingest fetches the bytes of each image part the body shows
+(5 MB cap) beside the body fetches and adopts them at store time
 (`AttachmentByteCustody::adoptBytes()`, sealed iff the message is). Inline
 image rows that are still reference-backed are turned file-backed by the
 `mailbox_inline_backfill` deferred-work consumer (`InlineImageBackfill`) — from

@@ -55,7 +55,7 @@
  *
  * @version 1.24
  * @changelog 1.24 - a part is inline only when the HTML body shows it by cid: (InlineParts); the ingest-time
- *   picture fetch takes every image with a Content-ID, and adoption follows the manifest (B5)
+ *   picture fetch takes only the images the body shows, decided from the same HTML (B5)
  * @changelog 1.23 - an INBOX arrival of a spam row clears the verdict (the member said Not spam at the
  *   source); neither folder's verdict overrides a correction not yet carried to the source
  * @version 1.22
@@ -1652,7 +1652,8 @@ class ImapIngestor {
 		// network I/O beside the body fetches, outside the transaction below —
 		// and adopted into Files by the stored half. Best-effort: a failed fetch
 		// leaves the part reference-backed, exactly as it was.
-		$inlineBytes = $this->fetchInlineImageParts($client, $folderName, $uid, $structure, $attachParts);
+		$inlineBytes = $this->fetchInlineImageParts($client, $folderName, $uid, $structure, $attachParts,
+			InlineParts::referencedIds($html));
 
 		// Generous ceiling: truncate-and-mark rather than skip. Cut with clip(),
 		// never substr(): a byte offset can land inside a multi-byte character,
@@ -2136,15 +2137,6 @@ class ImapIngestor {
 		return count($rows) ? (string)$rows->get(0)->get('iif_name') : null;
 	}
 
-	/** Whether a part could be a picture in the body: an image with a Content-ID.
-	 *  The ingest-time fetch runs before the body is decoded, so it takes every
-	 *  candidate; writeManifest() decides inline from the body itself
-	 *  (InlineParts), and adoptInlineParts() adopts only the rows it marked. */
-	private static function partMayBeInline($part): bool {
-		$cid = $part->getContentId();
-		return $cid !== null && trim((string)$cid, " \t<>") !== '';
-	}
-
 	/**
 	 * Fetch the decoded bytes of every inline image part, keyed by MIME id
 	 * (specs/bugfix_sealed_inline_images.md). Network half only — runs beside
@@ -2152,11 +2144,14 @@ class ImapIngestor {
 	 * throughout: any part that fails, exceeds the ceiling, or is not an image
 	 * is simply absent from the result and stays reference-backed.
 	 */
-	private function fetchInlineImageParts($client, string $folder, int $uid, $structure, array $attachParts): array {
+	private function fetchInlineImageParts($client, string $folder, int $uid, $structure, array $attachParts,
+			array $shown): array {
 		$out = array();
 		foreach ($attachParts as $part) {
 			try {
-				if (!self::partMayBeInline($part)) {
+				// Only the pictures the body shows (InlineParts), the rows
+				// writeManifest() marks inline from the same HTML.
+				if (!InlineParts::isInline($part->getContentId(), $shown)) {
 					continue;
 				}
 				if (strtolower((string)$part->getPrimaryType()) !== 'image') {

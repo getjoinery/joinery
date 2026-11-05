@@ -28,6 +28,7 @@
  * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
  * cannot land there.
  *
+ * @version 1.8 - attachment rows are marked ima_inline_by_body: decided by the body they were written with (B5)
  * @version 1.7 - a draft's own purges (discard, a removed part, a dropped inline image) run as
  *               rule_checked_write(): the viewer's grant and authorship are checked first
  * @version 1.6 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
@@ -547,6 +548,7 @@ class MailboxDrafts {
 			'ima_mime_part'    => $u['mime_part'],
 			'ima_content_id'   => '',
 			'ima_is_inline'    => $u['inline'],
+			'ima_inline_by_body' => true, // decided by the body it was written with
 			'ima_fil_file_id'  => (int)$file->key,
 			'ima_is_sealed'    => true,
 		));
@@ -915,6 +917,7 @@ class MailboxDrafts {
 					'ima_mime_part'    => substr($part_id, 0, 40),
 					'ima_content_id'   => $is_inline ? $localId : null,
 					'ima_is_inline'    => $is_inline,
+					'ima_inline_by_body' => true, // decided by the body it was written with
 					'ima_fil_file_id'  => (int)$file->key,
 					'ima_is_sealed'    => ($crypto !== null),
 				));

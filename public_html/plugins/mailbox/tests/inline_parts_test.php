@@ -169,10 +169,34 @@ if (!$session_ok) {
 	VaultUnlock::lockAll($uid);
 	check(InlineFlagBackfill::drainForUser($uid, vault_fixture_dummy_key()) === 0 && $flags()[$shown_id][1] === null,
 		'with the window shut nothing is decided');
+	// A second sealed message whose body cannot be opened (its sealed key is not one).
+	$bm = new InboundEmailMessage(NULL);
+	$bm->set('iem_ied_inbound_email_domain_id', (int)$sdomain->key);
+	$bm->set('iem_iea_inbound_email_alias_id', (int)$salias->key);
+	$bm->set('iem_recipient', $saddr);
+	$bm->set('iem_sender', 'sender@example.org');
+	$bm->set('iem_subject', 'broken');
+	$bm->set('iem_body_plain', 'body');
+	$bm->set('iem_body_html', 'x');
+	$bm->set('iem_thread_key', 'tk-inline-broken-' . $suffix);
+	$bm->save();
+	harness_register_model('InboundEmailMessage', (int)$bm->key);
+	$bmid = (int)$bm->key;
+	InboundEmailMessage::sealAndPersistContent($bmid, $vault, 'sender@example.org', $saddr, 'broken', 'body', '<p>x</p>');
+	DbConnector::get_instance()->get_db_link()->prepare('UPDATE iem_inbound_email_messages SET iem_sealed_key = ? WHERE iem_inbound_email_message_id = ?')
+		->execute(array(base64_encode(random_bytes(80)), $bmid));
+	$broken_id = (int)InboundMessageAttachment::CreateEntry(array(
+		'ima_iem_inbound_email_message_id' => $bmid, 'ima_filename' => 'b.png', 'ima_content_type' => 'image/png',
+		'ima_size_bytes' => 10, 'ima_mime_part' => '2', 'ima_content_id' => 'broken@x',
+		'ima_is_inline' => true, 'ima_is_sealed' => true))->key;
+
 	vault_fixture_open_window($uid, $kp['secret']);
 	$changed = InlineFlagBackfill::drainForUser($uid, vault_fixture_dummy_key());
 	$f = $flags();
-	check($changed === 2, 'both rows changed', (string)$changed);
+	check($changed === 3, 'three rows decided: two by their body, one that could not be opened', (string)$changed);
+	$b = DbConnector::get_instance()->get_db_link()->query('SELECT ima_is_inline, ima_inline_by_body FROM ima_inbound_message_attachments
+		WHERE ima_inbound_message_attachment_id = ' . $broken_id)->fetch(PDO::FETCH_NUM);
+	check($b[0] === true && $b[1] === true, 'a body that cannot be opened keeps its stored flag and is marked, so it is tried once', json_encode($b));
 	check($f[$shown_id] === array(true, true), 'the picture the body shows is inline now, and marked decided', json_encode($f[$shown_id]));
 	check($f[$hidden_id] === array(false, true), 'the Content-ID the body never shows is listed now, and marked decided', json_encode($f[$hidden_id]));
 	check(!InlineFlagBackfill::hasWork($uid), 'and nothing is left: a row is decided once');

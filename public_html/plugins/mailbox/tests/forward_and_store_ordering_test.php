@@ -19,6 +19,7 @@
  *
  * Run: php plugins/mailbox/tests/forward_and_store_ordering_test.php  (schema synced).
  *
+ * @version 1.4 - the persistRawAndManifest() override follows its signature (the body HTML, B5)
  * @version 1.3 - the destination is confirmed, as forwarding requires
  * @version 1.2 - the persistRawAndManifest() override follows its signature (Fortress flag, manifest return)
  * @version 1.1 - teardown goes through mailbox_purge_domains(), which also removes the
@@ -50,12 +51,12 @@ class ForwardStoreProbeRouter extends InboundEmailRouter {
 		return $map;
 	}
 
-	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null,
-			bool $for_browser = false): array {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, string $html, $alias = null,
+			?string $dek = null, bool $for_browser = false): array {
 		if ($this->fail_store) {
 			throw new \RuntimeException('forced store failure (simulating store backend down)');
 		}
-		return parent::persistRawAndManifest($message_id, $raw_email, $alias, $dek, $for_browser);
+		return parent::persistRawAndManifest($message_id, $raw_email, $html, $alias, $dek, $for_browser);
 	}
 
 	protected function checkAliasRateLimit($alias_id) {

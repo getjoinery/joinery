@@ -84,7 +84,8 @@
  * delivered parts. See AttachmentByteCustody.
  *
  * @version 1.60 - a part is inline only when the HTML body shows it by cid: (InlineParts), whatever its
- *                Content-Disposition says; persistRawAndManifest() takes the body HTML (B5)
+ *                Content-Disposition says; persistRawAndManifest() takes the body HTML, and Direct
+ *                mail decides it from its own body rather than the sender's flag (B5)
  * @version 1.59 - parseEmail makes every header value text (MailHeaderText::block), so the routing log's
  *               From, the Message-ID and the thread key carry no raw Latin-1; those two cut between
  *               characters (B66)
@@ -1511,7 +1512,7 @@ class InboundEmailRouter {
 				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $body_plain, $body_html,
 					null, null, $lists);
 			}
-			$manifest = $this->storeDirectAttachments(intval($msg->key), $attachments, $owner_id, $dek, $for_browser);
+			$manifest = $this->storeDirectAttachments(intval($msg->key), $attachments, $body_html, $owner_id, $dek, $for_browser);
 			if ($for_browser) {
 				InboundEmailMessage::sealFortressDerived(intval($msg->key), $vault, $dek, array(
 					'sender' => $sender, 'subject' => $subject, 'body_plain' => $body_plain, 'body_html' => $body_html,
@@ -1562,11 +1563,14 @@ class InboundEmailRouter {
 	 *
 	 * @return array manifest entries (InboundEmailMessage::manifestEntry())
 	 */
-	private function storeDirectAttachments(int $message_id, array $attachments, int $owner_id, ?string $dek,
-			bool $for_browser = false): array {
+	private function storeDirectAttachments(int $message_id, array $attachments, string $html, int $owner_id,
+			?string $dek, bool $for_browser = false): array {
 		if (empty($attachments)) {
 			return array();
 		}
+		// Inline is what this body shows (InlineParts), not the sender's flag:
+		// a peer on an older release may still send the old rule's answer.
+		$shown = InlineParts::referencedIds($html);
 		$sealing = ($dek !== null);
 		$for_browser = $sealing && $for_browser;
 
@@ -1615,7 +1619,8 @@ class InboundEmailRouter {
 					'ima_mime_part'    => substr($mime_part, 0, 40),
 					'ima_encoding'     => 'binary', // no base64: parts transfer as bytes
 					'ima_content_id'   => $for_browser ? '' : $content_id,
-					'ima_is_inline'    => !empty($attachment['is_inline']),
+					'ima_is_inline'    => InlineParts::isInline($cid, $shown),
+					'ima_inline_by_body' => true,
 					'ima_fil_file_id'  => intval($file->key),
 					'ima_is_sealed'    => $sealing,
 				);

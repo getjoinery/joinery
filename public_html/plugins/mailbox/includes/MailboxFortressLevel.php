@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.5 - attachment rows are marked ima_inline_by_body: decided by the body they were written with (B5)
  * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3 - a raw reset to inline forgets its file store and key; the stored raw is deleted by its descriptor
  * @version 1.2 - both drains are ProtectionLevelChange::convergeBatch() passes; the byte budget is the platform's
@@ -272,6 +273,7 @@ class MailboxFortressLevel {
 					'ima_filename' => '', 'ima_content_type' => '', 'ima_content_id' => '',
 					'ima_size_bytes' => strlen($p['bytes']), 'ima_mime_part' => $p['mime_part'], 'ima_encoding' => '',
 					'ima_is_inline' => $p['inline'], 'ima_fil_file_id' => intval($file->key), 'ima_is_sealed' => true,
+					'ima_inline_by_body' => true, // a Fortress body is decided again where it is opened
 				));
 				$manifest[] = InboundEmailMessage::manifestEntry(intval($att->key), $p['filename'], $p['content_type'],
 					$p['content_id'], $p['mime_part'], $p['inline'], strlen($p['bytes']));
