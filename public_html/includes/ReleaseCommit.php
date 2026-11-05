@@ -57,10 +57,11 @@
  * WHO COMMITS WHAT. The owner commits their own work; publish refuses before
  * writing anything while it is uncommitted or unpushed. Publish then writes
  * the files every release carries (publishWrite(): VERSION, the install SQL,
- * the plugin and theme version bumps, the parser jail binaries it rebuilds)
+ * the plugin and theme version bumps, the prebuilt Go binaries it rebuilds)
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.13 - the unseal daemon's source is held and its prebuilt binaries are publish's to commit
  * @version 1.12 - every git call ignores file modes (core.fileMode=false): the host converger sets them on every
  *               box, so a mode that differs from git is never a local change, never left out of a release,
  *               and never stops a catch-up
@@ -271,6 +272,7 @@ class ReleaseCommit {
 		'maintenance_scripts/install_tools/release_keys/',         // copied into the agent bundle from this disk
 		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/sandbox_host/',         // SandboxHostPublisher::SOURCE_SUBDIR, compiled here
+		'maintenance_scripts/install_tools/joinery_unseal/',       // UnsealDaemonPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/site_engine/',          // SiteEnginePublisher::SOURCE_SUBDIR, built here
 		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
 		'public_html/plugins/mail_apps/provisioning/mail-gateway/', // MailGatewayPublisher::SOURCE_SUBDIR, compiled here
@@ -663,6 +665,7 @@ class ReleaseCommit {
 		$rel = ltrim(str_replace('\\', '/', $rel), '/');
 		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0
 			|| strpos($rel, SandboxHostPublisher::BIN_SUBDIR . '/') === 0
+			|| strpos($rel, UnsealDaemonPublisher::BIN_SUBDIR . '/') === 0
 			|| $rel === SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE) {
 			return true;
 		}

@@ -284,6 +284,11 @@ check(in_array(SandboxHostPublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY
 $publish_source = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
 check(strpos($publish_source, 'SandboxHostPublisher::publish($full_site_dir') !== false
 	&& strpos($publish_source, 'SandboxHostPublisher::STATUS_FAILED') !== false, 'and publish builds it, refusing a release whose host is stale');
+check(in_array(UnsealDaemonPublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true)
+	&& ReleaseCommit::publishWrite(dirname(PathHelper::getIncludePath('includes')), UnsealDaemonPublisher::BIN_SUBDIR . '/joinery-unseal-x86_64')
+	&& strpos($publish_source, 'UnsealDaemonPublisher::publish($full_site_dir') !== false
+	&& strpos($publish_source, 'UnsealDaemonPublisher::STATUS_FAILED') !== false,
+	'the unseal daemon source is held, its binaries are publish\'s to commit, and publish refuses a stale daemon');
 check(in_array(SiteEnginePublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
 	'the site container engine source held is the one its publisher builds');
 $plugin_publishers = GoBinaryPublisher::pluginPublishers();

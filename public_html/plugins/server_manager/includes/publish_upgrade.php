@@ -728,6 +728,17 @@
 				publish_output("Fix the host build and publish again. Nothing has been written.");
 				exit(1);
 			}
+
+			// The unseal daemon (specs/unseal_daemon.md): the same shape, run
+			// on every node by its installer. A stale daemon must not ship.
+			publish_output("Building unseal daemon binaries...");
+			$unseal_daemon = UnsealDaemonPublisher::publish($full_site_dir, 'publish_output');
+			if ($unseal_daemon['status'] === UnsealDaemonPublisher::STATUS_FAILED) {
+				publish_output("\nRefusing to publish {$version} — the unseal daemon "
+					. "(maintenance_scripts/install_tools/joinery_unseal/bin) is stale and the build failed.");
+				publish_output("Fix the daemon build and publish again. Nothing has been written.");
+				exit(1);
+			}
 		}
 
 		// The site container engine, our own build of Podman (specs/
