@@ -454,4 +454,13 @@ check(strpos($aem, 'persistProvenKeys(PackageSignature::withoutTrust($verdict->k
 	&& strpos($aem, 'persistProvenKeys(PackageSignature::trustOf($verdict->keys_proven))') > strpos($aem, "could not place the verified"),
 	'and the extension refresh: the set once the package is placed');
 
+// ---------------------------------------------------------------------------
+section('Only the core sets the keys an upgrade records (B7), from fresh archives (B8)');
+
+check(strpos($up, "if (\$expected_root === '' && PackageSignature::trustOf(\$verdict->keys_proven)) {") !== false
+	&& substr_count($up, "\$GLOBALS['UPGRADE_PENDING_TRUST'] = ") === 1,
+	'an upgrade records the set of the core it verified: a theme or plugin verified after it, built by an earlier release, does not put back that release\'s set (the 2026-11-05 rotation: no production site recorded N)');
+check(strpos($up, "basename(\$path))\n\t\t\t\t\t. '?r=' . (int)@filemtime(\$path) . '.' . (int)@filesize(\$path),") !== false,
+	'each published theme and plugin URL names its bytes: a cache in front of the source (Cloudflare kept 0.8.578\'s boards archive under 0.8.579) cannot hand out an earlier release\'s copy');
+
 harness_finish();

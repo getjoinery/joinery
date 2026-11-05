@@ -34,6 +34,9 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.35 - only the core archive sets the trusted set it records (a theme or plugin built by an earlier
+	 *                release verified under its set); published archive URLs carry a query naming their bytes, so a
+	 *                cache never serves an earlier release's copy (release_key_rotation B7, B8)
 	 * @version 1.34 - no relay refusal: a relay is rebuilt from the bundle its site's release carries, so the site
 	 *                upgrades first and the map holds X-Wing keys back from a relay older than 3.16
 	 *                (RelayMapExporter::relayTakes); a same-version run reports a reinstall, not an upgrade
@@ -637,7 +640,11 @@
 			$log_keys = $verdict->keys_proven;
 			if (method_exists('PackageSignature', 'withoutTrust')) {
 				$log_keys = PackageSignature::withoutTrust($verdict->keys_proven);
-				if (PackageSignature::trustOf($verdict->keys_proven)) {
+				// The core's statement sets the site's keys. A theme or plugin
+				// verifies against the release that last built it, which can
+				// be an earlier one, and its set must not stand in for the
+				// core's.
+				if ($expected_root === '' && PackageSignature::trustOf($verdict->keys_proven)) {
 					$GLOBALS['UPGRADE_PENDING_TRUST'] = PackageSignature::trustOf($verdict->keys_proven);
 				}
 			}
@@ -2657,10 +2664,15 @@
 			$version = substr($basename, $pos + 1);
 			if ($name === '' || $version === '') continue;
 
+			// The query names these bytes: an archive keeps its file name across
+			// every release that leaves its version alone, and a cache in front
+			// of this site (Cloudflare) would otherwise serve an earlier
+			// release's copy, signed and logged under that release.
 			$out[] = [
 				'name'    => $name,
 				'version' => $version,
-				'url'     => LibraryFunctions::get_absolute_url('/static_files/' . $url_subpath . '/' . basename($path)),
+				'url'     => LibraryFunctions::get_absolute_url('/static_files/' . $url_subpath . '/' . basename($path))
+					. '?r=' . (int)@filemtime($path) . '.' . (int)@filesize($path),
 			];
 		}
 		return $out;
