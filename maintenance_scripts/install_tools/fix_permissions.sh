@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.15 - A setgid data directory (2770) is no longer picked on every run: chmod 770 keeps the bit, so the exact test churned its ctime each minute (reviewer2 B2)
+#VERSION 4.14 - The data set and config/'s data are fixed in one walk, mode then owner per entry: an entry made between two walks was handed to www-data at its birth mode, locking its maker out for a minute
 #VERSION 4.13 - backup_site_key.retired* is no longer pinned: nothing writes or reads one
 #VERSION 4.12 - config/backup_site_key.retired* (an old X25519 site key moved aside, specs/post_quantum_sealing.md R7) is pinned 640 like the live key
 #VERSION 4.11 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are pinned out of the data-set sweep: root writes them and the pool only reads them (plugin_installer_from_the_browser, reviewer2 B2)
@@ -418,6 +420,12 @@ fi
 # in both modes: the web server owns its own data, and no other local account on
 # the box can read an upload.
 
+# A data entry's mode is wrong unless it is 770. A directory may also carry
+# setgid (MailboxIndex and BackupDownload set 2770 so two accounts share the
+# group); chmod 770 keeps that bit on a directory, so an exact 770 test would
+# pick such a directory on every run and rewrite its ctime for nothing.
+DATA_MODE_WRONG=( -not -perm -770 -o -perm /5007 -o \( -type f -perm /2000 \) )
+
 DATA_ROOTS=()
 for d in uploads static_files cache logs storage backups; do
     [ -d "$SITE_ROOT/$d" ] && DATA_ROOTS+=( "$SITE_ROOT/$d" )
@@ -425,11 +433,12 @@ done
 
 echo "  Data set: uploads, static_files, cache, logs, storage, backups to www-data:www-data 0770..."
 if [ ${#DATA_ROOTS[@]} -gt 0 ]; then
+    # One walk, mode then owner on each entry it picks: two walks let an entry
+    # made between them be handed to www-data with its birth mode (0755), which
+    # locks its maker out until the next run.
     sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
-         -not -perm 770 -exec chmod 770 {} +
-    sweep_find "${DATA_ROOTS[@]}" -ignore_readdir_race "${PRUNE[@]}" \( -type f -o -type d \) \
-         \( -not -user www-data -o -not -group www-data \) \
-         -exec chown www-data:www-data {} +
+         \( "${DATA_MODE_WRONG[@]}" -o -not -user www-data -o -not -group www-data \) \
+         -exec sh -c 'r=0; chmod 770 "$@" || r=$?; chown www-data:www-data "$@" || r=$?; exit $r' sh {} +
 fi
 
 # The non-PHP contents of config/ are data the pool reads and writes: this
@@ -438,11 +447,8 @@ fi
 if [ -d "$CONFIG_DIR" ]; then
     sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
          -not -name '*.php' \
-         -not -perm 770 -exec chmod 770 {} +
-    sweep_find "$CONFIG_DIR" -ignore_readdir_race -mindepth 1 "${PRUNE[@]}" \( -type f -o -type d \) \
-         -not -name '*.php' \
-         \( -not -user www-data -o -not -group www-data \) \
-         -exec chown www-data:www-data {} +
+         \( "${DATA_MODE_WRONG[@]}" -o -not -user www-data -o -not -group www-data \) \
+         -exec sh -c 'r=0; chmod 770 "$@" || r=$?; chown www-data:www-data "$@" || r=$?; exit $r' sh {} +
 fi
 
 # =============================================================================

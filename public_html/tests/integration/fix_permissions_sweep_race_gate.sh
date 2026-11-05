@@ -85,8 +85,8 @@ fi
 echo "=== Every tree sweep goes through it ==="
 chk "no tree sweep calls find directly" \
     "$(grep -cE '^\s+find "(\$\{EXEC_ROOTS\[@\]\}|\$\{DATA_ROOTS\[@\]\}|\$CONFIG_DIR" -mindepth)' "$SCRIPT")" "0"
-chk "eight tree sweeps, each with -ignore_readdir_race after its roots" \
-    "$(grep -cE '^\s+sweep_find "(\$\{EXEC_ROOTS\[@\]\}|\$\{DATA_ROOTS\[@\]\}|\$CONFIG_DIR)" -ignore_readdir_race ' "$SCRIPT")" "8"
+chk "six tree sweeps (the data set and config/'s data in one walk each), each with -ignore_readdir_race after its roots" \
+    "$(grep -cE '^\s+sweep_find "(\$\{EXEC_ROOTS\[@\]\}|\$\{DATA_ROOTS\[@\]\}|\$CONFIG_DIR)" -ignore_readdir_race ' "$SCRIPT")" "6"
 
 echo ""
 echo "fix_permissions_sweep_race: $passed passed, $failed failed"

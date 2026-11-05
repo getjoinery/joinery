@@ -1724,8 +1724,8 @@ check(preg_match('/config\/\*\.php.*\n.*chown root:www-data|-exec chown root:www
 check(strpos($fix_perms_src_s10, 'chmod 750') !== false && strpos($fix_perms_src_s10, '"$SITE_ROOT/config"') !== false,
     'the config directory itself is 0750, so the pool cannot unlink Globalvars_site.php and leave another',
     'directory write is enough to replace a file the pool `require`s');
-check(strpos($fix_perms_src_s10, '-exec chown www-data:www-data {} +') !== false,
-    'the data set is www-data:www-data');
+check(strpos($fix_perms_src_s10, "chmod 770 \"\$@\" || r=\$?; chown www-data:www-data \"\$@\"") !== false,
+    'the data set is www-data:www-data 0770, mode then owner in one walk');
 check(strpos($fix_perms_src_s10, "-not -perm 777") === false,
     'no mode is 777 in either mode any more',
     'dev used to sweep the whole tree to 777, uploads included');
@@ -2644,7 +2644,7 @@ check($fix_perms_src !== '', 'fix_permissions.sh exists', $fix_perms);
 // is unchanged either way: the cache directory has to exist before the sweep
 // runs, or it is never given to www-data and page caching silently stays off.
 $fp_mkdir = strpos($fix_perms_src, 'mkdir -p "$SITE_ROOT/cache/static_pages"');
-$fp_chown = strpos($fix_perms_src, '-exec chown www-data:www-data {} +');
+$fp_chown = strpos($fix_perms_src, 'chown www-data:www-data "$@"');
 check($fp_mkdir !== false && $fp_chown !== false && $fp_mkdir < $fp_chown,
     'the permissions sweep guarantees the cache directory exists before it sweeps');
 
