@@ -3830,7 +3830,10 @@ check(in_array('_host_files.sh', $loaded_b13, true), 'install.sh loads _host_fil
 $build_fn_b13 = '';
 if (preg_match('/^do_build_base\(\) \{.*?^\}$/ms', $install_b13, $fm)) $build_fn_b13 = $fm[0];
 $copy_b13 = '';
-if (preg_match('/^COPY (.+) \/tmp\/?\S*$/m', $base_b13, $cm)) $copy_b13 = ' ' . $cm[1] . ' ';
+$dest_b13 = '';
+if (preg_match('/^COPY (.*install\.sh.*) (\/\S+)$/m', $base_b13, $cm)) { $copy_b13 = ' ' . $cm[1] . ' '; $dest_b13 = $cm[2]; }
+check($dest_b13 !== '' && !preg_match('#^/(tmp|var/tmp|dev/shm)(/|$)#', $dest_b13),
+	'Dockerfile.base builds from outside a scratch directory', 'a root program running from one is on the never-do list; got ' . $dest_b13);
 foreach ($loaded_b13 as $file_b13) {
 	check(strpos($build_fn_b13, 'cp "$SCRIPT_DIR/' . $file_b13 . '" "$BUILD_DIR/install_tools/' . $file_b13 . '"') !== false,
 		"do_build_base puts {$file_b13} in the build context",

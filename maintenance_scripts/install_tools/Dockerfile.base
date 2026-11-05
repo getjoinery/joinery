@@ -1,4 +1,7 @@
 # Joinery Base Image
+# VERSION 1.7 - The build runs install.sh from /opt/joinery-build, not /tmp: the never-do check
+#               holds any root program running from a scratch directory, and every nightly
+#               base refresh raised it on each container host. The image is the same image.
 # VERSION 1.6 - PostgreSQL is stopped before the build step ends, so the image carries a cluster shut
 #               down cleanly and a new site's first start is not a crash recovery (multi_tenant_host_hardening
 #               B8; with D9 a base is built whenever Ubuntu ships a fix, so every new site would be born
@@ -34,18 +37,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Copy only the install script and the helpers it loads - site code is NOT
 # included in the base. Build context is the prepared install_tools/ directory
-# (see do_build_base), so both are at the context root.
-COPY install.sh _host_files.sh _site_engine.sh /tmp/
+# (see do_build_base), so both are at the context root. Not /tmp: a root
+# program running from a scratch directory is on the never-do list
+# (never_do_check.sh), and the build is a program like any other.
+COPY install.sh _host_files.sh _site_engine.sh /opt/joinery-build/
 
 # Install all system dependencies.
 # --skip-postgres-password tells install.sh server not to set a postgres user
 # password during the base build - that is a per-site concern and is handled
 # by _site_init.sh at first container run. This avoids baking any credential
 # (not even a placeholder) into the shared base image.
-RUN chmod +x /tmp/install.sh && \
-    /tmp/install.sh server --skip-postgres-password && \
+RUN chmod +x /opt/joinery-build/install.sh && \
+    /opt/joinery-build/install.sh server --skip-postgres-password && \
     service postgresql stop && \
-    rm /tmp/install.sh /tmp/_host_files.sh /tmp/_site_engine.sh
+    rm -rf /opt/joinery-build
 
 # Label the image with a hash of the install.sh server code path so
 # do_site_docker can detect drift between the base and the current install.sh.

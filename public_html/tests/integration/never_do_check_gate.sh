@@ -13,7 +13,8 @@
 # nothing, the object has its keys, every item keeps only safe characters, a
 # port in the ephemeral range reads eph, a run that is not root says partial,
 # a program run from /tmp is seen while it runs, a port is named after the
-# holder that opened it, and nothing writes.
+# holder that opened it, nothing writes, and the mail gateway's credentials
+# drop-in is one fixed entry only while it holds nothing but LoadCredential lines.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -135,6 +136,22 @@ printf '[storage]\ndriver = "overlay"\ngraphroot = "/srv/joinery/containers/stor
 MOVED="$(eval "$(sed -n '/^walk_skips()/,/^}/p' "$SCRIPT" | sed "s#/etc/docker/#$FAKE/docker/#; s#/etc/containers/#$FAKE/containers/#")"; walk_skips)"
 chk "Docker's data-root from daemon.json" "$(printf '%s\n' "$MOVED" | grep -cxF /srv/joinery/docker)" "1"
 chk "Podman's graphroot from storage.conf" "$(printf '%s\n' "$MOVED" | grep -cxF /srv/joinery/containers/storage)" "1"
+
+
+echo "=== The mail gateway's credentials drop-in (1.4) ==="
+eval "$(sed -n '/^credentials_only()/,/^}/p' "$SCRIPT")"
+C="$T/credentials.conf"
+printf '[Service]\n' > "$C"
+chk "[Service] alone is credentials only" "$(credentials_only "$C" && echo yes || echo no)" "yes"
+printf '[Service]\nLoadCredential=joinerytest.crt:/etc/letsencrypt/live/dev.getjoinery.com/fullchain.pem\nLoadCredential=joinerytest.key:/etc/letsencrypt/live/dev.getjoinery.com/privkey.pem\n' > "$C"
+chk "certificate hand-offs are credentials only" "$(credentials_only "$C" && echo yes || echo no)" "yes"
+printf '[Service]\nLoadCredential=a.crt:/x\nExecStartPre=/tmp/x\n' > "$C"
+chk "any other line is not" "$(credentials_only "$C" && echo yes || echo no)" "no"
+printf '[Service]\nLoadCredential=a.crt:relative\n' > "$C"
+chk "a credential that is not an absolute path is not" "$(credentials_only "$C" && echo yes || echo no)" "no"
+ln -s "$C" "$T/link.conf"
+chk "a link is not" "$(credentials_only "$T/link.conf" && echo yes || echo no)" "no"
+chk "only the gateway's own path gets the fixed entry" "$(grep -c 'GATEWAY_CREDENTIALS" ]] && credentials_only' "$SCRIPT")" "1"
 
 echo
 echo "never_do_check gate: $passed passed, $failed failed"

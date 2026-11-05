@@ -15,10 +15,11 @@
  * tree and the keys the last logged release installed), the entries added
  * since the last run: entry bundles of 256, searched for the base64 of each
  * statement key (release_keys/statement/ and the keys nodes hold). An entry
- * naming one is compared with the release ledger (rle_release_log_entries):
- * the same index with the same leaf bytes is ours, and its ledger row is
- * stamped as seen in the log; anything else is unaccounted for, and
- * IncidentSourceReleaseLogEntry raises it.
+ * naming one is compared with the release ledger (rle_release_log_entries)
+ * and with the commit map this tree ships (ReleaseHistoryMap, whose rewrites
+ * are logged under the same keys): the same index with the same leaf bytes is
+ * ours, and a ledger row is stamped as seen in the log; anything else is
+ * unaccounted for, and IncidentSourceReleaseLogEntry raises it.
  *
  *  - It starts on each log at our first logged entry there, or, on a log we
  *    never logged to, where the log stood when the tail first saw it.
@@ -44,6 +45,7 @@
  * The state, which the public releases page shows: how far each log has been
  * read, when, every unaccounted entry, and the last key check.
  *
+ * @version 1.5 - an entry of the commit map this tree ships is ours too (specs_private_repo D4)
  * @version 1.4 - reads under retired statement keys too (release_keys/retired/statement/, specs/release_key_rotation.md F9)
  * @version 1.3 - every key pinned or held for a log reads its checkpoint (WP7 review B7)
  * @version 1.2 - a checkpoint smaller than one already seen is refused; the run reports only entries the ledger
@@ -250,7 +252,9 @@ class ReleaseLogTail {
 	private static function found(array $state, array $ledger, string $origin, int $index, string $leaf, int $now): array {
 		$mine = $ledger[$origin . '#' . $index] ?? null;
 		if ($mine !== null && hash_equals($mine['leaf'], $leaf)) {
-			$state['seen'][] = $mine['id'];
+			if ($mine['id']) {
+				$state['seen'][] = $mine['id'];
+			}
 			return $state;
 		}
 		foreach ($state['unaccounted'] as $u) {
@@ -279,7 +283,13 @@ class ReleaseLogTail {
 		return $first;
 	}
 
-	/** Every entry this site logged: "origin#index" => {id, leaf bytes, log_keys: [[origin, DER]] it installs}. */
+	/**
+	 * Every entry this site logged: "origin#index" => {id, leaf bytes, log_keys:
+	 * [[origin, DER]] it installs}. A publish's entries come from the release
+	 * ledger; a commit map rewrite's from the map this tree ships, with id 0
+	 * (no ledger row) and no log keys, when it proves a commit map under this
+	 * tree's keys.
+	 */
 	public static function ledger(): array {
 		$ledger = array();
 		foreach (new MultiReleaseLogEntry(array()) as $row) {
@@ -297,6 +307,12 @@ class ReleaseLogTail {
 				'leaf'     => (string)base64_decode((string)($doc['entry']['leaf'] ?? ''), true),
 				'log_keys' => $log_keys,
 			);
+		}
+		$root = PathHelper::getSiteRoot();
+		$statement_keys = array_merge(ReleaseLogClient::repoStatementKeys($root), ReleaseLogClient::repoRetiredStatementKeys($root));
+		$log_keys = ReleaseLogClient::keySets(ReleaseLogClient::repoLogKeys($root));
+		foreach (ReleaseHistoryMap::installed($root)->loggedEntries($statement_keys, $log_keys) as $e) {
+			$ledger += array($e['origin'] . '#' . $e['index'] => array('id' => 0, 'leaf' => $e['leaf'], 'log_keys' => array()));
 		}
 		return $ledger;
 	}

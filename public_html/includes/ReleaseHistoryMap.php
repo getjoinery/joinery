@@ -37,6 +37,12 @@
  *    current() follows it without re-proving it, as ReleaseProvenance reads
  *    the RELEASE_STATEMENT without re-proving it.
  *
+ * A THIRD READER. loggedEntries(): ReleaseLogTail, which reads every entry
+ * under our statement keys in the public log and must account for each. A
+ * rewrite's log entry is ours when the map this site ships holds it and it
+ * proves a commit map envelope, which no node installs as a release.
+ *
+ * @version 1.1 - loggedEntries(): the log entries the map accounts for, for ReleaseLogTail
  * @version 1.0
  */
 
@@ -101,6 +107,29 @@ class ReleaseHistoryMap {
 			$rewrites[] = array('envelope' => $r['envelope'], 'entry' => $r['entry'], 'payload' => $payload);
 		}
 		return new self($rewrites);
+	}
+
+	/**
+	 * The log entries this map accounts for: each rewrite whose envelope is a
+	 * commit map signed by one of $statement_keys and whose entry proves it
+	 * under $log_keys. A rewrite that does not verify is left out, so its
+	 * entry stays one no record here explains.
+	 *
+	 * @return array[] {origin, index, leaf (bytes)}
+	 */
+	public function loggedEntries(array $statement_keys, array $log_keys): array {
+		$entries = array();
+		foreach ($this->rewrites as $r) {
+			try {
+				$proof = TransparencyProof::verifyEntry($r['envelope'], $r['entry'], $statement_keys, $log_keys,
+					TransparencyProof::COMMIT_MAP_TYPE);
+			} catch (TransparencyProofException $e) {
+				continue;
+			}
+			$entries[] = array('origin' => (string)$proof['origin'], 'index' => (int)$proof['log_index'],
+				'leaf' => (string)base64_decode((string)$r['entry']['leaf'], true));
+		}
+		return $entries;
 	}
 
 	/** How many rewrites the map holds. */

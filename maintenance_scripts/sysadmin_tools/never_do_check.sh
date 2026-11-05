@@ -4,6 +4,8 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.4 - the mail gateway's credentials drop-in is one fixed entry while it only hands the
+#                gateway certificate files (LoadCredential=): Allow and Stop mail apps rewrite it.
 # Version: 1.3 - the setuid walk skips each container engine's storage where its own configuration puts it
 #                (Docker and Podman on the data root) and the site engine's build tree.
 # Version: 1.2 - a port is named after the holder with the lowest pid, not whichever ss lists first
@@ -274,6 +276,17 @@ sort -u -o "$T/sudoers" "$T/sudoers"
 
 # What starts things: unit files and cron, except what a package installed.
 # A file is "path hash", a link (an enabled unit) is "path -> target".
+#
+# The mail gateway's credentials drop-in (install_mail_gateway.sh) is rewritten
+# whenever a site's mail apps are allowed or stopped. While every line is
+# [Service] or LoadCredential=NAME:/PATH it starts nothing, only hands the
+# unprivileged gateway a certificate file, so it is one fixed entry; any other
+# line and it is hashed like any unit file.
+GATEWAY_CREDENTIALS=/etc/systemd/system/joinery-mail-gateway.service.d/credentials.conf
+credentials_only() {
+    [[ -f "$1" && ! -L "$1" ]] || return 1
+    ! grep -qvE '^(\[Service\]|LoadCredential=[A-Za-z0-9._-]+:/[^[:space:]]+)?$' -- "$1"
+}
 : > "$T/startup"
 startup_entry() {
     local f="$1"
@@ -281,6 +294,10 @@ startup_entry() {
         printf '%s -> %s\n' "$(safe "$f")" "$(safe "$(readlink "$f")")"
     elif [[ -f "$f" ]]; then
         is_packaged "$f" && return 0
+        if [[ "$f" == "$GATEWAY_CREDENTIALS" ]] && credentials_only "$f"; then
+            printf '%s credentials-only\n' "$(safe "$f")"
+            return 0
+        fi
         printf '%s %s\n' "$(safe "$f")" "$(hash16 "$f")"
     fi
 }

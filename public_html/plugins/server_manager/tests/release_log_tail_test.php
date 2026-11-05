@@ -23,8 +23,12 @@
  *    the root lists for that log passes, another key or another log's does not;
  *    no completed check for three days is blind
  *
+ *  - a commit map rewrite logged under our key is ours when the shipped map
+ *    holds it and it proves under our keys, and not under another key
+ *
  * Run: php tests/run.php safe --filter=release_log_tail
  *
+ * @version 1.3 - commit map rewrites are entries of ours (ReleaseHistoryMap::loggedEntries)
  * @version 1.2 - a checkpoint smaller than one already seen
  * @version 1.1 - the log keys releases installed, checked against Sigstore's trusted root
  * @version 1.0
@@ -183,5 +187,23 @@ $stale = ReleaseLogTail::blindCondition($fresh_state, $active, array($origin), $
 check($stale !== null && strpos($stale['detail']['Why'], 'trusted root') !== false, 'a log caught up but no key check for three days is blind', json_encode($stale));
 $fresh_state = ReleaseLogTail::checkRoot($fresh_state, $trusted, $installed, $t0 + 1400 + 3 * 86400);
 check(ReleaseLogTail::blindCondition($fresh_state, $active, array($origin), $t0 + 1400 + 3 * 86400 + 60) === null, 'checked: clear');
+
+section('A commit map rewrite logged under our key');
+require_once(__DIR__ . '/../../../tests/lib/release_log_fixtures.php');
+$map_log = fake_release_log('log.map-test.example');
+$mk = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1'));
+openssl_pkey_export($mk, $map_pem);
+$map_der = ReleaseLogClient::publicDer($map_pem);
+$map_env = ReleaseLogClient::signEnvelope(ReleaseHistoryMap::payload(array(array('version' => '0.0.1',
+	'old' => str_repeat('a', 40), 'new' => str_repeat('b', 40))), 'test'), $map_pem, TransparencyProof::COMMIT_MAP_TYPE);
+$map_entry = $map_log['client']->submitEntry($map_log['shard'], $map_env, $map_der);
+$map = ReleaseHistoryMap::parse(ReleaseHistoryMap::append('', $map_env, $map_entry));
+$found = $map->loggedEntries(array($map_der), array($map_log['origin'] => $map_log['der']));
+check(count($found) === 1 && $found[0]['origin'] === $map_log['origin'] && $found[0]['index'] === (int)$map_entry['log_index']
+	&& $found[0]['leaf'] === base64_decode($map_entry['leaf']), 'the map accounts for its entry, leaf for leaf');
+check($map->loggedEntries(array(rlt_p256_der()), array($map_log['origin'] => $map_log['der'])) === array(),
+	'not when signed by a key this tree does not hold');
+check($map->loggedEntries(array($map_der), array($map_log['origin'] => $log_der)) === array(),
+	'not when its entry does not prove under the log key');
 
 harness_finish();
