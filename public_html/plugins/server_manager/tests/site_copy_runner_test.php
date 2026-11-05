@@ -14,6 +14,7 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.12 - a copy of a current source runs at the copy floor (0.8.580, the rotated key), not 0.8.497
  * @version 1.11 - a copy's install passes --keep-root-login only to a release that knows it, and sources sit at the
  *                 raised floor, COPY_INSTALL_MIN_VERSION (B115)
  * @version 1.10 - a container source's host stages its certificate around the export (C7's B49)
@@ -272,7 +273,7 @@ $src_status = json_encode(array('backup_recovery_state' => 'proven'));
 $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_site_url' => 'https://scp.example.org',
 	// The source's agent seals to the copy's X-Wing key (COPY_EXPORT_KEM_MIN_AGENT_VERSION).
 	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => JobCommandBuilder::COPY_EXPORT_KEM_MIN_AGENT_VERSION, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
-	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.497',
+	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.580',
 	'mgn_last_status_data' => $src_status, 'mgn_backup_recovery_fpr' => str_repeat('ab', 32),
 	'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_host_report' => json_encode(array('memory' => array('total_bytes' => 1000000000),
@@ -441,10 +442,10 @@ section('A copy onto a server the owner brings');
 
 $copy = SiteCopyRunner::start_own_server($src, null);
 harness_register_row('scp_site_copies', 'scp_site_copy_id', $copy->key);
-check($copy->status() === SiteCopy::STATUS_WAITING && $copy->get('scp_release') === '0.8.497',
+check($copy->status() === SiteCopy::STATUS_WAITING && $copy->get('scp_release') === '0.8.580',
 	'the copy waits for its server, pinned to the source\'s release');
 $cmd = SiteCopyRunner::owner_command($copy);
-check(strpos($cmd, "/utils/latest_release?version=0.8.497'") !== false
+check(strpos($cmd, "/utils/latest_release?version=0.8.580'") !== false
 	&& strpos($cmd, "site --bare-metal 'scpsite' --password-file=/root/.joinery_postgres_password 'scp.example.org'") !== false
 	&& strpos($cmd, '--dormant --copy-of=' . (int)$src->key . " --copy-of-key='" . $source_key . "'") !== false,
 	'the owner\'s command installs the source\'s release, site name and domain, dormant, recording the source', $cmd);
@@ -617,27 +618,27 @@ check(SiteCopyRunner::fit_refusal($copy, $big, $small) === null, 'a 1 GB copy of
 
 // The source moved to another release: the copy cannot follow. The Refresh
 // is refused before anything moves, and the copy is left as it was.
-$src->set('mgn_joinery_version', '0.8.498');
+$src->set('mgn_joinery_version', '0.8.581');
 $src->save();
 $before = array($copy->status(), (string)$copy->get('scp_halt_reason'), json_encode($copy->steps()));
 $refused = '';
 try { SiteCopyRunner::copy_again($copy, null); } catch (SiteCopyException $e) { $refused = $e->getMessage(); }
 $copy->load();
-check(strpos($refused, 'exact release') !== false && strpos($refused, '0.8.498') !== false && strpos($refused, '0.8.497') !== false,
+check(strpos($refused, 'exact release') !== false && strpos($refused, '0.8.581') !== false && strpos($refused, '0.8.580') !== false,
 	'a Refresh of a copy made at an older release than its site\'s is refused, naming both releases', $refused);
 check(array($copy->status(), (string)$copy->get('scp_halt_reason'), json_encode($copy->steps())) === $before,
 	'and the copy is left exactly as it was');
 check(SiteCopyRunner::stale_release($copy) === $refused, 'its tab says the same, from the same rule');
-$src->set('mgn_joinery_version', '0.8.497');
+$src->set('mgn_joinery_version', '0.8.580');
 $src->save();
 check(SiteCopyRunner::stale_release($copy) === null, 'a copy at its site\'s release is not stale');
-$src->set('mgn_joinery_version', '0.8.498');
+$src->set('mgn_joinery_version', '0.8.581');
 $src->save();
 
 // Discard while the source waits for its owner to approve the export (B42):
 // the export job is cancelled, and the source, asking whether the job is still
 // wanted, hears that it was withdrawn and takes the request off its page.
-$src->set('mgn_joinery_version', '0.8.497');
+$src->set('mgn_joinery_version', '0.8.580');
 $src->save();
 $cnode->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 1000000000),
 	'disk' => array('avail_bytes' => 9000000000))));

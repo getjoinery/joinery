@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.159 - both copy floors at 0.8.580, the first release signed by the rotated release key
  * @version 1.158 - build_unseal_hold (agent 1.109.0): the sentinel's drop and hold, no parameters; install_unseal_daemon.sh
  *                  on RUN_INSTALLER_CORE
  * @version 1.157 - build_never_do_check (agent 1.106.0): the never-do list, no parameters
@@ -697,18 +698,23 @@ class JobCommandBuilder {
 	 * copy run backs the source up first, through this management node's
 	 * backup broker (BROKER_MIN_CORE_VERSION), so the copy is of the site as it
 	 * is at its release: 0.8.472. And that release's install.sh takes every
-	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION.
+	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION. And
+	 * that release must be signed by a key a new server trusts: 0.8.580, the
+	 * first release signed by the release key of the 2026-11-05 rotation
+	 * (specs/release_key_rotation.md R8). An older one is signed by a retired
+	 * key, which every node refuses.
 	 */
-	const COPY_SOURCE_MIN_VERSION = self::COPY_INSTALL_MIN_VERSION;
+	const COPY_SOURCE_MIN_VERSION = '0.8.580';
 
 	/**
 	 * The oldest release a site can be copied from its backups (site_copy.md
 	 * WP10). The owner types the recovery key on the copy's own /copy-key
 	 * page, and that page is part of the release the copy installs: the
 	 * source's (0.8.456 and later). And that release's install.sh takes every
-	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION.
+	 * option build_install_node passes a copy: COPY_INSTALL_MIN_VERSION. And
+	 * signed by a key a new server trusts: 0.8.580, as COPY_SOURCE_MIN_VERSION.
 	 */
-	const COPY_FROM_BACKUPS_MIN_VERSION = self::COPY_INSTALL_MIN_VERSION;
+	const COPY_FROM_BACKUPS_MIN_VERSION = '0.8.580';
 
 	/**
 	 * The oldest release whose install.sh takes every option a copy's install
