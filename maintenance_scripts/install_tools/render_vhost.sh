@@ -3,6 +3,7 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.13 - vhost_is_an_older_render refuses a file it cannot read instead of adopting it
 # Version: 1.12 - The history templates are rendered whole, as they were rendered when shipped, so a companion
 #                test site's old vhost is still recognised and adopted (reviewer2 D3).
 # Version: 1.11 - The render is _vhost_render.sh's, the one _site_init.sh writes a site's first
@@ -317,6 +318,9 @@ fi
 # `AllowOverride All`, which by construction is not in the new one.
 vhost_is_an_older_render() {
     local on_disk="$1" candidate="$2" domain="${3:-}" line trimmed
+    # A file that cannot be read is not an older render: without this the
+    # failed redirect below skips the loop and the function says "adopt".
+    [[ -r "${on_disk}" && -r "${candidate}" ]] || return 1
     while IFS= read -r line || [[ -n "${line}" ]]; do
         trimmed="${line#"${line%%[![:space:]]*}"}"
         # Blank lines and comments configure nothing, and the template carries a

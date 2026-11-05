@@ -3221,6 +3221,12 @@ check(!$adopts(str_replace("</VirtualHost>\n", "    ServerAlias old.example.com\
         "#Version 2.04\n" . $new_render),
     'but a directive under one still is');
 
+// A file that cannot be read is not an older render (the redirect failing
+// used to skip the loop and fall through to 'adopt').
+$missing = (string)shell_exec('bash -c ' . escapeshellarg($render_fn . "\n" . 'vhost_is_an_older_render '
+    . escapeshellarg($vh . '/no_such.conf') . ' ' . escapeshellarg($vh . '/candidate.conf') . '; echo $?') . ' 2>/dev/null');
+check(trim($missing) === '1', 'a vhost that cannot be read is not adopted', trim($missing));
+
 section('The vhost renderer adopts an exact render of any template we ever shipped');
 
 // The fleet was rendered from template 2.00, and 2.04 changed redirect
