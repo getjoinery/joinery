@@ -24,7 +24,7 @@
  * Budgets (fail above): idle reconcile 1.5 s, changed reconcile 3 s, full
  * listing 6 s. Measured numbers are printed either way.
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_scale_test.php [count]
+ * Run: php plugins/mail_apps/tests/mail_apps_scale_test.php [count]
  *
  * @version 1.0
  */

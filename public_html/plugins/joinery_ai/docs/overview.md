@@ -410,7 +410,7 @@ A job whose `requiresVaultScope()` returns a scope reads content encrypted to
 one user, which changes how — and whether — parts of its recipe can run at all.
 
 The sealed part of such a binding **never runs from cron**. The vault secret
-lives in APCu keyed to the browser session, so a CLI worker holds no window and
+is keyed to the browser session and bound to PHP-FPM, so a CLI worker holds no window and
 would read nothing. The split is per subset, because one recipe's mailbox list
 can span both postures:
 

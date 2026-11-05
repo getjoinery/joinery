@@ -36,6 +36,7 @@
  *
  * Specified in strategy/object_free_window_store.md.
  *
+ * @version 1.3 - sweep() removes this user's old /dev/shm/vault_window_* markers (strategy/object_free_window_store.md WP4)
  * @version 1.2 - INCLUDE_EXPIRED for keys(), so a wipe by name reaches an expired entry; info(): a live entry's identity and expiry, so a reader can keep what it read
  *                for as long as the file is the same one (VaultUnlock's request memo)
  * @version 1.1 - reviewer2 B1-B8: the generation's fourth part is OPcache's start time (APCu's moves on a
@@ -258,6 +259,7 @@ final class RamStore {
 		}
 		@touch($dir . '/.sweep');
 		$removed = self::sweepFiles($dir);
+		$removed += self::sweepOldMarkers();
 		$mine = self::generation();
 		foreach (@scandir($dir) ?: array() as $name) {
 			if (strncmp($name, 'gen-', 4) !== 0 || is_link($dir . '/' . $name) || !is_dir($dir . '/' . $name)) {
@@ -273,6 +275,29 @@ final class RamStore {
 			}
 		}
 		return $removed;
+	}
+
+	/**
+	 * The open-window markers VaultUnlock kept at the top of /dev/shm before
+	 * the store, /dev/shm/vault_window_{uid}_{scope}: empty files, but their
+	 * names say which users opened a vault, to anyone who lists /dev/shm.
+	 * Nothing reads them; each process user removes its own (the sticky
+	 * /dev/shm lets no one else), and a reboot removes the rest.
+	 */
+	private static function sweepOldMarkers(string $shm = '/dev/shm'): int {
+		$euid = function_exists('posix_geteuid') ? posix_geteuid() : getmyuid();
+		$n = 0;
+		foreach (glob($shm . '/vault_window_*') ?: array() as $path) {
+			$st = @lstat($path);
+			if ($st === false || $st['uid'] !== $euid || ($st['mode'] & 0170000) !== 0100000
+					|| !preg_match('/^vault_window_\d+_[A-Za-z0-9_]+$/', basename($path))) {
+				continue;
+			}
+			if (@unlink($path)) {
+				$n++;
+			}
+		}
+		return $n;
 	}
 
 	private static function maybeSweep(): void {
@@ -305,7 +330,7 @@ final class RamStore {
 
 	/**
 	 * Whether the process a generation is named for is gone. A web generation
-	 * of this worker's own master with another APCu segment ended at a reload.
+	 * of this worker's own master with another OPcache segment ended at a reload.
 	 */
 	private static function generationEnded(string $name, string $mine): bool {
 		if (!preg_match('/^gen-([0-9a-f]{12})-(\d+)-(\d+)-(c|\d+)$/', $name, $m)) {

@@ -3,7 +3,7 @@
  * VaultAudit — the record of when a Sealed Vault unlock window opened and
  * closed (docs/sealed_vault.md § The audit log).
  *
- * The window itself lives in APCu and a /dev/shm marker, both of which vanish
+ * The window itself lives in the RAM store (RamStore), which vanishes
  * without trace. Without this, "was my vault open at 3am?" is answerable only
  * by inference — correlating request-log traffic against unlock endpoints and
  * guessing at the idle arithmetic — and only for as long as request logging
@@ -24,6 +24,7 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.3 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.2 - VIA_APP_BORROW and REASON_APP_REVOKED for an app credential's borrowed
  *   window; handle() names a borrowed slot's credential instead of hashing it.
  * @version 1.1 - rows are written as a declared content-free site, so a window
@@ -53,7 +54,7 @@ class VaultAudit {
 	const REASON_IDLE_CAP         = 'idle_cap';          // hardened caps: no content decrypt for too long
 	const REASON_ABSOLUTE_CAP     = 'absolute_cap';      // armed too long ago, regardless of use
 	const REASON_HEARTBEAT_STALE  = 'heartbeat_stale';   // the browser stopped answering
-	const REASON_IDLE_EXPIRED     = 'idle_expired';      // the key aged out of APCu (vault_unlock_idle_minutes)
+	const REASON_IDLE_EXPIRED     = 'idle_expired';      // the key aged out of the window store (vault_unlock_idle_minutes)
 	const REASON_EXPLICIT_LOCK    = 'explicit_lock';     // someone pressed Lock now
 	const REASON_LOGOUT           = 'logout';
 	const REASON_IP_CHANGE        = 'ip_change';

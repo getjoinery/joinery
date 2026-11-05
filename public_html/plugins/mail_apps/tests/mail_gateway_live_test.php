@@ -21,7 +21,7 @@
  * Creates its own member, mailbox, mail and app password and removes them.
  * Needs the mail_apps plugin active and the site answering on 127.0.0.1:443.
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_gateway_live_test.php
+ * Run: php plugins/mail_apps/tests/mail_gateway_live_test.php
  *
  * @version 1.0
  */

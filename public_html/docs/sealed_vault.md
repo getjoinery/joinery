@@ -443,10 +443,14 @@ cannot activate one silently.
 
 ## The unlock window
 
-`includes/VaultUnlock.php` — the secret key lives in APCu, keyed
+`includes/VaultUnlock.php` — the secret key lives in the RAM store
+(`includes/RamStore.php`: small JSON files on tmpfs, in a directory private to
+the web user, that cannot hold an object), keyed
 `vault:{session_id}:{user_id}:{scope}`, TTL = `vault_unlock_idle_minutes`
-(default 30), re-stored on every read (activity extension). What callers
-hold is a `VaultKey`, never the bytes:
+(default 30), extended by use, at most once a minute (activity extension). Window entries are
+bound to the PHP-FPM master that opened them: a PHP-FPM restart or reload ends
+every window, a deploy does not, and a process outside PHP-FPM (cron, a script)
+never sees one. What callers hold is a `VaultKey`, never the bytes:
 
 ```php
 // $unlocker = $wrapping->unlocker($kek) — the row's wrapping, the KEK the
@@ -478,14 +482,13 @@ heartbeat/IP-change policy, a permission cap) is entirely consumer-defined.
 
 `hasAnyOpenWindow()` answers "does any session hold a window for this user"
 for a consumer's passive-close sweep (e.g. reclaiming `/dev/shm` working
-copies from cron). Its signal is a secret-free marker file
-(`/dev/shm/vault_window_{user_id}_{scope}`, mtime = the window's current
-expiry, stamped by `open()`/`secretKey()`), NOT APCu — a CLI cron process has
-its own APCu segment and can never see the web workers' entries, but every
-process on the host sees `/dev/shm`. A single-session `lock()` leaves the
-marker (another session may still hold a window); it expires with the idle
-TTL, so a sweep is at worst delayed one interval, never wrong about an open
-window. `lockAll()` removes the user's markers outright.
+copies from cron). Its signal is a secret-free store entry,
+`vaultwin:{user_id}:{scope}`, whose expiry is the window's current expiry,
+extended by `open()`/`secretKey()`. It is a plain entry, not one bound to
+PHP-FPM, so a cron process reads it although it can never read a window. A
+single-session `lock()` leaves it (another session may still hold a window); it
+expires with the idle TTL, so a sweep is at worst delayed one interval, never
+wrong about an open window. `lockAll()` removes the user's entries outright.
 
 Unlock endpoints (`logic/vault_unlock_options_logic.php` and its
 `vault_unlock_passkey` / `vault_unlock_recovery` / `vault_unlock_passphrase`
@@ -511,10 +514,15 @@ An expiry nobody saw happen is still written down: arming leaves a marker (`vaul
 
 ### Host hardening
 
-`includes/VaultHealth.php` checks the four facts that keep an unwrapped
+`includes/VaultHealth.php` checks the facts that keep an unwrapped
 secret key off disk even during a live window:
 
-- APCu backed by anonymous shared memory (`apc.mmap_file_mask` unset).
+- The RAM store's directory is on tmpfs, a real directory owned by the web
+  user, and mode 0700 (otherwise the store refuses and no window opens), and
+  the web server is PHP-FPM with OPcache readable, which is what ties a window
+  to the master's lifetime.
+- APCu, which holds only the class map, backed by anonymous shared memory
+  (`apc.mmap_file_mask` unset).
 - The PHP worker's core dumps disabled. `rlimit_core = 0` in the pool is the
   whole answer only when `kernel.core_pattern` names a file. When it pipes to
   a handler the kernel ignores the rlimit: Ubuntu's apport reads the entire
@@ -538,17 +546,19 @@ via `php maintenance_scripts/dev_tools/check_vault_health.php` (exits
 non-zero on any `unmet` check, mirroring `check_provisioning.php`'s
 convention).
 
-Two facts about the APCu window these checks guard:
+Two facts about the window store these checks guard:
 
-- APCu never zeroes a freed slot. Closing a window deletes the entry, but the
-  key bytes remain in the segment until the allocator reuses them, so the
-  anonymous-memory, no-core, encrypted-swap trio guards residue after close as
-  much as the live window. `sodium_memzero` reaches the PHP copy only.
-- The APCu segment belongs to the php-fpm master and is shared by every pool
-  and every site that master serves. Code on any site served by the same
-  php-fpm can read every other site's open windows. Managed nodes run one
-  site per container; a self-hoster serving several sites from one php-fpm
-  does not have that separation.
+- The store overwrites every entry with zeros before its file is freed, on a
+  lock, an expiry, a replacement or the sweep, so a freed tmpfs page holds no
+  key. A window a PHP-FPM restart ended stays a 0600 file in tmpfs until the
+  next sweep removes its generation. `sodium_memzero` reaches PHP's own copy. A read in progress still holds
+  the key in the worker's memory, which is what the no-core and encrypted-swap
+  checks cover.
+- Each site has its own store directory, named for its root and database, and
+  only its pool user can open it. Two sites served by one php-fpm as the same
+  user can still read each other's windows, as code running as the web user
+  reads every file that user owns; a key that must not be readable even then
+  belongs in a separate daemon (specs/unseal_daemon.md).
 
 The mailbox search index's working copy in `/dev/shm` (a 1777 tmpfs every
 local account can list) is created 0600 before its first write, at both of
@@ -1383,7 +1393,7 @@ tighter-than-usual window until the deploy is fixed.
 
 ## The audit log
 
-The window lives in APCu and a `/dev/shm` marker. Both vanish without trace, so
+The window lives in the RAM store, which keeps no history, so
 nothing about a past window is recoverable from the running system: whether it
 was open at a given moment, how it was armed, or why it ended. `VaultAudit`
 writes that down, into the platform's general event log (`evl_event_logs`)
@@ -1412,13 +1422,13 @@ Each closed row records `reason` and `open_seconds`:
 | `idle_cap` | a cap fired: no content decrypt within the consumer's idle limit |
 | `absolute_cap` | a cap fired: armed too long ago, however much it was used |
 | `heartbeat_stale` | the browser stopped answering |
-| `idle_expired` | the key aged out of APCu after `vault_unlock_idle_minutes` |
+| `idle_expired` | the key aged out of the store after `vault_unlock_idle_minutes` |
 | `explicit_lock` | someone pressed Lock now |
 | `logout` / `ip_change` | the session ended, or moved network |
 | `credential_event` | password change or reset, recovery-code use, 2FA change |
 
-The three end-events run code and write their own row. An APCu expiry does not
-— it happens inside the cache with nothing to hook — so the row is written by
+The three end-events run code and write their own row. A store expiry does not
+— it is a file's time passing, with nothing to hook — so the row is written by
 whoever next **notices**, which is why a session remembers in `$_SESSION` that
 it armed a window at all. Normally the beacon notices within one beat, because
 it is the only thing still asking once the user has gone.
@@ -1448,9 +1458,10 @@ per day.
 
 Some work over sealed content cannot happen when the user asks for it — mail
 arrives while they are logged out, and AI features want to run continuously.
-That work cannot run from cron either: the secret key lives in APCu keyed to
-the **browser session**, so a CLI process has a different APCu segment and
-`VaultUnlock::secretKey()` returns null there by construction. It has to run
+That work cannot run from cron either: the secret key is keyed to the
+**browser session** and bound to the PHP-FPM master, so a CLI process never
+finds a window and `VaultUnlock::secretKey()` returns null there by
+construction. It has to run
 inside a web request carrying a live window.
 
 `includes/VaultDeferredWork.php` schedules it. A consumer registers from its
@@ -1575,9 +1586,9 @@ sealed until it is downloaded.
 The vault test estate lives in `tests/vault/` (crypto refusals, the unlock
 window, the audit trail, ceremony state machines, rotation crash-injection) plus
 `plugins/mailbox/tests/mailbox_reseal_test.php` (the consumer contract
-against real rows); shared fixtures in `tests/lib/vault_fixtures.php`. The
-window suite exercises APCu and skips under plain CLI — run it directly with
-`php -d apc.enable_cli=1 tests/vault/vault_unlock_window_test.php`.
+against real rows); shared fixtures in `tests/lib/vault_fixtures.php`. A CLI
+test opens windows as the web does, in its own store directory, so every window
+suite runs under plain `php`.
 
 ## Settings
 

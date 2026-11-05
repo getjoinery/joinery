@@ -433,7 +433,7 @@ key calls `SealedEgressGuard::markHot()` with `fil:{id}:content`, which is why a
 AI turn that reads a Private file falls under the hot-turn rule with no
 Drive-specific egress code.
 
-The window is bound to the browser session that opened it (the APCu key is
+The window is bound to the browser session that opened it (its store entry is
 `vault:{session_id}:{user_id}:{scope}`), so **a request carrying no session can
 never open a Private file** — it answers 423 whatever windows the owner holds
 elsewhere. Signed URLs authorize the *fetch*, not the *unsealing*; see

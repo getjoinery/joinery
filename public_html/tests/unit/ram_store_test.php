@@ -28,6 +28,7 @@
  *
  * Run: php tests/unit/ram_store_test.php
  *
+ * @version 1.2 - the sweep removes this user's old /dev/shm/vault_window_* markers
  * @version 1.1 - reviewer2 B1-B8: a set() zeroes the value it replaces, a half-zeroed read is a quiet
  *                miss, a value too deep is refused, a generation whose start reads 0 is judged by its
  *                pid alone, and the CLI health row checks every user's directory for the site
@@ -278,7 +279,7 @@ unlink($dir . '/.probe');
 check(is_dir($dir . '/' . $mine) && RamStore::get('life', $ok, RamStore::LIFETIME) === 'L', 'this process\'s generation stays');
 check(is_dir($dir . '/' . $web) && RamStore::get('plain') === 'P', 'a live master\'s generation stays, seen from the CLI, and plain entries stay');
 
-// Seen from a web worker: its own master after a reload has a new APCu segment.
+// Seen from a web worker: its own master after a reload has a new OPcache segment.
 $me = getmypid();
 $start = RamStore::procStartTime($me);
 RamStore::$generation_override = 'gen-' . $boot . '-' . $me . '-' . $start . '-222';
@@ -303,6 +304,23 @@ file_put_contents($dir . '/.tmp-fresh', 'x');
 RamStore::sweep();
 check(!file_exists(rs_path('gone')) && file_exists($dir . '/.tmp-fresh'), 'the sweep removes an expired entry nobody read and leaves a write in progress');
 check(filemtime($dir . '/.sweep') >= time() - 1, 'it stamps its marker');
+
+section('The sweep removes the old open-window markers this user left in /dev/shm');
+$shm = $dir . '/fake-shm';
+@mkdir($shm, 0700);
+file_put_contents($shm . '/vault_window_42_user', '');
+file_put_contents($shm . '/vault_window_42_drive', '');
+file_put_contents($shm . '/vault_window_notes.txt', 'kept');
+file_put_contents($shm . '/other_file', 'kept');
+mkdir($shm . '/vault_window_7_user');
+$sweep_markers = (new ReflectionClass('RamStore'))->getMethod('sweepOldMarkers');
+check($sweep_markers->invoke(null, $shm) === 2 && !file_exists($shm . '/vault_window_42_user') && !file_exists($shm . '/vault_window_42_drive'),
+	'both of this user\'s markers are removed');
+check(file_exists($shm . '/vault_window_notes.txt') && file_exists($shm . '/other_file') && is_dir($shm . '/vault_window_7_user'),
+	'a name that is not a marker, another file and a directory are left alone');
+rmdir($shm . '/vault_window_7_user');
+array_map('unlink', glob($shm . '/*'));
+rmdir($shm);
 
 section('The CLI health row checks the site\'s directories');
 $h = new ReflectionClass('RamStore');

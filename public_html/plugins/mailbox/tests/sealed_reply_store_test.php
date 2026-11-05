@@ -47,7 +47,7 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-// Reading the sealed original needs a real unlock window, which lives in APCu
+// Reading the sealed original needs a real unlock window, which is kept
 // against a session id.
 if (!vault_ensure_session()) {
 	harness_skip('could not start a CLI session');

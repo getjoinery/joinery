@@ -24,6 +24,7 @@
  * column goes once every node reports zero
  * (specs/implemented/mailbox_search_index_blob_leak.md WP7).
  *
+ * @version 1.7 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.6 - the sweep takes SQLite's side files and a restore's orphaned `.opening.` temp too
  * @version 1.5 - sweepLegacyBlobs(): the File era's index bytes that no File
  *   row holds any more are counted and reclaimed by the same sweep
@@ -327,7 +328,7 @@ class InboundMailboxSearchIndex extends SystemBase {
 	 * The wipe callback (plugins/mailbox/includes/bootstrap.php) already deletes
 	 * a user's working copy on an explicit lock or credential event. This
 	 * catches everything else that ends a window without firing that callback —
-	 * an APCu TTL idle expiry, a php-fpm worker recycle. Worst case a working
+	 * a window store idle expiry, a php-fpm restart. Worst case a working
 	 * copy lingers until the next sweep.
 	 *
 	 * Unconditional: a copy whose vault window has closed is plaintext nobody

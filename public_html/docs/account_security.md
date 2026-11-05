@@ -383,7 +383,7 @@ remains, and revoking the last passkey is refused while TOTP is off.
 ## The unlock window
 
 One unlocker ceremony opens the vault for a bounded window
-(`VaultUnlock`, APCu, keyed to the browser session):
+(`VaultUnlock`, in the RAM store, keyed to the browser session):
 
 - **Opens** on any successful unlocker ceremony. Passkey unlocks demand
   device **user verification** (biometric or key PIN), not merely presence.

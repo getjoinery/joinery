@@ -23,7 +23,7 @@
  *  - a program's draft APPENDed to Drafts becomes a Joinery draft (attachments
  *    and all), found again by its Message-ID, and EXPUNGE deletes it
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_send_test.php
+ * Run: php plugins/mail_apps/tests/mail_apps_send_test.php
  *
  * @version 1.1 - APPEND answers its number (APPENDUID) for Sent and Drafts
  */

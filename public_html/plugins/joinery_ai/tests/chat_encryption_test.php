@@ -496,7 +496,7 @@ $old_fails = false;
 try { $crypto->openItemDek((string)$raw_msg2['aim_sealed_key'], vault_fixture_key($kp1['secret'])); } catch (Throwable $e) { $old_fails = true; }
 check($old_fails, 'the old key no longer opens the re-sealed DEK');
 
-// ---- In-window decrypt via the get() hook (needs APCu) -------------------
+// ---- In-window decrypt via the get() hook (needs a window) -------------------
 section('In-window decrypt (get() hook)');
 if (!$has_session || session_id() === '') {
     harness_skip('no session — window-based decrypt path skipped');

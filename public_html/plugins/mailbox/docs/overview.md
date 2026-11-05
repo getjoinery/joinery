@@ -2227,8 +2227,8 @@ chunk — never to the mailbox — at any index size. A container cut short exac
 chunk boundary opens shorter rather than failing; the SQLite copy then fails to open
 and is rebuilt. Missing, stale, corrupt, or in any other sealed shape → `rebuild()`
 from the sealed message rows; the cache is never the source of truth. `InboundMailboxSearchIndex::sweepWorkingCopies()` is the
-passive-close safety net for a working copy the wipe callback missed (an idle APCu
-expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
+passive-close safety net for a working copy the wipe callback missed (an idle store
+expiry, a PHP-FPM restart); it is declared as that class's `$retention_policy` and runs
 in the daily retention sweep, so worst case a copy lingers until the next sweep.
 Two things keep that invariant honest. `InboundMailboxSearchIndex::permanent_delete()`
 removes the owner's file with their bookkeeping row, and the `usr_users` rule runs
@@ -2309,8 +2309,8 @@ per thread, and the HTML body only when the plain part yields no preview.
 **Provisioning.** `ext-sqlite3` (with FTS5 compiled in) backs `MailboxIndex` and has no
 fallback — without it, search on a sealed mailbox is simply unavailable (the reader
 surfaces this, not a 500). `InboundEmailHealth::checkSearchIndexEngine()` verifies both
-the extension and FTS5 support. The unlock window's own host-hardening facts (APCu
-`apc.mmap_file_mask`, swap, coredumps) are the vault's own `VaultHealth` check
+the extension and FTS5 support. The unlock window's own host-hardening facts (the RAM
+store on tmpfs, swap, coredumps) are the vault's own `VaultHealth` check
 (`includes/VaultHealth.php`), not repeated here.
 
 ### Mail that belongs to no mailbox

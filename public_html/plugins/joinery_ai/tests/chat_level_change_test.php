@@ -288,7 +288,7 @@ $db->prepare("UPDATE aim_conversation_messages SET aim_level_attempt_time = NOW(
 	WHERE aim_conversation_message_id = ?")->execute(array((int)$turn->key));   // the retry is due
 check(ChatConversationLevel::hasWork((int)$att_owner->key), 'once due, the turn is work again');
 if (!$window_ok) {
-	harness_skip('finishing the attachment in window, and the lowering side', 'APCu/session unavailable');
+	harness_skip('finishing the attachment in window, and the lowering side', 'no CLI session could be started for an unlock window');
 } else {
 	vault_fixture_open_window((int)$att_owner->key, $att_kp['secret'], UserEncryptionVault::SCOPE_USER);
 	ChatConversationLevel::drain((int)$att_owner->key, microtime(true) + 60);

@@ -840,14 +840,13 @@ function run_one($d, $root, $timeout_s) {
 function run_one_start($d, $root, $timeout_s) {
 	$path = $d['path'];
 	$is_sh = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'sh';
-	// -d apc.enable_cli=1: APCu is off in CLI by default, so any suite that
-	// exercises the unlock-window / kill-switch runtime (which live in APCu)
-	// would silently SKIP in every gate run — the vault's most attack-relevant
-	// surface reading green by absence. Enabling it here makes those checks
-	// actually execute; suites that don't touch APCu are unaffected.
+	// A suite runs as plain CLI PHP: the unlock windows live in RamStore, which
+	// a CLI process uses as the web does, so nothing needs APCu turned on. The
+	// suites that test APCu itself (the class map) start their own processes
+	// with the flag they need.
 	$inner = $is_sh
 		? 'bash ' . escapeshellarg($path)
-		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . opcache_flags($root) . function_trace_flags($root) . escapeshellarg($path) . ' --json';
+		: escapeshellarg(PHP_BINARY) . ' ' . opcache_flags($root) . function_trace_flags($root) . escapeshellarg($path) . ' --json';
 	// -k 5s sends SIGKILL 5s after SIGTERM if the test ignores the term.
 	//
 	// The child starts with ONLY stdio open. This process inherits descriptors

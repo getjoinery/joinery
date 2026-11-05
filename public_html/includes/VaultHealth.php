@@ -2,10 +2,11 @@
 /**
  * VaultHealth - host-hardening checks for the Sealed Vault's unlock window.
  *
- * The unwrapped secret key lives only in APCu for the duration of a window
- * (includes/VaultUnlock.php). These checks verify the three host facts that
- * keep it off any disk path even so: APCu backed by anonymous shared memory
- * (never a file an attacker with disk access could read), the PHP worker's
+ * The unwrapped secret key lives only in the RAM store (includes/RamStore.php,
+ * on tmpfs) for the duration of a window (includes/VaultUnlock.php). These
+ * checks verify the host facts that keep it off any disk path even so: the
+ * store on tmpfs and private to the web user, APCu (the class map's) backed by
+ * anonymous shared memory rather than a file on disk, the PHP worker's
  * core dumps disabled (a crash must not write the key to a core file), and
  * swap off or encrypted (an idle worker's pages must not land on disk in the
  * clear). Best-effort and advisory — a check that cannot be verified from
@@ -22,6 +23,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.16 - the APCu check is the class map's; comments name the RAM store as the window's home (WP4)
  * @version 1.15 - a row for the RAM store (includes/RamStore.php): its directory is on tmpfs, ours, and
  *                 0700, or the store refuses and no window can open (strategy/object_free_window_store.md);
  *                 from the CLI, every user's directory for the site, each against the uid its name claims;
@@ -430,8 +432,9 @@ class VaultHealth {
 
 	/**
 	 * apc.mmap_file_mask must be empty - APCu's shared memory segment is then
-	 * anonymous (POSIX shm), never a file-backed mmap an attacker with disk
-	 * access could read the unwrapped key out of.
+	 * anonymous (POSIX shm), never a file-backed mmap that someone with disk
+	 * access could read or edit. APCu holds only the class map (ClassAutoloader);
+	 * every window entry is in the RAM store, checked by checkRamStore().
 	 */
 	public static function checkApcuAnonymous(): array {
 		$key = 'apcu_anonymous_shm';

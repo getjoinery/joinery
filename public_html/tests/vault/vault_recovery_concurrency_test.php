@@ -28,6 +28,7 @@
  * The code's root twin is spent in the same transaction (specs/
  * one_vault_experience.md § R6), so exactly one twin may end up used too.
  *
+ * @version 1.2.0 - workers use the harness's RAM store, not the site's (reviewer2 WP4 B3); no APCu flag
  * @version 1.1.0 - the posted account half of the code's KEK; the root twin is counted
  * @version 1.0.0
  */
@@ -77,6 +78,9 @@ require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+// The harness's own store, never the site's: the ceremony checks the store and
+// lockAll() lists and deletes in it.
+RamStore::useDirectory((string)getenv('VAULT_RC_STORE'));
 
 $user_id  = (int)($argv[1] ?? 0);
 $vault_id = (int)($argv[2] ?? 0);
@@ -110,6 +114,7 @@ $php = PHP_BINARY;
 $descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
 $env = $_ENV;
 $env['VAULT_RC'] = $code_kek;
+$env['VAULT_RC_STORE'] = RamStore::directory();
 $env['PATH'] = getenv('PATH');
 
 // Race the same fixture. A round in which NOBODY wins leaves the code unused — the
@@ -127,7 +132,7 @@ for ($round = 1; $round <= $MAX_ROUNDS; $round++) {
 	$procs = array();
 	$pipes = array();
 	for ($i = 0; $i < $N; $i++) {
-		$cmd = escapeshellarg($php) . ' -d apc.enable_cli=1 ' . escapeshellarg($worker_path)
+		$cmd = escapeshellarg($php) . ' ' . escapeshellarg($worker_path)
 			. ' ' . (int)$user->key . ' ' . $vault_id . ' ' . sprintf('%.6f', $start);
 		$procs[$i] = proc_open($cmd, $descriptors, $pipes[$i], null, $env);
 	}

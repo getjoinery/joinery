@@ -84,7 +84,7 @@ interface PipelineJobInterface {
      * they point at is on a sealed domain.
      *
      * A job returning non-null cannot read its sealed sources from cron AT
-     * ALL: the vault secret lives in APCu keyed to the browser session, so a
+     * ALL: the vault secret is keyed to the browser session and bound to PHP-FPM, so a
      * command-line worker can never hold a window. The sealed part of such a
      * binding is executed only in slices inside its owner's open window, via
      * the VaultDeferredWork consumer. Whether the recipe still runs from cron

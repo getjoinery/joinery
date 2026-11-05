@@ -48,6 +48,7 @@
  * scopes: the ones a device is handed and a person thinks of as "my Drive",
  * "my mail".
  *
+ * @version 1.3 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.2 - ROOT_SCOPE and contentScopes()
  * @version 1.1
  * @changelog 1.1 - a missing/corrupt vault_scopes.json refuses loudly instead of
@@ -268,9 +269,9 @@ class VaultScopes {
 		$raw = (string)$scope;
 		$scope = self::normalizeName($raw);
 		if ($scope === '') {
-			// The name is not cosmetic: it flows into the derived PRF context, the
-			// APCu window key, and the /dev/shm window-marker filename, whose
-			// sanitizer collapses anything outside [a-z0-9_] — so two names
+			// The name is not cosmetic: it flows into the derived PRF context and
+			// the window store's entry names (RamStore keys, which allow only a
+			// narrow character set) — so two names
 			// differing only in refused characters would collide after
 			// sanitization, which is the isolation failure again by another route.
 			error_log('[VaultScopes] scope name "' . $raw . '" is not a valid scope name '

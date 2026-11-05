@@ -47,7 +47,7 @@ if (!extension_loaded('sodium')) {
 	harness_skip('sodium extension unavailable');
 	harness_finish();
 }
-// Reading sealed bytes needs a real unlock window, which lives in APCu against a
+// Reading sealed bytes needs a real unlock window, which is kept against a
 // session id. Writing them does not — which is the point of the sealed-with-the-
 // vault-locked check above, and why that one never needs either of these.
 if (!vault_ensure_session()) {

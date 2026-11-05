@@ -127,7 +127,7 @@ check(($export['name'] ?? '') === 'notes.txt', 'the name stays plaintext (P1)');
 section('reading it back');
 
 if (!$window_ok) {
-	harness_skip('in-window reads', 'APCu is unavailable in this process — run through tests/run.php');
+	harness_skip('in-window reads', 'no CLI session could be started for an unlock window');
 } else {
 	drvpriv_lock($owner->key);
 	$threw = false;
@@ -227,7 +227,7 @@ check(DriveSealed::transitionBacklog($sfolder->key, ProtectionLevel::PRIVATE_)['
 check(DriveSealed::sealExistingFile($rfile) === 0, 're-running the raise on a sealed file is a no-op (batches resume safely)');
 
 if (!$window_ok) {
-	harness_skip('lowering', 'APCu is unavailable in this process');
+	harness_skip('lowering', 'no CLI session could be started for an unlock window');
 } else {
 	drvpriv_lock($owner->key);
 	$threw = false;
@@ -543,7 +543,7 @@ check((int)filesize($orphan->get_filesystem_path('original')) === (int)$rr_ciphe
 section('a truncated container is refused, not served short');
 
 if (!$window_ok) {
-	harness_skip('truncation', 'APCu is unavailable in this process');
+	harness_skip('truncation', 'no CLI session could be started for an unlock window');
 } else {
 	$tr = File::createFromBytes(str_repeat('truncate-me. ', 600), 'truncate.txt', 'text/plain', (int)$owner->key,
 		array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
@@ -607,7 +607,7 @@ if ($thumb_key === null) {
 		'and the thumbnail slot holds a container');
 
 	if (!$window_ok) {
-		harness_skip('image lower', 'APCu is unavailable in this process');
+		harness_skip('image lower', 'no CLI session could be started for an unlock window');
 	} else {
 		drvpriv_unlock($owner->key, $kp['secret']);
 		DriveSealed::unsealExistingFile($ifile);

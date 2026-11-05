@@ -20,6 +20,7 @@
  *   typing            true while the caller is composing, false when they stop
  *   mark_read         mark the open conversation read (the tab is focused)
  *
+ * @version 1.0.1 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.0.0
  */
 
@@ -51,7 +52,7 @@ function messenger_poll_logic(array $input): LogicResult {
 		}
 
 		// Typing rides the poll: record the caller's state, read back everyone
-		// else's. Both halves are APCu only and expire on their own.
+		// else's. Both halves are shared memory only and expire on their own.
 		if (array_key_exists('typing', $input)) {
 			MessengerTyping::set($conversation->key, $user_id, !empty($input['typing']));
 		}

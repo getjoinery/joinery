@@ -136,8 +136,9 @@ class RecipeWorkerSpawner {
             return false;
         }
         // A worker is a command-line process, and a command-line process can
-        // never hold a vault unlock window — the secret lives in APCu keyed to
-        // the browser session. A recipe whose WHOLE binding is sealed is
+        // never hold a vault unlock window — the secret is keyed to the browser
+        // session and bound to the PHP-FPM master, which no CLI process
+        // shares. A recipe whose WHOLE binding is sealed is
         // therefore unspawnable by construction; it runs in slices inside its
         // owner's own request instead (specs/in_window_deferred_work.md). A
         // mixed binding spawns fine: the worker drains its standard mailboxes

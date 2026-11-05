@@ -25,10 +25,14 @@
  *    planted class, and deletes the entry; plain values read as before;
  *  - no production code calls session_start() or apcu_fetch() around them,
  *    and every APCUIterator asks for keys only: its default format rebuilds
- *    each matched entry's value, with no guard in front at all.
+ *    each matched entry's value, with no guard in front at all;
+ *  - no production code but ClassAutoloader and ApcuStore calls any apcu_*
+ *    function (directly, or by a string naming it) or makes an APCUIterator: every other shared value is
+ *    RamStore's JSON, which cannot describe an object.
  *
  * Run: php tests/security/stored_object_guards_test.php
  *
+ * @version 1.2 - APCu is the class map's alone: any other apcu_* caller fails the scan
  * @version 1.1 - an APCUIterator without APC_ITER_KEY fails the scan
  * @version 1.0
  */
@@ -122,6 +126,15 @@ if (($got['apcu'] ?? null) === false) {
 section('Nothing in production reads around the guards');
 $around = array('session_start(' => array(), 'apcu_fetch(' => array());
 $iterators_reading_values = array();
+// Beyond the class map, nothing uses APCu at all: everything else shared
+// between requests is RamStore's JSON (strategy/object_free_window_store.md).
+$apcu_users = array();
+// APCu's functions, named here so the scan works where the extension is not loaded.
+$apcu_functions = array('apcu_add', 'apcu_cache_info', 'apcu_cas', 'apcu_clear_cache', 'apcu_dec', 'apcu_delete',
+	'apcu_enabled', 'apcu_entry', 'apcu_exists', 'apcu_fetch', 'apcu_inc', 'apcu_key_info', 'apcu_sma_info', 'apcu_store');
+if (extension_loaded('apcu')) {
+	$apcu_functions = array_values(array_unique(array_merge($apcu_functions, array_map('strtolower', get_extension_funcs('apcu') ?: array()))));
+}
 $root = PathHelper::getRootDir();
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 foreach ($it as $f) {
@@ -131,13 +144,18 @@ foreach ($it as $f) {
 	$src = (string)@file_get_contents($p);
 	// Code only: comments may name the functions.
 	$code = '';
+	$names_apcu = false;
 	foreach (@token_get_all($src) ?: array() as $t) {
+		// A string that is exactly an APCu function name is a call by name
+		// (call_user_func, array_map); function_exists() probes are the class map's.
+		if (is_array($t) && $t[0] === T_CONSTANT_ENCAPSED_STRING && in_array(strtolower(ltrim(trim($t[1], '\'"'), '\\')), $apcu_functions, true)) $names_apcu = true;
 		if (is_array($t) && in_array($t[0], array(T_COMMENT, T_DOC_COMMENT, T_CONSTANT_ENCAPSED_STRING), true)) continue;
 		$code .= is_array($t) ? $t[1] : $t;
 	}
 	foreach (array_keys($around) as $fn) {
 		if (preg_match('/(?<![\w:>$])' . preg_quote($fn, '/') . '/', $code)) $around[$fn][] = $rel;
 	}
+	if ($names_apcu || preg_match('/(?<![\w:>$])apcu_\w+\s*\(|\bAPCUIterator\b/i', $code)) $apcu_users[] = $rel;
 	// An iterator's value is unserialized by APCu itself, with every class
 	// allowed and no autoload guard: only a key-only iteration never builds one.
 	if (preg_match_all('/new\s+\\\\?APCUIterator\s*\(([^;]*)\)\s*(?:as|\)|;)/', $code, $m)) {
@@ -148,6 +166,9 @@ foreach ($it as $f) {
 }
 check($around['session_start('] === array('includes/SessionGuard.php'), 'session_start() is called only by SessionGuard', implode(', ', $around['session_start(']));
 check($around['apcu_fetch('] === array('includes/ApcuStore.php'), 'apcu_fetch() is called only by ApcuStore', implode(', ', $around['apcu_fetch(']));
+sort($apcu_users);
+check($apcu_users === array('includes/ApcuStore.php', 'includes/ClassAutoloader.php'),
+	'only the class map (ClassAutoloader, through ApcuStore) calls APCu or makes an APCUIterator', implode(', ', $apcu_users));
 check($iterators_reading_values === array(), 'every APCUIterator in production asks for keys only (APC_ITER_KEY)', implode(', ', $iterators_reading_values));
 
 harness_finish();

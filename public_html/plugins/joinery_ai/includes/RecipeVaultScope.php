@@ -5,13 +5,14 @@
  *
  * A pipeline job declares the vault scope its items need. When it declares one,
  * that recipe's sealed sources can never be read from cron: the vault secret
- * lives in APCu keyed to the browser session, so a command-line worker holds no
+ * is keyed to the browser session and bound to PHP-FPM, so a command-line worker holds no
  * window and would read nothing. The sealed subset executes here instead — in
  * slices, inside the owner's own request, while their window is open. A recipe
  * whose ENTIRE binding is sealed (cronRunnable() false) is skipped by the
  * dispatcher and refused by the spawner outright; a mixed binding still runs
  * from cron for its standard remainder.
  *
+ * @version 1.5.1 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.5.0
  * @changelog 1.5.0 - consentTrustFloor() binds for every pipeline recipe with a
  *   job, not only one with sealed content in play (specs/security_inventory.md
@@ -64,8 +65,8 @@ class RecipeVaultScope {
 		// InboundEmailMessage is $ai_readable with sealed fields — so
 		// ModelQueryExecutor WILL decrypt for it whenever an unlock window
 		// happens to be open. Nothing in this file stops that; what stops it is
-		// where agent runs execute. A CLI worker holds no window (APCu is
-		// session-keyed), and the only in-window execution path — the deferred
+		// where agent runs execute. A CLI worker holds no window (a window is
+		// session-keyed and bound to PHP-FPM), and the only in-window execution path — the deferred
 		// work drain — runs pipeline recipes exclusively.
 		//
 		// The day any agent run executes inside a web request with the owner's

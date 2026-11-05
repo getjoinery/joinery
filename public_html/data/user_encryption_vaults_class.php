@@ -19,7 +19,7 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * `uev_scope` names which vault this is. Which scopes exist is instance
  * configuration, declared in `vault_scopes.json` and in each plugin's
  * `vaultScopes` — see VaultScopes. `uev_custody` names where the secret key is
- * ever unwrapped ('server' = a VaultUnlock APCu window; 'client' = the browser
+ * ever unwrapped ('server' = a VaultUnlock window; 'client' = the browser
  * only — a client-custody row's secret key must never be unwrapped
  * server-side).
  *
@@ -32,6 +32,7 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * will become) while every sealed DEK is re-sealed to it, and the commit makes
  * it current.
  *
+ * @version 1.7 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.6 - keyIsOld(), oldKeyScopesFor() and oldKeyCounts() removed: every vault key is X-Wing
  * @version 1.5 - uev_previous_keys: the account vault's retired keys, each locked under the current key
  *               (VaultPreviousKeys), so content still sealed to one opens while the vault is open

@@ -6,7 +6,7 @@ Developer documentation for the scheduled task system.
 
 The scheduled tasks system provides a general-purpose framework for running tasks on a schedule. Tasks are PHP classes paired with JSON config files. A single cron entry runs every minute and executes any tasks that are due.
 
-**A scheduled task can never read sealed content.** The Sealed Vault keeps a user's secret key in APCu keyed to their browser session, and the cron runner is a separate CLI process with its own APCu segment, so `VaultUnlock::secretKey()` returns null there by design. Work that needs a user's vault open belongs to `VaultDeferredWork` instead, which runs it in slices inside that user's own request — see [Sealed Vault § Deferred work in the window](sealed_vault.md#deferred-work-in-the-window). A task that queues or selects such work is fine; a task that tries to decrypt it will find nothing.
+**A scheduled task can never read sealed content.** The Sealed Vault keeps a user's secret key keyed to their browser session and bound to the PHP-FPM master, and the cron runner is a separate CLI process that never sees a window, so `VaultUnlock::secretKey()` returns null there by design. Work that needs a user's vault open belongs to `VaultDeferredWork` instead, which runs it in slices inside that user's own request — see [Sealed Vault § Deferred work in the window](sealed_vault.md#deferred-work-in-the-window). A task that queues or selects such work is fine; a task that tries to decrypt it will find nothing.
 
 ## Architecture
 

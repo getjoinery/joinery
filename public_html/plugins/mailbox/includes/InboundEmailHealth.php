@@ -20,6 +20,7 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.31 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.30 - forwardingInUse(): the sending route is checked only while something forwards
  * @version 1.29 - relay fixes point at the Relay section on the Server tab
  * @version 1.28 - the spam scanner checks point at Run setup again on the Plugins page, not a command to
@@ -463,7 +464,7 @@ class InboundEmailHealth {
      * Verify ext-sqlite3 is loaded WITH FTS5 compiled in — MailboxIndex's
      * sealed search index (specs/implemented/inbound_email_encryption_at_rest.md
      * § 6) has no fallback: without it, search on a sealed mailbox is simply
-     * unavailable (the reader surfaces this, not a 500). The APCu/swap host
+     * unavailable (the reader surfaces this, not a 500). The RAM-store/swap host
      * hardening this feature also depends on is the vault's own VaultHealth
      * check (includes/VaultHealth.php), not repeated here.
      *

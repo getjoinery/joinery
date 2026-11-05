@@ -24,7 +24,7 @@
  * And the pure pieces: quoted-printable round-trips with lines under 77
  * characters, base64Length() matches base64Lines() for every length class.
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_rebuild_test.php
+ * Run: php plugins/mail_apps/tests/mail_apps_rebuild_test.php
  *
  * @version 1.1 - the encoders and kindOf() are the mailbox plugin's MessageRebuild
  */

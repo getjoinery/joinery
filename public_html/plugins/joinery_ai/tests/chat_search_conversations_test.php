@@ -228,7 +228,7 @@ check(stripos($out_remote_text, 'Compensation review') === false, 'protected tit
 check(stripos($out_remote_text, 'protected conversations') !== false, 'the fixed protected-history note is present on a remote turn');
 
 // ==========================================================================
-// Surfaced (local + open vault) path — needs an unlock window (APCu + session).
+// Surfaced (local + open vault) path — needs an unlock window (a session).
 section('Surfaced protected path (local + vault open)');
 if (!$has_session || session_id() === '') {
     harness_skip('no session — surfaced protected path skipped');

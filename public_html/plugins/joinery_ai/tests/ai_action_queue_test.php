@@ -53,7 +53,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
 
 $db = DbConnector::get_instance()->get_db_link();
 
-// Session + APCu availability must be established BEFORE the harness prints
+// The session must be established BEFORE the harness prints
 // anything — session_start() refuses once output has been sent, and the
 // in-window sealed-card checks below need both.
 $aq_window_capable = vault_ensure_session();
@@ -474,7 +474,7 @@ if ($aq_window_capable) {
 		'an unexpected exception shows as a plain internal error, not its class and message');
 	VaultUnlock::lockAll($owner_id);
 } else {
-	harness_skip('in-window sealed card checks', 'APCu unavailable in this process');
+	harness_skip('in-window sealed card checks', 'no CLI session could be started for an unlock window');
 }
 
 // -----------------------------------------------------------------------------

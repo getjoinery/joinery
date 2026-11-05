@@ -27,7 +27,7 @@
  *  - a new message format (MessageRebuild::FORMAT) starts a folder over: a
  *    higher UIDVALIDITY, every message renumbered, told sizes forgotten
  *
- * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_folders_test.php
+ * Run: php plugins/mail_apps/tests/mail_apps_folders_test.php
  *
  * @version 1.2 - a new message format starts a folder over
  * @version 1.1 - APPEND to INBOX answers its number (APPENDUID)

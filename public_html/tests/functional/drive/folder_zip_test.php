@@ -290,7 +290,7 @@ $p423 = harness_request('HEAD', '/drive/zip/' . (int)$pfolder->key, array('jar' 
 check($p423['status'] === 423, 'the owner\'s web session with no window open gets 423 (got ' . $p423['status'] . ')');
 
 if (!$window_ok) {
-	harness_skip('in-window Private zip', 'APCu is unavailable in this process; run through tests/run.php');
+	harness_skip('in-window Private zip', 'no CLI session could be started for an unlock window');
 } else {
 	VaultUnlock::close((int)$owner->key, 'user');
 	$threw = false;

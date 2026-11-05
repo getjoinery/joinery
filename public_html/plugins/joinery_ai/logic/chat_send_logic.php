@@ -155,7 +155,7 @@ function chat_send_logic(array $input): LogicResult {
     // Run the turn in a detached CLI worker and hand back the poll handle now;
     // the client polls chat_poll until the placeholder row is complete/failed.
     // A protected conversation must NOT go to the CLI worker: its unlock window
-    // lives in this web request's APCu segment (a separate CLI process can't see
+    // is bound to the web server's PHP-FPM (a separate CLI process can't see
     // the secret key to decrypt history), so it runs in-process below.
     if (!$needs_window && ChatWorkerSpawner::spawn((int)$assistant_msg->key)) {
         $payload['status'] = AiConversationMessage::STATUS_RUNNING;

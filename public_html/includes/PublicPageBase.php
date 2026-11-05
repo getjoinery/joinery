@@ -853,8 +853,8 @@ abstract class PublicPageBase {
 			// Vault presence (specs/mailbox_security_levels.md § The Unlock Window):
 			// while an unlock window is open, every page beats vault_heartbeat so
 			// presence means "on Joinery", not "on the mail page". The meta flag
-			// tells the beacon a window was open at render time (a cheap APCu
-			// check); the script itself is inert without the flag or a
+			// tells the beacon a window was open at render time (a cheap
+			// RamStore check); the script itself is inert without the flag or a
 			// 'joinery:vault-unlocked' event from an in-page unlock ceremony.
 			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 			$vault_window_open = VaultUnlock::isOpen((int)$session->get_user_id());
