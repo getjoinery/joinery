@@ -40,7 +40,7 @@
 				"filename": "café.jpg",
 				"content_type": "image/jpeg",
 				"content_id": "",
-				"inline": true,
+				"inline": false,
 				"size": 5,
 				"sha256_hex": "8b5b9db0c13db24256c829aa364aa90c6d2eba318b9232a4ab9313b954d3555f",
 				"bytes_b64": "dGhyZWU="
@@ -65,7 +65,7 @@
 			"iem_raw_headers": "From: alice@example.com\r\nTo: bob@example.org\r\nSubject: Filenames\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"=_mixed_42\"\r\n",
 			"iem_to": "bob@example.org",
 			"iem_cc": "",
-			"iem_attachment_manifest": "[{\"mime_part\":\"2\",\"filename\":\"Übersicht Q3 €.txt\",\"content_type\":\"application/octet-stream\",\"content_id\":\"\",\"inline\":false,\"size\":3},{\"mime_part\":\"3\",\"filename\":\"été.pdf\",\"content_type\":\"text/plain\",\"content_id\":\"\",\"inline\":false,\"size\":3},{\"mime_part\":\"4\",\"filename\":\"café.jpg\",\"content_type\":\"image/jpeg\",\"content_id\":\"\",\"inline\":true,\"size\":5}]"
+			"iem_attachment_manifest": "[{\"mime_part\":\"2\",\"filename\":\"Übersicht Q3 €.txt\",\"content_type\":\"application/octet-stream\",\"content_id\":\"\",\"inline\":false,\"size\":3},{\"mime_part\":\"3\",\"filename\":\"été.pdf\",\"content_type\":\"text/plain\",\"content_id\":\"\",\"inline\":false,\"size\":3},{\"mime_part\":\"4\",\"filename\":\"café.jpg\",\"content_type\":\"image/jpeg\",\"content_id\":\"\",\"inline\":false,\"size\":5}]"
 		},
 		"parts": [
 			{
@@ -81,7 +81,7 @@
 			{
 				"mime_part": "4",
 				"size": 5,
-				"inline": true
+				"inline": false
 			}
 		],
 		"spam_headers": {

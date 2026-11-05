@@ -18,6 +18,8 @@
  *   rfc2047_subject.eml           B and Q encoded words, adjacent words joined
  *   rfc2231_filename.eml          2231 continuations with charset, a 2047
  *                                 filename in quotes, the name*= form
+ *   cid_disposition.eml           pictures the HTML shows by cid: (one marked
+ *                                 attachment) and Content-IDs it never shows
  *   bare_lf.eml                   the same structure with LF-only lines
  *   malformed.eml                 no close boundary, junk in base64, a
  *                                 multipart with no boundary parameter
@@ -27,6 +29,7 @@
  * Runs with lib/whatwg_text_decoder.js installed: Node decodes windows-1252
  * bytes 0x80-0x9F as C1 controls, a browser as the WHATWG index says.
  *
+ * @version 1.2 - a part is inline only when the HTML shows it (cid_disposition.eml, B5)
  * @version 1.1 - a browser's windows-1252
  * @version 1.0
  */
@@ -171,8 +174,23 @@ console.log('== rfc2231_filename.eml ==');
 	eq('a named text/plain is an attachment, not the body', b && b.contentType, 'text/plain');
 	eq('its part number', b && b.mimePart, '3');
 	eq('name*= with a latin-1 charset', c && c.filename, 'café.jpg');
-	eq('disposition inline is inline', c && c.inline, true);
+	eq('disposition inline, but no HTML shows it: listed, not inline', c && c.inline, false);
 	eq('attachment disposition is not inline', a && a.inline, false);
+}
+
+console.log('== cid_disposition.eml ==');
+{
+	const p = parse('cid_disposition.eml');
+	const by = (name) => p.attachments.find((a) => a.contentId === name);
+	eq('four parts besides the body', p.attachments.length, 4);
+	eq('a picture the HTML shows is inline, though it says attachment', by('logo@example.com') && by('logo@example.com').inline, true);
+	eq('one with no disposition, shown through an upper-case CID: and brackets, is inline', by('pic2@example.com') && by('pic2@example.com').inline, true);
+	eq('a Content-ID the HTML never shows is listed (an Outlook emz)', by('image002.emz@01DA0000.00000000') && by('image002.emz@01DA0000.00000000').inline, false);
+	eq('a Gmail-style Content-ID on a PDF is listed', by('f_abc123') && by('f_abc123').inline, false);
+	const ids = globalThis.MailboxMime.inlineIds(p.textHtml);
+	ok('inlineIds reads both references', ids['logo@example.com'] === true && ids['pic2@example.com'] === true && Object.keys(ids).length === 2);
+	eq('isInline trims angle brackets', globalThis.MailboxMime.isInline('<logo@example.com>', ids), true);
+	eq('isInline: an empty Content-ID is never inline', globalThis.MailboxMime.isInline('', ids), false);
 }
 
 console.log('== bare_lf.eml ==');

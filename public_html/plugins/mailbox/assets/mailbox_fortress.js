@@ -41,6 +41,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.15 - an opened message's inline parts are the ones its body shows by cid: (MailboxMime.isInline, B5)
  * @version 1.14 - a draft's key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.13.2 - a failed device_rules fetch is not cached for the drain (review F6); the rule
  *   backlog walk moves past a row it cannot open (F7)
@@ -296,8 +297,12 @@ window.MailboxFortress = (function () {
 			a.preview_kind = imagePreviewKind(a.content_type, a.filename);
 			return a;
 		});
+		// Inline is what the opened body shows by cid:, the rule the server and
+		// the parser apply (MailboxMime.isInline), whatever the stored flag says.
+		var shown = MailboxMime.inlineIds(m.body_html);
+		parts.forEach(function (a) { a.inline = MailboxMime.isInline(a.content_id, shown); });
 		m.attachments = parts.filter(function (a) { return !a.inline; });
-		var inline = parts.filter(function (a) { return a.inline && a.content_id; });
+		var inline = parts.filter(function (a) { return a.inline; });
 		// As the sender wrote them, for a reply's quote and a forward's parts:
 		// the rendered body's cid: images become data: URLs below.
 		m.body_html_source = m.body_html;

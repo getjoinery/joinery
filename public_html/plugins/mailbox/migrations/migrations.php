@@ -1616,4 +1616,61 @@ return [
 			return true;
 		},
 	],
+	[
+		// A part was called inline from its Content-Disposition, so a picture the
+		// HTML shows but labels 'attachment' rendered broken, and a Content-ID the
+		// HTML never shows was hidden from the attachment list (B5). Inline is now
+		// what the body shows (InlineParts). Decide every unsealed row stored
+		// before that, once; a sealed message's rows are decided in its owner's
+		// window by InlineFlagBackfill, and a Fortress message's in the browser.
+		'id' => 'inl_001_inline_flag_by_body',
+		'version' => '1.144.29',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InlineParts.php'));
+			$db = $dbconnector->get_db_link();
+			if (!$db->query("SELECT to_regclass('ima_inbound_message_attachments')")->fetchColumn()
+					|| !$db->query("SELECT 1 FROM information_schema.columns WHERE table_name = 'ima_inbound_message_attachments'
+						AND column_name = 'ima_inline_by_body'")->fetchColumn()) {
+				echo "inl_001: the ima_inline_by_body column is not there yet; nothing decided.\n";
+				return false;
+			}
+			$pick = $db->prepare("SELECT DISTINCT a.ima_iem_inbound_email_message_id
+				FROM ima_inbound_message_attachments a
+				JOIN iem_inbound_email_messages m ON m.iem_inbound_email_message_id = a.ima_iem_inbound_email_message_id
+				WHERE a.ima_inline_by_body IS NULL AND m.iem_content_sealed IS NOT TRUE AND m.iem_sealed_owner_user_id IS NULL
+				  AND a.ima_iem_inbound_email_message_id > ?
+				ORDER BY 1 LIMIT 500");
+			$body = $db->prepare('SELECT iem_body_html FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+			$rows = $db->prepare('SELECT ima_inbound_message_attachment_id AS id, ima_content_id AS cid, ima_is_inline AS inline
+				FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ? AND ima_inline_by_body IS NULL');
+			$set = $db->prepare('UPDATE ima_inbound_message_attachments SET ima_is_inline = ?, ima_inline_by_body = true
+				WHERE ima_inbound_message_attachment_id = ?');
+			$messages = 0; $decided = 0; $now_inline = 0; $now_listed = 0; $after = 0;
+			do {
+				$pick->execute(array($after));
+				$ids = $pick->fetchAll(PDO::FETCH_COLUMN);
+				foreach ($ids as $mid) {
+					$after = intval($mid);
+					$body->execute(array($after));
+					$shown = InlineParts::referencedIds((string)$body->fetchColumn());
+					$rows->execute(array($after));
+					foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
+						$inline = InlineParts::isInline((string)$r['cid'], $shown);
+						$set->execute(array($inline ? 't' : 'f', intval($r['id'])));
+						$decided++;
+						if ($inline && !$r['inline']) { $now_inline++; }
+						if (!$inline && $r['inline']) { $now_listed++; }
+					}
+					$messages++;
+				}
+			} while (count($ids) === 500);
+			$sealed = (int)$db->query("SELECT count(*) FROM ima_inbound_message_attachments a
+				JOIN iem_inbound_email_messages m ON m.iem_inbound_email_message_id = a.ima_iem_inbound_email_message_id
+				WHERE a.ima_inline_by_body IS NULL AND coalesce(a.ima_content_id, '') <> '' AND m.iem_content_sealed = true")->fetchColumn();
+			echo "inl_001: $decided attachment row(s) on $messages unsealed message(s) decided by their body: "
+				. "$now_inline now shown inline, $now_listed now listed as attachments. "
+				. "$sealed sealed row(s) with a Content-ID wait for their owner's unlock (InlineFlagBackfill).\n";
+			return true;
+		},
+	],
 ];

@@ -53,7 +53,9 @@
  * interactive fetch (the reader's Refresh, the admin's Fetch now) stays inside
  * the time a browser, and the proxy in front of it, will wait.
  *
- * @version 1.23
+ * @version 1.24
+ * @changelog 1.24 - a part is inline only when the HTML body shows it by cid: (InlineParts); the ingest-time
+ *   picture fetch takes every image with a Content-ID, and adoption follows the manifest (B5)
  * @changelog 1.23 - an INBOX arrival of a spam row clears the verdict (the member said Not spam at the
  *   source); neither folder's verdict overrides a correction not yet carried to the source
  * @version 1.22
@@ -1830,7 +1832,7 @@ class ImapIngestor {
 			// existing row already has its own, and since both are written in one
 			// transaction that is now a guarantee rather than an assumption — a
 			// half-stored message never commits (D1).
-			$this->writeManifest($messageId, $attachParts);
+			$this->writeManifest($messageId, $attachParts, $html);
 			// Inline images fetched by the network half become file-backed rows
 			// now, so the reader's cid: rewrite can serve them
 			// (specs/bugfix_sealed_inline_images.md). Sealing needs only the
@@ -2134,14 +2136,13 @@ class ImapIngestor {
 		return count($rows) ? (string)$rows->get(0)->get('iif_name') : null;
 	}
 
-	/** Persist one ima_ row per non-text part (metadata only, no bytes). */
-	/** The one inline predicate, shared by the manifest write and the ingest-time
-	 *  inline-image fetch so the two can never disagree about which rows the
-	 *  adopted bytes belong to. */
-	private static function partIsInline($part): bool {
+	/** Whether a part could be a picture in the body: an image with a Content-ID.
+	 *  The ingest-time fetch runs before the body is decoded, so it takes every
+	 *  candidate; writeManifest() decides inline from the body itself
+	 *  (InlineParts), and adoptInlineParts() adopts only the rows it marked. */
+	private static function partMayBeInline($part): bool {
 		$cid = $part->getContentId();
-		$disp = $part->getDisposition();
-		return ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+		return $cid !== null && trim((string)$cid, " \t<>") !== '';
 	}
 
 	/**
@@ -2155,7 +2156,7 @@ class ImapIngestor {
 		$out = array();
 		foreach ($attachParts as $part) {
 			try {
-				if (!self::partIsInline($part)) {
+				if (!self::partMayBeInline($part)) {
 					continue;
 				}
 				if (strtolower((string)$part->getPrimaryType()) !== 'image') {
@@ -2250,11 +2251,12 @@ class ImapIngestor {
 		}
 	}
 
-	private function writeManifest($messageId, array $parts): void {
+	/** Persist one ima_ row per non-text part (metadata only, no bytes). */
+	private function writeManifest($messageId, array $parts, string $html): void {
+		$shown = InlineParts::referencedIds($html);
 		foreach ($parts as $part) {
 			$cid = $part->getContentId();
-			$disp = $part->getDisposition();
-			$isInline = self::partIsInline($part);
+			$isInline = InlineParts::isInline($cid, $shown);
 			InboundMessageAttachment::CreateEntry(array(
 				'ima_iem_inbound_email_message_id' => intval($messageId),
 				'ima_filename'     => $part->getName() ? DocumentText::clip((string)$part->getName(), 500) : null,
@@ -2264,6 +2266,7 @@ class ImapIngestor {
 				'ima_encoding'     => substr($this->partEncoding($part), 0, 40),
 				'ima_content_id'   => $cid ? DocumentText::clip(trim($cid, '<>'), 255) : null,
 				'ima_is_inline'    => $isInline,
+				'ima_inline_by_body' => true,
 			));
 		}
 	}

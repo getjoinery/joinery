@@ -511,7 +511,6 @@ object MimeParser {
         val filename: String,
         val contentId: String,
         val mimePart: String,
-        val inRelated: Boolean,
         val bytes: ByteArray,
     )
 
@@ -567,14 +566,13 @@ object MimeParser {
                 filename = filename,
                 contentId = cid,
                 mimePart = if (partNo == "") "1" else partNo,
-                inRelated = ancestors.contains("related"),
                 bytes = decoded,
             ),
         )
     }
 
     private fun opaqueLeaf(bytes: ByteArray, start: Int, end: Int, partNo: String) = Leaf(
-        "application/octet-stream", "", "attachment", false, "", "", partNo.ifEmpty { "1" }, false, bytes.copyOfRange(start, end),
+        "application/octet-stream", "", "attachment", false, "", "", partNo.ifEmpty { "1" }, bytes.copyOfRange(start, end),
     )
 
     fun parse(bytes: ByteArray?): Parsed {
@@ -614,6 +612,13 @@ object MimeParser {
             if (plainAt < 0 && l.type == "text/plain") plainAt = i
             else if (htmlAt < 0 && l.type == "text/html") htmlAt = i
         }
+        // A part is inline when the body shows it by cid: (InlineParts.php on the
+        // server, MailboxMime.isInline in the browser), whatever its disposition says.
+        val shown = if (htmlAt >= 0) {
+            try { inlineIds(decodeText(leaves[htmlAt].bytes, leaves[htmlAt].charset)) } catch (e: Exception) { emptySet() }
+        } else {
+            emptySet()
+        }
         leaves.forEachIndexed { j, leaf ->
             try {
                 if (j == plainAt) { result.textPlain = decodeText(leaf.bytes, leaf.charset); return@forEachIndexed }
@@ -627,12 +632,34 @@ object MimeParser {
                     contentType = leaf.type,
                     contentId = leaf.contentId,
                     mimePart = leaf.mimePart,
-                    inline = leaf.disposition == "inline" || (leaf.contentId != "" && leaf.inRelated),
+                    inline = isInline(leaf.contentId, shown),
                     bytes = leaf.bytes,
                 ),
             )
         }
         return result
+    }
+
+    private val CID_URL = Regex("cid:([^\"'\\s>]+)", RegexOption.IGNORE_CASE)
+    private val EDGES = Regex("^[ \\t<>]+|[ \\t<>]+$")
+
+    /** The Content-IDs an HTML body shows with cid: URLs: each value URL-decoded,
+     *  angle brackets trimmed (the browser's MailboxMime.inlineIds). */
+    fun inlineIds(html: String): Set<String> {
+        val ids = HashSet<String>()
+        for (m in CID_URL.findAll(html)) {
+            val value = m.groupValues[1]
+            val decoded = try { java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8") } catch (e: Exception) { value }
+            val id = decoded.replace(EDGES, "")
+            if (id.isNotEmpty()) ids.add(id)
+        }
+        return ids
+    }
+
+    /** Whether a part with this Content-ID is shown by a body whose references are [ids]. */
+    fun isInline(contentId: String, ids: Set<String>): Boolean {
+        val id = contentId.replace(EDGES, "")
+        return id.isNotEmpty() && ids.contains(id)
     }
 
     /** The first top-level header called [name], unfolded and decoded, or "". */

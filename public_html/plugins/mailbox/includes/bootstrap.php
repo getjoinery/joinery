@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.31 - InlineFlagBackfill: a sealed message's pre-B5 rows are decided by what its body shows, in-window
  * @version 1.30 - the rotation re-seal picks a message by the key it holds, not by iem_content_sealed: a sealed draft
  *                moved to or sent from a standard From keeps its key for its sealed attachments with the flag off,
  *                and every rotation passed it by (jeremytunnell, two rows on generation 1, 2026-11-02)
@@ -625,6 +626,21 @@ VaultDeferredWork::register(
 // this consumer turns them file-backed — from the IMAP source for 'remote'
 // rows, from the stored raw (in-window, when sealed) otherwise. Last of the
 // mailbox consumers: it is cosmetic catch-up next to parsing and repair.
+// Rows stored before the inline flag was decided by the body (B5): open a
+// sealed message's body in its owner's window and decide each row by what it
+// shows. Registered before the image backfill, so a row that becomes inline
+// has its bytes adopted in the same drain.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InlineFlagBackfill.php'));
+VaultDeferredWork::register(
+	'mailbox_inline_flag_backfill',
+	function (int $user_id): bool {
+		return InlineFlagBackfill::hasWork($user_id);
+	},
+	function (int $user_id, VaultKey $key, float $deadline): int {
+		return InlineFlagBackfill::drainForUser($user_id, $key, InlineFlagBackfill::DEFAULT_MAX, $deadline);
+	}
+);
+
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InlineImageBackfill.php'));
 VaultDeferredWork::register(
 	'mailbox_inline_backfill',

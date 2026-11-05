@@ -30,6 +30,7 @@
  * file-backed the moment any path turns up the real bytes — an archive import
  * of the same message adopts them, whichever order the two happened in.
  *
+ * @version 1.7 - ima_inline_by_body: the inline flag was decided by the HTML body (B5)
  * @version 1.6 - access_owner_is(): an attachment is its message's holders' (MailboxViewer::holdsMessage)
  * @version 1.5
  * @changelog 1.5 - ima_iem_inbound_email_message_id declared as a real
@@ -92,6 +93,11 @@ class InboundMessageAttachment extends SystemBase {
 		// heartbeat drain. Success needs no clearing — a file-backed row leaves
 		// the backfill's predicate entirely.
 		'ima_adopt_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
+		// True once ima_is_inline was decided by what the HTML body shows
+		// (InlineParts). Null on a row stored before that rule: the inline-flag
+		// backfill (migration inl_001, and InlineFlagBackfill for sealed mail
+		// inside the owner's window) recomputes those once.
+		'ima_inline_by_body' => array('type'=>'bool', 'is_nullable'=>true),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 

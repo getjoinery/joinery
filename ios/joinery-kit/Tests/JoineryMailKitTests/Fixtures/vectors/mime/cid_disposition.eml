@@ -1,0 +1,46 @@
+From: Sender <sender@example.com>
+To: You <you@example.com>
+Subject: cid and disposition
+Message-ID: <cid-disposition@example.com>
+Date: Thu, 05 Nov 2026 03:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/related; boundary="rel"
+
+--rel
+Content-Type: text/html; charset=UTF-8
+
+<p>Logo: <img src="cid:logo%40example.com"> and <img src="CID:<pic2@example.com>"></p>
+--rel
+Content-Type: image/png; name="logo.png"
+Content-Disposition: attachment; filename="logo.png"
+Content-ID: <logo@example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+--rel
+Content-Type: image/png
+Content-ID: <pic2@example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+--rel
+Content-Type: image/x-emz; name="image002.emz"
+Content-ID: <image002.emz@01DA0000.00000000>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM
+IQAAAABJRU5ErkJggg==
+--rel--
+--outer
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-ID: <f_abc123>
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQgZml4dHVyZQ==
+--outer--

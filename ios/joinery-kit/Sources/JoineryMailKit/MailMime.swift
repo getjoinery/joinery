@@ -498,7 +498,7 @@ public enum MailMime {
 
     struct Leaf {
         var type: String, charset: String, disposition: String
-        var hasName: Bool, filename: String, contentID: String, mimePart: String, inRelated: Bool
+        var hasName: Bool, filename: String, contentID: String, mimePart: String
         var bytes: [UInt8]
     }
 
@@ -543,7 +543,7 @@ public enum MailMime {
         if filename.isEmpty && (type == "message/rfc822" || type == "message/global") { filename = "message.eml" }
         leaves.append(Leaf(type: type, charset: ct.params["charset"] ?? "", disposition: disp.value,
                            hasName: !dispName.isEmpty || !ctName.isEmpty, filename: filename, contentID: cid,
-                           mimePart: partNo.isEmpty ? "1" : partNo, inRelated: ancestors.contains("related"),
+                           mimePart: partNo.isEmpty ? "1" : partNo,
                            bytes: decodeTransfer(bytes[split.bodyStart..<max(split.bodyStart, end)],
                                                  firstField(fields, "content-transfer-encoding"))))
     }
@@ -574,15 +574,57 @@ public enum MailMime {
             if plainAt < 0 && l.type == "text/plain" { plainAt = i }
             else if htmlAt < 0 && l.type == "text/html" { htmlAt = i }
         }
+        // A part is inline when the body shows it by cid: (InlineParts.php on the
+        // server, MailboxMime.isInline in the browser), whatever its disposition says.
+        let shown = htmlAt >= 0 ? inlineIDs(decodeText(leaves[htmlAt].bytes, leaves[htmlAt].charset)) : []
         for (j, leaf) in leaves.enumerated() {
             if j == plainAt { result.textPlain = decodeText(leaf.bytes, leaf.charset); continue }
             if j == htmlAt { result.textHTML = decodeText(leaf.bytes, leaf.charset); continue }
             result.attachments.append(Attachment(
                 filename: leaf.filename, contentType: leaf.type, contentID: leaf.contentID, mimePart: leaf.mimePart,
-                inline: leaf.disposition == "inline" || (!leaf.contentID.isEmpty && leaf.inRelated),
+                inline: isInline(leaf.contentID, shown),
                 bytes: Data(leaf.bytes)))
         }
         return result
+    }
+
+    private static let edgeChars: Set<Character> = [" ", "\t", "<", ">"]
+
+    private static func trimEdges(_ s: String) -> String {
+        var t = Substring(s)
+        while let c = t.first, edgeChars.contains(c) { t = t.dropFirst() }
+        while let c = t.last, edgeChars.contains(c) { t = t.dropLast() }
+        return String(t)
+    }
+
+    /// The Content-IDs an HTML body shows with cid: URLs: each value URL-decoded,
+    /// angle brackets trimmed (the browser's MailboxMime.inlineIds).
+    public static func inlineIDs(_ html: String) -> Set<String> {
+        var ids = Set<String>()
+        let chars = Array(html)
+        let lower = Array(html.lowercased())
+        var i = 0
+        while i + 4 <= lower.count {
+            if lower[i] == "c" && lower[i + 1] == "i" && lower[i + 2] == "d" && lower[i + 3] == ":" {
+                var j = i + 4
+                while j < chars.count && !"\"' \t\r\n>".contains(chars[j]) && !chars[j].isWhitespace { j += 1 }
+                if j > i + 4 {
+                    let value = String(chars[(i + 4)..<j])
+                    let id = trimEdges(value.removingPercentEncoding ?? value)
+                    if !id.isEmpty { ids.insert(id) }
+                }
+                i = j
+            } else {
+                i += 1
+            }
+        }
+        return ids
+    }
+
+    /// Whether a part with this Content-ID is shown by a body whose references are `ids`.
+    public static func isInline(_ contentID: String, _ ids: Set<String>) -> Bool {
+        let id = trimEdges(contentID)
+        return !id.isEmpty && ids.contains(id)
     }
 
     /// The first top-level header called `name`, unfolded and decoded, or ''.

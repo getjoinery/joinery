@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.65 - the reader reads cid: references through InlineParts, the same rule ingest uses (B5)
  * @version 1.64 - a singleton thread key (m:<id>) expands to the thread its message joined when replied to
  * @version 1.63 - purgeFromTrash() deletes as rule_checked_write(): trashMutationScopeSql() limits it to the viewer's mailboxes
  * @version 1.62 - fortressExportMessages(): a mailbox export pages through Fortress rows in the thread payload's shape
@@ -2461,9 +2462,9 @@ class MailboxService {
 			}
 			$map = $cids_by_msg[$mid];
 			$m['body_html'] = preg_replace_callback(
-				'/cid:([^"\'\s>]+)/i',
+				InlineParts::CID_URL,
 				function ($matches) use ($map) {
-					$id = trim(rawurldecode($matches[1]), '<>');
+					$id = InlineParts::idFromReference($matches[1]);
 					return isset($map[$id]) ? $map[$id] : $matches[0];
 				},
 				(string)$m['body_html']

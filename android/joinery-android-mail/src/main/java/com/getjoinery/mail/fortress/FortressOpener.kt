@@ -206,20 +206,25 @@ class FortressOpener(
             // A row a device parsed from the relay names its parts by number: it
             // sealed the manifest before the server gave them ids.
             val byPart = manifest.filter { it.id == null && it.mimePart.isNotEmpty() }.associateBy { it.mimePart }
+            val html = o["iem_body_html"] ?: ""
+            // Inline is what the opened body shows by cid: (MimeParser.isInline, the
+            // rule the server and the browser apply), whatever the stored flag says.
+            val shown = MimeParser.inlineIds(html)
             val parts = m.attachments.map { a ->
                 val e = byId[a.id] ?: byPart[a.mimePart]
+                val cid = e?.contentId ?: ""
                 a.copy(
                     filename = e?.filename?.ifEmpty { null } ?: "attachment",
                     contentType = e?.contentType?.ifEmpty { null } ?: "application/octet-stream",
-                    contentId = e?.contentId ?: "",
+                    contentId = cid,
+                    inline = MimeParser.isInline(cid, shown),
                     fortress = true,
                     messageId = m.id,
                     adPrefix = row.adPrefix,
                     sizeBytes = if (a.sizeBytes > 0) a.sizeBytes else (e?.size ?: 0),
                 )
             }
-            val inline = parts.filter { it.inline && it.contentId.isNotEmpty() }
-            val html = o["iem_body_html"] ?: ""
+            val inline = parts.filter { it.inline }
             m.copy(
                 sender = o["iem_sender"] ?: "",
                 subject = o["iem_subject"] ?: "",

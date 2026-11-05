@@ -1411,10 +1411,29 @@ file-backed rows, `ima_fil_file_id` pointing at its `File`. Dispatch everywhere 
 | no `ima_fil_file_id`, driver `remote` | the IMAP source | fetch the part on demand (`ImapIngestor::fetchPart`) |
 | no `ima_fil_file_id`, stored raw | inside the raw (legacy / fallback row) | `getRawMimePart($section)` |
 
+**A part is inline when the HTML body shows it.** `ima_is_inline` is true exactly
+when the message's HTML references the part's Content-ID with a `cid:` URL
+(`InlineParts`, read the way the reader resolves it: URL-decoded, angle brackets
+trimmed, any case of `cid:`). Content-Disposition plays no part: inside
+multipart/related a reader is told to ignore it (RFC 2387 § 4), Gmail puts a
+Content-ID on ordinary attachments, and some senders label a picture the body shows
+`attachment`. So a picture the body shows renders in place and leaves the attachment
+list, and a part the body never shows, a Content-ID or not, is listed. Every ingest
+path decides it this way (the file-backed split and the raw fallback in
+`InboundEmailRouter`, the IMAP manifest in `ImapIngestor`), the browser parser does
+the same for relay-sealed mail (`MailboxMime.inlineIds` / `isInline` in
+`mailbox_mime.js`, mirrored in the phone apps' MIME parsers), and a Fortress message's
+inline parts are decided from its opened body each time it is shown.
+`ima_inline_by_body` marks a row decided this way. Older rows are decided once:
+unsealed mail by the plugin migration `inl_001_inline_flag_by_body`, and sealed
+(Private) mail by the `mailbox_inline_flag_backfill` deferred-work consumer
+(`InlineFlagBackfill`), which opens each body inside its owner's unlock window.
+
 **Inline images are body content and are always file-backed.** The reader's
 cid: rewrite (`MailboxService::resolveInlineImages()`) serves only file-backed
-rows, so the IMAP ingest fetches each inline image part's bytes (5 MB cap)
-beside the body fetches and adopts them at store time
+rows, so the IMAP ingest fetches the bytes of each image part with a Content-ID
+(5 MB cap) beside the body fetches, before the body is decoded, and adopts those
+of the rows it marks inline at store time
 (`AttachmentByteCustody::adoptBytes()`, sealed iff the message is). Inline
 image rows that are still reference-backed are turned file-backed by the
 `mailbox_inline_backfill` deferred-work consumer (`InlineImageBackfill`) — from

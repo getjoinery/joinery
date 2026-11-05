@@ -83,6 +83,8 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.60 - a part is inline only when the HTML body shows it by cid: (InlineParts), whatever its
+ *                Content-Disposition says; persistRawAndManifest() takes the body HTML (B5)
  * @version 1.59 - parseEmail makes every header value text (MailHeaderText::block), so the routing log's
  *               From, the Message-ID and the thread key carry no raw Latin-1; those two cut between
  *               characters (B66)
@@ -1024,7 +1026,7 @@ class InboundEmailRouter {
 			// private Files and store the lean record (or fall back to raw storage
 			// on failure). Runs INSIDE the transaction so the row and its
 			// attachments/raw commit together — never a bare row.
-			$manifest = $this->persistRawAndManifest(intval($msg->key), $raw_email, $alias, $dek, $for_browser);
+			$manifest = $this->persistRawAndManifest(intval($msg->key), $raw_email, (string)$bodies['html'], $alias, $dek, $for_browser);
 			if ($for_browser) {
 				InboundEmailMessage::sealFortressDerived(intval($msg->key), $vault, $dek, array(
 					'sender' => $sender, 'subject' => $subject,
@@ -1179,7 +1181,7 @@ class InboundEmailRouter {
 		$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
 			$bodies['plain'], $bodies['html'], null, $this->rawHeaderBlock($raw),
 			$this->addressListsFromHeaders($parsed['headers'] ?? array()));
-		$this->persistRawAndManifest(intval($msg->key), $raw, $alias, $dek);
+		$this->persistRawAndManifest(intval($msg->key), $raw, (string)$bodies['html'], $alias, $dek);
 
 		// The verdict now runs on the parsed plaintext, exactly as storeMessage
 		// does — the relay stamps X-Spam inside the sealed raw, and the auth
@@ -1859,11 +1861,11 @@ class InboundEmailRouter {
 	 * @return array the attachment manifest entries (InboundEmailMessage::manifestEntry())
 	 *               the lean record wrote; empty on the raw fallback
 	 */
-	protected function persistRawAndManifest(int $message_id, string $raw_email, $alias = null, ?string $dek = null,
-			bool $for_browser = false): array {
+	protected function persistRawAndManifest(int $message_id, string $raw_email, string $html, $alias = null,
+			?string $dek = null, bool $for_browser = false): array {
 		try {
 			// lean record: Files written, manifest linked, no raw retained
-			return $this->extractAttachmentsToFiles($message_id, $raw_email, $alias, $dek, $for_browser);
+			return $this->extractAttachmentsToFiles($message_id, $raw_email, $html, $alias, $dek, $for_browser);
 		} catch (\Throwable $e) {
 			// extractAttachmentsToFiles() rolled back its own Files + manifest rows.
 			if ($for_browser) {
@@ -1895,7 +1897,7 @@ class InboundEmailRouter {
 				->prepare('UPDATE iem_inbound_email_messages SET iem_raw_sealed = true WHERE iem_inbound_email_message_id = ?')
 				->execute([$message_id]);
 			try {
-				$this->writeManifestFromRaw($message_id, $raw_email);
+				$this->writeManifestFromRaw($message_id, $raw_email, $html);
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
 			}
@@ -1906,7 +1908,7 @@ class InboundEmailRouter {
 		// the pre-lean storage shape, still fully supported by download/forward.
 		$this->persistRawFallback($message_id, $raw_email);
 		try {
-			$this->writeManifestFromRaw($message_id, $raw_email);
+			$this->writeManifestFromRaw($message_id, $raw_email, $html);
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: attachment manifest write failed for message ' . $message_id . ': ' . $e->getMessage());
 		}
@@ -1931,10 +1933,11 @@ class InboundEmailRouter {
 	 *
 	 * @return array manifest entries (InboundEmailMessage::manifestEntry()), one per row written
 	 */
-	private function extractAttachmentsToFiles(int $message_id, string $raw_email, $alias, ?string $dek = null,
-			bool $for_browser = false): array {
+	private function extractAttachmentsToFiles(int $message_id, string $raw_email, string $html, $alias,
+			?string $dek = null, bool $for_browser = false): array {
 		$owner_id = $this->attachmentOwnerId($alias);
 		$parts    = $this->enumerateNonTextParts($raw_email);
+		$shown    = InlineParts::referencedIds($html);
 		$sealing  = ($dek !== null);
 		$for_browser = $sealing && $for_browser;
 
@@ -1947,8 +1950,7 @@ class InboundEmailRouter {
 			foreach ($parts as $part) {
 				$bytes = (string)$part->getContents();
 				$cid   = $part->getContentId();
-				$disp  = $part->getDisposition();
-				$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+				$isInline = InlineParts::isInline($cid, $shown);
 				$name = $part->getName() ? DocumentText::clip((string)($part->getName()), 500) : null;
 				$type = (string)$part->getType() ?: 'application/octet-stream';
 				$mime_part = (string)$part->getMimeId();
@@ -1993,6 +1995,7 @@ class InboundEmailRouter {
 					'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
 					'ima_content_id'   => $for_browser ? '' : $content_id,
 					'ima_is_inline'    => $isInline,
+					'ima_inline_by_body' => true,
 					'ima_fil_file_id'  => intval($file->key),
 					// Per-file sealed state — every reader of the File bytes keys
 					// on this (InboundEmailMessage::openSealedAttachment).
@@ -2191,13 +2194,13 @@ class InboundEmailRouter {
 	 * The MIME-section ids (getMimeId) match what getRawMimePart() resolves, since
 	 * both parse the same raw with the same Horde method.
 	 */
-	private function writeManifestFromRaw(int $message_id, string $raw_email) {
+	private function writeManifestFromRaw(int $message_id, string $raw_email, string $html) {
 		$parts = $this->enumerateNonTextParts($raw_email);
+		$shown = InlineParts::referencedIds($html);
 
 		foreach ($parts as $part) {
 			$cid  = $part->getContentId();
-			$disp = $part->getDisposition();
-			$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+			$isInline = InlineParts::isInline($cid, $shown);
 			InboundMessageAttachment::CreateEntry(array(
 				'ima_iem_inbound_email_message_id' => $message_id,
 				'ima_filename'     => $part->getName() ? DocumentText::clip((string)$part->getName(), 500) : null,
@@ -2207,6 +2210,7 @@ class InboundEmailRouter {
 				'ima_encoding'     => substr($this->partTransferEncoding($part), 0, 40),
 				'ima_content_id'   => $cid ? DocumentText::clip(trim($cid, '<>'), 255) : null,
 				'ima_is_inline'    => $isInline,
+				'ima_inline_by_body' => true,
 			));
 		}
 	}
@@ -2488,7 +2492,7 @@ class InboundEmailRouter {
 			// the same parts as file-backed attachments.
 			$this->deleteManifestRows($message_id);
 			// Lean split — plaintext Files + manifest (dek=null: remote rows are plaintext).
-			$this->persistRawAndManifest($message_id, $raw, $alias, null);
+			$this->persistRawAndManifest($message_id, $raw, (string)$message->get('iem_body_html'), $alias, null);
 			// Flip the row to a self-contained lean record and drop the IMAP locator.
 			// The lean path leaves the driver as-is, so 'remote' → 'inline'; a
 			// raw-storage fallback already set its own driver, so leave that alone.

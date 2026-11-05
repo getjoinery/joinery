@@ -15,6 +15,7 @@
  * factor. Linked from the mail page's Settings menu and the admin mailbox
  * list (?mailbox=).
  *
+ * @version 1.2 - loads mailbox_mime.js before mailbox_fortress.js, which decides inline parts with it (B5)
  * @version 1.1 - doc names the Status and X-Mozilla-Status headers
  */
 
@@ -112,6 +113,7 @@ if ($current) {
 		// The reader's Fortress module opens each message here; it reads its
 		// part URL from the reader's config.
 		echo '<script>window.MAILBOX_READER = ' . json_encode(array('attachmentUrlBase' => '/profile/mailbox/attachment')) . ';</script>';
+		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_mime.js')) . '"></script>';
 		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_fortress.js')) . '"></script>';
 		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_mime_build.js')) . '"></script>';
 		echo '<script src="' . htmlspecialchars($asset('assets/js/zip-writer.js')) . '"></script>';

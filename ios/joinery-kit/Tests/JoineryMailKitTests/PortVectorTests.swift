@@ -206,8 +206,8 @@ final class PortVectorTests: XCTestCase {
     }
 
     func testMimeFixturesParseAsTheBrowserDoes() throws {
-        for name in ["alternative", "bare_lf", "malformed", "nested_inline_attachment", "plain", "qp_latin1",
-                     "rfc2047_subject", "rfc2231_filename"] {
+        for name in ["alternative", "bare_lf", "cid_disposition", "malformed", "nested_inline_attachment", "plain",
+                     "qp_latin1", "rfc2047_subject", "rfc2231_filename"] {
             let raw = try Self.data("mime/\(name).eml")
             let exp = try Self.vector("mime/\(name).expected.json")
             XCTAssertEqual(SHA256.hash(data: raw).map { String(format: "%02x", $0) }.joined(),

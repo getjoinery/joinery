@@ -11,7 +11,8 @@ import org.junit.Test
  *  (plugins/mailbox/tests/fixtures/mime/<name>.expected.json). */
 class MimeParserTest {
     private val files = listOf(
-        "alternative", "bare_lf", "malformed", "nested_inline_attachment", "plain", "qp_latin1", "rfc2047_subject", "rfc2231_filename",
+        "alternative", "bare_lf", "cid_disposition", "malformed", "nested_inline_attachment", "plain", "qp_latin1",
+        "rfc2047_subject", "rfc2231_filename",
     )
 
     private fun check(label: String, raw: ByteArray, expected: JsonValue) {

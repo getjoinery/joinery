@@ -181,12 +181,16 @@ public final class FortressSession: ObservableObject {
             // manifest before the server gave them ids.
             else if let p = e["mime_part"]?.stringValue, !p.isEmpty { byPart[p] = e }
         }
+        // Inline is what the opened body shows by cid: (MailMime.isInline, the
+        // rule the server and the browser apply), whatever the stored flag says.
+        let shown = MailMime.inlineIDs(m.bodyHTML)
         let parts: [MailAttachment] = m.attachments.map { a in
             var a = a
             let e = byID[String(a.id)] ?? byPart[a.mimePart]
             a.filename = e?["filename"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? "attachment"
             a.contentType = e?["content_type"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? "application/octet-stream"
             a.contentID = e?["content_id"]?.stringValue ?? ""
+            a.inline = MailMime.isInline(a.contentID, shown)
             a.sealed = true
             a.messageID = m.id
             a.adPrefix = row.adPrefix
@@ -194,7 +198,7 @@ public final class FortressSession: ObservableObject {
             return a
         }
         m.attachments = parts.filter { !$0.inline }
-        let inline = parts.filter { $0.inline && !$0.contentID.isEmpty }
+        let inline = parts.filter { $0.inline }
         m.bodyHTMLSource = m.bodyHTML
         m.inlineParts = inline
         if !m.bodyHTML.isEmpty && !inline.isEmpty {

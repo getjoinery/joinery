@@ -37,6 +37,8 @@
  *     as a text/plain body, so a broken message still shows its words.
  *   - Body text keeps the message's own line endings.
  *
+ * @version 1.1 - a part is inline only when the HTML body shows it by cid: (inlineIds/isInline,
+ *   the rule InlineParts.php applies on the server), whatever its disposition says (B5)
  * @version 1.0
  */
 (function (root) {
@@ -591,7 +593,6 @@
 			filename: filename,
 			contentId: cid,
 			mimePart: partNo === '' ? '1' : partNo,
-			inRelated: ancestors.indexOf('related') >= 0,
 			bytes: decoded
 		});
 	}
@@ -600,7 +601,7 @@
 		return {
 			type: 'application/octet-stream', charset: '', disposition: 'attachment',
 			hasName: false, filename: '', contentId: '', mimePart: partNo || '1',
-			inRelated: false, bytes: bytes.slice(start, end)
+			bytes: bytes.slice(start, end)
 		};
 	}
 
@@ -678,11 +679,42 @@
 				contentType: leaf.type,
 				contentId: leaf.contentId,
 				mimePart: leaf.mimePart,
-				inline: leaf.disposition === 'inline' || (leaf.contentId !== '' && leaf.inRelated),
+				inline: false,
 				bytes: leaf.bytes
 			});
 		}
+		// A part is inline when the body shows it (InlineParts on the server):
+		// decided once the HTML is known, whatever the disposition says.
+		var shown = inlineIds(result.textHtml);
+		for (var k = 0; k < result.attachments.length; k++) {
+			result.attachments[k].inline = isInline(result.attachments[k].contentId, shown);
+		}
 		return result;
+	}
+
+	/** The Content-ID a cid: URL value names: URL-decoded, angle brackets trimmed. */
+	function idFromReference(value) {
+		var v = String(value || '');
+		try { v = decodeURIComponent(v); } catch (e) { /* not percent-encoded: as written */ }
+		return v.replace(/^[ \t<>]+|[ \t<>]+$/g, '');
+	}
+
+	/** The Content-IDs an HTML body shows with cid: URLs, as a set (id -> true). */
+	function inlineIds(html) {
+		var ids = {};
+		var re = /cid:([^"'\s>]+)/gi, m;
+		var s = String(html || '');
+		while ((m = re.exec(s)) !== null) {
+			var id = idFromReference(m[1]);
+			if (id !== '') { ids[id] = true; }
+		}
+		return ids;
+	}
+
+	/** Whether a part with this Content-ID is shown by a body whose references are ids. */
+	function isInline(contentId, ids) {
+		var id = String(contentId || '').replace(/^[ \t<>]+|[ \t<>]+$/g, '');
+		return id !== '' && Object.prototype.hasOwnProperty.call(ids || {}, id);
 	}
 
 	function headerValue(parsed, name) {
@@ -694,5 +726,5 @@
 		}
 	}
 
-	root.MailboxMime = { parse: parse, headerValue: headerValue };
+	root.MailboxMime = { parse: parse, headerValue: headerValue, inlineIds: inlineIds, isInline: isInline };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -154,7 +154,7 @@ public struct MailAttachment: Identifiable, Equatable, Sendable {
     public let url: String?
     /// The IMAP part number; a Fortress part's AD is built from it.
     public let mimePart: String
-    public let inline: Bool
+    public var inline: Bool
     public var contentID: String = ""
     /// Stored as ciphertext: fetched from `url` and opened on this phone.
     public var sealed = false
