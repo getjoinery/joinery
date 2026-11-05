@@ -5,6 +5,9 @@
  * env: dev-only
  * needs: []
  */
+/**
+ * @version 1.1 - a credential event's close rows carry each window's open duration
+ */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/../lib/vault_fixtures.php');
@@ -158,7 +161,11 @@ foreach ($rows as $row) {
 	check($row['evl_event'] === VaultAudit::EVENT_CLOSED, 'each is a closed row');
 	check(strpos($row['evl_note'], 'reason=' . VaultAudit::REASON_CREDENTIAL_EVENT) !== false,
 		'attributed to the credential event');
+	check(preg_match('/open_seconds=\d+/', $row['evl_note']) === 1, 'with how long it was open', $row['evl_note']);
 }
+$other_row = array_values(array_filter($rows, function ($r) use ($other) { return strpos($r['evl_note'], 'session=' . VaultAudit::handle($other)) !== false; }));
+check($other_row && preg_match('/open_seconds=(\d+)/', $other_row[0]['evl_note'], $os) && (int)$os[1] >= 119 && (int)$os[1] <= 130,
+	'the other session\'s duration is from its own arming time (~120s)', $other_row[0]['evl_note'] ?? '');
 $handles = array_map(function ($r) {
 	preg_match('/session=(\w+)/', $r['evl_note'], $m);
 	return $m[1] ?? '';

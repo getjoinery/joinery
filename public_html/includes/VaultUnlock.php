@@ -54,6 +54,7 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.25 - lockAll() records how long each window it closes was open, from its metadata
  * @version 1.24 - windows live in RamStore, bound to the PHP-FPM master (strategy/
  *   object_free_window_store.md WP2): no APCu read of a window remains; lockAll() and
  *   lockBorrowed() list names; the open-window marker is a store entry; one read and one
@@ -923,17 +924,21 @@ class VaultUnlock {
 		// sweep zeroes it, and a credential event must not walk past it.
 		$pattern = '/^vault(?:meta|brw)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
 		$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
-		foreach (RamStore::keys('vault', RamStore::LIFETIME | RamStore::INCLUDE_EXPIRED) as $name) {
-			if (!preg_match($pattern, $name)) {
-				continue;
-			}
-			// One row per (session, scope) rather than a single summary: a
-			// credential event that closes three devices at once should read
-			// as three windows ending, which is what it was. An expired slot
-			// ended by expiry, not by this event: wiped, not reported.
+		$names = array_values(array_filter(RamStore::keys('vault', RamStore::LIFETIME | RamStore::INCLUDE_EXPIRED),
+			function ($name) use ($pattern) { return (bool)preg_match($pattern, $name); }));
+		// One row per (session, scope) rather than a single summary: a
+		// credential event that closes three devices at once should read as
+		// three windows ending, which is what it was. An expired slot ended by
+		// expiry, not by this event: wiped, not reported. How long each was
+		// open comes from its metadata, read before anything is deleted.
+		foreach ($names as $name) {
 			if (preg_match($window, $name, $m) && RamStore::info($name, RamStore::LIFETIME) !== null) {
-				$closed[] = array($m[1], $m[2]);
+				$meta = RamStore::get('vaultmeta:' . $m[1] . ':' . $user_id . ':' . $m[2], $ok, RamStore::LIFETIME);
+				$armed = ($ok && is_array($meta) && is_int($meta['armed'] ?? null)) ? $meta['armed'] : null;
+				$closed[] = array($m[1], $m[2], $armed === null ? null : time() - $armed);
 			}
+		}
+		foreach ($names as $name) {
 			RamStore::delete($name, RamStore::LIFETIME);
 		}
 		self::$memo = array();
@@ -941,7 +946,7 @@ class VaultUnlock {
 			RamStore::delete($marker); // every scope's window is gone — the markers with them
 		}
 		foreach ($closed as $pair) {
-			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0]);
+			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0], $pair[2]);
 			self::noteClosed($user_id, $pair[0], $pair[1], $reason);
 		}
 		self::runWipeCallbacks($user_id, null);
