@@ -106,3 +106,6 @@ legacy_message_export_*.json
 
 # Python bytecode (test rigs)
 __pycache__/
+
+# The private specs repository (getjoinery/joinery-specs) is cloned here.
+/public_html/specs/

@@ -3,7 +3,8 @@
  * write_commit_map.php - sign, log and write the commit map after the public
  * history is rewritten (spec specs_private_repo, WP3 and WP4 step 6).
  *
- * Usage (on the origin, as the site's user, once per rewrite):
+ * Usage (on the origin, as root, the one reader of config/release_statement_key;
+ * once per rewrite):
  *
  *   php plugins/server_manager/utils/write_commit_map.php \
  *       --filter-repo-map=MIRROR/filter-repo/commit-map --mirror=MIRROR [--out=FILE] [--dry-run]
@@ -31,7 +32,7 @@
  * Exit 0 when written (or, with --dry-run, when it would be), 1 when refused,
  * 2 for a usage error.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -40,11 +41,6 @@ if (php_sapi_name() !== 'cli') {
 }
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
-if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
-	fwrite(STDERR, "Refusing to run as root: run it as the site's user, who owns config/release_statement_key.\n");
-	exit(2);
-}
 
 $opts = array('reason' => 'specs removed from the public repository');
 foreach (array_slice($argv ?? array(), 1) as $arg) {
@@ -83,7 +79,8 @@ foreach ($lines as $i => $line) {
 	$rewritten[$m[1]] = $m[2];
 }
 
-$mirror = 'git -C ' . escapeshellarg($opts['mirror']);
+// safe.directory: a root run reads a mirror another user owns.
+$mirror = 'git -c ' . escapeshellarg('safe.directory=' . realpath($opts['mirror'])) . ' -C ' . escapeshellarg($opts['mirror']);
 exec($mirror . ' rev-parse --verify -q main 2>&1', $o, $code);
 if ($code !== 0) {
 	$refuse("{$opts['mirror']} has no main branch");
@@ -178,6 +175,12 @@ if (!is_dir(dirname($out_path)) && !mkdir(dirname($out_path), 0755, true)) {
 }
 if (file_put_contents($out_path, $bytes) === false) {
 	$refuse("cannot write {$out_path}");
+}
+// A root run leaves nothing root-owned behind: the file takes its directory's owner.
+$dir_uid = fileowner(dirname($out_path));
+if (function_exists('posix_geteuid') && posix_geteuid() === 0 && $dir_uid !== false && $dir_uid !== 0) {
+	@chown($out_path, $dir_uid);
+	@chgrp($out_path, filegroup(dirname($out_path)));
 }
 echo "Logged at index {$logged_map['entry']['log_index']} of {$logged_map['entry']['log_origin']}; wrote {$out_path} ("
 	. $map->count() . " rewrite(s)). Commit it on top of the rewritten main.\n";
