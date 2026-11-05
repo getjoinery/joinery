@@ -14,7 +14,8 @@
 # port in the ephemeral range reads eph, a run that is not root says partial,
 # a program run from /tmp is seen while it runs, a port is named after the
 # holder that opened it, nothing writes, and the mail gateway's credentials
-# drop-in is one fixed entry only while it holds nothing but LoadCredential lines.
+# drop-in is one fixed entry only while it holds nothing but LoadCredential lines,
+# and the shipped gateway's own ports and enable link are left out.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -152,6 +153,27 @@ chk "a credential that is not an absolute path is not" "$(credentials_only "$C" 
 ln -s "$C" "$T/link.conf"
 chk "a link is not" "$(credentials_only "$T/link.conf" && echo yes || echo no)" "no"
 chk "only the gateway's own path gets the fixed entry" "$(grep -c 'GATEWAY_CREDENTIALS" ]] && credentials_only' "$SCRIPT")" "1"
+
+
+echo "=== The mail gateway's ports and enable link (1.5) ==="
+G="$T/gw"; mkdir -p "$G/lib" "$G/root/public_html/plugins/mail_apps/provisioning/bin"
+cp "$(command -v bash)" "$G/lib/mail-gateway"
+cp "$(command -v bash)" "$G/root/public_html/plugins/mail_apps/provisioning/bin/mail-gateway-$(uname -m)"
+eval "$(sed -n '/^gateway_is_shipped()/,/^}/p; /^port_holder_pid()/,/^}/p; /^gateway_port()/,/^}/p' "$SCRIPT")"
+GATEWAY_BIN="$G/lib/mail-gateway"; SITE_ROOT="$G/root"
+"$G/lib/mail-gateway" -c 'sleep 300; :' &
+GW_PID=$!
+sleep 0.2
+gp() { gateway_port "$1" "$2" && echo yes || echo no; }
+chk "993 held by the shipped gateway is left out" "$(gp 993 "users:((\"mail-gateway\",pid=$GW_PID,fd=3))")" "yes"
+chk "so are 465 and 10465" "$(gp 465 "users:((\"mail-gateway\",pid=$GW_PID,fd=4))")$(gp 10465 "users:((\"mail-gateway\",pid=$GW_PID,fd=5))")" "yesyes"
+chk "another port it holds is not" "$(gp 8443 "users:((\"mail-gateway\",pid=$GW_PID,fd=6))")" "no"
+chk "993 held by another program is not" "$(gp 993 "users:((\"mail-gateway\",pid=$$,fd=3))")" "no"
+printf 'x' >> "$G/root/public_html/plugins/mail_apps/provisioning/bin/mail-gateway-$(uname -m)"
+chk "a gateway that is not the shipped one, byte for byte, is not" "$(gp 993 "users:((\"mail-gateway\",pid=$GW_PID,fd=3))")" "no"
+pkill -P "$GW_PID" 2>/dev/null; kill "$GW_PID" 2>/dev/null
+chk "only the gateway's own enable link to its own unit is left out" \
+    "$(grep -c '"$f" == "$GATEWAY_LINK" && "$(readlink "$f")" == "$GATEWAY_UNIT"' "$SCRIPT")" "1"
 
 echo
 echo "never_do_check gate: $passed passed, $failed failed"

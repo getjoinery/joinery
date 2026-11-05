@@ -4,6 +4,9 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.5 - Allow mail apps leaves the rest of the gateway's footprint out too: its enable link to
+#                its own unit file (still hashed), and its ports 993, 465 and 10465 while the shipped
+#                gateway, byte for byte, holds them.
 # Version: 1.4 - the mail gateway's credentials drop-in is one fixed entry while it only hands the
 #                gateway certificate files (LoadCredential=): Allow and Stop mail apps rewrite it.
 # Version: 1.3 - the setuid walk skips each container engine's storage where its own configuration puts it
@@ -116,6 +119,22 @@ jail_is_shipped() {
     [[ -n "$have" ]] || return 1
     for shipped in "$SITE_ROOT"/maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-"$(uname -m)" \
                    /var/www/html/*/maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-"$(uname -m)"; do
+        [[ -f "$shipped" ]] || continue
+        [[ "$(sha256sum -- "$shipped" 2>/dev/null | cut -d' ' -f1)" == "$have" ]] && return 0
+    done
+    return 1
+}
+
+# The mail gateway (plugins/mail_apps): the program a site's Allow mail apps
+# starts, byte for byte the one this release ships.
+GATEWAY_BIN=/usr/local/lib/joinery/mail-gateway
+gateway_is_shipped() {
+    local have shipped
+    [[ "$1" == "$GATEWAY_BIN" ]] || return 1
+    have="$(sha256sum -- "$1" 2>/dev/null | cut -d' ' -f1)"
+    [[ -n "$have" ]] || return 1
+    for shipped in "$SITE_ROOT"/public_html/plugins/mail_apps/provisioning/bin/mail-gateway-"$(uname -m)" \
+                   /var/www/html/*/public_html/plugins/mail_apps/provisioning/bin/mail-gateway-"$(uname -m)"; do
         [[ -f "$shipped" ]] || continue
         [[ "$(sha256sum -- "$shipped" 2>/dev/null | cut -d' ' -f1)" == "$have" ]] && return 0
     done
@@ -288,9 +307,15 @@ credentials_only() {
     ! grep -qvE '^(\[Service\]|LoadCredential=[A-Za-z0-9._-]+:/[^[:space:]]+)?$' -- "$1"
 }
 : > "$T/startup"
+# Allow mail apps enables the gateway's own unit, whose file is in this list by
+# its hash: the link adds nothing that file does not say.
+GATEWAY_LINK=/etc/systemd/system/multi-user.target.wants/joinery-mail-gateway.service
+GATEWAY_UNIT=/etc/systemd/system/joinery-mail-gateway.service
 startup_entry() {
     local f="$1"
-    if [[ -L "$f" ]]; then
+    if [[ -L "$f" && "$f" == "$GATEWAY_LINK" && "$(readlink "$f")" == "$GATEWAY_UNIT" ]]; then
+        return 0
+    elif [[ -L "$f" ]]; then
         printf '%s -> %s\n' "$(safe "$f")" "$(safe "$(readlink "$f")")"
     elif [[ -f "$f" ]]; then
         is_packaged "$f" && return 0
@@ -319,12 +344,23 @@ port_holder() {  # the ss users:(...) field
     printf '%s' "$1" | grep -o '("[^"]*",pid=[0-9]*' \
         | sed 's/^("\([^"]*\)",pid=\([0-9]*\)$/\2 \1/' | sort -n | awk 'NR==1 { print $2 }'
 }
+port_holder_pid() {  # the pid port_holder names
+    printf '%s' "$1" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -n | head -n 1
+}
+# The mail gateway's ports, held by the shipped gateway (Allow mail apps).
+gateway_port() {  # port, ss users:(...) field
+    local pid
+    [[ "$1" == 993 || "$1" == 465 || "$1" == 10465 ]] || return 1
+    pid="$(port_holder_pid "$2")"
+    [[ -n "$pid" ]] && gateway_is_shipped "$(readlink "/proc/$pid/exe" 2>/dev/null)"
+}
 : > "$T/ports"
 if command -v ss >/dev/null 2>&1; then
     ss -Hltnp 2>/dev/null | while read -r _state _rq _sq local _peer proc; do
         port="${local##*:}"; addr="${local%:*}"; addr="${addr//[\[\]]/}"
         [[ "$port" =~ ^[0-9]+$ ]] || continue
         (( port >= eph_lo && port <= eph_hi )) && port=eph
+        gateway_port "$port" "$proc" && continue
         prog="$(port_holder "$proc")"
         printf 'tcp %s:%s %s\n' "$(safe "$addr")" "$port" "$(safe "${prog:-unknown}")"
     done | sort -u > "$T/ports"
