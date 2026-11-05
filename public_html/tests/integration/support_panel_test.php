@@ -188,6 +188,27 @@ check(($open['thread']['remote_id'] ?? 0) === 501 && ($open['thread']['desk'] ??
 	'an open thread names its id at the desk and the desk, for a bug report to quote');
 
 // ---------------------------------------------------------------------------
+section('An Assistant sees the threads another administrator opened');
+
+$assistant = make_user('spp_assistant', SupportChatClient::ASK_PERMISSION);
+$session->set_api_user((int)$assistant->key, null);
+try {
+	$desk->answers[] = array(200, array('api_version' => '1.0', 'data' => array('threads' => array(
+		array('thread_id' => 501, 'title' => 'x', 'state' => 'answered_by_person', 'unread' => true, 'updated' => gmdate('Y-m-d H:i:s'))))));
+	$list = SupportChatClient::threads((int)$assistant->key);
+	check(count($list['threads']) === 1 && $list['threads'][0]['unread'], 'the panel lists the site\'s thread and its unread mark');
+	$desk->answers[] = array(200, array('api_version' => '1.0', 'data' => array('threads' => array(), 'thread' => array('state' => 'answered_by_person'),
+		'messages' => array())));
+	$open = SupportChatClient::threads((int)$assistant->key, (int)$local->key);
+	check(($open['thread']['remote_id'] ?? 0) === 501 && SiteSupportThread::unreadCount() === $before,
+		'and opening it clears the mark');
+} catch (SystemAuthenticationError $e) {
+	check(false, 'an Assistant\'s Help panel lists and opens the site\'s threads', $e->getMessage());
+} finally {
+	$session->set_api_user((int)$admin->key, null);
+}
+
+// ---------------------------------------------------------------------------
 section('An account\'s threads from before this site had a row');
 
 $desk->answers[] = array(200, array('api_version' => '1.0', 'data' => array('threads' => array(

@@ -14,6 +14,11 @@
  * account opened before this site had a row for it (a reinstall) is adopted
  * with no token: the desk opens it by the account's key.
  *
+ * Read and written at the Help panel's own level (SupportChatClient::
+ * ASK_PERMISSION): listing or opening threads records the desk's state on
+ * every row, including rows another administrator opened.
+ *
+ * @version 1.2.0 - read and write at the Help panel's level, so an Assistant's panel can list the site's threads
  * @version 1.1.0
  */
 class SiteSupportThreadException extends SystemBaseException {}
@@ -22,6 +27,8 @@ class SiteSupportThread extends SystemBase {
 	public static $prefix = 'spt';
 	public static $tablename = 'spt_support_threads';
 	public static $access_class = 'personal';
+	public static $read_permission = SupportChatClient::ASK_PERMISSION;
+	public static $write_permission = SupportChatClient::ASK_PERMISSION;
 	public static $pkey_column = 'spt_support_thread_id';
 
 	/** Threads the panel lists and the unread check asks about. */
