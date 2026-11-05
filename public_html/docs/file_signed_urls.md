@@ -98,8 +98,9 @@ over bare signed URLs. For those, the code minting the signed URL — which hold
 the owner's open window and has already scope-checked the content — extends the
 minting-is-authorization principle to decryption: it resolves the file's
 content key through that window and stashes it server-side under a random
-token (`includes/FileServeGrant.php`; APCu, the same store and custody class as
-the unlock windows — never the database, never the URL). The token rides the
+token (`includes/FileServeGrant.php`; `RamStore`, beside the unlock windows and
+ended by the same PHP-FPM restart — never the database, never the URL). Where
+the store refuses the write, no grant is minted and the image serves 423. The token rides the
 URL as `grant=`.
 
 At serve time the `/uploads` route redeems the token **only after the

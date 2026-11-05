@@ -3,16 +3,17 @@
  * MessengerTyping — who is typing, right now, and nowhere else.
  *
  * "Alice is typing…" is worthless the moment it is stale, so it is never
- * written to the database. It lives in APCu for a few seconds under one key per
- * conversation, holding {user_id => last-typed-at}. The poll writes the caller's
- * own state as it asks, so typing needs no endpoint of its own, and the whole
- * thing evaporates on its own when a member stops typing, closes the tab, or the
- * process restarts. APCu is per-host, which is the right scope here: a Joinery
+ * written to the database. It lives in RamStore for a few seconds under one key
+ * per conversation, holding {user_id => last-typed-at}. The poll writes the
+ * caller's own state as it asks, so typing needs no endpoint of its own, and the
+ * whole thing evaporates on its own when a member stops typing or closes the
+ * tab. The store is per-host, which is the right scope here: a Joinery
  * deployment is one box.
  *
- * With APCu unavailable the indicator simply never appears — the feature
+ * With the store unavailable the indicator simply never appears — the feature
  * degrades to nothing rather than falling back to a table nobody wants.
  *
+ * @version 1.1.0 - typing state lives in RamStore, not APCu (strategy/object_free_window_store.md WP3)
  * @version 1.0.1 - typing state is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.0.0
  */
@@ -25,11 +26,6 @@ class MessengerTyping {
 	/** Cap on how many typists one key remembers — a group is capped anyway. */
 	const MAX_TYPISTS = 64;
 
-	protected static function available(): bool {
-		return function_exists('apcu_enabled') && apcu_enabled()
-			&& function_exists('apcu_fetch') && function_exists('apcu_store');
-	}
-
 	protected static function key($conversation_id): string {
 		return 'messenger:typing:' . (int)$conversation_id;
 	}
@@ -41,10 +37,6 @@ class MessengerTyping {
 	 *                        message should stop the indicator, not wait it out.
 	 */
 	public static function set($conversation_id, $user_id, bool $is_typing): void {
-		if (!self::available()) {
-			return;
-		}
-
 		$key   = self::key($conversation_id);
 		$state = self::read($key);
 		$now   = time();
@@ -59,10 +51,10 @@ class MessengerTyping {
 		}
 
 		if (!$state) {
-			apcu_delete($key);
+			RamStore::delete($key);
 			return;
 		}
-		apcu_store($key, $state, self::TTL_SECONDS * 2);
+		RamStore::set($key, $state, self::TTL_SECONDS * 2);
 	}
 
 	/**
@@ -71,10 +63,6 @@ class MessengerTyping {
 	 * @return int[] user ids
 	 */
 	public static function who($conversation_id, $exclude_user_id = null): array {
-		if (!self::available()) {
-			return array();
-		}
-
 		$state  = self::read(self::key($conversation_id));
 		$cutoff = time() - self::TTL_SECONDS;
 		$out    = array();
@@ -93,14 +81,21 @@ class MessengerTyping {
 
 	/** Forget everything about one conversation (it was deleted, or left). */
 	public static function clear($conversation_id): void {
-		if (self::available()) {
-			apcu_delete(self::key($conversation_id));
-		}
+		RamStore::delete(self::key($conversation_id));
 	}
 
 	protected static function read($key): array {
-		$ok    = false;
-		$state = ApcuStore::fetch($key, $ok);
-		return ($ok && is_array($state)) ? $state : array();
+		$state = RamStore::get($key, $ok);
+		if (!$ok || !is_array($state)) {
+			return array();
+		}
+		// JSON keeps the user ids as object keys; anything but id => time is dropped.
+		$out = array();
+		foreach ($state as $user_id => $at) {
+			if (is_int($at) && (int)$user_id > 0) {
+				$out[(int)$user_id] = $at;
+			}
+		}
+		return $out;
 	}
 }

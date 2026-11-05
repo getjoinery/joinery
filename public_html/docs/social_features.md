@@ -383,10 +383,11 @@ paused while the tab is hidden, and poked immediately after the member does
 something. Both intervals are plugin settings. The loop itself is the shared
 helper `assets/js/joinery-poll.js`.
 
-**Typing indicators never touch the database.** They live in APCu under
+**Typing indicators never touch the database.** They live in shared
+memory (`RamStore`, JSON files in `/dev/shm`) under
 `messenger:typing:{conversation_id}` with an ~8 s TTL (`MessengerTyping`), which
 is the honest storage for a fact that is worthless the moment it is stale. With
-APCu unavailable the indicator simply never appears.
+the store unavailable the indicator simply never appears.
 
 **`NOTIFY message_events`** is emitted at the end of `add_message()`, carrying
 `{conversation_id, message_id, sent_time}`. A NOTIFY with nobody listening costs

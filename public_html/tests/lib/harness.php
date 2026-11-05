@@ -592,6 +592,7 @@ function harness_ram_store() {
 		}
 	}
 	$dir = $prefix . $h['run_token'];
+	$h['ram_store_dir'] = $dir;
 	RamStore::useDirectory($dir);
 	if (empty($h['ram_store_deferred'])) {
 		$h['ram_store_deferred'] = true;
@@ -1713,6 +1714,16 @@ function harness_finish() {
 		echo "PASSED: {$h['passed']}   FAILED: {$h['failed']}"
 			. ($h['skipped'] ? "   SKIPPED: {$h['skipped']}" : '')
 			. "   ($total checks)\n";
+	}
+	// A shutdown function the test body registered (AdminPageAccess's menu
+	// flush, say) runs after this exit and may write the store again, making
+	// its directory anew. One registered now runs after all of those, so the
+	// run's store is gone when the process is.
+	if (!empty($h['ram_store_dir'])) {
+		$dir = $h['ram_store_dir'];
+		register_shutdown_function(function () use ($dir) {
+			harness_remove_ram_store($dir);
+		});
 	}
 	exit($h['failed'] > 0 ? 1 : 0);
 }

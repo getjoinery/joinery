@@ -10,7 +10,7 @@
  * A value the pool can write never chooses which file a request requires, or
  * who may open an admin page.
  *
- * The web user holds the database password and writes APCu, so code that ran
+ * The web user holds the database password and writes shared memory, so code that ran
  * once in a worker can plant a row or a cache entry that a later request acts
  * on, with no file in the tree changed and no process left behind
  * (specs/unseal_daemon.md § Channels that skip the foothold, C3). Each sink
@@ -25,10 +25,11 @@
  *  - a plugin name read from a plg_plugins row is a folder name before it
  *    becomes sync.php or data/*_class.php;
  *  - the level that opens an admin page is read from the page file, so a 0
- *    planted in APCu opens nothing (it may only redraw a menu).
+ *    planted in the menu cache opens nothing (it may only redraw a menu).
  *
  * Run: php tests/security/stored_path_sinks_test.php
  *
+ * @version 1.2 - the menu cache is a RamStore entry: the planted 0 goes there, in this process
  * @version 1.1 - plugin names from rows, every composerAutoLoad reader, the validator report (reviewer2 B1-B3)
  * @version 1.0
  */
@@ -139,28 +140,22 @@ if ($real) {
 	check($task->resolve_task_file() === $real[0], 'a real task class still resolves (' . basename($real[0]) . ')');
 }
 
-section('Admin pages: the opening level comes from the file, never APCu');
-// APCu does not outlive a CLI process, so one process plants a 0 under the
-// key the display cache uses for admin_settings, then asks both questions.
-$boot = 'require_once(' . var_export(PathHelper::getIncludePath('includes/PathHelper.php'), true) . ');';
-$script = $boot
-	. ' if (!function_exists("apcu_enabled") || !apcu_enabled()) { echo "no-apcu"; exit; }'
-	. ' $rel = "adm/admin_settings.php"; $path = PathHelper::getIncludePath($rel);'
-	. ' apcu_store("joinery_admin_page_level:" . md5($path . "|" . (int)filemtime($path)), 0, 60);'
-	. ' echo json_encode(array("menu" => AdminPageAccess::levelForMenuUrl("admin_settings"),'
-	. '   "gate" => AdminPageAccess::levelForPath("/admin/admin_settings"),'
-	. '   "file" => AdminPageAccess::levelForFile($rel), "header" => AdminPageAccess::headerLevel($rel)));';
-$out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 -r ' . escapeshellarg($script) . ' 2>/dev/null');
-$got = json_decode($out, true);
-if ($out === 'no-apcu') {
-	check(true, 'APCu is not loaded here: the planted-level check has nothing to plant into');
-} else {
-	check(is_array($got), 'the planted-level process ran', substr($out, 0, 200));
-	check(is_array($got) && $got['header'] >= 8 && $got['gate'] === $got['header'] && $got['file'] === $got['header'],
-		'a 0 planted in APCu does not open admin_settings: the gate reads the header (' . ($got['header'] ?? '?') . ')', $out);
-	check(is_array($got) && $got['menu'] === 0,
-		'the planted 0 reaches the menu, which only draws a link (the test planted where it meant to)', $out);
-}
+section('Admin pages: the opening level comes from the file, never the menu cache');
+// Plant a 0 for admin_settings in the menu cache's store entry (this run's own
+// store directory, never the site's), then ask both questions.
+$rel = 'adm/admin_settings.php';
+$path = PathHelper::getIncludePath($rel);
+AdminPageAccess::reset();
+$planted = RamStore::set(AdminPageAccess::MENU_CACHE_KEY, array(md5($path . '|' . (int)filemtime($path)) => 0), 60);
+check($planted, 'a 0 was planted in the menu cache');
+$header = AdminPageAccess::headerLevel($rel);
+$menu = AdminPageAccess::levelForMenuUrl('admin_settings');
+AdminPageAccess::reset();
+check($header >= 8 && AdminPageAccess::levelForPath('/admin/admin_settings') === $header && AdminPageAccess::levelForFile($rel) === $header,
+	'a planted 0 does not open admin_settings: the gate reads the header (' . $header . ')');
+check($menu === 0, 'the planted 0 reaches the menu, which only draws a link (the test planted where it meant to)', (string)$menu);
+RamStore::delete(AdminPageAccess::MENU_CACHE_KEY);
+AdminPageAccess::reset();
 
 @unlink($scratch . '/stored_path_canary.php');
 check(!is_file($marker), 'the planted file outside the tree never ran');

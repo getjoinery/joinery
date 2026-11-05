@@ -6,7 +6,7 @@
  * A signed /uploads URL (docs/file_signed_urls.md) authorizes the FETCH on its
  * own, which is what lets mail bodies render inside a sandbox="" iframe whose
  * opaque origin sends no cookies. But a SEALED file also needs DECRYPTING, and
- * the unlock window lives in APCu keyed to the browser session — a cookie-less
+ * the unlock window is keyed to the browser session — a cookie-less
  * request can never present it, so a sealed inline image served that way was a
  * structural 423. This class closes the gap the way the signed URL itself
  * works: minting is the authorization statement. Code that is already
@@ -14,10 +14,11 @@
  * file's content key server-side under a random token, and the serve path
  * redeems the token cookie-less.
  *
- * Custody: the key material lives in APCu (the same store and custody class as
- * the unlock windows themselves) or, where APCu is absent (CLI — tests), a
- * per-process array with identical semantics. It is never written to the
- * database and never appears in the URL — the token is a lookup handle. The
+ * Custody: the key material lives in RamStore under LIFETIME, beside the
+ * unlock windows themselves (the same custody class, ended by the same PHP-FPM
+ * restart), base64-encoded since the store holds JSON. It is never written to
+ * the database and never appears in the URL — the token is a lookup handle.
+ * Where the store refuses the write, no grant is minted and the URL serves 423. The
  * grant is scoped to ONE file + ONE size key, lives exactly as long as the
  * signed URL beside it, and is multi-use within that lifetime because a
  * browser may fetch an <img> several times.
@@ -30,6 +31,8 @@
  *    Client-custody content has no server-resolvable key and can never gain a
  *    grant.
  *
+ * @version 1.2 - grants live in RamStore (LIFETIME), not APCu; no per-process fallback: a store that
+ *                refuses mints nothing (strategy/object_free_window_store.md WP3)
  * @version 1.1 - grants are read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.0
  */
@@ -48,9 +51,6 @@ class FileServeGrant {
 	/** @var array|null The one grant this request redeemed (file_id, size_key, shape, key, expires). */
 	private static $active = null;
 
-	/** @var array<string,array> Fallback store where APCu is unavailable (CLI — tests). */
-	private static $mem = array();
-
 	/**
 	 * Stash $key for one file + size key and return the URL token, or null when
 	 * the grant cannot be stored. Callers mint ONLY from code that resolved
@@ -67,15 +67,14 @@ class FileServeGrant {
 			'file_id'  => $file_id,
 			'size_key' => $size_key,
 			'shape'    => $shape,
-			'key'      => $key,
-			// Expiry travels in the value too: the fallback store has no TTL of
-			// its own, and an APCu entry surviving past its TTL must still refuse.
+			'key'      => base64_encode($key),
+			// Expiry travels in the value too, so the check never rests on the
+			// store's own clock alone.
 			'expires'  => time() + $ttl_seconds,
 		);
-		if (function_exists('apcu_store') && apcu_store(self::storeKey($token), $value, $ttl_seconds)) {
-			return $token;
+		if (!RamStore::set(self::storeKey($token), $value, $ttl_seconds, RamStore::LIFETIME)) {
+			return null;
 		}
-		self::$mem[$token] = $value;
 		return $token;
 	}
 
@@ -92,19 +91,18 @@ class FileServeGrant {
 		if (!is_string($token) || !preg_match('/^[0-9a-f]{32}$/', $token)) {
 			return false;
 		}
-		$value = false;
-		if (function_exists('apcu_store')) {
-			$value = ApcuStore::fetch(self::storeKey($token));
-		}
-		if ($value === false) {
-			$value = self::$mem[$token] ?? false;
-		}
-		if (!is_array($value) || intval($value['expires'] ?? 0) < time()) {
+		$value = RamStore::get(self::storeKey($token), $ok, RamStore::LIFETIME);
+		if (!$ok || !is_array($value) || intval($value['expires'] ?? 0) < time()) {
 			return false;
 		}
-		if (intval($value['file_id']) !== $file_id || (string)$value['size_key'] !== $size_key) {
+		if (intval($value['file_id'] ?? 0) !== $file_id || (string)($value['size_key'] ?? '') !== $size_key) {
 			return false;
 		}
+		$key = base64_decode((string)($value['key'] ?? ''), true);
+		if ($key === false || $key === '') {
+			return false;
+		}
+		$value['key'] = $key;
 		self::$active = $value;
 		return true;
 	}

@@ -25,7 +25,7 @@ thread's level chip marks it: "Private+", with the add-on named on hover.
 | `views/profile/index.php` | The app, at `/profile/messenger` |
 | `logic/messenger_*_logic.php` | The `/api/v1` actions the app calls |
 | `includes/Messenger.php` | The shared middle: gates, settings, and the one description of a conversation and a message |
-| `includes/MessengerTyping.php` | Typing state, in APCu, never in the database |
+| `includes/MessengerTyping.php` | Typing state, in shared memory (`RamStore`), never in the database |
 | `includes/MessengerUploads.php` | Photos and files on their way in |
 | `includes/MessengerAttachmentGate.php` | Who may open an attachment |
 | `includes/MessengerFederation.php` | The sending end of cross-instance chat |

@@ -17,9 +17,11 @@
  *   that turns the check off (publish_theme) is not sent to sign in.
  * - MultiAdminMenu::visible_entries(): an entry shows when its page opens; a
  *   section when one of its entries does.
+ * - The menu's level cache is one RamStore entry, written once a request.
  *
  * Run: php tests/run.php --filter=admin_page_access
  *
+ * @version 1.2 - the menu cache: one RamStore entry, written at the end of a request, non-levels ignored
  * @version 1.1 - a kept higher check is the page's level; an inactive plugin's page maps to nothing
  * @version 1.0
  */
@@ -57,6 +59,26 @@ check(AdminPageAccess::levelForMenuUrl('admin_users') === 6, 'admin_users (under
 check(AdminPageAccess::levelForMenuUrl('/admin/admin_settings') === 8, 'a full admin path');
 check(AdminPageAccess::levelForMenuUrl('/profile/account_edit') === 0, 'a member page is 0');
 check(AdminPageAccess::levelForMenuUrl('admin_no_such_page_here') === 10, 'a missing admin page is 10: no one can open it');
+section('the menu cache is one store entry, written once a request');
+AdminPageAccess::reset();
+RamStore::delete(AdminPageAccess::MENU_CACHE_KEY);
+AdminPageAccess::levelForMenuUrl('admin_users');
+AdminPageAccess::levelForMenuUrl('admin_settings');
+check(!RamStore::exists(AdminPageAccess::MENU_CACHE_KEY), 'nothing is written while the request runs');
+AdminPageAccess::flushMenuCache();
+$map = RamStore::get(AdminPageAccess::MENU_CACHE_KEY, $ok);
+check(($ok && is_array($map) && count($map) === 2 && in_array(6, $map, true) && in_array(8, $map, true)),
+	'one entry holds both levels', json_encode($map));
+$users = PathHelper::getIncludePath('adm/admin_users.php');
+$users_key = md5($users . '|' . (int)filemtime($users));
+RamStore::set(AdminPageAccess::MENU_CACHE_KEY, array($users_key => 'six'), 60);
+AdminPageAccess::reset();
+check(AdminPageAccess::levelForMenuUrl('admin_users') === 6, 'a stored value that is not a level is ignored: the header answers');
+AdminPageAccess::flushMenuCache();
+check((RamStore::get(AdminPageAccess::MENU_CACHE_KEY)[$users_key] ?? null) === 6, 'and the level the header gave replaces it');
+AdminPageAccess::reset();
+RamStore::delete(AdminPageAccess::MENU_CACHE_KEY);
+
 $row = function ($id, $page, $parent = null) {
 	return (object)array('amu_admin_menu_id' => $id, 'amu_defaultpage' => $page, 'amu_parent_menu_id' => $parent);
 };

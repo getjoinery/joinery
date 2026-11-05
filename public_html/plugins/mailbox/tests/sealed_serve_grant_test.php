@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_serve_grant
  *
+ * @version 1.3 - grants live in RamStore: base64 key, LIFETIME, a refusing store mints nothing
  * @version 1.2 - stored bytes read through File::read_bytes(): a File can share a blob
  *   already moved to cloud storage, which has no local path
  * @version 1.1 - the ingest-adopted message is registered for teardown
@@ -165,6 +166,24 @@ FileServeGrant::deactivate();
 $short = FileServeGrant::mint(103, 'original', FileServeGrant::SHAPE_FILE_KEY, 'k-103', 1);
 sleep(2);
 check(!FileServeGrant::redeemAndActivate(103, 'original', $short), 'an expired token refuses');
+
+section('A grant is held as JSON in the window store');
+$raw = random_bytes(32);
+$tok = FileServeGrant::mint(104, 'original', FileServeGrant::SHAPE_MESSAGE_DEK, $raw, 60);
+$stored = RamStore::get('fsg.' . $tok, $ok, RamStore::LIFETIME);
+check($ok && is_array($stored) && $stored['key'] === base64_encode($raw), 'a binary key is stored base64-encoded, beside the windows');
+check(RamStore::get('fsg.' . $tok) === null, 'and never as a plain entry, which would outlive a PHP-FPM restart');
+check(FileServeGrant::redeemAndActivate(104, 'original', $tok)
+	&& FileServeGrant::activeKey(104, FileServeGrant::SHAPE_MESSAGE_DEK) === $raw, 'it redeems to the exact bytes');
+FileServeGrant::deactivate();
+RamStore::set('fsg.' . $tok, array_merge($stored, array('key' => '%%%')), 60, RamStore::LIFETIME);
+check(!FileServeGrant::redeemAndActivate(104, 'original', $tok), 'a stored key that is not base64 refuses');
+$store_dir = RamStore::directory();
+RamStore::useDirectory(__DIR__ . '/no-store-here'); // on disk, not tmpfs: refused
+$none = FileServeGrant::mint(105, 'original', FileServeGrant::SHAPE_FILE_KEY, 'k-105', 60);
+RamStore::useDirectory($store_dir);
+check($none === null, 'a store that refuses mints no grant, so the URL serves 423 as before');
+check(!is_dir(__DIR__ . '/no-store-here'), 'and no directory was made on disk');
 
 // ---- Sealed serve through a grant, with no window --------------------------
 section('A grant decrypts what a closed window cannot');

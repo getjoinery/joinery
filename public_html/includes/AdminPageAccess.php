@@ -21,6 +21,8 @@
  * and a plugin's dynamic route inside /admin/ names its view file. An
  * inactive plugin's pages are not served, so they map to no file.
  *
+ * @version 1.4 - the menu cache is one RamStore entry holding every page's level, read once a request
+ *                and written once at its end (strategy/object_free_window_store.md WP3)
  * @version 1.3 - the menu cache is read through ApcuStore::fetch() (unseal_daemon.md C4)
  * @version 1.2 - the level that opens a page is read from its file, never APCu (unseal_daemon.md C3)
  * @version 1.1
@@ -32,8 +34,19 @@ final class AdminPageAccess {
 
 	/** @var array file => level, for this request */
 	private static $levels = array();
-	/** Levels for drawing menus, possibly from APCu; never read by levelForFile(). */
+	/** Levels for drawing menus, possibly from the store; never read by levelForFile(). */
 	private static $display_levels = array();
+
+	/** The menu cache's one store entry: {md5(path|mtime) => level}. */
+	const MENU_CACHE_KEY = 'admin_page_levels';
+	const MENU_CACHE_TTL = 3600;
+	/** Past this many entries the cache starts over: old mtimes are never asked again. */
+	const MENU_CACHE_MAX = 4000;
+
+	/** @var array|null The stored map, read at most once a request. */
+	private static $stored = null;
+	/** @var array Levels this request worked out, written at the end of it. */
+	private static $pending = array();
 
 	/** Whether a request path is in an admin URL family. */
 	public static function isAdminPath(string $path): bool {
@@ -81,8 +94,8 @@ final class AdminPageAccess {
 	/**
 	 * The level a page file needs: its header's (undeclared or malformed is 10),
 	 * read from the file itself and remembered for the request. This is the
-	 * answer that lets someone in, so it never comes from APCu: the pool writes
-	 * APCu, and a stored 0 would open the page to anyone (unseal_daemon.md C3).
+	 * answer that lets someone in, so it never comes from shared memory: the
+	 * pool writes it, and a stored 0 would open the page to anyone (unseal_daemon.md C3).
 	 */
 	public static function levelForFile(string $rel): int {
 		if (isset(self::$levels[$rel])) {
@@ -92,9 +105,9 @@ final class AdminPageAccess {
 	}
 
 	/**
-	 * The same level for drawing a menu, cached by the file's mtime in APCu
-	 * where it is there. A wrong cached value shows or hides a link and nothing
-	 * else; opening the page asks levelForFile().
+	 * The same level for drawing a menu, cached by the file's mtime in the
+	 * store. A wrong cached value shows or hides a link and nothing else;
+	 * opening the page asks levelForFile().
 	 */
 	private static function displayLevelForFile(string $rel): int {
 		if (isset(self::$levels[$rel])) {
@@ -104,15 +117,46 @@ final class AdminPageAccess {
 			return self::$display_levels[$rel];
 		}
 		$path = PathHelper::getIncludePath($rel);
-		$key = 'joinery_admin_page_level:' . md5($path . '|' . (int)@filemtime($path));
-		$apcu = function_exists('apcu_fetch') && (PHP_SAPI !== 'cli' || ini_get('apc.enable_cli'));
-		if ($apcu) {
-			$hit = ApcuStore::fetch($key, $ok);
-			if ($ok && is_int($hit)) return self::$display_levels[$rel] = $hit;
+		$key = md5($path . '|' . (int)@filemtime($path));
+		if (self::$stored === null) {
+			self::$stored = self::readMenuCache();
+		}
+		if (isset(self::$stored[$key])) {
+			return self::$display_levels[$rel] = self::$stored[$key];
 		}
 		$level = self::headerLevel($rel);
-		if ($apcu) apcu_store($key, $level, 3600);
+		if (!self::$pending) {
+			register_shutdown_function(array(__CLASS__, 'flushMenuCache'));
+		}
+		self::$pending[$key] = $level;
 		return self::$display_levels[$rel] = $level;
+	}
+
+	/** The stored map, keeping only entries that are a level. */
+	private static function readMenuCache(): array {
+		$map = RamStore::get(self::MENU_CACHE_KEY, $ok);
+		if (!$ok || !is_array($map)) {
+			return array();
+		}
+		return array_filter($map, 'is_int');
+	}
+
+	/**
+	 * Write this request's new levels into the stored map, merged with what
+	 * other requests wrote meanwhile. Two requests racing lose each other's
+	 * additions, which only costs a header read next time.
+	 */
+	public static function flushMenuCache(): void {
+		if (!self::$pending) {
+			return;
+		}
+		$map = self::readMenuCache();
+		if (count($map) + count(self::$pending) > self::MENU_CACHE_MAX) {
+			$map = array();
+		}
+		$map = self::$pending + $map;
+		self::$pending = array();
+		RamStore::set(self::MENU_CACHE_KEY, $map, self::MENU_CACHE_TTL);
 	}
 
 	/** The level a page file's header alone declares; undeclared or malformed is 10. */
@@ -162,9 +206,11 @@ final class AdminPageAccess {
 		return $file === null ? self::UNDECLARED_LEVEL : self::displayLevelForFile($file);
 	}
 
-	/** Forget the per-request cache (tests). */
+	/** Forget the per-request cache (tests). Levels not yet written are dropped. */
 	public static function reset(): void {
 		self::$levels = array();
 		self::$display_levels = array();
+		self::$stored = null;
+		self::$pending = array();
 	}
 }
