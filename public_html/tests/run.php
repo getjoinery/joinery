@@ -271,6 +271,12 @@ function harness_unmet_needs(array $needs) {
 					// failing it, and says so.
 					$cache[$need] = DocumentText::jailAvailable();
 					break;
+				case 'unseal-daemon':
+					// Installed by root (install_unseal_daemon.sh), which leaves
+					// the install record; a box without it skips the daemon's
+					// gate rather than failing it.
+					$cache[$need] = UnsealDaemon::installRecord() !== null;
+					break;
 				case 'test-db':
 					// The test-database copy is provisioned per install (see
 					// /admin/admin_test_database), so a checkout without one must

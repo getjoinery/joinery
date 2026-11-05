@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.10 - unseal_daemon joins the core notices (specs/unseal_daemon.md WP3)
  * @version 1.9 - outbound_transfer joins the core notices (specs/node_outbound_and_transfer.md WP1)
  * @version 1.8 - backup_objects joins the core notices (specs/implemented/backup_offloaded_files.md § Admin surfaces, offloaded files waiting for a backup)
  * @version 1.7 - agent_log_access joins the core notices (specs/agent_log_access.md §4.1, the one-time notice on an already-connected node)
@@ -50,6 +51,10 @@ class AdminNotices {
 			// A node parsing strangers' bytes as the web user says so to the
 			// one admin who can run the installer. Silent once it is installed.
 			'parser_jail'    => array('ParserJailNotice', 'render'),
+			// A node whose unseal daemon is missing, not answering, on its
+			// previous build or held says which, to the admin who can act.
+			// Silent while it answers on the current build.
+			'unseal_daemon'  => array('UnsealDaemonNotice', 'render'),
 			// A box whose root timer stopped following its upgrades says so to
 			// the one admin who can reinstall it. Silent while it runs.
 			'host_converger' => array('HostConvergerNotice', 'render'),

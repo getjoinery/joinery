@@ -29,6 +29,7 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.10 - mgn_agent_unseal_daemon moves with the machine, beside the agent's other reports
  * @version 1.9 - the agent's X-Wing key and its signature move with the machine, beside its agent key
  * @version 1.8 - mgn_agent_root_access moves with the machine, beside mgn_agent_log_access
  * @version 1.7 - at a take-over the old machine's row keeps the release both machines run, so Permanently Delete
@@ -59,7 +60,7 @@ class SiteCopySwap {
 		'mgn_last_host_report', 'mgn_last_host_report_time',
 		'mgn_agent_public_key', 'mgn_agent_kem_public_key', 'mgn_agent_kem_signature', 'mgn_agent_paired_time', 'mgn_agent_quiet_time', 'mgn_agent_last_poll',
 		'mgn_agent_version', 'mgn_agent_primitives', 'mgn_agent_recipes', 'mgn_agent_bundle_version',
-		'mgn_agent_log_access', 'mgn_agent_root_access', 'mgn_agent_server_manager', 'mgn_agent_update_state', 'mgn_agent_update_offered', 'mgn_agent_bundle_state',
+		'mgn_agent_log_access', 'mgn_agent_root_access', 'mgn_agent_server_manager', 'mgn_agent_update_state', 'mgn_agent_update_offered', 'mgn_agent_bundle_state', 'mgn_agent_unseal_daemon',
 		'mgn_script_trust', 'mgn_script_trust_since', 'mgn_script_trust_reason', 'mgn_script_trust_job_type',
 	);
 

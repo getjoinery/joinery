@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.51 - install_unseal_daemon.sh joins CORE_INSTALLERS, after the parser jail's: every site gets its
+#                 unseal daemon, supervised, at every root moment (specs/unseal_daemon.md WP3).
 # Version: 2.50 - The agent runs wherever it is installed: the tick's hold no longer reads an
 #                on/off marker, and the change hash no longer reads the agent_enabled setting.
 # Version: 2.49 - A run that changed /etc/cron.d touches the folder in a later second before
@@ -312,7 +314,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
 # This list is also the whole of what --only may name.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_sandbox_host.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_unseal_daemon.sh install_sandbox_host.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
 # subset of CORE_INSTALLERS by construction (each is also a site's), and the

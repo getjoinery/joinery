@@ -100,6 +100,11 @@ chk "mode 644, no secret in it" "$(stat -c %a "$SPECS/mysite/run_spec")" "644"
 A="$(args_of mysite)"
 chk "name and hostname" "$(echo "$A" | grep -c -- '--name mysite --hostname mysite ')" "1"
 chk "memory, with swap pinned to it" "$(echo "$A" | grep -c -- '--memory=256m --memory-swap=256m ')" "1"
+chk "with a memory budget, memory locking is unbounded (the unseal daemon locks every page)" \
+    "$(echo "$A" | grep -c -- '--memory-swap=256m --ulimit memlock=-1:-1 ')" "1"
+run_spec_render nobudget 127.0.0.1 8088 9088 "" 1.0 512 | run_spec_write nobudget
+chk "with no memory budget, memory locking keeps its bounded default" \
+    "$(args_of nobudget | grep -c -- 'memlock')" "0"
 chk "cpus" "$(echo "$A" | grep -c -- '--cpus=1.0 ')" "1"
 chk "pids limit" "$(echo "$A" | grep -c -- '--pids-limit=512 ')" "1"
 chk "web port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:8087:80 ')" "1"

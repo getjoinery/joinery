@@ -530,6 +530,21 @@ foreach (array('yes', '1', 'OFF', 'on;off') as $v) {
 check(in_array('mgn_agent_root_access', SiteCopySwap::MACHINE_COLUMNS, true),
 	'the owner\'s root access answer moves with the machine at a switch-over');
 
+// The site's unseal daemon in one word (specs/unseal_daemon.md WP3): a closed
+// set, the same one the incident source reads.
+foreach (IncidentSourceUnsealDaemon::STATES as $v) {
+	$with = $claim; $with['unseal_daemon'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null,
+		"A claim reporting unseal_daemon '$v' is accepted", (string)AgentChannelEndpoint::validation_error($with, $claim_spec));
+}
+foreach (array('', 'Running', 'running;down', 'crashed') as $v) {
+	$with = $claim; $with['unseal_daemon'] = $v;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
+		"unseal_daemon '$v' is outside the closed set and refused");
+}
+check(in_array('mgn_agent_unseal_daemon', SiteCopySwap::MACHINE_COLUMNS, true),
+	'the unseal daemon\'s state moves with the machine at a switch-over');
+
 // Where the agent's own self-update stands rides the claim as a closed set of
 // verdicts and a version (release_transparency O7: a refusal is an incident).
 foreach (array(array('unlogged', '1.66.0'), array('verify_failed', ''), array('none', ''), array('current', '1.65.0')) as $v) {

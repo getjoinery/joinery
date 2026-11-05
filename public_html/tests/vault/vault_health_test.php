@@ -51,8 +51,8 @@ check(VaultHealth::parseFpmOpcache([]) === false, 'no lines, nothing claimed');
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 11 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
-	'runAll reports the eleven host facts, and the data root\'s break-glass copy where it is encrypted');
+check(count($checks) === 12 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
+	'runAll reports the twelve host facts, and the data root\'s break-glass copy where it is encrypted');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -152,6 +152,38 @@ check(strpos($r['reason'], DocumentText::JAIL_LAUNCHER) !== false, 'and the path
 $live = VaultHealth::checkParserJail();
 check($live['state'] === (DocumentText::jailAvailable() ? 'verified' : 'unmet'),
 	'the live check agrees with DocumentText about this box', $live['state']);
+
+// ---------------------------------------------------------------------------
+section('Unseal daemon: installed, answering, current, not held, locked');
+
+$ud = function (array $over) {
+	return array_merge(array('installed' => true, 'socket' => '/run/joinery-unseal/x/unseal.sock', 'binary' => 'current',
+		'held' => false, 'crashes_hour' => 0, 'running' => true, 'asked' => true, 'answering' => true, 'memory_locked' => true, 'daemon' => '1.1.0',
+		'error' => null), $over);
+};
+$r = VaultHealth::checkUnsealDaemon($ud(array()));
+check($r['state'] === 'verified' && strpos($r['reason'], '1.1.0') !== false, 'an answering daemon on its current build is verified', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('crashes_hour' => 2)));
+check($r['state'] === 'verified' && strpos($r['reason'], '2 crashes') !== false, 'recent crashes are named on a verified row');
+$r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'answering' => null)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'install_unseal_daemon.sh') !== false, 'not installed: unmet, naming the installer', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'refused' => 'memlock', 'answering' => null)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'memlock=-1:-1') !== false && strpos($r['reason'], 'memory budget') !== false
+	&& strpos($r['reason'], 'host converger') === false,
+	'refused in a container that cannot lock memory: unmet, naming the run option, never promising the converger', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('answering' => false, 'error' => 'connect')));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'did not answer') !== false, 'not answering: unmet');
+$r = VaultHealth::checkUnsealDaemon($ud(array('held' => true)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'security case') !== false, 'held: unmet, as a security case');
+$r = VaultHealth::checkUnsealDaemon($ud(array('binary' => 'previous')));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'previous build') !== false, 'on the previous build: unmet');
+$r = VaultHealth::checkUnsealDaemon($ud(array('memory_locked' => false)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'locked memory') !== false, 'unlocked memory: unmet');
+$r = VaultHealth::checkUnsealDaemon($ud(array('asked' => false, 'answering' => null)));
+check($r['state'] === 'unknown', 'running, but asked from a shell the daemon does not serve: unknown, never a false pass');
+$r = VaultHealth::checkUnsealDaemon($ud(array('asked' => false, 'answering' => null, 'running' => false)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'not running') !== false, 'installed and not running: unmet');
+check(in_array('unseal_daemon', array_column(VaultHealth::runAll(), 'key'), true), 'and runAll() carries the row');
 
 // ---------------------------------------------------------------------------
 section('Host converger: installed boxes must have run within a day');

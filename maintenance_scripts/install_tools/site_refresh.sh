@@ -4,6 +4,8 @@
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
 # D9, B7), on a site container engine host and on a Docker host alike.
 #
+# Version: 1.4 - a site with a memory budget whose container lacks unbounded memory locking is due
+#                (the run spec's --ulimit memlock=-1:-1, specs/unseal_daemon.md Q1)
 # Version: 1.3 - Docker hosts too (fleet_security_patching.md WP4, B10): host housekeeping installs the
 #                timer wherever Docker runs sites, and a site Docker made before run specs is counted
 #                and replaced (recreate_site.sh 1.5 records its run spec first); a Docker host with no
@@ -340,8 +342,9 @@ host_sites() {
 # Due: on an image that does not carry the current base's id, or, on the site
 # engine, made under another system call filter than the host's (its
 # joinery.seccomp label, run_spec_seccomp_hash; none on a container made before
-# the label). Quiet, held stopped and held sites are never due. DUE_WHY says
-# which.
+# the label), or with a memory budget and no unbounded memory locking (a
+# container made before run_spec_args gave it, or given its budget live).
+# Quiet, held stopped and held sites are never due. DUE_WHY says which.
 site_due() {
     local site="$1" img label want
     DUE_WHY=""
@@ -351,6 +354,14 @@ site_due() {
     img="$(site_engine inspect -f '{{.Image}}' "$site" 2>/dev/null)" || return 1
     label="$(site_engine image inspect -f '{{index .Config.Labels "joinery.base_id"}}' "$img" 2>/dev/null)"
     if [ "$label" != "$BASE_ID_FULL" ]; then DUE_WHY="an older base"; return 0; fi
+    # Docker names it memlock with -1; Podman RLIMIT_MEMLOCK with the largest
+    # unsigned value.
+    if [ -n "$(run_spec_get "$site" memory 2>/dev/null)" ]; then
+        label="$(site_engine inspect -f '{{range .HostConfig.Ulimits}}{{.Name}}={{.Hard}} {{end}}' "$site" 2>/dev/null)" || return 1
+        if ! printf '%s\n' $label | tr 'A-Z' 'a-z' | grep -qxE '(rlimit_)?memlock=(-1|18446744073709551615)'; then
+            DUE_WHY="no unbounded memory locking"; return 0
+        fi
+    fi
     site_engine_is_podman || return 1
     want="$(run_spec_seccomp_hash)" || return 1
     label="$(site_engine inspect -f '{{index .Config.Labels "joinery.seccomp"}}' "$site" 2>/dev/null)"

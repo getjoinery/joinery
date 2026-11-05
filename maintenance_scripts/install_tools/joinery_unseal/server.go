@@ -85,11 +85,12 @@ func (o *ownedSocket) release() {
 	o.lock.Close()
 }
 
-// listen makes the socket at path, mode 0660 from birth (umask), after
+// listen makes the socket at path, no wider than 0660 from birth (umask) and
+// then the mode asked for, after
 // removing a stale socket left by a crash. Anything at that path that is not
 // a socket is refused rather than removed, and so is a socket another daemon
 // still answers on.
-func listen(path string) (*net.UnixListener, *ownedSocket, error) {
+func listen(path string, mode os.FileMode) (*net.UnixListener, *ownedSocket, error) {
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, nil, err
@@ -127,7 +128,7 @@ func listen(path string) (*net.UnixListener, *ownedSocket, error) {
 		return fail(fmt.Errorf("cannot stat %s", path))
 	}
 	own := &ownedSocket{path: path, ino: ino, lock: lock}
-	if err := os.Chmod(path, 0o660); err != nil {
+	if err := os.Chmod(path, mode); err != nil {
 		l.Close()
 		own.release()
 		return nil, nil, err

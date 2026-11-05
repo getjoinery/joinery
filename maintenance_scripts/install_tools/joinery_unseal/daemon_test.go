@@ -400,7 +400,7 @@ func TestSocket(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "u.sock")
 	d, _ := newTestDaemon()
-	l, own, err := listen(sock)
+	l, own, err := listen(sock, 0o660)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestSocket(t *testing.T) {
 
 	// Another uid is refused: the server serves only cfg.allowUID.
 	sock2 := filepath.Join(dir, "other.sock")
-	l2, own2, err := listen(sock2)
+	l2, own2, err := listen(sock2, 0o660)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,11 +546,11 @@ func TestOnlyASuccessfulOpenExtends(t *testing.T) {
 func TestOneDaemonPerSocket(t *testing.T) {
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "u.sock")
-	l, own, err := listen(sock)
+	l, own, err := listen(sock, 0o660)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := listen(sock); err == nil {
+	if _, _, err := listen(sock, 0o660); err == nil {
 		t.Fatal("a second daemon took a socket the first holds")
 	}
 	// The first exits: its socket goes, and the next one starts cleanly.
@@ -559,7 +559,7 @@ func TestOneDaemonPerSocket(t *testing.T) {
 	if _, err := os.Lstat(sock); !os.IsNotExist(err) {
 		t.Fatal("the socket outlived its daemon")
 	}
-	l2, own2, err := listen(sock)
+	l2, own2, err := listen(sock, 0o660)
 	if err != nil {
 		t.Fatalf("a daemon could not start after the first exited: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestOneDaemonPerSocket(t *testing.T) {
 	if _, err := os.Lstat(sock); err != nil {
 		t.Fatal("expected the stale socket to remain after a crash")
 	}
-	l3, own3, err := listen(sock)
+	l3, own3, err := listen(sock, 0o660)
 	if err != nil {
 		t.Fatalf("a stale socket blocked the next start: %v", err)
 	}

@@ -495,6 +495,28 @@ check(strpos($refused->cleared_text($node), 'v1.66.0') !== false, 'The clear nam
 $set(array('mgn_agent_update_state' => null, 'mgn_agent_update_offered' => null, 'mgn_agent_version' => null, 'mgn_agent_public_key' => null));
 
 // ---------------------------------------------------------------------------
+section('Unseal daemon');
+
+$ud = new IncidentSourceUnsealDaemon();
+$set(array('mgn_agent_unseal_daemon' => 'held', 'mgn_agent_public_key' => null));
+check($ud->evaluate($node) === null, 'An unpaired node: nothing, whatever it last said');
+$set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
+$v = $ud->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'held') !== false
+	&& strpos($v['detail']['What to do'], 'lift --all') !== false, 'Held: critical, and the lift is root\'s', json_encode($v));
+foreach (array('down', 'previous', 'unlocked') as $state) {
+	$set(array('mgn_agent_unseal_daemon' => $state));
+	$v = $ud->evaluate($node);
+	check(($v['severity'] ?? '') === 'warning' && ($v['detail']['State'] ?? '') === $state, "'{$state}': a warning");
+}
+foreach (array('', 'absent', 'running', 'restarting') as $state) {
+	$set(array('mgn_agent_unseal_daemon' => $state));
+	check($ud->evaluate($node) === null, "'{$state}': nothing");
+}
+check(strpos($ud->cleared_text($node), 'restarting') !== false, 'The clear says what the node reports now');
+$set(array('mgn_agent_unseal_daemon' => null, 'mgn_agent_public_key' => null));
+
+// ---------------------------------------------------------------------------
 section('Support bundle refused');
 
 $bundle = new IncidentSourceAgentBundleRefused();

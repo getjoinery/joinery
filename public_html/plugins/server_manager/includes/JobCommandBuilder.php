@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.158 - build_unseal_hold (agent 1.109.0): the sentinel's drop and hold, no parameters; install_unseal_daemon.sh
+ *                  on RUN_INSTALLER_CORE
  * @version 1.157 - build_never_do_check (agent 1.106.0): the never-do list, no parameters
  * @version 1.156 - build_v1_census removed with the v1 code (v1_key_retirement WP2)
  * @version 1.155 - build_v1_census (agent 1.103.0): what a site still holds on an old X25519 key, no parameters; TEMPORARY (v1_key_retirement)
@@ -2684,6 +2686,7 @@ class JobCommandBuilder {
 	const RUN_INSTALLER_CORE = [
 		'install_agent.sh'          => 'Agent',
 		'install_parser_jail.sh'    => 'Parser jail',
+		'install_unseal_daemon.sh'  => 'Unseal daemon',
 		'install_host_converger.sh' => 'Host timer',
 		'render_vhost.sh'           => 'Site vhost',
 		'host_housekeeping.sh'      => 'Host housekeeping (fail2ban, Apache, PHP, journald)',
@@ -2921,6 +2924,25 @@ class JobCommandBuilder {
 				. implode(', ', array_keys(self::UNIT_JOURNAL_UNITS)) . '.');
 		}
 		return ['primitive' => 'reset_failed_unit', 'params' => ['unit' => $unit]];
+	}
+
+	/**
+	 * Drop every open vault window on the node and hold its unseal daemon, so
+	 * no Private vault opens there until root lifts the hold
+	 * (specs/unseal_daemon.md § The sentinel's hold). No parameters, and no
+	 * lift: lifting is root's alone, on the node.
+	 */
+	public static function build_unseal_hold($node) {
+		if (!self::has_primitive($node, 'unseal_hold')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot hold its unseal daemon. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['unseal_hold']));
+		}
+		return self::build_unseal_hold_primitive($node);
+	}
+
+	public static function build_unseal_hold_primitive($node) {
+		return ['primitive' => 'unseal_hold', 'params' => []];
 	}
 
 	/**

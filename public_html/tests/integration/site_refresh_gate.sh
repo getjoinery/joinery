@@ -89,6 +89,7 @@ case "$1" in
       # As a real engine call may: stdin read, where a test asks for it.
       *Config.Env*) [ -f "$S/inspect_reads_stdin" ] && timeout 1 cat > /dev/null 2>&1; cat "$d/env" ;;
       *joinery.seccomp*) cat "$d/seccomp" 2>/dev/null ;;
+      *HostConfig.Ulimits*) cat "$d/ulimits" 2>/dev/null ;;
       *.Image*) cat "$d/image" ;;
       *) echo "" ;;
     esac ;;
@@ -158,11 +159,12 @@ case "$1" in
       exit 0
     fi
     [ -f "$S/fail_all" ] && [ -f "$S/arm_run_fail" ] && exit 125
-    name=""; envf=""; prev=""; img=""; filter=""
-    for a in "$@"; do case "$prev" in --name) name="$a" ;; --env-file) envf="$a" ;; --label) case "$a" in joinery.seccomp=*) filter="${a#*=}" ;; esac ;; esac; prev="$a"; img="$a"; done
+    name=""; envf=""; prev=""; img=""; filter=""; ulim=""
+    for a in "$@"; do case "$prev" in --name) name="$a" ;; --env-file) envf="$a" ;; --label) case "$a" in joinery.seccomp=*) filter="${a#*=}" ;; esac ;; --ulimit) ulim="${a%%=*}=${a##*:}" ;; esac; prev="$a"; img="$a"; done
     id="$(resolve "$img")" || exit 125
     d="$S/containers/$name"; mkdir -p "$d"; echo "$id" > "$d/image"; echo running > "$d/state"
     rm -f "$d/seccomp"; [ -n "$filter" ] && echo "$filter" > "$d/seccomp"
+    rm -f "$d/ulimits"; [ -n "$ulim" ] && echo "$ulim " > "$d/ulimits"
     cp "$envf" "$d/env"; stat -c %a "$envf" > "$S/envmode"
     echo "$name" >> "$S/runs" ;;
   healthcheck) id="$(cat "$S/containers/$3/image" 2>/dev/null)" || exit 1; [ -f "$S/fail_all" ] && exit 1; [ -f "$S/images/$id/fail" ] && exit 1; exit 0 ;;
@@ -217,6 +219,7 @@ site() {  # NAME IDBLOCK PORT IMAGE-ID
     mkdir -p "$STUB/volumes/${n}_postgres/18/main"; echo 18 > "$STUB/volumes/${n}_postgres/18/main/PG_VERSION"
     echo "$4" > "$STUB/containers/$n/image"; echo running > "$STUB/containers/$n/state"
     sha256sum "$R/etc/containers/joinery-site-seccomp.json" | cut -d' ' -f1 > "$STUB/containers/$n/seccomp"
+    echo "memlock=-1 " > "$STUB/containers/$n/ulimits"
     printf 'SITENAME=%s\nDOMAIN_NAME=%s.example.com\nPOSTGRES_PASSWORD=pw-%s\n' "$n" "$n" "$n" > "$STUB/containers/$n/env"
     mkdir -p "$STUB/fs/var/www/html/$n"
     echo "manifest $n" > "$STUB/fs/var/www/html/$n/RELEASE_MANIFEST"; echo "sig $n" > "$STUB/fs/var/www/html/$n/RELEASE_MANIFEST.sig"
@@ -496,6 +499,22 @@ chk "a container made before the label: due" "$(srun check)|$(st sites_due)" "0|
 chk "the run arguments carry the filter's hash as joinery.seccomp" \
     "$(bash -c ". '$TOOLS/_site_run_spec.sh'; run_spec_args sa" 2>/dev/null | tr '\0' '\n' | grep -A1 -x -- '--label' | tail -n1)" "joinery.seccomp=$FILTER_NEW"
 [ "$FILTER_OLD" != "$FILTER_NEW" ] || chk "the two filters differ" "same" "different"
+
+echo "=== site_refresh: a budgeted site without unbounded memory locking is due (unseal_daemon Q1) ==="
+reset
+: > "$STUB/apt"; echo "$BASE" > "$STUB/images/$OLD_B/label"
+chk "both sites lock memory unbounded: nothing due" "$(srun check)|$(st sites_due)" "0|0"
+rm -f "$STUB/containers/sa/ulimits"
+echo "nofile=1024 " > "$STUB/containers/sb/ulimits"
+chk "a container made before the option, and one with other limits only: both due" "$(srun check)|$(st sites_due)" "0|2"
+echo "RLIMIT_MEMLOCK=18446744073709551615 " > "$STUB/containers/sb/ulimits"
+chk "Podman's spelling of unbounded counts" "$(srun check)|$(st sites_due)" "0|1"
+: > "$STUB/calls"
+chk "  the run replaces it, saying why, and the new container carries the option" \
+    "$(srun run)|$(grep -c 'replacing sa (no unbounded memory locking)' "$T/rout")|$(cat "$STUB/containers/sa/ulimits")" "0|1|memlock=-1 "
+sed -i 's/^memory=.*/memory=/' "$R/etc/joinery/sites/sb/run_spec"
+echo "nofile=1024 " > "$STUB/containers/sb/ulimits"
+chk "a site with no memory budget is never due for it" "$(srun check)|$(st sites_due)" "0|0"
 
 echo "=== site_refresh: the check ==="
 reset

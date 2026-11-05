@@ -4,7 +4,7 @@ The unseal daemon: it holds members' vault keys outside the PHP pool, so a
 break-in during an open window can use a key while the window lives but never
 carry it away (`specs/unseal_daemon.md`, `docs/sealed_vault.md`).
 
-    joinery-unseal --socket PATH --allow-uid UID [--hold-file PATH]
+    joinery-unseal --socket PATH --allow-uid UID [--hold-file PATH] [--socket-mode 0660]
                    [--max-window-seconds S] [--max-windows N]
                    [--max-frame-bytes N] [--memory-budget N] [--max-conns N]
     joinery-unseal ping [--socket PATH] [--timeout S]

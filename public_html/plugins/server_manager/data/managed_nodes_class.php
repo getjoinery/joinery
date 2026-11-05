@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.74 - mgn_agent_unseal_daemon: the site's unseal daemon in one word as the agent last reported it at poll
+ *                (specs/unseal_daemon.md WP3); a degraded one is an incident (IncidentSourceUnsealDaemon)
  * @version 1.73 - mgn_agent_quiet_time means a node this plane is deleting; no agent says it is switched off
  * @version 1.72 - mgn_never_do / mgn_never_do_time: the never-do check's baseline, the items it holds unexplained
  *                 and when the machine last answered (NeverDoCheck)
@@ -508,6 +510,11 @@ class ManagedNode extends SystemBase {
 		// A siteless machine's verdict on the support bundle on offer
 		// (current, unlogged, verify_failed); empty where none was reported.
 		'mgn_agent_bundle_state' => array('type'=>'varchar(24)'),
+		// The site's unseal daemon in one word, as the agent reported it on its
+		// last poll (agent 1.109.0): absent, running, restarting, down,
+		// previous, held or unlocked. Empty for an older agent. Down,
+		// previous, held and unlocked are an incident (IncidentSourceUnsealDaemon).
+		'mgn_agent_unseal_daemon' => array('type'=>'varchar(16)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 

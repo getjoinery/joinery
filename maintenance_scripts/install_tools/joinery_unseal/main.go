@@ -56,6 +56,7 @@ func runServe(args []string) int {
 	maxFrame := fs.Int64("max-frame-bytes", 101<<20, "the largest request body (a held Direct part, whole)")
 	budget := fs.Int64("memory-budget", 256<<20, "request body bytes in flight across all connections")
 	maxConns := fs.Int("max-conns", 64, "connections served at once")
+	socketMode := fs.String("socket-mode", "0660", "the socket's mode; the installer passes 0666 inside a directory only the pool's group can enter")
 	unlocked := fs.Bool("unlocked-memory", false, "serve without locked memory when the limit is bounded (test suites only)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -63,6 +64,11 @@ func runServe(args []string) int {
 	if *socket == "" || *allowUID < 0 || *maxWindow <= 0 || *maxWindows <= 0 || *maxFrame <= 0 ||
 		*budget < *maxFrame || *maxConns <= 0 || fs.NArg() != 0 {
 		fs.Usage()
+		return 2
+	}
+	mode, merr := strconv.ParseUint(*socketMode, 8, 32)
+	if merr != nil || mode&^0o666 != 0 {
+		log.Printf("--socket-mode must be octal permission bits no wider than 0666")
 		return 2
 	}
 	if os.Geteuid() == 0 {
@@ -91,7 +97,7 @@ func runServe(args []string) int {
 	}
 	d := &daemon{store: st, started: time.Now(), memoryLocked: locked}
 
-	l, own, err := listen(*socket)
+	l, own, err := listen(*socket, os.FileMode(mode))
 	if err != nil {
 		log.Printf("cannot listen on %s: %v", *socket, err)
 		return 1

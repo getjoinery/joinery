@@ -23,6 +23,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.17 - a row for the unseal daemon (specs/unseal_daemon.md WP3): installed, answering, on the
+ *                 current build, not held, its memory locked; checkUnsealDaemon(), read from UnsealDaemon::facts()
  * @version 1.16 - the APCu check is the class map's; comments name the RAM store as the window's home (WP4)
  * @version 1.15 - a row for the RAM store (includes/RamStore.php): its directory is on tmpfs, ours, and
  *                 0700, or the store refuses and no window can open (strategy/object_free_window_store.md);
@@ -79,6 +81,7 @@ class VaultHealth {
 			self::checkExceptionArgs(),
 			self::checkSwapSafe(),
 			self::checkParserJail(),
+			self::checkUnsealDaemon(),
 			self::checkHostConverger(),
 			self::checkCertificates(),
 			self::checkReleaseVerifyKeys(),
@@ -423,6 +426,64 @@ class VaultHealth {
 			'reason' => 'The parser jail launcher is not installed at ' . DocumentText::JAIL_LAUNCHER
 				. ', so attachments, reports and fetched pages are parsed as the web user on this node. '
 				. 'On the host: ' . self::parserJailInstallCommand()];
+	}
+
+	/**
+	 * The unseal daemon (specs/unseal_daemon.md): installed by root, answering
+	 * on its socket, running the current release's build (not the previous one
+	 * its launcher falls back to after three crashes in a minute), not held by
+	 * a security case, and with its memory locked.
+	 *
+	 * @param array|null $facts Injected for tests; UnsealDaemon::facts() otherwise.
+	 */
+	public static function checkUnsealDaemon(?array $facts = null): array {
+		$key = 'unseal_daemon';
+		$label = 'The unseal daemon is installed and answering';
+		$facts = $facts ?? UnsealDaemon::facts();
+		$unmet = function (string $why) use ($key, $label) {
+			return ['key' => $key, 'label' => $label, 'state' => 'unmet', 'reason' => $why];
+		};
+		if (empty($facts['installed']) && ($facts['refused'] ?? null) === 'memlock') {
+			return $unmet('The unseal daemon is not installed: this site container cannot lock memory, and the daemon '
+				. 'refuses to hold keys it cannot keep out of swap, so an open vault window\'s key is held in the PHP pool. '
+				. 'A site container with a memory budget is given unbounded memory locking (--ulimit memlock=-1:-1) when it '
+				. 'is next rebuilt; one with no budget is not, because nothing would bound what it could lock.');
+		}
+		if (empty($facts['installed'])) {
+			return $unmet('The unseal daemon is not installed on this node, so an open vault window\'s key is held '
+				. 'in the PHP pool. The host converger installs it at its next run; by hand, on the host: '
+				. UnsealDaemon::installCommand());
+		}
+		if (empty($facts['asked'])) {
+			// Only the pool user may ask it; a check run from a shell reads the process table.
+			if (!empty($facts['running'])) {
+				return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+					'reason' => 'The unseal daemon is running; only the web server\'s user can ask it for its status, '
+						. 'so a check run from a shell cannot say more. The site\'s own health page asks it.'];
+			}
+			return $unmet('The unseal daemon is installed but not running. Its supervisor restarts it within seconds; '
+				. 'if this persists, see the daemon\'s journal or /var/log/joinery-unseal-' . UnsealDaemon::key() . '.log.');
+		}
+		if (empty($facts['answering'])) {
+			return $unmet('The unseal daemon is installed but did not answer on ' . (string)($facts['socket'] ?? '?')
+				. ' (' . (string)($facts['error'] ?? 'no answer') . '). Its supervisor restarts it within seconds; '
+				. 'if this persists, see the daemon\'s journal or /var/log/joinery-unseal-' . UnsealDaemon::key() . '.log.');
+		}
+		if (!empty($facts['held'])) {
+			return $unmet('The unseal daemon is held by a security case: no Private vault opens on this node until '
+				. 'root lifts the hold.');
+		}
+		if (($facts['binary'] ?? 'current') === 'previous') {
+			return $unmet('The unseal daemon is running the previous build: this release\'s build crashed three times '
+				. 'inside a minute. The next release with a working build moves it back.');
+		}
+		if (empty($facts['memory_locked'])) {
+			return $unmet('The unseal daemon is running without locked memory, so its keys could reach swap.');
+		}
+		$crashes = (int)($facts['crashes_hour'] ?? 0);
+		return ['key' => $key, 'label' => $label, 'state' => 'verified',
+			'reason' => 'Version ' . (string)($facts['daemon'] ?? '?')
+				. ($crashes > 0 ? '; ' . $crashes . ' crash' . ($crashes === 1 ? '' : 'es') . ' in the last hour' : '')];
 	}
 
 	/** The one command that installs the jail on this machine. */

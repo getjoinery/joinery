@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const daemonVersion = "1.0.0"
+const daemonVersion = "1.1.0"
 
 const (
 	maxWrap   = 64

@@ -3,6 +3,11 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.18 - a site with a memory budget runs with --ulimit memlock=-1:-1, so its unseal daemon can
+#                lock every page (specs/unseal_daemon.md Q1). Only with a budget: locked pages count
+#                against it, so the worst a process in the container can pin is its own site's
+#                memory; a site with no budget keeps the bounded default, and its daemon is not
+#                installed.
 # Version: 1.17 - on the site engine a site's container carries the hash of the system call filter it was
 #                made under (joinery.seccomp, run_spec_seccomp_hash), so the nightly replacement finds a
 #                site on an older filter (site_refresh.sh; multi_tenant_host_hardening WP3)
@@ -787,8 +792,12 @@ run_spec_args() {  # SITE
     [[ -n "$v" && "$v" != "no" ]] && printf '%s\0' --restart "$v"
     v="$(run_spec_get "$site" memory)"
     # Swap pinned to the same figure, so the limit is real: left alone Docker
-    # allows as much swap again, and a 256m site quietly uses 512m.
-    [[ -n "$v" ]] && printf '%s\0' "--memory=${v}" "--memory-swap=${v}"
+    # allows as much swap again, and a 256m site quietly uses 512m. With a
+    # budget, memory locking is unbounded: the unseal daemon locks every page
+    # (Go reserves arenas far past what it uses, so no finite limit works),
+    # and locked pages count against the budget, so nothing in the container
+    # can pin more than its own site's memory.
+    [[ -n "$v" ]] && printf '%s\0' "--memory=${v}" "--memory-swap=${v}" --ulimit memlock=-1:-1
     v="$(run_spec_get "$site" cpus)"
     [[ -n "$v" ]] && printf '%s\0' "--cpus=${v}"
     v="$(run_spec_get "$site" pids_limit)"

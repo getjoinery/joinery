@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.60 - the claim takes the site's unseal daemon in one word (agent 1.109.0) and keeps it (specs/unseal_daemon.md WP3)
  * @version 1.59 - the quiet endpoint is gone: no agent is switched off, so none says it is going quiet
  * @version 1.58 - the claim takes the node's X-Wing key and its agent key's signature (agent 1.99.0) and keeps it when verified
  *                (a new signature over the same key too); forgetAgent and approveJoin clear it
@@ -1262,6 +1263,11 @@ class AgentChannelEndpoint {
 			// settings. A closed set; absent for an agent before 1.94.0, or one
 			// whose database did not answer.
 			'root_access'    => ['type' => 'string', 'max' => 3, 'pattern' => '/^(on|off)?$/'],
+			// The site's unseal daemon in one word, read by the agent from what
+			// root left and the process table. A closed set; absent for an agent
+			// before 1.109.0 and on a machine with no site.
+			'unseal_daemon'  => ['type' => 'string', 'max' => 16,
+				'pattern' => '/^(absent|running|restarting|down|previous|held|unlocked)$/'],
 			// Where the agent's own self-update stands: its verdict on the
 			// version on offer, and that version. A closed set of verdicts;
 			// absent for an agent before 1.65.0 and before its first check.
@@ -1387,6 +1393,14 @@ class AgentChannelEndpoint {
 		if (array_key_exists('root_access', $in) && in_array((string)$in['root_access'], ['on', 'off'], true)
 			&& (string)$in['root_access'] !== (string)$node->get('mgn_agent_root_access')) {
 			$node->set('mgn_agent_root_access', (string)$in['root_access']);
+		}
+
+		// The site's unseal daemon, the same way: absent leaves the last answer
+		// standing. A degraded daemon is an incident (IncidentSourceUnsealDaemon).
+		if (array_key_exists('unseal_daemon', $in)
+			&& in_array((string)$in['unseal_daemon'], IncidentSourceUnsealDaemon::STATES, true)
+			&& (string)$in['unseal_daemon'] !== (string)$node->get('mgn_agent_unseal_daemon')) {
+			$node->set('mgn_agent_unseal_daemon', (string)$in['unseal_daemon']);
 		}
 
 		// Where its own self-update stands. A refused update is otherwise seen
