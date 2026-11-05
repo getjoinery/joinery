@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php safe --filter=verify_release
  *
+ * @version 1.2 - a release built before the rewrite: its commit is read through the commit map
  * @version 1.1 - a core commit the public history rewrote (specs_private_repo D6)
  * @version 1.0
  */
@@ -101,6 +102,14 @@ section('A commit that is not on the public main branch');
 // main. Local stand-ins for the public repositories share the clones'
 // objects; one has main at the release's commit, one a commit short of it.
 $statement_payload = json_decode(base64_decode($statement['envelope']['payload']), true);
+// A release built before the rewrite names a commit this clone no longer
+// holds; the commit standing for it is the one the installed map names, and
+// the main that holds it is this clone's own, which carries the map.
+$c = $statement_payload['core_commit'];
+$site_git = 'git -C ' . escapeshellarg(PathHelper::getSiteRoot());
+exec($site_git . ' cat-file -e ' . escapeshellarg($c . '^{commit}') . ' 2>/dev/null', $o_c, $c_missing);
+$c_here = $c_missing ? ReleaseHistoryMap::installed()->current($c) : $c;
+$core_main = $c_missing ? trim((string)shell_exec($site_git . ' rev-parse HEAD')) : $c;
 $stand_in = function ($label, $source, $main) use ($tmp) {
 	$bare = $tmp . '/public_' . $label . '.git';
 	exec('git clone -q --bare --shared ' . escapeshellarg($source) . ' ' . escapeshellarg($bare) . ' 2>&1');
@@ -108,9 +117,9 @@ $stand_in = function ($label, $source, $main) use ($tmp) {
 	exec('git -C ' . escapeshellarg($bare) . ' update-ref refs/heads/main ' . escapeshellarg($main));
 	return 'file://' . $bare;
 };
-$core_on = $stand_in('core_on', PathHelper::getSiteRoot(), $statement_payload['core_commit']);
+$core_on = $stand_in('core_on', PathHelper::getSiteRoot(), $core_main);
 $agent_on = $stand_in('agent_on', AgentDistPublisher::DEFAULT_SOURCE_PATH, $statement_payload['agent_commit']);
-$core_off = $stand_in('core_off', PathHelper::getSiteRoot(), $statement_payload['core_commit'] . '~1');
+$core_off = $stand_in('core_off', PathHelper::getSiteRoot(), $c_here . '~1');
 $anchored = array('version' => $version, 'core_archive' => $archive, 'offline' => false, 'sigstore' => false,
 	'core_url' => $core_on, 'agent_url' => $agent_on);
 
@@ -130,13 +139,12 @@ section('A core commit the public history rewrote (specs_private_repo D6)');
 // commit map naming it. The map is signed by a key and log built here, which
 // map_keys hands the verifier in place of the release's own.
 require_once(__DIR__ . '/../lib/release_log_fixtures.php');
-$c = $statement_payload['core_commit'];
-$rewritten = function ($label, ?string $map_bytes) use ($tmp, $c) {
+$rewritten = function ($label, ?string $map_bytes) use ($tmp, $c_here) {
 	$bare = $tmp . '/public_' . $label . '.git';
 	exec('git clone -q --bare --shared ' . escapeshellarg(PathHelper::getSiteRoot()) . ' ' . escapeshellarg($bare) . ' 2>&1');
 	$g = 'git -C ' . escapeshellarg($bare);
 	exec($g . ' config uploadpack.allowFilter true');
-	$y = trim((string)shell_exec($g . ' commit-tree ' . escapeshellarg($c . '^{tree}') . ' -m rewritten 2>/dev/null'));
+	$y = trim((string)shell_exec($g . ' commit-tree ' . escapeshellarg($c_here . '^{tree}') . ' -m rewritten 2>/dev/null'));
 	$tip = $y;
 	if ($map_bytes !== null) {
 		$blob_file = $tmp . '/' . $label . '_map.json';
