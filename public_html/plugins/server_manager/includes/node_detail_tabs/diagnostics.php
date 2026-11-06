@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.8 - Vault windows (24 h): the vault's unlock history through log_table_tail (agent 1.113.0)
  * @version 1.7 - Old key census removed with the v1 code
  * @version 1.6 - The machine: Old key census (v1_census, agent 1.103.0; TEMPORARY, removed with the v1 code)
  * @version 1.5 - Site containers: Read site converger in its own box, offered whatever this machine's log switch
@@ -205,6 +206,23 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 			$fw_tbl->submitbutton('btn_log_table', 'Read log table', ['class' => 'btn btn-sm btn-outline-secondary']);
 			$fw_tbl->end_form();
 			echo '</div>';
+			// The vault's unlock history: each window paired with its close,
+			// where its key was held, why it ended (agent_event_log_filter.md).
+			if (version_compare(AgentVocabulary::version($node) ?: '0', JobCommandBuilder::LOG_FILTER_AGENT, '>=')) {
+				echo '<div>';
+				$fw_vw = $page->getFormWriter('vault_windows_form', ['action' => $base_url . '&tab=diagnostics']);
+				$fw_vw->begin_form();
+				$fw_vw->hiddeninput('action', '', ['id' => 'vault_windows_action', 'value' => 'log_table_tail']);
+				$fw_vw->hiddeninput('table', '', ['id' => 'vault_windows_table', 'value' => 'events']);
+				$fw_vw->hiddeninput('event', '', ['id' => 'vault_windows_event', 'value' => 'vault_windows']);
+				$fw_vw->hiddeninput('hours', '', ['id' => 'vault_windows_hours', 'value' => '24']);
+				$fw_vw->hiddeninput('rows', '', ['id' => 'vault_windows_rows', 'value' => (string)JobCommandBuilder::LOG_EVENT_MAX_COUNT]);
+				$fw_vw->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'vault_windows_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_vw->submitbutton('btn_vault_windows', 'Vault windows (24 h)', ['class' => 'btn btn-sm btn-outline-secondary',
+					'helptext' => 'Each vault unlock on this site in the last day: whether its key was held in the unseal daemon or the PHP pool, how it opened, and why and when it ended.']);
+				$fw_vw->end_form();
+				echo '</div>';
+			}
 		}
 		// The converger's journal: on a host with a data root it is the only
 		// record of which installer failed a run, and the converger exits 0

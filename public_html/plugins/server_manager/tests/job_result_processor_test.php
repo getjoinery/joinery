@@ -1778,6 +1778,32 @@ check(is_array($tr) && $tr['rows'][0]['nested'] === '{"a":1}',
 check(is_array($tr) && in_array('nosuchcolumn', $tr['columns'], true) && !in_array('no such; column', $tr['columns'], true),
 	'a column name is reduced to identifier characters');
 
+// An event read (agent 1.113.0): its event and hours are kept, and it may
+// carry up to LOG_EVENT_MAX_COUNT rows; an event this plane never asks for is
+// dropped, and the ordinary cap applies.
+$ev_rows = [];
+for ($i = 0; $i < JobCommandBuilder::LOG_EVENT_MAX_COUNT + 5; $i++) {
+	$ev_rows[] = ['evl_event_log_id' => $i, 'evl_event' => 'vault_window_closed', 'evl_note' => 'scope=user reason=explicit_lock'];
+}
+$ev_env = function ($event, $hours) use ($ev_rows) {
+	return json_encode(['api_version' => '1.0', 'data' => [
+		'table' => 'events', 'event' => $event, 'hours' => $hours, 'columns' => ['evl_event_log_id', 'evl_event', 'evl_note'],
+		'rows' => $ev_rows, 'truncated' => false,
+	]]);
+};
+$ej = jrp_job($jrp_log_node, 'log_table_tail', $ev_env('vault_windows', 24));
+JobResultProcessor::process($ej);
+$er = json_decode((string)$ej->get('mjb_result'), true);
+check(is_array($er) && $er['event'] === 'vault_windows' && $er['hours'] === 24
+	&& count($er['rows']) === JobCommandBuilder::LOG_EVENT_MAX_COUNT && $er['truncated'] === true,
+	'an event read keeps its event and hours and up to the event ceiling of rows', json_encode(array_diff_key((array)$er, ['rows' => 1])));
+$ej = jrp_job($jrp_log_node, 'log_table_tail', $ev_env('everything', 9999));
+JobResultProcessor::process($ej);
+$er = json_decode((string)$ej->get('mjb_result'), true);
+check(is_array($er) && $er['event'] === null && $er['hours'] === JobCommandBuilder::LOG_MAX_HOURS
+	&& count($er['rows']) === JobCommandBuilder::LOG_MAX_COUNT,
+	'an event the plane never asks for is dropped and the ordinary cap applies; hours is bounded', json_encode(array_diff_key((array)$er, ['rows' => 1])));
+
 $tn = jrp_job($jrp_log_node, 'log_table_tail', json_encode(['api_version' => '1.0', 'data' => ['table' => 'logins']]));
 JobResultProcessor::process($tn);
 check((string)$tn->get('mjb_result') === json_encode(['read' => false]),

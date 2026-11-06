@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.88 - log_table_tail passes event and hours (the Vault windows button, agent_event_log_filter.md)
  * @version 1.87 - never_do_accept says Marked safe
  * @version 1.86 - never_do_accept: the never-do check's held changes accepted as the person's own (level 10)
  * @version 1.85 - v1_census removed with the v1 code
@@ -385,7 +386,9 @@ class NodeDetailActions {
 
 			case 'log_table_tail': {
 				$built = JobCommandBuilder::build_log_table_tail($node,
-					(string)($_POST['table'] ?? ''), (int)($_POST['rows'] ?? 50));
+					(string)($_POST['table'] ?? ''), (int)($_POST['rows'] ?? 50),
+					isset($_POST['event']) && $_POST['event'] !== '' ? (string)$_POST['event'] : null,
+					isset($_POST['hours']) && $_POST['hours'] !== '' ? (int)$_POST['hours'] : null);
 				$job = ManagementJob::createFromBuild($node->key, 'log_table_tail', $built, null, $uid);
 				return self::jobUrl($job);
 			}

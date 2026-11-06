@@ -1598,7 +1598,16 @@ thousands that do not is how an audit log stops being read.
 Each opened row records `via`: `passkey`, `passphrase`, `recovery`, `setup`,
 `rotate`, `reenroll`, or `unknown`. It also records the caps this window
 resolved to and the configured `vault_unlock_idle_minutes`, because between
-them those decide how late a legitimate read can arrive.
+them those decide how late a legitimate read can arrive, and `holder`: where
+the key is held, `daemon` or `pool`, with `fallback=pool_rung` on a pool
+window the daemon's five silent minutes sent there
+(§ The unseal daemon).
+
+`VaultAudit::parseNote($event, $note)` reads a note back into its fields,
+every value checked against the class's own lists (anything else reads as
+`other`). The management node's vault window view reads the rows through
+the agent's `log_table_tail` and pairs each open with its close by the
+`session` handle.
 
 Each closed row records `reason` and `open_seconds`:
 

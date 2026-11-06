@@ -2547,6 +2547,31 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		try { JobCommandBuilder::build_log_table_tail($log_node, $bad[0], $bad[1]); } catch (Exception $e) { $threw = true; }
 		check($threw, 'log_table_tail refuses on the plane: ' . var_export($bad, true));
 	}
+	// event and hours (agent 1.113.0, specs/agent_event_log_filter.md): sent
+	// only to an agent that has them, on the event log only, bounded.
+	$threw = '';
+	try { JobCommandBuilder::build_log_table_tail($log_node, 'events', 1000, 'vault_windows', 24); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, JobCommandBuilder::LOG_FILTER_AGENT) !== false,
+		'an agent older than ' . JobCommandBuilder::LOG_FILTER_AGENT . ' is never sent event or hours, and is told why', $threw);
+	$filter_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => JobCommandBuilder::LOG_FILTER_AGENT,
+		'mgn_agent_primitives' => 'check_status,log_table_tail',
+		'mgn_agent_log_access' => 'on',
+	));
+	$built = JobCommandBuilder::build_log_table_tail($filter_node, 'events', 1000, 'vault_windows', 24);
+	check($built === array('primitive' => 'log_table_tail', 'params' => array('table' => 'events', 'rows' => 1000,
+		'event' => 'vault_windows', 'hours' => 24)),
+		'an event read travels as the table, up to ' . JobCommandBuilder::LOG_EVENT_MAX_COUNT . ' rows, the event word and the hours',
+		var_export($built, true));
+	$built = JobCommandBuilder::build_log_table_tail($filter_node, 'logins', 20, null, 6);
+	check($built['params'] === array('table' => 'logins', 'rows' => 20, 'hours' => 6), 'hours bounds any table', var_export($built, true));
+	foreach (array(array('logins', 10, 'vault_windows', null), array('events', 10, 'login', null), array('events', 1001, 'vault_windows', null),
+			array('events', 201, null, null), array('events', 10, null, 0), array('events', 10, null, 169)) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_log_table_tail($filter_node, $bad[0], $bad[1], $bad[2], $bad[3]); } catch (Exception $e) { $threw = true; }
+		check($threw, 'log_table_tail\'s event and hours refuse on the plane: ' . var_export($bad, true));
+	}
 	check(array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is on the list, as the node\'s compiled shape of each line');
 	check(count(JobCommandBuilder::SITE_LOG_FILES) === 7 && count(JobCommandBuilder::LOG_TABLES) === 5,
 		'the mirrored lists are the seven files and five tables the specs name');

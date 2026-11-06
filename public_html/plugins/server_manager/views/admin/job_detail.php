@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.36 - a log_table_tail event read shows the vault windows paired and counted (VaultWindowHistory) above its rows
  * @version 1.35 - v1_census results removed with the v1 code; relay transport key shows kind and generation only
  * @version 1.34 - v1_census: key generations per column and unswept chain entries
  * @version 1.33 - v1_census results: what the site still holds on an old X25519 key (TEMPORARY, v1_key_retirement)
@@ -526,9 +527,51 @@ if ($result) {
 	} elseif (is_array($result_data) && $job_type === 'log_table_tail' && isset($result_data['rows']) && is_array($result_data['rows'])) {
 		$table   = (string)($result_data['table'] ?? '');
 		$columns = is_array($result_data['columns'] ?? null) ? $result_data['columns'] : array();
+		$ltt_event = (string)($result_data['event'] ?? '');
+		$ltt_hours = $result_data['hours'] ?? null;
+		if (array_key_exists($ltt_event, JobCommandBuilder::LOG_EVENTS)) {
+			// The vault's window rows, paired and counted (agent_event_log_filter.md):
+			// where each key was held, how it opened, why and when it ended.
+			$vw = VaultWindowHistory::fromRows($result_data['rows']);
+			$vw_tz = SessionControl::get_instance()->get_timezone();
+			$vw_when = function ($t) use ($vw_tz) {
+				if ($t === null || $t === '') { return ''; }
+				$ts = strtotime((string)$t);
+				return $ts ? LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $ts), 'UTC', $vw_tz, 'M j, g:i:s A') : '';
+			};
+			echo '<div class="card mb-3"><div class="card-header"><strong>Vault windows</strong> <small class="text-muted">— '
+				. ($ltt_hours ? 'the last ' . (int)$ltt_hours . ' h' : 'the rows read')
+				. (!empty($result_data['truncated']) ? ', cut to the size cap: older windows are missing' : '') . '</small></div>';
+			echo '<div class="card-body py-2"><p class="mb-0">' . htmlspecialchars(VaultWindowHistory::summary($vw['totals'])) . '</p></div>';
+			if ($vw['windows']) {
+				echo '<div class="table-responsive"><table class="table table-sm table-striped mb-0"><thead><tr>'
+					. '<th>Member</th><th>Scope</th><th>Opened</th><th>How</th><th>Held in</th><th>Closed</th><th>Why</th><th>Open for</th><th>Opens</th>'
+					. '</tr></thead><tbody>';
+				foreach ($vw['windows'] as $w) {
+					$held = $w['holder'] . ($w['fallback'] ? ' (' . $w['fallback'] . ')' : '');
+					$for = is_int($w['open_seconds']) ? gmdate($w['open_seconds'] >= 3600 ? 'G\h i\m' : 'i\m s\s', $w['open_seconds'])
+						: (string)($w['open_seconds'] ?? '');
+					echo '<tr' . ($w['holder'] === VaultAudit::HOLDER_POOL ? ' class="table-warning"' : '') . '>'
+						. '<td>' . (int)$w['user_id'] . ($w['borrowed'] ? ' <small>(app)</small>' : '') . '</td>'
+						. '<td>' . htmlspecialchars((string)$w['scope']) . '</td>'
+						. '<td>' . htmlspecialchars($w['opened_at'] === null ? 'before these rows' : $vw_when($w['opened_at'])) . '</td>'
+						. '<td>' . htmlspecialchars((string)$w['via']) . '</td>'
+						. '<td>' . htmlspecialchars($held) . '</td>'
+						. '<td>' . htmlspecialchars($w['closed_at'] === null ? 'not yet' : $vw_when($w['closed_at'])) . '</td>'
+						. '<td>' . htmlspecialchars((string)$w['reason']) . '</td>'
+						. '<td>' . htmlspecialchars($for) . '</td>'
+						. '<td>' . htmlspecialchars($w['unwraps'] === null ? '' : (string)$w['unwraps']) . '</td>'
+						. '</tr>';
+				}
+				echo '</tbody></table></div>';
+			}
+			echo '</div>';
+		}
 		echo '<div class="card mb-3"><div class="card-header"><strong>'
 			. htmlspecialchars(JobCommandBuilder::LOG_TABLES[$table] ?? $table)
+			. (array_key_exists($ltt_event, JobCommandBuilder::LOG_EVENTS) ? ': ' . htmlspecialchars(JobCommandBuilder::LOG_EVENTS[$ltt_event]) : '')
 			. '</strong> <small class="text-muted">— ' . count($result_data['rows']) . ' newest row(s)'
+			. ($ltt_hours ? ' of the last ' . (int)$ltt_hours . ' h' : '')
 			. (!empty($result_data['truncated']) ? ', cut to the size cap' : '') . '</small></div>';
 		echo '<div class="table-responsive"><table class="table table-sm table-striped mb-0"><thead><tr>';
 		foreach ($columns as $c) { echo '<th>' . htmlspecialchars((string)$c) . '</th>'; }

@@ -102,6 +102,14 @@ function dvk_last_close(int $user_id): string {
 	return (string)$q->fetchColumn();
 }
 
+/** The newest vault_window_opened note for $user_id. */
+function dvk_last_open(int $user_id): string {
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT evl_note FROM evl_event_logs WHERE evl_usr_user_id = ?
+		AND evl_event = 'vault_window_opened' ORDER BY evl_event_log_id DESC LIMIT 1");
+	$q->execute(array($user_id));
+	return (string)$q->fetchColumn();
+}
+
 harness_defer(function () use ($dir) {
 	VaultUnlock::useDaemonForTests(null);
 	UnsealDaemon::$root_override = null;
@@ -149,6 +157,9 @@ $opened = VaultUnlock::open($user_id, $wrapping->unlocker($fx['kek']), array(), 
 check($opened['key'] instanceof DaemonVaultKey, 'the unlock\'s key is a daemon handle', get_class($opened['key']));
 check($opened['key']->publicKey() === $public, 'the daemon opened the vault\'s own key');
 check(dvk_status($sock, $user_id)['open'] === true, 'the daemon holds a window for the member');
+$note = VaultAudit::parseNote(VaultAudit::EVENT_OPENED, dvk_last_open($user_id));
+check(($note['holder'] ?? null) === VaultAudit::HOLDER_DAEMON && !isset($note['fallback']),
+	'the opened row says the key is in the daemon', dvk_last_open($user_id));
 $slot = RamStore::get('vault:' . session_id() . ':' . $user_id . ':user', $ok, RamStore::LIFETIME);
 check($ok && strpos((string)$slot, DaemonVaultKey::SLOT_TAG) === 0, 'the window slot holds a handle');
 $pool_twin = PoolVaultKey::open($wrapping->unlocker($fx['kek']))['key'];
@@ -285,6 +296,9 @@ VaultUnlock::$daemon_retry_us = 1000;
 check($opened['key'] instanceof PoolVaultKey, 'past five silent minutes an unlock takes the pool path');
 check($took < 1.0, 'without waiting out the retry (reviewer2 B3)', sprintf('%.2f s', $took));
 check(VaultUnlock::secretKey($user_id) instanceof PoolVaultKey, 'and that window reads from the pool');
+$note = VaultAudit::parseNote(VaultAudit::EVENT_OPENED, dvk_last_open($user_id));
+check(($note['holder'] ?? null) === VaultAudit::HOLDER_POOL && ($note['fallback'] ?? null) === VaultAudit::FALLBACK_POOL_RUNG,
+	'its opened row says pool, sent there by the five-minute rung', dvk_last_open($user_id));
 $facts = array('installed' => true, 'asked' => true, 'answering' => false, 'socket' => $sock, 'error' => 'connect',
 	'down_since' => VaultUnlock::daemonDownSince());
 check(strpos(VaultHealth::checkUnsealDaemon($facts)['reason'], 'held in the PHP pool') !== false, 'the health row says new windows are in the pool');

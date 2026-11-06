@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.122 - process_log_table_tail keeps an event read's event and hours and its larger row count (agent_event_log_filter.md)
  * @version 1.121 - process_never_do_check: the never-do list folded into its node (NeverDoCheck), the job keeping counts only
  * @version 1.120 - sanitise_v1_census removed with the v1 code (v1_key_retirement WP2); parse_backup_keys_tokens
  *   reads the two kinds only (no x25519, retired count or old epochs); the host report keeps
@@ -2492,9 +2493,16 @@ HTML;
 			$columns[] = substr(preg_replace('/[^A-Za-z0-9_]/', '', (string)$c), 0, 64);
 			if (count($columns) >= self::LOG_TABLE_MAX_COLUMNS) { break; }
 		}
+		// An event read (agent 1.113.0) is one kind of row and may carry more
+		// of them; the event must be one this plane asks for.
+		$event = (string)($data['event'] ?? '');
+		$event = array_key_exists($event, JobCommandBuilder::LOG_EVENTS) ? $event : null;
+		$max_rows = $event !== null ? JobCommandBuilder::LOG_EVENT_MAX_COUNT : JobCommandBuilder::LOG_MAX_COUNT;
+		$hours = isset($data['hours']) && is_numeric($data['hours'])
+			? max(1, min(JobCommandBuilder::LOG_MAX_HOURS, (int)$data['hours'])) : null;
 		$rows = [];
-		$truncated_here = count($data['rows']) > JobCommandBuilder::LOG_MAX_COUNT;
-		foreach (array_slice($data['rows'], 0, JobCommandBuilder::LOG_MAX_COUNT) as $row) {
+		$truncated_here = count($data['rows']) > $max_rows;
+		foreach (array_slice($data['rows'], 0, $max_rows) as $row) {
 			if (!is_array($row)) { continue; }
 			$kept = [];
 			foreach ($columns as $c) {
@@ -2514,6 +2522,8 @@ HTML;
 			'read'          => true,
 			'table'         => substr($table, 0, 64),
 			'columns'       => $columns,
+			'event'         => $event,
+			'hours'         => $hours,
 			'rows_returned' => count($rows),
 			'rows'          => $rows,
 			'truncated'     => !empty($data['truncated']) || $truncated_here,

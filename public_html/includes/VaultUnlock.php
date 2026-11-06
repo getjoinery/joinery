@@ -54,6 +54,8 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.28 - the opened audit row records where the key is held, and a pool key the five-minute rung chose
+ *   (agent_event_log_filter.md WP1)
  * @version 1.27 - lockAll()'s close rows carry each daemon window's unwrap count, as lock()'s do
  * @version 1.26 - the unseal daemon (specs/unseal_daemon.md WP4): openKey() opens the window in the
  *   daemon where the install record says it runs here (a DaemonVaultKey: a handle, never the key), with
@@ -264,6 +266,9 @@ class VaultUnlock {
 	/** @var array<string,DaemonVaultKey> daemon keys opened this request that no window holds, by id */
 	private static $unarmed = array();
 
+	/** Pool keys the five-minute rung opened this request, by id: their opened row says so. */
+	private static $pool_rung_keys = array();
+
 	/** Whether the shutdown closer of $unarmed is registered. */
 	private static $closer_registered = false;
 
@@ -376,7 +381,9 @@ class VaultUnlock {
 				$down_since = self::noteDaemonDown();
 				if (time() - $down_since >= self::POOL_RUNG_SECONDS && !UnsealDaemon::held()) {
 					self::notePoolPath('the unseal daemon has not answered since ' . gmdate('c', $down_since), true);
-					return PoolVaultKey::open($unlocker, $wrap_under, $reveal);
+					$fell_back = PoolVaultKey::open($unlocker, $wrap_under, $reveal);
+					self::$pool_rung_keys[$fell_back['key']->id()] = true;
+					return $fell_back;
 				}
 				throw new VaultServiceUnavailableException();
 			} catch (DaemonBusyException $e) {
@@ -498,6 +505,20 @@ class VaultUnlock {
 	 * request runs after its answer is registered as a shutdown function too,
 	 * and must finish with the old key first.
 	 */
+	/**
+	 * The holder and fallback fields of a window's opened audit row: where
+	 * this key is held, and whether the daemon's silence sent it to the pool.
+	 *
+	 * @return array{0: string, 1: ?string}
+	 */
+	private static function holderOf(VaultKey $key): array {
+		if ($key instanceof DaemonVaultKey) {
+			return array(VaultAudit::HOLDER_DAEMON, null);
+		}
+		return array(VaultAudit::HOLDER_POOL,
+			isset(self::$pool_rung_keys[$key->id()]) ? VaultAudit::FALLBACK_POOL_RUNG : null);
+	}
+
 	private static function registerCloser(): void {
 		if (self::$closer_registered) {
 			return;
@@ -543,7 +564,7 @@ class VaultUnlock {
 		));
 		self::touchWindowMarker($user_id, $scope);
 		self::rememberOpen($user_id, $scope, $via, $now);
-		VaultAudit::opened($user_id, $scope, $via, $caps, $sid);
+		VaultAudit::opened($user_id, $scope, $via, $caps, $sid, ...self::holderOf($key));
 
 		// A person's unlock on the website also opens their app credentials'
 		// borrowed windows. Only the server-custody `user` scope is borrowed,
@@ -743,7 +764,7 @@ class VaultUnlock {
 				error_log('VaultUnlock::armBorrowers: no armed marker for app credential ' . $credential['id'] . ' of user '
 					. $user_id . ': its expiry will not reach the audit log');
 			}
-			VaultAudit::opened($user_id, 'user', VaultAudit::VIA_APP_BORROW, $caps, $sid);
+			VaultAudit::opened($user_id, 'user', VaultAudit::VIA_APP_BORROW, $caps, $sid, ...self::holderOf($key));
 		}
 	}
 
@@ -2052,6 +2073,7 @@ class VaultUnlock {
 		self::$credential_window = null;
 		self::$memo = array();
 		self::$unarmed = array();
+		self::$pool_rung_keys = array();
 		if (session_status() === PHP_SESSION_ACTIVE) {
 			unset($_SESSION['vault_windows']);
 		}

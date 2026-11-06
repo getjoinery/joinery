@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.160 - log_table_tail takes event and hours (agent 1.113.0, sent only to agents that have them), up to
+ *   LOG_EVENT_MAX_COUNT rows for an event read (specs/agent_event_log_filter.md)
  * @version 1.159 - both copy floors at 0.8.580, the first release signed by the rotated release key
  * @version 1.158 - build_unseal_hold (agent 1.112.0): the sentinel's drop and hold, no parameters; install_unseal_daemon.sh
  *                  on RUN_INSTALLER_CORE
@@ -520,6 +522,21 @@ class JobCommandBuilder {
 
 	/** The most lines or rows either log word returns; the node caps at the same figure. */
 	const LOG_MAX_COUNT = 200;
+
+	/**
+	 * log_table_tail's event words (table=events only), the most rows an event
+	 * read returns, how far back hours reaches, and the agent that first takes
+	 * either parameter: an older one refuses a job carrying a field it does not
+	 * know, so the plane sends them only from this version on.
+	 */
+	const LOG_EVENTS = [
+		'vault_windows'       => 'Vault windows (opened and closed)',
+		'vault_window_opened' => 'Vault windows opened',
+		'vault_window_closed' => 'Vault windows closed',
+	];
+	const LOG_EVENT_MAX_COUNT = 1000;
+	const LOG_MAX_HOURS = 168;
+	const LOG_FILTER_AGENT = '1.113.0';
 
 	/**
 	 * The units unit_journal may be asked about, and how the plane labels them.
@@ -2133,29 +2150,54 @@ class JobCommandBuilder {
 	 * column list on the node, redacted there, refused there when the switch
 	 * is off (specs/agent_log_access.md §2.2). Primitive only.
 	 *
-	 * @param string $table one of LOG_TABLES' keys
-	 * @param int    $rows  1..LOG_MAX_COUNT
+	 * @param string      $table one of LOG_TABLES' keys
+	 * @param int         $rows  1..LOG_MAX_COUNT, or 1..LOG_EVENT_MAX_COUNT with an event
+	 * @param string|null $event one of LOG_EVENTS' keys, table events only
+	 * @param int|null    $hours 1..LOG_MAX_HOURS: only the last hours
 	 */
-	public static function build_log_table_tail($node, $table, $rows = 50) {
+	public static function build_log_table_tail($node, $table, $rows = 50, $event = null, $hours = null) {
 		if (!self::has_primitive($node, 'log_table_tail')) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot read its log tables. "
 				. AgentVocabulary::needs_newer_agent_text($node, ['log_table_tail']));
 		}
 		self::assert_log_access($node);
-		return self::build_log_table_tail_primitive($node, $table, $rows);
+		if (($event !== null || $hours !== null)
+				&& version_compare(AgentVocabulary::version($node) ?: '0', self::LOG_FILTER_AGENT, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read its logs by event or time: that needs agent "
+				. self::LOG_FILTER_AGENT . ' or newer. ' . AgentVocabulary::needs_newer_agent_text($node, []));
+		}
+		return self::build_log_table_tail_primitive($node, $table, $rows, $event, $hours);
 	}
 
-	public static function build_log_table_tail_primitive($node, $table, $rows = 50) {
+	public static function build_log_table_tail_primitive($node, $table, $rows = 50, $event = null, $hours = null) {
 		$table = (string)$table;
 		if (!array_key_exists($table, self::LOG_TABLES)) {
 			throw new Exception("'" . $table . "' is not a log table the node offers. Choose one of: "
 				. implode(', ', array_keys(self::LOG_TABLES)) . '.');
 		}
-		return ['primitive' => 'log_table_tail', 'params' => [
-			'table' => $table,
-			'rows'  => self::bounded_log_count($rows, 'rows'),
-		]];
+		$params = ['table' => $table];
+		if ($event !== null) {
+			$event = (string)$event;
+			if ($table !== 'events' || !array_key_exists($event, self::LOG_EVENTS)) {
+				throw new Exception("'" . $event . "' is not an event the node can narrow its event log to. Choose one of: "
+					. implode(', ', array_keys(self::LOG_EVENTS)) . ', on the event log.');
+			}
+			if (!is_numeric($rows) || (int)$rows < 1 || (int)$rows > self::LOG_EVENT_MAX_COUNT) {
+				throw new Exception('Rows must be between 1 and ' . self::LOG_EVENT_MAX_COUNT . '.');
+			}
+			$params['rows'] = (int)$rows;
+			$params['event'] = $event;
+		} else {
+			$params['rows'] = self::bounded_log_count($rows, 'rows');
+		}
+		if ($hours !== null) {
+			if (!is_numeric($hours) || (int)$hours < 1 || (int)$hours > self::LOG_MAX_HOURS) {
+				throw new Exception('Hours must be between 1 and ' . self::LOG_MAX_HOURS . '.');
+			}
+			$params['hours'] = (int)$hours;
+		}
+		return ['primitive' => 'log_table_tail', 'params' => $params];
 	}
 
 	/**

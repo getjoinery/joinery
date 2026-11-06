@@ -24,6 +24,8 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.5 - opened() records where the key is held (holder=daemon|pool, fallback=pool_rung); parseNote()
+ *   reads every note this class writes, for the plane's vault window view (agent_event_log_filter.md)
  * @version 1.4 - REASON_DAEMON_RESTART and REASON_SENTINEL_DROP; closed() records the daemon window's unwrap count (unseal_daemon.md WP4)
  * @version 1.3 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.2 - VIA_APP_BORROW and REASON_APP_REVOKED for an app credential's borrowed
@@ -50,6 +52,13 @@ class VaultAudit {
 	// (VaultUnlock::armBorrowers()). The session field names the credential.
 	const VIA_APP_BORROW = 'app_borrow';
 
+	// Where an opened window's key is held (unseal_daemon.md): in the unseal
+	// daemon, or in the PHP pool. A pool window the daemon's five-minute
+	// silence sent there also says why.
+	const HOLDER_DAEMON      = 'daemon';
+	const HOLDER_POOL        = 'pool';
+	const FALLBACK_POOL_RUNG = 'pool_rung';
+
 	// Why a window ended. The first four are policy end-events the platform
 	// decided on; the last three are things that happened to the session.
 	const REASON_IDLE_CAP         = 'idle_cap';          // hardened caps: no content decrypt for too long
@@ -71,13 +80,15 @@ class VaultAudit {
 	 * legitimate.
 	 */
 	public static function opened(int $user_id, string $scope, string $via,
-			?array $caps, ?string $session_id): void {
+			?array $caps, ?string $session_id, ?string $holder = null, ?string $fallback = null): void {
 		$note = 'scope=' . $scope
 			. ' via=' . $via
 			. ' session=' . self::handle($session_id)
 			. ' idle_cap=' . self::capText($caps['idle'] ?? null)
 			. ' absolute_cap=' . self::capText($caps['absolute'] ?? null)
-			. ' idle_setting=' . self::idleSettingText();
+			. ' idle_setting=' . self::idleSettingText()
+			. ($holder === null ? '' : ' holder=' . $holder)
+			. ($fallback === null ? '' : ' fallback=' . $fallback);
 		self::write(self::EVENT_OPENED, $user_id, $note);
 	}
 
@@ -113,6 +124,80 @@ class VaultAudit {
 			return substr($session_id, 1);
 		}
 		return substr(hash('sha256', $session_id), 0, 12);
+	}
+
+	/**
+	 * The fields of a note this class wrote, for a reader that has only the
+	 * row (the plane's vault window view, over log_table_tail). Every value is
+	 * checked: a word field against this class's constants, a number field as
+	 * digits (with 's' or 'm' on the caps and the idle setting), the session
+	 * handle by its shape. Anything else reads as 'other', and a field the note
+	 * does not carry is absent, never guessed: a row written before holder
+	 * existed has no holder.
+	 *
+	 * @return array<string, string|int|null> scope, via|reason, session, holder, fallback,
+	 *         idle_cap, absolute_cap, idle_setting (seconds or null for none, 'unknown'),
+	 *         open_seconds (int or 'unknown'), unwraps (int)
+	 */
+	public static function parseNote(string $event, string $note): array {
+		$words = array(
+			'via'      => self::constantsStarting('VIA_'),
+			'reason'   => self::constantsStarting('REASON_'),
+			'holder'   => array(self::HOLDER_DAEMON, self::HOLDER_POOL),
+			'fallback' => array(self::FALLBACK_POOL_RUNG),
+		);
+		$fields = array();
+		foreach (preg_split('/\s+/', trim($note)) as $pair) {
+			$eq = strpos($pair, '=');
+			if ($eq === false || $eq === 0) {
+				continue;
+			}
+			$name = substr($pair, 0, $eq);
+			$value = substr($pair, $eq + 1);
+			if (isset($words[$name])) {
+				$fields[$name] = in_array($value, $words[$name], true) ? $value : 'other';
+			} elseif ($name === 'scope') {
+				// Any scope a consumer registers: a name, checked by its shape.
+				$fields[$name] = preg_match('/^[a-z][a-z0-9_]{0,31}$/', $value) ? $value : 'other';
+			} elseif ($name === 'session') {
+				$fields[$name] = preg_match('/^(none|[0-9a-f]{12}|apk[0-9]{1,12})$/', $value) ? $value : 'other';
+			} elseif ($name === 'idle_cap' || $name === 'absolute_cap' || $name === 'idle_setting') {
+				if ($value === 'none') {
+					$fields[$name] = null;
+				} elseif ($value === 'unknown') {
+					$fields[$name] = 'unknown';
+				} elseif (preg_match('/^([0-9]{1,9})(s|m)$/', $value, $m)) {
+					$fields[$name] = (int)$m[1] * ($m[2] === 'm' ? 60 : 1);
+				} else {
+					$fields[$name] = 'other';
+				}
+			} elseif ($name === 'open_seconds') {
+				$fields[$name] = $value === 'unknown' ? 'unknown'
+					: (preg_match('/^[0-9]{1,12}$/', $value) ? (int)$value : 'other');
+			} elseif ($name === 'unwraps') {
+				$fields[$name] = preg_match('/^[0-9]{1,12}$/', $value) ? (int)$value : 'other';
+			}
+		}
+		if ($event === self::EVENT_OPENED) {
+			unset($fields['reason'], $fields['open_seconds'], $fields['unwraps']);
+		} elseif ($event === self::EVENT_CLOSED) {
+			unset($fields['via'], $fields['holder'], $fields['fallback'],
+				$fields['idle_cap'], $fields['absolute_cap'], $fields['idle_setting']);
+		} else {
+			return array();
+		}
+		return $fields;
+	}
+
+	/** The values of this class's constants whose names start with $prefix. */
+	private static function constantsStarting(string $prefix): array {
+		$out = array();
+		foreach ((new ReflectionClass(self::class))->getConstants() as $name => $value) {
+			if (strpos($name, $prefix) === 0) {
+				$out[] = $value;
+			}
+		}
+		return $out;
 	}
 
 	private static function capText(?int $seconds): string {
