@@ -2027,8 +2027,8 @@ check(strpos($install_src, 'https://*) ;;') !== false
 check(strpos($install_src, '[ -f "$keys_file" ] && return 0') !== false,
     'never replacing a file that is already there');
 check(strpos($upgrade_src, "\$_GET['serve-verify-key']") !== false
-    && strpos($upgrade_src, 'agent_signing_key.pub') !== false,
-    'upgrade.php serves the endpoint, from its own public key on a publishing box');
+    && strpos($upgrade_src, "glob(\$full_site_dir . '/maintenance_scripts/install_tools/release_keys/release/*.pub')") !== false,
+    'upgrade.php serves the endpoint, from the keys its repository lists on the origin');
 check(strpos($upgrade_src, "readKeys(\$full_site_dir . '/config/release_verify_keys')") !== false,
     'and from the keys it verifies against otherwise');
 

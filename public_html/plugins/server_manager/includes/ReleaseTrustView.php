@@ -17,6 +17,8 @@
  * release installs; on any other management node, the set it holds itself,
  * which its own last upgrade recorded.
  *
+ * @version 1.1 - expected(): only the origin compares with its repository list; a republisher with a signing key
+ *               of its own compares with the set it holds (release_key_rotation B10)
  * @version 1.0
  */
 class ReleaseTrustView {
@@ -45,7 +47,10 @@ class ReleaseTrustView {
 			return $out;
 		};
 		$expected = null;
-		if (is_file($site . '/config/agent_signing_key')) {
+		// The origin compares with what its repository lists; a site that
+		// republishes what it received keeps a signing key and a copy of
+		// release_keys/ too, but its own held set is what it hands on.
+		if (is_file($site . '/config/agent_signing_key') && TreeManifestPublisher::signsItsOwnTree($site)) {
 			try {
 				$lists = AgentDistPublisher::repoKeyLists($site);
 				$authority = AgentDistPublisher::repoAuthority($site);

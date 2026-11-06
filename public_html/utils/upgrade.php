@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.36 - serve-verify-key: only the origin serves its repository's list; a republisher serves the set it
+	 *                holds, and no site serves its own key file (release_key_rotation B10, B11)
 	 * @version 1.35 - only the core archive sets the trusted set it records (a theme or plugin built by an earlier
 	 *                release verified under its set); published archive URLs carry a query naming their bytes, so a
 	 *                cache never serves an earlier release's copy (release_key_rotation B7, B8)
@@ -791,19 +793,18 @@
 	// once over TLS when its tree ships no agent bundle to read the key from.
 	if (!$is_cli && isset($_GET['serve-verify-key']) && $_GET['serve-verify-key'] && class_exists('PackageSignature')) {
 		$verify_key_lines = array();
-		$own_public = $full_site_dir . '/config/agent_signing_key.pub';
-		if (is_file($own_public)) {
-			$own_raw = base64_decode(trim((string)@file_get_contents($own_public)), true);
-			if ($own_raw !== false && strlen($own_raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
-				$verify_key_lines[] = base64_encode($own_raw);
-			}
-		}
-		// The publisher serves the release keys its repository lists now
-		// (release_keys/release/), never its own key file, which no verdict
-		// replaces there and so still holds a retired key after a rotation
-		// (specs/release_key_rotation.md R8, F11). Any other site serves the
-		// set it holds, which a verdict replaces (R1).
-		if (is_file($full_site_dir . '/config/agent_signing_key')) {
+		// The origin (the site whose publishes sign its own tree) serves the
+		// release keys its repository lists now (release_keys/release/),
+		// never its own key file, which no verdict replaces there and so
+		// still holds a retired key after a rotation (specs/
+		// release_key_rotation.md R8, F11). Every other site serves the set
+		// it holds, which a verdict replaces (R1): a site that republishes
+		// what it received keeps a signing key and a copy of release_keys/
+		// too, but neither says what nodes trust (2026-11-05: getjoinery
+		// served its own key and the retired one beside the current).
+		$is_origin = is_file($full_site_dir . '/config/agent_signing_key') && class_exists('TreeManifestPublisher')
+			&& TreeManifestPublisher::signsItsOwnTree($full_site_dir);
+		if ($is_origin) {
 			foreach (glob($full_site_dir . '/maintenance_scripts/install_tools/release_keys/release/*.pub') ?: array() as $listed_key) {
 				$listed_raw = base64_decode(trim((string)@file_get_contents($listed_key)), true);
 				if ($listed_raw !== false && strlen($listed_raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {

@@ -463,4 +463,11 @@ check(strpos($up, "if (\$expected_root === '' && PackageSignature::trustOf(\$ver
 check(strpos($up, "basename(\$path))\n\t\t\t\t\t. '?r=' . (int)@filemtime(\$path) . '.' . (int)@filesize(\$path),") !== false,
 	'each published theme and plugin URL names its bytes: a cache in front of the source (Cloudflare kept 0.8.578\'s boards archive under 0.8.579) cannot hand out an earlier release\'s copy');
 
+check(strpos($up, "TreeManifestPublisher::signsItsOwnTree(\$full_site_dir);\n\t\tif (\$is_origin) {") !== false
+	&& strpos($up, "\$own_public = \$full_site_dir . '/config/agent_signing_key.pub';") === false,
+	'serve-verify-key: only the origin serves its repository list, and no site serves its own key file (getjoinery served its own key and the retired one to fresh installs)');
+$rtv = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseTrustView.php'));
+check(strpos($rtv, "is_file(\$site . '/config/agent_signing_key') && TreeManifestPublisher::signsItsOwnTree(\$site)") !== false,
+	'the fleet badge compares a republisher\'s nodes with the set it holds, not with a copy of release_keys/ an upgrade never prunes');
+
 harness_finish();
