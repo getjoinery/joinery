@@ -116,6 +116,22 @@ check(($last2[0]['event'] ?? '') === 'crash' && ($last2[0]['status'] ?? '') === 
 	'a stop that was not a success is a crash, with how it ended; a clean stop is a stop', json_encode($last2));
 check(count(array_filter($events, function ($e) { return !is_array($e) || !isset($e['time'], $e['event']); })) === 0,
 	'every line is a JSON object with a time and an event');
+// A run whose stop hook never ran (systemctl kill reaches the whole unit,
+// the hook with it; a power cut) is recorded as a crash at the next start.
+ui_launch($launch, $root, 'prepare ' . $key);
+$before = count(file($state . '/events'));
+ui_launch($launch, $root, 'prepare ' . $key);
+$events = array_map(function ($l) { return json_decode($l, true); }, file($state . '/events', FILE_IGNORE_NEW_LINES));
+$tail = array_slice($events, $before - count($events));
+check(count($tail) === 2 && ($tail[0]['event'] ?? '') === 'crash' && ($tail[0]['result'] ?? '') === 'unrecorded'
+	&& ($tail[1]['event'] ?? '') === 'start',
+	'a start after a run that left no stop or crash records that crash first', json_encode($tail));
+ui_launch($launch, $root, 'stopped ' . $key, array('SERVICE_RESULT' => 'success'));
+$before = count(file($state . '/events'));
+ui_launch($launch, $root, 'prepare ' . $key);
+$events = array_map(function ($l) { return json_decode($l, true); }, file($state . '/events', FILE_IGNORE_NEW_LINES));
+check(count($events) === $before + 1 && end($events)['event'] === 'start',
+	'a start after a recorded stop adds only the start', json_encode(array_slice($events, -2)));
 
 [$rc, $out] = ui_launch($launch, $root, 'hold --all');
 check($rc === 0 && file_exists($root . '/run/joinery-unseal/' . $key . '.hold'), 'hold --all writes each site\'s hold file', $out);

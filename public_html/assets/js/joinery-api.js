@@ -38,6 +38,9 @@
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
+ * @version 1.6.0 - an answer whose request ended this session's vault window (X-Joinery-Vault: locked,
+ *   VaultUnlock::lock()) dispatches 'joinery:vault-locked', so the lock chip and the browser-held vaults
+ *   lock at once instead of at the presence beacon's next beat
  * @version 1.5.0 - an answer that is not JSON (a proxy's error page) gets a sentence saying what it means,
  *   by status: the server did not answer in time, or could not be reached (notJsonMessage)
  * @version 1.4.0 - postForm(action, formData, opts): opts.keepalive lets an
@@ -86,6 +89,9 @@
 			keepalive: !!(opts && opts.keepalive),
 			body: isForm ? body : JSON.stringify(body || {})
 		}).then(function (r) {
+			if (r.headers && r.headers.get('X-Joinery-Vault') === 'locked') {
+				document.dispatchEvent(new CustomEvent('joinery:vault-locked'));
+			}
 			return r.json().catch(function () { return { error: notJsonMessage(r.status) }; }).then(function (env) {
 				if (!r.ok) {
 					// Stale-token recovery (see header): the 403 response has

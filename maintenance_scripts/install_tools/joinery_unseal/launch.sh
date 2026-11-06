@@ -6,6 +6,7 @@
 # the unit and the keepalive call it there, and the agent's unseal_hold runs the
 # tree's own copy, verified against the signed release manifest.
 #
+# Version: 1.2 - prepare records a crash the previous run left no record of (its stop hook killed with it)
 # Version: 1.1 - the site's own builds under its state directory (reviewer2 B1); the fallback counts
 #               starts since the last run that stayed up five minutes, so a build that hangs falls
 #               back too (B3); the ping runs the active build (B4); the daemon is found by systemd's
@@ -178,6 +179,13 @@ prepare() {
 
     local now count binary target
     now="$(date +%s)"
+    # A run that ended with no stop or crash recorded: the stop hook was
+    # killed with it (systemctl kill reaches the whole unit), the machine lost
+    # power, or the hook failed. Recorded now, so the crash report the agent
+    # reads never misses a death.
+    if [[ "$(grep -E '"event":"(start|stop|crash)"' "${STATE_DIR}/events" 2>/dev/null | tail -n 1)" == *'"event":"start"'* ]]; then
+        event "crash" ",\"result\":\"unrecorded\""
+    fi
     # Every start since the last run that stayed up: a crash, a hang the
     # watchdog or the start timeout ended, or an exit, each leaves one here.
     { tail -n 20 "${STATE_DIR}/starts" 2>/dev/null; echo "${now}"; } > "${STATE_DIR}/starts.tmp"

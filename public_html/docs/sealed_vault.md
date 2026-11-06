@@ -822,10 +822,14 @@ page — chip, presence beacon, consumer UIs — in one state:
 - `joinery:vault-unlocked` — dispatched after any successful unlock. The chip
   flips open, `vault-presence.js` starts beating, and consumer surfaces may
   refresh sealed placeholders in place.
-- `joinery:vault-locked` — dispatched after any explicit lock, and by
+- `joinery:vault-locked` — dispatched after any explicit lock, by
   `vault-presence.js` when a heartbeat answers `alive:false` (the window
-  ended elsewhere — another session's lock, a credential event, a cap). The
-  chip flips closed, the beacon stops, and consumer surfaces re-seal their
+  ended elsewhere — another session's lock, a credential event, a cap), and
+  by `joinery-api.js` when an answer carries `X-Joinery-Vault: locked`, which
+  `VaultUnlock::lock()` sends on any request that ends its own session's
+  window (a read that found the daemon's window gone after a restart, a cap
+  noticed at read time). The chip flips closed, the beacon stops, the
+  browser-held vaults lock with it, and consumer surfaces re-seal their
   content to placeholders.
 - `joinery:vault-scope-unlocked` / `joinery:vault-scope-locked` (`detail.scope`)
   — the same for a vault this browser holds; the chip follows them.

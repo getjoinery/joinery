@@ -54,6 +54,8 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.30 - a window lock() ends for this request's own session sends X-Joinery-Vault: locked, so the page
+ *   announces the lock at once rather than at the next presence beat (the partly-locked gap)
  * @version 1.29 - a window a later arm of the same slot replaces is closed in the audit log (replaced)
  * @version 1.28 - the opened audit row records where the key is held, and a pool key the five-minute rung chose
  *   (agent_event_log_filter.md WP1)
@@ -1355,6 +1357,14 @@ class VaultUnlock {
 		// called defensively on paths where there may be nothing to close, and a
 		// log full of closes for windows that never opened teaches nobody anything.
 		if ($was_open) {
+			// The page this request answers learns at once that its window
+			// ended (a read that found the daemon's window gone, a cap, Lock
+			// now), instead of at the presence beacon's next beat: joinery-api.js
+			// reads the header and announces the lock, so the chip and the
+			// browser-held vaults lock together.
+			if ($session_id === self::currentSessionId() && PHP_SAPI !== 'cli' && !headers_sent()) {
+				header('X-Joinery-Vault: locked');
+			}
 			$armed = ($had_meta && is_array($meta)) ? (int)($meta['armed'] ?? 0) : 0;
 			if ($audit) {
 				VaultAudit::closed($user_id, $scope, $reason, $session_id,
