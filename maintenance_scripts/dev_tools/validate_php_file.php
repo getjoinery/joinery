@@ -7,6 +7,10 @@
  * Loads model files and dependencies to check for undefined functions.
  *
  * Usage: php validate_php_file.php <path_to_php_file>
+ *
+ * @version 1.1 - includes the file only when it just declares, or is a class file in includes/ or data/;
+ *                a script (utils/upgrade.php ran a real upgrade) is read from its source, with the files it
+ *                requires by a written-out path
  */
 
 // Bootstrap the application using path relative to this script
@@ -248,12 +252,23 @@ class MethodExistenceTest {
         // Load common data models
         $this->loadDataModels();
 
-        try {
-            // Include the file being tested
-            require_once($this->file_path);
-            echo "✓ File loaded successfully\n";
-        } catch (Throwable $e) {
-            echo "⚠ Warning: Could not load file: " . $e->getMessage() . "\n";
+        // Including a file runs its top-level code: a script (utils/upgrade.php,
+        // a view, a test) would do its work here. A file is included when it
+        // only declares, or when it is a class file in includes/ or data/,
+        // which the class autoloader includes on every request anyway; any
+        // other is read from its source.
+        $code_line = $this->topLevelCodeLine();
+        if ($code_line > 0 && !$this->isLibraryClassFile()) {
+            echo "⊘ Not loaded: line $code_line runs when the file is included, so its functions are read from its source\n";
+            $this->source_only_files = $this->staticRequires();
+        } else {
+            try {
+                // Include the file being tested
+                require_once($this->file_path);
+                echo "✓ File loaded successfully\n";
+            } catch (Throwable $e) {
+                echo "⚠ Warning: Could not load file: " . $e->getMessage() . "\n";
+            }
         }
 
         echo "\n";
@@ -272,6 +287,8 @@ class MethodExistenceTest {
         if ($this->function_definition_index === null) {
             $this->function_definition_index = [];
             $scan_files = array_merge(
+                [$this->file_path],                     // its own, when it was not loaded
+                $this->source_only_files,               // and what it requires, read, not run
                 glob(PathHelper::getIncludePath('logic') . '/*.php') ?: [],
                 glob(PathHelper::getIncludePath('includes') . '/*.php') ?: [],
                 glob(PathHelper::getIncludePath('plugins') . '/*/logic/*.php') ?: [],
@@ -284,6 +301,92 @@ class MethodExistenceTest {
             }
         }
         return isset($this->function_definition_index[strtolower($function_name)]);
+    }
+
+    /** Files a script that was not loaded requires, whose functions are read from source. */
+    private $source_only_files = [];
+
+    /**
+     * The files this file requires by a path written out in full: a string,
+     * __DIR__ . 'string', or PathHelper::getIncludePath('string'). Read only
+     * for their function names, never included, and followed one level.
+     */
+    private function staticRequires() {
+        $src = (string)file_get_contents($this->file_path);
+        $dir = dirname(realpath($this->file_path) ?: $this->file_path);
+        $found = [];
+        $req = '(?:require|include)(?:_once)?\s*\(?\s*';
+        if (preg_match_all('/' . $req . '__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/', $src, $m)) {
+            foreach ($m[1] as $rel) { $found[] = $dir . $rel; }
+        }
+        if (preg_match_all('/' . $req . 'PathHelper::getIncludePath\(\s*[\'"]([^\'"]+)[\'"]\s*\)/', $src, $m)) {
+            foreach ($m[1] as $rel) { $found[] = PathHelper::getIncludePath(ltrim($rel, '/')); }
+        }
+        if (preg_match_all('/' . $req . '[\'"](\/[^\'"]+\.php)[\'"]/', $src, $m)) {
+            foreach ($m[1] as $abs) { $found[] = $abs; }
+        }
+        $files = [];
+        foreach ($found as $f) {
+            $real = realpath($f);
+            if ($real !== false && is_file($real)) { $files[$real] = true; }
+        }
+        return array_keys($files);
+    }
+
+    /**
+     * A class file in a core or plugin includes/ or data/ directory: what the
+     * class autoloader includes by name, so including it here runs nothing a
+     * page load does not.
+     */
+    private function isLibraryClassFile() {
+        $base = rtrim(PathHelper::getIncludePath(''), '/') . '/';
+        $real = realpath($this->file_path) ?: $this->file_path;
+        if (strpos($real, $base) !== 0) { return false; }
+        $rel = substr($real, strlen($base));
+        if (!preg_match('#^(plugins/[^/]+/)?(includes|data)/([^/]+/)?[^/]+\.php$#', $rel)) { return false; }
+        return (bool)preg_match('/^\s*((final|abstract|readonly)\s+)*(class|interface|trait|enum)\s+\w+/m',
+            (string)file_get_contents($real));
+    }
+
+    /**
+     * The line of the first top-level statement that runs when the file is
+     * included, or 0 when the file only declares: namespace, use, declare,
+     * const, classes, interfaces, traits, enums, functions, attributes, and
+     * the requires that pull in other declarations.
+     */
+    private function topLevelCodeLine() {
+        $declaring = [T_NAMESPACE, T_USE, T_DECLARE, T_CONST, T_CLASS, T_ABSTRACT, T_FINAL,
+                      T_INTERFACE, T_TRAIT, T_FUNCTION, T_ATTRIBUTE,
+                      T_REQUIRE, T_REQUIRE_ONCE, T_INCLUDE, T_INCLUDE_ONCE];
+        foreach (['T_READONLY', 'T_ENUM'] as $t) {
+            if (defined($t)) { $declaring[] = constant($t); }
+        }
+        $quiet = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG, T_CLOSE_TAG];
+        $depth = 0;
+        $at_start = true;
+        $line = 1;
+        foreach ($this->tokens as $tok) {
+            if (is_array($tok)) {
+                $line = $tok[2];
+                if ($tok[0] === T_OPEN_TAG) { $at_start = true; continue; }
+                if (in_array($tok[0], $quiet, true)) { continue; }
+                if ($tok[0] === T_INLINE_HTML) {
+                    if (trim($tok[1]) === '') { continue; }
+                    return $line;                       // output is a body too
+                }
+                if ($tok[0] === T_CURLY_OPEN || $tok[0] === T_DOLLAR_OPEN_CURLY_BRACES) { $depth++; }
+                if ($depth === 0 && $at_start) {
+                    if (!in_array($tok[0], $declaring, true)) { return $line; }
+                    $at_start = false;
+                }
+                continue;
+            }
+            if ($depth === 0 && $at_start) { return $line; }   // a bare (, $, ! ... starts code
+            if ($tok === '{') { $depth++; }
+            elseif ($tok === '}') { $depth--; if ($depth === 0) { $at_start = true; } }
+            elseif ($tok === ';' && $depth === 0) { $at_start = true; }
+        }
+        return 0;
     }
 
     /**

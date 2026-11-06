@@ -4,6 +4,8 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.6 - a port is named after the holder that started first, by start time: pids wrap, and a
+#                postfix smtpd forked after the wrap outranked its master (getjoinery, xandy).
 # Version: 1.5 - Allow mail apps leaves the rest of the gateway's footprint out too: its enable link to
 #                its own unit file (still hashed), and its ports 993, 465 and 10465 while the shipped
 #                gateway, byte for byte, holds them.
@@ -338,14 +340,27 @@ sort -u -o "$T/startup" "$T/startup"
 # reads "eph" and the program carries the meaning.
 read -r eph_lo eph_hi < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || { eph_lo=32768; eph_hi=60999; }
 # ss lists every process holding a socket, in no fixed order (a master and
-# the children it forks share it), so a port is named after the holder with
-# the lowest pid: the one that opened it.
-port_holder() {  # the ss users:(...) field
+# the children it forks share it), so a port is named after the holder that
+# started first: the one that opened it. Start time, not pid: pids wrap on a
+# busy machine, and a child forked after the wrap has a lower pid than its
+# master. A holder gone before its start time is read sorts last.
+PROC=/proc
+holders_by_age() {  # the ss users:(...) field -> "pid name" lines, oldest first
+    local pid name stat start
     printf '%s' "$1" | grep -o '("[^"]*",pid=[0-9]*' \
-        | sed 's/^("\([^"]*\)",pid=\([0-9]*\)$/\2 \1/' | sort -n | awk 'NR==1 { print $2 }'
+        | sed 's/^("\([^"]*\)",pid=\([0-9]*\)$/\2 \1/' \
+        | while read -r pid name; do
+            stat="$(cat "$PROC/$pid/stat" 2>/dev/null)"
+            start="$(printf '%s' "${stat##*) }" | awk '{ print $20 }')"
+            [[ -n "$stat" && "$start" =~ ^[0-9]+$ ]] || start=999999999999999999
+            printf '%s %s %s\n' "$start" "$pid" "$name"
+        done | sort -n -k1,1 -k2,2 | cut -d' ' -f2-
+}
+port_holder() {  # the ss users:(...) field
+    holders_by_age "$1" | awk 'NR==1 { sub(/^[0-9]+ /, ""); print }'
 }
 port_holder_pid() {  # the pid port_holder names
-    printf '%s' "$1" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -n | head -n 1
+    holders_by_age "$1" | awk 'NR==1 { print $1 }'
 }
 # The mail gateway's ports, held by the shipped gateway (Allow mail apps).
 gateway_port() {  # port, ss users:(...) field

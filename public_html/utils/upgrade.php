@@ -34,6 +34,10 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.37 - the files a release stopped shipping are read from its listing under the key its archive
+	 *                verified with: a node that walked the key chain to this release does not hold that key on disk
+	 *                until the end of the upgrade, so the listing read as none and nothing was removed; a file under
+	 *                install_tools/release_keys/ the release does not list is removed too (0.8.580 left retired keys)
 	 * @version 1.36 - serve-verify-key: only the origin serves its repository's list; a republisher serves the set it
 	 *                holds, and no site serves its own key file (release_key_rotation B10, B11)
 	 * @version 1.35 - only the core archive sets the trusted set it records (a theme or plugin built by an earlier
@@ -638,6 +642,12 @@
 		// not left under a set that retired the key its code is signed by
 		// (specs/release_key_rotation.md R1). method_exists: on a self-update's
 		// re-run this file runs against the site's old includes/.
+		// The key the core archive verified with: its listing is read under it
+		// below, where a node that walked the chain to this release does not
+		// hold it on disk yet (upgrade_persist_trust() writes it last).
+		if ($expected_root === '' && $verdict->key) {
+			$GLOBALS['UPGRADE_STAGED_KEY'] = $verdict->key;
+		}
 		if ($verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0) {
 			$log_keys = $verdict->keys_proven;
 			if (method_exists('PackageSignature', 'withoutTrust')) {
@@ -664,6 +674,48 @@
 		}
 		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed'
 			. ($verdict->log ? ', logged at ' . htmlspecialchars($verdict->log['origin']) . ' index ' . (int)$verdict->log['index'] : '') . '<br>');
+	}
+
+	// The staged core archive's signed listing, read under the key it verified
+	// with (upgrade_verify_staged()). The node's key file is not enough: a
+	// node that walked the key chain to this release holds the key that signs
+	// it only once upgrade_persist_trust() has run, after the deploy, and read
+	// that way the listing is none and no file the release dropped is removed.
+	function upgrade_staged_listing($stage_location) {
+		$key = $GLOBALS['UPGRADE_STAGED_KEY'] ?? null;
+		if (!$key) {
+			return PackageSignature::trustedListing($stage_location);
+		}
+		$keys_file = tempnam(sys_get_temp_dir(), 'upgrade-staged-key-');
+		if ($keys_file === false || file_put_contents($keys_file, $key . "\n") === false) {
+			return PackageSignature::trustedListing($stage_location);
+		}
+		$listing = PackageSignature::trustedListing($stage_location, $keys_file);
+		@unlink($keys_file);
+		return $listing;
+	}
+
+	// The files under maintenance_scripts/install_tools/release_keys/ that
+	// $listing (the new release's) does not name, site-root-relative.
+	function upgrade_unlisted_release_keys($full_site_dir, array $listing) {
+		$rel_dir = 'maintenance_scripts/install_tools/release_keys';
+		$dir = rtrim($full_site_dir, '/') . '/' . $rel_dir;
+		if (!is_dir($dir) || is_link($dir)) {
+			return array();
+		}
+		$unlisted = array();
+		$walk = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+		foreach ($walk as $file) {
+			if ($file->isLink() || !$file->isFile()) {
+				continue;
+			}
+			$rel = $rel_dir . '/' . substr($file->getPathname(), strlen($dir) + 1);
+			if (!isset($listing[$rel])) {
+				$unlisted[] = $rel;
+			}
+		}
+		sort($unlisted);
+		return $unlisted;
 	}
 
 	// The trusted set the verified release leaves (upgrade_verify_staged()),
@@ -1851,12 +1903,18 @@
 			// one of them. They are removed once this release has passed its
 			// deploy tier, so a rolled-back upgrade removes nothing.
 			$stale_release_files = array();
-			$new_listing = class_exists('PackageSignature') ? PackageSignature::trustedListing($stage_location) : null;
+			$new_listing = class_exists('PackageSignature') ? upgrade_staged_listing($stage_location) : null;
 			if ($new_listing !== null) {
 				$previous_listing = PackageSignature::trustedListing($full_site_dir);
 				if ($previous_listing !== null) {
 					$stale_release_files = PackageSignature::droppedPaths($previous_listing, $new_listing, 'maintenance_scripts');
 				}
+				// release_keys/ is the release's alone (no node keeps a key of
+				// its own there), and publishing reads it as the set nodes
+				// trust: a file in it this release does not list goes too, so
+				// a key a missed removal left behind does not outlive it.
+				$stale_release_files = array_values(array_unique(array_merge($stale_release_files,
+					upgrade_unlisted_release_keys($full_site_dir, $new_listing))));
 			}
 
 			$staged_maintenance = rtrim($stage_location, '/') . '/maintenance_scripts';

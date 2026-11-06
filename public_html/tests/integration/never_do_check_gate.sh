@@ -13,7 +13,7 @@
 # nothing, the object has its keys, every item keeps only safe characters, a
 # port in the ephemeral range reads eph, a run that is not root says partial,
 # a program run from /tmp is seen while it runs, a port is named after the
-# holder that opened it, nothing writes, and the mail gateway's credentials
+# holder that started first (pids wrap), nothing writes, and the mail gateway's credentials
 # drop-in is one fixed entry only while it holds nothing but LoadCredential lines,
 # and the shipped gateway's own ports and enable link are left out.
 
@@ -115,13 +115,28 @@ merged=()
 chk "on a machine that is not merged nothing gains a twin" "$(printf '/bin/x\n' | usr_twins / | wc -l)" "1"
 
 echo "=== A port is named after the holder that opened it ==="
-eval "$(sed -n '/^port_holder()/,/^}/p' "$SCRIPT")"
+eval "$(sed -n '/^holders_by_age()/,/^}/p; /^port_holder()/,/^}/p' "$SCRIPT")"
+# A fake /proc: each stat line carries its start time in field 22, and a
+# comm with a space and a parenthesis, which the parse must survive.
+PROC="$T/proc"
+fake_stat() {  # pid starttime
+    mkdir -p "$PROC/$1"
+    printf '%s (odd name) x) S 1 %s %s\n' "$1" "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17" "$2" > "$PROC/$1/stat"
+}
+fake_stat 980 100; fake_stat 2043 900
 chk "a postfix master and its smtpd child read as master, whichever ss lists first" \
     "$(port_holder 'users:(("smtpd",pid=2043,fd=6),("master",pid=980,fd=13))')" "master"
 chk "and the other way round" \
     "$(port_holder 'users:(("master",pid=980,fd=13),("smtpd",pid=2043,fd=6))')" "master"
+fake_stat 4000000 100; fake_stat 1500 900
+chk "a child forked after the pids wrapped (lower pid, started later) still reads as master" \
+    "$(port_holder 'users:(("smtpd",pid=1500,fd=6),("master",pid=4000000,fd=13))')" "master"
+chk "a holder gone before its start time is read sorts last" \
+    "$(port_holder 'users:(("smtpd",pid=7777,fd=6),("master",pid=4000000,fd=13))')" "master"
+fake_stat 711 50
 chk "one holder is that holder" "$(port_holder 'users:(("sshd",pid=711,fd=3))')" "sshd"
 chk "no holder (not root) is empty" "$(port_holder '')" ""
+PROC=/proc
 
 echo "=== Container image layers are not walked ==="
 eval "$(sed -n '/^walk_skips()/,/^}/p' "$SCRIPT")"
@@ -159,7 +174,7 @@ echo "=== The mail gateway's ports and enable link (1.5) ==="
 G="$T/gw"; mkdir -p "$G/lib" "$G/root/public_html/plugins/mail_apps/provisioning/bin"
 cp "$(command -v bash)" "$G/lib/mail-gateway"
 cp "$(command -v bash)" "$G/root/public_html/plugins/mail_apps/provisioning/bin/mail-gateway-$(uname -m)"
-eval "$(sed -n '/^gateway_is_shipped()/,/^}/p; /^port_holder_pid()/,/^}/p; /^gateway_port()/,/^}/p' "$SCRIPT")"
+eval "$(sed -n '/^gateway_is_shipped()/,/^}/p; /^holders_by_age()/,/^}/p; /^port_holder_pid()/,/^}/p; /^gateway_port()/,/^}/p' "$SCRIPT")"
 GATEWAY_BIN="$G/lib/mail-gateway"; SITE_ROOT="$G/root"
 "$G/lib/mail-gateway" -c 'sleep 300; :' &
 GW_PID=$!
