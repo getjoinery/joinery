@@ -32,6 +32,8 @@
  * newest live recovery code was made, and a check that predates it proved codes
  * that no longer exist (regenerated, or retired by a key rotation).
  *
+ * @version 1.4.1 - the code check opens once and closes (VaultUnlock::openOnce()); a key holder that did not
+ *   answer says so instead of calling the code wrong
  * @version 1.4.0 - the backup recovery key and bucket console items are core (BackupReadinessItems)
  * @version 1.3.0 - with the root vault, one card for the one code set (the account and root-opened vaults fold into it)
  * @version 1.2.0 - a check older than the newest live recovery code is stale (codes_since)
@@ -444,8 +446,10 @@ class RecoveryReadiness {
 				continue;
 			}
 			try {
-				VaultUnlock::openKey((int)$user_id, $wrapping->unlocker($keks[$salt]), array(), (string)$scope);
+				VaultUnlock::openOnce((int)$user_id, $wrapping->unlocker($keks[$salt]), array(), array(), (string)$scope);
 				return array('ok' => true, 'message' => 'That code works. It was not used up by this check.');
+			} catch (VaultStoreUnavailableException $e) {
+				return array('ok' => false, 'message' => $e->getMessage());
 			} catch (Exception $e) {
 				continue; // wrong code for this row — try the next
 			}

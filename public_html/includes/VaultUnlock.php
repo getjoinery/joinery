@@ -54,6 +54,13 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.26 - the unseal daemon (specs/unseal_daemon.md WP4): openKey() opens the window in the
+ *   daemon where the install record says it runs here (a DaemonVaultKey: a handle, never the key), with
+ *   the window's clocks; it retries once after three seconds, refuses as vault_service_unavailable, falls
+ *   back to the pool after five minutes of no answer, and never while root holds it (vault_held). A key
+ *   no window holds is closed when the request ends; lock() closes a handle nothing else holds, lockAll()
+ *   every window of the user in the daemon; a window the daemon ended reads as locked with the reason
+ *   (daemon_restart, sentinel_drop). Reveal lists, openOnce(), and a chain's re-seal under its own scope.
  * @version 1.25 - lockAll() records how long each window it closes was open, from its metadata
  * @version 1.24 - windows live in RamStore, bound to the PHP-FPM master (strategy/
  *   object_free_window_store.md WP2): no APCu read of a window remains; lockAll() and
@@ -127,8 +134,28 @@ class VaultSealedForBrowserException extends RuntimeException {}
  *  window can open, and the reason is in the log and on the vault health page. */
 class VaultStoreUnavailableException extends RuntimeException {}
 
+/** Thrown by an unlock when the unseal daemon is installed here and did not
+ *  answer, before the five-minute fallback (vault_service_unavailable). A
+ *  restart takes seconds: the person tries again, nothing was used up. */
+class VaultServiceUnavailableException extends VaultStoreUnavailableException {
+	public function __construct(string $message = '') {
+		parent::__construct($message !== '' ? $message : 'The vault service on this server is restarting. '
+			. 'Wait a minute and unlock again; nothing was used up.');
+	}
+}
+
+/** Thrown by an unlock while root holds this site's unseal daemon (the
+ *  sentinel's drop and hold, vault_held): no vault opens here until it lifts. */
+class VaultHeldException extends VaultStoreUnavailableException {
+	public function __construct(string $message = '') {
+		parent::__construct($message !== '' ? $message : 'Vaults on this server are on a security hold, so none can be '
+			. 'unlocked here until the site\'s operator lifts it. Your passkeys and recovery codes are unaffected.');
+	}
+}
+
 require_once(PathHelper::getIncludePath('includes/VaultKey.php'));
 require_once(PathHelper::getIncludePath('includes/PoolVaultKey.php'));
+require_once(PathHelper::getIncludePath('includes/DaemonVaultKey.php'));
 
 class VaultUnlock {
 
@@ -207,7 +234,7 @@ class VaultUnlock {
 
 	/**
 	 * @var array<string, array> the windows this request has read, by slot key:
-	 *   key (PoolVaultKey), slot_id and meta_id (RamStore::info() ids of the
+	 *   key (PoolVaultKey or DaemonVaultKey), slot_id and meta_id (RamStore::info() ids of the
 	 *   files as read), meta, accounted (when this process last extended it),
 	 *   seen (when it was last asked for: an entry not asked for in
 	 *   ACCOUNT_EVERY_SECONDS is dropped, so a long process does not keep keys
@@ -217,6 +244,30 @@ class VaultUnlock {
 
 	/** A request extends a window at most once in this many seconds (account()). */
 	const ACCOUNT_EVERY_SECONDS = 60;
+
+	/**
+	 * How long the unseal daemon must have gone unanswered (as this site saw
+	 * it) before an unlock takes the pool path (spec § the ladder, rung 3).
+	 */
+	const POOL_RUNG_SECONDS = 300;
+
+	/** Store entry: when this site first found its daemon not answering; gone while it answers. */
+	const DAEMON_DOWN_KEY = 'unsealdown';
+
+	/** Microseconds an unlock waits before its one retry of a daemon that did not answer. Tests shorten it. */
+	public static $daemon_retry_us = 3000000;
+
+	/** @var ?array tests: the install record to use instead of this site's ('pool' forces the pool) */
+	private static $daemon_override = null;
+
+	/** @var array<string,DaemonVaultKey> daemon keys opened this request that no window holds, by id */
+	private static $unarmed = array();
+
+	/** Whether the shutdown closer of $unarmed is registered. */
+	private static $closer_registered = false;
+
+	/** Whether this process already logged that it holds keys in the pool. */
+	private static $pool_logged = false;
 
 	/**
 	 * Load every plugin bootstrap and core consumer bootstrap — lazy, once per
@@ -255,14 +306,213 @@ class VaultUnlock {
 	 * the request that presented a real unlocker for it, or that minted it.
 	 *
 	 * $user_id and $scope tag the key for the holder; the pool path needs
-	 * neither, the daemon path files the window under them.
+	 * neither, the daemon path files the window under them. $reveal is a list
+	 * of sealed chain KEKs, with an unlocker only; each comes back under
+	 * `revealed` as ['kek' => ?string, 'scope' => string] (the rotation's
+	 * re-seal of the chain). $caps sets the daemon window's clocks (null: the
+	 * user's, capsForUser()).
 	 *
-	 * @return array{key: VaultKey, wrappings: string[]}
+	 * Where the daemon runs for this site the key is a DaemonVaultKey: the
+	 * window is the daemon's, and one no session's window takes (arm()) is
+	 * closed when the request ends. Elsewhere it is a PoolVaultKey.
+	 *
+	 * @return array{key: VaultKey, wrappings: string[], revealed: array}
 	 * @throws RuntimeException when the unlocker does not open the wrapping
+	 * @throws VaultServiceUnavailableException|VaultHeldException (both VaultStoreUnavailableException)
 	 */
 	public static function openKey(int $user_id, ?array $unlocker, array $wrap_under = array(),
-			string $scope = 'user'): array {
-		return PoolVaultKey::open($unlocker, $wrap_under);
+			string $scope = 'user', array $reveal = array(), ?array $caps = null, bool $rescope_chain = true): array {
+		// A chain written before the previous-key scope existed is re-sealed under
+		// it by the first open that presents an unlocker (spec B2): the reveal
+		// list hands its KEKs over in this request only.
+		$rescope = array();
+		if ($rescope_chain && $unlocker !== null && !$reveal && $scope === UserEncryptionVault::SCOPE_USER && $user_id > 0) {
+			$rescope = VaultPreviousKeys::unscoped($user_id);
+			$reveal = $rescope;
+		}
+		$rec = self::daemonRecord();
+		if ($rec === null) {
+			self::notePoolPath('the unseal daemon is not installed for this site, or this process is not its pool user');
+			$opened = PoolVaultKey::open($unlocker, $wrap_under, $reveal);
+		} else {
+			$opened = self::openInDaemon($rec, $user_id, $unlocker, $wrap_under, $scope, $reveal, $caps);
+		}
+		if ($rescope) {
+			VaultPreviousKeys::rescope($user_id, $rescope, $opened['revealed'], $opened['key']->publicKey());
+			foreach (array_keys($rescope) as $slot) {
+				unset($opened['revealed'][$slot]);
+			}
+		}
+		return $opened;
+	}
+
+	/**
+	 * The ladder's first and third rungs at an open (spec § When the daemon is
+	 * missing or down): held refuses; a daemon that does not answer is asked
+	 * once more after $daemon_retry_us; then the open refuses as
+	 * vault_service_unavailable until the daemon has been silent for
+	 * POOL_RUNG_SECONDS, after which it takes the pool path.
+	 */
+	private static function openInDaemon(array $rec, int $user_id, ?array $unlocker, array $wrap_under,
+			string $scope, array $reveal, ?array $caps): array {
+		if (UnsealDaemon::held()) {
+			throw new VaultHeldException();
+		}
+		[$idle, $absolute] = self::daemonClocks($user_id, $caps);
+		for ($attempt = 0; ; $attempt++) {
+			try {
+				$opened = DaemonVaultKey::open($rec['socket'], $user_id, $scope, $idle, $absolute, $unlocker, $wrap_under, $reveal);
+				break;
+			} catch (DaemonUnreachableException $e) {
+				// The retry is for a restart; a daemon already silent past the
+				// pool rung has outlived one, so the open goes straight on.
+				$down = self::daemonDownSince();
+				$past_rung = $down !== null && time() - $down >= self::POOL_RUNG_SECONDS;
+				if ($attempt === 0 && !$past_rung) {
+					usleep(self::$daemon_retry_us);
+					continue;
+				}
+				$down_since = self::noteDaemonDown();
+				if (time() - $down_since >= self::POOL_RUNG_SECONDS && !UnsealDaemon::held()) {
+					self::notePoolPath('the unseal daemon has not answered since ' . gmdate('c', $down_since), true);
+					return PoolVaultKey::open($unlocker, $wrap_under, $reveal);
+				}
+				throw new VaultServiceUnavailableException();
+			} catch (DaemonBusyException $e) {
+				if ($attempt === 0) {
+					usleep(self::$daemon_retry_us);
+					continue;
+				}
+				throw new VaultServiceUnavailableException('The vault service on this server is busy. Wait a moment and unlock again; nothing was used up.');
+			}
+		}
+		RamStore::delete(self::DAEMON_DOWN_KEY, RamStore::LIFETIME);
+		self::$unarmed[$opened['key']->id()] = $opened['key'];
+		self::registerCloser();
+		return $opened;
+	}
+
+	/**
+	 * openKey() for a request that needs the open's wrappings or revealed KEKs
+	 * and no key: a retired generation wrapped into the chain, the rotation's
+	 * reveal, a probe. The daemon's window, if one opened, is closed before
+	 * this returns.
+	 *
+	 * @return array{wrappings: string[], revealed: array, public: string}
+	 */
+	public static function openOnce(int $user_id, ?array $unlocker, array $wrap_under = array(),
+			array $reveal = array(), string $scope = 'user'): array {
+		$opened = self::openKey($user_id, $unlocker, $wrap_under, $scope, $reveal, null, false);
+		self::release($opened['key']);
+		return array('wrappings' => $opened['wrappings'], 'revealed' => $opened['revealed'], 'public' => $opened['key']->publicKey());
+	}
+
+	/** Close a key openKey() returned that no window will hold. Nothing to do for a pool key. */
+	public static function release(VaultKey $key): void {
+		if ($key instanceof DaemonVaultKey && !$key->isArmed()) {
+			unset(self::$unarmed[$key->id()]);
+			$key->close();
+		}
+	}
+
+	/**
+	 * This site's daemon as this process may use it: the install record, when
+	 * the installer wrote one and this process is the pool user it serves
+	 * (any other process, a shell as root or a test user, holds keys in the
+	 * pool as it always did). Null otherwise.
+	 */
+	public static function daemonRecord(): ?array {
+		if (self::$daemon_override !== null) {
+			return self::$daemon_override === 'pool' ? null : self::$daemon_override;
+		}
+		$rec = UnsealDaemon::installRecord();
+		if ($rec === null) {
+			return null;
+		}
+		$euid = function_exists('posix_geteuid') ? posix_geteuid() : -1;
+		return $euid === $rec['allow_uid'] ? $rec : null;
+	}
+
+	/** Tests: use $record (socket, allow_uid) as the install record, 'pool' for none, null for the site's own. */
+	public static function useDaemonForTests($record): void {
+		if (PHP_SAPI !== 'cli') {
+			throw new RuntimeException('VaultUnlock::useDaemonForTests() is for tests run from the command line.');
+		}
+		self::$daemon_override = $record;
+		DaemonVaultKey::resetClientsForTests();
+		self::$memo = array();
+	}
+
+	/** When this site first found its daemon silent (now, if this is the first time). */
+	private static function noteDaemonDown(): int {
+		$since = RamStore::get(self::DAEMON_DOWN_KEY, $ok, RamStore::LIFETIME);
+		if ($ok && is_int($since) && $since <= time()) {
+			return $since;
+		}
+		$now = time();
+		RamStore::set(self::DAEMON_DOWN_KEY, $now, 86400, RamStore::LIFETIME);
+		return $now;
+	}
+
+	/** Since when this site has found its daemon silent, or null while it answers. */
+	public static function daemonDownSince(): ?int {
+		$since = RamStore::get(self::DAEMON_DOWN_KEY, $ok, RamStore::LIFETIME);
+		return ($ok && is_int($since)) ? $since : null;
+	}
+
+	/** The pool path's log line: once per process, or every time for the fallback. */
+	private static function notePoolPath(string $why, bool $fallback = false): void {
+		if ($fallback) {
+			error_log('VaultUnlock: a vault key is held in the PHP pool, not the unseal daemon: ' . $why);
+			return;
+		}
+		if (!self::$pool_logged && UnsealDaemon::installRecord() === null && PHP_SAPI !== 'cli') {
+			self::$pool_logged = true;
+			error_log('VaultUnlock: vault keys are held in the PHP pool on this site: ' . $why);
+		}
+	}
+
+	/**
+	 * The daemon's two clocks for a window of $user_id: one idle clock, the
+	 * smaller of the idle setting and the hardened idle cap, and the absolute
+	 * cap (0: the daemon's own seven-day ceiling).
+	 *
+	 * @return array{0:int,1:int}
+	 */
+	private static function daemonClocks(int $user_id, ?array $caps): array {
+		if ($caps === null) {
+			$caps = self::capsForUser($user_id);
+		}
+		$idle = self::idleSeconds();
+		if (!empty($caps['idle'])) {
+			$idle = min($idle, (int)$caps['idle']);
+		}
+		$absolute = empty($caps['absolute']) ? 0 : (int)$caps['absolute'];
+		return array(max(60, min($idle, self::PRIVATE_ABSOLUTE_CAP_SECONDS)), max(0, min($absolute, self::PRIVATE_ABSOLUTE_CAP_SECONDS)));
+	}
+
+	/**
+	 * Close, when the request ends, every daemon key it opened that no window
+	 * holds (a rotation's old generation, a probe). Two stages: a drain this
+	 * request runs after its answer is registered as a shutdown function too,
+	 * and must finish with the old key first.
+	 */
+	private static function registerCloser(): void {
+		if (self::$closer_registered) {
+			return;
+		}
+		self::$closer_registered = true;
+		register_shutdown_function(function () {
+			register_shutdown_function(function () {
+				foreach (self::$unarmed as $id => $key) {
+					unset(self::$unarmed[$id]);
+					if (!$key->isArmed()) {
+						$key->close();
+					}
+				}
+				self::$closer_registered = false;
+			});
+		});
 	}
 
 	/**
@@ -275,8 +525,8 @@ class VaultUnlock {
 	 */
 	public static function arm(int $user_id, VaultKey $key, string $scope = 'user', ?array $caps = null,
 			string $via = VaultAudit::VIA_UNKNOWN): void {
-		if (!$key instanceof PoolVaultKey) {
-			throw new RuntimeException('VaultUnlock::arm: this build holds keys in the pool only.');
+		if (!$key instanceof PoolVaultKey && !$key instanceof DaemonVaultKey) {
+			throw new RuntimeException('VaultUnlock::arm: a window holds a pool key or a daemon handle.');
 		}
 		if ($caps === null) {
 			$caps = self::capsForUser($user_id);
@@ -307,14 +557,101 @@ class VaultUnlock {
 	 * Write a window's key slot and metadata. Throws, leaving no window, when
 	 * the store refuses: an unlock then reports the vault service unavailable.
 	 */
-	private static function storeWindow(PoolVaultKey $key, string $sid, int $user_id, string $scope, array $meta): void {
+	private static function storeWindow(VaultKey $key, string $sid, int $user_id, string $scope, array $meta): void {
 		$slot = self::slotKey($sid, $user_id, $scope);
 		unset(self::$memo[$slot]);
-		if (!$key->storeInSlot($slot, self::idleSeconds())
+		$replaced = self::slotKeyIn($slot);
+		if (!RamStore::set($slot, $key->slotValue(), self::idleSeconds(), RamStore::LIFETIME)
 				|| !RamStore::set(self::metaKey($sid, $user_id, $scope), $meta, self::idleSeconds(), RamStore::LIFETIME)) {
 			RamStore::delete($slot, RamStore::LIFETIME);
 			throw new VaultStoreUnavailableException(self::storeMessage(RamStore::status()));
 		}
+		if ($key instanceof DaemonVaultKey) {
+			$key->markArmed();
+			unset(self::$unarmed[$key->id()]);
+		}
+		// A re-unlock replaces the slot's window: the daemon's old one goes
+		// when nothing else holds it.
+		if ($replaced instanceof DaemonVaultKey && !($key instanceof DaemonVaultKey && $key->sameWindow($replaced))) {
+			self::releaseHandle($user_id, $replaced);
+		}
+	}
+
+	/** The key a slot holds (a pool key or a daemon handle), or null. Reads; deletes nothing. */
+	private static function slotKeyIn(string $slot): ?VaultKey {
+		$value = RamStore::get($slot, $ok, RamStore::LIFETIME);
+		if (!$ok || !is_string($value)) {
+			return null;
+		}
+		if (strncmp($value, DaemonVaultKey::SLOT_TAG, strlen(DaemonVaultKey::SLOT_TAG)) === 0) {
+			$rec = self::daemonRecord();
+			return $rec === null ? null : DaemonVaultKey::fromSlotValue($value, $rec['socket']);
+		}
+		return PoolVaultKey::fromSlotValue($value);
+	}
+
+	/**
+	 * Close a daemon window no slot of $user_id holds any more (borrowed slots
+	 * share their person's handle). Returns the daemon's [closed, unwraps], or
+	 * null when something still holds it or the daemon did not answer.
+	 */
+	private static function releaseHandle(int $user_id, DaemonVaultKey $key): ?array {
+		$pattern = '/^vault:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
+		foreach (RamStore::keys('vault:', RamStore::LIFETIME) as $name) {
+			if (!preg_match($pattern, $name)) {
+				continue;
+			}
+			$value = RamStore::get($name, $ok, RamStore::LIFETIME);
+			$other = ($ok && is_string($value)) ? DaemonVaultKey::fromSlotValue($value, '') : null;
+			if ($other !== null && $other->sameWindow($key)) {
+				return null;
+			}
+		}
+		return $key->close();
+	}
+
+	/**
+	 * The daemon no longer holds $key's window (DaemonVaultKey saw
+	 * unknown_handle): close every slot this request read that held it, with
+	 * the reason it ended, so the read reads as locked and the audit says why.
+	 * A slot that names another window by now (the session unlocked again
+	 * since this request read it) is that window's, and stays.
+	 */
+	public static function windowEnded(DaemonVaultKey $key): void {
+		unset(self::$unarmed[$key->id()]);
+		$reason = null;
+		foreach (self::$memo as $slot => $state) {
+			if (!($state['key'] instanceof DaemonVaultKey) || !$state['key']->sameWindow($key)
+					|| !preg_match('/^vault:([^:]*):(\d+):([^:]*)$/', $slot, $m)) {
+				continue;
+			}
+			unset(self::$memo[$slot]);
+			$now = self::slotKeyIn($slot);
+			if (!($now instanceof DaemonVaultKey) || !$now->sameWindow($key)) {
+				continue;
+			}
+			$reason = $reason ?? self::daemonEndReason($key);
+			self::lock((int)$m[2], $m[1], $m[3], $reason);
+		}
+	}
+
+	/**
+	 * Why the daemon no longer holds a window: root's drop and hold, a
+	 * restart since it opened, or the daemon's own clocks.
+	 */
+	private static function daemonEndReason(DaemonVaultKey $key): string {
+		$rec = self::daemonRecord();
+		$f = $rec === null ? array() : DaemonVaultKey::client($rec['socket'])->status()['fields'];
+		if (($f['ok'] ?? false) === true) {
+			if (($f['held'] ?? false) === true) {
+				return VaultAudit::REASON_SENTINEL_DROP;
+			}
+			if (isset($f['uptime']) && (int)$f['uptime'] < time() - $key->openedAt()) {
+				return VaultAudit::REASON_DAEMON_RESTART;
+			}
+			return VaultAudit::REASON_IDLE_EXPIRED;
+		}
+		return VaultAudit::REASON_DAEMON_RESTART;
 	}
 
 	/**
@@ -327,6 +664,36 @@ class VaultUnlock {
 		$status = RamStore::status();
 		if (!$status['ok']) {
 			throw new VaultStoreUnavailableException(self::storeMessage($status));
+		}
+		// The daemon, where it runs here: held refuses, and a daemon that does
+		// not answer refuses until the pool rung, so nothing is spent on an
+		// unlock that cannot open (a recovery code above all).
+		$rec = self::daemonRecord();
+		if ($rec === null) {
+			return;
+		}
+		if (UnsealDaemon::held()) {
+			throw new VaultHeldException();
+		}
+		for ($attempt = 0; $attempt < 2; $attempt++) {
+			$f = DaemonVaultKey::client($rec['socket'])->status()['fields'];
+			if (($f['ok'] ?? false) === true) {
+				RamStore::delete(self::DAEMON_DOWN_KEY, RamStore::LIFETIME);
+				if (($f['held'] ?? false) === true) {
+					throw new VaultHeldException();
+				}
+				return;
+			}
+			$down = self::daemonDownSince();
+			if ($down !== null && time() - $down >= self::POOL_RUNG_SECONDS) {
+				break; // past the rung: no retry, as at an open
+			}
+			if ($attempt === 0) {
+				usleep(self::$daemon_retry_us);
+			}
+		}
+		if (time() - self::noteDaemonDown() < self::POOL_RUNG_SECONDS) {
+			throw new VaultServiceUnavailableException();
 		}
 	}
 
@@ -341,7 +708,7 @@ class VaultUnlock {
 	 * purpose borrows the unlock, with the same caps measured from $now.
 	 * Re-arming (a second website unlock) restarts each slot's caps.
 	 */
-	private static function armBorrowers(int $user_id, PoolVaultKey $key, array $caps, int $now): void {
+	private static function armBorrowers(int $user_id, VaultKey $key, array $caps, int $now): void {
 		// A borrowed window is kept open by a program's checks, so the absolute
 		// cap is the only thing that ends it while the program is running. A
 		// person whose caps carry none (no consumer asks for one — no Private
@@ -453,8 +820,7 @@ class VaultUnlock {
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return false;
 		}
-		self::account($sid, $user_id, $scope);
-		return true;
+		return self::account($sid, $user_id, $scope);
 	}
 
 	/**
@@ -534,8 +900,16 @@ class VaultUnlock {
 	 */
 	public static function open(int $user_id, ?array $unlocker, array $wrap_under = array(),
 			string $scope = 'user', ?array $caps = null, string $via = VaultAudit::VIA_UNKNOWN): array {
-		$opened = self::openKey($user_id, $unlocker, $wrap_under, $scope);
-		self::arm($user_id, $opened['key'], $scope, $caps, $via);
+		if ($caps === null) {
+			$caps = self::capsForUser($user_id);
+		}
+		$opened = self::openKey($user_id, $unlocker, $wrap_under, $scope, array(), $caps);
+		try {
+			self::arm($user_id, $opened['key'], $scope, $caps, $via);
+		} catch (Throwable $e) {
+			self::release($opened['key']);
+			throw $e;
+		}
 		return $opened;
 	}
 
@@ -659,8 +1033,8 @@ class VaultUnlock {
 		// it must not extend the window or restart the idle cap. Every check
 		// above still applied — suppression skips the accounting, never the
 		// policy (see $activity_suppressed).
-		if (!self::$activity_suppressed) {
-			self::account($sid, $user_id, $scope); // this fetch IS a content decrypt
+		if (!self::$activity_suppressed && !self::account($sid, $user_id, $scope)) { // this fetch IS a content decrypt
+			return null;
 		}
 		// Every open of sealed content needs this key first, so this is where the
 		// hot-turn rule learns whose content the process could be holding. It does
@@ -669,6 +1043,28 @@ class VaultUnlock {
 		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 		SealedEgressGuard::noteScopeOpened($user_id, $scope);
 		return $key;
+	}
+
+	/**
+	 * The in-window key without counting a content read: for a collection's
+	 * DEK prefetch (SystemBase::prefetchSealedDeks()), which opens keys ahead
+	 * of the reads that will count. Every policy check still runs. Null when
+	 * locked.
+	 */
+	public static function peekKey(int $user_id, string $scope = 'user'): ?VaultKey {
+		$sid = self::currentSessionIdOrNull();
+		if ($sid === null || self::windowState($sid, $user_id, $scope) === null) {
+			return null;
+		}
+		if (self::endedByPolicy($sid, $user_id, $scope)) {
+			return null;
+		}
+		$state = self::windowState($sid, $user_id, $scope);
+		if ($state === null) {
+			return null;
+		}
+		SealedEgressGuard::noteScopeOpened($user_id, $scope);
+		return $state['key'];
 	}
 
 	/**
@@ -701,8 +1097,7 @@ class VaultUnlock {
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
 			return false;
 		}
-		self::account($sid, $user_id, $scope);
-		return true;
+		return self::account($sid, $user_id, $scope);
 	}
 
 	/**
@@ -775,8 +1170,24 @@ class VaultUnlock {
 		}
 		$state = self::$memo[$slot] ?? null;
 		if ($state === null || $state['slot_id'] !== $slot_info['id']) {
-			$key = PoolVaultKey::fromSlot($slot);
+			$value = RamStore::get($slot, $ok, RamStore::LIFETIME);
+			$key = null;
+			if ($ok && is_string($value) && strncmp($value, DaemonVaultKey::SLOT_TAG, strlen(DaemonVaultKey::SLOT_TAG)) === 0) {
+				// A daemon window: only a process the daemon answers can use it, and
+				// a slot another process cannot use is not this one's to delete.
+				$rec = self::daemonRecord();
+				if ($rec === null) {
+					unset(self::$memo[$slot]);
+					return null;
+				}
+				$key = DaemonVaultKey::fromSlotValue($value, $rec['socket']);
+			} elseif ($ok && is_string($value)) {
+				$key = PoolVaultKey::fromSlotValue($value);
+			}
 			if ($key === null) {
+				if ($ok) {
+					RamStore::delete($slot, RamStore::LIFETIME);
+				}
 				unset(self::$memo[$slot]);
 				return null;
 			}
@@ -802,17 +1213,22 @@ class VaultUnlock {
 	 * the stored content stamp is older than this request's last extension:
 	 * then something wrote it back, and the read counts again.
 	 */
-	private static function account(string $sid, int $user_id, string $scope): void {
+	private static function account(string $sid, int $user_id, string $scope): bool {
 		$slot = self::slotKey($sid, $user_id, $scope);
 		$state = self::$memo[$slot] ?? null;
 		if ($state === null) {
-			return;
+			return false;
 		}
 		$now = time();
 		$content = (int)($state['meta']['content'] ?? 0);
 		if ($state['accounted'] > 0 && $now - $state['accounted'] < self::ACCOUNT_EVERY_SECONDS
 				&& $content >= $state['accounted']) {
-			return;
+			return true;
+		}
+		// The daemon's idle clock moves with this one (one clock): a window the
+		// daemon has ended is closed by the touch, and reads as locked.
+		if ($state['key'] instanceof DaemonVaultKey && !$state['key']->touch()) {
+			return false;
 		}
 		RamStore::touch($slot, self::idleSeconds(), RamStore::LIFETIME);
 		self::touchWindowMarker($user_id, $scope);
@@ -820,6 +1236,7 @@ class VaultUnlock {
 		if (isset(self::$memo[$slot])) {
 			self::$memo[$slot]['accounted'] = $now;
 		}
+		return true;
 	}
 
 	/** Update one metadata timestamp field to now, preserving the rest, for a full idle time. */
@@ -889,11 +1306,15 @@ class VaultUnlock {
 		$slot = self::slotKey($session_id, $user_id, $scope);
 		$meta = RamStore::get(self::metaKey($session_id, $user_id, $scope), $had_meta, RamStore::LIFETIME);
 		$was_open = RamStore::exists($slot, RamStore::LIFETIME);
+		$held = $was_open ? self::slotKeyIn($slot) : null;
 
 		unset(self::$memo[$slot]);
 		RamStore::delete($slot, RamStore::LIFETIME);
 		RamStore::delete(self::metaKey($session_id, $user_id, $scope), RamStore::LIFETIME);
 		RamStore::delete(self::borrowMarkerKey($session_id, $user_id, $scope), RamStore::LIFETIME);
+		// The daemon's window ends with the last slot holding it (a borrowed
+		// slot shares its person's), and says how many reads it served.
+		$daemon = $held instanceof DaemonVaultKey ? self::releaseHandle($user_id, $held) : null;
 		// Wiping the window has to take the DEKs unwrapped under it as well, or a
 		// process that locked mid-request would still hold keys that open content.
 		// Cleared wholesale, not per user: this runs once at lock, and rebuilding
@@ -908,15 +1329,21 @@ class VaultUnlock {
 			$armed = ($had_meta && is_array($meta)) ? (int)($meta['armed'] ?? 0) : 0;
 			if ($audit) {
 				VaultAudit::closed($user_id, $scope, $reason, $session_id,
-					$armed > 0 ? time() - $armed : null);
+					$armed > 0 ? time() - $armed : null, $daemon === null ? null : $daemon['unwraps']);
 			}
 			self::noteClosed($user_id, $session_id, $scope, $reason);
 		}
 		self::runWipeCallbacks($user_id, $scope);
 	}
 
-	/** Wipe every scope's window, across every session, for a user (e.g. on password change). */
-	public static function lockAll(int $user_id, string $reason = VaultAudit::REASON_CREDENTIAL_EVENT): void {
+	/**
+	 * Wipe every scope's window, across every session, for a user (e.g. on
+	 * password change). $keep is a key this request opened and is about to
+	 * make the window (a recovery unlock ends every other window first): its
+	 * daemon window is spared.
+	 */
+	public static function lockAll(int $user_id, string $reason = VaultAudit::REASON_CREDENTIAL_EVENT,
+			?VaultKey $keep = null): void {
 		$closed = array();
 		// The window keys (vault:), their metadata (vaultmeta:), and a borrowed
 		// slot's armed marker (vaultbrw:), found by name: no entry is opened.
@@ -926,6 +1353,12 @@ class VaultUnlock {
 		$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
 		$names = array_values(array_filter(RamStore::keys('vault', RamStore::LIFETIME | RamStore::INCLUDE_EXPIRED),
 			function ($name) use ($pattern) { return (bool)preg_match($pattern, $name); }));
+		$handles = array();
+		foreach ($names as $name) {
+			if (preg_match($window, $name) && ($held = self::slotKeyIn($name)) instanceof DaemonVaultKey) {
+				$handles[$held->id()] = $held;
+			}
+		}
 		// One row per (session, scope) rather than a single summary: a
 		// credential event that closes three devices at once should read as
 		// three windows ending, which is what it was. An expired slot ended by
@@ -942,6 +1375,21 @@ class VaultUnlock {
 			RamStore::delete($name, RamStore::LIFETIME);
 		}
 		self::$memo = array();
+		// The daemon's windows the slots named, and this request's own unarmed
+		// keys, one by one. Not the daemon's close-by-user: that would also end
+		// a key another request holds without a window (a rotation's drain of
+		// the old generation, running after its answer), and a handle no slot
+		// names is reachable by nothing; it ends on its own clocks.
+		$rec = self::daemonRecord();
+		if ($rec !== null) {
+			foreach ($handles + array_filter(self::$unarmed, function ($k) use ($user_id) { return $k->userId() === $user_id; })
+					as $id => $key) {
+				if (!($keep instanceof DaemonVaultKey && $key->sameWindow($keep))) {
+					unset(self::$unarmed[$id]);
+					$key->close();
+				}
+			}
+		}
 		foreach (RamStore::keys('vaultwin:' . $user_id . ':') as $marker) {
 			RamStore::delete($marker); // every scope's window is gone — the markers with them
 		}
@@ -1595,6 +2043,7 @@ class VaultUnlock {
 		self::$activity_suppressed = false;
 		self::$credential_window = null;
 		self::$memo = array();
+		self::$unarmed = array();
 		if (session_status() === PHP_SESSION_ACTIVE) {
 			unset($_SESSION['vault_windows']);
 		}

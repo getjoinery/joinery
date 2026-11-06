@@ -23,6 +23,8 @@
  * the window slot is `v2.` + base64url(seed); anything else (an untagged
  * X25519 secret included) is refused as malformed.
  *
+ * @version 1.6 - open() takes a reveal list (chain KEKs, the previous-key scope then dek) and
+ *   answers `revealed`; openPrevious(); slotValue()/fromSlotValue() so VaultUnlock reads a slot once
  * @version 1.5 - the window slot is a RamStore entry (strategy/object_free_window_store.md): JSON
  *   cannot hold an object, so nothing planted in the slot runs when it is read; storeInSlot()
  *   reports a store that refused
@@ -96,11 +98,18 @@ final class PoolVaultKey implements VaultKey {
 	 *
 	 * @param ?array $unlocker  ['wrapped' => string, 'kek' => string, 'ad' => string], or null to mint
 	 * @param array  $wrap_under list of ['kek' => string, 'ad' => string]
-	 * @return array{key: PoolVaultKey, wrappings: string[]} wrappings under the
+	 * $reveal is a list of sealed chain KEKs (`v2.seal.` blobs), only with an
+	 * unlocker: each comes back under `revealed` as ['kek' => ?string,
+	 * 'scope' => 'previous-key'|'dek'|''], the daemon's reveal list.
+	 *
+	 * @return array{key: PoolVaultKey, wrappings: string[], revealed: array} wrappings under the
 	 *   same keys as $wrap_under, in order
 	 * @throws RuntimeException when the unlocker does not open the wrapping
 	 */
-	public static function open(?array $unlocker, array $wrap_under = array()): array {
+	public static function open(?array $unlocker, array $wrap_under = array(), array $reveal = array()): array {
+		if ($reveal && $unlocker === null) {
+			throw new RuntimeException('PoolVaultKey: a chain KEK is revealed only to a presented unlocker.');
+		}
 		$box = new SealedBox();
 		if ($unlocker === null) {
 			$keypair = $box->generateKeypair();
@@ -115,7 +124,50 @@ final class PoolVaultKey implements VaultKey {
 		foreach ($wrap_under as $slot => $entry) {
 			$wrappings[$slot] = $box->wrapKey($key->stored(), (string)$entry['kek'], (string)$entry['ad']);
 		}
-		return array('key' => $key, 'wrappings' => $wrappings);
+		$revealed = array();
+		foreach ($reveal as $slot => $sealed) {
+			$revealed[$slot] = $key->openChainKek((string)$sealed);
+		}
+		return array('key' => $key, 'wrappings' => $wrappings, 'revealed' => $revealed);
+	}
+
+	/**
+	 * A sealed chain KEK opened with this key: its own scope first, then the
+	 * content scope a chain from before the split was sealed under, saying
+	 * which (the daemon's openChainKEK). ['kek' => null, 'scope' => ''] when
+	 * neither opens it.
+	 */
+	private function openChainKek(string $sealed): array {
+		try {
+			[, $raw] = SealedBox::unframeSeal($sealed);
+		} catch (RuntimeException $e) {
+			return array('kek' => null, 'scope' => '');
+		}
+		$seed = SealedBox::b64url_decode($this->secret);
+		try {
+			foreach (array(SealedBox::SCOPE_PREVIOUS_KEY, SealedBox::SCOPE_DEK) as $scope) {
+				try {
+					return array('kek' => SealedBox::openV2($raw, $seed, $scope), 'scope' => $scope);
+				} catch (RuntimeException $e) {
+					continue;
+				}
+			}
+		} finally {
+			sodium_memzero($seed);
+		}
+		return array('kek' => null, 'scope' => '');
+	}
+
+	public function openPrevious(string $sealed_kek, string $wrapped, string $ad): VaultKey {
+		$opened = $this->openChainKek($sealed_kek);
+		if ($opened['kek'] === null) {
+			throw new RuntimeException('PoolVaultKey: the chain entry is not sealed to this key.');
+		}
+		try {
+			return self::open(array('wrapped' => $wrapped, 'kek' => $opened['kek'], 'ad' => $ad))['key'];
+		} finally {
+			sodium_memzero($opened['kek']);
+		}
 	}
 
 	public function id(): string {
@@ -159,14 +211,25 @@ final class PoolVaultKey implements VaultKey {
 		if (!$success) {
 			return null;
 		}
-		try {
-			if (is_string($value)) {
-				return new self($value);
-			}
-		} catch (RuntimeException $e) {
+		$key = is_string($value) ? self::fromSlotValue($value) : null;
+		if ($key === null) {
+			RamStore::delete($slot, RamStore::LIFETIME);
 		}
-		RamStore::delete($slot, RamStore::LIFETIME);
-		return null;
+		return $key;
+	}
+
+	/** The key a slot value holds, or null when it is not a pool key in its slot form. */
+	public static function fromSlotValue(string $value): ?PoolVaultKey {
+		try {
+			return new self($value);
+		} catch (RuntimeException $e) {
+			return null;
+		}
+	}
+
+	/** The slot value: the secret in its slot form. */
+	public function slotValue(): string {
+		return $this->stored();
 	}
 
 	/**

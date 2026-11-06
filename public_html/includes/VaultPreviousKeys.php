@@ -11,12 +11,18 @@
  * holds, so without this that content opens only through a passkey ceremony.
  *
  * Shape: uev_previous_keys is JSON, a list of
- *   {generation, wrapped, sealed_kek[, swept][, sweep_at]}
+ *   {generation, wrapped, sealed_kek[, scope][, swept][, sweep_at]}
  * where `wrapped` is the retired secret wrapped (SealedBox::wrapKey) under a
  * random 32-byte KEK, AD "vault:user:previous:{generation}", and `sealed_kek`
- * is that KEK sealed to the current public key, exactly as a row's DEK is
- * (VaultCrypto::sealItemDek). Opening one is: the open window's key opens the
- * KEK, the KEK opens the old secret. A rotation re-seals every KEK to the new
+ * is that KEK sealed to the current public key under the chain's own scope
+ * (VaultCrypto::sealChainKek, `scope: previous-key`), which the unseal
+ * daemon's `unwrap` never opens (specs/unseal_daemon.md B2). An entry without
+ * `scope` was sealed as a DEK is, before that scope existed; the first open
+ * that presents an unlocker re-seals it (unscoped(), rescope()). Opening one
+ * is VaultKey::openPrevious(): the open window's key opens the KEK, the KEK
+ * opens the old secret, inside whatever holds the key (the daemon, or the
+ * pool). A KEK reaches PHP only through an open's reveal list, in a request
+ * that presented an unlocker: the rotation's re-seal and the re-scope. A rotation re-seals every KEK to the new
  * key, so the chain follows the vault. It keeps every retired key: an entry is
  * a few hundred bytes, and dropping one would strand whatever still sits on
  * that generation.
@@ -37,6 +43,9 @@
  * runs out of time records where it stopped (`sweep_at`) and the next window
  * goes on from there.
  *
+ * @version 1.3 - the chain KEK's own scope (sealChainKek, `scope`); open() through VaultKey::openPrevious();
+ *   forNewKey() re-seals KEKs an open revealed; wrap() and adoptRetired() open through VaultUnlock::openOnce();
+ *   unscoped()/rescope() (unseal_daemon.md WP4)
  * @version 1.2.1 - comment: no X25519 note
  * @version 1.2 - `swept` holds the pass that swept the entry; true reads as pass 1
  * @version 1.1 - entries carry `swept` and the sweep's place, `sweep_at` (VaultChainSweep); recordSweep()
@@ -60,6 +69,9 @@ class VaultPreviousKeys {
 			if (is_array($e) && isset($e['generation'], $e['wrapped'], $e['sealed_kek'])) {
 				$out[(int)$e['generation']] = array('generation' => (int)$e['generation'],
 					'wrapped' => (string)$e['wrapped'], 'sealed_kek' => (string)$e['sealed_kek']);
+				if (($e['scope'] ?? null) === SealedBox::SCOPE_PREVIOUS_KEY) {
+					$out[(int)$e['generation']]['scope'] = SealedBox::SCOPE_PREVIOUS_KEY;
+				}
 				if (!empty($e['swept'])) {
 					$out[(int)$e['generation']]['swept'] = (int)$e['swept'];
 				} elseif (isset($e['sweep_at']['step']) && is_string($e['sweep_at']['step'])) {
@@ -73,36 +85,121 @@ class VaultPreviousKeys {
 	}
 
 	/**
-	 * The chain for a vault moving from $old_key to $new_public_key: every
-	 * entry already held, its KEK re-sealed to the new key, plus each
-	 * $retiring generation (generation => an unlocker that opens it), wrapped
-	 * fresh. Returns the JSON to store in uev_previous_keys.
+	 * Every entry's sealed KEK, generation => `v2.seal.` blob: the reveal list
+	 * a rotation's open takes (VaultUnlock::openOnce()) under its authorizing
+	 * unlocker, so forNewKey() can re-seal the chain to the new key.
+	 */
+	public static function sealedKeks(UserEncryptionVault $vault): array {
+		$out = array();
+		foreach (self::entries($vault) as $e) {
+			$out[$e['generation']] = $e['sealed_kek'];
+		}
+		return $out;
+	}
+
+	/**
+	 * The chain for a vault moving to $new_public_key: every entry already
+	 * held, its KEK (revealed by the rotation's open, sealedKeks()) re-sealed
+	 * to the new key under the chain's scope, plus each $retiring generation
+	 * (generation => an unlocker that opens it), wrapped fresh. Returns the
+	 * JSON to store in uev_previous_keys.
 	 *
+	 * @param array<int,array{kek:?string,scope:string}> $revealed generation => what the open revealed
 	 * @param array<int,array> $retiring generation => unlocker (VaultUnlock::openKey's first argument)
 	 */
-	public static function forNewKey(UserEncryptionVault $vault, VaultKey $old_key, array $retiring, string $new_public_key): string {
+	public static function forNewKey(UserEncryptionVault $vault, array $revealed, array $retiring, string $new_public_key): string {
 		$crypto = new VaultCrypto();
 		$out = array();
 		foreach (self::entries($vault) as $e) {
-			// A KEK that will not open is not dropped: the rotation is inside its
+			// A KEK that did not open is not dropped: the rotation is inside its
 			// transaction, so throwing rolls it back whole, and committing a
 			// shorter chain would strand that generation for good.
-			$kek = $crypto->openItemDek($e['sealed_kek'], $old_key);
+			$kek = $revealed[$e['generation']]['kek'] ?? null;
+			if (!is_string($kek) || $kek === '') {
+				throw new RuntimeException('VaultPreviousKeys: the chain entry for generation ' . $e['generation']
+					. ' did not open with the rotation\'s unlocker.');
+			}
 			$out[$e['generation']] = array('generation' => $e['generation'], 'wrapped' => $e['wrapped'],
-				'sealed_kek' => $crypto->sealItemDek($kek, $new_public_key));
+				'sealed_kek' => $crypto->sealChainKek($kek, $new_public_key), 'scope' => SealedBox::SCOPE_PREVIOUS_KEY);
 			if (!empty($e['swept'])) {
 				$out[$e['generation']]['swept'] = (int)$e['swept'];
 			}
-			sodium_memzero($kek);
 		}
 		foreach ($retiring as $generation => $unlocker) {
-			$entry = self::wrap((int)$generation, $unlocker, $new_public_key);
+			$entry = self::wrap($vault, (int)$generation, $unlocker, $new_public_key);
 			if ($entry !== null) {
 				$out[(int)$generation] = $entry;
 			}
 		}
 		krsort($out);
 		return json_encode(array_values($out));
+	}
+
+	/** @var array<int,array> per-request: user id => [vault id, chain as read, generation => sealed KEK] */
+	private static $unscoped = array();
+
+	/**
+	 * The entries of $user_id's account vault still sealed as a DEK is (no
+	 * `scope`), generation => sealed KEK: the reveal list for the next open
+	 * that presents an unlocker, which re-seals them (rescope()). Empty for a
+	 * chain already moved, which is every chain after its first such open.
+	 */
+	public static function unscoped(int $user_id): array {
+		try {
+			$vault = UserEncryptionVault::loadForUser($user_id);
+		} catch (Throwable $e) {
+			return array();
+		}
+		if (!$vault) {
+			return array();
+		}
+		$out = array();
+		foreach (self::entries($vault) as $e) {
+			if (($e['scope'] ?? null) !== SealedBox::SCOPE_PREVIOUS_KEY) {
+				$out[$e['generation']] = $e['sealed_kek'];
+			}
+		}
+		self::$unscoped[$user_id] = array('vault' => $vault, 'entries' => $out);
+		return $out;
+	}
+
+	/**
+	 * Re-seal the entries an open revealed (VaultUnlock::openKey(), from
+	 * unscoped()) under the chain's own scope, to $public_key, and store the
+	 * chain with the compare-and-swap add() uses. Only when $public_key is the
+	 * vault's current key, the one the chain is sealed to; an entry that did
+	 * not open stays as it is. A failure is logged: the unlock it rides on
+	 * still stands, and the next one tries again.
+	 */
+	public static function rescope(int $user_id, array $pending, array $revealed, string $public_key): void {
+		$read = self::$unscoped[$user_id] ?? null;
+		unset(self::$unscoped[$user_id]);
+		$vault = $read['vault'] ?? null;
+		if (!$vault || !hash_equals((string)$vault->get('uev_public_key'), $public_key)) {
+			return;
+		}
+		try {
+			$crypto = new VaultCrypto();
+			$entries = array();
+			foreach (self::entries($vault) as $e) {
+				$entries[$e['generation']] = $e;
+			}
+			$moved = 0;
+			foreach ($pending as $generation => $sealed) {
+				$kek = $revealed[$generation]['kek'] ?? null;
+				if (!isset($entries[$generation]) || !is_string($kek) || $kek === '') {
+					continue;
+				}
+				$entries[$generation]['sealed_kek'] = $crypto->sealChainKek($kek, $public_key);
+				$entries[$generation]['scope'] = SealedBox::SCOPE_PREVIOUS_KEY;
+				$moved++;
+			}
+			if ($moved > 0 && !self::store($vault, $entries)) {
+				error_log('VaultPreviousKeys::rescope: the chain of user ' . $user_id . ' changed meanwhile; the next unlock moves it');
+			}
+		} catch (Throwable $e) {
+			error_log('VaultPreviousKeys::rescope: user ' . $user_id . ': ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -135,7 +232,7 @@ class VaultPreviousKeys {
 			krsort($rows);
 			foreach ($rows as $w) {
 				try {
-					PoolVaultKey::open($w->unlocker($kek));
+					VaultUnlock::openOnce((int)$vault->get('uev_usr_user_id'), $w->unlocker($kek));
 				} catch (Throwable $e) {
 					continue;
 				}
@@ -161,7 +258,7 @@ class VaultPreviousKeys {
 			$entries[$e['generation']] = $e;
 		}
 		foreach ($retiring as $generation => $unlocker) {
-			$entry = self::wrap((int)$generation, $unlocker, (string)$vault->get('uev_public_key'));
+			$entry = self::wrap($vault, (int)$generation, $unlocker, (string)$vault->get('uev_public_key'));
 			if ($entry !== null) {
 				$entries[(int)$generation] = $entry;
 				$added[] = (int)$generation;
@@ -233,14 +330,12 @@ class VaultPreviousKeys {
 		if (isset(self::$opened[$cache])) {
 			return self::$opened[$cache];
 		}
-		$crypto = new VaultCrypto();
 		$keys = array();
 		foreach (self::entries($vault) as $e) {
 			try {
-				$kek = $crypto->openItemDek($e['sealed_kek'], $current_key);
-				$keys[$e['generation']] = PoolVaultKey::open(array('wrapped' => $e['wrapped'], 'kek' => $kek,
-					'ad' => self::ad($e['generation'])))['key'];
-				sodium_memzero($kek);
+				$keys[$e['generation']] = $current_key->openPrevious($e['sealed_kek'], $e['wrapped'], self::ad($e['generation']));
+			} catch (VaultLockedException $ex) {
+				throw $ex; // the window itself ended: locked, not a chain that does not open
 			} catch (Throwable $ex) {
 				continue;
 			}
@@ -248,17 +343,24 @@ class VaultPreviousKeys {
 		return self::$opened[$cache] = $keys;
 	}
 
-	/** One retired generation, wrapped under a fresh KEK sealed to $public_key; null when $unlocker does not open it. */
-	private static function wrap(int $generation, array $unlocker, string $public_key): ?array {
+	/**
+	 * One retired generation, wrapped under a fresh KEK sealed to $public_key
+	 * under the chain's scope; null when $unlocker does not open it. The open
+	 * is the key holder's, closed again at once (VaultUnlock::openOnce()).
+	 */
+	private static function wrap(UserEncryptionVault $vault, int $generation, array $unlocker, string $public_key): ?array {
 		$kek = random_bytes(32);
 		try {
-			$opened = PoolVaultKey::open($unlocker, array(array('kek' => $kek, 'ad' => self::ad($generation))));
+			$opened = VaultUnlock::openOnce((int)$vault->get('uev_usr_user_id'), $unlocker,
+				array(array('kek' => $kek, 'ad' => self::ad($generation))));
 		} catch (Throwable $e) {
+			sodium_memzero($kek);
 			return null;
 		}
 		$entry = array('generation' => $generation, 'wrapped' => $opened['wrappings'][0],
-			'sealed_kek' => (new VaultCrypto())->sealItemDek($kek, $public_key));
+			'sealed_kek' => (new VaultCrypto())->sealChainKek($kek, $public_key), 'scope' => SealedBox::SCOPE_PREVIOUS_KEY);
 		sodium_memzero($kek);
 		return $entry;
 	}
 }
+?>

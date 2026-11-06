@@ -1153,6 +1153,8 @@ abstract class SystemBase {
 		$crypto = new VaultCrypto();
 		try {
 			$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $key);
+		} catch (VaultLockedException $e) {
+			throw $e; // the window ended under the read (the unseal daemon's clock or restart): locked
 		} catch (Throwable $e) {
 			// Sealed to a key a rotation retired: the vault keeps its retired
 			// keys under the current one (VaultPreviousKeys), so it opens with
@@ -1191,6 +1193,49 @@ abstract class SystemBase {
 	 * (server_initiated_write); a failed one is logged and the read still
 	 * answers.
 	 */
+	/**
+	 * Open the sealed DEKs of a page of rows in one trip per owner, before any
+	 * row's column is read (specs/unseal_daemon.md § The PHP seam): with the
+	 * key in the unseal daemon each open is a socket round trip, and a list
+	 * would otherwise make one per row. The opens land in VaultCrypto's DEK
+	 * memo, where each row's own read finds them. Only for an owner whose
+	 * window is open and held by the daemon; counts as no activity (the rows'
+	 * own reads do that); a batch that does not open whole (a row on a
+	 * retired key) leaves every row to open on its own. Never throws.
+	 *
+	 * @param array<int,array|object> $rows raw rows as the collection loaded them
+	 */
+	public static function prefetchSealedDeks(array $rows): void {
+		if (empty(static::$sealed_fields) || count($rows) < 2 || static::sealedKeyColumn() === '') {
+			return;
+		}
+		try {
+			$by_owner = array();
+			foreach ($rows as $row) {
+				$r = (array)$row;
+				if (!static::rowArrayIsSealed($r)) {
+					continue;
+				}
+				$blob = (string)$r[static::sealedKeyColumn()];
+				if (VaultCrypto::edgeFrame($blob) !== null) {
+					continue;
+				}
+				$owner = static::sealedOwnerUserIdFor($r);
+				if ($owner !== null) {
+					$by_owner[$owner][$blob] = true;
+				}
+			}
+			foreach ($by_owner as $owner => $blobs) {
+				$key = VaultUnlock::peekKey($owner);
+				if ($key instanceof DaemonVaultKey) {
+					(new VaultCrypto())->openItemDeks(array_keys($blobs), $key);
+				}
+			}
+		} catch (Throwable $e) {
+			// each row opens on its own
+		}
+	}
+
 	protected static function openWithPreviousKeys(string $sealed, int $owner_id, VaultKey $current_key, array $row = array()): ?string {
 		// A cached vault with no chain is read again: the chain may have been
 		// written since (an unlock adopting retired keys), and a vault with
@@ -1215,6 +1260,8 @@ abstract class SystemBase {
 			try {
 				$dek = $crypto->openItemDek($sealed, $previous);
 				break;
+			} catch (VaultLockedException $e) {
+				throw $e; // the window ended under the read: locked, as for the current key
 			} catch (Throwable $e) {
 				continue;
 			}
@@ -4934,6 +4981,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		$q = $this->getMultiResults(false, $debug);
 		
 		// Load each row into a child object
+		$loaded_rows = array();
 		foreach($q->fetchAll() as $row) {
 			// Create child object using the primary key value
 			$child = new $childClassName($row->$pkey_column);
@@ -4943,6 +4991,11 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			
 			// Add to collection
 			$this->add($child);
+			$loaded_rows[] = $row;
+		}
+		// One trip to the unseal daemon for the page's sealed keys, not one per row.
+		if (!empty($childClassName::$sealed_fields) && $loaded_rows) {
+			$childClassName::prefetchSealedDeks($loaded_rows);
 		}
 	}
 	

@@ -34,6 +34,7 @@
  * A DEK frame's `v2` is the seal version: X-Wing. A frame of any other
  * version is malformed.
  *
+ * @version 1.12 - sealChainKek(): a chain KEK sealed under the previous-key scope (unseal_daemon.md B2)
  * @version 1.11 - v2 frames only: `v1.seal.` and `v1.edgeseal.` are malformed; EDGE_SEAL_PREFIX_V1
  *   and the key-version check are gone
  * @version 1.10 - browserScriptTag(): the one tag that puts assets/js/vault-crypto.js on a page
@@ -100,6 +101,20 @@ class VaultCrypto {
 	}
 
 	/** Seal a per-item DEK to the vault's public key — stored on the consumer's own row. */
+	/**
+	 * Seal a retired key's chain KEK (VaultPreviousKeys) to the vault's public
+	 * key under the chain's own scope, `previous-key`: the same frame as a DEK,
+	 * but the daemon's `unwrap` never opens it, so a window can use the
+	 * retired keys (open_previous) and never carry them away (spec B2).
+	 */
+	public function sealChainKek(string $kek, string $public_key): string {
+		$public_raw = SealedBox::b64url_decode($public_key);
+		if ($public_raw === false) {
+			throw new RuntimeException('VaultCrypto: malformed public key.');
+		}
+		return 'v2.seal.' . SealedBox::b64url(SealedBox::sealV2($kek, $public_raw, SealedBox::SCOPE_PREVIOUS_KEY));
+	}
+
 	public function sealItemDek(string $dek, string $public_key): string {
 		return $this->box->sealDek($dek, $public_key);
 	}

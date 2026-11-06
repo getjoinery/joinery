@@ -15,6 +15,7 @@
  * KEY is the basename of the site root, made safe for a path, exactly as the
  * installer derives it.
  *
+ * @version 1.2 - facts(): down_since, when the site's unlocks first found the daemon silent
  * @version 1.1 - refused(): the reason an installer left for not installing (a container that cannot
  *                lock memory, reviewer2 B8); the process table is read only when status was not asked (B10)
  * @version 1.0
@@ -96,13 +97,14 @@ class UnsealDaemon {
 	 *   memory_locked  as the daemon reports it
 	 *   daemon         its version
 	 *   error          why it did not answer
+	 *   down_since     when this site's unlocks first found it silent (VaultUnlock), when not answering
 	 */
 	public static function facts(bool $ask = true, float $timeout = 0.5): array {
 		$key = self::key();
 		$rec = self::installRecord($key);
 		$facts = array('installed' => $rec !== null, 'refused' => $rec === null ? self::refused($key) : null, 'socket' => $rec['socket'] ?? null, 'binary' => 'current',
 			'held' => self::held($key), 'crashes_hour' => 0, 'running' => null, 'asked' => false, 'answering' => null,
-			'memory_locked' => null, 'daemon' => null, 'error' => null);
+			'memory_locked' => null, 'daemon' => null, 'error' => null, 'down_since' => null);
 		if ($rec === null) {
 			return $facts;
 		}
@@ -133,6 +135,7 @@ class UnsealDaemon {
 				$facts['held'] = $facts['held'] || (($f['held'] ?? false) === true);
 			} else {
 				$facts['error'] = (string)($f['error'] ?? 'unknown');
+				$facts['down_since'] = VaultUnlock::daemonDownSince();
 			}
 		}
 		return $facts;

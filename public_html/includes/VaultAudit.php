@@ -24,6 +24,7 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.4 - REASON_DAEMON_RESTART and REASON_SENTINEL_DROP; closed() records the daemon window's unwrap count (unseal_daemon.md WP4)
  * @version 1.3 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.2 - VIA_APP_BORROW and REASON_APP_REVOKED for an app credential's borrowed
  *   window; handle() names a borrowed slot's credential instead of hashing it.
@@ -60,6 +61,8 @@ class VaultAudit {
 	const REASON_IP_CHANGE        = 'ip_change';
 	const REASON_CREDENTIAL_EVENT = 'credential_event';  // password change/reset, recovery-code use, 2FA change
 	const REASON_APP_REVOKED      = 'app_credential_revoked'; // the app credential borrowing the window was revoked
+	const REASON_DAEMON_RESTART   = 'daemon_restart';    // the unseal daemon restarted (or never answered for it) and the window went with it
+	const REASON_SENTINEL_DROP    = 'sentinel_drop';     // root's drop and hold ended every window in the unseal daemon
 
 	/**
 	 * A window was armed. $caps is the resolved end-event policy, recorded
@@ -84,11 +87,12 @@ class VaultAudit {
 	 * measure from, and says so rather than guessing.
 	 */
 	public static function closed(int $user_id, string $scope, string $reason,
-			?string $session_id, ?int $open_seconds = null): void {
+			?string $session_id, ?int $open_seconds = null, ?int $unwraps = null): void {
 		$note = 'scope=' . $scope
 			. ' reason=' . $reason
 			. ' session=' . self::handle($session_id)
-			. ' open_seconds=' . ($open_seconds === null ? 'unknown' : (string)max(0, $open_seconds));
+			. ' open_seconds=' . ($open_seconds === null ? 'unknown' : (string)max(0, $open_seconds))
+			. ($unwraps === null ? '' : ' unwraps=' . $unwraps);
 		self::write(self::EVENT_CLOSED, $user_id, $note);
 	}
 

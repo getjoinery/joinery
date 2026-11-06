@@ -97,6 +97,8 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.16 - restoreFromBlob() lets a VaultLockedException through: a window that ended mid-open
+ *   (the unseal daemon) reads as locked, not as a blob to rebuild over
  * @version 1.15 - the fold lock is a PostgreSQL advisory lock, not a world-writable /dev/shm file
  * @version 1.14 - FILE_SOURCE: the mailbox_search_index origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
@@ -483,6 +485,8 @@ class MailboxIndex {
 			$crypto->openFieldFile($src, $this->shmPath($user_id), $dek, $this->blobAd($user_id));
 			// Before the first open: SQLite's -journal/-wal inherit this mode.
 			self::makePrivate($this->shmPath($user_id));
+		} catch (VaultLockedException $e) {
+			throw $e; // the window ended under the open: locked, not a bad blob to rebuild over
 		} catch (Throwable $e) {
 			error_log('MailboxIndex: restoreFromBlob failed for user ' . $user_id . ' (rebuilding): ' . $e->getMessage());
 			return false;

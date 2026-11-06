@@ -20,6 +20,8 @@
  * itself under any KEK would be a key-export door for anything resident in
  * the pool during a window.
  *
+ * @version 1.4 - openPrevious(): a retired key from the vault's chain, opened by this one (the
+ *   daemon's open_previous); DaemonVaultKey is the daemon's implementation
  * @version 1.3 - version() is always 2: X25519 keys are gone
  * @version 1.2 - version(): 1 (X25519, opened only until the holder rotates)
  *   or 2 (X-Wing); unseal() opens raw boxes of the key's own version
@@ -72,5 +74,16 @@ interface VaultKey {
 	 * @throws RuntimeException when any one of them does not open
 	 */
 	public function unsealEdge(array $sealed): array;
+
+	/**
+	 * A retired key from the vault's chain (VaultPreviousKeys), opened with
+	 * this key and held where this one is: $sealed_kek is the chain entry's
+	 * KEK sealed to this key (the `previous-key` scope, or `dek` for a chain
+	 * written before that scope), $wrapped the retired secret under that KEK,
+	 * $ad its AD. Neither the KEK nor the retired secret reaches the caller.
+	 *
+	 * @throws RuntimeException when the entry does not open with this key
+	 */
+	public function openPrevious(string $sealed_kek, string $wrapped, string $ad): VaultKey;
 }
 ?>

@@ -30,6 +30,8 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.13 - the rotation re-seals the chain from KEKs an open under its unlocker revealed; a
+ *   probe whose key holder did not answer (or is held) says so instead of trying the next row
  * @version 1.12 - a ceremony that opens a window checks the window store first (requireWindowStore()),
  *   so a refusing host spends no recovery code and writes no vault; a window that fails to open
  *   after the work is saved is logged, not reported as a failed ceremony
@@ -244,7 +246,7 @@ class VaultCeremonies {
 			VaultClientCustody::createVault((int)$user->key, VaultScopes::ROOT_SCOPE, $root, $code_set);
 
 			$db->commit();
-		} catch (VaultClientCustodyException $e) {
+		} catch (VaultClientCustodyException | VaultStoreUnavailableException $e) {
 			if ($db->inTransaction()) {
 				$db->rollBack();
 			}
@@ -259,6 +261,8 @@ class VaultCeremonies {
 
 		if ($open_window) {
 			self::armAfterCommit($user, $opened['key'], VaultAudit::VIA_SETUP);
+		} else {
+			VaultUnlock::release($opened['key']);
 		}
 
 		return [
@@ -442,9 +446,14 @@ class VaultCeremonies {
 			$vault->set('uev_previous_keys', $locked_row->fetchColumn());
 
 			$retiring = array($old_generation => $authorizing_wrapping->unlocker($kek));
-			// The chain is sealed to the vault's current key, the authorizing one.
+			// The chain is sealed to the vault's current key, the authorizing one:
+			// its KEKs are revealed by an open under that unlocker, in this
+			// request, and re-sealed to the new key (specs/unseal_daemon.md B2).
+			$chain = VaultPreviousKeys::sealedKeks($vault);
+			$revealed = $chain ? VaultUnlock::openOnce((int)$user->key, $authorizing_wrapping->unlocker($kek), array(),
+				$chain)['revealed'] : array();
 			$vault->set('uev_previous_keys', VaultPreviousKeys::forNewKey($vault,
-				$old_key, $retiring, $new_key->publicKey()));
+				$revealed, $retiring, $new_key->publicKey()));
 
 			$vault->set('uev_public_key', $new_key->publicKey());
 			$vault->set('uev_salt', $salt);
@@ -457,7 +466,7 @@ class VaultCeremonies {
 			$this->replaceRootTwins($user, $code_set, $root_unlockers, $passphrase_kek !== '');
 
 			$db->commit();
-		} catch (VaultClientCustodyException $e) {
+		} catch (VaultClientCustodyException | VaultStoreUnavailableException $e) {
 			if ($db->inTransaction()) {
 				$db->rollBack();
 			}
@@ -476,13 +485,21 @@ class VaultCeremonies {
 		// the answer goes; the re-seal follows the answer.
 		if ($open_window) {
 			self::armAfterCommit($user, $new_key, VaultAudit::VIA_ROTATE);
+		} else {
+			VaultUnlock::release($new_key);
 		}
 
 		$new_public = $new_key->publicKey();
 		$drains = array(array($old_key, $old_generation));
 		$in_background = $this->drainAfterResponse($user, function () use ($user, $live_wrappings, $drains, $new_public, $new_generation) {
-			foreach ($drains as list($key, $generation)) {
-				$this->drainAndRetire($user, $live_wrappings, $key, $generation, $new_public, $new_generation);
+			try {
+				foreach ($drains as list($key, $generation)) {
+					$this->drainAndRetire($user, $live_wrappings, $key, $generation, $new_public, $new_generation);
+				}
+			} finally {
+				foreach ($drains as list($key, $generation)) {
+					VaultUnlock::release($key); // the old generation's daemon window ends with its drain
+				}
 			}
 		});
 
@@ -608,11 +625,17 @@ class VaultCeremonies {
 
 		if ($open_window && $current_key !== null) {
 			self::armAfterCommit($user, $current_key, VaultAudit::VIA_REENROLL);
+		} elseif ($current_key !== null) {
+			VaultUnlock::release($current_key);
 		}
 
 		$current_public = (string)$vault->get('uev_public_key');
 		$in_background = $this->drainAfterResponse($user, function () use ($user, $live_wrappings, $old_key, $old_generation, $current_public, $current_generation) {
-			$this->drainAndRetire($user, $live_wrappings, $old_key, $old_generation, $current_public, $current_generation);
+			try {
+				$this->drainAndRetire($user, $live_wrappings, $old_key, $old_generation, $current_public, $current_generation);
+			} finally {
+				VaultUnlock::release($old_key);
+			}
 		});
 
 		return [
@@ -923,7 +946,7 @@ class VaultCeremonies {
 
 		// Kill-switch: end every window everywhere FIRST, then open one only for
 		// this session. A stolen code evicts the thief's pre-existing windows.
-		VaultUnlock::lockAll($user->key);
+		VaultUnlock::lockAll($user->key, VaultAudit::REASON_CREDENTIAL_EVENT, $key);
 		UserEncryptionVault::stampRecovery((int)$user->key);
 		require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
 		VaultClientCustody::forgetDevices((int)$user->key);
@@ -1011,6 +1034,10 @@ class VaultCeremonies {
 			try {
 				$opened = VaultUnlock::openKey((int)$vault->get('uev_usr_user_id'), $wrapping->unlocker($keks[$salt]),
 					$wrap_under, (string)$vault->get('uev_scope'));
+			} catch (VaultStoreUnavailableException $e) {
+				// The key holder did not answer, or is held: not a wrong code, and
+				// trying the next row would only say so as "invalid code".
+				throw new VaultCeremonyException($e->getMessage());
 			} catch (Exception $e) {
 				continue; // wrong code / phrase for this row - try the next
 			}

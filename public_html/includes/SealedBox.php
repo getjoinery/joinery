@@ -31,6 +31,7 @@
  * primitives like the rest; the `v2.edgeseal.` / `v1.edge.` framing belongs to
  * the row layer (VaultCrypto).
  *
+ * @version 2.5 - SCOPE_PREVIOUS_KEY, the chain KEK's own scope; b64any_decode() public (DaemonVaultKey's edge open)
  * @version 2.4 - X-Wing only: the X25519 openers and V1 are gone; a 32-byte public key is
  *                malformed; openBinary() and publicKeyFor() take no version
  * @version 2.3 - PASSPHRASE_MIN_CHARS says truthfully where it is enforced (the browser)
@@ -150,6 +151,8 @@ class SealedBox {
 
 	const V2_INFO      = 'joinery-seal:v2:';
 	const SCOPE_DEK    = 'dek';
+	/** The scope a retired key's chain KEK is sealed under (unseal_daemon.md B2): `unwrap` never opens it. */
+	const SCOPE_PREVIOUS_KEY = 'previous-key';
 	const V2_OVERHEAD  = 1148;   // XWing::CIPHERTEXT_BYTES + IV + tag
 
 	/**
@@ -486,7 +489,7 @@ class SealedBox {
 	}
 
 	/** Strict base64 in either alphabet, padding optional. */
-	private static function b64any_decode(string $s) {
+	public static function b64any_decode(string $s) {
 		$s = strtr($s, '-_', '+/');
 		$pad = strlen($s) % 4;
 		if ($pad) {

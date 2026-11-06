@@ -23,6 +23,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.18 - the unseal daemon row says when new windows are held in the pool (the fallback after five silent minutes)
  * @version 1.17 - a row for the unseal daemon (specs/unseal_daemon.md WP3): installed, answering, on the
  *                 current build, not held, its memory locked; checkUnsealDaemon(), read from UnsealDaemon::facts()
  * @version 1.16 - the APCu check is the class map's; comments name the RAM store as the window's home (WP4)
@@ -465,9 +466,14 @@ class VaultHealth {
 				. 'if this persists, see the daemon\'s journal or /var/log/joinery-unseal-' . UnsealDaemon::key() . '.log.');
 		}
 		if (empty($facts['answering'])) {
+			$since = $facts['down_since'] ?? null;
+			$pool = (is_int($since) && time() - $since >= VaultUnlock::POOL_RUNG_SECONDS)
+				? ' It has not answered since ' . gmdate('Y-m-d H:i', $since) . ' UTC, so new vault windows on this site '
+					. 'are held in the PHP pool until it does.'
+				: '';
 			return $unmet('The unseal daemon is installed but did not answer on ' . (string)($facts['socket'] ?? '?')
 				. ' (' . (string)($facts['error'] ?? 'no answer') . '). Its supervisor restarts it within seconds; '
-				. 'if this persists, see the daemon\'s journal or /var/log/joinery-unseal-' . UnsealDaemon::key() . '.log.');
+				. 'if this persists, see the daemon\'s journal or /var/log/joinery-unseal-' . UnsealDaemon::key() . '.log.' . $pool);
 		}
 		if (!empty($facts['held'])) {
 			return $unmet('The unseal daemon is held by a security case: no Private vault opens on this node until '
