@@ -524,6 +524,24 @@ fn content_matches_last_agreement(entry: &Entry) -> bool {
     }
 }
 
+/// Is a file a queued download is bringing here content a delete here cannot
+/// take? `Some(true)` for a file this device never had, `Some(false)` for a
+/// peer's edit of one it had, `None` for anything else: what the server has
+/// trashed, or a download restoring what this device already agreed on, which
+/// the delete saw.
+pub(crate) fn download_still_owed(entry: &Entry) -> Option<bool> {
+    if entry.id.entity_type != crate::model::EntityType::File || entry.id.is_provisional() || entry.remote_deleted {
+        return None;
+    }
+    if !entry.is_established() {
+        Some(true)
+    } else if server_moved_past_agreement(entry) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Has the server's copy moved on from the one this device agreed on? Only
 /// for a record that has an agreement: one with none (content arriving, never
 /// here) has nothing to have moved on from.

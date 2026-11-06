@@ -27441,3 +27441,297 @@ fn a_folder_renamed_with_its_disk_mounted_is_followed_not_held() {
     assert_converged(&world);
     assert_nothing_lost(&world, &committed);
 }
+
+/// The folder_unreadable issues a device holds, by their text.
+fn unreadable_said(d: &jd_sim::Device) -> Vec<String> {
+    d.store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == jd_core::pass::FOLDER_UNREADABLE)
+        .map(|i| i.detail)
+        .collect()
+}
+
+/// B-UR: a folder this computer will not let sync list (a chmod 000 folder,
+/// another user's, a disk's root-only lost+found) is held: the rest of the
+/// tree syncs both ways, what is in it stays on the server and on the peer,
+/// a peer's change under it waits, and it is said once. Opened again, nothing
+/// in it uploads twice, the file added while it was shut goes up, and the
+/// peer's change arrives. RED with the refused listing failing the pass:
+/// nothing on the account synced, and the client said the server could not be
+/// reached.
+#[test]
+fn an_unreadable_folder_is_held_and_the_rest_still_syncs() {
+    let world = World::new(10_101, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut committed = Committed::default();
+    a.fs.user_mkdir("Locked");
+    a.fs.user_write("Locked/in.txt", b"inside the locked folder");
+    committed.note("Locked/in.txt", b"inside the locked folder");
+    a.fs.user_mkdir("Open");
+    a.fs.user_write("Open/o.txt", b"beside it");
+    committed.note("Open/o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before the folder was shut");
+    let in_txt = world.server.files().into_iter().find(|f| f.name == "in.txt").unwrap().id;
+
+    a.fs.fail_next(FsOp::ReadDir, Some("Locked"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.user_write("Open/new.txt", b"made while it was shut");
+    committed.note("Open/new.txt", b"made while it was shut");
+    a.fs.user_write("Locked/added.txt", b"added while it was shut");
+    committed.note("Locked/added.txt", b"added while it was shut");
+    b.fs.user_write("Open/from_b.txt", b"from the peer");
+    committed.note("Open/from_b.txt", b"from the peer");
+    b.fs.user_write("Locked/from_b.txt", b"from the peer, inside");
+    committed.note("Locked/from_b.txt", b"from the peer, inside");
+    assert!(world.settle().is_some(), "never settled while the folder was shut");
+    for _ in 0..3 {
+        let again = world.pass(a);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    let tree: Vec<String> = world.server.tree().into_keys().collect();
+    assert!(tree.contains(&"Open/new.txt".to_string()), "the rest of the tree stopped syncing: {tree:?}");
+    assert!(tree.contains(&"Locked/in.txt".to_string()), "read as deleted while shut: {tree:?}");
+    assert!(!tree.contains(&"Locked/added.txt".to_string()), "read through a folder that would not open: {tree:?}");
+    assert!(a.fs.exists("Open/from_b.txt"), "{:?}", a.fs.all_paths());
+    assert!(!a.fs.exists("Locked/from_b.txt"), "written into a folder that would not open: {:?}", a.fs.all_paths());
+    assert!(b.fs.exists("Locked/in.txt"), "{:?}", b.fs.all_paths());
+    let said = unreadable_said(a);
+    assert_eq!(said.len(), 1, "{:?}", a.store.open_issues().unwrap());
+    assert!(said[0].contains("/sync/Locked") && said[0].contains("permission denied"), "{said:?}");
+    assert!(unreadable_said(b).is_empty());
+
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after the folder opened");
+    assert!(unreadable_said(a).is_empty(), "still said once it opened: {:?}", unreadable_said(a));
+    let versions_of_in = world.server.all_versions().into_iter().filter(|v| v.file_id == in_txt).count();
+    assert_eq!(versions_of_in, 1, "uploaded again once it opened: {:?}", world.server.all_versions());
+    assert!(a.fs.exists("Locked/from_b.txt"), "{:?}", a.fs.all_paths());
+    assert!(b.fs.exists("Locked/added.txt"), "{:?}", b.fs.all_paths());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B-UR: a disk's own trash folder, which every volume a Mac mounts carries
+/// and its user cannot list, is held without a word: nothing in it is synced
+/// and a person cannot open it anyway. RED with the refused listing failing
+/// every pass.
+#[test]
+fn an_unreadable_system_folder_is_held_without_a_word() {
+    let world = World::new(10_102, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_mkdir("Disk");
+    a.fs.mount_another_disk("Disk");
+    a.fs.user_mkdir("Disk/.Trashes");
+    a.fs.user_write("Disk/a.txt", b"on the disk");
+    assert!(world.settle().is_some(), "never settled before the trash folder was shut");
+
+    a.fs.fail_next(FsOp::ReadDir, Some("Disk/.Trashes"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.user_write("Disk/b.txt", b"made after");
+    assert!(world.settle().is_some(), "never settled with the trash folder shut");
+    assert!(b.fs.exists("Disk/b.txt"), "{:?}", b.fs.all_paths());
+    assert!(!b.fs.exists("Disk/.Trashes"), "{:?}", b.fs.all_paths());
+    assert!(a.store.open_issues().unwrap().is_empty(), "{:?}", a.store.open_issues().unwrap());
+}
+
+/// B-UR: a peer deletes a file inside a folder this computer cannot list. The
+/// delete waits: the trash here could not see what it takes. Opened again, the
+/// file goes. RED with the refused listing failing every pass.
+#[test]
+fn a_peers_delete_inside_an_unreadable_folder_waits_for_it_to_open() {
+    let world = World::new(10_103, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_mkdir("Locked");
+    a.fs.user_write("Locked/in.txt", b"inside");
+    a.fs.user_write("top.txt", b"at the top");
+    assert!(world.settle().is_some());
+    a.fs.fail_next(FsOp::ReadDir, Some("Locked"), FailureKind::PermissionDenied, 1_000_000);
+    b.fs.user_remove("Locked/in.txt");
+    b.fs.user_write("top.txt", b"edited by the peer");
+    assert!(world.settle().is_some(), "never settled while the folder was shut");
+    assert!(a.fs.exists("Locked/in.txt"), "taken from a folder that would not open: {:?}", a.fs.all_paths());
+    assert_eq!(a.fs.peek("top.txt").unwrap(), b"edited by the peer");
+    assert_eq!(unreadable_said(a).len(), 1, "{:?}", a.store.open_issues().unwrap());
+
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after the folder opened");
+    assert!(!a.fs.exists("Locked/in.txt"), "{:?}", a.fs.all_paths());
+    assert!(unreadable_said(a).is_empty());
+    assert_converged(&world);
+}
+
+/// B-UR: a vault placeholder whose directory this computer cannot list keeps
+/// its tie. Lapsed, the directory was adopted as a plain folder once it
+/// opened, and the file held in it went up in the clear. RED with the tie
+/// lapsed on any refused listing.
+#[test]
+fn a_placeholder_that_cannot_be_opened_keeps_its_tie() {
+    let vault = SimVault::new(10_104);
+    let mut world = World::new(10_104, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "V");
+    let w = world.server.seed_encrypted_folder(Some(v), "W");
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("V");
+    guest.fs.user_mkdir("V/W");
+    guest.fs.user_write("V/W/x.txt", b"held under the placeholder");
+    assert!(world.settle().is_some(), "never settled before the folder was shut");
+    let tied = |d: &jd_sim::Device| d.store.get_entry(jd_core::EntityId::folder(w)).unwrap().is_some_and(|e| e.stand_in.is_some());
+    assert!(tied(guest), "the premise: W stands here as a placeholder");
+
+    guest.fs.fail_next(FsOp::ReadDir, Some("V/W"), FailureKind::PermissionDenied, 1_000_000);
+    world.pass(guest);
+    world.pass(guest);
+    assert!(tied(guest), "the placeholder's tie lapsed while it could not be opened");
+
+    guest.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after the folder opened");
+    assert!(tied(guest), "the placeholder's tie lapsed once it opened");
+    assert!(!world.server.tree().keys().any(|k| k.ends_with("x.txt")), "went up in the clear: {:?}", world.server.tree());
+}
+
+/// B-UR: the sync folder itself cannot be listed. Everything is held, it is
+/// said once naming the sync folder, and nothing on the server changes. Opened
+/// again, it syncs. RED with the refused listing failing every pass.
+#[test]
+fn a_sync_folder_that_cannot_be_opened_holds_everything_and_says_so() {
+    let world = World::new(10_105, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_write("top.txt", b"at the top");
+    assert!(world.settle().is_some());
+    a.fs.fail_next(FsOp::ReadDir, Some(""), FailureKind::PermissionDenied, 1_000_000);
+    b.fs.user_write("from_b.txt", b"from the peer");
+    assert!(world.settle().is_some(), "never settled while the sync folder was shut");
+    let said = unreadable_said(a);
+    assert_eq!(said.len(), 1, "{:?}", a.store.open_issues().unwrap());
+    assert!(said[0].contains("the sync folder itself"), "{said:?}");
+    assert!(world.server.tree().contains_key("top.txt"), "read as deleted: {:?}", world.server.tree());
+
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after it opened");
+    assert!(a.fs.exists("from_b.txt"));
+    assert!(unreadable_said(a).is_empty());
+    assert_converged(&world);
+}
+
+/// Owner decision D1 (vault-longhostile-2dev 71433): the same when this device
+/// heard of the new file in an earlier pass and its download is still in the
+/// journal, retrying, when the user deletes the folder. Spoken for by that
+/// download, the file was out of the round that decided the folder's trash, so
+/// nothing kept the folder for it, and the server's cascade took a file this
+/// device knew about and never had. The folder comes back for it.
+#[test]
+fn a_folder_deleted_here_comes_back_for_a_new_file_whose_download_is_still_retrying() {
+    let world = World::new(10_106, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    let new = b"pc's new file";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    let id = world.server.files().into_iter().find(|f| f.name == "new.txt" && !f.trashed).expect("construction: pc's file is up").id;
+
+    // Heard of, and its download fails: left in the journal, retrying.
+    mac.fs.fail_next(FsOp::Spool, None, FailureKind::Io, 1);
+    let first = world.pass(mac);
+    assert_eq!(first.exec.retrying, 1, "{:?}", first.exec);
+    let open = mac.store.entities_with_open_ops().unwrap();
+    assert!(open.contains(&jd_core::EntityId::file(id)), "construction: the download is still open: {open:?} {:?}", mac.store.get_entry(jd_core::EntityId::file(id)).unwrap().map(|e| (e.status, e.head_change_id)));
+    assert!(!mac.fs.exists("Art/new.txt"), "construction: mac never had it");
+
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.iter().map(|f| f.id).collect::<Vec<_>>(), vec![id], "only the new file stays: {live:?}");
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// The same for a peer's edit of a file this device has: its download is still
+/// retrying when the user deletes the folder. An edit beats a delete; the
+/// folder comes back holding it. RED with only arrivals kept: the server's
+/// cascade took the edit.
+#[test]
+fn a_folder_deleted_here_comes_back_for_an_edit_whose_download_is_still_retrying() {
+    let world = World::new(10_107, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/notes.txt", b"the first words");
+    assert!(world.settle().is_some());
+    let edit = b"pc's edit of the notes";
+    pc.fs.user_write("Art/notes.txt", edit);
+    world.pass(pc);
+    let id = world.server.files().into_iter().find(|f| f.name == "notes.txt" && !f.trashed).unwrap().id;
+
+    mac.fs.fail_next(FsOp::Spool, None, FailureKind::Io, 1);
+    let first = world.pass(mac);
+    assert_eq!(first.exec.retrying, 1, "{:?}", first.exec);
+    assert!(mac.store.entities_with_open_ops().unwrap().contains(&jd_core::EntityId::file(id)), "construction: the download is still open");
+
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.tree().get("Art/notes.txt").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/notes.txt").as_deref(), Some(&edit[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// A journal an earlier client left: the download of a new file still retrying,
+/// and beside it the trash of its folder, decided after the file was heard of.
+/// Nothing has changed on the server since that trash was decided, and the
+/// journal runs the older download first, which finds no folder and leaves, so
+/// nothing at run time says what the trash takes. It is taken back before
+/// anything runs, and the folder comes back. RED with the trash left queued.
+#[test]
+fn a_folder_trash_queued_beside_a_retrying_download_is_taken_back() {
+    let world = World::new(10_108, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    let art = world.server.folder_id_at("Art").unwrap();
+    let new = b"pc's new file";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    let id = world.server.files().into_iter().find(|f| f.name == "new.txt" && !f.trashed).unwrap().id;
+    mac.fs.fail_next(FsOp::Spool, None, FailureKind::Io, 1);
+    assert_eq!(world.pass(mac).exec.retrying, 1);
+    mac.fs.user_remove("Art");
+    let decided_at = mac.store.cursor().unwrap();
+    mac.store
+        .queue_op("trash_remote", jd_core::EntityId::folder(art), &serde_json::json!({ "decided_at": decided_at }).to_string(), "key-old-trash")
+        .unwrap();
+
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert!(world.server.files().into_iter().any(|f| f.id == id && !f.trashed), "the server's cascade took it");
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// The other order of the keep: the queued download runs first in the journal,
+/// and the folder brought back for it cannot be made this pass. The download
+/// is overtaken, and the next round, seeing the file as an arrival, keeps the
+/// folder by the ordinary rule.
+#[test]
+fn a_retrying_download_whose_folder_cannot_be_made_yet_is_kept_the_next_round() {
+    let world = World::new(10_109, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    let new = b"pc's new file";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    mac.fs.fail_next(FsOp::Spool, None, FailureKind::Io, 1);
+    assert_eq!(world.pass(mac).exec.retrying, 1);
+    mac.fs.user_remove("Art");
+    mac.fs.fail_next(FsOp::CreateDir, None, FailureKind::Io, 1);
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}

@@ -129,6 +129,29 @@ pub enum DeletePolicy {
     ApprovedFor(String),
 }
 
+/// What an earlier pass left in the journal that this round must decide
+/// around: those entries are spoken for, and out of its inputs.
+#[derive(Debug, Clone, Default)]
+pub struct InTheJournal {
+    /// Folders whose trash on the server is already queued.
+    pub trash_queued: std::collections::HashSet<i64>,
+    /// Files still on their way here, retrying (`DownloadOwed`).
+    pub downloads_owed: Vec<DownloadOwed>,
+}
+
+/// A file a queued download is still bringing here that a delete here cannot
+/// have seen: a new file this device never had, or a peer's edit of one it
+/// had. Content beats a delete whichever pass first heard of it (owner
+/// decision D1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadOwed {
+    pub id: EntityId,
+    /// The folder the server keeps it in.
+    pub parent: Option<i64>,
+    /// True for a file this device never had, false for an edit of one it did.
+    pub arrival: bool,
+}
+
 /// Run one reconciliation round.
 ///
 /// `synced_total` is the number of entries currently in agreement — the
@@ -141,7 +164,7 @@ pub fn run_round(
     ctx: &Context,
     policy: DeletePolicy,
     parents: &FolderParents,
-    trash_already_queued: &std::collections::HashSet<i64>,
+    journal: &InTheJournal,
 ) -> RoundOutcome {
     let mut out = RoundOutcome::default();
     let mut resolved: Vec<(RoundInput, Vec<Action>)> = Vec::new();
@@ -199,6 +222,16 @@ pub fn run_round(
             resolved.push((input, res.actions));
         }
     }
+    // The same for one heard of in an earlier pass whose download is still
+    // retrying when its folder is deleted here: spoken for, it is not in the
+    // inputs above, and nothing kept the folder for it (vault-longhostile-2dev
+    // 71433).
+    for owed in &journal.downloads_owed {
+        edit_kept.push((owed.id, owed.parent));
+        if owed.arrival {
+            arrivals.insert(owed.id);
+        }
+    }
 
     // What arrives under a folder the user removed here is not brought in:
     // its trash runs, the server trashes the subtree, and the feed forgets
@@ -241,7 +274,7 @@ pub fn run_round(
         input.entry.id.entity_type == crate::model::EntityType::Folder
             && matches!(action, Action::TrashRemote)
             && kept_for_an_edit.contains(&input.entry.id.server_id)
-            && !trash_already_queued.contains(&input.entry.id.server_id)
+            && !journal.trash_queued.contains(&input.entry.id.server_id)
     };
     let restored: std::collections::HashSet<i64> = resolved
         .iter()
@@ -468,7 +501,7 @@ pub fn run_round(
     // arrival's parent is stated. Read before the mass-delete withholding
     // below, deliberately: while that pause holds a folder's trash for a
     // person to answer, the arrivals under it wait with it.
-    let mut going: std::collections::HashSet<i64> = trash_already_queued.clone();
+    let mut going: std::collections::HashSet<i64> = journal.trash_queued.clone();
     going.extend(withheld_trash.iter().copied());
     going.extend(
         resolved

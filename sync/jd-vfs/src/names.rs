@@ -160,7 +160,7 @@ pub fn is_system_file(name: &str) -> bool {
 
 /// A folder a volume keeps for itself at its root: the macOS event log,
 /// search index, trash and versions store, the Windows recycle bin and
-/// restore data, a freedesktop trash. Seen wherever a disk is the sync root
+/// restore data, a freedesktop trash, an ext4 lost+found. Seen wherever a disk is the sync root
 /// or is mounted inside it. Kept like [`is_system_file`], with everything in
 /// it.
 pub fn is_system_folder(name: &str) -> bool {
@@ -175,6 +175,7 @@ pub fn is_system_folder(name: &str) -> bool {
             | "$recycle.bin"
             | "system volume information"
             | ".trash"
+            | "lost+found"
     ) || lower.starts_with(".trash-")
 }
 

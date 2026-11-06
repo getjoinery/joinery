@@ -399,7 +399,9 @@ only renamed it, the folder comes back for it. A trash decided before the edit
 was heard of stands down when it runs. New content counts the same: a file
 another device saved into a folder deleted here, which this device never had,
 brings the folder back holding it, and the user is told the folder came back for
-a file another device was still sending. This device's own files that were never
+a file another device was still sending. Either holds as well for a file whose
+download an earlier pass queued and is still retrying when the folder is deleted
+here. This device's own files that were never
 sent go with the folder its user deleted. The server trashes a folder with
 everything in it, so an edit that reaches the server after this device last read
 the change feed and before its trash lands goes to the server's trash with the
@@ -805,8 +807,8 @@ beside the user's files: `.DS_Store`, `Thumbs.db`, `desktop.ini`, `Icon\r`,
 `.tmp` (`jd_vfs::is_system_file`). A volume keeps folders of its own at its
 root, seen wherever a disk is the sync root or is mounted inside it:
 `.fseventsd`, `.Spotlight-V100`, `.Trashes`, `.TemporaryItems`,
-`.DocumentRevisions-V100`, `$RECYCLE.BIN`, `System Volume Information`, and the
-freedesktop `.Trash` and `.Trash-*` (`jd_vfs::is_system_folder`, everything
+`.DocumentRevisions-V100`, `$RECYCLE.BIN`, `System Volume Information`,
+`lost+found`, and the freedesktop `.Trash` and `.Trash-*` (`jd_vfs::is_system_folder`, everything
 inside one included).
 
 One that was never agreed is `ignored` (`LocalStatus::Ignored`): made here, it
@@ -1328,6 +1330,16 @@ is read again as it stands. A disk gone for good leaves with its folder
 deleted on the web: a folder the server deleted, or one it is in, is not
 held. Where the system has no mount table to read (Windows), nothing is held.
 
+**A folder the system will not list** (permission denied) is held the same way,
+here and from the server, because what is in it is not known: nothing in it is
+read as deleted, adopted or written to, the rest of the tree goes on syncing,
+and a vault's placeholder there keeps its tie. It is said as
+`folder_unreadable` from the first pass, and withdrawn the pass it can be
+listed, when what is in it is read again as it stands. A server delete of such
+a folder waits with it, since a trash could not see what it takes. A system
+folder (a mounted disk's `.Trashes`) is held without being said. The sync folder
+itself refused holds everything, said as one issue, and the pass ends there.
+
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification
 at completion and re-queues. After the transfer the fingerprint is
@@ -1362,7 +1374,7 @@ those reduce to one indicator:
 | **Green** | Converged: everything is in agreement, deliberately not synced here, a system file kept where it was made, or waiting on a key that only arrives from elsewhere. |
 | **Working** | Transfers in flight or queued. |
 | **Attention** | *n* things need a person: name clashes, conflicts, a full Drive, ciphertext that failed to authenticate. |
-| **Stopped** | Cannot sync at all: no server, dead credentials, the folder is missing, or paused. |
+| **Stopped** | Cannot sync at all: no server, dead credentials, the folder is missing, a failure on this computer's disk, or paused. |
 
 Three rules decide between them, and all of them are about refusing to look
 better than things are. **Attention outranks working** — a cheerful spinner
@@ -1400,6 +1412,7 @@ tray reads from.
 | `store_inconsistent` | items have no way back to the root, and the server's index does not have their folder either | nothing is left stranded |
 | `reserved_prefix` | files here have names beginning `.jd-`, which the client keeps for its own working files | no such file is left; the list in it follows the disk |
 | `disk_not_there` | a disk mounted inside the sync folder is not there, so what was on it is held, here and from the server | the disk is mounted there again, or the server deletes its folder |
+| `folder_unreadable` | the system refused to list a folder (permission denied), so what is in it is held, here and from the server; a system folder such as a disk's own `.Trashes` is held without being said | the folder can be listed again |
 | `leftover_stays` | something under one of the client's working names could not be swept to the trash: a disk is mounted in it, or the trash refused it | nothing is left standing; the list in it follows the disk |
 | `renames_untracked_on_this_drive` | the standing notice on a FAT or exFAT drive | the sync folder is on a drive that keeps file identities |
 | `trash_waits` | a folder's trash here waits for a child that cannot move yet | the trash goes through, or the folder stops being trashable |

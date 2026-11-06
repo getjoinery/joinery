@@ -62,6 +62,10 @@ pub enum Blocker {
     RootUnavailable { path: String },
     /// The server cannot be reached.
     ServerUnreachable { detail: String },
+    /// Something on this computer stopped the pass: the disk, not the network
+    /// (`jd_vfs::VfsError`). Said as this computer's, so nobody goes looking
+    /// for a server outage.
+    LocalError { detail: String },
     /// This device's credential was revoked or expired. Re-linking is the fix.
     NotAuthorized,
     /// The user pressed pause.
@@ -76,6 +80,9 @@ impl Blocker {
             }
             Blocker::ServerUnreachable { detail } => {
                 format!("Cannot reach the server: {detail}. Retrying.")
+            }
+            Blocker::LocalError { detail } => {
+                format!("Sync stopped on this computer: {detail}. Retrying.")
             }
             Blocker::NotAuthorized => {
                 "This device is no longer authorized. Link it again to resume syncing.".into()
@@ -607,6 +614,9 @@ mod tests {
             Blocker::RootUnavailable { path: "/x".into() },
             Blocker::ServerUnreachable {
                 detail: "timed out".into(),
+            },
+            Blocker::LocalError {
+                detail: "disk full".into(),
             },
             Blocker::NotAuthorized,
             Blocker::Paused,

@@ -386,8 +386,18 @@ pub fn run_pass(
     // A folder whose disk is not there is held the same way, and from the
     // server below (`disks_not_there`).
     say_which_disks_are_not_there(env, &away)?;
+    // A folder whose listing the system refused is held the same way: what is
+    // in it is not known, so nothing in it is read as deleted, adopted or
+    // judged, and from the server below its changes wait too. The sync
+    // folder itself refused holds everything: said, and the pass ends.
+    let refused = look.refused;
+    say_which_folders_cannot_be_opened(env, &refused)?;
+    if refused.iter().any(|r| r.is_empty()) {
+        return Ok(out);
+    }
     let mut unsettled = look.unsettled;
     unsettled.extend(away.iter().map(|(_, rel)| rel.clone()));
+    unsettled.extend(refused.iter().cloned());
     let (held_files, observed): (Vec<ObservedFile>, Vec<ObservedFile>) =
         look.files.into_iter().partition(|o| under_unsettled(&unsettled, &o.path));
     let held_identities: std::collections::HashSet<jd_vfs::FileIdentity> =
@@ -855,9 +865,17 @@ pub fn run_pass(
     let resolve = |path: &str| placement_of(path, &folder_ids);
     // Every folder on a disk not there (`disks_not_there`), by where it is
     // here.
+    // And every folder whose listing was refused (`observe`): its changes on
+    // the server wait as a missing disk's do. One that never reached the
+    // server has nothing there to wait, and is held by its path alone.
+    let held: Vec<(i64, String)> = away
+        .iter()
+        .cloned()
+        .chain(refused.iter().filter_map(|rel| folder_ids.get(rel).map(|id| (*id, rel.clone()))))
+        .collect();
     let on_a_disk_not_there: std::collections::HashSet<i64> = {
-        let mut set: std::collections::HashSet<i64> = away.iter().map(|(id, _)| *id).collect();
-        let folders: Vec<Entry> = if away.is_empty() {
+        let mut set: std::collections::HashSet<i64> = held.iter().map(|(id, _)| *id).collect();
+        let folders: Vec<Entry> = if held.is_empty() {
             Vec::new()
         } else {
             all_entries(env)?.into_iter().filter(|e| e.id.entity_type == EntityType::Folder).collect()
@@ -880,12 +898,12 @@ pub fn run_pass(
     // take the place of the empty folder the disk was mounted at (a rename
     // replaces an empty directory), and the disk, mounted again, covers it.
     let personality = env.vfs.personality();
-    let away_slots: std::collections::HashSet<(Option<i64>, String)> = if away.is_empty() {
+    let away_slots: std::collections::HashSet<(Option<i64>, String)> = if held.is_empty() {
         std::collections::HashSet::new()
     } else {
         all_entries(env)?
             .into_iter()
-            .filter(|e| e.id.entity_type == EntityType::Folder && away.iter().any(|(id, _)| *id == e.id.server_id))
+            .filter(|e| e.id.entity_type == EntityType::Folder && held.iter().any(|(id, _)| *id == e.id.server_id))
             .map(|e| (e.local_placement().parent, jd_vfs::comparison_key(e.effective_local_name(), &personality)))
             .collect()
     };
@@ -909,6 +927,39 @@ pub fn run_pass(
                 "download" | "create_local_folder" | "move_local" | "park_local" | "preserve_local_as" | "adopt_placement" | "trash_local"
             );
             if writes_here && env.store.get_entry(op.entity)?.is_some_and(|e| on_a_disk_not_there_now(&e)) {
+                env.store.drop_op(op.op_id)?;
+            }
+        }
+    }
+
+    // A folder's trash an earlier pass queued beside a download still bringing
+    // a file into it is taken back, before anything runs: the journal runs the
+    // older download first, it finds no folder and leaves, and then nothing
+    // says what the trash takes (`round::InTheJournal`). Decided again below,
+    // the folder comes back for the file.
+    let owed_now = downloads_owed(env)?;
+    if !owed_now.is_empty() {
+        for op in env.store.queued_ops()? {
+            if op.kind != "trash_remote" || op.entity.entity_type != EntityType::Folder {
+                continue;
+            }
+            let mut holds_one = false;
+            for owed in &owed_now {
+                let mut at = owed.parent;
+                let mut guard = 0;
+                while let Some(folder) = at {
+                    if folder == op.entity.server_id {
+                        holds_one = true;
+                        break;
+                    }
+                    guard += 1;
+                    if guard > 512 {
+                        break;
+                    }
+                    at = env.store.get_entry(EntityId::folder(folder))?.and_then(|f| f.remote.parent);
+                }
+            }
+            if holds_one {
                 env.store.drop_op(op.op_id)?;
             }
         }
@@ -2217,13 +2268,15 @@ pub fn run_pass(
     }
     // Folders whose trash on the server is already in the journal from an
     // earlier pass: busy, so out of this round, and just as decided.
-    let trash_already_queued: std::collections::HashSet<i64> = env
+    let trash_queued: std::collections::HashSet<i64> = env
         .store
         .queued_ops()?
-        .into_iter()
+        .iter()
         .filter(|op| op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder)
         .map(|op| op.entity.server_id)
         .collect();
+    let downloads_owed = downloads_owed(env)?;
+    let in_the_journal = crate::round::InTheJournal { trash_queued, downloads_owed };
     // A person's answer to the guard, kept until a round has read it: it goes
     // through only for the set it names (`approve_deletes`).
     let approval = env.store.get_meta(DELETES_APPROVED)?;
@@ -2231,7 +2284,7 @@ pub fn run_pass(
         (DeletePolicy::Guard, Some(shown)) => DeletePolicy::ApprovedFor(shown.clone()),
         (policy, _) => policy,
     };
-    out.round = run_round(inputs, synced_total, &synced, ctx, policy, &parents, &trash_already_queued);
+    out.round = run_round(inputs, synced_total, &synced, ctx, policy, &parents, &in_the_journal);
     if let Some(t) = trace.as_mut() {
         t.round_ended_ms = (env.now_ms)();
         for op in &out.round.plan.ops {
@@ -3049,11 +3102,18 @@ fn observed_remote(entry: &Entry) -> RemoteState {
 /// The hash cache means a file whose fingerprint has not moved is not read
 /// again — but a fingerprint is only ever allowed to skip the read. It is never
 /// allowed to stand in for the answer.
-pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
+pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>), ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     let mut out = Vec::new();
+    // Directories whose listing the system refused (`VfsError::PermissionDenied`):
+    // what is in one is not known, so it is held, never read as emptied
+    // (`run_pass`, `say_which_folders_cannot_be_opened`). Every volume a Mac
+    // mounts has a `.Trashes` its user cannot list; failing the pass on it
+    // stopped all syncing on the account and said the server could not be
+    // reached (B-UR).
+    let mut refused: Vec<String> = Vec::new();
     let mut reserved: Vec<String> = Vec::new();
     let mut left: Vec<String> = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
@@ -3118,7 +3178,15 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         // those. Against a real filesystem this walk saw none of them and the
         // recovery could never fire -- dead code that every sweep reported
         // working, because the simulator did not filter and production does.
-        for child in env.vfs.read_dir_all(&dir)? {
+        let children = match env.vfs.read_dir_all(&dir) {
+            Ok(children) => children,
+            Err(jd_vfs::VfsError::PermissionDenied(_)) => {
+                refused.push(rel.clone());
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        };
+        for child in children {
             if jd_vfs::is_internal(&child.name) {
                 // A park nobody is coming back for, left standing on THIS disk.
                 //
@@ -3316,7 +3384,8 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         }
     }
 
-    Ok(out)
+    refused.sort();
+    Ok((out, refused))
 }
 
 /// The issue for what the walk's sweep had to leave standing (`sweep_away`).
@@ -3355,6 +3424,8 @@ pub(crate) struct Look {
     pub(crate) files: Vec<ObservedFile>,
     pub(crate) dirs: DirsSeen,
     pub(crate) unsettled: Vec<String>,
+    /// Directories whose listing was refused (`observe`).
+    pub(crate) refused: Vec<String>,
 }
 
 /// `observed_dirs_and_tie_breaks`'s answer.
@@ -3387,11 +3458,11 @@ pub(crate) fn look_at_the_disk(env: &ExecEnv) -> Result<Look, ExecError> {
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let files = observe(env)?;
+        let (files, refused) = observe(env)?;
         let dirs = observed_dirs_and_tie_breaks(env)?;
         let torn = tears(env, &files, &dirs)?;
         if torn.is_empty() || attempt >= LOOKS {
-            return Ok(Look { files, dirs, unsettled: torn });
+            return Ok(Look { files, dirs, unsettled: torn, refused });
         }
     }
 }
@@ -3614,7 +3685,15 @@ pub(crate) fn observed_dirs_and_tie_breaks(
         if guard > 100_000 {
             return Err(ExecError::Contract("the local walk does not end".into()));
         }
-        for child in env.vfs.read_dir_all(&dir)? {
+        // A directory whose listing is refused stands in `out` (its parent
+        // listed it) and is held by `observe`'s answer; nothing under it is
+        // known, so nothing under it is listed here.
+        let children = match env.vfs.read_dir_all(&dir) {
+            Ok(children) => children,
+            Err(jd_vfs::VfsError::PermissionDenied(_)) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        for child in children {
             if child.kind != jd_vfs::EntryKind::Directory {
                 continue;
             }
@@ -4733,6 +4812,23 @@ fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<usize, ExecError> {
     Ok(sealed_elsewhere)
 }
 
+/// Files a download from an earlier pass is still bringing here that a delete
+/// here cannot have seen (`reconcile::download_still_owed`). Busy, so out of
+/// every round's inputs.
+fn downloads_owed(env: &ExecEnv) -> Result<Vec<crate::round::DownloadOwed>, ExecError> {
+    let mut owed = Vec::new();
+    for op in env.store.queued_ops()?.into_iter().chain(env.store.interrupted_ops()?) {
+        if op.kind != "download" {
+            continue;
+        }
+        let Some(e) = env.store.get_entry(op.entity)? else { continue };
+        if let Some(arrival) = crate::reconcile::download_still_owed(&e) {
+            owed.push(crate::round::DownloadOwed { id: e.id, parent: e.remote.parent, arrival });
+        }
+    }
+    Ok(owed)
+}
+
 /// A directory standing in for a vault this device cannot open follows the
 /// server, exactly as a materialized folder would.
 ///
@@ -4803,10 +4899,18 @@ fn placeholders_follow_the_server(
         if !away.is_empty() && under_unsettled(away, &here) {
             continue;
         }
-        if env.vfs.read_dir(&root.join(&here)).is_err() {
-            entry.stand_in = None;
-            env.store.put_entry(&entry)?;
-            continue;
+        // Refused, its directory still stands: what is in it is not known, and
+        // lapsed, the tie leaves the vault's directory to be adopted as a plain
+        // folder and what is held in it goes up in the clear. It waits, as a
+        // stand-in on a disk not there does.
+        match env.vfs.read_dir(&root.join(&here)) {
+            Ok(_) => {}
+            Err(jd_vfs::VfsError::PermissionDenied(_)) => continue,
+            Err(_) => {
+                entry.stand_in = None;
+                env.store.put_entry(&entry)?;
+                continue;
+            }
         }
         let there = {
             let mut probe = entry.clone();
@@ -5095,6 +5199,10 @@ const DISKS_META: &str = "disks_mounted";
 /// The state issue `say_which_disks_are_not_there` raises.
 pub const DISK_NOT_THERE: &str = "disk_not_there";
 
+/// The state issue for folders whose listing is refused
+/// (`say_which_folders_cannot_be_opened`).
+pub const FOLDER_UNREADABLE: &str = "folder_unreadable";
+
 /// The folders whose disk is not there now: the folder a second disk was
 /// mounted at, and nothing is mounted there now, nor has the disk turned up
 /// at another folder (a Mac renames a folder a disk is mounted at, disk and
@@ -5212,6 +5320,36 @@ fn path_here(id: i64, folders: &HashMap<i64, Entry>, paths: &mut HashMap<i64, Op
     };
     paths.insert(id, path.clone());
     path
+}
+
+/// A state: the folders this computer would not let sync open (`observe`),
+/// said for as long as they stay shut and withdrawn the pass they open. A
+/// system folder or one inside it (`jd_vfs::is_system_path`: a disk's own `.Trashes`) is held
+/// the same way and never said: nothing in it is synced, and a person cannot
+/// open it anyway.
+fn say_which_folders_cannot_be_opened(env: &ExecEnv, refused: &[String]) -> Result<(), ExecError> {
+    let root = env.vfs.root().unwrap_or_default();
+    let shown: Vec<String> = refused
+        .iter()
+        .filter(|rel| rel.is_empty() || !jd_vfs::is_system_path(rel, true))
+        .map(|rel| if rel.is_empty() { format!("the sync folder itself ({})", root.display()) } else { root.join(rel).display().to_string() })
+        .collect();
+    let want = (!shown.is_empty()).then(|| {
+        format!(
+            "Sync cannot open {} (permission denied), so it leaves what is in it as it is, here and on \
+             the server, until it can be opened. If it was deleted on another device, delete it here \
+             once it opens",
+            shown.join(", ")
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == FOLDER_UNREADABLE).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(FOLDER_UNREADABLE)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, FOLDER_UNREADABLE, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+    Ok(())
 }
 
 /// A state: the disks not there (`disks_not_there`), said for as long as

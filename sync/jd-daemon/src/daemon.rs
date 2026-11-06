@@ -781,6 +781,16 @@ fn vault_probe_refusal_line(said: &mut Option<String>, now: Option<String>) -> O
 /// A network problem resolves itself and should not send anybody to a settings
 /// page; a revoked credential never resolves itself and a spinner is a lie.
 fn blocker_for(error: &jd_core::ExecError) -> Blocker {
+    // The disk, not the network: said as this computer's. A sync folder that
+    // went away in the middle of a pass is the missing-folder state, as it is
+    // when a pass finds it gone at the start.
+    match error {
+        jd_core::ExecError::Vfs(jd_vfs::VfsError::RootUnavailable(path)) => {
+            return Blocker::RootUnavailable { path: path.display().to_string() };
+        }
+        jd_core::ExecError::Vfs(e) => return Blocker::LocalError { detail: e.to_string() },
+        _ => {}
+    }
     let text = error.to_string();
     if text.contains("401") || text.to_lowercase().contains("unauthor") {
         Blocker::NotAuthorized
@@ -1859,6 +1869,21 @@ mod tests {
             "api error 401: unauthorized".into(),
         ));
         assert!(matches!(revoked, Blocker::NotAuthorized));
+    }
+
+    #[test]
+    fn a_problem_on_this_computer_is_not_called_a_server_outage() {
+        // A folder the system would not list stopped every pass and was said
+        // as 'Cannot reach the server': a person checked their network and
+        // the server, never the folder (B-UR).
+        let local = blocker_for(&jd_core::ExecError::Vfs(jd_vfs::VfsError::PermissionDenied(
+            "/home/u/Drive/Locked".into(),
+        )));
+        assert!(matches!(local, Blocker::LocalError { .. }), "{local:?}");
+        assert!(local.message().starts_with("Sync stopped on this computer"));
+
+        let gone = blocker_for(&jd_core::ExecError::Vfs(jd_vfs::VfsError::RootUnavailable("/Volumes/D/Drive".into())));
+        assert!(matches!(gone, Blocker::RootUnavailable { .. }), "{gone:?}");
     }
 
     #[test]
