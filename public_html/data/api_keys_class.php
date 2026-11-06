@@ -45,6 +45,9 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	/** What an app password looks like when shown: jm-{public}-{secret}. */
 	const APP_PASSWORD_PREFIX = 'jm';
 
+	/** What every session key's public half starts with. */
+	const SESSION_KEY_PREFIX = 'sess_';
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 *
@@ -108,7 +111,7 @@ public static function GenerateKey($key) {
 		$settings = Globalvars::get_instance();
 		$lifetime_days = (int)($settings->get_setting('api_session_key_lifetime_days') ?: 365);
 
-		$public_key = 'sess_' . bin2hex(random_bytes(12));
+		$public_key = self::SESSION_KEY_PREFIX . bin2hex(random_bytes(12));
 		$secret_plaintext = bin2hex(random_bytes(32));
 
 		$api_key = new ApiKey(NULL);

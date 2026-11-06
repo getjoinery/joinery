@@ -62,7 +62,8 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.11.0
+ * @version 1.12.0
+ * @changelog 1.12.0 - A refused session key is not a failed sign-in: it guessed nothing
  * @changelog 1.11.0 - A machine account accepts only machine keys, and auth/login refuses it
  *   (reason 'machine'; machine_accounts.md).
  * @changelog 1.10.0 - The user floor is Access::allows(): min_user_permission may be a level or
@@ -198,6 +199,8 @@ class ApiAuth {
 			$public_key = $split['public_key'];
 			$secret_key = $split['secret_key'];
 		}
+
+		self::$session_key_attempt = self::$app_access_attempt === null && self::isSessionKeyShaped($headers);
 
 		if (!$public_key || !$secret_key) {
 			// No key headers — the request may instead carry the browser-session
@@ -428,8 +431,25 @@ class ApiAuth {
 	 * A failed app sign-in counts in app_access_auth instead, twice: once for
 	 * the network it came from and once for the username it tried, so neither
 	 * a guesser hopping usernames nor one hopping addresses gets far.
+	 *
+	 * A refused session key counts in neither (isSessionKeyShaped()).
 	 */
 	private static function auth_failure($status_code, $note, $message) {
+		if (self::$session_key_attempt) {
+			// The refusal is never limited; its log row is, so that requests
+			// carrying no real credential cannot write rows without end.
+			$settings = Globalvars::get_instance();
+			$limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
+			$window = (int)($settings->get_setting('api_auth_rate_limit_window') ?: 900);
+			if (RequestLogger::rate_limit_state(self::SESSION_KEY_FEATURE, $limit, $window, false)['allowed']) {
+				RequestLogger::log(self::SESSION_KEY_FEATURE, 'auth_failure', false, [
+					'status_code' => $status_code,
+					'error_type'  => 'AuthenticationError',
+					'note'        => $note,
+				]);
+			}
+			api_error($message, 'AuthenticationError', $status_code);
+		}
 		if (self::$app_access_attempt !== null) {
 			foreach (self::appAccessBucketKeys(self::$app_access_attempt) as $key) {
 				RequestLogger::log(self::APP_ACCESS_FEATURE, 'auth_failure', false, [
@@ -452,6 +472,25 @@ class ApiAuth {
 	// ====================================================================
 	// App access — failed sign-in limits
 	// ====================================================================
+
+	/**
+	 * Whether a request's public key is a session key's. A session key is minted
+	 * here with 256 random bits of secret, so nobody finds one by guessing, and
+	 * the one that fails most is a person's own device after its key was revoked
+	 * or expired. Counted as failed sign-ins, that one device locks every device
+	 * at its address out within seconds, working keys included. So a session key
+	 * is not held to the failed-auth limit, and its refusals are logged apart.
+	 */
+	public static function isSessionKeyShaped(array $headers): bool {
+		return strpos((string)($headers['public_key'] ?? ''), ApiKey::SESSION_KEY_PREFIX) === 0
+			&& !empty($headers['secret_key']);
+	}
+
+	/** The request-log feature a refused session key is recorded in. */
+	const SESSION_KEY_FEATURE = 'session_key_auth';
+
+	/** @var bool This request presented a session key (isSessionKeyShaped()). */
+	private static $session_key_attempt = false;
 
 	/** Requests an app credential's person may make per hour (at least; the browser-session limit when higher). */
 	const APP_REQUEST_LIMIT = 20000;

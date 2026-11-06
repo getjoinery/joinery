@@ -2,7 +2,8 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.32
+ * @version 2.33
+ * @changelog 2.33 - A session key is not held to the failed-auth limit: it guessed nothing
  * @changelog 2.32 - the HTTPS requirement believes X-Forwarded-Proto only from a proxy we know
  *   (LibraryFunctions::isSecure()).
  * @changelog 2.31 - Every route family past the action dispatch runs as its caller
@@ -527,7 +528,9 @@ $api_auth_rate_window = (int)($settings->get_setting('api_auth_rate_limit_window
 // app_access_auth), counted per the program's network and per username; its
 // requests all arrive from the gateway's loopback address, which this
 // per-address bucket would share with every other loopback caller.
-$api_auth_state = $app_shaped ? array('allowed' => true)
+// A session key cannot be guessed, and one device's revoked key must not lock
+// out the working devices at its address (ApiAuth::isSessionKeyShaped).
+$api_auth_state = ($app_shaped || ApiAuth::isSessionKeyShaped($headers)) ? array('allowed' => true)
 	: RequestLogger::rate_limit_state('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false);
 if (!$api_auth_state['allowed']) {
 	api_rate_limited($api_auth_state, 'This address', $api_auth_rate_limit, $api_auth_rate_window,

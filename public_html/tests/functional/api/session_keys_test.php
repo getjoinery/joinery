@@ -461,6 +461,39 @@ try {
 	$saved_min_versions = null;
 
 	// ------------------------------------------------------------------
+	section('A revoked session key locks out nobody at its address');
+	$device_ip = harness_http_loopback_source();
+	$from_device = function ($headers) use ($device_ip) {
+		return harness_request('GET', '/api/v1/auth/session', array('headers' => $headers, 'from' => $device_ip));
+	};
+	$revoked = ApiKey::CreateSessionKey($user_b_after->key, 'Revoked Phone ' . $suffix);
+	harness_register_key_id($revoked['api_key']->key);
+	$working = ApiKey::CreateSessionKey($user_b_after->key, 'Working Phone ' . $suffix);
+	harness_register_key_id($working['api_key']->key);
+	$revoked_h = key_headers($revoked['api_key']->get('apk_public_key'), $revoked['secret_key']);
+	$working_h = key_headers($working['api_key']->get('apk_public_key'), $working['secret_key']);
+	$revoked['api_key']->soft_delete();
+	$device_limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
+	$told_revoked = 0;
+	for ($i = 0; $i < $device_limit + 5; $i++) {
+		$r = $from_device($revoked_h);
+		if ($r['status'] === 401 && stripos($r['raw'], 'revoked') !== false) {
+			$told_revoked++;
+		}
+	}
+	check($told_revoked === $device_limit + 5, 'past the failed-auth limit, the revoked key is still told it was revoked', "$told_revoked told");
+	$r = $from_device($working_h);
+	check($r['status'] === 200, 'a working session key at that address still works', $r['raw']);
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs
+		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address = ?");
+	$q->execute([$device_ip]);
+	check((int)$q->fetchColumn() === 0, 'none of its refusals counted as failed sign-ins');
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs
+		WHERE rql_feature = 'session_key_auth' AND rql_was_success = FALSE AND rql_ip_address = ?");
+	$q->execute([$device_ip]);
+	check((int)$q->fetchColumn() === $device_limit, 'they are on record apart, and only up to the limit');
+
+	// ------------------------------------------------------------------
 	section('Failed-auth rate limit lockout (acceptance #5 — runs LAST)');
 	// The bad logins come from a loopback address of this run's own, so the
 	// lockout they earn falls on an address no other suite, session or
@@ -509,6 +542,8 @@ try {
 		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address IN (?, ?)");
 	$q->execute([(string)$GLOBALS['__harness_http']['from'], isset($lockout_ip) ? $lockout_ip : '']);
 	echo "  Removed " . $q->rowCount() . " failed-auth log rows from this run\n";
+	$q = $db->prepare("DELETE FROM rql_request_logs WHERE rql_feature = 'session_key_auth' AND rql_ip_address = ?");
+	$q->execute([isset($device_ip) ? $device_ip : '']);
 
 	harness_teardown_data();
 }
