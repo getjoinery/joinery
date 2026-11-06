@@ -160,6 +160,16 @@ check(dvk_status($sock, $user_id)['open'] === true, 'the daemon holds a window f
 $note = VaultAudit::parseNote(VaultAudit::EVENT_OPENED, dvk_last_open($user_id));
 check(($note['holder'] ?? null) === VaultAudit::HOLDER_DAEMON && !isset($note['fallback']),
 	'the opened row says the key is in the daemon', dvk_last_open($user_id));
+// Unlocking again in the same session replaces the window: the old one is
+// closed in the daemon and in the log, so every open has its close.
+$first = $opened['key'];
+$opened = VaultUnlock::open($user_id, $wrapping->unlocker($fx['kek']), array(), UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSKEY);
+$note = VaultAudit::parseNote(VaultAudit::EVENT_CLOSED, dvk_last_close($user_id));
+check(($note['reason'] ?? null) === VaultAudit::REASON_REPLACED && is_int($note['unwraps'] ?? null)
+	&& $note['session'] === VaultAudit::handle(session_id()),
+	'a re-unlock closes the window it replaces, with its unwrap count', dvk_last_close($user_id));
+check(!$first->sameWindow($opened['key']) && dvk_status($sock)['windows'] >= 1,
+	'and the new window is a different daemon window');
 $slot = RamStore::get('vault:' . session_id() . ':' . $user_id . ':user', $ok, RamStore::LIFETIME);
 check($ok && strpos((string)$slot, DaemonVaultKey::SLOT_TAG) === 0, 'the window slot holds a handle');
 $pool_twin = PoolVaultKey::open($wrapping->unlocker($fx['kek']))['key'];

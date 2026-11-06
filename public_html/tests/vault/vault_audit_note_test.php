@@ -62,7 +62,7 @@ section('Closed rows');
 $reasons = array(VaultAudit::REASON_IDLE_CAP, VaultAudit::REASON_ABSOLUTE_CAP, VaultAudit::REASON_HEARTBEAT_STALE,
 	VaultAudit::REASON_IDLE_EXPIRED, VaultAudit::REASON_EXPLICIT_LOCK, VaultAudit::REASON_LOGOUT, VaultAudit::REASON_IP_CHANGE,
 	VaultAudit::REASON_CREDENTIAL_EVENT, VaultAudit::REASON_APP_REVOKED, VaultAudit::REASON_DAEMON_RESTART,
-	VaultAudit::REASON_SENTINEL_DROP);
+	VaultAudit::REASON_SENTINEL_DROP, VaultAudit::REASON_REPLACED);
 $all = true;
 foreach ($reasons as $reason) {
 	VaultAudit::closed($user_id, 'user', $reason, 'sess-a', 95, 12);

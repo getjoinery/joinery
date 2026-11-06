@@ -1622,6 +1622,7 @@ Each closed row records `reason` and `open_seconds`:
 | `credential_event` | password change or reset, recovery-code use, 2FA change |
 | `daemon_restart` | the unseal daemon restarted, and the window went with it |
 | `sentinel_drop` | root's hold ended every window in the unseal daemon |
+| `replaced` | a later unlock or ceremony in the same session took the window's place |
 
 A close of a daemon window by `lock()` or `lockAll()` also records `unwraps`,
 the number of opens the daemon served for it.

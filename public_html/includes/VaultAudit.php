@@ -24,6 +24,7 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.6 - REASON_REPLACED: a window a later arm of the same slot took the place of is closed in the log
  * @version 1.5 - opened() records where the key is held (holder=daemon|pool, fallback=pool_rung); parseNote()
  *   reads every note this class writes, for the plane's vault window view (agent_event_log_filter.md)
  * @version 1.4 - REASON_DAEMON_RESTART and REASON_SENTINEL_DROP; closed() records the daemon window's unwrap count (unseal_daemon.md WP4)
@@ -72,6 +73,7 @@ class VaultAudit {
 	const REASON_APP_REVOKED      = 'app_credential_revoked'; // the app credential borrowing the window was revoked
 	const REASON_DAEMON_RESTART   = 'daemon_restart';    // the unseal daemon restarted (or never answered for it) and the window went with it
 	const REASON_SENTINEL_DROP    = 'sentinel_drop';     // root's drop and hold ended every window in the unseal daemon
+	const REASON_REPLACED         = 'replaced';          // a new unlock or ceremony in the same session took the window's place
 
 	/**
 	 * A window was armed. $caps is the resolved end-event policy, recorded

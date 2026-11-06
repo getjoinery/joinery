@@ -54,6 +54,7 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.29 - a window a later arm of the same slot replaces is closed in the audit log (replaced)
  * @version 1.28 - the opened audit row records where the key is held, and a pool key the five-minute rung chose
  *   (agent_event_log_filter.md WP1)
  * @version 1.27 - lockAll()'s close rows carry each daemon window's unwrap count, as lock()'s do
@@ -583,6 +584,7 @@ class VaultUnlock {
 		$slot = self::slotKey($sid, $user_id, $scope);
 		unset(self::$memo[$slot]);
 		$replaced = self::slotKeyIn($slot);
+		$replaced_meta = $replaced === null ? null : RamStore::get(self::metaKey($sid, $user_id, $scope), $meta_ok, RamStore::LIFETIME);
 		if (!RamStore::set($slot, $key->slotValue(), self::idleSeconds(), RamStore::LIFETIME)
 				|| !RamStore::set(self::metaKey($sid, $user_id, $scope), $meta, self::idleSeconds(), RamStore::LIFETIME)) {
 			RamStore::delete($slot, RamStore::LIFETIME);
@@ -593,9 +595,14 @@ class VaultUnlock {
 			unset(self::$unarmed[$key->id()]);
 		}
 		// A re-unlock replaces the slot's window: the daemon's old one goes
-		// when nothing else holds it.
-		if ($replaced instanceof DaemonVaultKey && !($key instanceof DaemonVaultKey && $key->sameWindow($replaced))) {
-			self::releaseHandle($user_id, $replaced);
+		// when nothing else holds it, and the log says the old window ended
+		// (agent_event_log_filter.md: every open has its close). Re-storing
+		// the very same daemon window is not an end.
+		if ($replaced !== null && !($replaced instanceof DaemonVaultKey && $key instanceof DaemonVaultKey && $key->sameWindow($replaced))) {
+			$daemon = $replaced instanceof DaemonVaultKey ? self::releaseHandle($user_id, $replaced) : null;
+			$armed = (!empty($meta_ok) && is_array($replaced_meta)) ? (int)($replaced_meta['armed'] ?? 0) : 0;
+			VaultAudit::closed($user_id, $scope, VaultAudit::REASON_REPLACED, $sid,
+				$armed > 0 ? time() - $armed : null, $daemon === null ? null : $daemon['unwraps']);
 		}
 	}
 
