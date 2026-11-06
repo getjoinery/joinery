@@ -237,6 +237,9 @@ struct MemFsState {
     /// wrong is recoverable, so the simulator keeps the evidence.
     trash: Vec<(String, Node)>,
     root_available: bool,
+    /// Links, FIFOs, sockets and names that are not text: listed and nothing
+    /// else, as a real disk shows them to an engine that follows none of them.
+    specials: std::collections::BTreeMap<String, EntryKind>,
     /// Folders where a second disk is mounted inside the root
     /// (`MemFs::mount_another_disk`). Nothing renames across one.
     mounts: BTreeSet<String>,
@@ -510,6 +513,7 @@ impl MemFs {
                 watch_lost: false,
                 trash: Vec::new(),
                 root_available: true,
+                specials: std::collections::BTreeMap::new(),
                 mounts: BTreeSet::new(),
                 mounts_stay: false,
                 unmounted: BTreeMap::new(),
@@ -982,6 +986,27 @@ impl MemFs {
 
     /// Write a file the way a *user* would: no engine involved, no atomic
     /// spool. This is how a scenario says "someone saved a document".
+    /// The user putting a link or special file at a path, taking whatever
+    /// stood there: `mv dir away; ln -s away dir`, `mkfifo`.
+    pub fn user_put_special(&self, path: &str, kind: EntryKind) {
+        self.user_remove_if_there(path);
+        let key = self.store_path(path);
+        self.state.lock().unwrap().specials.insert(key, kind);
+    }
+
+    /// The user taking a link or special file away.
+    pub fn user_remove_special(&self, path: &str) {
+        let key = self.store_path(path);
+        self.state.lock().unwrap().specials.remove(&key);
+    }
+
+    fn user_remove_if_there(&self, path: &str) {
+        let key = self.store_path(path);
+        if self.state.lock().unwrap().nodes.contains_key(&key) {
+            self.user_remove(path);
+        }
+    }
+
     pub fn user_write(&self, path: &str, bytes: &[u8]) {
         self.write_as_the_user(path, bytes, true)
     }
@@ -2100,6 +2125,15 @@ impl MemFs {
             *n += 1;
             *n
         };
+        {
+            let st = self.state.lock().unwrap();
+            for (k, kind) in &st.specials {
+                let Some(rest) = k.strip_prefix(&prefix).filter(|r| !r.contains('/')) else {
+                    continue;
+                };
+                out.push(DirEntry { name: rest.to_string(), kind: *kind, fingerprint: None, tie_break_id: 0 });
+            }
+        }
         for k in &names {
             let st = self.state.lock().unwrap();
             // Gone between the names and the look, as `OsVfs` skips one.
@@ -2748,7 +2782,7 @@ impl SpoolFile for MemSpool {
         // unexercised — and what lived in it was a file the engine asked for
         // forever because the bytes were already on the disk. Eighteen thousand
         // seeds passed over it; the rig found it in a day.
-        if expect.is_none() && st.nodes.contains_key(&key) {
+        if expect.is_none() && (st.nodes.contains_key(&key) || st.specials.contains_key(&key)) {
             return Err(VfsError::AlreadyExists(target.to_path_buf()));
         }
 

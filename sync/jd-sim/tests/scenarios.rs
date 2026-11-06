@@ -27735,3 +27735,369 @@ fn a_retrying_download_whose_folder_cannot_be_made_yet_is_kept_the_next_round() 
     assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
     assert_converged(&world);
 }
+
+
+// ---------------------------------------------------------------------------
+// Real-disk failures: no one path ends a walk, nothing in the tree goes unsaid.
+// ---------------------------------------------------------------------------
+
+/// B1: a file the system will not let sync read (a chmod 000 file) never ended
+/// a pass here for anything but itself: held, said, read again once it opens.
+/// RED with the refused open failing the pass: nothing on the account synced.
+#[test]
+fn an_unreadable_new_file_is_held_and_the_rest_still_syncs() {
+    let world = World::new(10_200, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut committed = Committed::default();
+    a.fs.user_mkdir("Open");
+    a.fs.user_write("Open/o.txt", b"beside it");
+    committed.note("Open/o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+
+    a.fs.fail_next(FsOp::OpenRead, Some("Open/locked.txt"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.user_write("Open/locked.txt", b"nobody can read this yet");
+    committed.note("Open/locked.txt", b"nobody can read this yet");
+    a.fs.user_write("Open/new.txt", b"made beside it");
+    committed.note("Open/new.txt", b"made beside it");
+    b.fs.user_write("Open/from_b.txt", b"from the peer");
+    committed.note("Open/from_b.txt", b"from the peer");
+    assert!(world.settle().is_some(), "never settled while the file was shut");
+    for _ in 0..3 {
+        let again = world.pass(a);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert!(b.fs.exists("Open/new.txt"), "the rest stopped going up: {:?}", b.fs.all_paths());
+    assert!(a.fs.exists("Open/from_b.txt"), "the rest stopped coming down: {:?}", a.fs.all_paths());
+    assert!(!world.server.tree().contains_key("Open/locked.txt"), "sent bytes it could not read");
+    let said = issues_of(a, jd_core::pass::FILE_UNREADABLE);
+    assert_eq!(said.len(), 1, "{:?}", a.store.open_issues().unwrap());
+    assert!(said[0].contains("/sync/Open/locked.txt") && said[0].contains("permission denied"), "{said:?}");
+
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after it opened");
+    assert!(issues_of(a, jd_core::pass::FILE_UNREADABLE).is_empty(), "still said once it opened");
+    assert!(b.fs.exists("Open/locked.txt"), "{:?}", b.fs.all_paths());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B1, the server half: a synced file edited and then shut. What the server
+/// has stays; a peer's edit and a peer's delete of a file nobody here can read
+/// wait, as a shut folder's do. Opened again the edit is met as an edit, and
+/// the two versions are both kept. RED with the pass ended; RED with the hold
+/// on the path alone, the peer's edit lands over bytes never read.
+#[test]
+fn a_peers_change_to_an_unreadable_file_waits_until_it_can_be_read() {
+    let world = World::new(10_201, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut committed = Committed::default();
+    a.fs.user_write("edit.txt", b"v1");
+    a.fs.user_write("del.txt", b"keep me");
+    committed.note("del.txt", b"keep me");
+    assert!(world.settle().is_some(), "never settled before");
+
+    a.fs.user_write("edit.txt", b"edited here, then shut");
+    committed.note("edit.txt", b"edited here, then shut");
+    a.fs.user_write("del.txt", b"keep me, edited");
+    committed.note("del.txt", b"keep me, edited");
+    a.fs.fail_next(FsOp::OpenRead, Some("edit.txt"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.fail_next(FsOp::OpenRead, Some("del.txt"), FailureKind::PermissionDenied, 1_000_000);
+    b.fs.user_write("edit.txt", b"edited by the peer");
+    committed.note("edit.txt", b"edited by the peer");
+    b.fs.user_remove("del.txt");
+    assert!(world.settle().is_some(), "never settled while shut");
+    assert_eq!(a.fs.peek("edit.txt").as_deref(), Some(&b"edited here, then shut"[..]), "written over a file it could not read");
+    assert_eq!(a.fs.peek("del.txt").as_deref(), Some(&b"keep me, edited"[..]), "a peer's delete took a file it could not read");
+
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after they opened");
+    assert!(issues_of(a, jd_core::pass::FILE_UNREADABLE).is_empty());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B1: the same for any read failure: a failing disk's EIO on one file. RED
+/// with the pass ended and said as the server's fault.
+#[test]
+fn a_file_that_fails_to_read_is_held_and_says_what_the_system_said() {
+    let world = World::new(10_202, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.fail_next(FsOp::OpenRead, Some("bad.bin"), FailureKind::Io, 1_000_000);
+    a.fs.user_write("bad.bin", b"on bad blocks");
+    b.fs.user_write("from_b.txt", b"from the peer");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(a.fs.exists("from_b.txt"), "{:?}", a.fs.all_paths());
+    let said = issues_of(a, jd_core::pass::FILE_UNREADABLE);
+    assert!(said.len() == 1 && said[0].contains("simulated I/O error"), "{:?}", a.store.open_issues().unwrap());
+}
+
+/// B6, B7: a listing that fails for any reason but the folder being gone is
+/// the same hold as a refused one: a path past the system's limit, an EIO.
+/// RED with only `PermissionDenied` held: the whole pass ended.
+#[test]
+fn a_folder_that_fails_to_list_for_any_reason_is_held() {
+    for (seed, kind, words) in [(10_203u64, FailureKind::NameRefused, "longer than this computer allows"), (10_204, FailureKind::Io, "simulated I/O error")] {
+        let world = World::new(seed, &["a", "b"]);
+        let (a, b) = (world.device("a"), world.device("b"));
+        let mut committed = Committed::default();
+        a.fs.user_mkdir("Far");
+        a.fs.user_write("Far/in.txt", b"inside");
+        committed.note("Far/in.txt", b"inside");
+        assert!(world.settle().is_some(), "never settled before");
+        a.fs.fail_next(FsOp::ReadDir, Some("Far"), kind, 1_000_000);
+        a.fs.user_write("new.txt", b"beside it");
+        committed.note("new.txt", b"beside it");
+        b.fs.user_write("from_b.txt", b"from the peer");
+        committed.note("from_b.txt", b"from the peer");
+        assert!(world.settle().is_some(), "never settled while it would not list");
+        assert!(b.fs.exists("new.txt"), "{:?}", b.fs.all_paths());
+        assert!(a.fs.exists("from_b.txt"), "{:?}", a.fs.all_paths());
+        assert!(world.server.tree().contains_key("Far/in.txt"), "read as deleted: {:?}", world.server.tree());
+        assert!(b.fs.exists("Far/in.txt"), "{:?}", b.fs.all_paths());
+        let said = issues_of(a, jd_core::pass::FOLDER_UNREADABLE);
+        assert!(said.len() == 1 && said[0].contains(words), "{said:?}");
+        a.fs.clear_failures();
+        assert!(world.settle().is_some(), "never settled after");
+        assert!(issues_of(a, jd_core::pass::FOLDER_UNREADABLE).is_empty());
+        assert_converged(&world);
+        assert_nothing_lost(&world, &committed);
+    }
+}
+
+/// The hold never stands in for a root that has gone. A sync folder lost in the
+/// middle of a walk stops the pass, and nothing is read as held or as deleted.
+/// RED with every listing failure held.
+#[test]
+fn a_root_gone_in_the_middle_of_a_walk_is_not_read_as_a_held_folder() {
+    let world = World::new(10_205, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_mkdir("Far");
+    a.fs.user_write("Far/in.txt", b"inside");
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.fail_next(FsOp::ReadDir, Some("Far"), FailureKind::RootUnavailable, 1_000);
+    a.fs.user_write("n.txt", b"not sent by a pass that stopped");
+    world.pass(a);
+    assert!(!world.server.tree().contains_key("n.txt"), "the pass went on with its root gone");
+    assert!(issues_of(a, jd_core::pass::FOLDER_UNREADABLE).is_empty(), "a root gone was said as a shut folder");
+    assert!(b.fs.exists("Far/in.txt"));
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after");
+    assert!(world.server.tree().contains_key("n.txt"));
+}
+
+/// A system file that cannot be read is held without a word, as a disk's
+/// `.Trashes` is. RED with the issue said for every path.
+#[test]
+fn an_unreadable_system_file_is_held_without_a_word() {
+    let world = World::new(10_206, &["a"]);
+    let a = world.device("a");
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.fail_next(FsOp::OpenRead, Some(".DS_Store"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.user_write(".DS_Store", b"finder");
+    a.fs.user_write("n.txt", b"new");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(issues_of(a, jd_core::pass::FILE_UNREADABLE).is_empty(), "{:?}", a.store.open_issues().unwrap());
+    assert!(world.server.tree().contains_key("n.txt"));
+}
+
+/// B2, B3: a name that is not text cannot be synced, but it never ends a walk
+/// and it is said. Withdrawn when it is renamed. RED with the entry listed
+/// under a spelling that names nothing.
+#[test]
+fn a_name_that_is_not_text_is_said_and_the_rest_still_syncs() {
+    let world = World::new(10_207, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_put_special("caf\u{fffd}.txt", jd_vfs::EntryKind::NameNotText);
+    a.fs.user_put_special("dir\u{fffd}", jd_vfs::EntryKind::NameNotText);
+    a.fs.user_write("n.txt", b"new");
+    b.fs.user_write("from_b.txt", b"from the peer");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(b.fs.exists("n.txt") && a.fs.exists("from_b.txt"));
+    let said = issues_of(a, jd_core::pass::NAME_NOT_TEXT);
+    assert!(said.len() == 1 && said[0].contains("caf\u{fffd}.txt") && said[0].contains("dir\u{fffd}"), "{said:?}");
+    a.fs.user_remove_special("caf\u{fffd}.txt");
+    a.fs.user_remove_special("dir\u{fffd}");
+    assert!(world.settle().is_some(), "never settled after");
+    assert!(issues_of(a, jd_core::pass::NAME_NOT_TEXT).is_empty());
+}
+
+/// B5: a synced file replaced by a link or FIFO is not a delete: it stays on
+/// the server and on the peer, and it is said. A real file back at the name is
+/// that file again. RED with the link read as nothing: the file went from the
+/// server and every other device, and this device said nothing.
+#[test]
+fn a_synced_file_replaced_by_a_link_is_held_not_deleted() {
+    let world = World::new(10_208, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut committed = Committed::default();
+    a.fs.user_write("f.txt", b"the file");
+    committed.note("f.txt", b"the file");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_put_special("f.txt", jd_vfs::EntryKind::Symlink);
+    assert!(world.settle().is_some(), "never settled while a link stood there");
+    assert!(world.server.tree().contains_key("f.txt"), "read as deleted: {:?}", world.server.tree());
+    assert!(b.fs.exists("f.txt"), "{:?}", b.fs.all_paths());
+    let said = issues_of(a, jd_core::pass::NAME_OCCUPIED);
+    assert!(said.len() == 1 && said[0].contains("/sync/f.txt"), "{:?}", a.store.open_issues().unwrap());
+    a.fs.user_remove_special("f.txt");
+    a.fs.user_write("f.txt", b"the file");
+    assert!(world.settle().is_some(), "never settled after");
+    assert!(issues_of(a, jd_core::pass::NAME_OCCUPIED).is_empty());
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: `mv dir away; ln -s away dir`. The folder and all that is in it stay on
+/// the server and on the peer, and a peer's new file under it waits. RED with
+/// the link read as nothing: the folder went from every other device.
+#[test]
+fn a_synced_folder_replaced_by_a_link_is_held_not_deleted() {
+    let world = World::new(10_209, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_mkdir("Dir/Sub");
+    a.fs.user_write("Dir/in.txt", b"inside");
+    a.fs.user_write("Dir/Sub/deep.txt", b"deep");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_remove("Dir");
+    a.fs.user_put_special("Dir", jd_vfs::EntryKind::Symlink);
+    b.fs.user_write("Dir/from_b.txt", b"under the link");
+    assert!(world.settle().is_some(), "never settled while a link stood there");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Dir/in.txt") && tree.contains_key("Dir/Sub/deep.txt"), "read as deleted: {tree:?}");
+    assert!(b.fs.exists("Dir/in.txt"), "{:?}", b.fs.all_paths());
+    assert_eq!(issues_of(a, jd_core::pass::NAME_OCCUPIED).len(), 1, "{:?}", a.store.open_issues().unwrap());
+}
+
+/// B5: taking the link away is an ordinary delete of what stood there, by the
+/// ordinary rules. RED with the hold outliving the link.
+#[test]
+fn taking_the_link_away_is_an_ordinary_delete() {
+    let world = World::new(10_210, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    for i in 0..6 {
+        a.fs.user_write(&format!("keep{i}.txt"), b"so it stays under the line");
+    }
+    a.fs.user_write("f.txt", b"the file");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_put_special("f.txt", jd_vfs::EntryKind::Symlink);
+    assert!(world.settle().is_some(), "never settled while a link stood there");
+    assert!(b.fs.exists("f.txt"));
+    a.fs.user_remove_special("f.txt");
+    assert!(world.settle().is_some(), "never settled after");
+    assert!(!world.server.tree().contains_key("f.txt"), "{:?}", world.server.tree());
+    assert!(!b.fs.exists("f.txt"), "{:?}", b.fs.all_paths());
+    assert!(issues_of(a, jd_core::pass::NAME_OCCUPIED).is_empty());
+}
+
+/// B4: a file from the server whose name a FIFO or link holds waits, says so,
+/// and fetches nothing while it waits. It lands the pass the name is free. RED
+/// with the download planned anyway: its bytes were fetched and thrown away on
+/// every pass, for ever, and nothing was said.
+#[test]
+fn a_download_whose_name_a_special_file_holds_waits_and_fetches_nothing() {
+    let world = World::new(10_211, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_put_special("ff", jd_vfs::EntryKind::Other);
+    b.fs.user_write("ff", b"from the peer");
+    assert!(world.settle().is_some(), "never settled while the name was held");
+    for _ in 0..3 {
+        let again = world.pass(a);
+        assert!(again.quiet(), "asked again with nothing changed: {:?}", again.exec);
+    }
+    assert!(!a.fs.exists("ff"));
+    assert!(issues_of(a, jd_core::pass::NAME_OCCUPIED).iter().any(|d| d.contains("/sync/ff")), "{:?}", a.store.open_issues().unwrap());
+    a.fs.user_remove_special("ff");
+    assert!(world.settle().is_some(), "never settled after");
+    assert_eq!(a.fs.peek("ff").as_deref(), Some(&b"from the peer"[..]));
+    assert!(issues_of(a, jd_core::pass::NAME_OCCUPIED).is_empty());
+    assert_converged(&world);
+}
+
+/// A link nothing wants is not synced and not said.
+#[test]
+fn a_link_no_record_wants_is_not_said() {
+    let world = World::new(10_212, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_put_special("l", jd_vfs::EntryKind::Symlink);
+    a.fs.user_put_special("fifo", jd_vfs::EntryKind::Other);
+    a.fs.user_write("n.txt", b"new");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(b.fs.exists("n.txt"));
+    assert!(!world.server.tree().contains_key("l"));
+    assert!(a.store.open_issues().unwrap().is_empty(), "{:?}", a.store.open_issues().unwrap());
+}
+
+/// B1, the server half by record: a peer's rename of a file nobody here can
+/// read waits with the rest, though a rename here could be carried out. RED
+/// with the hold kept by name alone: the record moved, and what the walk held
+/// by its old path was no longer the file it held.
+#[test]
+fn a_peers_rename_of_an_unreadable_file_waits() {
+    let world = World::new(10_213, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_write("f.txt", b"v1");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_write("f.txt", b"edited here, then shut");
+    a.fs.fail_next(FsOp::OpenRead, Some("f.txt"), FailureKind::PermissionDenied, 1_000_000);
+    b.fs.user_rename("f.txt", "renamed.txt");
+    assert!(world.settle().is_some(), "never settled while shut");
+    assert!(a.fs.exists("f.txt") && !a.fs.exists("renamed.txt"), "{:?}", a.fs.all_paths());
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after");
+    assert!(a.fs.exists("renamed.txt"), "{:?}", a.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// B1, the name: a file from the server waits for the name a never-sent file
+/// nobody can read stands at. RED without the name held: a move aside of bytes
+/// nothing could look at, and a conflict decided blind.
+#[test]
+fn a_file_from_the_server_waits_for_the_name_an_unreadable_file_holds() {
+    let world = World::new(10_214, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    let mut committed = Committed::default();
+    a.fs.user_write("o.txt", b"beside it");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.fail_next(FsOp::OpenRead, Some("same.txt"), FailureKind::PermissionDenied, 1_000_000);
+    a.fs.user_write("same.txt", b"shut, never sent");
+    committed.note("same.txt", b"shut, never sent");
+    b.fs.user_write("same.txt", b"from the peer");
+    committed.note("same.txt", b"from the peer");
+    assert!(world.settle().is_some(), "never settled while shut");
+    assert_eq!(a.fs.peek("same.txt").as_deref(), Some(&b"shut, never sent"[..]));
+    assert_eq!(a.fs.all_paths().iter().filter(|p| p.contains("conflict")).count(), 0, "{:?}", a.fs.all_paths());
+    a.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after");
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// B5: a record the server has deleted wants nothing here: the hold ends, the
+/// issue goes, and the link stays. RED with a deleted record still counted: the
+/// issue stood for ever over a name nothing wants.
+#[test]
+fn a_link_at_the_name_of_a_file_deleted_elsewhere_is_left_alone() {
+    let world = World::new(10_215, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    for i in 0..6 {
+        a.fs.user_write(&format!("keep{i}.txt"), b"so it stays under the line");
+    }
+    a.fs.user_write("f.txt", b"the file");
+    assert!(world.settle().is_some(), "never settled before");
+    a.fs.user_put_special("f.txt", jd_vfs::EntryKind::Symlink);
+    assert!(world.settle().is_some(), "never settled while a link stood there");
+    b.fs.user_remove("f.txt");
+    assert!(world.settle().is_some(), "never settled after the delete");
+    assert!(issues_of(a, jd_core::pass::NAME_OCCUPIED).is_empty(), "{:?}", a.store.open_issues().unwrap());
+    let root = jd_vfs::Vfs::root(&a.fs).unwrap();
+    let names: Vec<String> = jd_vfs::Vfs::read_dir_all(&a.fs, &root).unwrap().into_iter().map(|e| e.name).collect();
+    assert!(names.iter().any(|n| n == "f.txt"), "the link was taken: {names:?}");
+}

@@ -390,18 +390,31 @@ pub fn run_pass(
     // in it is not known, so nothing in it is read as deleted, adopted or
     // judged, and from the server below its changes wait too. The sync
     // folder itself refused holds everything: said, and the pass ends.
-    let refused = look.refused;
-    say_which_folders_cannot_be_opened(env, &refused)?;
+    let mut refused_files = look.refused_files;
+    say_which_files_cannot_be_read(env, &refused_files)?;
+    say_which_folders_cannot_be_opened(env, &look.refused)?;
+    let mut refused: Vec<String> = look.refused.iter().map(|r| r.path.clone()).collect();
+    // A link or special file at a name a record owns is held the same way.
+    let (occupied_files, occupied_folders) = what_stands_in_the_way(env, &look.occupied)?;
+    say_what_stands_in_the_way(env, &occupied_files, &occupied_folders)?;
+    refused_files.extend(occupied_files.iter().map(|p| Refused { path: p.clone(), why: String::new(), identity: None }));
+    refused.extend(occupied_folders);
     if refused.iter().any(|r| r.is_empty()) {
         return Ok(out);
     }
     let mut unsettled = look.unsettled;
+    unsettled.extend(refused_files.iter().map(|r| r.path.clone()));
+    unsettled.extend(look.gone);
     unsettled.extend(away.iter().map(|(_, rel)| rel.clone()));
     unsettled.extend(refused.iter().cloned());
     let (held_files, observed): (Vec<ObservedFile>, Vec<ObservedFile>) =
         look.files.into_iter().partition(|o| under_unsettled(&unsettled, &o.path));
-    let held_identities: std::collections::HashSet<jd_vfs::FileIdentity> =
-        held_files.iter().map(|o| o.fingerprint.identity()).filter(|i| i.file_id != 0).collect();
+    let held_identities: std::collections::HashSet<jd_vfs::FileIdentity> = held_files
+        .iter()
+        .map(|o| o.fingerprint.identity())
+        .chain(refused_files.iter().filter_map(|r| r.identity))
+        .filter(|i| i.file_id != 0)
+        .collect();
     let tie_breaks = tie_breaks_for_this_pass(env, &observed)?;
     let known: Vec<KnownLocal> = known_local(env, &tie_breaks, &observed)?
         .into_iter()
@@ -907,8 +920,30 @@ pub fn run_pass(
             .map(|e| (e.local_placement().parent, jd_vfs::comparison_key(e.effective_local_name(), &personality)))
             .collect()
     };
+    // A file the system will not let this device read is held the same way:
+    // the record at its name, which is also one the server is sending there,
+    // and the record whose own file it is, wherever that now stands. Written
+    // over, the bytes nobody could read are the bytes lost.
+    let mut unreadable_files: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    if !refused_files.is_empty() {
+        let paths: std::collections::HashSet<String> =
+            refused_files.iter().map(|r| jd_vfs::comparison_key(&r.path, &personality)).collect();
+        let identities: std::collections::HashSet<jd_vfs::FileIdentity> =
+            refused_files.iter().filter_map(|r| r.identity).filter(|i| i.file_id != 0).collect();
+        for e in all_entries(env)? {
+            if e.id.entity_type != EntityType::File {
+                continue;
+            }
+            if e.own_file.is_some_and(|o| identities.contains(&o))
+                || relative_path(env, &e)?.is_some_and(|rel| paths.contains(&jd_vfs::comparison_key(&rel, &personality)))
+            {
+                unreadable_files.insert(e.id);
+            }
+        }
+    }
     let on_a_disk_not_there_now = |entry: &Entry| {
-        (entry.id.entity_type == EntityType::Folder && on_a_disk_not_there.contains(&entry.id.server_id))
+        unreadable_files.contains(&entry.id)
+            || (entry.id.entity_type == EntityType::Folder && on_a_disk_not_there.contains(&entry.id.server_id))
             || entry.local_placement().parent.is_some_and(|p| on_a_disk_not_there.contains(&p))
             || entry.remote.parent.is_some_and(|p| on_a_disk_not_there.contains(&p))
             || (!away_slots.is_empty()
@@ -920,7 +955,7 @@ pub fn run_pass(
     // disk, and a park sets the folder the disk is mounted at aside under a
     // working name, where the disk cannot be mounted again. Dropped, not held: the round below declines the entry until
     // the disk is back, and then plans it again from what it finds.
-    if !on_a_disk_not_there.is_empty() {
+    if !on_a_disk_not_there.is_empty() || !unreadable_files.is_empty() {
         for op in env.store.queued_ops()? {
             let writes_here = matches!(
                 op.kind.as_str(),
@@ -3102,18 +3137,27 @@ fn observed_remote(entry: &Entry) -> RemoteState {
 /// The hash cache means a file whose fingerprint has not moved is not read
 /// again — but a fingerprint is only ever allowed to skip the read. It is never
 /// allowed to stand in for the answer.
-pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>), ExecError> {
+pub(crate) fn observe(env: &ExecEnv) -> Result<Walked, ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(Walked::default());
     };
     let mut out = Vec::new();
-    // Directories whose listing the system refused (`VfsError::PermissionDenied`):
-    // what is in one is not known, so it is held, never read as emptied
-    // (`run_pass`, `say_which_folders_cannot_be_opened`). Every volume a Mac
-    // mounts has a `.Trashes` its user cannot list; failing the pass on it
-    // stopped all syncing on the account and said the server could not be
-    // reached (B-UR).
-    let mut refused: Vec<String> = Vec::new();
+    // No one path ends the walk. A directory whose listing failed: what is in
+    // it is not known, so it is held, never read as emptied (`run_pass`,
+    // `say_which_folders_cannot_be_opened`). Every volume a Mac mounts has a
+    // `.Trashes` its user cannot list; failing the pass on it stopped all
+    // syncing on the account and said the server could not be reached (B-UR).
+    // Only the disk as a whole ends it (`walk_stops_for`).
+    let mut refused: Vec<Refused> = Vec::new();
+    // A file listed whose bytes could not be read (`say_which_files_cannot_be_read`).
+    let mut refused_files: Vec<Refused> = Vec::new();
+    // A directory gone since its parent listed it: held this pass, unsaid, and
+    // the next pass reads what is left.
+    let mut gone: Vec<String> = Vec::new();
+    // Names that are not text (`jd_vfs::EntryKind::NameNotText`).
+    let mut not_text: Vec<String> = Vec::new();
+    // Links and special files, by path.
+    let mut occupied: Vec<String> = Vec::new();
     let mut reserved: Vec<String> = Vec::new();
     let mut left: Vec<String> = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
@@ -3180,13 +3224,23 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
         // working, because the simulator did not filter and production does.
         let children = match env.vfs.read_dir_all(&dir) {
             Ok(children) => children,
-            Err(jd_vfs::VfsError::PermissionDenied(_)) => {
-                refused.push(rel.clone());
+            Err(e) => {
+                if walk_stops_for(env, &rel, &e) {
+                    return Err(e.into());
+                }
+                if matches!(e, jd_vfs::VfsError::NotFound(_)) {
+                    gone.push(rel.clone());
+                } else {
+                    refused.push(Refused { path: rel.clone(), why: why_refused(&e), identity: None });
+                }
                 continue;
             }
-            Err(e) => return Err(e.into()),
         };
         for child in children {
+            if child.kind == jd_vfs::EntryKind::NameNotText {
+                not_text.push(if rel.is_empty() { child.name.clone() } else { format!("{rel}/{}", child.name) });
+                continue;
+            }
             if jd_vfs::is_internal(&child.name) {
                 // A park nobody is coming back for, left standing on THIS disk.
                 //
@@ -3269,9 +3323,18 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
                     // read is taken as it stands, uncached: there the check
                     // compares no files, and a file left out reads as deleted.
                     let mut looked = None;
+                    // Not read, and why: held rather than left out, which
+                    // would read it as deleted, and no reason to end the walk
+                    // for every other file.
+                    let mut not_read: Option<(Option<jd_vfs::FileIdentity>, jd_vfs::VfsError)> = None;
                     for attempt in 1..=LOOKS_AT_A_FILE {
-                        let Some((fingerprint, change_ns)) = env.vfs.fingerprint_and_change_time(&full)? else {
-                            break;
+                        let (fingerprint, change_ns) = match env.vfs.fingerprint_and_change_time(&full) {
+                            Ok(Some(seen)) => seen,
+                            Ok(None) => break,
+                            Err(e) => {
+                                not_read = Some((None, e));
+                                break;
+                            }
                         };
                         // Without file ids the cache is kept by path, and is
                         // only as good as the watcher that forgets it
@@ -3285,14 +3348,25 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
                             looked = Some((fingerprint, change_ns, sha));
                             break;
                         }
-                        let Some((mut reader, opened)) = env.vfs.open_file(&full)? else {
-                            continue;
+                        let (mut reader, opened) = match env.vfs.open_file(&full) {
+                            Ok(Some(open)) => open,
+                            Ok(None) => continue,
+                            Err(e) => {
+                                not_read = Some((Some(fingerprint.identity()), e));
+                                break;
+                            }
                         };
                         let same = if positional { opened == fingerprint } else { opened.identity() == fingerprint.identity() };
                         if !same && !(positional && attempt == LOOKS_AT_A_FILE) {
                             continue;
                         }
-                        let sha = crate::execute::hash_of(&mut *reader)?;
+                        let sha = match crate::execute::hash_of(&mut *reader) {
+                            Ok(sha) => sha,
+                            Err(e) => {
+                                not_read = Some((Some(opened.identity()), what_the_read_said(&full, e)));
+                                break;
+                            }
+                        };
                         // Cached only as the file it was looked at: one
                         // written to meanwhile is hashed again next time.
                         if opened == fingerprint {
@@ -3304,6 +3378,13 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
                         }
                         looked = Some((fingerprint, change_ns, sha));
                         break;
+                    }
+                    if let Some((identity, e)) = not_read {
+                        if walk_stops_for(env, &path, &e) {
+                            return Err(e.into());
+                        }
+                        refused_files.push(Refused { path, why: why_refused(&e), identity });
+                        continue;
                     }
                     let Some((fingerprint, change_ns, sha)) = looked else {
                         continue;
@@ -3327,9 +3408,11 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
                         change_ns,
                     });
                 }
-                // Symlinks are flagged and never followed: following one walks
-                // out of the sync folder, and a loop walks forever.
-                _ => {}
+                // Symlinks are never followed: following one walks out of the
+                // sync folder, and a loop walks forever. Neither a link nor a
+                // FIFO, socket or device is synced; one standing at a name a
+                // record owns is held (`what_stands_in_the_way`).
+                _ => occupied.push(path),
             }
         }
     }
@@ -3384,8 +3467,83 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<(Vec<ObservedFile>, Vec<String>),
         }
     }
 
-    refused.sort();
-    Ok((out, refused))
+    not_text.sort();
+    let want = (!not_text.is_empty()).then(|| {
+        format!(
+            "{} name(s) here are not text this client can read, so they cannot be synced and every \
+             other device goes on without them. Rename them and they will sync: {}",
+            not_text.len(),
+            not_text.join(", "),
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == NAME_NOT_TEXT).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(NAME_NOT_TEXT)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, NAME_NOT_TEXT, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+
+    refused.sort_by(|a, b| a.path.cmp(&b.path));
+    refused_files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(Walked { files: out, refused, refused_files, gone, occupied })
+}
+
+/// The issue for names that are not text (`jd_vfs::EntryKind::NameNotText`).
+pub const NAME_NOT_TEXT: &str = "name_not_text";
+
+/// One path the walk could not read: a folder it could not list, or a file it
+/// could not read the bytes of. Held, and said unless it is a system path.
+#[derive(Debug, Clone)]
+pub(crate) struct Refused {
+    /// Relative to the root; `""` for the root itself.
+    pub(crate) path: String,
+    /// What the system said, for the person reading the issue.
+    pub(crate) why: String,
+    /// A file's identity where the stat got that far: the record that owns the
+    /// file is held wherever the file now stands.
+    pub(crate) identity: Option<jd_vfs::FileIdentity>,
+}
+
+/// What one walk of the disk read (`observe`).
+#[derive(Debug, Default)]
+pub(crate) struct Walked {
+    pub(crate) files: Vec<ObservedFile>,
+    pub(crate) refused: Vec<Refused>,
+    pub(crate) refused_files: Vec<Refused>,
+    pub(crate) gone: Vec<String>,
+    pub(crate) occupied: Vec<String>,
+}
+
+/// Does this failure speak for the whole disk rather than for one path? The
+/// sync folder gone, or failing to list for any reason but a refusal, which
+/// `say_which_folders_cannot_be_opened` says. A root gone is never read as a
+/// held folder: the pass stops, and the folder is said to be missing.
+fn walk_stops_for(env: &ExecEnv, rel: &str, e: &jd_vfs::VfsError) -> bool {
+    matches!(e, jd_vfs::VfsError::RootUnavailable(_))
+        || env.vfs.root().is_none()
+        || (rel.is_empty() && !matches!(e, jd_vfs::VfsError::PermissionDenied(_)))
+}
+
+/// A failed read of a file's bytes, as what the system said about that file.
+/// `ExecError::Io` by itself reads "could not write a working file", which is
+/// the other direction.
+fn what_the_read_said(path: &std::path::Path, e: ExecError) -> jd_vfs::VfsError {
+    match e {
+        ExecError::Io(source) => jd_vfs::VfsError::Io { path: path.to_path_buf(), source },
+        ExecError::Vfs(v) => v,
+        other => jd_vfs::VfsError::Io { path: path.to_path_buf(), source: std::io::Error::other(other.to_string()) },
+    }
+}
+
+/// What to tell a person the system said about a path.
+fn why_refused(e: &jd_vfs::VfsError) -> String {
+    match e {
+        jd_vfs::VfsError::PermissionDenied(_) => "permission denied".to_string(),
+        jd_vfs::VfsError::NameRefused(_) => "its path is longer than this computer allows".to_string(),
+        jd_vfs::VfsError::Io { source, .. } => source.to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// The issue for what the walk's sweep had to leave standing (`sweep_away`).
@@ -3424,8 +3582,14 @@ pub(crate) struct Look {
     pub(crate) files: Vec<ObservedFile>,
     pub(crate) dirs: DirsSeen,
     pub(crate) unsettled: Vec<String>,
-    /// Directories whose listing was refused (`observe`).
-    pub(crate) refused: Vec<String>,
+    /// Directories whose listing failed (`observe`).
+    pub(crate) refused: Vec<Refused>,
+    /// Files whose bytes could not be read (`observe`).
+    pub(crate) refused_files: Vec<Refused>,
+    /// Directories gone since their parent listed them (`observe`).
+    pub(crate) gone: Vec<String>,
+    /// Links and special files, by path (`observe`).
+    pub(crate) occupied: Vec<String>,
 }
 
 /// `observed_dirs_and_tie_breaks`'s answer.
@@ -3458,11 +3622,11 @@ pub(crate) fn look_at_the_disk(env: &ExecEnv) -> Result<Look, ExecError> {
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let (files, refused) = observe(env)?;
+        let Walked { files, refused, refused_files, gone, occupied } = observe(env)?;
         let dirs = observed_dirs_and_tie_breaks(env)?;
-        let torn = tears(env, &files, &dirs)?;
+        let torn = tears(env, &files, &refused_files, &dirs)?;
         if torn.is_empty() || attempt >= LOOKS {
-            return Ok(Look { files, dirs, unsettled: torn, refused });
+            return Ok(Look { files, dirs, unsettled: torn, refused, refused_files, gone, occupied });
         }
     }
 }
@@ -3542,7 +3706,7 @@ fn identities_listed_now(env: &ExecEnv) -> Result<(HashMap<String, jd_vfs::FileI
 /// What a second listing reads is torn the same way if the disk moves under
 /// it, and a torn second listing differs from the look: it errs towards
 /// another read, never towards a look let stand.
-fn tears(env: &ExecEnv, files: &[ObservedFile], dirs: &DirsSeen) -> Result<Vec<String>, ExecError> {
+fn tears(env: &ExecEnv, files: &[ObservedFile], refused_files: &[Refused], dirs: &DirsSeen) -> Result<Vec<String>, ExecError> {
     let personality = env.vfs.personality();
     if personality.positional_file_ids && !personality.fat_directories_hold {
         // No identities to compare on such a disk: its own limit.
@@ -3556,6 +3720,13 @@ fn tears(env: &ExecEnv, files: &[ObservedFile], dirs: &DirsSeen) -> Result<Vec<S
             let i = o.fingerprint.identity();
             if i.file_id != 0 {
                 seen_files.entry(i).or_default().push(o.path.clone());
+            }
+        }
+        // Looked at, and its bytes would not be read: it stands where the look
+        // saw it, which is no tear.
+        for r in refused_files {
+            if let Some(i) = r.identity.filter(|i| i.file_id != 0) {
+                seen_files.entry(i).or_default().push(r.path.clone());
             }
         }
     }
@@ -3685,13 +3856,13 @@ pub(crate) fn observed_dirs_and_tie_breaks(
         if guard > 100_000 {
             return Err(ExecError::Contract("the local walk does not end".into()));
         }
-        // A directory whose listing is refused stands in `out` (its parent
-        // listed it) and is held by `observe`'s answer; nothing under it is
-        // known, so nothing under it is listed here.
+        // A directory whose listing fails stands in `out` (its parent listed
+        // it) and is held by `observe`'s answer; nothing under it is known, so
+        // nothing under it is listed here.
         let children = match env.vfs.read_dir_all(&dir) {
             Ok(children) => children,
-            Err(jd_vfs::VfsError::PermissionDenied(_)) => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) if walk_stops_for(env, &rel, &e) => return Err(e.into()),
+            Err(_) => continue,
         };
         for child in children {
             if child.kind != jd_vfs::EntryKind::Directory {
@@ -5203,6 +5374,14 @@ pub const DISK_NOT_THERE: &str = "disk_not_there";
 /// (`say_which_folders_cannot_be_opened`).
 pub const FOLDER_UNREADABLE: &str = "folder_unreadable";
 
+/// The state issue for files whose bytes cannot be read
+/// (`say_which_files_cannot_be_read`).
+pub const FILE_UNREADABLE: &str = "file_unreadable";
+
+/// The state issue for a link or special file at a name a record owns
+/// (`say_what_stands_in_the_way`).
+pub const NAME_OCCUPIED: &str = "name_occupied";
+
 /// The folders whose disk is not there now: the folder a second disk was
 /// mounted at, and nothing is mounted there now, nor has the disk turned up
 /// at another folder (a Mac renames a folder a disk is mounted at, disk and
@@ -5327,16 +5506,22 @@ fn path_here(id: i64, folders: &HashMap<i64, Entry>, paths: &mut HashMap<i64, Op
 /// system folder or one inside it (`jd_vfs::is_system_path`: a disk's own `.Trashes`) is held
 /// the same way and never said: nothing in it is synced, and a person cannot
 /// open it anyway.
-fn say_which_folders_cannot_be_opened(env: &ExecEnv, refused: &[String]) -> Result<(), ExecError> {
+fn say_which_folders_cannot_be_opened(env: &ExecEnv, refused: &[Refused]) -> Result<(), ExecError> {
     let root = env.vfs.root().unwrap_or_default();
     let shown: Vec<String> = refused
         .iter()
-        .filter(|rel| rel.is_empty() || !jd_vfs::is_system_path(rel, true))
-        .map(|rel| if rel.is_empty() { format!("the sync folder itself ({})", root.display()) } else { root.join(rel).display().to_string() })
+        .filter(|r| r.path.is_empty() || !jd_vfs::is_system_path(&r.path, true))
+        .map(|r| {
+            if r.path.is_empty() {
+                format!("the sync folder itself ({}) ({})", root.display(), r.why)
+            } else {
+                format!("{} ({})", root.join(&r.path).display(), r.why)
+            }
+        })
         .collect();
     let want = (!shown.is_empty()).then(|| {
         format!(
-            "Sync cannot open {} (permission denied), so it leaves what is in it as it is, here and on \
+            "Sync cannot open {}, so it leaves what is in it as it is, here and on \
              the server, until it can be opened. If it was deleted on another device, delete it here \
              once it opens",
             shown.join(", ")
@@ -5347,6 +5532,96 @@ fn say_which_folders_cannot_be_opened(env: &ExecEnv, refused: &[String]) -> Resu
         env.store.withdraw_issues(FOLDER_UNREADABLE)?;
         if let Some(detail) = want {
             env.store.raise_issue(None, FOLDER_UNREADABLE, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+    Ok(())
+}
+
+/// Of the links and special files on the disk, those standing at a name a
+/// record owns: a synced file or folder replaced by one (`mv dir away; ln -s
+/// away dir`), or a file from the server on its way to that name. Files and
+/// folders apart, as each is held by its own road. Read as gone, such a record
+/// was deleted from the server and every other device without a word; and a
+/// download kept fetching its bytes and finding the name taken, every pass.
+/// One no record wants is nobody's business: not synced, and not said.
+/// A record the server has deleted wants nothing here.
+fn what_stands_in_the_way(env: &ExecEnv, occupied: &[String]) -> Result<(Vec<String>, Vec<String>), ExecError> {
+    let (mut files, mut folders) = (Vec::new(), Vec::new());
+    if occupied.is_empty() {
+        return Ok((files, folders));
+    }
+    let personality = env.vfs.personality();
+    let stands: std::collections::HashMap<String, &String> =
+        occupied.iter().map(|p| (jd_vfs::comparison_key(p, &personality), p)).collect();
+    for e in all_entries(env)? {
+        if e.remote_deleted {
+            continue;
+        }
+        let Some(rel) = relative_path(env, &e)? else {
+            continue;
+        };
+        if let Some(path) = stands.get(&jd_vfs::comparison_key(&rel, &personality)) {
+            match e.id.entity_type {
+                EntityType::Folder => folders.push((*path).clone()),
+                _ => files.push((*path).clone()),
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    folders.sort();
+    folders.dedup();
+    Ok((files, folders))
+}
+
+/// A state: what `what_stands_in_the_way` found, withdrawn the pass the name
+/// is free or holds a file or folder again.
+fn say_what_stands_in_the_way(env: &ExecEnv, files: &[String], folders: &[String]) -> Result<(), ExecError> {
+    let root = env.vfs.root().unwrap_or_default();
+    let mut shown: Vec<String> = files.iter().chain(folders).map(|p| root.join(p).display().to_string()).collect();
+    shown.sort();
+    let want = (!shown.is_empty()).then(|| {
+        format!(
+            "A link, special file or mounted disk stands at {}, where a synced item belongs. Sync does \
+             not follow or replace those, so it leaves the item as it is on the server and on your other \
+             devices. Put a real file or folder back there, or remove what stands there and the item is \
+             treated as deleted",
+            shown.join(", ")
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == NAME_OCCUPIED).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(NAME_OCCUPIED)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, NAME_OCCUPIED, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+    Ok(())
+}
+
+/// A state: the files the system would not let this device read
+/// (`Walked::refused_files`), said for as long as it will not, and withdrawn
+/// the pass they can be read. A system file is held the same way and never
+/// said: it is not synced, and nothing depends on reading it.
+fn say_which_files_cannot_be_read(env: &ExecEnv, refused: &[Refused]) -> Result<(), ExecError> {
+    let root = env.vfs.root().unwrap_or_default();
+    let shown: Vec<String> = refused
+        .iter()
+        .filter(|r| !jd_vfs::is_system_path(&r.path, false))
+        .map(|r| format!("{} ({})", root.join(&r.path).display(), r.why))
+        .collect();
+    let want = (!shown.is_empty()).then(|| {
+        format!(
+            "Sync cannot read {}, so it leaves each as it is, here and on the server, until it can be \
+             read. Everything else goes on syncing",
+            shown.join(", ")
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == FILE_UNREADABLE).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(FILE_UNREADABLE)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, FILE_UNREADABLE, &detail, (env.now_ms)() as i64)?;
         }
     }
     Ok(())
@@ -9506,5 +9781,17 @@ mod tests {
         assert_eq!(store.get_meta(DELETES_APPROVED).unwrap(), None);
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod a_read_that_fails {
+    use super::*;
+
+    #[test]
+    fn says_what_the_system_said_and_not_a_write() {
+        let source = std::io::Error::other("Input/output error");
+        let said = why_refused(&what_the_read_said(std::path::Path::new("/s/bad.bin"), ExecError::Io(source)));
+        assert_eq!(said, "Input/output error");
     }
 }

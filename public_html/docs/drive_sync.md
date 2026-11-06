@@ -1330,15 +1330,47 @@ is read again as it stands. A disk gone for good leaves with its folder
 deleted on the web: a folder the server deleted, or one it is in, is not
 held. Where the system has no mount table to read (Windows), nothing is held.
 
-**A folder the system will not list** (permission denied) is held the same way,
-here and from the server, because what is in it is not known: nothing in it is
-read as deleted, adopted or written to, the rest of the tree goes on syncing,
-and a vault's placeholder there keeps its tie. It is said as
-`folder_unreadable` from the first pass, and withdrawn the pass it can be
-listed, when what is in it is read again as it stands. A server delete of such
-a folder waits with it, since a trash could not see what it takes. A system
-folder (a mounted disk's `.Trashes`) is held without being said. The sync folder
-itself refused holds everything, said as one issue, and the pass ends there.
+**No one path ends a walk.** Only the disk as a whole does: the sync folder gone
+is the missing-folder state, never a held folder, and the sync folder failing to
+list for any reason but a refusal stops the pass as a problem on this computer.
+
+**A folder that will not list** is held the same way, here and from the server,
+because what is in it is not known: nothing in it is read as deleted, adopted or
+written to, the rest of the tree goes on syncing, and a vault's placeholder there
+keeps its tie. That covers every reason it may fail: permission denied, a folder
+that lists but will not be entered (no execute bit), a path past the system's
+limit, a read error. It is said as `folder_unreadable`, with what the system
+said, from the first pass, and withdrawn the pass it can be listed, when what is
+in it is read again as it stands. A server delete of such a folder waits with it,
+since a trash could not see what it takes. A system folder (a mounted disk's
+`.Trashes`) is held without being said. The sync folder itself refused holds
+everything, said as one issue, and the pass ends there. A folder gone since its
+parent listed it is held for that pass, unsaid.
+
+**A file that will not read** (permission denied, a read error) is held, here and
+from the server: it is not read as deleted, its bytes do not go up, and a peer's
+edit or delete of it waits, as does a file arriving at its name. Its record is
+held wherever the file stands by its identity. It is said as `file_unreadable`
+and withdrawn the pass it reads, when an edit made meanwhile is met as an edit. A
+system file is held without being said. A synced file nobody has changed is not
+read at all, so shutting it costs nothing.
+
+**A name that is not text** (bytes that are not UTF-8, which ext4 and network
+mounts can hold) is never synced: the server cannot hold it, and no two systems
+would read it alike. It is left where it is, not walked into, and said as
+`name_not_text`.
+
+**Links and special files are not synced.** A symlink, FIFO, socket or device in
+the tree is neither followed nor read, and with no record at its name it is not
+said. A loop or a link out of the tree is nothing to the walk. One standing at a
+name a record owns is held rather than read as gone: a synced file or folder
+replaced by a link (`mv dir away; ln -s away dir`) stays on the server and on every
+other device with all that is in it, and a file from the server on its way to
+that name waits and fetches nothing. It is said as `name_occupied`, and released
+when the name holds a real file or folder again, or holds nothing, which is an
+ordinary delete under the ordinary rules. A record the server has deleted wants
+nothing here, and sync leaves the link alone. On Windows a folder a disk is mounted
+at, like a junction, reads as a link, so it is not synced and the same hold applies.
 
 **Uploads** commit their hash at init, read from the same open handle the
 bytes are sent from. A file whose bytes change mid-upload fails verification
@@ -1412,7 +1444,10 @@ tray reads from.
 | `store_inconsistent` | items have no way back to the root, and the server's index does not have their folder either | nothing is left stranded |
 | `reserved_prefix` | files here have names beginning `.jd-`, which the client keeps for its own working files | no such file is left; the list in it follows the disk |
 | `disk_not_there` | a disk mounted inside the sync folder is not there, so what was on it is held, here and from the server | the disk is mounted there again, or the server deletes its folder |
-| `folder_unreadable` | the system refused to list a folder (permission denied), so what is in it is held, here and from the server; a system folder such as a disk's own `.Trashes` is held without being said | the folder can be listed again |
+| `folder_unreadable` | a folder will not list, and why, so what is in it is held, here and from the server; a system folder such as a disk's own `.Trashes` is held without being said | the folder can be listed again |
+| `file_unreadable` | a file's bytes will not read, and why, so it is held, here and from the server; a system file is held without being said | the file can be read again |
+| `name_not_text` | names here are not text, so they cannot be synced | they are renamed or gone |
+| `name_occupied` | a link or special file stands at a name a synced item owns, so the item is held here and stays on the server and other devices | the name holds a real file or folder, or nothing |
 | `leftover_stays` | something under one of the client's working names could not be swept to the trash: a disk is mounted in it, or the trash refused it | nothing is left standing; the list in it follows the disk |
 | `renames_untracked_on_this_drive` | the standing notice on a FAT or exFAT drive | the sync folder is on a drive that keeps file identities |
 | `trash_waits` | a folder's trash here waits for a child that cannot move yet | the trash goes through, or the folder stops being trashable |

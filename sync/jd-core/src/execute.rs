@@ -8890,7 +8890,12 @@ pub(crate) fn where_file_stands(
         if guard > 100_000 {
             return Err(ExecError::Contract("the local walk does not end".into()));
         }
-        for child in env.vfs.read_dir_all(&dir)? {
+        // A folder that will not list holds nothing this can see, and is no
+        // reason to fail: called from naming, a failure here ended the pass.
+        let Ok(children) = env.vfs.read_dir_all(&dir) else {
+            continue;
+        };
+        for child in children {
             match child.kind {
                 jd_vfs::EntryKind::File => {
                     if child.fingerprint.is_some_and(|fp| fp.identity() == own) {

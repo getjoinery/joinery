@@ -180,6 +180,11 @@ pub enum EntryKind {
     Directory,
     Symlink,
     Other,
+    /// A name that is not text (`to_str` refuses it: bytes that are not UTF-8,
+    /// an unpaired surrogate on Windows). The server cannot hold it and no two
+    /// systems would read it alike, so it is never synced. The entry's `name`
+    /// is a spelling for saying so, and no path built from it reaches the file.
+    NameNotText,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

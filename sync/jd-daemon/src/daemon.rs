@@ -789,7 +789,12 @@ fn blocker_for(error: &jd_core::ExecError) -> Blocker {
             return Blocker::RootUnavailable { path: path.display().to_string() };
         }
         jd_core::ExecError::Vfs(e) => return Blocker::LocalError { detail: e.to_string() },
-        _ => {}
+        // This computer's too: its state store, its working files, a journal
+        // row it cannot read. None of them has anything to do with a server.
+        jd_core::ExecError::Store(_) | jd_core::ExecError::Io(_) | jd_core::ExecError::UnknownOp(_) => {
+            return Blocker::LocalError { detail: error.to_string() };
+        }
+        jd_core::ExecError::Proto(_) | jd_core::ExecError::Contract(_) | jd_core::ExecError::StoodDown => {}
     }
     let text = error.to_string();
     if text.contains("401") || text.to_lowercase().contains("unauthor") {
@@ -1881,6 +1886,12 @@ mod tests {
         )));
         assert!(matches!(local, Blocker::LocalError { .. }), "{local:?}");
         assert!(local.message().starts_with("Sync stopped on this computer"));
+
+        // Its working files and its state store are this computer's too.
+        let scratch = blocker_for(&jd_core::ExecError::Io(std::io::Error::other("No space left on device")));
+        assert!(matches!(scratch, Blocker::LocalError { .. }), "{scratch:?}");
+        let unknown = blocker_for(&jd_core::ExecError::UnknownOp("a newer client's kind".into()));
+        assert!(matches!(unknown, Blocker::LocalError { .. }), "{unknown:?}");
 
         let gone = blocker_for(&jd_core::ExecError::Vfs(jd_vfs::VfsError::RootUnavailable("/Volumes/D/Drive".into())));
         assert!(matches!(gone, Blocker::RootUnavailable { .. }), "{gone:?}");

@@ -119,7 +119,18 @@ include_internal: bool,
     let mut out = Vec::new();
     for entry in rd {
         let entry = entry.map_err(|e| io_err(path, e))?;
-        let raw = entry.file_name().to_string_lossy().to_string();
+        // A spelling invented for a name that is not text names nothing: asked
+        // of, it reads as not there, and a folder listed under one ended every
+        // pass. Said for what it is, and nothing is asked of it.
+        let Some(raw) = entry.file_name().to_str().map(str::to_string) else {
+            out.push(DirEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                kind: EntryKind::NameNotText,
+                tie_break_id: 0,
+                fingerprint: None,
+            });
+            continue;
+        };
         // macOS hands back what it stored, which is decomposed, whatever
         // spelling the file was created with. Left alone, every file with an
         // accent in its name reads as a rename on the very next scan — the
@@ -146,7 +157,13 @@ include_internal: bool,
         // which could be outside the root or a loop back into it.
         let md = match entry.path().symlink_metadata() {
             Ok(md) => md,
-            Err(_) => continue, // vanished between listing and stat — the rescan will catch up
+            // Vanished between the listing and the stat: the rescan catches up.
+            Err(e) if not_there(&e) => continue,
+            // The name is there and what it is could not be asked: a folder
+            // that lists but will not be entered (no execute bit), a path past
+            // the system's limit. Left out, everything in such a folder read
+            // as deleted and went from the server and every other device.
+            Err(e) => return Err(io_err(&entry.path(), e)),
         };
         let kind = if md.file_type().is_symlink() {
             EntryKind::Symlink
@@ -1751,6 +1768,42 @@ mod tests {
     /// A finished scratch file reads back what was written to it, from its
     /// start, and is gone once the reader is dropped. An encrypted upload
     /// sends its ciphertext this way; a write-only handle failed every one.
+    /// B6: listed, and nothing in it can be asked about. Left out, its files
+    /// read as deleted. Not run as root, which no permission stops.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_lists_but_will_not_be_entered_fails_the_listing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("no_execute");
+        let sub = dir.path().join("nox");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("a.txt"), b"a").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o444)).unwrap();
+        let entered = sub.join("a.txt").symlink_metadata().is_ok();
+        let listed = vfs(&dir).read_dir_all(&sub);
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+        if entered {
+            return; // running as root
+        }
+        assert!(matches!(listed, Err(VfsError::PermissionDenied(_))), "{listed:?}");
+    }
+
+    /// B2, B3: a name that is not text is listed for what it is, never under a
+    /// spelling no path reaches. APFS refuses such a name; ext4 keeps it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_name_that_is_not_text_is_listed_for_what_it_is() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = TempDir::new("not_text");
+        let name = std::ffi::OsStr::from_bytes(b"dir\xff");
+        fs::create_dir(dir.path().join(name)).unwrap();
+        fs::write(dir.path().join("ok.txt"), b"a").unwrap();
+        let listed = vfs(&dir).read_dir_all(dir.path()).unwrap();
+        let odd: Vec<_> = listed.iter().filter(|e| e.kind == EntryKind::NameNotText).collect();
+        assert_eq!(odd.len(), 1, "{listed:?}");
+        assert!(listed.iter().any(|e| e.name == "ok.txt" && e.kind == EntryKind::File), "{listed:?}");
+    }
+
     #[test]
     fn a_finished_scratch_file_reads_back_what_was_written() {
         let d = TempDir::new("scratch");
