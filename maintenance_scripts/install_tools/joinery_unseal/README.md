@@ -11,7 +11,9 @@ carry it away (`specs/unseal_daemon.md`, `docs/sealed_vault.md`).
     joinery-unseal --selftest
     joinery-unseal --version
 
-It answers on one unix socket, mode 0660, and serves only the peer whose
+It answers on one unix socket (mode 0660 by default; the installed unit passes
+`--socket-mode 0666` inside a `joinery-unseal:www-data 0750` directory, so the
+directory is the access) and serves only the peer whose
 `SO_PEERCRED` uid is `--allow-uid` (the pool user). It has no network, reads no
 database, holds no configuration beyond its argv, and opens no file after
 startup but the hold marker. It refuses to serve as root, locks every page

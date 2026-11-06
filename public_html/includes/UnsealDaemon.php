@@ -87,7 +87,7 @@ class UnsealDaemon {
 	 *   installed      the install record exists
  *   refused        why the installer did not install, when it said (see refused())
 	 *   socket         its socket path
-	 *   binary         'current' or 'previous' (the launcher moved it after three crashes)
+	 *   binary         'current' or 'previous' (the launcher moved it after four starts with no run lasting five minutes)
 	 *   held           the hold file exists
 	 *   crashes_hour   crash events in the last hour
 	 *   running        a process serving this socket is in the process table

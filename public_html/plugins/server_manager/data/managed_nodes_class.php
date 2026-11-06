@@ -511,7 +511,7 @@ class ManagedNode extends SystemBase {
 		// (current, unlogged, verify_failed); empty where none was reported.
 		'mgn_agent_bundle_state' => array('type'=>'varchar(24)'),
 		// The site's unseal daemon in one word, as the agent reported it on its
-		// last poll (agent 1.109.0): absent, running, restarting, down,
+		// last poll (agent 1.112.0): absent, running, restarting, down,
 		// previous, held or unlocked. Empty for an older agent. Down,
 		// previous, held and unlocked are an incident (IncidentSourceUnsealDaemon).
 		'mgn_agent_unseal_daemon' => array('type'=>'varchar(16)'),

@@ -23,6 +23,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.19 - the previous-build row states the launcher's rule (four starts with no five-minute run)
  * @version 1.18 - the unseal daemon row says when new windows are held in the pool (the fallback after five silent minutes)
  * @version 1.17 - a row for the unseal daemon (specs/unseal_daemon.md WP3): installed, answering, on the
  *                 current build, not held, its memory locked; checkUnsealDaemon(), read from UnsealDaemon::facts()
@@ -432,7 +433,7 @@ class VaultHealth {
 	/**
 	 * The unseal daemon (specs/unseal_daemon.md): installed by root, answering
 	 * on its socket, running the current release's build (not the previous one
-	 * its launcher falls back to after three crashes in a minute), not held by
+	 * its launcher falls back to after four starts with no run lasting five minutes), not held by
 	 * a security case, and with its memory locked.
 	 *
 	 * @param array|null $facts Injected for tests; UnsealDaemon::facts() otherwise.
@@ -480,8 +481,8 @@ class VaultHealth {
 				. 'root lifts the hold.');
 		}
 		if (($facts['binary'] ?? 'current') === 'previous') {
-			return $unmet('The unseal daemon is running the previous build: this release\'s build crashed three times '
-				. 'inside a minute. The next release with a working build moves it back.');
+			return $unmet('The unseal daemon is running the previous build: this release\'s build did not stay up '
+				. '(four starts with no run lasting five minutes). The next release with a working build moves it back.');
 		}
 		if (empty($facts['memory_locked'])) {
 			return $unmet('The unseal daemon is running without locked memory, so its keys could reach swap.');

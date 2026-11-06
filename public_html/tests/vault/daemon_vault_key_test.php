@@ -187,6 +187,7 @@ $stray = VaultUnlock::openKey($user_id, $wrapping->unlocker($fx['kek']))['key'];
 check(dvk_status($sock)['windows'] >= 2, 'a window and an unarmed key are open');
 VaultUnlock::lockAll($user_id);
 check(dvk_status($sock, $user_id)['open'] === false, 'lockAll ends every window of the member, unarmed ones too');
+check(strpos(dvk_last_close($user_id), 'unwraps=') !== false, 'lockAll\'s close row counts the window\'s unwraps too', dvk_last_close($user_id));
 // Another request's key with no window (a rotation's drain of the old
 // generation, after its answer) is not this request's to end (reviewer2 B2).
 $drain = DaemonVaultKey::open($sock, $user_id, 'user', 600, 0, $wrapping->unlocker($fx['kek']))['key'];

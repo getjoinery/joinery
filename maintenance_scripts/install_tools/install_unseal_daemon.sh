@@ -48,7 +48,7 @@
 # limit that cannot be raised here (a container started without
 # --ulimit memlock=-1), which leaves /etc/joinery-unseal/KEY/refused naming the
 # reason for the site's health row. A restart ends every window, so the daemon is restarted
-# only when its binary or unit changed.
+# only when something this installs changed: the build, the launcher, the unit or the record.
 #
 # Runs at the platform's root moments through _plugin_installers_start.sh (a
 # core installer), and by hand:

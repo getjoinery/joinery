@@ -54,12 +54,13 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.27 - lockAll()'s close rows carry each daemon window's unwrap count, as lock()'s do
  * @version 1.26 - the unseal daemon (specs/unseal_daemon.md WP4): openKey() opens the window in the
  *   daemon where the install record says it runs here (a DaemonVaultKey: a handle, never the key), with
  *   the window's clocks; it retries once after three seconds, refuses as vault_service_unavailable, falls
  *   back to the pool after five minutes of no answer, and never while root holds it (vault_held). A key
  *   no window holds is closed when the request ends; lock() closes a handle nothing else holds, lockAll()
- *   every window of the user in the daemon; a window the daemon ended reads as locked with the reason
+ *   each handle the user's slots name and this request's unarmed keys, one by one; a window the daemon ended reads as locked with the reason
  *   (daemon_restart, sentinel_drop). Reveal lists, openOnce(), and a chain's re-seal under its own scope.
  * @version 1.25 - lockAll() records how long each window it closes was open, from its metadata
  * @version 1.24 - windows live in RamStore, bound to the PHP-FPM master (strategy/
@@ -1368,7 +1369,9 @@ class VaultUnlock {
 			if (preg_match($window, $name, $m) && RamStore::info($name, RamStore::LIFETIME) !== null) {
 				$meta = RamStore::get('vaultmeta:' . $m[1] . ':' . $user_id . ':' . $m[2], $ok, RamStore::LIFETIME);
 				$armed = ($ok && is_array($meta) && is_int($meta['armed'] ?? null)) ? $meta['armed'] : null;
-				$closed[] = array($m[1], $m[2], $armed === null ? null : time() - $armed);
+				$held = self::slotKeyIn($name);
+				$closed[] = array($m[1], $m[2], $armed === null ? null : time() - $armed,
+					$held instanceof DaemonVaultKey ? $held->id() : null);
 			}
 		}
 		foreach ($names as $name) {
@@ -1381,12 +1384,16 @@ class VaultUnlock {
 		// the old generation, running after its answer), and a handle no slot
 		// names is reachable by nothing; it ends on its own clocks.
 		$rec = self::daemonRecord();
+		$unwraps = array();
 		if ($rec !== null) {
 			foreach ($handles + array_filter(self::$unarmed, function ($k) use ($user_id) { return $k->userId() === $user_id; })
 					as $id => $key) {
 				if (!($keep instanceof DaemonVaultKey && $key->sameWindow($keep))) {
 					unset(self::$unarmed[$id]);
-					$key->close();
+					$answer = $key->close();
+					if ($answer !== null) {
+						$unwraps[$id] = $answer['unwraps'];
+					}
 				}
 			}
 		}
@@ -1394,7 +1401,8 @@ class VaultUnlock {
 			RamStore::delete($marker); // every scope's window is gone — the markers with them
 		}
 		foreach ($closed as $pair) {
-			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0], $pair[2]);
+			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0], $pair[2],
+				$pair[3] === null ? null : ($unwraps[$pair[3]] ?? null));
 			self::noteClosed($user_id, $pair[0], $pair[1], $reason);
 		}
 		self::runWipeCallbacks($user_id, null);

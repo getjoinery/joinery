@@ -10,7 +10,7 @@
 # (specs/unseal_daemon.md WP3). Runs only where it is installed (needs:
 # unseal-daemon). Each check is one promise the installation makes:
 #  - the binary and its launcher are root's, and the binary is the build this
-#    tree ships (or the previous build, after three crashes);
+#    tree ships (or the previous build, after four starts with no run lasting five minutes);
 #  - the socket's directory lets in the pool's group and nobody else, and the
 #    hold sits where neither the pool nor the daemon can write;
 #  - the process runs as its own user, with locked memory, not dumpable, no

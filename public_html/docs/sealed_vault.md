@@ -53,7 +53,8 @@ the browser, which opens every browser-held vault ([One vault](#one-vault)); eve
 `VaultUnlock::secretKey()` call sees it open at once. That is the UX win and
 the accepted cost: an attacker resident during an active window reads every
 consumer's in-window content, not just one — bounded by the idle timeout,
-seal-after-use, and key rotation. A consumer that needs genuine isolation
+seal-after-use, and key rotation, and, where the unseal daemon holds the key
+([The unseal daemon](#the-unseal-daemon)), without the key itself. A consumer that needs genuine isolation
 declares a **client-custody** scope of its own and accepts that no server-side
 feature can ever read it; isolation *with* server readability is the one
 combination the platform does not offer.
@@ -249,7 +250,9 @@ index this serves then fails SQLite's own integrity check and is rebuilt.
 `VaultKey` (`includes/VaultKey.php`): `unseal(array $sealed)` opens
 DEKs sealed to its public half, `publicKey()` is that
 half, and `id()` is a stable non-secret identity the DEK memo keys on. There
-is no getter for the bytes and no wrap method. `PoolVaultKey` is the
+is no getter for the bytes and no wrap method. `DaemonVaultKey` holds a
+handle to a key in the unseal daemon (§ The unseal daemon) and
+`openPrevious()` opens a retired key the same way. `PoolVaultKey` is the
 implementation that holds the bytes in PHP; the `SealedBox` primitives that
 take or produce a vault secret (`openDek`, `openBinary`, `unwrapKey`,
 `wrapKey`, `generateKeypair`) are pinned to that one file by
@@ -443,28 +446,36 @@ cannot activate one silently.
 
 ## The unlock window
 
-`includes/VaultUnlock.php` — the secret key lives in the RAM store
+`includes/VaultUnlock.php` — a window is a slot in the RAM store
 (`includes/RamStore.php`: small JSON files on tmpfs, in a directory private to
 the web user, that cannot hold an object), keyed
 `vault:{session_id}:{user_id}:{scope}`, TTL = `vault_unlock_idle_minutes`
 (default 30), extended by use, at most once a minute (activity extension). Window entries are
 bound to the PHP-FPM master that opened them: a PHP-FPM restart or reload ends
 every window, a deploy does not, and a process outside PHP-FPM (cron, a script)
-never sees one. What callers hold is a `VaultKey`, never the bytes:
+never sees one. On a node with the unseal daemon (§ The unseal daemon) the
+secret key lives in the daemon and the slot holds the daemon's handle for it,
+not the key: a handle opens rows only through this site's socket while the
+window lives, and is worthless once it ends. Without one the slot holds the
+key itself. What callers
+hold is a `VaultKey`, never the bytes:
 
 ```php
 // $unlocker = $wrapping->unlocker($kek) — the row's wrapping, the KEK the
 // credential derived, the row's AD; null mints a fresh keypair (setup, rotation).
 // $wrap_under = [$row->wrapEntry($kek), ...] — the wrappings to produce.
+// $reveal = chain entries whose KEKs to hand back (a rotation's re-seal only).
 VaultUnlock::open($user_id, $unlocker, $wrap_under = [], $scope = 'user', $caps = null, $via)
     : array{key: VaultKey, wrappings: string[]};          // opens AND arms the session's window
-VaultUnlock::openKey($user_id, $unlocker, $wrap_under = [], $scope = 'user'): array;  // the key, no window
+VaultUnlock::openKey($user_id, $unlocker, $wrap_under = [], $scope = 'user', $reveal = [], $caps = null, $rescope_chain = true): array;  // the key, no window
+VaultUnlock::openOnce($user_id, $unlocker, $wrap_under = [], $reveal = [], $scope = 'user'): array;  // openKey, released at once
+VaultUnlock::release(VaultKey $key): void;                  // done with a key no window holds
 VaultUnlock::arm($user_id, VaultKey $key, $scope = 'user', $caps = null, $via): void;  // make it the window
 VaultUnlock::isOpen($user_id, $scope = 'user'): bool;
 VaultUnlock::secretKey($user_id, $scope = 'user'): ?VaultKey;  // null = locked
 VaultUnlock::close($user_id, $scope = 'user'): void;         // current session
 VaultUnlock::lock($user_id, $session_id, $scope = 'user'): void;  // a specific session
-VaultUnlock::lockAll($user_id): void;                        // every scope, every session
+VaultUnlock::lockAll($user_id, $reason, ?VaultKey $keep = null): void;  // every scope, every session
 VaultUnlock::hasAnyOpenWindow($user_id, $scope = 'user'): bool;  // ANY session, any SAPI
 ```
 
@@ -472,7 +483,10 @@ VaultUnlock::hasAnyOpenWindow($user_id, $scope = 'user'): bool;  // ANY session,
 rotation ceremony, whose old-generation key every resealer uses and which
 must never become the window, and the recovery-code / passphrase probes
 (and the recovery-readiness dry run), which try each wrapping until one
-opens. A wrong unlocker throws and yields nothing.
+opens. A wrong unlocker throws and yields nothing. A key no window holds is
+closed by `release()` where its caller is done with it, and otherwise when the
+request ends; `openOnce()` is the shape for a key needed for one step (a
+rotation revealing its chain).
 
 Every content read calls `secretKey()` and treats `null` as **locked** — a
 one-tap unlock prompt, never an error; code that only asks whether the window
@@ -500,6 +514,162 @@ the account half the browser derived (`code_kek`, `passphrase_kek`). The
 account's sign-in second factor never takes part in opening a vault: an
 authenticator code confirms sign-ins and sensitive changes, and opens nothing.
 
+### The unseal daemon
+
+A member's secret key decrypts everything ever sealed to them, against any
+copy of the database, forever. So it is held outside the PHP pool: in
+`joinery-unseal`, a small Go process under its own system user, one per site.
+A break-in to the pool during an open window can use the key while the window
+lasts, by asking the daemon to open the rows it wants, but cannot carry the
+key away.
+
+**What it is.** The source is `maintenance_scripts/install_tools/joinery_unseal/`
+(the README has the wire format and the error codes); `UnsealDaemonPublisher`
+builds it at publish for each architecture, and a failed build refuses the
+release. Per site, keyed by the basename of the site root
+(`UnsealDaemon::key()`): unit `joinery-unseal-KEY`, socket
+`/run/joinery-unseal/KEY/unseal.sock`, install record
+`/etc/joinery-unseal/KEY/installed`, builds and launcher in
+`/var/lib/joinery-unseal/KEY/`. The socket's directory is
+`joinery-unseal:www-data 0750` and the daemon answers only a peer whose uid
+is the site's pool user. It has no network, reads no database, opens no file
+after startup, locks every page of its memory, is never dumped, and zeroes a
+key when its window ends. It refuses to run as root, and refuses to start
+under a bounded memory-lock limit.
+
+**What PHP holds.** `DaemonVaultKey` (`includes/DaemonVaultKey.php`): the
+daemon's handle for the window, the public key, and nothing secret, over
+`UnsealClient` with one connection per request. Five operations:
+
+| Op | Does |
+|---|---|
+| `open` | Unwraps a stored wrapping under the KEK the unlocker derived (or mints a fresh key, for setup and rotation) and keeps it, answering a handle. Its wrap list is the only way the secret ever leaves the daemon, wrapped, and only in the request that presented an unlocker; its reveal list is the only way a retired-key chain KEK leaves, likewise |
+| `unwrap` | Opens a list of sealed DEKs under a handle, `dek` scope only. A page of rows or a fold batch of 200 is one trip |
+| `open_previous` | Opens a retired-key chain entry inside the daemon as a child window of the handle (same clocks, closed with it); what comes back is a child handle and the retired key's public half, never its KEK or secret |
+| `close` | Ends a window by handle, answering its unwrap count |
+| `status` | Version, window count, uptime, whether it is held, whether its memory is locked; asked about one user, whether that user has a window. It never lists who is open |
+
+**Which holder.** `openKey()` opens in the daemon when the install record
+exists and the process is its pool user (`VaultUnlock::daemonRecord()`). Any
+other process (a shell as root, a test user), and a site with no record,
+holds the key in the pool as `PoolVaultKey`; a site with no record logs that
+once per process.
+
+**One idle clock.** The daemon ends a window itself, whether or not PHP asks
+again: idle after the smaller of `vault_unlock_idle_minutes` and the hardened
+idle cap, absolute at the folded cap or its own seven-day ceiling, both on
+the monotonic clock. Only an `unwrap` flagged as activity that opened every
+blob moves its idle clock. Each window carries a small blob sealed to its own
+key at open, and `VaultUnlock::account()`, which counts a content read, opens
+it as activity, so the daemon's clock moves exactly when PHP's does. PHP's
+read-time checks of the same numbers stay the earlier end, with the
+heartbeat, an IP change and an explicit lock.
+
+**A window the daemon ended** (`unknown_handle`) reads as locked and is closed
+in every slot this request read that still names it (a slot read later closes
+on its own read), with the reason from the daemon's status: `sentinel_drop`
+while held, `daemon_restart` when the daemon's uptime is shorter than the
+window or its status does not answer, `idle_expired` otherwise. **A restart ends every
+window**: after an upgrade that changes the binary, or a crash, every member
+taps once to unlock again. The installer restarts the daemon only when
+something it installs changed: the build, the launcher, the unit or the
+install record.
+
+**Closing.** `lock()` closes the daemon's window when no slot of that user
+still names the handle (borrowed slots share their person's). `lockAll()`
+closes, one by one, the handle each of the user's slots names and this
+request's own unarmed keys; never every window of the user at once, which
+would also end a rotation still draining in another request. A recovery
+unlock passes the key it just opened as `$keep`.
+
+**The retired-key chain.** Chain KEKs are sealed under their own scope,
+`previous-key` (`VaultCrypto::sealChainKek()`), which `unwrap` refuses, so a
+window cannot hand back a retired key. Reading content on a retired key goes
+through `open_previous` (`VaultKey::openPrevious()`). An unlock that finds
+entries sealed under `dek` re-seals them under `previous-key` with the
+compare-and-swap store. A rotation reveals the whole chain with `openOnce()`
+under the unlocker that authorized it and re-seals it to the new key.
+
+**One trip per page.** `SystemMultiBase::load()` hands a collection of a
+model with sealed fields to `prefetchSealedDeks()`, which opens the page's
+DEKs in one `unwrap` per owner into `VaultCrypto`'s memo (not counted as
+activity: the rows' own reads count), only for a daemon key. A batch that
+does not open whole leaves each row to open on its own. Measured on localdev:
+a 50-row thread list's DEKs take 14.3 ms prefetched (17.1 ms with the key in
+the pool); a 200-row fold batch takes 56.5 ms in one trip (66.6 ms in the
+pool). A round trip is under 0.05 ms.
+
+**When it does not answer: the ladder.** Nobody is ever asked to open a
+shell, and an unlock never reads as a wrong passkey.
+
+1. **Held** (the hold file, or the daemon's own `held`): the open refuses with
+   `VaultHeldException`, worded as a security hold.
+2. **Silent:** the request asks again after three seconds (it holds a spent
+   passkey assertion, so the retry is the server's, not the page's), then
+   refuses with `VaultServiceUnavailableException`, "restarting, try again
+   shortly". Both exceptions extend `VaultStoreUnavailableException`, so
+   every unlock endpoint words them, and a recovery-code or phrase probe
+   stops instead of calling the code wrong. `assertStoreUsable()` asks the
+   daemon too, so a ceremony refuses before it spends a code. Meanwhile the
+   supervisor restarts the daemon within seconds (systemd: restart in 5 s, a
+   30 s watchdog; in a container, a cron keepalive that pings every minute).
+   A build that does not stay up hands over to the previous build: the
+   fourth start with no run since that lasted five minutes starts
+   `joinery-unseal.previous`, and the site stays on it until a changed build
+   installs.
+3. **Five silent minutes:** counted from when this site first found the
+   daemon silent (a RAM-store entry the next answer clears), new windows
+   open in the pool, logged every time, and the health row says so. Never
+   while held. A window opened in the pool ends on its own terms; the next
+   unlock after the daemon answers uses it.
+
+**The hold.** When the agent's sentinel has an open infiltration case, its
+`unseal_hold` word (`launch hold --all`) writes `/run/joinery-unseal/KEY.hold`
+(a root-owned directory neither the pool nor the daemon can write) and sends
+the daemon `SIGUSR1`, which zeroes every key it holds and refuses every
+`open`. Every member reads as locked on their next request, audited as
+`sentinel_drop`. The daemon reads the hold file at startup, so a crash
+restarts it held, and PHP reads it before the pool rung, so a held site never
+falls back. Only root lifts it: `sudo /var/lib/joinery-unseal/KEY/launch lift --all`
+removes the file and sends `SIGUSR2`. There is no lift word, so a compromised
+management node cannot undo a hold.
+
+**Installing.** `install_unseal_daemon.sh` is a core host installer
+(`CORE_INSTALLERS`, after the parser jail's), run at every root moment and by
+hand with
+`sudo bash /var/www/html/SITE/maintenance_scripts/install_tools/install_unseal_daemon.sh`.
+It installs the prebuilt for `uname -m` only when its bytes changed and its
+`--selftest` passes as the daemon's user, keeps the build it replaced, writes
+the unit (or the keepalive), the install record, and ends by asking the
+daemon for its status as the pool user. Where it cannot apply (not root, no
+prebuilt for the machine, a container whose memory-lock limit cannot be
+raised) it installs nothing and the site keeps its keys in the pool; a
+memory-lock refusal leaves `/etc/joinery-unseal/KEY/refused` for the health
+row. A site container with a memory budget runs with
+`--ulimit memlock=-1:-1` (`_site_run_spec.sh`), since Go's locked arena
+reservation fits no finite limit; locked pages count against the
+container's own budget. The launcher's event log
+(`/var/lib/joinery-unseal/KEY/events`, one JSON object per line, the newest
+200: every start, stop, fallback, hold and lift) is what the agent reads into
+`check_status` and its poll's `unseal_daemon` field, so the fleet dashboard
+shows a degraded node, and what `UnsealDaemon::facts()` reads for the health
+row. The daemon's own output is in the journal, or under the cron keepalive
+in `/var/log/joinery-unseal-KEY.log`. The agent
+reads files and the process table; only the pool user can ask the daemon.
+
+**`hasAnyOpenWindow()` stays on its marker** (above): the daemon answers only
+the pool user, and the sweep that asks may run as another user under cron.
+
+Tests: `tests/vault/unseal_daemon_test.php` (the protocol, on the shipped
+binary), `tests/vault/daemon_vault_key_test.php` (`VaultUnlock` pointed at the
+shipped binary: setup, unlock, reads, rotation, lock and the ladder),
+`tests/vault/unseal_install_test.php`, the Go suite through
+`tests/vault/unseal_daemon_go_gate.sh`, and the installed daemon's gate
+`tests/security/unseal_daemon_gate.sh` (needs `unseal-daemon`: the socket
+directory's owner and mode, another uid refused, memory locked and undumpable, no
+network, `ptrace_scope` at 1 or above, the hold directory out of the pool's
+reach).
+
 ### Borrowed windows
 
 A program signed in with an **app credential** (`docs/api.md` § App credentials — a mail app's app password) has no browser session and never unlocks anything. When its purpose declares `borrowsUnlock`, it **borrows** the person's website unlock instead:
@@ -514,9 +684,19 @@ An expiry nobody saw happen is still written down: arming leaves a marker (`vaul
 
 ### Host hardening
 
-`includes/VaultHealth.php` checks the facts that keep an unwrapped
-secret key off disk even during a live window:
+`includes/VaultHealth.php` checks the facts that keep key material in the
+PHP workers off disk during a live window: the per-item keys every read
+opens, and the secret key itself wherever the pool holds it (a site with no
+daemon, a process that is not the pool user, the five-minute fallback):
 
+- The unseal daemon (`unseal_daemon`): installed, answering, on the current
+  build, not held, its memory locked. Unmet names what is wrong and the fix:
+  the installer's command, the container's memory-lock run option, the
+  daemon's log, the open security case, or new windows held in the pool
+  after five silent minutes. A shell cannot ask the daemon (only the pool
+  user can), so the row run from `check_vault_health.php` reads `unknown`
+  while the process runs. `UnsealDaemonNotice` carries an unmet row to
+  superadmins on every admin page.
 - The RAM store's directory is on tmpfs, a real directory owned by the web
   user, and mode 0700 (otherwise the store refuses and no window opens), and
   the web server is PHP-FPM with OPcache readable, which is what ties a window
@@ -532,8 +712,9 @@ secret key off disk even during a live window:
   namespaced and a container reads the host's). `systemd-coredump` honours
   the rlimit; any other handler reports `unknown`, naming it.
 - Exception traces omit their arguments (`zend.exception_ignore_args = On`).
-  The secret key is a string argument on the `VaultCrypto` open methods, and
-  with it off a logged uncaught exception carries the key's leading bytes.
+  A KEK or a pool-held secret key is a string argument on the unlock and
+  `SealedBox` paths, and with it off a logged uncaught exception carries its
+  leading bytes.
 - Swap off, or every active swap device encrypted. The device-mapper type is
   read from `/sys/block/dm-N/dm/uuid`: `CRYPT-` is dm-crypt and verified,
   `LVM-` is a plain volume and unmet. zram is accepted (compressed RAM, no
@@ -550,15 +731,19 @@ Two facts about the window store these checks guard:
 
 - The store overwrites every entry with zeros before its file is freed, on a
   lock, an expiry, a replacement or the sweep, so a freed tmpfs page holds no
-  key. A window a PHP-FPM restart ended stays a 0600 file in tmpfs until the
-  next sweep removes its generation. `sodium_memzero` reaches PHP's own copy. A read in progress still holds
-  the key in the worker's memory, which is what the no-core and encrypted-swap
-  checks cover.
+  key or handle. A window a PHP-FPM restart ended stays a 0600 file in tmpfs
+  until the next sweep removes its generation. A read in progress holds the
+  row's per-item key, and a pool-held window its secret key, in the worker's
+  memory, which is what the no-core and encrypted-swap checks cover. The
+  unlocker's KEK passes through the worker serving the unlock; the unseal
+  client zeroes its request frame once it is sent.
 - Each site has its own store directory, named for its root and database, and
   only its pool user can open it. Two sites served by one php-fpm as the same
-  user can still read each other's windows, as code running as the web user
-  reads every file that user owns; a key that must not be readable even then
-  belongs in a separate daemon (specs/unseal_daemon.md).
+  user can still read each other's slots, as code running as the web user
+  reads every file that user owns. With the daemon a slot holds a handle, so
+  the other site can open that window's rows while it lasts, through this
+  site's socket, and cannot take the key; a pool-held window gives it the
+  key.
 
 The mailbox search index's working copy in `/dev/shm` (a 1777 tmpfs every
 local account can list) is created 0600 before its first write, at both of
@@ -1426,6 +1611,11 @@ Each closed row records `reason` and `open_seconds`:
 | `explicit_lock` | someone pressed Lock now |
 | `logout` / `ip_change` | the session ended, or moved network |
 | `credential_event` | password change or reset, recovery-code use, 2FA change |
+| `daemon_restart` | the unseal daemon restarted, and the window went with it |
+| `sentinel_drop` | root's hold ended every window in the unseal daemon |
+
+A close of a daemon window by `lock()` or `lockAll()` also records `unwraps`,
+the number of opens the daemon served for it.
 
 The three end-events run code and write their own row. A store expiry does not
 — it is a file's time passing, with nothing to hook — so the row is written by

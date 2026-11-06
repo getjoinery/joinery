@@ -43,6 +43,7 @@
  * while the real gate is held; JOINERY_GATE_CUTOFF (same gating) lowers the
  * queue cutoff so such a test can exercise the wait.
  *
+ * @version 1.3 - the tree id survives an untracked path outside a sparse checkout's cone (the add names the cone)
  * @version 1.2 - a difference inside function bodies blocks reuse only for a suite that ran one of them
  * @version 1.1 - a comment-only difference in a PHP file does not block reuse through what loads it
  * @version 1.0 - lock, holder, run records, reuse (specs/gate_lock_and_shared_results.md)
@@ -230,12 +231,43 @@ function gate_tree_id($site_root) {
 	if ($tmp === false) return null;
 	if (is_file($git_dir . '/index') && !@copy($git_dir . '/index', $tmp)) { @unlink($tmp); return null; }
 	$env = 'GIT_INDEX_FILE=' . escapeshellarg($tmp) . ' ';
-	exec($env . $git . ' add -A 2>/dev/null', $o1, $rc1);
+	// In a sparse checkout, `add -A` exits 1 whenever an untracked path sits
+	// outside the cone (a build's output at the repository root), though it
+	// staged everything inside it. Naming the cone (its directories, and the
+	// top-level files cone mode always includes) stages the same tree cleanly.
+	// A cone entry a/b also includes the files directly in a/, so each parent
+	// is named by a one-level glob. Pattern-mode sparse checkouts list
+	// patterns, not directories, and are not handled: no tree id.
+	$pathspec = '';
+	exec($git . ' config --bool core.sparseCheckout 2>/dev/null', $sp);
+	if (trim(implode('', $sp)) === 'true') {
+		exec($git . ' config --bool core.sparseCheckoutCone 2>/dev/null', $cm);
+		if (trim(implode('', $cm)) !== 'true') return gate_tree_id_unlink($tmp);
+		exec($git . ' sparse-checkout list 2>/dev/null', $cone, $rc0);
+		if ($rc0 !== 0 || !$cone) return gate_tree_id_unlink($tmp);
+		$specs = array(':(top,glob)*' => true);
+		foreach ($cone as $dir) {
+			$dir = trim($dir, " \t/");
+			if ($dir === '') continue;
+			$specs[':(top)' . $dir] = true;
+			for ($up = dirname($dir); $up !== '.' && $up !== '/' && $up !== ''; $up = dirname($up)) {
+				$specs[':(top,glob)' . $up . '/*'] = true;
+			}
+		}
+		$pathspec = ' --';
+		foreach (array_keys($specs) as $spec) $pathspec .= ' ' . escapeshellarg($spec);
+	}
+	exec($env . $git . ' add -A' . $pathspec . ' 2>/dev/null', $o1, $rc1);
 	exec($env . $git . ' write-tree 2>/dev/null', $o2, $rc2);
 	@unlink($tmp);
 	$tree = trim(implode('', $o2));
 	if ($rc1 !== 0 || $rc2 !== 0 || !preg_match('/^[0-9a-f]{40,64}$/', $tree)) return null;
 	return $tree;
+}
+
+function gate_tree_id_unlink($tmp) {
+	@unlink($tmp);
+	return null;
 }
 
 /**
