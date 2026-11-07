@@ -415,8 +415,17 @@ impl Daemon {
             return false;
         }
         let now = now_ms();
-        if now.saturating_sub(self.last_poll_ms) >= self.config.poll_seconds * 1_000 {
+        // Refused for the credential: only linking again cures that, and each
+        // ask costs this address a failed sign-in on a server that counts them.
+        // Rarely, in case the refusal was the server's mistake; a sync-now asks
+        // at once.
+        let refused = matches!(self.blocker, Some(Blocker::NotAuthorized));
+        let poll_ms = if refused { REFUSED_CREDENTIAL_POLL_MS } else { self.config.poll_seconds * 1_000 };
+        if now.saturating_sub(self.last_poll_ms) >= poll_ms {
             return true;
+        }
+        if refused {
+            return false;
         }
         if self.next_retry_ms.is_some_and(|due| due <= now) {
             return true;
@@ -790,6 +799,9 @@ fn vault_probe_refusal_line(said: &mut Option<String>, now: Option<String>) -> O
     })
 }
 
+/// How often a device whose credential was refused asks whether it still is.
+const REFUSED_CREDENTIAL_POLL_MS: u64 = 15 * 60 * 1_000;
+
 /// Turn an engine error into something the user can act on.
 ///
 /// The distinction that matters is between "come back later" and "do something".
@@ -811,11 +823,13 @@ fn blocker_for(error: &jd_core::ExecError) -> Blocker {
         }
         jd_core::ExecError::Proto(_) | jd_core::ExecError::Contract(_) | jd_core::ExecError::StoodDown => {}
     }
-    let text = error.to_string();
-    if text.contains("401") || text.to_lowercase().contains("unauthor") {
-        Blocker::NotAuthorized
-    } else {
-        Blocker::ServerUnreachable { detail: text }
+    match error {
+        // Refused for the credential, by the status: the words of an error can
+        // hold "401" anywhere, a port or a file's name among them.
+        jd_core::ExecError::Proto(
+            jd_proto::ProtoError::Api { status: 401, .. } | jd_proto::ProtoError::NoCredentials,
+        ) => Blocker::NotAuthorized,
+        _ => Blocker::ServerUnreachable { detail: error.to_string() },
     }
 }
 
@@ -1619,6 +1633,10 @@ mod tests {
         down: Arc<std::sync::atomic::AtomicBool>,
         /// How many connections have been dropped that way.
         dropped: Arc<std::sync::atomic::AtomicU64>,
+        /// While set, every request is refused for its credential.
+        revoked: Arc<std::sync::atomic::AtomicBool>,
+        /// How many requests have been refused that way.
+        refusals: Arc<std::sync::atomic::AtomicU64>,
     }
 
     impl Drive {
@@ -1634,9 +1652,12 @@ mod tests {
                 feed_asks: Arc::default(),
                 down: Arc::default(),
                 dropped: Arc::default(),
+                revoked: Arc::default(),
+                refusals: Arc::default(),
             };
             let (server, slow, sent) = (drive.server.clone(), Arc::clone(&drive.slow), Arc::clone(&drive.sent));
             let (spoil, feed_asks) = (Arc::clone(&drive.spoil), Arc::clone(&drive.feed_asks));
+            let (revoked, refusals) = (Arc::clone(&drive.revoked), Arc::clone(&drive.refusals));
             let (down, dropped) = (Arc::clone(&drive.down), Arc::clone(&drive.dropped));
             std::thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
@@ -1647,8 +1668,9 @@ mod tests {
                     }
                     let (server, slow, sent) = (server.clone(), Arc::clone(&slow), Arc::clone(&sent));
                     let (spoil, feed_asks) = (Arc::clone(&spoil), Arc::clone(&feed_asks));
+                    let (revoked, refusals) = (Arc::clone(&revoked), Arc::clone(&refusals));
                     std::thread::spawn(move || {
-                        answer_as_the_server(stream, &server, &slow, &sent, &spoil, &feed_asks)
+                        answer_as_the_server(stream, &server, &slow, &sent, &spoil, &feed_asks, &revoked, &refusals)
                     });
                 }
             });
@@ -1669,6 +1691,8 @@ mod tests {
         sent: &std::sync::atomic::AtomicU64,
         spoil: &std::sync::atomic::AtomicBool,
         feed_asks: &std::sync::atomic::AtomicU64,
+        revoked: &std::sync::atomic::AtomicBool,
+        refusals: &std::sync::atomic::AtomicU64,
     ) {
         use std::io::{BufRead, BufReader, Read, Write};
         let mut out = match stream.try_clone() {
@@ -1697,6 +1721,16 @@ mod tests {
         }
         let mut body = vec![0u8; length];
         if reader.read_exact(&mut body).is_err() {
+            return;
+        }
+        if revoked.load(Ordering::SeqCst) {
+            refusals.fetch_add(1, Ordering::SeqCst);
+            let text = r#"{"errortype":"AuthenticationError","error":"API key has been revoked"}"#;
+            let _ = write!(
+                out,
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                text.len()
+            );
             return;
         }
         let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
@@ -1863,6 +1897,41 @@ mod tests {
     }
 
     #[test]
+    fn a_revoked_device_stops_asking_and_comes_back_when_asked_to() {
+        let drive = Drive::start();
+        for n in 0..20 {
+            drive.server.seed_file(None, &format!("f{n}.bin"), &[7u8; 64 << 10]);
+        }
+        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "revoked");
+        wait_for("the downloads starting", Duration::from_secs(30), || drive.sent() > 0);
+
+        drive.revoked.store(true, Ordering::SeqCst);
+        let says_it = || {
+            let (_, status) = handle_control(&shared, &req("GET", "/status", Value::Null));
+            status["blocker"].as_str().is_some_and(|b| b.contains("no longer authorized"))
+        };
+        wait_for("the device saying so", Duration::from_secs(30), says_it);
+        let refusals = drive.refusals.load(Ordering::SeqCst);
+        assert!(refusals <= 2, "{refusals} refusals before it stopped asking");
+
+        // The disk keeps changing, and that is no reason to ask again.
+        for n in 0..12 {
+            std::fs::write(root.join(format!("new{n}.txt")), b"later").unwrap();
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        assert_eq!(drive.refusals.load(Ordering::SeqCst), refusals, "asked again unprompted");
+        assert!(says_it(), "still says so");
+
+        drive.revoked.store(false, Ordering::SeqCst);
+        assert_eq!(handle_control(&shared, &req("POST", "/sync-now", Value::Null)).0, 200);
+        wait_for("everything landing once the credential is good", Duration::from_secs(60), || {
+            (0..20).all(|n| std::fs::read(root.join(format!("f{n}.bin"))).is_ok_and(|b| b.len() == 64 << 10))
+        });
+        assert_eq!(handle_control(&shared, &req("POST", "/stop", Value::Null)).0, 200);
+        exited.recv_timeout(Duration::from_secs(15)).expect("the daemon stopped");
+    }
+
+    #[test]
     fn a_stop_lands_in_the_middle_of_a_transfer_not_when_it_ends() {
         // Eight MiB at 160 KiB a second: fifty seconds of transfer, against a
         // stop that is to land at once. The installer and an update's restart
@@ -1960,13 +2029,33 @@ mod tests {
     fn a_revoked_credential_is_told_apart_from_a_network_problem() {
         // One resolves itself and should not send anybody to a settings page;
         // the other never does, and a spinner there is a lie.
-        let network = blocker_for(&jd_core::ExecError::Contract("connection timed out".into()));
-        assert!(matches!(network, Blocker::ServerUnreachable { .. }));
+        use jd_proto::ProtoError;
+        let proto = |e: ProtoError| blocker_for(&jd_core::ExecError::Proto(e));
+        let api = |status: u16, message: &str| {
+            proto(ProtoError::Api {
+                status,
+                errortype: "ActionError".into(),
+                message: message.into(),
+                data: serde_json::Value::Null,
+            })
+        };
 
-        let revoked = blocker_for(&jd_core::ExecError::Contract(
-            "api error 401: unauthorized".into(),
+        let network = proto(ProtoError::Transport("https://h/: Network Error: timed out reading response".into()));
+        assert!(matches!(network, Blocker::ServerUnreachable { .. }), "{network:?}");
+
+        assert!(matches!(api(401, "Invalid key"), Blocker::NotAuthorized));
+        assert!(matches!(proto(ProtoError::NoCredentials), Blocker::NotAuthorized));
+
+        // Only the status says so. A device told it is no longer authorized
+        // goes to be linked again, and asks every fifteen minutes meanwhile.
+        let in_the_address = proto(ProtoError::Transport(
+            "http://127.0.0.1:40123/api/v1/drive_upload/ab401c: Network Error: Connection refused".into(),
         ));
-        assert!(matches!(revoked, Blocker::NotAuthorized));
+        assert!(matches!(in_the_address, Blocker::ServerUnreachable { .. }), "{in_the_address:?}");
+        let in_the_words = api(403, "Unauthorized for folder 401");
+        assert!(matches!(in_the_words, Blocker::ServerUnreachable { .. }), "{in_the_words:?}");
+        let in_a_reply = proto(ProtoError::Contract("line 401: unauthorized".into()));
+        assert!(matches!(in_a_reply, Blocker::ServerUnreachable { .. }), "{in_a_reply:?}");
     }
 
     #[test]

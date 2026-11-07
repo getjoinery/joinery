@@ -300,11 +300,11 @@ enum Stopped {
 /// How long `stop`, `unlink`, and a `login` that replaces a link wait for the
 /// daemon to be gone once it is asked to stop. A pass hears a stop between two
 /// operations or two chunks of a transfer, so this is normally under a second.
-/// The bound is a transfer whose connection has gone quiet, which is when a
-/// person reaches for stop: it gives up at the silence limit, and the daemon
-/// stands down just after.
+/// The bound is a call or a transfer the server has gone quiet on, which is when
+/// a person reaches for stop: a call gives up at its deadline, a transfer sooner,
+/// at the silence limit, and the daemon stands down just after.
 const STOP_WAIT: std::time::Duration =
-    jd_proto::SILENCE_LIMIT.saturating_add(std::time::Duration::from_secs(15));
+    jd_proto::ANSWER_LIMIT.saturating_add(std::time::Duration::from_secs(15));
 
 /// Whether the daemon of the home whose state folder is `state` is gone. The
 /// home's lock says, and truthfully: the daemon lets go of it last, after its

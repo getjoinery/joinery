@@ -478,6 +478,10 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
     Ok(report)
 }
 
+fn the_credential_was_refused(e: &ExecError) -> bool {
+    matches!(e, ExecError::Proto(ProtoError::Api { status: 401, .. }))
+}
+
 /// Run one op, marking the crash window around it and recording how it ended.
 pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // The server answered this op with a refusal that stands, or the disk
@@ -509,6 +513,16 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 Err(ExecError::StoodDown) => {
                     env.store.set_op_state(op.op_id, OpState::Queued)?;
                     return Err(ExecError::StoodDown);
+                }
+                // Refused for the credential, not for this op, and every op
+                // after it would be too. Each refusal costs this device's
+                // address a failed sign-in on a server that counts them, so the
+                // run ends here. Back on the queue as it was, as for a stand-down:
+                // nothing about this entity failed, and it runs when the
+                // credential is good again.
+                Err(e) if the_credential_was_refused(&e) => {
+                    env.store.set_op_state(op.op_id, OpState::Queued)?;
+                    return Err(e);
                 }
                 Err(e) => {
                     note_the_parent_is_in_the_trash(env, &e)?;

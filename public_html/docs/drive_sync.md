@@ -368,7 +368,18 @@ the transfer's first chunk:
 
 A download whose connection has gone quiet asks only when bytes arrive, so its
 stop waits for the next bytes or for the client's 60-second silence limit to
-drop the connection.
+drop the connection. A call the server has not answered holds a stop for at most
+its deadline, below, and `stop` waits that long and fifteen seconds more.
+
+Each file transfer opens its own connection, and small API calls share kept
+connections under a deadline per call of twice the silence limit (thirty times
+for completing an upload, where the server works on the whole file before it
+answers). The HTTP library drops a connection's timeouts when it keeps one, so
+without these a server falling silent on a reused connection would be waited for
+without limit, with the daemon reading as up to date and `stop` unanswered. The
+deadline covers a reused connection's reads and never its writes: a call's few
+hundred bytes fit the send buffer, and anything with a large body goes on a
+connection of its own.
 
 The daemon's control thread says it (`Shared::send`), for the tray, the CLI,
 the settings page, and the update thread installing an update alike; the
@@ -1529,8 +1540,11 @@ quota) or after an hour, the one change the feed does not carry, such as a
 limit an administrator raised. One `withdrawn` issue says what was refused, in
 the words of the latest refusal, and goes when the operation is carried out.
 Any other refusal is withdrawn and planned afresh on the next pass, and a
-transport failure, a timeout, a 5xx, a refused sign-in or an upload whose bytes
-did not all arrive (`upload_incomplete`) is retried. An edit sent back to a
+transport failure, a timeout, a 5xx or an upload whose bytes did not all arrive
+(`upload_incomplete`) is retried. A request refused for its credential ends the
+run with the operation back on the queue as it was, because the next would be
+refused too and nothing about this operation failed. The device then says it is
+no longer authorized and asks again only every fifteen minutes or on a sync-now. An edit sent back to a
 folder that is leaving this computer, refused there, is not held: there is no
 upload of the user's to hold and no path to hold it at, so the bytes stay as
 `name (unsynced local edit).ext` at the top of the sync folder, and go up from
@@ -1825,8 +1839,8 @@ every answer is what the daemon actually believes rather than a second opinion.
 monitoring script does not have to parse prose. `stop` comes back once the
 daemon is gone, so a script that stops it and then touches its folder or its
 state does not race a pass still finishing. A pass hears a stop between two
-operations or two chunks of a transfer; one still going a little over a minute
-later (past a stalled download's silence limit) makes `stop` exit non-zero,
+operations or two chunks of a transfer; one still going a little over two
+minutes later (past an unanswered call's deadline) makes `stop` exit non-zero,
 naming the process, and it stops on its own at its next safe point.
 
 `login` takes the same addresses the settings page does, checked by the same
@@ -1876,7 +1890,7 @@ that stood down (a daemon was already running by hand), quitting the hand-run
 one leaves nothing syncing until autostart runs again, at the next login.
 
 `unlink` stops the daemon first and waits for it to be gone; if it is still
-finishing a pass a little over a minute later, `unlink` changes nothing and
+finishing a pass a little over two minutes later, `unlink` changes nothing and
 says to run it again once the daemon has stopped. It revokes the device's key
 on the server *before* forgetting it locally — the other order leaves a live
 credential nothing on this machine can name, which is exactly the key a lost
@@ -1892,7 +1906,7 @@ removes its device row) — only then, so a ceremony that fails part way does no
 cost the user the link they had. If the old key is not on the computer any more,
 `login` says to remove the old device from Security on the web. A daemon that is
 syncing is stopped first, rather than left running on a key about to be revoked,
-and `login` waits a little over a minute for it to be gone before it writes
+and `login` waits a little over two minutes for it to be gone before it writes
 the new config; one still finishing a pass after that stops on its own, and
 `login` says so rather than that it stopped. One still in first-run setup
 picks up the new config by itself. Linking the same drive into the same folder

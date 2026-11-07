@@ -420,6 +420,8 @@ pub fn agent(os: Os, arch: &str) -> ureq::Agent {
         .timeout_connect(Duration::from_secs(15))
         .timeout_read(Duration::from_secs(60))
         .timeout_write(Duration::from_secs(60))
+        // A reused connection would carry no timeouts: see jd_proto::Client.
+        .max_idle_connections(0)
         .user_agent(&format!(
             "joinery-drive/{} ({}; {arch})",
             current_version(),

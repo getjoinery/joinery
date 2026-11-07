@@ -180,10 +180,11 @@ Var WasDaemon
 ; open file. The daemon is asked to stop through its own control channel, so it
 ; stands down cleanly; the tray holds nothing and is simply closed.
 ;
-; `stop` comes back once the daemon is gone, or after a little over a minute
+; `stop` comes back once the daemon is gone, or after a little over two minutes
 ; if it is still finishing: it stands down at its next safe point, usually at once, but
-; hashing or encrypting a large file, or a download whose connection has gone
-; quiet (up to its 60-second silence limit), is not interrupted. The files are
+; hashing or encrypting a large file, a download whose connection has gone quiet
+; (up to its 60-second silence limit), or a call the server has not answered (up
+; to its two-minute deadline) is not interrupted. The files are
 ; then waited on too, for the tray and for a daemon that outlasted that wait.
 ; Still in use after another minute: the person can wait again or stop here; a
 ; silent run stops here. Stopping here replaces or removes no file and brings

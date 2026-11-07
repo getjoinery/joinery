@@ -46,6 +46,8 @@ impl BrowserSession {
             .redirects(0)
             .timeout_connect(Duration::from_secs(15))
             .timeout_read(jd_proto::SILENCE_LIMIT)
+            // A reused connection would carry no timeouts: see jd_proto::Client.
+            .max_idle_connections(0)
             .build();
         let minted = envelope(
             agent

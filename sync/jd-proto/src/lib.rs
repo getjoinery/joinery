@@ -364,7 +364,21 @@ pub struct Credentials {
 
 pub struct Client {
     base_url: String,
+    /// Small API calls, over connections kept for the next call. ureq clears a
+    /// connection's timeouts when it keeps one and does not restore them when
+    /// it reuses it, so a reply that never comes on a reused connection would
+    /// be waited for without limit. Each call here carries its own deadline,
+    /// which ureq does apply to a reused connection's reads.
     agent: ureq::Agent,
+    /// File bytes, which may take any time as long as they keep moving, so they
+    /// cannot carry a deadline. They rely on the silence limit, which holds only
+    /// on a new connection, so each transfer opens its own.
+    transfer_agent: ureq::Agent,
+    /// The most one small API call may take from start to finish.
+    answer_limit: std::time::Duration,
+    /// The same for completing an upload, where the server does its byte work
+    /// on the whole file before it answers.
+    completion_limit: std::time::Duration,
     creds: Option<Credentials>,
 }
 
@@ -382,6 +396,11 @@ pub struct Client {
 /// whole executor down and the daemon keeps running while syncing nothing.
 pub const SILENCE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// The most one small API call may take from start to finish, on a client with
+/// the standard silence limit: the longest an unanswered call can hold up a
+/// stop. Twice the silence limit, so a slow answer that keeps talking still fits.
+pub const ANSWER_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl Client {
     /// `base_url` like `https://dev.getjoinery.com` (scheme + host, no path).
     pub fn new(base_url: &str) -> Client {
@@ -391,14 +410,18 @@ impl Client {
     /// As `new`, with the silence limit chosen by the caller. Tests use a short
     /// one so they can watch the client give up without waiting a real minute.
     pub fn with_silence_limit(base_url: &str, silence_limit: std::time::Duration) -> Client {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(15))
-            .timeout_read(silence_limit)
-            .timeout_write(silence_limit)
-            .build();
+        let builder = || {
+            ureq::AgentBuilder::new()
+                .timeout_connect(std::time::Duration::from_secs(15))
+                .timeout_read(silence_limit)
+                .timeout_write(silence_limit)
+        };
         Client {
             base_url: base_url.trim_end_matches('/').to_string(),
-            agent,
+            agent: builder().build(),
+            transfer_agent: builder().max_idle_connections(0).build(),
+            answer_limit: silence_limit * 2,
+            completion_limit: silence_limit * 30,
             creds: None,
         }
     }
@@ -422,11 +445,22 @@ impl Client {
     }
 
     fn request(&self, method: &str, path: &str, authed: bool) -> Result<ureq::Request> {
+        Ok(self
+            .request_on(&self.agent, method, path, authed)?
+            .timeout(self.answer_limit))
+    }
+
+    fn request_on(
+        &self,
+        agent: &ureq::Agent,
+        method: &str,
+        path: &str,
+        authed: bool,
+    ) -> Result<ureq::Request> {
         // Hyphen-form header names throughout: Apache→FPM stacks silently drop
         // header names containing underscores, and the server normalizes both
         // spellings to one namespace (api/apiv1.php header normalization).
-        let mut req = self
-            .agent
+        let mut req = agent
             .request(method, &self.api_url(path))
             .set("client-app", CLIENT_APP)
             .set("client-version", CLIENT_VERSION);
@@ -604,7 +638,7 @@ impl Client {
     ) -> Result<(u64, u64)> {
         let end = start + bytes.len() as u64 - 1;
         let data = Self::envelope(
-            self.request("PUT", &format!("drive_upload/{token}"), true)?
+            self.request_on(&self.transfer_agent, "PUT", &format!("drive_upload/{token}"), true)?
                 .set("Content-Range", &format!("bytes {start}-{end}/{total}"))
                 .set("Content-Type", "application/octet-stream")
                 .send_bytes(bytes),
@@ -717,10 +751,11 @@ impl Client {
             Some(key) => format!("{key}-complete-{token}"),
             None => Self::new_idempotency_key(),
         };
-        let complete = self.action_idempotent(
-            "drive_upload_complete",
-            params.complete_body(&token),
-            &complete_key,
+        let complete = Self::envelope(
+            self.request("POST", "action/drive_upload_complete", true)?
+                .timeout(self.completion_limit)
+                .set("Idempotency-Key", &complete_key)
+                .send_json(params.complete_body(&token)),
         )?;
         let file = complete
             .get("file")
@@ -759,7 +794,7 @@ impl Client {
         } else {
             format!("{}{}", self.base_url, download_url)
         };
-        let mut req = self.agent.request("GET", &url);
+        let mut req = self.transfer_agent.request("GET", &url);
         if from > 0 {
             req = req.set("Range", &format!("bytes={from}-"));
         }
