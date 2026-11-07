@@ -1351,7 +1351,7 @@ SettingsWriter::reportTo($write, '~/plugins/myplugin/admin/~');
 
 ### Uninstall Script
 
-`uninstall.php` is **optional**. Most plugins don't need one — the system automatically drops tables, deletes declared settings and menus and the app credentials of its declared purposes, removes scheduled task / version / dependency / migration records, and deletes the `plg_plugins` row.
+`uninstall.php` is **optional**. Most plugins don't need one — the system automatically drops tables, deletes declared settings and menus and the app credentials of its declared purposes, removes scheduled task / version / dependency / migration records, and marks the `plg_plugins` row uninstalled (the row stays as the record).
 
 Create `uninstall.php` only when you need external cleanup the system can't do:
 - Revoking an API key or token with a third-party service
