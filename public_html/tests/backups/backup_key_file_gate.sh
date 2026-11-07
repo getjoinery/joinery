@@ -43,10 +43,12 @@ chk() {
 if [ -z "${PGPASSWORD:-}" ]; then
     CFG="$ROOT/config/Globalvars_site.php"
     if [ -f "$CFG" ]; then
-        PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbpassword 2>/dev/null)"
-        PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbusername 2>/dev/null)"
+        PGPASSWORD="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$CFG" dbpassword 2>/dev/null)"
+        PGUSER="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$CFG" dbusername 2>/dev/null)"
         export PGPASSWORD
         [ -n "$PGUSER" ] && export PGUSER
+            # psql with no -d opens the database named after the user; the role has none.
+    [ -n "$PGUSER" ] && export PGDATABASE=postgres
     fi
 fi
 

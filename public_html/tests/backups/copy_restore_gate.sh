@@ -40,10 +40,12 @@ fi
 # this gate as that role, which has CREATEDB and owns what it makes; a config
 # still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
-    PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
-    PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
+    PGPASSWORD="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
+    PGUSER="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
     export PGPASSWORD
     [ -n "$PGUSER" ] && export PGUSER
+    # psql with no -d opens the database named after the user; the role has none.
+    [ -n "$PGUSER" ] && export PGDATABASE=postgres
 fi
 if ! psql -U "${PGUSER:-postgres}" -XtAc "SELECT 1" >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"; finish
@@ -79,7 +81,7 @@ function box_from_config($cfg) {
     return array($box, $g->settings);
 }
 function pdo_for($db) {
-    return new PDO('pgsql:host=localhost;dbname=' . $db, 'postgres', getenv('PGPASSWORD'),
+    return new PDO('pgsql:host=localhost;dbname=' . $db, getenv('PGUSER') ?: 'postgres', getenv('PGPASSWORD'),
         array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
 }
 // Every sealed setting (the canary among them) opened with a config's key, and the canary itself.
@@ -189,7 +191,7 @@ echo "only on the target" > "$T/target_only.txt"
 chk "before the restore, the two configs carry different keys" "$(H same_key "$S/config/Globalvars_site.php" "$T/config/Globalvars_site.php")" "no"
 
 restore() {
-    bash "$TOOLS/restore_chain.sh" "$PROJ" --target-dir "$T" --artifacts "$W/arts" --key-file "$W/chain.key" \
+    bash "$TOOLS/restore_chain.sh" "$PROJ" --target-dir "$T" --artifacts "$W/arts" --key-file "$W/chain.key" --db-user "${PGUSER:-postgres}" \
         --force --adopt-secret-key --skip-ssl > "$W/log" 2>&1
 }
 

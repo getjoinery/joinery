@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.8.0 - the database-exists check runs as the --db-user (else postgres) against the postgres
+#   database, so a site's own role can run it (mail_access_hardening WP4)
 # Version: 1.7.0 - an upgrade's own trees in an archive (deploy/, upgrades/, upgrade_archives/,
 #                  public_html_*) are never restored, on every host; this machine keeps its own copy of every file in MACHINE_CONFIG_FILES (_restore_guard.sh),
 #                  the trust files included; on a host that refuses unsigned code the archive is checked
@@ -515,7 +517,9 @@ perform_restore() {
             fi
 
             # Check if database exists and warn
-            DB_EXISTS=$(psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$PROJECT_NAME" && echo "yes" || echo "no")
+            # As the user the engine will restore as, against the postgres
+            # database: a site's own role has no database of its own name.
+            DB_EXISTS=$(psql -U "${DB_USER:-postgres}" -d postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$PROJECT_NAME" && echo "yes" || echo "no")
 
             # Declining the DB stage must skip ONLY the DB stage — files and
             # Apache config still restore. A bare `return 0` here used to abort

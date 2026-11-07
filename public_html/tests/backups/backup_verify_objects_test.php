@@ -82,6 +82,7 @@ harness_defer(function() use ($pdo, $dbname) {
 	$pdo->exec('DROP DATABASE IF EXISTS "' . $dbname . '" WITH (FORCE)');
 });
 putenv('PGPASSWORD=' . $password);
+putenv('PGUSER=' . (string)Globalvars::get_instance()->get_setting('dbusername', true, true));
 $db = array('user' => (string)Globalvars::get_instance()->get_setting('dbusername', true, true), 'password' => $password,
 	'connect_db' => (string)Globalvars::get_instance()->get_setting('dbname', true, true), 'host' => 'localhost', 'port' => 5432);
 $scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), $password);

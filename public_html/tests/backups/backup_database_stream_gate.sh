@@ -42,10 +42,12 @@ chk() {
 # this gate as that role, which has CREATEDB and owns what it makes; a config
 # still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
-    PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
-    PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
+    PGPASSWORD="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
+    PGUSER="$(php "$ROOT/maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
     export PGPASSWORD
     [ -n "$PGUSER" ] && export PGUSER
+    # psql with no -d opens the database named after the user; the role has none.
+    [ -n "$PGUSER" ] && export PGDATABASE=postgres
 fi
 if ! psql -U "${PGUSER:-postgres}" -h localhost -c 'select 1' >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"

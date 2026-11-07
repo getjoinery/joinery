@@ -203,6 +203,9 @@ function rde_restore($engine, $scratch, $archive, $home, $db_user, $db_pass, arr
 	$env = [
 		'PATH'       => getenv('PATH'),
 		'HOME'       => $home,
+		// The site's pair, both halves: the engine dumps and restores as this
+		// user, which is the site's own role once the role split has landed.
+		'PGUSER'     => $db_user,
 		'PGPASSWORD' => $db_pass,
 	];
 	$pipes = [];
@@ -316,7 +319,7 @@ if ($rc !== 0) {
 	$cmd = 'bash ' . escapeshellarg($src . '/backup_database.sh') . ' --non-interactive'
 		. ' --key-file ' . escapeshellarg($key_file) . ' --archive - --report ' . escapeshellarg($report)
 		. ' ' . escapeshellarg($source) . ' > ' . escapeshellarg($streamed) . ' 2>/dev/null';
-	$env = ['PATH' => getenv('PATH'), 'HOME' => $home, 'PGPASSWORD' => $db_pass];
+	$env = ['PATH' => getenv('PATH'), 'HOME' => $home, 'PGUSER' => $db_user, 'PGPASSWORD' => $db_pass];
 	$proc = proc_open(['bash', '-c', $cmd], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
 	fclose($pipes[1]); fclose($pipes[2]);
 	$rc = proc_close($proc);

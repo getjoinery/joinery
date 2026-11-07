@@ -83,6 +83,7 @@ $scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars:
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
 $scratch = null;
 putenv('PGPASSWORD=' . (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+putenv('PGUSER=' . (string)Globalvars::get_instance()->get_setting('dbusername', true, true));
 
 // The offloaded blobs, as the storage profiles would describe them. Ids are
 // negative so the per-row advisory locks collide with no real blob's. The
@@ -643,5 +644,6 @@ unset(BackupObjects::$test_hooks['fetch']);
 // Debris check on the machine.
 check(!glob('/tmp/jy_backup_*'), 'no engine temp files');
 putenv('PGPASSWORD');
+putenv('PGUSER');
 
 harness_finish();

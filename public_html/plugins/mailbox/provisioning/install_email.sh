@@ -2,6 +2,10 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.31 - The Postfix role is created and its attributes and password set as postgres (the pair
+#                from the root-only config/db_admin.php), since the site's own database role may not
+#                manage roles; the grants stay with the site's role, which owns the tables
+#                (mail_access_hardening WP4, found on the first re-run after the role split)
 # Version: 2.30 - Refreshes Postfix's chroot copies of system files before 'postfix check': a box whose
 #                listener is decommissioned never starts Postfix, which is what refreshes them,
 #                and printed five 'differ' warnings on every apply after a libnss update
@@ -452,6 +456,31 @@ db_psql() {
     PGPASSWORD="${DBPASS}" psql "${DB_PSQL_ARGS[@]}" "$@"
 }
 
+# The Postfix role itself (CREATE ROLE, ALTER ROLE ... attributes and password)
+# is role management, which the site's own database role may not do
+# (NOCREATEROLE, mail_access_hardening WP4): that runs as postgres with the pair
+# from the root-only config/db_admin.php, or from PGPASSWORD, or from a config
+# that still connects as postgres. The grants stay with db_psql: the site's
+# role owns the tables and may grant on them.
+ADMIN_PASS="${PGPASSWORD:-}"
+if [[ -z "${ADMIN_PASS}" && -r "${SITE_ROOT}/config/db_admin.php" ]]; then
+    ADMIN_PASS="$("${PHP_BIN}" "${SITE_ROOT}/maintenance_scripts/install_tools/_config_value.php" "${SITE_ROOT}/config/db_admin.php" dbadminpassword 2>/dev/null)"
+fi
+if [[ -z "${ADMIN_PASS}" && "${DBUSER}" == "postgres" ]]; then
+    ADMIN_PASS="${DBPASS}"
+fi
+ADMIN_PSQL_ARGS=(-U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
+if [[ -n "${DBHOST}" && "${DBHOST}" != "localhost" ]]; then
+    ADMIN_PSQL_ARGS+=(-h "${DBHOST}")
+fi
+admin_psql() {
+    PGPASSWORD="${ADMIN_PASS}" psql "${ADMIN_PSQL_ARGS[@]}" "$@"
+}
+if ! admin_psql -c "SELECT 1" >/dev/null 2>&1; then
+    echo "ERROR: cannot connect to PostgreSQL as postgres to manage the ${DBNAME} mail role: set PGPASSWORD, or keep the pair in ${SITE_ROOT}/config/db_admin.php (site_db_role.sh writes it)" >&2
+    exit 1
+fi
+
 # The role's GRANT needs the domains table, which update_database creates after
 # the plugin is activated. Fail clearly rather than half-configure.
 TABLE_CHECK="$(db_psql -c "SELECT to_regclass('public.ied_inbound_email_domains') IS NOT NULL" 2>&1)" || {
@@ -544,8 +573,8 @@ fi
 # run. CONNECTION LIMIT bounds what Postfix can take from the site's database:
 # past it a lookup fails, and Postfix answers "try again later".
 
-if [[ "$(db_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
-    db_psql -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
+if [[ "$(admin_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
+    admin_psql -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
     echo "postgres: created role ${DB_ROLE}"
 fi
 # iea_handler (handler aliases, which accept +tag sub-addresses) is created by
@@ -556,9 +585,16 @@ ALIAS_GRANT_COLUMNS="iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled,
 if [[ "$(db_psql -c "SELECT 1 FROM information_schema.columns WHERE table_name = 'iea_inbound_email_aliases' AND column_name = 'iea_handler'")" == "1" ]]; then
     ALIAS_GRANT_COLUMNS="${ALIAS_GRANT_COLUMNS}, iea_handler"
 fi
-# The password is set over stdin, never argv, so it stays out of the process list.
-db_psql <<SQL
+# The password is set over stdin, never argv, so it stays out of the process
+# list, and with statement logging off for that one transaction so a server
+# that logs DDL does not write it to the PostgreSQL log.
+admin_psql <<SQL
+BEGIN;
+SET LOCAL log_statement = 'none';
 ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 10 PASSWORD '${ROLE_PW}';
+COMMIT;
+SQL
+db_psql <<SQL
 GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
 GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
 GRANT SELECT ON ied_inbound_email_domains TO "${DB_ROLE}";

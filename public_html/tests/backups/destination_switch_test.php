@@ -76,6 +76,7 @@ $scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars:
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
 $scratch = null;
 putenv('PGPASSWORD=' . (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+putenv('PGUSER=' . (string)Globalvars::get_instance()->get_setting('dbusername', true, true));
 
 $store = new InMemoryBlobDriver();
 $a_bytes = random_bytes(5000);

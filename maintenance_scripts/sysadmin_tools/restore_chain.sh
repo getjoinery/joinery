@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.14.0 - --db-user USER is forwarded to the database engine (the gates run it as the site's own
+#   role; a root restore keeps postgres)
 # Version: 1.13.0 - the tools copy carries install_tools/*.php as well: the engine's config reader
 #   (_config_value.php) hands the restored database to the site's own role (mail_access_hardening WP4)
 # Version: 1.12.0 - the site root's own deletions are replayed here, not by tar, and never take what is the
@@ -154,6 +156,7 @@ print_dry()     { echo -e "${CYAN}[DRY-RUN]${NC} $1" >&2; }
 PROJECT_NAME=""
 ARTIFACT_DIR=""
 KEY_FILE=""
+DB_USER=""   # --db-user: the role the engine restores as (postgres when unset)
 MANIFEST_SHA256=""
 SEQ=""
 TARGET_DIR_OVERRIDE=""
@@ -173,6 +176,8 @@ while [[ $# -gt 0 ]]; do
         --artifacts)      ARTIFACT_DIR="$2"; shift 2 ;;
         --target-dir)     TARGET_DIR_OVERRIDE="$2"; shift 2 ;;
         --key-file)       KEY_FILE="$2"; shift 2 ;;
+        --db-user)        DB_USER="$2"; shift 2 ;;
+        --db-user=*)      DB_USER="${1#*=}"; shift ;;
         --manifest-sha256) MANIFEST_SHA256="$(echo "$2" | tr 'A-F' 'a-f')"; shift 2 ;;
         --seq)            SEQ="$2"; shift 2 ;;
         --domain)         DOMAIN="$2"; shift 2 ;;
@@ -889,6 +894,7 @@ if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
         if [ -n "${run_at:-}" ] && [ "${run_at}" != "0" ]; then
             RUN_ARGS=(--restored-run "${CHAIN_ID}:${RESTORE_SEQ}:${run_level}:${run_bytes}:${run_at}")
         fi
+        [ -n "$DB_USER" ] && RUN_ARGS+=(--db-user "$DB_USER")
         if bash "$ENGINE" "$PROJECT_NAME" "$DB_ARCHIVE" --non-interactive --key-file "$KEY_FILE" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"}; then
             print_success "Database restored"
         else

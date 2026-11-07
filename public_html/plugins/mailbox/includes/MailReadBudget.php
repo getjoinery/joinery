@@ -44,6 +44,7 @@
  * rebuild, the AI pipeline jobs). A download is counted once, as its message
  * count, when it is started.
  *
+ * @version 1.2 - credentialKind() asks ApiAuth::requestCredentialClass(): only ApiAuth names the credential kinds
  * @version 1.1 - reviewer2: a download is judged on the count before it (B1); a pause within the ceremony's bounce
  *                window waits instead of asking again (B2); the notice counts messages alone (B4);
  *                stepUpRedirect() for page surfaces (B7)
@@ -85,15 +86,14 @@ final class MailReadBudget {
 	/**
 	 * The credential kind this request is on, from what ApiAuth stamped the
 	 * request logger with: 'browser' (the website session, also a CLI with no
-	 * request), 'session' (a linked device's key), 'app_password' or 'machine'
-	 * (a program).
+	 * request), a linked device's session key, or a program's app or machine key.
 	 */
 	public static function credentialKind(): string {
-		switch ((string)RequestLogger::api_key_type()) {
-			case ApiKey::TYPE_SESSION:      return self::CREDENTIAL_DEVICE;
-			case ApiKey::TYPE_APP_PASSWORD:
-			case ApiKey::TYPE_MACHINE:      return self::CREDENTIAL_APP;
-			default:                        return self::CREDENTIAL_BROWSER;
+		// ApiAuth names the kinds; this only meters by their class.
+		switch (ApiAuth::requestCredentialClass()) {
+			case 'device': return self::CREDENTIAL_DEVICE;
+			case 'app':    return self::CREDENTIAL_APP;
+			default:       return self::CREDENTIAL_BROWSER;
 		}
 	}
 

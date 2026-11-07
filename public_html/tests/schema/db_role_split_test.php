@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/site_db_role.sh, maintenance_scripts/install_tools/_db_ownership_sql.sh, maintenance_scripts/install_tools/_set_site_db_role.php, maintenance_scripts/install_tools/_site_init.sh, maintenance_scripts/install_tools/fix_permissions.sh, maintenance_scripts/install_tools/build_dev_from_source.sh, maintenance_scripts/install_tools/default_Globalvars_site.php, maintenance_scripts/sysadmin_tools/_dump_without_owners.sh, maintenance_scripts/sysadmin_tools/_backup_root_only_files.sh, maintenance_scripts/sysadmin_tools/restore_database.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh, maintenance_scripts/sysadmin_tools/backup_database.sh, maintenance_scripts/sysadmin_tools/copy_database.sh, maintenance_scripts/sysadmin_tools/backup_project.sh, maintenance_scripts/sysadmin_tools/remove_account.sh, utils/upgrade.php]
  */
 /**
  * The site's own database role, as the tools build it (mail_access_hardening WP4).

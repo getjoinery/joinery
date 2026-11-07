@@ -62,6 +62,8 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
+ * @version 1.13.0 - requestCredentialClass(): browser, device or app, so a consumer (the mail read budget) meters by
+ *   credential class without naming the kinds
  * @version 1.12.0
  * @changelog 1.12.0 - A refused session key is not a failed sign-in: it guessed nothing
  * @changelog 1.11.0 - A machine account accepts only machine keys, and auth/login refuses it
@@ -176,6 +178,21 @@ class ApiAuth {
 	 * True for an ordinary page render too: no key was presented there either,
 	 * and a page render is the browser-session case by definition.
 	 */
+	/**
+	 * The class of credential this request authenticated with, for a consumer
+	 * that meters or audits by it without knowing the kinds themselves:
+	 * 'browser' (the website session, and a CLI with no request), 'device' (a
+	 * linked device's session key) or 'app' (an app password or a machine key).
+	 */
+	public static function requestCredentialClass(): string {
+		switch ((string)RequestLogger::api_key_type()) {
+			case ApiKey::TYPE_SESSION:      return 'device';
+			case ApiKey::TYPE_APP_PASSWORD:
+			case ApiKey::TYPE_MACHINE:      return 'app';
+			default:                        return 'browser';
+		}
+	}
+
 	public static function isBrowserSessionPrincipal(): bool {
 		return self::$current_api_key === null;
 	}

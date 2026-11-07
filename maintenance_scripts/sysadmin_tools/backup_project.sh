@@ -536,7 +536,9 @@ if [ -z "${PGPASSWORD:-}" ]; then
 fi
 
 # Check if database exists
-DB_EXISTS=$(psql -U postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$PROJECT_NAME" && echo "yes" || echo "no")
+# As the pair this run holds (the site's own role, or postgres), against the
+# postgres database: a role has no database of its own name to open by default.
+DB_EXISTS=$(psql -U "${PGUSER:-postgres}" -d postgres -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "$PROJECT_NAME" && echo "yes" || echo "no")
 
 if [ "$DB_EXISTS" = "yes" ]; then
     # Run backup_database.sh in the temp directory

@@ -417,7 +417,24 @@ info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}')) 
 # restores as the site's role). Out they come, as pg_restore --no-owner would;
 # the ownership block after the load hands everything to the site's role.
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OWNER_LINES="$(bash "$TOOLS_DIR/_dump_without_owners.sh" "$SQL_TMP" 2>&1)" || stage_failed
+if [ -f "$TOOLS_DIR/_dump_without_owners.sh" ]; then
+    OWNER_LINES="$(bash "$TOOLS_DIR/_dump_without_owners.sh" "$SQL_TMP" 2>&1)" || stage_failed
+else
+    # An engine run from a copy without its helper (a tools copy of this one
+    # file) does the same here: the statements out, a COPY block's rows kept.
+    # The same awk as the helper; the two must stay in step.
+    OWNER_TMP="${SQL_TMP}.noowner.$$"
+    LC_ALL=C awk -v counter_file="${OWNER_TMP}.count" '
+        copy { print; if ($0 == "\\.") copy = 0; next }
+        /^COPY .* FROM stdin;$/ { copy = 1; print; next }
+        /^ALTER [A-Z ]+ .* OWNER TO .*;$/ { removed++; next }
+        { print }
+        END { print removed + 0 > counter_file }
+    ' "$SQL_TMP" > "$OWNER_TMP" || stage_failed
+    OWNER_LINES="$(cat "${OWNER_TMP}.count" 2>/dev/null || echo 0)"
+    rm -f "${OWNER_TMP}.count"
+    mv "$OWNER_TMP" "$SQL_TMP" || stage_failed
+fi
 info "✓ ${OWNER_LINES:-0} ownership statement(s) taken out of the dump; the site's role is given everything after the load."
 
 # --- Stage 1b: refuse a dump this server is too old to load --------------------
@@ -435,7 +452,9 @@ DUMP_PG_MAJOR="$(sed -n 's/^-- Dumped by pg_dump version \([0-9]\{1,\}\).*/\1/p'
 if [ -z "$DUMP_PG_MAJOR" ]; then
     DUMP_PG_MAJOR="$(sed -n 's/^-- Dumped from database version \([0-9]\{1,\}\).*/\1/p' "$SQL_TMP" | head -1)"
 fi
-TARGET_VERSION_NUM="$(psql -U "$DB_USER" -XtAc 'SHOW server_version_num' 2>/dev/null | tr -cd '0-9')"
+# -d postgres: with no database named, psql opens the one named after the user,
+# and the site's own role has no database of its own name.
+TARGET_VERSION_NUM="$(psql -U "$DB_USER" -d postgres -XtAc 'SHOW server_version_num' 2>/dev/null | tr -cd '0-9')"
 if [ -n "$DUMP_PG_MAJOR" ] && [ -n "$TARGET_VERSION_NUM" ]; then
     TARGET_PG_MAJOR=$(( TARGET_VERSION_NUM / 10000 ))
     if [ "$DUMP_PG_MAJOR" -gt "$TARGET_PG_MAJOR" ]; then
@@ -592,7 +611,7 @@ put_back_database() {
 # Checked probe: a connectivity/auth failure here must NOT read as "database
 # absent" — that path runs createdb and misreports a connection problem as a
 # load failure. Nothing is destroyed either way, but the marker must be honest.
-if ! DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>&1); then
+if ! DB_EXISTS=$(psql -U "$DB_USER" -d postgres -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>&1); then
     info "✗ Could not query PostgreSQL: $DB_EXISTS"
     echo "DB_UNREACHABLE"
     exit 7

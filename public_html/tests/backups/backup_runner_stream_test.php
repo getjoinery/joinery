@@ -494,6 +494,7 @@ $full_plan['database']    = $dbname;
 // site uses, the way a shell run would.
 $pw = (string)Globalvars::get_instance()->get_setting('dbpassword', true, true);
 putenv('PGPASSWORD=' . $pw);
+putenv('PGUSER=' . (string)Globalvars::get_instance()->get_setting('dbusername', true, true));
 $hist_full = new BackupHistory(NULL);
 $hist_full->set('bkh_type', 'project');
 $hist_full->set('bkh_outcome', 'running');
@@ -512,6 +513,7 @@ try {
 	$full_error = $e->getMessage();
 }
 putenv('PGPASSWORD');
+putenv('PGUSER');
 
 check($full_error === null && ($full_result['status'] ?? '') === 'success', 'the standalone run succeeds', (string)$full_error);
 $left = array_values(array_diff(scandir($full_dir) ?: array(), array('.', '..')));
