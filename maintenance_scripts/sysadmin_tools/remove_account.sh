@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.22 - A site tree that cannot be removed (a folder of it still mounted) ends the removal with the
+#               reason; under set -e it ended unsaid, with the databases and the role left behind. The role's
+#               name is composed (joinery_{site}) like the database names, and the postgres pair falls back
+#               to PGPASSWORD or /root/.joinery_postgres_password, so a removal run again after one that
+#               stopped part way (config folder gone) still drops the databases and the role: a site whose
+#               only remains are its database counts as present, and the verdict checks the role gone too
 #VERSION 2.21 - The postgres password is read from the root-only config/db_admin.php before a config still on
 #               postgres, and the site's own database role (joinery_{site}) is dropped with its databases (WP4)
 #VERSION 2.20 - site_quiet_host.sh's 'forward' and site_certificate_stage.sh's 'certificate-staged' go with the
@@ -357,9 +363,26 @@ if [ "$HOST_PROXY" = false ] && ! another_site "${SITE_NAME}_test"; then
     fi
 fi
 
-# Check for bare-metal installation
+# The postgres pair when no site config can give it: the environment's
+# PGPASSWORD, or install.sh's record of it. A removal run again after one that
+# stopped part way finds the config folder gone and only the databases left.
+ADMIN_PW_FALLBACK="${PGPASSWORD:-}"
+[ -n "$ADMIN_PW_FALLBACK" ] || ADMIN_PW_FALLBACK="$(head -n 1 "$FS/root/.joinery_postgres_password" 2>/dev/null || true)"
+# A database named after the site on this machine's PostgreSQL, asked with that pair.
+site_database_here() {
+    [ "$IS_DOCKER" = false ] || return 1
+    command -v psql >/dev/null 2>&1 || return 1
+    [[ "$SITE_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
+    [ "$(PGPASSWORD="$ADMIN_PW_FALLBACK" timeout 30 psql -w -U postgres -d postgres -AtXc "SELECT 1 FROM pg_database WHERE datname = '$SITE_NAME'" < /dev/null 2>/dev/null)" = "1" ]
+}
+
+# Check for bare-metal installation: its tree, its vhost, or (a removal that
+# stopped part way) only its database, left on this machine's PostgreSQL.
 if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ] || [ -f "$LE_SSL_FILE" ]; then
     IS_BAREMETAL=true
+elif site_database_here; then
+    IS_BAREMETAL=true
+    echo "Only the database of '$SITE_NAME' is left on this machine (its tree and virtual host are gone): it goes, with its role."
 fi
 
 # A bare-metal site's databases on this machine's PostgreSQL: its own, and the
@@ -392,10 +415,16 @@ if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ]; then
             joinery_*) ;;   # the role's password, not postgres's
             *) [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$db_config" dbpassword)" ;;
         esac
-        case "$(config_value "$db_config" dbusername)" in
-            joinery_*) SITE_DB_ROLES="${SITE_DB_ROLES:-} $(config_value "$db_config" dbusername)" ;;
-        esac
+        # The role is the name site_db_role.sh gives it, composed here like the
+        # database names, so a site whose config is already gone (a removal
+        # that stopped part way) still loses its role; IF EXISTS covers a site
+        # that never had one.
+        SITE_DB_ROLES="${SITE_DB_ROLES:-} joinery_${db_site}"
     done
+    # A site whose config folder is already gone (a removal that stopped part
+    # way, run again) has no file to read the postgres pair from: the
+    # environment's PGPASSWORD, or install.sh's record of it, serves instead.
+    [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$ADMIN_PW_FALLBACK"
 fi
 
 # The machine's host converger unit, when it runs for this site: its service
@@ -486,6 +515,9 @@ if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
     echo "  - No Docker container or volumes named '$SITE_NAME'"
     echo "  - No directory at $SITE_ROOT"
     echo "  - No virtual host at $VIRTUALHOST_FILE"
+    if [ "$IS_DOCKER" = false ] && command -v psql >/dev/null 2>&1; then
+        echo "  - No PostgreSQL database named '$SITE_NAME' on this machine"
+    fi
     echo "REMOVE_ACCOUNT_NOTHING $SITE_NAME"
     echo "DECOMMISSION_VERIFIED $SITE_NAME"
     exit 0
@@ -711,8 +743,12 @@ if [ "$IS_BAREMETAL" = true ]; then
     elif [ -f "$FS/etc/joinery/data_binds" ]; then
         echo "WARNING: this host has a data root, but $DATA_ROOT_TOOL is missing, so ${SITE_NAME}'s folders mounted from it cannot be taken away first."
     fi
+    # A folder of the tree still mounted (a bind the data-root tool could not
+    # take away) cannot be removed: said, and the removal stops here, so the
+    # databases and the role are not dropped under a tree that is still there.
     if [ -d "$SITE_ROOT" ]; then
-        rm -rf "${SITE_ROOT:?}"
+        rm -rf "${SITE_ROOT:?}" \
+            || { echo "ERROR: $SITE_ROOT could not be removed (above): a folder of it is still mounted (findmnt -R $SITE_ROOT); nothing more was removed."; exit 1; }
         echo "Removed: $SITE_ROOT"
     else
         echo "Directory $SITE_ROOT does not exist"
@@ -720,7 +756,8 @@ if [ "$IS_BAREMETAL" = true ]; then
 
     if [ "$OWN_TEST_SITE" = true ]; then
         if [ -d "$TEST_SITE_ROOT" ]; then
-            rm -rf "${TEST_SITE_ROOT:?}"
+            rm -rf "${TEST_SITE_ROOT:?}" \
+                || { echo "ERROR: $TEST_SITE_ROOT could not be removed (above): a folder of it is still mounted (findmnt -R $TEST_SITE_ROOT); nothing more was removed."; exit 1; }
             echo "Removed: $TEST_SITE_ROOT"
         else
             echo "Directory $TEST_SITE_ROOT does not exist"
@@ -804,7 +841,9 @@ if [ "$IS_BAREMETAL" = true ]; then
         # The site's own database role (site_db_role.sh) owns nothing once its
         # databases are gone; a role left behind is a login that opens nothing.
         for role in ${SITE_DB_ROLES:-}; do
-            if DROP_ERR="$(printf 'DROP ROLE IF EXISTS :"r";\n' | PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -XqA -v ON_ERROR_STOP=1 -v r="$role" 2>&1)"; then
+            if [ "$(printf "SELECT 1 FROM pg_roles WHERE rolname = :'r';\n" | PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -AtX -v r="$role" 2>/dev/null)" != "1" ]; then
+                echo "Database role '$role' does not exist or already removed"
+            elif DROP_ERR="$(printf 'DROP ROLE IF EXISTS :"r";\n' | PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -XqA -v ON_ERROR_STOP=1 -v r="$role" 2>&1)"; then
                 echo "Removed database role: $role"
             else
                 echo "WARNING: database role '$role' was not removed: $(printf '%s' "${DROP_ERR:-psql failed}" | head -n 1)"
@@ -921,6 +960,11 @@ if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ] && [ -n "$SITE_DATABA
         for db in $SITE_DATABASES; do
             if printf '%s\n' "$LEFT_DATABASES" | grep -qxF "$db"; then
                 LEFTOVERS="${LEFTOVERS}  - Database still present: $db"$'\n'
+            fi
+        done
+        for role in ${SITE_DB_ROLES:-}; do
+            if [ "$(printf "SELECT 1 FROM pg_roles WHERE rolname = :'r';\n" | PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -AtX -v r="$role" 2>/dev/null)" = "1" ]; then
+                LEFTOVERS="${LEFTOVERS}  - Database role still present: $role"$'\n'
             fi
         done
     fi

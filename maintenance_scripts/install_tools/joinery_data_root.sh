@@ -4,6 +4,11 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.34 - remove-site: a mount that cannot be unmounted (busy) is tried again for a few seconds, then
+#                keeps its record and its unit with the records not yet released, so a run again takes them;
+#                a mount of the site's data left by an earlier run that dropped its record goes with the rest,
+#                and the site's data is never removed while a mount of it is in place (a removal that raced
+#                the web server's reload deleted the data under two live mounts)
 # Version: 1.33 - the recovery recipient is an X-Wing key (1216 bytes, specs/post_quantum_sealing.md WP3); a
 #                recipient file still holding an old 32-byte key is read, and only an X-Wing key is set
 # Version: 1.32 - provider-layer records what its management node knows of the provider's own disk
@@ -1800,12 +1805,19 @@ unbind_one() {  # REL TARGET
 
 # The mount of a bind no longer recorded, once the target has let it go.
 unbind_release() {  # REL TARGET
-    local rel="$1" target="$2" unit
+    local rel="$1" target="$2" unit try
     unit="$(bind_unit "$target")"
     if bind_ok "$rel" "$target" || findmnt -n --mountpoint "${ROOT}${target}" >/dev/null 2>&1; then
         # systemd still knows a mounted unit whose file is gone, from mountinfo.
-        systemctl stop "$unit" 2>/dev/null || umount "${ROOT}${target}" \
-            || die "${target} could not be unmounted; see: findmnt ${target}"
+        # A mount is busy for a moment after the site's web server reloads
+        # (its old workers hold the log files until they exit), so a refused
+        # unmount is tried again for a few seconds before it is a failure.
+        for try in 1 2 3 4 5; do
+            systemctl stop "$unit" 2>/dev/null && break
+            umount "${ROOT}${target}" 2>/dev/null && break
+            (( try == 5 )) && die "${target} could not be unmounted: something still has a file open there; see: findmnt ${target}"
+            sleep 1
+        done
     fi
     chattr -i "${ROOT}${target}" 2>/dev/null || true
     if [[ -d "${MNT}/${rel}" && -d "${ROOT}${target}" && ! -L "${ROOT}${target}" ]]; then
@@ -1840,20 +1852,51 @@ do_remove_site() {
         die "${name}'s data is on the data root, which is not mounted: $(check_reason). Nothing was changed."
     fi
     # All of the site's records go, the units reload once, then each mount.
-    local -a gone=()
+    local -a gone=() stray=()
     while read -r rel target; do
         [[ "$rel" == "sites/${name}/"* ]] && gone+=("$rel $target")
     done < <(binds)
+    # A mount of the site's data that no record names: a run before this one
+    # dropped the records and then could not unmount it (busy), so it is
+    # still mounted, and it goes with the others. Its place is read from the
+    # mount's source (SOURCE[/sites/NAME/...]; a source whose folder is gone
+    # reads //deleted after the place).
+    local mtarget msource mrel
+    while read -r mtarget msource; do
+        [[ "$msource" == *"[/sites/${name}/"* ]] || continue
+        mrel="${msource#*\[/}"; mrel="${mrel%%\]*}"; mrel="${mrel%%//deleted}"
+        mtarget="${mtarget#"$ROOT"}"
+        printf '%s\n' "${gone[@]}" | grep -qxF "${mrel} ${mtarget}" 2>/dev/null || stray+=("$mrel $mtarget")
+    done < <(findmnt -rn -o TARGET,SOURCE 2>/dev/null || true)
     if (( ${#gone[@]} > 0 )); then
         awk -v p="sites/${name}/" '!(NF == 2 && index($1, p) == 1)' "$BINDS" > "${BINDS}.tmp.$$" && mv -f "${BINDS}.tmp.$$" "$BINDS" \
             || { rm -f "${BINDS}.tmp.$$"; die "could not update ${BINDS}"; }
         chmod 644 "$BINDS"
         ensure_units || die "${name}'s mounts are no longer recorded, but the target could not be reloaded without them, so they are still mounted; fix the reason above, then run: systemctl daemon-reload, and this again"
-        local pair
-        for pair in "${gone[@]}"; do
-            unbind_release "${pair%% *}" "${pair#* }"
+        # Each mount in turn. One that cannot be unmounted gets its record
+        # back, with every record not yet released, and its unit with it, so
+        # what is mounted is what is recorded, and this run again takes the
+        # rest once it is free. Nothing of the site's data goes until every
+        # mount of it is gone.
+        local pair i
+        for i in "${!gone[@]}"; do
+            pair="${gone[$i]}"
+            if ! ( unbind_release "${pair%% *}" "${pair#* }" ); then
+                printf '%s\n' "${gone[@]:$i}" >> "$BINDS"
+                ensure_units || true
+                die "${pair#* } is still mounted and its record is kept, with ${name}'s other mounts not yet taken away; run this again once nothing has a file open there"
+            fi
             n=$((n + 1))
         done
+    fi
+    if (( ${#stray[@]} > 0 )); then
+        for pair in "${stray[@]}"; do
+            ( unbind_release "${pair%% *}" "${pair#* }" ) || die "${pair#* } is still mounted; run this again once nothing has a file open there"
+            n=$((n + 1))
+        done
+    fi
+    if findmnt -rn -o SOURCE 2>/dev/null | grep -qF "[/sites/${name}/"; then
+        die "a mount of ${name}'s data is still in place (findmnt | grep sites/${name}); its data is kept until that is gone"
     fi
     if [[ -e "${MNT}/sites/${name}" ]] && mounted_ok; then
         rm -rf "${MNT:?}/sites/${name:?}" || die "could not remove ${MNT_REAL}/sites/${name}"

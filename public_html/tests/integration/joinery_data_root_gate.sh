@@ -492,7 +492,11 @@ case "$1 $2" in
       echo "$where" > "$GATE_T/active/$2"
     else
       [ -f "$GATE_T/active/$2" ] || exit 5
+      # stop_fail names units that will not stop (a busy mount); othermounts
+      # loses the line of a mount that stopped.
+      grep -qxF "$2" "$GATE_T/stop_fail" 2>/dev/null && exit 1
       where="$(cat "$GATE_T/active/$2")"; rm -f "$GATE_T/active/$2"
+      [ -f "$GATE_T/othermounts" ] && sed -i "\|^$GATE_T/root$where |d" "$GATE_T/othermounts"
       rm -f "$GATE_T/root$where"; mkdir -p "$GATE_T/root$where"; chmod 000 "$GATE_T/root$where"
     fi ;;
 esac
@@ -594,6 +598,32 @@ chk "a site whose name starts with it keeps its own" "$(grep -c '^sites/s4x/uplo
 chk "check: 0, so nothing on the host waits on the removed site" "$(run check >/dev/null 2>&1; echo $?)" "0"
 chk "a site with nothing on the data root: exit 0, silent" "$(run remove-site nosuch 2>&1; echo $?)" "0"
 chk "a name that is not a site name is refused" "$(run remove-site ../etc >/dev/null 2>&1; echo $?)" "1"
+
+echo "=== remove-site: a mount that will not unmount keeps its record; a mount left by an earlier run goes (1.34) ==="
+# A removal raced the web server's reload: the logs mount was busy, its record
+# was already gone, and the run after it removed the data under the live mount.
+for d in logs cache; do run bind "sites/s5/$d" "/var/www/html/s5/$d" >/dev/null 2>&1; done
+echo keep > "$T/root/srv/joinery/sites/s5/logs/error.log"
+echo var-www-html-s5-logs.mount > "$T/stop_fail"; : > "$LOG"
+out="$(run remove-site s5 2>&1)"; rc=$?
+chk "a mount that is busy: exit 1, said, and the site's data stays" \
+    "$rc|$(grep -c 'is still mounted and its record is kept' <<< "$out")|$(cat "$T/root/srv/joinery/sites/s5/logs/error.log")" "1|1|keep"
+chk "its record is back, with the record not yet released, and their units with them" \
+    "$(grep -c '^sites/s5/' "$B")|$( [ -e "$SD/var-www-html-s5-logs.mount" ] && echo unit)|$( [ -e "$SD/var-www-html-s5-cache.mount" ] && echo unit)" "2|unit|unit"
+chk "it was tried five times before it was given up" "$(grep -c '^systemctl stop var-www-html-s5-logs.mount$' "$LOG")" "5"
+rm -f "$T/stop_fail"; : > "$LOG"
+out="$(run remove-site s5 2>&1)"; rc=$?
+chk "run again once it is free: exit 0, both taken away, its data removed" \
+    "$rc|$(grep -c '^sites/s5/' "$B")|$( [ -e "$T/root/srv/joinery/sites/s5" ] && echo kept || echo gone)|$(grep -c '2 mount(s) taken away and its data on the data root removed' <<< "$out")" "0|0|gone|1"
+run bind sites/s6/logs /var/www/html/s6/logs >/dev/null 2>&1
+echo keep > "$T/root/srv/joinery/sites/s6/logs/error.log"
+sed -i '/^sites\/s6\/logs /d' "$B"
+printf '%s %s\n' "$T/root/var/www/html/s6/logs" "/dev/loop0[/sites/s6/logs]" > "$T/othermounts"
+: > "$LOG"
+out="$(run remove-site s6 2>&1)"; rc=$?
+rm -f "$T/othermounts"
+chk "a mount of the site's data that no record names is taken away with the site, and its data goes" \
+    "$rc|$(grep -c '^systemctl stop var-www-html-s6-logs.mount$' "$LOG")|$( [ -e "$T/root/srv/joinery/sites/s6" ] && echo kept || echo gone)|$(grep -c '1 mount(s) taken away and its data on the data root removed' <<< "$out")" "0|1|gone|1"
 
 echo "=== migrate (WP3, D5): an install's data moves onto the data root ==="
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/srv/joinery" "$T/root/srv/joinery.old" "$SD" "$T/root/run" "$T/root/var" "$T/active"
