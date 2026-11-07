@@ -4717,3 +4717,34 @@ fn a_mount_point_that_stays_is_refused_and_its_parent_still_moves() {
     assert!(jd_vfs::Vfs::is_a_fixed_mount_point(&device.fs, &at("Media2/Disk")));
     assert_eq!(device.fs.peek("Media2/Disk/a.txt").as_deref(), Some(&b"on the other disk"[..]));
 }
+
+/// A pass that only finds a download waiting out its backoff is not quiet, the
+/// journal still owes it, and has no reason to run again before that backoff
+/// ends. It says when that is.
+#[test]
+fn a_pass_with_only_a_backoff_left_says_when_it_ends_and_asks_for_nothing_sooner() {
+    let (_clock, server, device) = world();
+    let ctx = jd_core::reconcile::Context {
+        date: "2026-07-31".into(),
+        device_name: "laptop".into(),
+        conflict_suffix: 1,
+        personality: jd_vfs::Personality::linux(),
+        trace: false,
+    };
+    server.seed_file(None, "spoiled.bin", b"the bytes");
+    device.fs.fail_next(jd_sim::vfs::FsOp::Spool, None, jd_sim::vfs::FailureKind::Io, 1);
+    let now = device.now();
+    let e = env(&device, &now);
+    let mut keys = device.key_source();
+    let failed = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    assert_eq!(failed.exec.retrying, 1, "{:?}", failed.exec);
+    assert!(failed.made_progress(), "the attempt itself is followed up");
+
+    let waiting = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    assert_eq!(waiting.exec.deferred, 1, "{:?}", waiting.exec);
+    assert!(!waiting.quiet(), "work is still owed");
+    assert!(!waiting.made_progress(), "and nothing a pass run now would change");
+    let due = waiting.exec.next_retry_at.expect("it says when the backoff ends");
+    let queued = device.store.queued_ops().unwrap();
+    assert_eq!(Some(due), queued[0].next_retry_time);
+}

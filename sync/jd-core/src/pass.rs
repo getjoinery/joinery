@@ -75,6 +75,14 @@ impl PassOutcome {
             && self.exec.waiting == 0
             && !self.exec.stood_down
     }
+
+    /// Did this pass do something the next pass could follow up on at once?
+    /// Work only waiting out a backoff, or on another entity's work, is not
+    /// quiet, but a pass run now finds it just as it was: its time comes at
+    /// `ExecReport::next_retry_at` or the next poll.
+    pub fn made_progress(&self) -> bool {
+        !self.round.plan.is_empty() || self.exec.attempted() > 0 || self.exec.stood_down
+    }
 }
 
 /// Run one pass.

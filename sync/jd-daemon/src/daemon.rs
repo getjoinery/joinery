@@ -280,6 +280,8 @@ pub struct Daemon {
     paused: bool,
     last_pass_ms: Option<u64>,
     last_poll_ms: u64,
+    /// When the journal's next backoff ends, as the last pass found it.
+    next_retry_ms: Option<u64>,
     blocker: Option<Blocker>,
     custody: String,
     /// The key for encrypted folders. Read back from the credential store once,
@@ -338,6 +340,7 @@ impl Daemon {
             paused: false,
             last_pass_ms: None,
             last_poll_ms: 0,
+            next_retry_ms: None,
             blocker: None,
             custody,
             vault,
@@ -413,6 +416,9 @@ impl Daemon {
         }
         let now = now_ms();
         if now.saturating_sub(self.last_poll_ms) >= self.config.poll_seconds * 1_000 {
+            return true;
+        }
+        if self.next_retry_ms.is_some_and(|due| due <= now) {
             return true;
         }
         match self.dirty.lock() {
@@ -500,6 +506,9 @@ impl Daemon {
         let mut keys = jd_proto::Client::new_idempotency_key;
 
         self.last_poll_ms = now_ms();
+        // Answered by this pass, whatever comes of it: a pass that succeeds
+        // says the next one, and one that fails leaves the poll to pace it.
+        self.next_retry_ms = None;
         match run_pass(&env, &ctx, DeletePolicy::Guard, &mut keys) {
             Ok(outcome) => {
                 if let Some(journal) = self.pass_journal.as_mut() {
@@ -527,10 +536,16 @@ impl Daemon {
                 // Anything that changed the server is worth telling the other
                 // devices about promptly, and the cheapest way to do that is to
                 // come straight back round rather than wait out the interval.
-                if !outcome.quiet() {
+                // A pass that only found work waiting out a backoff comes back
+                // when the backoff ends: sooner, it walks the disk and asks the
+                // server again for nothing, for as long as the op keeps failing.
+                if outcome.made_progress() {
                     self.last_poll_ms = 0;
+                }
+                if !outcome.quiet() {
                     self.publish_folders();
                 }
+                self.next_retry_ms = outcome.exec.next_retry_at.map(|due| due.max(0) as u64);
                 self.say_a_refused_vault_probe();
                 outcome.exec.stood_down
             }
@@ -1596,6 +1611,14 @@ mod tests {
         server: jd_sim::MockServer,
         slow: Arc<std::sync::atomic::AtomicBool>,
         sent: Arc<std::sync::atomic::AtomicU64>,
+        /// While set, a download's first byte arrives wrong.
+        spoil: Arc<std::sync::atomic::AtomicBool>,
+        /// How many times the feed has been asked.
+        feed_asks: Arc<std::sync::atomic::AtomicU64>,
+        /// While set, every connection is dropped unanswered.
+        down: Arc<std::sync::atomic::AtomicBool>,
+        /// How many connections have been dropped that way.
+        dropped: Arc<std::sync::atomic::AtomicU64>,
     }
 
     impl Drive {
@@ -1607,12 +1630,26 @@ mod tests {
                 server: jd_sim::MockServer::new(jd_sim::SimClock::new()),
                 slow: Arc::new(std::sync::atomic::AtomicBool::new(true)),
                 sent: Arc::default(),
+                spoil: Arc::default(),
+                feed_asks: Arc::default(),
+                down: Arc::default(),
+                dropped: Arc::default(),
             };
             let (server, slow, sent) = (drive.server.clone(), Arc::clone(&drive.slow), Arc::clone(&drive.sent));
+            let (spoil, feed_asks) = (Arc::clone(&drive.spoil), Arc::clone(&drive.feed_asks));
+            let (down, dropped) = (Arc::clone(&drive.down), Arc::clone(&drive.dropped));
             std::thread::spawn(move || {
                 for stream in listener.incoming().flatten() {
+                    if down.load(Ordering::SeqCst) {
+                        dropped.fetch_add(1, Ordering::SeqCst);
+                        drop(stream);
+                        continue;
+                    }
                     let (server, slow, sent) = (server.clone(), Arc::clone(&slow), Arc::clone(&sent));
-                    std::thread::spawn(move || answer_as_the_server(stream, &server, &slow, &sent));
+                    let (spoil, feed_asks) = (Arc::clone(&spoil), Arc::clone(&feed_asks));
+                    std::thread::spawn(move || {
+                        answer_as_the_server(stream, &server, &slow, &sent, &spoil, &feed_asks)
+                    });
                 }
             });
             drive
@@ -1630,6 +1667,8 @@ mod tests {
         server: &jd_sim::MockServer,
         slow: &std::sync::atomic::AtomicBool,
         sent: &std::sync::atomic::AtomicU64,
+        spoil: &std::sync::atomic::AtomicBool,
+        feed_asks: &std::sync::atomic::AtomicU64,
     ) {
         use std::io::{BufRead, BufReader, Read, Write};
         let mut out = match stream.try_clone() {
@@ -1665,6 +1704,9 @@ mod tests {
             (r.status, json!({ "errortype": r.errortype, "error": r.message, "data": r.data }).to_string())
         };
         if let Some(name) = path.strip_prefix("/api/v1/action/") {
+            if name == "drive_changes" {
+                feed_asks.fetch_add(1, Ordering::SeqCst);
+            }
             let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
             let answer = match &key {
                 Some(k) => server.action_idempotent(name, &body, k),
@@ -1682,7 +1724,10 @@ mod tests {
             return;
         }
         match server.download(&path, from) {
-            Ok(bytes) => {
+            Ok(mut bytes) => {
+                if spoil.load(Ordering::SeqCst) && !bytes.is_empty() {
+                    bytes[0] ^= 0xff;
+                }
                 let status = if from > 0 { 206 } else { 200 };
                 let _ = write!(
                     out,
@@ -1767,6 +1812,54 @@ mod tests {
             assert!(started.elapsed() < within, "{what}: not within {within:?}");
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn a_server_outage_after_a_retry_came_due_is_paced_by_the_poll() {
+        // A due time that outlives the pass answering it has a pass run on
+        // every tick of the loop while the server is down: twice a second, for
+        // as long as the outage lasts.
+        let drive = Drive::start();
+        drive.slow.store(false, Ordering::SeqCst);
+        drive.spoil.store(true, Ordering::SeqCst);
+        drive.server.seed_file(None, "spoiled.bin", &[7u8; 4096]);
+        let Running { shared, root: _root, exited } = a_daemon_syncing_with(&drive, "outage");
+        wait_for("the download failing a few times", Duration::from_secs(40), || drive.sent() >= 4 * 4096);
+        std::thread::sleep(Duration::from_millis(1500));
+        drive.down.store(true, Ordering::SeqCst);
+        // Past the longest back-off this run reaches, and past one poll.
+        std::thread::sleep(Duration::from_secs(50));
+        let asked = drive.dropped.load(Ordering::SeqCst);
+        drive.down.store(false, Ordering::SeqCst);
+        assert_eq!(handle_control(&shared, &req("POST", "/stop", Value::Null)).0, 200);
+        exited.recv_timeout(Duration::from_secs(15)).expect("the daemon stopped");
+        assert!(asked <= 4, "asked the server {asked} times in 50 s while it was down");
+    }
+
+    #[test]
+    fn a_download_waiting_out_its_backoff_leaves_the_server_and_the_disk_alone() {
+        let drive = Drive::start();
+        drive.slow.store(false, Ordering::SeqCst);
+        drive.spoil.store(true, Ordering::SeqCst);
+        drive.server.seed_file(None, "spoiled.bin", &[7u8; 4096]);
+        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "backoff");
+        // The attempts come quickly at first: past them, the backoff is
+        // longer than the watch below.
+        wait_for("the download failing a few times", Duration::from_secs(40), || drive.sent() >= 4 * 4096);
+        let asks = drive.feed_asks.load(Ordering::SeqCst);
+        let attempts = drive.sent();
+        std::thread::sleep(Duration::from_secs(6));
+        let asked = drive.feed_asks.load(Ordering::SeqCst) - asks;
+        let tried = (drive.sent() - attempts) / 4096;
+        // One attempt in the watch, and the pass either side of it, at most.
+        assert!(asked <= 3 + 2 * tried, "asked the feed {asked} times in 6 s with {tried} attempts");
+
+        drive.spoil.store(false, Ordering::SeqCst);
+        wait_for("the file landing once the bytes are good", Duration::from_secs(120), || {
+            std::fs::read(root.join("spoiled.bin")).is_ok_and(|b| b == [7u8; 4096])
+        });
+        assert_eq!(handle_control(&shared, &req("POST", "/stop", Value::Null)).0, 200);
+        exited.recv_timeout(Duration::from_secs(15)).expect("the daemon stopped");
     }
 
     #[test]

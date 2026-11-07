@@ -143,6 +143,8 @@ pub struct ExecReport {
     pub retrying: usize,
     /// Ops left alone because their backoff has not elapsed.
     pub deferred: usize,
+    /// When the first of those backoffs ends, in the clock's milliseconds.
+    pub next_retry_at: Option<i64>,
     /// Ops not ready yet, waiting for another entity's work still to come
     /// (`OpOutcome::Waits`). Pending, like `deferred`, and counted apart from
     /// it and from `retrying`: a wait is not a failure.
@@ -450,8 +452,9 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
         if op.state != OpState::Queued {
             continue;
         }
-        if op.next_retry_time.map(|t| t > now).unwrap_or(false) {
+        if let Some(due) = op.next_retry_time.filter(|t| *t > now) {
             report.deferred += 1;
+            report.next_retry_at = Some(report.next_retry_at.map_or(due, |first| first.min(due)));
             continue;
         }
         let outcome = match run_one(env, &op) {

@@ -313,6 +313,92 @@ fn points_inside(points: impl IntoIterator<Item = PathBuf>, real: &Path, given: 
     inside
 }
 
+/// What is left of a Windows path `point` below the folder `real`, if it is
+/// strictly inside it. Compared name by name and ignoring case: the system
+/// keeps a mount point in the spelling it was mounted with, which need not be
+/// the folder's own. `canonicalize` answers in the `\\\\?\\` form, which the
+/// system's list of mount points does not use.
+#[cfg(any(windows, test))]
+fn under_folder_named(point: &str, real: &str) -> Option<String> {
+    let names = |path: &'_ str| -> Vec<String> {
+        let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+        path.split('\\').filter(|n| !n.is_empty()).map(str::to_string).collect()
+    };
+    let (point, real) = (names(point), names(real));
+    let same = |a: &String, b: &String| a.to_lowercase() == b.to_lowercase();
+    if point.len() <= real.len() || !real.iter().zip(&point).all(|(r, p)| same(r, p)) {
+        return None;
+    }
+    Some(point[real.len()..].join("\\"))
+}
+
+/// The names in a Windows `MULTI_SZ`: strings of UTF-16, each ended by a NUL,
+/// the list ended by another.
+#[cfg(any(windows, test))]
+fn multi_sz(wide: &[u16]) -> Vec<String> {
+    wide.split(|c| *c == 0)
+        .take_while(|name| !name.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+/// Every folder and drive letter any volume on this computer is mounted at.
+/// `None` where the list cannot be read; a volume that left while it was being
+/// read is simply not on it.
+#[cfg(windows)]
+fn volume_mount_paths() -> Option<Vec<String>> {
+    use windows_sys::Win32::Foundation::{
+        GetLastError, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_MORE_FILES, ERROR_PATH_NOT_FOUND,
+        INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, GetVolumePathNamesForVolumeNameW,
+    };
+    const VOLUME_NAME_LEN: u32 = 64;
+    let mut volume = [0u16; VOLUME_NAME_LEN as usize];
+    // SAFETY: `volume` holds `VOLUME_NAME_LEN` characters, as said.
+    let found = unsafe { FindFirstVolumeW(volume.as_mut_ptr(), VOLUME_NAME_LEN) };
+    if found == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let mut paths = Vec::new();
+    let finished = loop {
+        let mut names = vec![0u16; 1024];
+        let read = loop {
+            let mut needed = 0u32;
+            // SAFETY: `volume` is NUL-terminated by the call that filled it;
+            // `names` holds the length said; `needed` outlives the call.
+            let ok = unsafe {
+                GetVolumePathNamesForVolumeNameW(volume.as_ptr(), names.as_mut_ptr(), names.len() as u32, &mut needed)
+            };
+            if ok != 0 {
+                break true;
+            }
+            // SAFETY: no precondition.
+            match unsafe { GetLastError() } {
+                ERROR_MORE_DATA => names = vec![0u16; (needed as usize).max(names.len() * 2)],
+                ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => {
+                    names[0] = 0;
+                    break true;
+                }
+                _ => break false,
+            }
+        };
+        if !read {
+            break false;
+        }
+        paths.extend(multi_sz(&names));
+        // SAFETY: `found` is the open search; `volume` holds the length said.
+        if unsafe { FindNextVolumeW(found, volume.as_mut_ptr(), VOLUME_NAME_LEN) } == 0 {
+            // SAFETY: no precondition.
+            break unsafe { GetLastError() } == ERROR_NO_MORE_FILES;
+        }
+    };
+    // SAFETY: `found` is the open search, closed once.
+    unsafe { FindVolumeClose(found) };
+    finished.then_some(paths)
+}
+
 /// The path as the kernel's mount table names it: every symlink on the way
 /// to it followed, as the table never shows one. The path as given where it
 /// cannot be read.
@@ -1045,6 +1131,22 @@ impl Vfs for OsVfs {
         Some(inside)
     }
 
+    /// The system's list of volumes and the folders each is mounted at, read
+    /// once. A drive letter is one of those names, and never inside a folder.
+    #[cfg(windows)]
+    fn disks_mounted_inside(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        let real = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let real = real.to_string_lossy();
+        let mut inside: Vec<PathBuf> = volume_mount_paths()?
+            .iter()
+            .filter_map(|m| under_folder_named(m, &real))
+            .map(|under| path.join(under))
+            .collect();
+        inside.sort();
+        inside.dedup();
+        Some(inside)
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         folder_on_disk(to)?;
         let to = as_written(to, &self.personality);
@@ -1697,6 +1799,25 @@ mod tests {
     /// The disks mounted inside a folder are the mount points strictly
     /// under it, named as the caller names the folder, each once: not the
     /// folder's own mount, nor one a name it starts with, nor one above it.
+    #[test]
+    fn a_windows_mount_point_is_found_under_the_folder_whatever_its_spelling() {
+        let real = r"\\?\C:\Users\Me\Joinery Drive";
+        let under = |p: &str| under_folder_named(p, real);
+        assert_eq!(under(r"C:\Users\Me\Joinery Drive\Disk\").as_deref(), Some("Disk"));
+        assert_eq!(under(r"c:\users\me\JOINERY DRIVE\A\Disk\").as_deref(), Some(r"A\Disk"));
+        assert_eq!(under(r"C:\Users\Me\Joinery Drive\"), None, "the folder itself is not inside it");
+        assert_eq!(under(r"C:\"), None);
+        assert_eq!(under(r"D:\Users\Me\Joinery Drive\Disk\"), None);
+        assert_eq!(under(r"C:\Users\Me\Joinery Drive 2\Disk\"), None, "a name beginning the same is another folder");
+    }
+
+    #[test]
+    fn a_windows_list_of_names_ends_at_its_empty_string() {
+        let wide: Vec<u16> = "C:\\\0D:\\Mnt\\\0\0left over\0".encode_utf16().collect();
+        assert_eq!(multi_sz(&wide), vec![r"C:\".to_string(), r"D:\Mnt\".to_string()]);
+        assert!(multi_sz(&[0, 0]).is_empty());
+    }
+
     #[test]
     fn the_disks_inside_a_folder_are_the_mount_points_under_it() {
         let table = "22 1 0:21 / / rw,relatime shared:1 - btrfs /dev/sda2 rw\n\

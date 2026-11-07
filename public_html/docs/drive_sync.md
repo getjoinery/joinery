@@ -318,8 +318,11 @@ stands aside.
 
 In the order the daemon checks: something on disk changed and has gone quiet
 (2 s); the watcher admitted it lost events; the poll interval elapsed (30 s);
-somebody asked for one. Anything that changes the server schedules an immediate
-next pass rather than waiting out the interval.
+somebody asked for one; an operation's backoff ended. Anything a pass did or
+planned schedules an immediate next pass rather than waiting out the interval.
+A pass that only finds work waiting out a backoff does not: it would walk the
+disk and ask the server again with nothing to act on, for as long as the
+operation keeps failing.
 
 The last two conditions are what make the client work when the first two fail. A
 watcher that dies degrades this into a thirty-second polling client, not into a
@@ -1309,8 +1312,8 @@ the folder goes to the trash, or they delete it themselves.
 An unmounted disk leaves behind the empty folder it was mounted at. Read as it
 stands, every file that was on it is deleted here, on the server and on every
 other device, and a disk of a few files is too few for the mass-delete guard
-to ask. So each pass reads the system's mount table
-(`Vfs::disks_mounted_inside`) and remembers each folder a disk is mounted at,
+to ask. So each pass reads the system's mount table, on Windows its list of volumes
+(`Vfs::disks_mounted_inside`), and remembers each folder a disk is mounted at,
 by its id and the identity of the disk's top folder (store meta
 `disks_mounted`). A folder remembered so, with no disk mounted at it now and
 its disk mounted at no other folder (a Mac renames a folder a disk is mounted
@@ -1328,7 +1331,7 @@ disk is back. It is said as
 `disk_not_there`, and withdrawn the pass the disk is back, when what is on it
 is read again as it stands. A disk gone for good leaves with its folder
 deleted on the web: a folder the server deleted, or one it is in, is not
-held. Where the system has no mount table to read (Windows), nothing is held.
+held. Where the system's list cannot be read, nothing is held and nothing remembered is forgotten.
 
 **No one path ends a walk.** Only the disk as a whole does: the sync folder gone
 is the missing-folder state, never a held folder, and the sync folder failing to
