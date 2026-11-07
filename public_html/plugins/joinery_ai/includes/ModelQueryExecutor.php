@@ -44,6 +44,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
  *
+ * @version 1.7 - a chat's read of mail across users asks the reader's oversight (a fresh step-up marker on this
+ *   browser session, MailboxViewer::withOversight) and is refused before any row is fetched without it (WP3, B13)
  * @version 1.6 - mail read across users is written down (MailboxReadAudit, mail_access_hardening WP1); mail rows
  *   count against the acting person's read budget and a paused budget is the tool's error (MailReadBudget, WP2);
  *   a recipe's reads are metered as a program's, and an owner-scoped read is budgeted too (reviewer2 B5)
@@ -209,6 +211,20 @@ class ModelQueryExecutor {
         // too); only a read across users is audited as foreign.
         $audit_pkey = $mail_read ? (string)$class::$pkey_column : null;
         $audit_foreign = $mail_read && !$ctx->ownerScopedReads($class);
+        // A read across users from a chat asks the oversight the mail reader
+        // asks (mail_access_hardening WP3): a level-10 person reads everyone's
+        // mail only in a browser session that confirmed a second factor within
+        // the oversight window. Without it the read is refused before any row
+        // is fetched, with the reader's own answer; the viewer that decided it
+        // is the one the audit names. A recipe runs in no browser session and
+        // keeps its metered, audited reads as before.
+        $audit_viewer = null;
+        if ($audit_foreign && $ctx instanceof ChatTurnContext) {
+            $audit_viewer = $ctx->mailOversightViewer();
+            if (!$audit_viewer->isAllAccess()) {
+                throw new InvalidArgumentException(self::oversightRefusal($audit_viewer->oversightState()));
+            }
+        }
         $sql_fields = $select_fields;
         $audit_pkey_added = $audit_pkey !== null && !in_array($audit_pkey, $sql_fields, true);
         if ($audit_pkey_added) $sql_fields[] = $audit_pkey;
@@ -233,7 +249,7 @@ class ModelQueryExecutor {
                 // This path is scoped by the person's level, not by a mailbox
                 // viewer (a viewer built here has no session and is never
                 // all-access), so the audit is told the surface reached everything.
-                MailboxReadAudit::messages(MailboxViewer::forUser($uid, self::actingLevel($uid)),
+                MailboxReadAudit::messages($audit_viewer ?? MailboxViewer::forUser($uid, self::actingLevel($uid)),
                     MailboxReadAudit::SURFACE_AI_QUERY, $ids, true);
             }
             // The rows count against the acting person's read budget; a paused
@@ -257,6 +273,22 @@ class ModelQueryExecutor {
 
     /** Rows dropped from the most recent query() because their vault was locked. */
     private static $last_locked_excluded = 0;
+
+    /**
+     * Why a chat may not read mail across users right now, in the words the
+     * mail reader uses for the same state, so the person is sent to the same
+     * place: the reader's rail, where the step-up is confirmed.
+     */
+    private static function oversightRefusal(string $state): string {
+        switch ($state) {
+            case MailboxViewer::OVERSIGHT_NEEDS_SECOND_FACTOR:
+                return 'Reading mail across users needs a second factor on your account (a passkey or an authenticator app) and a fresh confirmation of it; this query is limited to your own mail until then.';
+            case MailboxViewer::OVERSIGHT_NEEDS_STEPUP:
+                return 'Reading mail across users needs oversight confirmed for this browser session: open the mail reader, confirm with your second factor, then ask again. Until then this query is limited to your own mail.';
+            default:
+                return 'Reading mail across users is not open to this account; this query is limited to your own mail.';
+        }
+    }
 
     /** The acting user's stored level, as the chat context reads it. */
     private static function actingLevel(int $user_id): int {

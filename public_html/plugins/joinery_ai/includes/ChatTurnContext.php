@@ -58,7 +58,12 @@ class ChatTurnContext implements ToolContext {
     /** @var callable|null  live sink for stage labels (set by the endpoint) */
     private $activity_stamper = null;
 
-    public function __construct(AiConversation $conversation, int $acting_user_id, int $message_id = 0) {
+    /** @var string  the browser session this turn runs in ('' when there is none:
+     *  a test, or a turn with no request). The mail reader's oversight marker is
+     *  keyed by it (mail_access_hardening WP3). */
+    private $session_id;
+
+    public function __construct(AiConversation $conversation, int $acting_user_id, int $message_id = 0, ?string $session_id = null) {
         $this->conversation = $conversation;
         $this->acting_user_id = $acting_user_id;
         $this->message_id = $message_id;
@@ -66,10 +71,23 @@ class ChatTurnContext implements ToolContext {
         $this->owner_timezone = self::resolveTimezone($acting_user_id);
         $this->nonce = bin2hex(random_bytes(4));
         $this->turn_started_at = microtime(true);
+        $this->session_id = $session_id ?? (string)session_id();
     }
 
     public function actingUserId(): int {
         return $this->acting_user_id;
+    }
+
+    /**
+     * The mailbox viewer this turn reads other people's mail as: the acting
+     * person at their level, with oversight decided by this browser session's
+     * step-up marker, exactly as the mail reader decides it (MailboxViewer::
+     * fromSession()). A level-10 chat with no fresh marker is not all-access,
+     * and ModelQueryExecutor refuses the read across users with the same
+     * answer the reader gives (mail_access_hardening WP3, B13).
+     */
+    public function mailOversightViewer(): MailboxViewer {
+        return MailboxViewer::withOversight($this->acting_user_id, (int)$this->acting_permission, $this->session_id);
     }
 
     // --- chat-only accessors ------------------------------------------------
