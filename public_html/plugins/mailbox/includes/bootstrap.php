@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.32 - mail parsing registers as foreground work: the mail list waits on it after an unlock
  * @version 1.31 - InlineFlagBackfill: a sealed message's pre-B5 rows are decided by what its body shows, in-window
  * @version 1.30 - the rotation re-seal picks a message by the key it holds, not by iem_content_sealed: a sealed draft
  *                moved to or sent from a standard From keeps its key for its sealed attachments with the flag off,
@@ -481,7 +482,8 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, VaultKey $key, float $deadline): int {
 		return DeferredIngest::drainForUser($user_id, $key, DeferredIngest::DEFAULT_MAX, $deadline);
-	}
+	},
+	array('foreground' => true)
 );
 
 // A Sent-folder direction promotion runs from cron and cannot seal the

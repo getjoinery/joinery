@@ -33,21 +33,40 @@
  * is background work and loses nothing by starting a few seconds late.
  *
  * Chained drains are paced: DRAIN_GAP_MS between one slice ending and the
- * next starting. Every request here counts against the API's per-address
- * budget (default 1000 an hour), the same budget the reader's own requests
- * draw on. Back-to-back ten-second slices plus the beat plus the reader can
- * spend it inside an hour when a consumer has a long backlog, and the reader
- * then answers 429 to everything — the person is locked out of their own mail
- * by background work. A drain the server refuses (429, or any failure) backs
- * off for BACKOFF_MS instead of being retried on the next beat.
+ * next starting. The budget is not what sets this. A signed-in browser is
+ * metered per person (api_session_rate_limit_requests, default 5000 an hour)
+ * and thirty short slices are a small part of it. The gap stands because a long
+ * backlog of work nobody is looking at should not run a one-CPU box at a 40%
+ * duty cycle for an hour. A drain the server refuses (429, or any failure) backs
+ * off for BACKOFF_MS instead of being retried on the next beat, and nothing
+ * here cuts that short.
  *
- * A page whose own work is waiting on a drain skips the wait: drainNow()
- * starts one at once, past the quiet period and the chain gap (the mail
- * reader, when its list says relay-sealed mail is waiting to be parsed). Every
- * drain that answers dispatches 'joinery:vault-work-done' with the server's
- * {done, more}, so a page can refresh what a drain just made readable.
+ * A page whose own work is waiting on a drain calls drainNow() (the mail
+ * reader, when its list says relay-sealed mail is waiting to be parsed). That
+ * starts a foreground run, past the quiet period and the chain gap: each slice
+ * posts foreground=1, which the server keeps to the work a page can wait on, and
+ * the next starts FOREGROUND_GAP_MS after the last ended, up to
+ * FOREGROUND_MAX_SLICES. Background pacing takes over when the server says no
+ * foreground work remains, a slice makes no progress (another tab holds the
+ * lock, or every pending row failed to parse), the page is hidden, the cap is
+ * reached, or the beacon stops.
  *
- * @version 1.6
+ * The cap is why a run's count outlives the run. The reader re-reads its list
+ * after every slice that parsed something, and that list says "parsing" again
+ * while mail is waiting, so a count reset on exit would restart the run after
+ * each background slice and pace nothing. The count clears when the server
+ * says no foreground work remains, or when the beacon stops. A row that fails
+ * to parse every time keeps that answer true, so the worst case is thirty
+ * short requests a page, then background pacing.
+ *
+ * Every drain that answers dispatches 'joinery:vault-work-done' with the
+ * server's {done, more}, so a page can refresh what a drain just made readable.
+ *
+ * @version 1.7
+ * @changelog 1.7 - foreground runs (specs/sealed_mail_after_unlock.md); drainNow()
+ *   no longer cuts short a chain gap or a back-off from a hidden page or after
+ *   the cap; an answer from a run stop() ended changes nothing; the header states
+ *   the real budget
  * @changelog 1.6 - drainNow(); 'joinery:vault-work-done' after each drain
  * @changelog 1.5 - chained drains paced (DRAIN_GAP_MS); a refused drain backs
  *   off (BACKOFF_MS). A long backlog drained the per-address API budget and
@@ -59,11 +78,23 @@
 	var QUIET_MS = 10000;
 	var DRAIN_GAP_MS = 15000;   // between chained slices: ~144 drains an hour at most
 	var BACKOFF_MS = 60000;     // after a drain the server refused or that failed
+	var FOREGROUND_GAP_MS = 1000;
+	var FOREGROUND_MAX_SLICES = 30;
 
 	var timer = null;
 	var draining = false;
 	var quietUntil = 0;
 	var drainTimer = null;
+	var foreground = false;
+	var foregroundSlices = 0;
+	var backoffUntil = 0;
+	var epoch = 0;              // stop() moves it: a drain still in flight then answers for a run that ended
+
+	function isHidden() { return document.visibilityState === 'hidden'; }
+
+	function madeProgress(done) {
+		return Object.keys(done || {}).some(function (id) { return done[id] > 0; });
+	}
 
 	function beat() {
 		joineryApi.post('vault_heartbeat', {}).then(function (res) {
@@ -90,11 +121,25 @@
 			return;
 		}
 		draining = true;
-		joineryApi.post('vault_deferred_work', {}).then(function (res) {
-			draining = false;
+		if (foreground) { foregroundSlices++; }
+		var sentIn = epoch;
+		joineryApi.post('vault_deferred_work', foreground ? { foreground: 1 } : {}).then(function (res) {
+			var stale = sentIn !== epoch;
+			if (!stale) { draining = false; }
 			if (res) {
 				document.dispatchEvent(new CustomEvent('joinery:vault-work-done',
 					{ detail: { done: res.done || {}, more: !!res.more } }));
+			}
+			if (stale) { return; }
+			if (res && !res.foreground_more) { foregroundSlices = 0; }
+			if (foreground && (!res || res.locked || !res.foreground_more || !madeProgress(res.done)
+					|| isHidden() || foregroundSlices >= FOREGROUND_MAX_SLICES)) {
+				foreground = false;
+			}
+			if (foreground && timer) {
+				quietUntil = Date.now() + FOREGROUND_GAP_MS;
+				drain();
+				return;
 			}
 			// More waiting and the window still open - keep going rather than
 			// idling until the next beat, but paced: the next slice starts
@@ -104,17 +149,27 @@
 				drain();
 			}
 		}).catch(function () {
+			if (sentIn !== epoch) { return; }
 			draining = false;
+			foreground = false;
 			// Refused or failed: wait it out. A 429 in particular means the
-			// address's budget is spent; asking again sooner only spends more.
-			quietUntil = Date.now() + BACKOFF_MS;
+			// budget is spent; asking again sooner only spends more.
+			backoffUntil = Date.now() + BACKOFF_MS;
+			quietUntil = backoffUntil;
 		});
 	}
 
-	// Drain now, not after the quiet period or the chain gap. One in flight
-	// already is left to finish: a second would only wait on its locks.
+	// Start a foreground run, past the quiet period and the chain gap. A run
+	// under way keeps its own schedule; a drain in flight is left to finish and
+	// the run carries on from its answer. A hidden page, a spent cap and a
+	// back-off all leave the existing pacing alone.
 	function drainNow() {
 		if (!timer) { start(); }
+		if (foreground || isHidden() || foregroundSlices >= FOREGROUND_MAX_SLICES
+				|| Date.now() < backoffUntil) {
+			return;
+		}
+		foreground = true;
 		quietUntil = 0;
 		if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
 		drain();
@@ -130,13 +185,26 @@
 	function stop() {
 		if (timer) { clearInterval(timer); timer = null; }
 		if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
-		draining = false;   // a drain in flight finds timer null and stops chaining
+		draining = false;   // a drain in flight is stale from here on and changes nothing
+		epoch++;
+		foreground = false;
+		foregroundSlices = 0;
 	}
 
 	// An immediate beat when the tab becomes visible again recovers quickly
 	// from background throttling.
 	document.addEventListener('visibilitychange', function () {
 		if (timer && document.visibilityState === 'visible') { beat(); }
+		if (foreground && isHidden()) {
+			foreground = false;
+			// A slice already waiting on the short gap takes the long one instead.
+			if (drainTimer) {
+				clearTimeout(drainTimer);
+				drainTimer = null;
+				quietUntil = Date.now() + DRAIN_GAP_MS;
+				drain();
+			}
+		}
 	});
 
 	// A page that opens a window mid-life announces it; an explicit lock

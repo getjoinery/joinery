@@ -1675,7 +1675,8 @@ inside a web request carrying a live window.
 VaultDeferredWork::register(
     'mailbox_parse',
     fn(int $user_id) => bool,                                   // cheap, indexed, no decrypt
-    fn(int $user_id, VaultKey $key, float $deadline) => int      // work until the deadline
+    fn(int $user_id, VaultKey $key, float $deadline) => int,     // work until the deadline
+    ['foreground' => true]                                       // optional: a page may wait on this work
 );
 ```
 
@@ -1688,20 +1689,29 @@ already open): `work_pending` schedules the drain for the end of the period
 rather than firing it, so the page's own requests — the mail-list refresh an
 unlock triggers, a fresh page's content fetches — get the workers and the
 database first. The backlog is background work and loses nothing by starting
-a few seconds late. Chained drains are paced — 15 seconds between one slice
-ending and the next starting — because every drain counts against the API's
-per-address request budget alongside the reader's own requests; the pacing
-keeps a long backlog from spending that budget and locking the person out of
-their own mail. A drain the server refuses (a 429, or any failure) backs off
-for a minute before the next attempt.
+a few seconds late. Chained drains are paced, 15 seconds between one slice
+ending and the next starting, because a long backlog of work nobody is looking
+at should not keep a one-CPU box busy for an hour. A drain the server refuses (a
+429, or any failure) backs off for a minute before the next attempt, and nothing
+cuts that short.
 
-A page whose own content is waiting on a consumer skips the wait:
-`JoineryVaultPresence.drainNow()` starts a drain at once, past the quiet period
-and the chain gap. Every drain that answers dispatches `joinery:vault-work-done`
-on `document` with the server's `{done, more}` (`done` maps consumer id to items
-completed), so the page re-reads what the drain made readable. The mail reader
-does both for relay-sealed mail: its list answers `parsing` instead of parsing,
-it calls `drainNow()`, and it refreshes on `done.mailbox_parse`.
+A page whose own content is waiting on a consumer starts a foreground run with
+`JoineryVaultPresence.drainNow()`, past the quiet period and the chain gap. Each
+slice posts `foreground`, and the server runs only consumers registered with
+`'foreground' => true`, in a slice of at most 3 seconds. The next slice starts one
+second after the last ended, up to 30 in a row. Background pacing takes over when
+the answer's `foreground_more` is false, a slice completes nothing (another tab
+holds the lock, or every pending row failed to parse), the page is hidden, the cap
+is reached, or the beacon stops. The cap's count clears only when no foreground
+work remains or the beacon stops, so a row that fails to parse every time costs
+thirty short requests a page and no more. On a hidden page `drainNow()` starts the
+beacon if none is running and changes nothing else.
+
+Every drain that answers dispatches `joinery:vault-work-done` on `document` with
+the server's `{done, more}` (`done` maps consumer id to items completed), so the
+page re-reads what the drain made readable. The mail reader does both for
+relay-sealed mail: its list answers `parsing` instead of parsing, it calls
+`drainNow()`, and it refreshes on `done.mailbox_parse`.
 
 The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind
@@ -1711,12 +1721,23 @@ itself while the window it exists to protect lapsed.
 declares in its `vaultConsumer` block, and it is meaningful: mail parsing
 precedes AI judging, because an unparsed message has no fields to read. Each batch is bounded by
 `vault_deferred_work_slice_seconds` (default 10), shared round-robin so one slow
-consumer cannot starve another. The deadline is checked **between** items, never
+consumer cannot starve another. Foreground consumers go first in each pass. A
+foreground consumer's first turn is an equal share; if it completed something it
+carries on to the slice deadline, and if it completed nothing it loses the lead for
+the rest of that drain and shares like any other. The rest take equal shares of what
+is left. While one foreground consumer keeps progressing, a second one waits. The
+deadline is checked **between** items, never
 inside one — an in-flight model call cannot be cut off cleanly, so a batch may
 overrun by a single item. Each consumer's turn holds a Postgres advisory lock on
 `(user, consumer)`, so two open tabs never double-process; a held lock is
 skipped, not waited on. A consumer that throws is logged and skipped for that
 batch, and retried on the next.
+
+**Timing.** Each drain answer carries `ms`, a map of consumer id to the
+milliseconds its turns took in that slice, so `ms.mailbox_parse` divided by
+`done.mailbox_parse` is milliseconds per message. A turn that overruns its end by
+more than 2 seconds is logged once per slice as `VaultDeferredWork: consumer X
+overran its turn by N s (user U)`.
 
 **Background work is not user activity.** `secretKey()` normally stamps the
 content-decrypt time the hardened idle cap measures from. If a drain's reads

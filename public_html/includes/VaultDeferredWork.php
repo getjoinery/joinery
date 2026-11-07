@@ -33,6 +33,19 @@
  * stamping for the duration — including for consumer code that reaches
  * VaultUnlock::secretKey() on its own.
  *
+ * § A page waiting on a drain. A consumer registered with 'foreground' => true
+ * holds work a page may be waiting on (the mail list showing sealed rows). A
+ * foreground drain runs those consumers only, in a short slice, so the page
+ * redraws every few seconds. A background drain runs everything, those
+ * consumers first. A lead's first turn is an equal share, like anyone's; if it
+ * completed something it carries on to the deadline, and if it completed nothing
+ * it forfeits the lead for the rest of that drain and shares like any other. That
+ * is the starvation guard: a lead that is progressing has a bounded backlog, and
+ * one that is not, even one that fails slowly right up to its turn's end, gets no
+ * more than anyone else. Leads are not fair to each other: while the first keeps
+ * progressing, a second foreground consumer waits for it to finish.
+ *
+ * @version 1.2.0 - foreground consumers and drains; ms per consumer in each answer; an overrun turn is logged
  * @version 1.1.1 - comment wording: the hardened idle cap
  * @version 1.1.0 - drain callbacks receive the window's VaultKey, not bytes
  * @version 1.0.0
@@ -49,8 +62,14 @@ class VaultDeferredWork {
 	/** Never hand a consumer less than this, however little of the slice is left. */
 	const MIN_TURN_SECONDS = 1.0;
 
+	/** The most a foreground drain runs, whatever the site's slice is. */
+	const FOREGROUND_SLICE_SECONDS = 3;
+
+	/** A turn this far past its end is logged: it is what a redraw was waiting on. */
+	const OVERRUN_LOG_SECONDS = 2.0;
+
 	/**
-	 * @var array<string, array{has_work: callable, drain: callable}>
+	 * @var array<string, array{has_work: callable, drain: callable, foreground: bool}>
 	 *      Registration order is preserved and is the execution order.
 	 */
 	private static $consumers = array();
@@ -73,9 +92,15 @@ class VaultDeferredWork {
 	 *                            (server_initiated_write): the model check does
 	 *                            not apply, so a drain that acts for a person
 	 *                            asks that person's rules itself.
+	 * @param array    $options   'foreground' => true marks work a page may be
+	 *                            waiting on (§ A page waiting on a drain).
 	 */
-	public static function register(string $id, callable $has_work, callable $drain): void {
-		self::$consumers[$id] = array('has_work' => $has_work, 'drain' => $drain);
+	public static function register(string $id, callable $has_work, callable $drain, array $options = array()): void {
+		self::$consumers[$id] = array(
+			'has_work'   => $has_work,
+			'drain'      => $drain,
+			'foreground' => !empty($options['foreground']),
+		);
 	}
 
 	/**
@@ -113,67 +138,108 @@ class VaultDeferredWork {
 	 * that session made. A locked (or lapsed) window returns an empty tally
 	 * rather than an error; the caller shows a locked state, never a failure.
 	 *
-	 * @return array{locked: bool, done: array<string,int>, more: bool}
+	 * A foreground drain runs the foreground consumers only, in a slice of at most
+	 * FOREGROUND_SLICE_SECONDS. With no foreground work it runs nothing, and the
+	 * answer tells the client to fall back to background pacing.
+	 *
+	 * `ms` maps consumer id to the milliseconds its turns took in this slice.
+	 * `foreground_more` is whether a foreground consumer still reports work.
+	 *
+	 * @return array{locked: bool, done: array<string,int>, more: bool, foreground_more: bool, ms: array<string,int>}
 	 */
-	public static function drain(int $user_id, ?string $scope = null, ?float $budget_seconds = null): array {
+	public static function drain(int $user_id, ?string $scope = null, ?float $budget_seconds = null, bool $foreground = false): array {
 		$scope = $scope ?? UserEncryptionVault::SCOPE_USER;
-		$empty = array('locked' => true, 'done' => array(), 'more' => false);
+		$empty = array('locked' => true, 'done' => array(), 'more' => false, 'foreground_more' => false, 'ms' => array());
 		if ($user_id <= 0) {
 			return $empty;
 		}
 		self::loadConsumers();
 		if (empty(self::$consumers)) {
-			return array('locked' => false, 'done' => array(), 'more' => false);
+			return array('locked' => false, 'done' => array(), 'more' => false, 'foreground_more' => false, 'ms' => array());
 		}
 
 		$budget = $budget_seconds !== null ? $budget_seconds : self::sliceSeconds();
+		if ($foreground) {
+			$budget = min($budget, (float)self::FOREGROUND_SLICE_SECONDS);
+		}
 		$deadline = microtime(true) + max(0.1, $budget);
-		$done = array();
+		$slice = array('done' => array(), 'ms' => array(), 'overran' => array());
 
 		// One suppression wrapper around the whole slice, so nested consumer
 		// reads of secretKey() are covered too.
 		$locked = true;
-		self::withBackgroundWork(function () use ($user_id, $scope, $deadline, &$done, &$locked) {
+		self::withBackgroundWork(function () use ($user_id, $scope, $deadline, $foreground, &$slice, &$locked) {
 			$key = VaultUnlock::secretKey($user_id, $scope);
 			if ($key === null) {
 				return;   // locked, lapsed, or ended by policy — nothing to do
 			}
 			$locked = false;
-			self::runTurns($user_id, $key, $deadline, $done);
+			self::runTurns($user_id, $key, $deadline, $foreground, $slice);
 		});
 
 		if ($locked) {
 			return $empty;
 		}
-		return array('locked' => false, 'done' => $done, 'more' => self::hasWork($user_id));
+		return array(
+			'locked'          => false,
+			'done'            => $slice['done'],
+			'more'            => self::hasWork($user_id),
+			'foreground_more' => !empty(self::activeConsumers($user_id, true)),
+			'ms'              => array_map('intval', array_map('round', $slice['ms'])),
+		);
 	}
 
 	/**
 	 * Round-robin the consumers that have work until the deadline passes or a
 	 * full pass completes nothing.
 	 *
-	 * Each turn gets an equal share of the time remaining, so one slow consumer
-	 * cannot spend the whole slice while another waits. The share is a floor,
-	 * not a ceiling that can be enforced mid-item: an in-flight model call
-	 * cannot be cut off cleanly, so a consumer checks the deadline BEFORE
-	 * starting each item and a turn may overrun it by one item. That is
-	 * accepted (specs/in_window_deferred_work.md § Keeping it small).
+	 * Each pass starts with the foreground consumers (§ A page waiting on a
+	 * drain). The rest take equal shares of the time that leaves, so one slow
+	 * consumer cannot spend the whole slice while another waits. The share is a
+	 * floor, not a ceiling that can be enforced mid-item: an in-flight model call
+	 * cannot be cut off cleanly, so a consumer checks the deadline BEFORE starting
+	 * each item and a turn may overrun it by one item. That is accepted
+	 * (specs/in_window_deferred_work.md § Keeping it small).
 	 */
-	private static function runTurns(int $user_id, VaultKey $key, float $deadline, array &$done): void {
+	private static function runTurns(int $user_id, VaultKey $key, float $deadline, bool $foreground_only, array &$slice): void {
+		$forfeited = array();
 		while (microtime(true) < $deadline) {
-			$active = self::activeConsumers($user_id);
+			$active = self::activeConsumers($user_id, $foreground_only);
 			if (empty($active)) {
 				return;
 			}
-			$progressed = 0;
+			$leads = array();
+			$shared = array();
 			foreach ($active as $id) {
+				if (self::$consumers[$id]['foreground'] && empty($forfeited[$id])) {
+					$leads[] = $id;
+				} else {
+					$shared[] = $id;
+				}
+			}
+			$progressed = 0;
+			foreach ($leads as $id) {
 				if (microtime(true) >= $deadline) {
 					return;
 				}
 				$remaining = $deadline - microtime(true);
-				$turn_end = microtime(true) + max(self::MIN_TURN_SECONDS, $remaining / max(1, count($active)));
+				$share_end = min($deadline, microtime(true) + max(self::MIN_TURN_SECONDS, $remaining / count($active)));
+				$count = self::runOneTurn($id, $user_id, $key, $share_end, $slice);
+				if ($count === 0) {
+					$forfeited[$id] = true;
+				} else if (microtime(true) < $deadline) {
+					$count += self::runOneTurn($id, $user_id, $key, $deadline, $slice);
+				}
+				$progressed += $count;
+			}
+			foreach ($shared as $id) {
+				if (microtime(true) >= $deadline) {
+					return;
+				}
+				$remaining = $deadline - microtime(true);
+				$turn_end = microtime(true) + max(self::MIN_TURN_SECONDS, $remaining / count($shared));
 				$turn_end = min($turn_end, $deadline);
-				$progressed += self::runOneTurn($id, $user_id, $key, $turn_end, $done);
+				$progressed += self::runOneTurn($id, $user_id, $key, $turn_end, $slice);
 			}
 			if ($progressed === 0) {
 				return;   // a full pass did nothing — stop rather than spin
@@ -189,10 +255,11 @@ class VaultDeferredWork {
 	 * A consumer that throws is logged and skipped. It stays registered and is
 	 * retried on the next drain — one broken feature never stalls the others.
 	 */
-	private static function runOneTurn(string $id, int $user_id, VaultKey $key, float $turn_end, array &$done): int {
+	private static function runOneTurn(string $id, int $user_id, VaultKey $key, float $turn_end, array &$slice): int {
 		if (!self::tryLock($id, $user_id)) {
 			return 0;
 		}
+		$started = microtime(true);
 		try {
 			// A drain is the platform finishing work that waited for the vault
 			// (a reseal, a backfill), not an act of the person whose page is open.
@@ -200,7 +267,7 @@ class VaultDeferredWork {
 				return call_user_func(self::$consumers[$id]['drain'], $user_id, $key, $turn_end);
 			});
 			if ($count > 0) {
-				$done[$id] = ($done[$id] ?? 0) + $count;
+				$slice['done'][$id] = ($slice['done'][$id] ?? 0) + $count;
 			}
 			return $count;
 		} catch (\Throwable $e) {
@@ -208,14 +275,25 @@ class VaultDeferredWork {
 				. ' (user ' . $user_id . '): ' . $e->getMessage());
 			return 0;
 		} finally {
+			$ended = microtime(true);
+			$slice['ms'][$id] = ($slice['ms'][$id] ?? 0) + ($ended - $started) * 1000;
+			$overrun = $ended - $turn_end;
+			if ($overrun > self::OVERRUN_LOG_SECONDS && empty($slice['overran'][$id])) {
+				$slice['overran'][$id] = true;
+				error_log('VaultDeferredWork: consumer ' . $id . ' overran its turn by '
+					. round($overrun, 1) . ' s (user ' . $user_id . ')');
+			}
 			self::releaseLock($id, $user_id);
 		}
 	}
 
 	/** Consumer ids reporting work, in registration order. */
-	private static function activeConsumers(int $user_id): array {
+	private static function activeConsumers(int $user_id, bool $foreground_only = false): array {
 		$active = array();
 		foreach (self::$consumers as $id => $consumer) {
+			if ($foreground_only && !$consumer['foreground']) {
+				continue;
+			}
 			try {
 				if (call_user_func($consumer['has_work'], $user_id) === true) {
 					$active[] = $id;

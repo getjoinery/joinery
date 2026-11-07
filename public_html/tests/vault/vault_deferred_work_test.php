@@ -28,7 +28,7 @@ harness_defer(function () use ($uid) { VaultUnlock::lockAll($uid); });
  * Register a fake consumer with a fixed amount of work. Returns a state array
  * the test can inspect: how many turns it got, how many items it completed.
  */
-function fake_consumer(string $id, int $items, float $seconds_per_item = 0.0, bool $throws = false): array {
+function fake_consumer(string $id, int $items, float $seconds_per_item = 0.0, bool $throws = false, array $options = array()): array {
 	$state = array('turns' => 0, 'done' => 0, 'remaining' => $items, 'has_work_calls' => 0);
 	$ref = new ArrayObject($state);
 	VaultDeferredWork::register(
@@ -50,7 +50,8 @@ function fake_consumer(string $id, int $items, float $seconds_per_item = 0.0, bo
 				$did++;
 			}
 			return $did;
-		}
+		},
+		$options
 	);
 	return array($ref);
 }
@@ -98,6 +99,105 @@ list($fast) = fake_consumer('t_fast', 3);
 VaultDeferredWork::drain($uid, $scope, 1.2);
 check($slow['done'] > 0, 'the slow consumer made progress');
 check($fast['done'] === 3, 'and the fast one still finished its work');
+
+section('A foreground consumer leads a background drain');
+// Registered second and given work that would fill the slice: it still goes
+// first and takes the whole slice, where an equal share would leave it half.
+VaultDeferredWork::resetForTests();
+$ran = new ArrayObject(array());
+VaultDeferredWork::register('t_plain',
+	function () { return true; },
+	function (int $u, VaultKey $k, float $d) use ($ran): int { $ran[] = 't_plain'; return 0; });
+list($lead) = fake_consumer('t_lead', 10000, 0.005, false, array('foreground' => true));
+$res = VaultDeferredWork::drain($uid, $scope, 1.0);
+check($lead['done'] > 0 && $ran->count() === 0, 'the lead ran ahead of one registered before it, for the whole slice');
+check(($res['done']['t_lead'] ?? 0) === $lead['done'], 'the tally reports it');
+check($res['foreground_more'] === true && $res['more'] === true, 'and the answer says foreground work remains');
+
+section('A lead with time left hands the slice on');
+VaultDeferredWork::resetForTests();
+list($small) = fake_consumer('t_small_plain', 2);
+list($quick) = fake_consumer('t_quick_lead', 2, 0.0, false, array('foreground' => true));
+$res = VaultDeferredWork::drain($uid, $scope, 1.0);
+check($quick['done'] === 2 && $small['done'] === 2, 'the lead finished and the other consumer still ran');
+check($res['foreground_more'] === false && $res['more'] === false, 'and nothing remains of either');
+
+section('A foreground consumer that completes nothing shares like any other');
+VaultDeferredWork::resetForTests();
+$stuck_turns = new ArrayObject(array('n' => 0));
+VaultDeferredWork::register('t_stuck',
+	function () { return true; },
+	function (int $u, VaultKey $k, float $d) use ($stuck_turns): int {
+		$stuck_turns['n'] = $stuck_turns['n'] + 1;
+		usleep(30000);
+		return 0;   // every pending row failed to parse
+	},
+	array('foreground' => true));
+list($other) = fake_consumer('t_other', 3);
+$res = VaultDeferredWork::drain($uid, $scope, 1.0);
+check($other['done'] === 3, 'the stuck lead did not starve the other consumer');
+check($stuck_turns['n'] >= 2, 'and it was still offered a later turn as an ordinary consumer');
+check($res['foreground_more'] === true, 'the answer still says foreground work remains');
+
+section('A lead that fails slowly does not spend the slice');
+// Every pending row failing to parse looks like this: the turn works right up
+// to its end and completes nothing. It gets its share, like anyone else, and
+// the other consumer still runs in this same drain.
+VaultDeferredWork::resetForTests();
+VaultDeferredWork::register('t_failing',
+	function () { return true; },
+	function (int $u, VaultKey $k, float $d): int {
+		while (microtime(true) < $d) { usleep(10000); }
+		return 0;
+	},
+	array('foreground' => true));
+list($waiting) = fake_consumer('t_waiting', 3);
+VaultDeferredWork::drain($uid, $scope, 1.5);
+check($waiting['done'] === 3, 'the other consumer finished in the same drain (' . $waiting['done'] . ' of 3)');
+
+section('A lead that makes progress keeps the slice after its share');
+// An equal share of a 2.5 s slice is 1.25 s. Only a lead whose turn reopens to
+// the deadline can still be working past it, and the other consumer waits.
+VaultDeferredWork::resetForTests();
+$other_ran = new ArrayObject(array('n' => 0));
+VaultDeferredWork::register('t_other_plain',
+	function () { return true; },
+	function (int $u, VaultKey $k, float $d) use ($other_ran): int { $other_ran['n'] = $other_ran['n'] + 1; return 0; });
+list($busy) = fake_consumer('t_busy', 100000, 0.005, false, array('foreground' => true));
+$res = VaultDeferredWork::drain($uid, $scope, 2.5);
+check(($res['ms']['t_busy'] ?? 0) > 1800 && $other_ran['n'] === 0,
+	'the lead worked past its share and nothing else ran (' . ($res['ms']['t_busy'] ?? 0) . ' ms)');
+
+section('A foreground drain runs foreground consumers only');
+VaultDeferredWork::resetForTests();
+list($bg_only) = fake_consumer('t_bg_only', 5);
+list($fg_only) = fake_consumer('t_fg_only', 2, 0.0, false, array('foreground' => true));
+$res = VaultDeferredWork::drain($uid, $scope, 1.0, true);
+check($fg_only['done'] === 2, 'the foreground consumer ran');
+check($bg_only['turns'] === 0, 'the background consumer did not');
+check($res['foreground_more'] === false, 'no foreground work remains');
+check($res['more'] === true, 'but the answer still says background work does');
+
+section('A foreground drain with no foreground work runs nothing');
+$res = VaultDeferredWork::drain($uid, $scope, 1.0, true);
+check($bg_only['turns'] === 0 && $res['done'] === array(), 'nothing ran');
+check($res['foreground_more'] === false && $res['more'] === true, 'and the answer sends the client to background pacing');
+
+section('A foreground slice is short whatever the site allows');
+VaultDeferredWork::resetForTests();
+list($long) = fake_consumer('t_long', 100000, 0.005, false, array('foreground' => true));
+$started = microtime(true);
+VaultDeferredWork::drain($uid, $scope, 60.0, true);
+$elapsed = microtime(true) - $started;
+check($elapsed < VaultDeferredWork::FOREGROUND_SLICE_SECONDS + 1, 'the cap holds (' . round($elapsed, 2) . 's)');
+check($long['remaining'] > 0, 'and it stopped with work left over');
+
+section('The answer times each consumer');
+VaultDeferredWork::resetForTests();
+list($timed) = fake_consumer('t_timed', 4, 0.05);
+$res = VaultDeferredWork::drain($uid, $scope, 2.0);
+check(is_int($res['ms']['t_timed'] ?? null) && $res['ms']['t_timed'] >= 150,
+	'ms reports the consumer\'s time (' . ($res['ms']['t_timed'] ?? 'none') . ')');
 
 section('The deadline bounds the slice');
 VaultDeferredWork::resetForTests();
