@@ -28,6 +28,7 @@
  *
  * Run: php tests/backups/restore_settles_running_backups_test.php
  *
+ * @version 1.2 - the engine's helper _dump_without_owners.sh is copied beside it (mail_access_hardening WP4)
  * @version 1.1 - the database is closed to everything else while it loads (B24)
  * @version 1.0
  */
@@ -50,6 +51,9 @@ foreach (array($tools, $tmp . '/home', $tmp . '/backups') as $dir) {
 }
 harness_defer(function () use ($tmp) { exec('rm -rf ' . escapeshellarg($tmp)); });
 copy(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/restore_database.sh', $tools . '/restore_database.sh');
+// The engine ships with its helper beside it in every real tree (the dump's
+// OWNER TO statements come out at stage 1b, mail_access_hardening WP4).
+copy(PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/_dump_without_owners.sh', $tools . '/_dump_without_owners.sh');
 $engine = $tools . '/restore_database.sh';
 
 $scratch = 'jy_rsrb_' . bin2hex(random_bytes(4));

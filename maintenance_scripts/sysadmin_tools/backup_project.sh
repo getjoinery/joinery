@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.12.0 - the postgres password is read from the root-only config/db_admin.php before a config still
+#   on postgres (mail_access_hardening WP4); db_admin.php rides in the root-only config files
 # Version: 2.11.0 - --exclude NAME (repeatable): the site's backup_exclude names, left out as the chain's
 #                  files engine leaves them out; a standalone archive carried them
 # Version: 2.10.0 - the root-only config/ files (_backup_root_only_files.sh, the list backup_files.sh reads)
@@ -512,8 +514,23 @@ fi
 # Load database password from config if not already set
 if [ -z "${PGPASSWORD:-}" ]; then
     CONFIG_FILE="${PROJECT_DIR}/config/Globalvars_site.php"
-    if [ -f "$CONFIG_FILE" ]; then
-        PGPASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+    CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
+    # A site on its own database role (site_db_role.sh) is dumped as that role
+    # with the pair its config holds, and the pair is handed down to
+    # backup_database.sh as PGUSER/PGPASSWORD; the scheduled backup runs as
+    # www-data, which can read the site's config and not the root-only
+    # db_admin.php. Otherwise the postgres pair: db_admin.php when readable, a
+    # config still on postgres when not. The literals are read as PHP reads them.
+    CONFIG_DB_USER="$( [ -f "$CONFIG_FILE" ] && php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null )"
+    if [[ "$CONFIG_DB_USER" =~ ^joinery_[a-z0-9_]+$ ]]; then
+        PGUSER="$CONFIG_DB_USER"
+        PGPASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
+        export PGUSER PGPASSWORD
+    elif [ -r "${PROJECT_DIR}/config/db_admin.php" ]; then
+        PGPASSWORD="$(php "$CONFIG_READER" "${PROJECT_DIR}/config/db_admin.php" dbadminpassword 2>/dev/null)"
+        export PGPASSWORD
+    elif [ "$CONFIG_DB_USER" = "postgres" ]; then
+        PGPASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
         export PGPASSWORD
     fi
 fi

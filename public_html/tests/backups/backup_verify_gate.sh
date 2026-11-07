@@ -47,14 +47,19 @@ chk() {
 kv() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 
 # Database password the way the engines resolve it.
+# The site's own pair: a site on its own database role (site_db_role.sh) runs
+# this gate as that role, which has CREATEDB and owns what it makes; a config
+# still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ]; then
     CFG="$ROOT/config/Globalvars_site.php"
     if [ -f "$CFG" ]; then
-        PGPASSWORD=$(grep "dbpassword.*=" "$CFG" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbpassword 2>/dev/null)"
+        PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbusername 2>/dev/null)"
         export PGPASSWORD
+        [ -n "$PGUSER" ] && export PGUSER
     fi
 fi
-if ! psql -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -c "SELECT 1;" >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"
     echo "RESULT: PASS 0 0"
     exit 0
@@ -63,7 +68,7 @@ fi
 W=$(mktemp -d /tmp/jy_verify_gate_XXXXXX)
 SRC="jt_vb_src_$$"
 cleanup() {
-    dropdb -U postgres --if-exists "$SRC" >/dev/null 2>&1
+    dropdb -U "${PGUSER:-postgres}" --if-exists "$SRC" >/dev/null 2>&1
     rm -rf "${W:?}"
 }
 trap cleanup EXIT
@@ -97,9 +102,9 @@ chk "run 1 is an incremental" "$(kv "$OUT" LEVEL)" "1"
 
 # A database with known content, dumped with the chain key the way a run
 # dumps it, and filed positionally the way the chain files it.
-dropdb -U postgres --if-exists "$SRC" >/dev/null 2>&1
-createdb -U postgres "$SRC"
-psql -U postgres -d "$SRC" -q -c \
+dropdb -U "${PGUSER:-postgres}" --if-exists "$SRC" >/dev/null 2>&1
+createdb -U "${PGUSER:-postgres}" "$SRC"
+psql -U "${PGUSER:-postgres}" -d "$SRC" -q -c \
     "CREATE TABLE t(id int primary key, v text); INSERT INTO t SELECT g,'row'||g FROM generate_series(1,500) g;"
 ( cd "$W/arts" && bash "$DBBACKUP" --non-interactive --key-file "$W/chain.key" "$SRC" >/dev/null 2>&1 )
 DUMP=$(ls "$W/arts"/${SRC}-*.sql.gz.enc 2>/dev/null | head -1)
@@ -124,7 +129,7 @@ cat > "$W/arts/manifest.json" <<JSON
 }
 JSON
 
-leftover_dbs() { psql -U postgres -XtAc "SELECT count(*) FROM pg_database WHERE datname LIKE 'verify\\_testsite\\_%'"; }
+leftover_dbs() { psql -U "${PGUSER:-postgres}" -XtAc "SELECT count(*) FROM pg_database WHERE datname LIKE 'verify\\_testsite\\_%'"; }
 
 # ── Level 2: opened and read ────────────────────────────────────────────────
 echo "== Level 2: opened and read =="

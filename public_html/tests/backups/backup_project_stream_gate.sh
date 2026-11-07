@@ -44,11 +44,16 @@ chk() {
 # The database password the way the scripts themselves find it: read into the
 # environment, never printed. The throwaway database is created and dropped
 # with it.
+# The site's own pair: a site on its own database role (site_db_role.sh) runs
+# this gate as that role, which has CREATEDB and owns what it makes; a config
+# still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
-    PGPASSWORD=$(grep "dbpassword.*=" "$ROOT/config/Globalvars_site.php" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+    PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
+    PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
     export PGPASSWORD
+    [ -n "$PGUSER" ] && export PGUSER
 fi
-if ! psql -U postgres -h localhost -c 'select 1' >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -h localhost -c 'select 1' >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"
     echo "RESULT: PASS 0 0"
     exit 0
@@ -57,7 +62,7 @@ fi
 PROJ="jyps_$$"
 W=$(mktemp -d /tmp/jy_project_stream_gate_XXXXXX)
 cleanup() {
-    psql -U postgres -h localhost -c "DROP DATABASE IF EXISTS \"$PROJ\"" >/dev/null 2>&1
+    psql -U "${PGUSER:-postgres}" -h localhost -c "DROP DATABASE IF EXISTS \"$PROJ\"" >/dev/null 2>&1
     chmod -R u+rwX "$W" 2>/dev/null; rm -rf "${W:?}"
 }
 trap cleanup EXIT
@@ -78,9 +83,9 @@ ln -s public_html/index.php "$W/site/link_to_index"
 ln -s ./public_html "$W/site/link_to_dir"
 ln "$W/site/public_html/index.php" "$W/site/public_html/index_hardlink.php"
 
-psql -U postgres -h localhost -c "CREATE DATABASE \"$PROJ\" TEMPLATE template0" >/dev/null 2>&1
-psql -U postgres -h localhost -d "$PROJ" -c "CREATE TABLE t (id int, name text); INSERT INTO t VALUES (1,'one'),(2,'two')" >/dev/null 2>&1
-chk "throwaway database exists" "$(psql -U postgres -h localhost -tAc "select count(*) from t" "$PROJ")" "2"
+psql -U "${PGUSER:-postgres}" -h localhost -c "CREATE DATABASE \"$PROJ\" TEMPLATE template0" >/dev/null 2>&1
+psql -U "${PGUSER:-postgres}" -h localhost -d "$PROJ" -c "CREATE TABLE t (id int, name text); INSERT INTO t VALUES (1,'one'),(2,'two')" >/dev/null 2>&1
+chk "throwaway database exists" "$(psql -U "${PGUSER:-postgres}" -h localhost -tAc "select count(*) from t" "$PROJ")" "2"
 
 head -c 32 /dev/urandom | base64 > "$W/key"; chmod 600 "$W/key"
 

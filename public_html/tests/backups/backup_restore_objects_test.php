@@ -83,7 +83,7 @@ $pdo = DbConnector::get_instance()->get_db_link();
 $scratch_db = 'jy_restore_objects_' . getmypid();
 $pdo->exec('CREATE DATABASE "' . $scratch_db . '" TEMPLATE template0');
 harness_defer(function() use ($pdo, $scratch_db) { $pdo->exec('DROP DATABASE IF EXISTS "' . $scratch_db . '" WITH (FORCE)'); });
-$scratch = new PDO('pgsql:host=localhost dbname=' . $scratch_db, 'postgres', (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+$scratch = new PDO('pgsql:host=localhost dbname=' . $scratch_db, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
 $scratch = null;
 $tag = 'jyro' . getmypid() . '_';

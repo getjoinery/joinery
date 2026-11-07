@@ -1525,7 +1525,12 @@ is gone.
 What that gives up, stated plainly: a load that fails part way leaves the schema
 already replaced and nothing on the machine to put back
 (`RESTORE_LOAD_FAILED`). The answer is the archive itself, which is still in
-backup storage and can be retried, or an earlier one.
+backup storage and can be retried, or an earlier one. One other marker leaves
+the database modified: `RESTORE_OWNER_FAILED` (exit 11), when the data is whole
+and back under its name but could not be handed to the site's own database role
+(the role is missing on the server, or the hand-over failed), so the site cannot
+read it until `site_db_role.sh` runs; see
+[The database role](deploy_and_upgrade.md#the-database-role).
 
 The target's PostgreSQL must be at least as new as the source's. A dump carries
 the syntax of the version that wrote it, so the restore reads that version from
@@ -1556,6 +1561,16 @@ is: install the site, then restore onto it. See
 
 Bucket credentials plus the password-manager private key are sufficient to
 recover from total loss of the machine.
+
+A dump says `OWNER TO` on every object, naming whatever role owned it where it
+was written. The restore takes those statements out before the load
+(`_dump_without_owners.sh`, what `pg_restore --no-owner` does for a custom
+dump) and, after the load, hands the database and everything in it to the
+site's own role, `joinery_{site}`, when that role exists on the server
+(`_db_ownership_sql.sh`; see [The database role](deploy_and_upgrade.md#the-database-role)).
+So a dump from before the role existed, or from another site, comes back owned
+by this site's role; and the backup verifier, which restores as the site's own
+non-superuser role, is not stopped by an `OWNER TO postgres` it could not run.
 
 ### Restoring a managed node from its management node
 

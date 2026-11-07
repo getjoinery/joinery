@@ -25,6 +25,9 @@ $this->settings['upload_web_dir'] = 'uploads';  //URL AFTER webDir WHERE UPLOADS
 $this->settings['static_files_dir'] = $this->settings['baseDir'] . $this->settings['site_template']. '/static_files';  //LOCATION OF STATIC FILES EXAMPLE: /var/www/html/test/static_files
 	
 
+// The site's own role, joinery_{site}, owner of this database and nothing else:
+// site_db_role.sh sets these four and keeps the postgres pair in the root-only
+// config/db_admin.php, which no PHP process reads (mail_access_hardening WP4).
 $this->settings['dbusername'] = 'postgres';  //DATABASE USERNAME
 $this->settings['dbname'] = '{{SITE_NAME}}';  //DATABASE NAME
 $this->settings['dbpassword'] = '';  //DATABASE PASSWORD

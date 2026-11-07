@@ -34,6 +34,9 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.38 - site_db_role.sh runs as root after the last schema-touching step of every upgrade: a site
+	 *   still connecting as postgres gets its own database role, and the objects this process (connected as the
+	 *   old role) created are handed to the site's role (mail_access_hardening WP4, reviewer2 B3)
 	 * @version 1.37 - the files a release stopped shipping are read from its listing under the key its archive
 	 *                verified with: a node that walked the key chain to this release does not hold that key on disk
 	 *                until the end of the upgrade, so the listing read as none and nothing was removed; a file under
@@ -341,6 +344,9 @@
 		'outcome'          => 'failed',
 		'migrations'       => array(),
 		'schema_changes'   => array(),
+		// Steps that did not stop the upgrade but left something for a person
+		// (a site still connecting as postgres because site_db_role.sh failed).
+		'warnings'         => array(),
 		'plugins'          => array(),
 		'deploy_tier'      => array('verdict' => 'not_run', 'failed_tests' => array()),
 		'rolled_back'      => array('rolled_back' => false, 'step' => null, 'schema_ahead_of_code' => false),
@@ -2436,6 +2442,39 @@
 		//
 		// Fresh installs never reach this file, so there is no case where the
 		// tests run with nothing to roll back to.
+		// ============================================
+		// THE SITE'S OWN DATABASE ROLE
+		// ============================================
+		// After the last step that touches the schema, never before it: this
+		// process opened its connection as whatever the config named when it
+		// started, so the migrations and the plugin sync above ran as that role,
+		// and anything they created is owned by it. site_db_role.sh (idempotent,
+		// root: this process in a container, sudo -n on bare metal) creates the
+		// site's role on a site still connecting as postgres, hands the database
+		// and every object in it to the role, every upgrade, and points the
+		// config at it (mail_access_hardening WP4). The deploy tier below runs
+		// in child processes, which read the new config. A failure is said and
+		// the upgrade goes on.
+		$role_script = $full_site_dir . '/maintenance_scripts/install_tools/site_db_role.sh';
+		if (file_exists($role_script)) {
+			out_step('The Site\'s Own Database Role');
+			$role_was_postgres = (string)$settings->get_setting('dbusername', false, true) === 'postgres';
+			$role_is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
+			$role_cmd = ($role_is_root ? '' : 'sudo -n ') . 'bash ' . escapeshellarg($role_script) . ' ' . escapeshellarg($site_template);
+			$role_output = [];
+			$role_return = 0;
+			exec($role_cmd . ' 2>&1', $role_output, $role_return);
+			echo nl2br(htmlspecialchars(implode("\n", $role_output))) . "<br>\n";
+			if ($role_return !== 0) {
+				echo "⚠ Run site_db_role.sh as root to finish this step"
+					. ($role_was_postgres ? '; the site keeps connecting as postgres for now' : '; objects this upgrade created may still be owned by postgres') . "<br>\n";
+				$GLOBALS['APPLY_RESULT']['warnings'][] = 'site_db_role.sh failed (exit ' . $role_return . ')'
+					. ($role_was_postgres ? '; the site still connects as postgres' : '; ownership of new objects was not re-asserted');
+			} elseif ($role_was_postgres) {
+				$GLOBALS['APPLY_RESULT']['schema_changes'][] = 'The site connects as its own database role joinery_' . $site_template;
+			}
+		}
+
 		$test_runner = $live_directory . '/tests/run.php';
 		if (file_exists($test_runner) && is_dir($backup_directory)) {
 			out_step('Verifying the Deployed Code');

@@ -13,4 +13,4 @@
 # manager backup of the same site carries it. Any other unreadable file still
 # fails the run. backup_files.sh and backup_project.sh both read this one list.
 
-ROOT_ONLY_FILES=(agent_signing_key release_statement_key admin_credentials.txt)
+ROOT_ONLY_FILES=(agent_signing_key release_statement_key admin_credentials.txt db_admin.php)

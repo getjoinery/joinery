@@ -229,7 +229,8 @@ section('The store step waits on the tick\'s row lock');
 
 BackupProfile::$enabled_for_tests = array(BackupProfile::SITE);
 list($b5, $p5, $n5) = $make_blob('lock', random_bytes(64));
-$other = new PDO('pgsql:host=localhost dbname=' . $settings->get_setting('dbname', true, true), 'postgres',
+$other = new PDO('pgsql:host=localhost dbname=' . $settings->get_setting('dbname', true, true),
+	(string)$settings->get_setting('dbusername', true, true),
 	(string)$settings->get_setting('dbpassword', true, true));
 $other->query('SELECT pg_advisory_lock(' . CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE . ', ' . (int)$b5->key . ')');
 $obj5 = $profile->backupObject((int)$b5->key);

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.13.0 - the tools copy carries install_tools/*.php as well: the engine's config reader
+#   (_config_value.php) hands the restored database to the site's own role (mail_access_hardening WP4)
 # Version: 1.12.0 - the site root's own deletions are replayed here, not by tar, and never take what is the
 #                  machine's: a mount point (the site container engine mounts a volume at each top-level
 #                  directory) or an upgrade's trees; an own server's chain restored into a container failed
@@ -597,6 +599,13 @@ if ! cp -a "${SCRIPT_DIR}/." "${TOOLS_TMP}/sysadmin_tools/" \
     print_error "Could not take a copy of this release's restore tools before extraction. Nothing was restored."
     exit 1
 fi
+# The PHP helpers too, where this release has them: _config_value.php is how the
+# engine reads the site's config to hand the restored database to the site's own
+# role (mail_access_hardening WP4). A tree without them (an older release's
+# tools) is not a failure here; the engine then reads the config with sed.
+for _php_tool in "${SCRIPT_DIR}/../install_tools/"*.php; do
+    [ -f "$_php_tool" ] && cp -a "$_php_tool" "${TOOLS_TMP}/install_tools/"
+done
 
 # Every file in MACHINE_CONFIG_FILES (_restore_guard.sh) is held the same way:
 # the two above, and the files that decide what this machine trusts. One this

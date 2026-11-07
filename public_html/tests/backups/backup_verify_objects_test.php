@@ -67,7 +67,9 @@ file_put_contents($tree . '/public_html/kept.txt', 'a plain file that stays in t
 @mkdir($tree . '/config', 0755, true);
 $dbname = 'jy_vobj_' . getmypid();
 file_put_contents($tree . '/config/Globalvars_site.php', "<?php\n\$this->settings['deployment_environment'] = 'docker';\n"
-	. "\$this->settings['dbusername'] = 'postgres';\n\$this->settings['dbname'] = '" . $dbname . "';\n");
+	. "\$this->settings['dbusername'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbusername', true, true), true) . ";\n"
+	. "\$this->settings['dbpassword'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbpassword', true, true), true) . ";\n"
+	. "\$this->settings['dbname'] = '" . $dbname . "';\n");
 harness_defer(function() use ($work) {
 	exec('chmod -R u+rwX ' . escapeshellarg($work) . ' 2>/dev/null; rm -rf ' . escapeshellarg($work));
 });
@@ -80,9 +82,9 @@ harness_defer(function() use ($pdo, $dbname) {
 	$pdo->exec('DROP DATABASE IF EXISTS "' . $dbname . '" WITH (FORCE)');
 });
 putenv('PGPASSWORD=' . $password);
-$db = array('user' => 'postgres', 'password' => $password,
+$db = array('user' => (string)Globalvars::get_instance()->get_setting('dbusername', true, true), 'password' => $password,
 	'connect_db' => (string)Globalvars::get_instance()->get_setting('dbname', true, true), 'host' => 'localhost', 'port' => 5432);
-$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, 'postgres', $password);
+$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), $password);
 $scratch->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $scratch->exec('CREATE TABLE fbb_file_blobs (fbb_stored_name varchar(255) primary key, fbb_sha256 varchar(64), fbb_size_bytes int8 not null)');
 

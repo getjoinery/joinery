@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.42 - The closing summary says the site connects as its own database role and where the postgres
+#               password is kept (config/db_admin.php, root-only), not that it is in Globalvars_site.php (WP4)
 #VERSION 3.41 - The agent runs on every site and Docker host: --enable-agent is accepted and changes
 #               nothing, --management-node=URL asks to join on its own, and a Docker site's agent
 #               installer runs inside its container at the end of the install
@@ -4984,7 +4986,8 @@ do_site_create() {
             # far more often than it runs at a keyboard, and its output is a log
             # file. The site's own config is the durable copy.
             print_info "Auto-generated a database password for this site."
-            print_info "It is stored at /var/www/html/${SITENAME}/config/Globalvars_site.php (dbpassword)."
+            print_info "The site connects as its own role (joinery_${SITENAME}, Globalvars_site.php); the postgres"
+            print_info "password is kept root-only at /var/www/html/${SITENAME}/config/db_admin.php."
         fi
     fi
 

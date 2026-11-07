@@ -157,7 +157,8 @@ try {
 	section('a message another request is parsing is never parsed twice');
 
 	$settings = Globalvars::get_instance();
-	$other = new PDO('pgsql:host=localhost dbname=' . $settings->get_setting('dbname', true, true), 'postgres',
+	$other = new PDO('pgsql:host=localhost dbname=' . $settings->get_setting('dbname', true, true),
+		(string)$settings->get_setting('dbusername', true, true),
 		(string)$settings->get_setting('dbpassword', true, true));
 	$other->query('SELECT pg_advisory_lock(' . DeferredIngest::LOCK_CLASS . ', ' . ($target & 0x7FFFFFFF) . ')');
 

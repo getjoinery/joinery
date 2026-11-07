@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#Version 3.17 - The dump's OWNER TO statements come out before the load (stage 1b, _dump_without_owners.sh), so the
+#              site's own non-superuser role can restore; after the load the site's role is given the database
+#              and everything in it (_db_ownership_sql.sh): the site is the one whose config names this database,
+#              a missing role or a failed hand-over is RESTORE_OWNER_FAILED (exit 11), a restore as a joinery_*
+#              role needs nothing; the postgres password is read from the root-only config/db_admin.php before a
+#              config still on postgres (mail_access_hardening WP4, Q4; reviewer2 B4)
 #Version 3.16 - The database is renamed out of the way for the load and back once it is whole (or as it is, if
 #              the load fails): a page or scheduled task writing mid-load collided with the dump's own rows,
 #              and the load stopped with the schema already dropped (B24)
@@ -72,8 +78,11 @@
 #         RESTORE_OK | BACKUP_KEY_MISSING | DECRYPT_FAILED
 #         ARCHIVE_CORRUPT | RESTORE_LOAD_FAILED | DB_UNREACHABLE
 #         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD | RESTORE_ROLE_MISSING
-#         RESTORE_DB_BUSY
-#     Only RESTORE_LOAD_FAILED can leave the database modified; every other
+#         RESTORE_DB_BUSY | RESTORE_OWNER_FAILED
+#     Two markers leave the database modified: RESTORE_LOAD_FAILED (the load
+#     stopped part way) and RESTORE_OWNER_FAILED (exit 11: the data is whole
+#     and back under its name, but owned by a role the site does not connect
+#     as, so the site cannot read it until site_db_role.sh runs). Every other
 #     failure exits with it untouched.
 #   * Roles: a role the dump names and the server lacks is created without
 #     login before anything is dropped (stage 1c).
@@ -190,7 +199,29 @@ else
         CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
     fi
     if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        # The postgres pair lives in the root-only config/db_admin.php once the
+        # site has its own role (site_db_role.sh); a config still on postgres
+        # carries the password itself.
+        ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
+        CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
+        # The reader where this engine has it beside it; sed where it does not
+        # (an engine run from a copy of sysadmin_tools alone), as the hand-over
+        # after the load does. A generated password is alphanumeric, so the sed
+        # reads it right; one with a quote in it needs the reader or PGPASSWORD.
+        cfg_read() {  # FILE NAME
+            if [[ -f "$CONFIG_READER" ]]; then
+                php "$CONFIG_READER" "$1" "$2" 2>/dev/null
+            else
+                sed -n "s/^[[:space:]]*\$this->settings\['$2'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1
+            fi
+        }
+        CONFIG_PASSWORD=""
+        if [[ -r "$ADMIN_FILE" ]]; then
+            CONFIG_PASSWORD="$(cfg_read "$ADMIN_FILE" dbadminpassword)"
+        fi
+        if [[ -z "$CONFIG_PASSWORD" && "$(cfg_read "$CONFIG_FILE" dbusername)" == "postgres" ]]; then
+            CONFIG_PASSWORD="$(cfg_read "$CONFIG_FILE" dbpassword)"
+        fi
         if [[ -n "$CONFIG_PASSWORD" ]]; then
             export PGPASSWORD="$CONFIG_PASSWORD"
             info "✓ Loaded database password from $CONFIG_FILE"
@@ -378,6 +409,16 @@ case "$INPUT_FILE" in
         ;;
 esac
 info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}')) in $STAGE_DIR."
+
+# --- Stage 1b: the dump's ownership statements come out ----------------------
+# A dump says `ALTER ... OWNER TO role;` on every object. The connecting role
+# owns what it creates, so the lines add nothing when it is the site's own role
+# and they stop the load when it is not the superuser (the backup verifier
+# restores as the site's role). Out they come, as pg_restore --no-owner would;
+# the ownership block after the load hands everything to the site's role.
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OWNER_LINES="$(bash "$TOOLS_DIR/_dump_without_owners.sh" "$SQL_TMP" 2>&1)" || stage_failed
+info "✓ ${OWNER_LINES:-0} ownership statement(s) taken out of the dump; the site's role is given everything after the load."
 
 # --- Stage 1b: refuse a dump this server is too old to load --------------------
 # pg_dump emits the settings and meta-commands of the version that WROTE the
@@ -717,14 +758,92 @@ check_secret_key() {
     fi
 }
 
+# The site's own role owns the restored database and everything in it
+# (mail_access_hardening WP4, Q4): the dump's owner was taken out at stage 1b,
+# so without this the restoring role would own it all. The role is the one the
+# site's config names (joinery_{site}), else joinery_{database}; a database
+# with no such role (a verifier's rehearsal copy) is left to its restorer. A
+# failure here is said and does not undo the restore: the data is whole, and
+# site_db_role.sh re-asserts ownership on its next run.
+REOWN_FAILED=false
+reown_to_site_role() {
+    # The restoring role already owns everything it just created: a site's own
+    # role restoring its own database (the backup verifier's rehearsal copy,
+    # or a site restoring itself) needs nothing here.
+    if [[ "$DB_USER" =~ ^joinery_[a-z0-9_]+$ ]]; then
+        info "ℹ Restored as '$DB_USER', which owns what it created."
+        return 0
+    fi
+    # The site this database belongs to is the one whose config names it as
+    # dbname, never a config found by path or by guess: on a host with several
+    # sites, another site's config would hand this database to another site's
+    # role. A database no site names (a rehearsal copy under another name) has
+    # no role to go to and stays with the restorer, as before.
+    # The literals are read as PHP reads them (_config_value.php), and a site's
+    # test database (dbname_test) counts too: left owned by the restorer, the
+    # test runner, as the role, could not drop it on its next rebuild. An engine
+    # run from a copy without its reader (a tools copy that took only
+    # sysadmin_tools) reads the three identifiers with sed, which the names
+    # here (database and role names, never a password) are safe for, and says so.
+    local cfg role="" site_cfg="" key reader="$TOOLS_DIR/../install_tools/_config_value.php"
+    read_literal() {  # FILE NAME
+        if [ -f "$reader" ]; then
+            php "$reader" "$1" "$2" 2>/dev/null
+        else
+            sed -n "s/^[[:space:]]*\$this->settings\['$2'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1
+        fi
+    }
+    [ -f "$reader" ] || info "ℹ ${reader} is not beside this engine; the site's config is read with sed for the hand-over."
+    for cfg in /var/www/html/*/config/Globalvars_site.php; do
+        [ -r "$cfg" ] || continue
+        for key in dbname dbname_test; do
+            if [ "$(read_literal "$cfg" "$key")" = "$DB_NAME" ]; then
+                site_cfg="$cfg"
+                role="$(read_literal "$cfg" "dbusername${key#dbname}")"
+                break 2
+            fi
+        done
+    done
+    if [ -z "$site_cfg" ]; then
+        info "ℹ No site names '$DB_NAME' as its database: it stays owned by '$DB_USER'."
+        return 0
+    fi
+    if [[ ! "$role" =~ ^joinery_[a-z0-9_]+$ ]]; then
+        info "ℹ The site ($site_cfg) still connects as '$role': the database stays owned by '$DB_USER'."
+        return 0
+    fi
+    if [ "$(psql -U "$DB_USER" -d postgres -XtAc "SELECT 1 FROM pg_roles WHERE rolname = '$role'" 2>/dev/null)" != "1" ]; then
+        info "✗ The site connects as '$role', which this server lacks: the data is loaded but the site cannot read it."
+        info "  Run site_db_role.sh $(basename "$(dirname "$(dirname "$site_cfg")")") as root to create the role and hand the database over."
+        REOWN_FAILED=true
+        return 0
+    fi
+    if printf 'ALTER DATABASE :"d" OWNER TO :"r";\n' | psql -U "$DB_USER" -d postgres -XqA -v ON_ERROR_STOP=1 -v d="$LOAD_DB" -v r="$role" 1>&2 \
+        && bash "$TOOLS_DIR/../install_tools/_db_ownership_sql.sh" "$role" | psql -U "$DB_USER" -d "$LOAD_DB" -XqA -v ON_ERROR_STOP=1 1>&2; then
+        info "✓ The restored database and its objects are owned by '$role'."
+    else
+        info "✗ Could not hand the restored database to '$role': the data is loaded but the site cannot read it."
+        info "  Run site_db_role.sh as root to hand it over."
+        REOWN_FAILED=true
+    fi
+}
+
 info "📥 Loading dump under ON_ERROR_STOP..."
 if psql -U "$DB_USER" -d "$LOAD_DB" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     keep_recovery_key
     settle_running_backups
+    reown_to_site_role
     put_back_database
     if [ "$LOAD_DB" != "$DB_NAME" ]; then
         echo "RESTORE_LOAD_FAILED"
         exit 6
+    fi
+    if [ "$REOWN_FAILED" = true ]; then
+        # The data is whole and back under its name, but owned by a role the
+        # site does not connect as: every query the site makes is refused until
+        # site_db_role.sh runs. That is a failed restore, said as one.
+        echo "RESTORE_OWNER_FAILED"
+        exit 11
     fi
     # A dump carries no planner statistics: until ANALYZE, every table reads as
     # never analyzed and the site plans its queries blind (the nightly Database

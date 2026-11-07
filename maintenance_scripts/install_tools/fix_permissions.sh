@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.16 - config/db_admin.php (the postgres pair, site_db_role.sh) is pinned 600 root:root and left out of
+#               the config/*.php sweep, so no run hands the web server user the superuser password (WP4)
 #VERSION 4.15 - A setgid data directory (2770) is no longer picked on every run: chmod 770 keeps the bit, so the exact test churned its ctime each minute (reviewer2 B2)
 #VERSION 4.14 - The data set and config/'s data are fixed in one walk, mode then owner per entry: an entry made between two walks was handed to www-data at its birth mode, locking its maker out for a minute
 #VERSION 4.13 - backup_site_key.retired* is no longer pinned: nothing writes or reads one
@@ -279,6 +281,10 @@ PINNED=(
     "$SITE_ROOT/config/agent_signing_key"
     "$SITE_ROOT/config/release_statement_key"
     "$SITE_ROOT/config/admin_credentials.txt"
+    # The database superuser pair (site_db_role.sh): root's alone, never the
+    # pool's, or the role split protects nothing. A *.php under config/, so the
+    # config sweep below names it too and leaves it out.
+    "$SITE_ROOT/config/db_admin.php"
 )
 
 # Directories with deliberately tighter permissions. Separate from PINNED
@@ -406,9 +412,10 @@ if [ -d "$CONFIG_DIR" ]; then
     # root, not the tree owner: the pool has to read it and nobody else needs
     # to. On the developer box the developer is in the www-data group, so the
     # file is still readable from a shell and still not writable from one.
-    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
+    # Not db_admin.php: the postgres pair is root's alone (re-pinned below).
+    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' -not -name 'db_admin.php' \
          -not -perm 640 -exec chmod 640 {} +
-    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' \
+    find "$CONFIG_DIR" -maxdepth 1 -type f -name '*.php' -not -name 'db_admin.php' \
          \( -not -user root -o -not -group www-data \) \
          -exec chown root:www-data {} +
 fi
@@ -531,6 +538,16 @@ if [ -f "$CRED_FILE" ]; then
     echo "  Pinning $CRED_FILE to 600 root:root..."
     chown root:root "$CRED_FILE" 2>/dev/null || true
     chmod 600 "$CRED_FILE"
+fi
+
+# The database superuser pair (site_db_role.sh, mail_access_hardening WP4): the
+# shell tools run as root read it, and no PHP process may. Re-pinned last for
+# the same reason as the credentials file.
+DB_ADMIN_FILE="$SITE_ROOT/config/db_admin.php"
+if [ -f "$DB_ADMIN_FILE" ]; then
+    echo "  Pinning $DB_ADMIN_FILE to 600 root:root..."
+    chown root:root "$DB_ADMIN_FILE" 2>/dev/null || true
+    chmod 600 "$DB_ADMIN_FILE"
 fi
 
 # The keys root verifies every package against before it goes into the tree.

@@ -64,7 +64,7 @@ $dbname = 'jy_stream_' . getmypid();
 $pdo = DbConnector::get_instance()->get_db_link();
 $pdo->exec('CREATE DATABASE "' . $dbname . '" TEMPLATE template0');
 harness_defer(function() use ($pdo, $dbname) { $pdo->exec('DROP DATABASE IF EXISTS "' . $dbname . '"'); });
-$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, 'postgres', (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1), (2), (3)');
 $scratch = null;
 
@@ -471,7 +471,10 @@ section('A standalone whole-site run streams its archive; only the sidecar is wr
 // database, so backup_project.sh dumps it and records a shape.
 file_put_contents($tree . '/config/Globalvars_site.php', "<?php\n"
 	. "\$this->settings['deployment_environment'] = 'docker';\n"
-	. "\$this->settings['dbusername'] = 'postgres';\n"
+	// The site's own pair: backup_project.sh hands it down and backup_database.sh
+	// dumps the throwaway database, which the role created, as the role.
+	. "\$this->settings['dbusername'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbusername', true, true), true) . ";\n"
+	. "\$this->settings['dbpassword'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbpassword', true, true), true) . ";\n"
 	. "\$this->settings['dbname'] = '" . $dbname . "';\n");
 $full_dir = $out . '/full';
 @mkdir($full_dir, 0700, true);

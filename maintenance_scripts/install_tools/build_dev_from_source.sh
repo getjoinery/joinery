@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#version 3.16 - After the database copy, site_db_role.sh gives the target site its own database role and
+#               hands the copy to it (mail_access_hardening WP4)
 #version 3.15 - The permissions-fix banner and the cache-move hints describe what fix_permissions.sh
 #               sets; they named group user1 and 770, which no install has used since the read-only tree
 #version 3.14 - Validators no longer narrate; dropped the ignored verbose argument
@@ -732,6 +734,16 @@ if [ "$IS_TEST_DEPLOY" = true ]; then
             exit 1
         fi
         echo "Database copy successful."
+        # The copy is owned by whatever owned the source (createdb -T keeps
+        # ownership): the target site's own role takes it over, with the
+        # target's config pointed at that role (mail_access_hardening WP4).
+        if [[ -f "./site_db_role.sh" ]] && [[ -f "/var/www/html/$TARGET_SITE/config/Globalvars_site.php" ]]; then
+            echo "Giving $TARGET_SITE its own database role..."
+            if ! ./site_db_role.sh "$TARGET_SITE" --db-name "$TARGET_SITE"; then
+                echo "ERROR: site_db_role.sh failed for $TARGET_SITE. Aborting deploy."
+                exit 1
+            fi
+        fi
     else
         echo "ERROR: ../sysadmin_tools/copy_database.sh not found. Aborting deploy."
         exit 1

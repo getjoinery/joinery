@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.123 - apply_result() keeps the upgrade's warnings (a role step that left the site on postgres), shown on the job page
  * @version 1.122 - process_log_table_tail keeps an event read's event and hours and its larger row count (agent_event_log_filter.md)
  * @version 1.121 - process_never_do_check: the never-do list folded into its node (NeverDoCheck), the job keeping counts only
  * @version 1.120 - sanitise_v1_census removed with the v1 code (v1_key_retirement WP2); parse_backup_keys_tokens
@@ -1746,7 +1747,14 @@ class JobResultProcessor {
 			if ($t !== '') { $failed_tests[] = substr($t, 0, 64); }
 		}
 		$rb = is_array($in['rolled_back'] ?? null) ? $in['rolled_back'] : [];
+		// Steps that did not stop the upgrade but left something for a person
+		// (a site still connecting as postgres because site_db_role.sh failed).
+		$warnings = [];
+		foreach (array_slice((array)($in['warnings'] ?? []), 0, 50) as $w) {
+			if (is_scalar($w)) { $warnings[] = $str($w, 300); }
+		}
 		return [
+			'warnings'         => $warnings,
 			'version_before'   => $ver($in['version_before'] ?? null),
 			'version_after'    => $ver($in['version_after'] ?? null),
 			'self_updated'     => ($in['self_updated'] ?? false) === true,

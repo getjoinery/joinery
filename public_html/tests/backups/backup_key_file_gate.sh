@@ -37,15 +37,20 @@ chk() {
     fi
 }
 
+# The site's own pair: a site on its own database role (site_db_role.sh) runs
+# this gate as that role, which has CREATEDB and owns what it makes; a config
+# still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ]; then
     CFG="$ROOT/config/Globalvars_site.php"
     if [ -f "$CFG" ]; then
-        PGPASSWORD=$(grep "dbpassword.*=" "$CFG" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbpassword 2>/dev/null)"
+        PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$CFG" dbusername 2>/dev/null)"
         export PGPASSWORD
+        [ -n "$PGUSER" ] && export PGUSER
     fi
 fi
 
-if ! psql -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -c "SELECT 1;" >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"
     echo "RESULT: PASS 0 0"
     exit 0
@@ -60,16 +65,16 @@ mkdir -p "$FAKE_HOME"
 
 cleanup() {
     cd /
-    psql -U postgres -c "DROP DATABASE IF EXISTS $SRC;" >/dev/null 2>&1
-    psql -U postgres -c "DROP DATABASE IF EXISTS $DST;" >/dev/null 2>&1
+    psql -U "${PGUSER:-postgres}" -c "DROP DATABASE IF EXISTS $SRC;" >/dev/null 2>&1
+    psql -U "${PGUSER:-postgres}" -c "DROP DATABASE IF EXISTS $DST;" >/dev/null 2>&1
     rm -rf "${WORK:?}"
 }
 trap cleanup EXIT
 
 echo "== Fixture =="
-psql -U postgres -c "CREATE DATABASE $SRC;" >/dev/null 2>&1
-psql -U postgres -d "$SRC" -c "CREATE TABLE t (id int); INSERT INTO t SELECT generate_series(1,42);" >/dev/null 2>&1
-SRC_ROWS=$(psql -U postgres -d "$SRC" -tAc "SELECT count(*) FROM t;" 2>/dev/null)
+psql -U "${PGUSER:-postgres}" -c "CREATE DATABASE $SRC;" >/dev/null 2>&1
+psql -U "${PGUSER:-postgres}" -d "$SRC" -c "CREATE TABLE t (id int); INSERT INTO t SELECT generate_series(1,42);" >/dev/null 2>&1
+SRC_ROWS=$(psql -U "${PGUSER:-postgres}" -d "$SRC" -tAc "SELECT count(*) FROM t;" 2>/dev/null)
 chk "fixture has rows" "$SRC_ROWS" "42"
 
 # The key for THIS run, and a decoy in $HOME. If --key-file were ignored and the
@@ -88,14 +93,14 @@ HOME="$FAKE_HOME" bash "$BACKUP_DB" --non-interactive --key-file "$RUN_KEY" "$SR
 ARCHIVE=$(ls -t "$WORK"/${SRC}-*.sql.gz.enc 2>/dev/null | head -1)
 chk "encrypted dump produced" "$([ -n "$ARCHIVE" ] && echo yes || echo no)" "yes"
 
-psql -U postgres -c "CREATE DATABASE $DST;" >/dev/null 2>&1
-bash "$RESTORE_DB" "$DST" "$ARCHIVE" --non-interactive --db-user postgres --key-file "$RUN_KEY" >/dev/null 2>&1
-DST_ROWS=$(psql -U postgres -d "$DST" -tAc "SELECT count(*) FROM t;" 2>/dev/null)
+psql -U "${PGUSER:-postgres}" -c "CREATE DATABASE $DST;" >/dev/null 2>&1
+bash "$RESTORE_DB" "$DST" "$ARCHIVE" --non-interactive --db-user "${PGUSER:-postgres}" --key-file "$RUN_KEY" >/dev/null 2>&1
+DST_ROWS=$(psql -U "${PGUSER:-postgres}" -d "$DST" -tAc "SELECT count(*) FROM t;" 2>/dev/null)
 chk "restores with the key it was made with" "$DST_ROWS" "42"
 
 # The decoy must NOT open it. This is the assertion that proves --key-file was
 # honored rather than quietly falling through to the key in $HOME.
-OUT=$(bash "$RESTORE_DB" "$DST" "$ARCHIVE" --non-interactive --db-user postgres \
+OUT=$(bash "$RESTORE_DB" "$DST" "$ARCHIVE" --non-interactive --db-user "${PGUSER:-postgres}" \
         --key-file "$FAKE_HOME/.joinery_backup_key" 2>&1)
 chk "the \$HOME key does NOT open it" "$(echo "$OUT" | grep -c 'DECRYPT_FAILED')" "1"
 

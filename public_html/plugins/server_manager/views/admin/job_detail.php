@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.37 - an apply result's warnings (a role step that left the site on postgres) show as alerts on the card
  * @version 1.36 - a log_table_tail event read shows the vault windows paired and counted (VaultWindowHistory) above its rows
  * @version 1.35 - v1_census results removed with the v1 code; relay transport key shows kind and generation only
  * @version 1.34 - v1_census: key generations per column and unswept chain entries
@@ -440,6 +441,11 @@ if ($result) {
 			. ', ' . (int)$a['duration_seconds'] . 's</small></div><div class="card-body">';
 		if (!empty($rb['rolled_back']) && !empty($rb['schema_ahead_of_code'])) {
 			echo '<div class="alert alert-warning small">The code was rolled back and the schema was not: migrations had already run. Upgrade forward rather than leaving the node here.</div>';
+		}
+		// A step that did not stop the upgrade but left something for a person,
+		// said here where a rollout is judged, not only in the transcript.
+		foreach ((array)($a['warnings'] ?? []) as $w) {
+			echo '<div class="alert alert-warning small">' . $h($w) . '</div>';
 		}
 		$tier = $a['deploy_tier'];
 		echo '<div>Deploy tier: <strong>' . $h(str_replace('_', ' ', $tier['verdict'])) . '</strong>'

@@ -46,12 +46,16 @@ chk() {
     fi
 }
 
-# Database password: prefer an already-set PGPASSWORD, else derive postgres's
-# password from the local site config the same way the scripts do.
+# Database password: prefer an already-set PGPASSWORD, else postgres's password
+# from the local site config, but only while that config still connects as
+# postgres: this gate creates and drops roles (the RESTORE_ROLE_MISSING checks),
+# which the site's own role may not, so it runs as postgres or skips. With the
+# config on its own role, PGPASSWORD or ~/.pgpass must hold the postgres pair.
 if [ -z "${PGPASSWORD:-}" ]; then
     CFG="$ROOT/config/Globalvars_site.php"
-    if [ -f "$CFG" ]; then
-        PGPASSWORD=$(grep "dbpassword.*=" "$CFG" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+    READER="$ROOT/maintenance_scripts/install_tools/_config_value.php"
+    if [ -f "$CFG" ] && [ "$(php "$READER" "$CFG" dbusername 2>/dev/null)" = "postgres" ]; then
+        PGPASSWORD="$(php "$READER" "$CFG" dbpassword 2>/dev/null)"
         export PGPASSWORD
     fi
 fi

@@ -72,7 +72,7 @@ $dbname = 'jy_dest_switch_' . getmypid();
 $pdo = DbConnector::get_instance()->get_db_link();
 $pdo->exec('CREATE DATABASE "' . $dbname . '" TEMPLATE template0');
 harness_defer(function() use ($pdo, $dbname) { $pdo->exec('DROP DATABASE IF EXISTS "' . $dbname . '"'); });
-$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, 'postgres', (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
 $scratch = null;
 putenv('PGPASSWORD=' . (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));

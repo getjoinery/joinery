@@ -34,11 +34,16 @@ finish() { echo; echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $p
 if [ "$(id -u)" = "0" ]; then
     echo "  SKIP: run unprivileged - as root the restore would take the real site's lock"; finish
 fi
+# The site's own pair: a site on its own database role (site_db_role.sh) runs
+# this gate as that role, which has CREATEDB and owns what it makes; a config
+# still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
-    PGPASSWORD=$(grep "dbpassword.*=" "$ROOT/config/Globalvars_site.php" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+    PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
+    PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
     export PGPASSWORD
+    [ -n "$PGUSER" ] && export PGUSER
 fi
-if ! psql -U postgres -XtAc "SELECT 1" >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -XtAc "SELECT 1" >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"; finish
 fi
 
@@ -46,8 +51,8 @@ PROJ="jt_owntools_$$"          # the site's name, and the restored database
 SRC_DB="jt_owntools_src_$$"    # the database the chain was taken of
 W="$(mktemp -d /tmp/jy_owntools_gate_XXXXXX)"
 cleanup() {
-    dropdb -U postgres --if-exists "$SRC_DB" >/dev/null 2>&1
-    dropdb -U postgres --if-exists "$PROJ" >/dev/null 2>&1
+    dropdb -U "${PGUSER:-postgres}" --if-exists "$SRC_DB" >/dev/null 2>&1
+    dropdb -U "${PGUSER:-postgres}" --if-exists "$PROJ" >/dev/null 2>&1
     rm -rf "${W:?}"
 }
 trap cleanup EXIT
@@ -70,7 +75,7 @@ OLD_ENGINE='#!/bin/bash
 echo "OLD restore_database.sh ran with: $*" >&2
 exit 1'
 printf '%s\n' "$OLD_ENGINE" > "$S/maintenance_scripts/sysadmin_tools/restore_database.sh"
-createdb -U postgres "$SRC_DB" && psql -U postgres -q -d "$SRC_DB" -c "CREATE TABLE owntools_marker (id int); INSERT INTO owntools_marker VALUES (23);" >/dev/null 2>&1
+createdb -U "${PGUSER:-postgres}" "$SRC_DB" && psql -U "${PGUSER:-postgres}" -q -d "$SRC_DB" -c "CREATE TABLE owntools_marker (id int); INSERT INTO owntools_marker VALUES (23);" >/dev/null 2>&1
 
 echo "== A chain of it =="
 mkdir -p "$W/arts"
@@ -102,7 +107,7 @@ if grep -q 'OLD restore_database.sh ran' "$W/log"; then
 else
     pass "the database was restored with this release's tool, not the one the backup carried"
 fi
-chk "the database is the chain's" "$(psql -U postgres -d "$PROJ" -XtAc 'SELECT id FROM owntools_marker' 2>/dev/null)" "23"
+chk "the database is the chain's" "$(psql -U "${PGUSER:-postgres}" -d "$PROJ" -XtAc 'SELECT id FROM owntools_marker' 2>/dev/null)" "23"
 chk "the restored tree holds the tool the backup carried, exactly" \
     "$(cmp -s "$T/maintenance_scripts/sysadmin_tools/restore_database.sh" "$S/maintenance_scripts/sysadmin_tools/restore_database.sh" && echo same)" "same"
 chk "the reconcile is taken from the same copy of this release's tools" \

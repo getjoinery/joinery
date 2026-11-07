@@ -68,7 +68,9 @@ file_put_contents($tree . '/public_html/kept.txt', 'a plain file that stays in t
 // A tree that says it is a container, so backup_project.sh skips the vhost lookup.
 @mkdir($tree . '/config', 0755, true);
 file_put_contents($tree . '/config/Globalvars_site.php', "<?php\n\$this->settings['deployment_environment'] = 'docker';\n"
-	. "\$this->settings['dbusername'] = 'postgres';\n\$this->settings['dbname'] = '" . 'jy_objects_' . getmypid() . "';\n");
+	. "\$this->settings['dbusername'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbusername', true, true), true) . ";\n"
+	. "\$this->settings['dbpassword'] = " . var_export((string)Globalvars::get_instance()->get_setting('dbpassword', true, true), true) . ";\n"
+	. "\$this->settings['dbname'] = '" . 'jy_objects_' . getmypid() . "';\n");
 harness_defer(function() use ($work) {
 	exec('chmod -R u+rwX ' . escapeshellarg($work) . ' 2>/dev/null; rm -rf ' . escapeshellarg($work));
 });
@@ -77,7 +79,7 @@ $dbname = 'jy_objects_' . getmypid();
 $pdo = DbConnector::get_instance()->get_db_link();
 $pdo->exec('CREATE DATABASE "' . $dbname . '" TEMPLATE template0');
 harness_defer(function() use ($pdo, $dbname) { $pdo->exec('DROP DATABASE IF EXISTS "' . $dbname . '"'); });
-$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, 'postgres', (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
+$scratch = new PDO('pgsql:host=localhost dbname=' . $dbname, (string)Globalvars::get_instance()->get_setting('dbusername', true, true), (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
 $scratch->exec('CREATE TABLE t (id int); INSERT INTO t VALUES (1)');
 $scratch = null;
 putenv('PGPASSWORD=' . (string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
@@ -323,7 +325,8 @@ foreach (array('e1.bin', 'e2.bin', 'e3.bin') as $n) { @unlink($up . '/' . $n); }
 
 section('The run\'s store step waits on the tick\'s row lock');
 $blob(-9008, 'locked.bin', random_bytes(100), array());
-$other = new PDO('pgsql:host=localhost dbname=' . Globalvars::get_instance()->get_setting('dbname', true, true), 'postgres',
+$other = new PDO('pgsql:host=localhost dbname=' . Globalvars::get_instance()->get_setting('dbname', true, true),
+	(string)Globalvars::get_instance()->get_setting('dbusername', true, true),
 	(string)Globalvars::get_instance()->get_setting('dbpassword', true, true));
 $other->query('SELECT pg_advisory_lock(' . CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE . ', -9008)');
 $r = BackupObjects::store_object($plan, BackupObjects::epoch($plan), $blobs['locked.bin'], $up . '/locked.bin');

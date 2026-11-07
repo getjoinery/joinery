@@ -36,16 +36,21 @@ finish() { echo; echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $p
 if [ "$(id -u)" = "0" ]; then
     echo "  SKIP: run unprivileged - as root the restore would take the real site's lock"; finish
 fi
+# The site's own pair: a site on its own database role (site_db_role.sh) runs
+# this gate as that role, which has CREATEDB and owns what it makes; a config
+# still on postgres runs it as postgres. PGUSER goes to every -U below.
 if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
-    PGPASSWORD=$(grep "dbpassword.*=" "$ROOT/config/Globalvars_site.php" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+    PGPASSWORD="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbpassword 2>/dev/null)"
+    PGUSER="$(php "$ROOT/../maintenance_scripts/install_tools/_config_value.php" "$ROOT/config/Globalvars_site.php" dbusername 2>/dev/null)"
     export PGPASSWORD
+    [ -n "$PGUSER" ] && export PGUSER
 fi
-if ! psql -U postgres -XtAc "SELECT 1" >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -XtAc "SELECT 1" >/dev/null 2>&1; then
     echo "  SKIP: no postgres connection available"; finish
 fi
 TEMPLATE_DB="$(php -r 'require $argv[1]; echo Globalvars::get_instance()->get_setting("dbname") . "";' "$ROOT/public_html/includes/PathHelper.php" 2>/dev/null)"
 TEMPLATE_DB="test_${TEMPLATE_DB}"
-if ! psql -U postgres -d "$TEMPLATE_DB" -XtAc "SELECT 1" >/dev/null 2>&1; then
+if ! psql -U "${PGUSER:-postgres}" -d "$TEMPLATE_DB" -XtAc "SELECT 1" >/dev/null 2>&1; then
     echo "  SKIP: no test database ($TEMPLATE_DB) to take a schema from"; finish
 fi
 
@@ -53,8 +58,8 @@ PROJ="jt_copy_$$"            # the site's name on both machines, and the target'
 SRC_DB="jt_copy_src_$$"      # the source's database
 W="$(mktemp -d /tmp/jy_copy_gate_XXXXXX)"
 cleanup() {
-    dropdb -U postgres --if-exists "$SRC_DB" >/dev/null 2>&1
-    dropdb -U postgres --if-exists "$PROJ" >/dev/null 2>&1
+    dropdb -U "${PGUSER:-postgres}" --if-exists "$SRC_DB" >/dev/null 2>&1
+    dropdb -U "${PGUSER:-postgres}" --if-exists "$PROJ" >/dev/null 2>&1
     rm -rf "${W:?}"
 }
 trap cleanup EXIT
@@ -97,6 +102,9 @@ switch ($argv[2]) {
         $n = 0;
         foreach ($pdo->query("SELECT stg_name FROM stg_settings WHERE stg_value ~ '^v1\\.(sodium|aesgcm)\\.'")
                  ->fetchAll(PDO::FETCH_COLUMN) as $name) {
+            // The canary is written below, once; a test database that already
+            // holds one must not count it twice.
+            if ($name === SecretBox::CANARY_SETTING) { continue; }
             $u->execute(array($box->encrypt('fixture ' . $name), $name)); $n++;
         }
         $pdo->prepare('DELETE FROM stg_settings WHERE stg_name = ?')->execute(array(SecretBox::CANARY_SETTING));
@@ -147,7 +155,7 @@ config() {
 }
 
 echo "== The source: a project with its own key, sealed values and files =="
-createdb -U postgres "$SRC_DB" && pg_dump -U postgres "$TEMPLATE_DB" | psql -U postgres -q -d "$SRC_DB" >/dev/null 2>&1
+createdb -U "${PGUSER:-postgres}" "$SRC_DB" && pg_dump -U "${PGUSER:-postgres}" "$TEMPLATE_DB" | psql -U "${PGUSER:-postgres}" -q -d "$SRC_DB" >/dev/null 2>&1
 config "$S/config/Globalvars_site.php" "$SRC_DB" "source-db-password"
 echo "relay identity" > "$S/config/relay_pull_key"
 mkdir -p "$S/public_html/theme/x" "$S/uploads" "$S/storage/mail" "$S/static_files" "$S/logs"
@@ -204,13 +212,13 @@ fi
 echo "== A second full apply discards what changed on the target =="
 echo "edited on the target" > "$T/public_html/index.php"
 echo "new on the target" > "$T/uploads/new.jpg"
-psql -U postgres -d "$PROJ" -q -c "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('copy_gate_probe_$$', 'x')" >/dev/null 2>&1
+psql -U "${PGUSER:-postgres}" -d "$PROJ" -q -c "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('copy_gate_probe_$$', 'x')" >/dev/null 2>&1
 C="$(H census "$S" "$SRC_DB" "$S/config/Globalvars_site.php" "$T" "$PROJ" "$T/config/Globalvars_site.php")"
 case "$C" in DIFFER*) pass "the census sees the edit, the new file and the new row" ;; *) fail "the census missed a change on the target" "$C" ;; esac
 if restore; then pass "the second apply succeeds"; else fail "the second apply failed" "$(grep -E 'ERROR|✗' "$W/log" | head -5)"; fi
 chk "the edit is gone" "$(cat "$T/public_html/index.php")" '<?php echo 1;'
 chk "the new file is gone" "$([ -e "$T/uploads/new.jpg" ] && echo present || echo gone)" "gone"
-chk "the new row is gone" "$(psql -U postgres -d "$PROJ" -XtAc "SELECT count(*) FROM stg_settings WHERE stg_name = 'copy_gate_probe_$$'")" "0"
+chk "the new row is gone" "$(psql -U "${PGUSER:-postgres}" -d "$PROJ" -XtAc "SELECT count(*) FROM stg_settings WHERE stg_name = 'copy_gate_probe_$$'")" "0"
 C="$(H census "$S" "$SRC_DB" "$S/config/Globalvars_site.php" "$T" "$PROJ" "$T/config/Globalvars_site.php")"
 case "$C" in MATCH*) pass "and the census matches again" ;; *) fail "the census differs after the second apply" "$C" ;; esac
 chk "the key is still the source's" "$(H same_key "$S/config/Globalvars_site.php" "$T/config/Globalvars_site.php")" "yes"

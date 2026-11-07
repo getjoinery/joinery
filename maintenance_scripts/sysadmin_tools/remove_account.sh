@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.21 - The postgres password is read from the root-only config/db_admin.php before a config still on
+#               postgres, and the site's own database role (joinery_{site}) is dropped with its databases (WP4)
 #VERSION 2.20 - site_quiet_host.sh's 'forward' and site_certificate_stage.sh's 'certificate-staged' go with the
 #               site's other marks: a switch-over's old container, removed, left its forward behind (C7's B53)
 #VERSION 2.19 - A bare-metal site's databases are dropped without a prompt: the site's own config gives the
@@ -364,6 +366,11 @@ fi
 # test suite's (its config's dbname_test, test_<site>) when it names that; its
 # test twin's the same way. Names this script composes, never a name a config
 # supplies: a copied config may name another site's database.
+# A sed, not _config_value.php: this script runs where PHP may not (its gate
+# fixture, a box being torn down). A generated password is alphanumeric, so the
+# literal has no escaped quote to misread; one set by hand with a quote in it
+# would be read wrong here, and dropdb would then prompt or fail, never drop
+# the wrong thing.
 config_value() {  # FILE NAME
     sed -n "s/^[[:space:]]*\$this->settings\['$2'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1
 }
@@ -377,7 +384,17 @@ if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ]; then
         # The role's password, read now: the config goes with the site's folder.
         # Local connections need it (install.sh's pg_hba), and without it
         # dropdb asks on a terminal nobody is at.
-        [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$db_config" dbpassword)"
+        # The postgres pair lives in the root-only config/db_admin.php once the
+        # site has its own role (site_db_role.sh); a config still on postgres
+        # carries the password itself. The role goes with the databases.
+        [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$WEB_DIR/$db_site/config/db_admin.php" dbadminpassword)"
+        case "$(config_value "$db_config" dbusername)" in
+            joinery_*) ;;   # the role's password, not postgres's
+            *) [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$db_config" dbpassword)" ;;
+        esac
+        case "$(config_value "$db_config" dbusername)" in
+            joinery_*) SITE_DB_ROLES="${SITE_DB_ROLES:-} $(config_value "$db_config" dbusername)" ;;
+        esac
     done
 fi
 
@@ -782,6 +799,15 @@ if [ "$IS_BAREMETAL" = true ]; then
                 echo "Removed database: $db"
             else
                 echo "WARNING: database '$db' was not removed: $(printf '%s' "${DROP_ERR:-dropdb failed}" | head -n 1)"
+            fi
+        done
+        # The site's own database role (site_db_role.sh) owns nothing once its
+        # databases are gone; a role left behind is a login that opens nothing.
+        for role in ${SITE_DB_ROLES:-}; do
+            if DROP_ERR="$(printf 'DROP ROLE IF EXISTS :"r";\n' | PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -XqA -v ON_ERROR_STOP=1 -v r="$role" 2>&1)"; then
+                echo "Removed database role: $role"
+            else
+                echo "WARNING: database role '$role' was not removed: $(printf '%s' "${DROP_ERR:-psql failed}" | head -n 1)"
             fi
         done
     fi

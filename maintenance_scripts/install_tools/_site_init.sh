@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.23 - The site gets its own database role (site_db_role.sh): the website connects as joinery_{site},
+#                 which owns the database and nothing else; the postgres pair goes to the root-only
+#                 config/db_admin.php (mail_access_hardening WP4)
 # VERSION: 3.22 - The seeded admin is user 1, username admin, with no email (spec optional_username):
 #                found by id, never by an address; with no JOINERY_ADMIN_EMAIL, or one the account
 #                refuses, it stays username-only instead of taking admin@example.com
@@ -447,6 +450,24 @@ if [ "$DB_EXISTS" = false ]; then
         }
         log "Database '$SITENAME' loaded successfully."
     fi
+fi
+
+# =============================================================================
+# THE SITE'S OWN DATABASE ROLE
+# =============================================================================
+# The website connects as joinery_{site}, which owns the site's database and
+# nothing else (mail_access_hardening WP4); the postgres pair goes to the
+# root-only config/db_admin.php for the shell tools. Idempotent: a re-run
+# re-asserts the role and keeps the config's password.
+log "Giving the site its own database role..."
+# Captured, not piped: a pipeline's status is its last command's, and this
+# step is fatal on purpose, so the script's own exit decides it.
+if ROLE_OUT="$(PGPASSWORD="${PASSWORD:-${PGPASSWORD:-}}" "${SCRIPT_DIR}/site_db_role.sh" "$SITENAME" --db-name "$SITENAME" 2>&1)"; then
+    printf '%s\n' "$ROLE_OUT" | sed 's/^/  /'
+else
+    printf '%s\n' "$ROLE_OUT" | sed 's/^/  /'
+    log_error "Could not give '$SITENAME' its own database role (site_db_role.sh failed)"
+    exit 1
 fi
 
 # =============================================================================

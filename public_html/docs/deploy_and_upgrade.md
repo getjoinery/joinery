@@ -1303,6 +1303,43 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 
 The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Version-controlled manifests like Joinery AI's [recipes.json](../plugins/joinery_ai/docs/overview.md#shipped-recipes) are for the same reason edited only on the publishing checkout.
 
+### The database role
+
+The website connects to PostgreSQL as the site's own role, `joinery_{site}`:
+LOGIN, NOSUPERUSER, NOCREATEROLE, CREATEDB, CONNECTION LIMIT 100. It owns the
+site's database and every object in it and nothing else, so the connection a
+request runs on can touch the site's own tables and no other database, no role
+and no server setting, and `COPY … TO PROGRAM` is refused. CREATEDB is what the
+test runner (the test database) and the backup verifier (its rehearsal
+database) need; neither is a superuser right. `dbusername` / `dbpassword` and
+the `_test` pair in `config/Globalvars_site.php` name that role.
+
+The `postgres` pair lives in `config/db_admin.php`, mode 0600, owned by root.
+No PHP process can read it and `DbConnector` never looks there; the shell tools
+run as root read it (`backup_database.sh`, `restore_database.sh`,
+`copy_database.sh`, `backup_project.sh`, `remove_account.sh`), after
+`PGPASSWORD` and `~/.pgpass` and before a config still on `postgres`. It rides
+in the root-only config files a backup carries.
+
+`maintenance_scripts/install_tools/site_db_role.sh SITENAME` (as root) does
+all of it, idempotently: creates the role once, re-asserts its attributes and
+password every run, hands the database and its objects to the role
+(`_db_ownership_sql.sh`, one `DO` block over tables, sequences, views,
+functions and types in `public`; never `REASSIGN OWNED BY`, which would move
+every database on the server), rewrites the four config literals
+(`_set_site_db_role.php`, leaving every other byte) and writes `db_admin.php`.
+`_site_init.sh` runs it for a new site after the schema loads; `upgrade.php`
+runs it as root on every upgrade, after the last step that touches the schema,
+because the upgrade keeps the connection it opened as whatever role the config
+named when it started, and what that connection created is owned by that role.
+A site still connecting as `postgres` gets its role at that step. `fix_permissions.sh`
+pins `db_admin.php` to 0600 root:root on every run and leaves it out of the
+`config/*.php` sweep. A restore takes the dump's `OWNER TO` statements
+out before the load and hands the restored database to the site's role after
+it, so a dump from before the role existed, or from another site, comes back
+owned right. The Postfix role (`iemap_*`) and its grants are untouched: grants,
+not ownership.
+
 ### PostgreSQL and PHP memory
 
 `maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh` sizes PostgreSQL from the RAM

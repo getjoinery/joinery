@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 1.04 - The postgres password is read from the root-only config/db_admin.php before a config still on
+#              postgres (mail_access_hardening WP4); the copy keeps the source's owner (createdb -T) until
+#              site_db_role.sh TARGET hands it to the target site's role, which build_dev_from_source.sh runs
 #Version 1.03
 # For passwordless operation, create ~/.pgpass file with:
 # hostname:port:database:username:password
@@ -45,7 +48,18 @@ else
     if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
         echo "Found config file: $CONFIG_FILE"
         # Extract password from config file
-        CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+        # The postgres pair lives in the root-only config/db_admin.php once the
+        # site has its own role (site_db_role.sh); a config still on postgres
+        # carries the password itself.
+        ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
+        CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
+        CONFIG_PASSWORD=""
+        if [[ -r "$ADMIN_FILE" ]]; then
+            CONFIG_PASSWORD="$(php "$CONFIG_READER" "$ADMIN_FILE" dbadminpassword 2>/dev/null)"
+        fi
+        if [[ -z "$CONFIG_PASSWORD" && "$(php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null)" == "postgres" ]]; then
+            CONFIG_PASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
+        fi
         if [[ -n "$CONFIG_PASSWORD" ]]; then
             export PGPASSWORD="$CONFIG_PASSWORD"
             echo "Using database password from config file."

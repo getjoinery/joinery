@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#Version 3.9 - A database whose site is on its own role (site_db_role.sh) is dumped as that role with the pair its
+#              config holds, so the scheduled backup (www-data) needs no postgres password; any other database as
+#              postgres, with the password read from the root-only config/db_admin.php before a config still on
+#              postgres (mail_access_hardening WP4, reviewer2 B5)
 #Version 3.8 - pg_dump | gzip | openssl is one pipeline: the plaintext dump never lands on disk
 #              in any mode (the /tmp/jy_backup_* temp file and its sweep are gone). Stream mode:
 #              `--archive -` writes the encrypted dump to stdout and nothing else does, and
@@ -35,7 +39,55 @@ ENC_RC=0
 # Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt.
 # Called after the arguments are parsed, so DATABASE_NAME is known and the
 # named database's own site config is tried before any other.
+# The role a database is dumped as. A site on its own database role
+# (site_db_role.sh) is dumped as that role, with the pair its config holds: an
+# owner can dump its database, nothing in a dump needs a superuser, and the
+# backup runs from the scheduled task as www-data, which can read the site's
+# config and not the root-only db_admin.php. Any other database is dumped as
+# postgres with the password load_db_password() finds. The all-databases
+# listing stays with postgres.
+# A caller that already holds a pair hands it down as PGUSER/PGPASSWORD
+# (backup_project.sh for a site on its own role; a test's throwaway database
+# that no site config names, created by the role).
+DUMP_USER="${PGUSER:-postgres}"
+DUMP_PASSWORD=""
+resolve_dump_user() {  # DBNAME
+    local db="$1" cfg name_key user reader
+    # The literals are read as PHP reads them, quotes and backslashes included.
+    reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
+    DUMP_USER="${PGUSER:-postgres}"
+    DUMP_PASSWORD=""
+    for cfg in /var/www/html/*/config/Globalvars_site.php; do
+        [[ -r "$cfg" ]] || continue
+        for name_key in dbname dbname_test; do
+            if [[ "$(php "$reader" "$cfg" "$name_key" 2>/dev/null)" == "$db" ]]; then
+                user="$(php "$reader" "$cfg" "dbusername${name_key#dbname}" 2>/dev/null)"
+                if [[ "$user" =~ ^joinery_[a-z0-9_]+$ ]]; then
+                    DUMP_USER="$user"
+                    DUMP_PASSWORD="$(php "$reader" "$cfg" "dbpassword${name_key#dbname}" 2>/dev/null)"
+                fi
+                return 0
+            fi
+        done
+    done
+}
+run_pg_dump() {  # DBNAME
+    if [[ -n "$DUMP_PASSWORD" ]]; then
+        PGPASSWORD="$DUMP_PASSWORD" pg_dump -U "$DUMP_USER" "$1"
+    else
+        pg_dump -U "$DUMP_USER" "$1"
+    fi
+}
+
 load_db_password() {
+    # A single database on its own role needs no postgres password at all.
+    if [[ -n "$DATABASE_NAME" ]]; then
+        resolve_dump_user "$DATABASE_NAME"
+        if [[ "$DUMP_USER" != "postgres" ]]; then
+            echo "✓ Dumping as the site's own database role ($DUMP_USER)."
+            return 0
+        fi
+    fi
     # Check for .pgpass file first
     if [[ -f ~/.pgpass ]]; then
         echo "✓ Found .pgpass file - using passwordless authentication."
@@ -73,7 +125,18 @@ load_db_password() {
         if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
             echo "✓ Found config file: $CONFIG_FILE"
             # Extract password from config file
-            CONFIG_PASSWORD=$(grep "dbpassword.*=" "$CONFIG_FILE" | head -1 | sed "s/.*'\(.*\)'.*/\1/")
+            # The postgres pair lives in the root-only config/db_admin.php once
+            # the site has its own role (site_db_role.sh); a config still on
+            # postgres carries the password itself.
+            ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
+            CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
+            CONFIG_PASSWORD=""
+            if [[ -r "$ADMIN_FILE" ]]; then
+                CONFIG_PASSWORD="$(php "$CONFIG_READER" "$ADMIN_FILE" dbadminpassword 2>/dev/null)"
+            fi
+            if [[ -z "$CONFIG_PASSWORD" && "$(php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null)" == "postgres" ]]; then
+                CONFIG_PASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
+            fi
             if [[ -n "$CONFIG_PASSWORD" ]]; then
                 export PGPASSWORD="$CONFIG_PASSWORD"
                 echo "✓ Using database password from config file."
@@ -122,6 +185,7 @@ write_report() {
 backup_database() {
     local db_name="$1"
     local backup_file
+    resolve_dump_user "$db_name"
 
     if [ "$ENCRYPT_BACKUPS" = true ]; then
         backup_file="${db_name}-${now}.sql.gz.enc"
@@ -133,16 +197,16 @@ backup_database() {
             # Non-interactive: key crosses on fd 3, never argv (visible in ps
             # for the whole encrypt on shared boxes).
             if [ "$STREAM" = true ]; then
-                pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< <(printf '%s\n' "$ENCRYPTION_KEY") >&4
+                run_pg_dump "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 3< <(printf '%s\n' "$ENCRYPTION_KEY") >&4
             else
-                pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$backup_file" 3< <(printf '%s\n' "$ENCRYPTION_KEY")
+                run_pg_dump "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "$backup_file" 3< <(printf '%s\n' "$ENCRYPTION_KEY")
             fi
             pipe=("${PIPESTATUS[@]}")
         else
             # Interactive: prompt for password
             echo ""
             echo "🔐 Enter encryption password for backup file:"
-            pg_dump -U postgres "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"
+            run_pg_dump "$db_name" | gzip -9 | openssl enc -aes-256-cbc -salt -pbkdf2 -out "$backup_file"
             pipe=("${PIPESTATUS[@]}")
         fi
         DUMP_RC=${pipe[0]:-1}
@@ -179,9 +243,9 @@ backup_database() {
 
         local pipe
         if [ "$STREAM" = true ]; then
-            pg_dump -U postgres "$db_name" | gzip -9 >&4
+            run_pg_dump "$db_name" | gzip -9 >&4
         else
-            pg_dump -U postgres "$db_name" | gzip -9 > "$backup_file"
+            run_pg_dump "$db_name" | gzip -9 > "$backup_file"
         fi
         pipe=("${PIPESTATUS[@]}")
         DUMP_RC=${pipe[0]:-1}
