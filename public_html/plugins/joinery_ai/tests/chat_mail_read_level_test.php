@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php --filter=chat_mail_read_level
  *
+ * @version 1.2 - a recipe is owner-scoped on mail (Q5)
  * @version 1.1 - a level-10 chat reads mail across users only with the reader's oversight confirmed (WP3, B13)
  */
 
@@ -112,5 +113,27 @@ check($query_mail($confirmed) === 'read', 'and the read across users goes throug
 
 $staff_scoped = $query_mail(new ChatTurnContext($conversation_for($staff), (int)$staff->key, 0, $sid));
 check($staff_scoped === 'read', 'an owner-scoped staff read asks no oversight (it is the person\'s own mail)', $staff_scoped);
+
+// ---------------------------------------------------------------------------
+// Q5: a recipe runs in no browser session, so it can never confirm oversight;
+// it reads its owner's own mail and nothing across users, whoever owns it.
+section('a recipe is owner-scoped on mail, even a superadmin\'s');
+$recipe = new Recipe(NULL);
+$recipe->set('rcp_owner_user_id', (int)$admin->key);
+$recipe->set('rcp_allowed_models', json_encode(array('InboundEmailMessage')));
+$recipe_ctx = new RecipeRunContext($recipe, new RecipeRun(NULL));
+check($recipe_ctx->ownerScopedReads('InboundEmailMessage') === true,
+	'a level 10 owner\'s recipe reads only the mail the owner holds');
+check($recipe_ctx->ownerScopedReads('Address') === false,
+	'the same recipe still reads other models across users, as before');
+$recipe_read = (function () use ($recipe_ctx) {
+	try {
+		ModelQueryExecutor::query('InboundEmailMessage', array(), array(), 1, array('iem_inbound_email_message_id'), $recipe_ctx);
+		return 'read';
+	} catch (InvalidArgumentException $e) {
+		return $e->getMessage();
+	}
+})();
+check($recipe_read === 'read', 'and its mail query runs, scoped to the owner, with no oversight asked', $recipe_read);
 
 harness_finish();

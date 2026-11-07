@@ -2072,7 +2072,13 @@ Recipes read mail through the `query_model` tool (`InboundEmailMessage` is
 `$ai_readable`, with sender/subject/body wrapped as untrusted input). The model's
 read level is 10 (`$read_permission`), the reader's all-access level, so a chat
 below it reads only the messages its account owns (its grant, its sealed
-owner), as `docs/permissions.md` § The REST API and the AI chat says. On a protected
+owner), as `docs/permissions.md` § The REST API and the AI chat says. A level-10
+chat reads across users only with the reader's oversight confirmed: a second
+factor confirmed in its browser session within the oversight window
+(`MailboxViewer::withOversight()`, the same marker the reader checks); without it
+the query is refused before any row is read, with the reader's words for what to
+do. A recipe runs in no browser session, so it never reads mail across users: it
+reads its owner's own mail, whoever owns it. On a protected
 domain a locked row is **excluded** from AI results (never a placeholder) and stays
 pending for post-unlock catch-up; `query_model` reports the excluded count so the model
 knows the result set is partial. The LLM provider is a disclosure, not a level gate.

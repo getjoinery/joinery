@@ -27,6 +27,8 @@
  *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_action_queue_test.php
  *
+ * @version 1.5 - the recipe check asks a pipeline recipe's queuesWrites() instead of grepping the source for a
+ *   literal that another method happened to carry
  * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3 - X-Wing test vault, minted outside the hot state
  * @version 1.2 - Past: approve after a decline or a failure; labelled calendar card fields
@@ -482,8 +484,13 @@ section('Recipes never queue');
 
 check((new ReflectionMethod('RecipeRunContext', 'queuesWrites'))->getDeclaringClass()->getName()
 		=== 'RecipeRunContext', 'RecipeRunContext declares its own answer');
-$src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
-check(strpos($src, 'return false;') !== false && strpos($src, 'function queuesWrites') !== false,
-	'and that answer is false — the verdict handler stays their one write door');
+// A pipeline recipe never queues: the verdict handler stays its one write
+// door. An agent recipe that reads content written by other people does
+// queue (S16), which recipe_queued_writes_test covers.
+$pipeline = new Recipe(NULL);
+$pipeline->set('rcp_mode', Recipe::MODE_PIPELINE);
+$pipeline->set('rcp_owner_user_id', (int)$owner_id);
+check((new RecipeRunContext($pipeline, new RecipeRun(NULL)))->queuesWrites() === false,
+	'and a pipeline recipe answers false — the verdict handler stays its one write door');
 
 harness_finish();

@@ -1550,7 +1550,7 @@ System-prompt impact: the untrusted-input block is a separate text item *after* 
 
 Reads are scoped by **who is asking**, a property of the run context (`ToolContext::ownerScopedReads()`):
 
-- **Admins read cross-user.** An admin already sees every row through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). For an admin caller `ModelQueryExecutor` injects no owner filter.
+- **Admins read cross-user.** An admin already sees every row through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). For an admin caller `ModelQueryExecutor` injects no owner filter. Mail is the one exception: `InboundEmailMessage` is read across users only by a level-10 chat whose browser session has confirmed a second factor within the mail reader's oversight window (the executor refuses the query otherwise, naming what to do), and a recipe, which runs in no browser session, is always owner-scoped on it (see the mailbox plugin's overview § AI processing).
 - **A non-admin member reads only their own rows.** For a member caller the executor appends an owner `WHERE` clause from the model's resolved owner column(s), and a model whose ownership can't be resolved is refused outright (it is also absent from a member's `allowedModels()`). This closes the exfiltration-of-others'-data path — a member's reads can never cross into another member's rows, and a read has no approval step that could catch it after the fact.
 
 How a model's owner column is resolved (`OwnerScopeResolver`, surfaced in `ModelRegistry`'s `owner_scope` metadata) is driven by an optional `$ai_owner_field` on the class:

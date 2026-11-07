@@ -18,6 +18,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_cla
  * stays inline is the recipe's own workspace (OWN_STATE_TOOLS): nothing but
  * this recipe reads it, and it is wrapped as untrusted when it does.
  *
+ * @version 2.2 - a recipe is owner-scoped on mail: no browser session, so no oversight step-up, so no read of
+ *   mail across users (mail_access_hardening WP3, Q5)
  * @version 2.1 - resolveTimezone() is public, for a browser run's system prompt
  * @version 2.0 - queues writes for a tainted-capable agent recipe (S16);
  *   writeProvenance() for memories (S18)
@@ -234,9 +236,14 @@ class RecipeRunContext implements ToolContext {
      * is authored and taint-gated by an admin, who already has full read reach.
      * The day a member-owned recipe surface lands, this flips to a permission
      * check on the recipe owner — the same fence the chat context applies.
+     *
+     * Mail is the exception (mail_access_hardening WP3, Q5): reading other
+     * people's mail is deliberate, a level-10 person confirming a second factor
+     * in a browser session, and a recipe runs in none, so no recipe reads mail
+     * across users. It reads its owner's own mail, as a staff chat does.
      */
     public function ownerScopedReads(?string $model_class = null): bool {
-        return false;
+        return $model_class === 'InboundEmailMessage';
     }
 
     /**
