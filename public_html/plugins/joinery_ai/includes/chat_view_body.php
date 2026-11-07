@@ -381,7 +381,7 @@ if (!function_exists('joai_pin_svg')) {
     // back here.
     function joaiStepUp() {
         var viaPage = function () {
-            window.location = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search);
+            window.location = '/profile/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search);
             return new Promise(function () {});
         };
         if (!window.JoineryPasskeys || !window.JoineryPasskeys.stepUp) return viaPage();

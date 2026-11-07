@@ -48,7 +48,7 @@ $setup_vault_phrase_return = '/setup?step=encryption_key&phrase=1';
 	<div class="setup-choice jy-mt-2">
 		<a class="btn btn-primary" href="/profile/security">&larr; Add a passkey elsewhere</a>
 <?php if ($setup_vault_stepup_first) { ?>
-		<a class="btn btn-secondary" href="/verify-stepup?return=<?php echo urlencode($setup_vault_phrase_return); ?>">Use a passphrase instead</a>
+		<a class="btn btn-secondary" href="/profile/verify-stepup?return=<?php echo urlencode($setup_vault_phrase_return); ?>">Use a passphrase instead</a>
 <?php } else { ?>
 		<button type="button" class="btn btn-secondary" id="setup-vault-phrase-open">Use a passphrase instead</button>
 <?php } ?>
@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function () {
 			// Shared second-factor step-up handling: a 2xx render carrying the
 			// flag redirects to the ceremony, then back to this step.
 			if (result && result.second_factor_required) {
-				window.location = '/verify-stepup?return=' + encodeURIComponent('/setup?step=encryption_key');
+				window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/setup?step=encryption_key');
 				return;
 			}
 			one.value = two.value = '';

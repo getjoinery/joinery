@@ -29,6 +29,7 @@
  * peak memory, and each PHP warning or error raised as its type and file:line
  * only — never the message text, which can carry a row's value.
  *
+ * @version 1.2 - the step-up page lives at /profile/verify-stepup
  * @version 1.1 - review 2026-09-23: view-only enforced at the database layer (B3); failed assets named
  *                only when the file is in this tree (B4); a probe request is marked in the request log (B5)
  * @version 1.0
@@ -75,7 +76,7 @@ class PageProbe {
 		'/password-reset-totp',
 		'/password-set',
 		'/terms-accept',
-		'/verify-stepup',
+		'/profile/verify-stepup',
 		'/verify-totp',
 		'/change-password-required',
 		'/admin/admin_user_login_as',

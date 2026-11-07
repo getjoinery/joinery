@@ -1,4 +1,10 @@
 <?php
+    /**
+     * Second-factor step-up page. The visitor is always signed in, so it uses
+     * the member page layout (site header and menu), not the bare sign-in card.
+     *
+     * @version 1.1
+     */
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
     require_once(PathHelper::getThemeFilePath('verify_stepup_logic.php', 'logic'));
@@ -10,21 +16,23 @@
     $page->public_header([
         'is_valid_page' => $is_valid_page ?? false,
         'title'         => 'Confirm it\'s you',
-        'header_only'   => true,
     ]);
 
     $return_qs = '?return=' . rawurlencode($return);
 ?>
 
 <div class="jy-ui">
-<div class="auth-page">
-    <div class="auth-card">
+<section class="jy-content-section">
+    <div class="jy-container">
+        <div class="jy-narrow-sm">
 
-        <div class="auth-logo">
-            <a href="/"><?php $page->get_logo(); ?></a>
+        <div class="jy-page-header">
+            <div class="jy-page-header-bar">
+                <h1>Confirm it's you</h1>
+            </div>
         </div>
 
-        <h3>Confirm it's you</h3>
+        <div class="jy-panel">
         <p>This is a sensitive change, so please re-confirm your identity with your second factor.</p>
 
         <?php if (!empty($error)) { echo PublicPage::alert('Verification failed', htmlspecialchars($error), 'danger'); } ?>
@@ -39,7 +47,7 @@
         <?php if (!empty($has_totp)) { ?>
         <?php if (!empty($has_passkey)) { echo '<div class="auth-divider">or</div>'; } ?>
         <?php
-        $formwriter = $page->getFormWriter('form1', ['action' => '/verify-stepup' . $return_qs, 'method' => 'POST']);
+        $formwriter = $page->getFormWriter('form1', ['action' => '/profile/verify-stepup' . $return_qs, 'method' => 'POST']);
         $formwriter->begin_form();
         $formwriter->hiddeninput('return', '', ['value' => $return]);
         $formwriter->textinput('totp_code', 'Authenticator code', [
@@ -60,8 +68,11 @@
             <a href="<?php echo htmlspecialchars($return); ?>">Cancel</a>
         </div>
 
+        </div><!-- /.jy-panel -->
+
+        </div>
     </div>
-</div>
+</section>
 </div>
 
 <?php if (!empty($has_passkey)) { ?>
@@ -92,5 +103,5 @@
 <?php } ?>
 
 <?php
-    $page->public_footer(['header_only' => true]);
+    $page->public_footer();
 ?>

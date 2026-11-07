@@ -633,7 +633,7 @@ if ($show_form) {
 			// never lost to the redirect ceremony. Always — a render-time
 			// freshness snapshot goes stale while the form sits open.
 			// Fallback (no passkey, or the ceremony fails): plain submit —
-			// the server redirects through /verify-stepup and target_level
+			// the server redirects through /profile/verify-stepup and target_level
 			// preserves the choice.
 			var stepupDone = false;
 			var stepupInFlight = false;

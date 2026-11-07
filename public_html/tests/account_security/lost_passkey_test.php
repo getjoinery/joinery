@@ -10,7 +10,7 @@
  * that must be enough to replace the passkey and to revoke the lost one.
  *
  * Both actions ask for a fresh second-factor confirmation. A passkey step-up
- * and an authenticator-code step-up (/verify-stepup) stamp the same marker, so
+ * and an authenticator-code step-up (/profile/verify-stepup) stamp the same marker, so
  * the server takes either; what each action must not do is insist on the
  * passkey, which is the one thing this person no longer has. Unconfirmed, each
  * answers second_factor_required, the flag that sends the page to the step-up
@@ -18,7 +18,7 @@
  *
  * The four vault actions behind the same confirmation answer with that flag
  * too (checked in their source: each needs a vault and a ceremony to reach),
- * and the setup wizard's Add a passkey follows it to /verify-stepup.
+ * and the setup wizard's Add a passkey follows it to /profile/verify-stepup.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -85,8 +85,8 @@ section('The setup wizard sends the step-up, not a dead end');
 $src = file_get_contents(PathHelper::getIncludePath('includes/setup_steps/signin_security.php'));
 $at = strpos($src, 'if (opts.second_factor_required)');
 $branch = $at === false ? '' : substr($src, $at, 400);
-check(strpos($branch, "'/verify-stepup?return='") !== false,
-	'its Add a passkey goes to /verify-stepup when a second factor is owed');
+check(strpos($branch, "'/profile/verify-stepup?return='") !== false,
+	'its Add a passkey goes to /profile/verify-stepup when a second factor is owed');
 
 $_SESSION = array();
 harness_finish();

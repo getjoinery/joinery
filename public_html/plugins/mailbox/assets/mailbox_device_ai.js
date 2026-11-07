@@ -329,7 +329,7 @@
 		}
 		return post().catch(function (e) {
 			if (!(e && e.data && e.data.requires_stepup)) throw e;
-			window.location.href = '/verify-stepup?return=' + encodeURIComponent(returnUrl);
+			window.location.href = '/profile/verify-stepup?return=' + encodeURIComponent(returnUrl);
 			return new Promise(function () {});
 		});
 	}

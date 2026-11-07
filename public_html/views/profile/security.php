@@ -336,7 +336,7 @@
                 }
 
                 function goVerifyStepUp() {
-                    window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                    window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/profile/security');
                     return new Promise(function () {});
                 }
 
@@ -503,7 +503,7 @@
                 // Run an action the server answers with second_factor_required until
                 // a step-up is fresh. A passkey on this device confirms it right here;
                 // when none answers (the one being replaced or revoked may be the
-                // lost one), /verify-stepup takes the authenticator app instead and
+                // lost one), /profile/verify-stepup takes the authenticator app instead and
                 // comes back, and the next try needs no confirmation.
                 async function withSecondFactor(url, body, hint) {
                     var json = await apiFetch(url, { method: 'POST', body: body, stepUpHere: true });
@@ -899,7 +899,7 @@ $pac_writer->end_form();
                         // carrying the flag redirects to the ceremony, then back here.
                         // Never-resolving promise halts the chain during navigation.
                         if (json.data && json.data.second_factor_required) {
-                            window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                            window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/profile/security');
                             return new Promise(function () {});
                         }
                         return json;
@@ -989,9 +989,9 @@ $pac_writer->end_form();
                 // Code regeneration and a passphrase change need a recent step-up
                 // as well as an unlocker. Ask for it FIRST: refused at the end, the
                 // person has done every other ceremony for nothing and the page
-                // leaves for /verify-stepup, dropping the click. A passkey here
+                // leaves for /profile/verify-stepup, dropping the click. A passkey here
                 // confirms it in place; otherwise the authenticator app on
-                // /verify-stepup, which comes back to this page.
+                // /profile/verify-stepup, which comes back to this page.
                 async function stepUpFirst() {
                     var st = (await apiFetch('/api/v1/action/vault_status', { method: 'POST', body: '{}' })).data;
                     if (!st.step_up_outstanding) return true;
@@ -999,7 +999,7 @@ $pac_writer->end_form();
                         await JoineryPasskeys.stepUp();
                         return true;
                     } catch (e) {
-                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                        window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/profile/security');
                         return false;
                     }
                 }
@@ -1025,7 +1025,7 @@ $pac_writer->end_form();
 
                 function secondFactorRedirect(data) {
                     if (data && data.second_factor_required) {
-                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                        window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/profile/security');
                         return true;
                     }
                     return false;
@@ -1448,7 +1448,7 @@ $pac_writer->end_form();
                     var scope = card.getAttribute('data-vault-rotate');
                     var btn = card.querySelector('[data-vault-rotate-btn]');
                     var status = card.querySelector('[data-vault-rotate-status]');
-                    // Back from /verify-stepup for this rotation: the confirmation is
+                    // Back from /profile/verify-stepup for this rotation: the confirmation is
                     // given, and the rotation's own passkey prompts need a click.
                     try {
                         var back = JSON.parse(sessionStorage.getItem(ROTATE_RESUME) || 'null');
@@ -1473,11 +1473,11 @@ $pac_writer->end_form();
                                 btn.disabled = false;
                                 if (e && e.data && e.data.requires_stepup && !confirmed) {
                                     // Confirm with a passkey here and carry on; without
-                                    // one, the trip to /verify-stepup remembers the scope.
+                                    // one, the trip to /profile/verify-stepup remembers the scope.
                                     status.textContent = 'Confirm it is you to rotate.';
                                     JoineryPasskeys.stepUp().then(function () { rotate(ev, true); }, function () {
                                         try { sessionStorage.setItem(ROTATE_RESUME, JSON.stringify({ t: Date.now(), scope: scope })); } catch (x) {}
-                                        window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                                        window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/profile/security');
                                     });
                                     return;
                                 }
@@ -1492,7 +1492,7 @@ $pac_writer->end_form();
             <script>
             // Every form here that posts a step-up-gated action is marked
             // data-stepup: confirmed with a passkey before it posts, and carried
-            // across a trip to /verify-stepup.
+            // across a trip to /profile/verify-stepup.
             document.addEventListener('DOMContentLoaded', function () {
                 if (window.JoineryPasskeys && JoineryPasskeys.confirmForms) {
                     JoineryPasskeys.confirmForms(<?php echo json_encode($page_vars['stepup'] ?? ['needed' => false, 'passkey' => false]); ?>);

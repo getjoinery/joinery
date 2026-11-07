@@ -84,7 +84,7 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 		$viewer = MailboxViewer::fromSession($session);
 		if (!$viewer->canReadMessage($message)) {
 			if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
-				return LogicResult::redirect('/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
+				return LogicResult::redirect('/profile/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
 			}
 			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 		}
@@ -95,7 +95,7 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 		$viewer = MailboxViewer::fromSession($session);
 		if (!$viewer->canReadMessage($message)) {
 			if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
-				return LogicResult::redirect('/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
+				return LogicResult::redirect('/profile/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
 			}
 			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 		}

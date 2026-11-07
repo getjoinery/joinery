@@ -73,13 +73,13 @@ default. Three logout/login cycles:
   path on the same page)
 
 **1.5 Cadence change.** Switch to `sensitive_only`. Expect: the change itself
-demands a recent step-up (`/verify-stepup`). Log out/in — no factor prompt at
+demands a recent step-up (`/profile/verify-stepup`). Log out/in — no factor prompt at
 login. Switch back to `every_login`.
 
 **1.6 Second passkey.** Add passkey #2 (the second authenticator). Expect:
 gate is a **recent step-up with the existing passkey**, not password re-entry.
 
-**1.7 Step-up page both ways.** Trigger `/verify-stepup` (e.g. regenerate
+**1.7 Step-up page both ways.** Trigger `/profile/verify-stepup` (e.g. regenerate
 backup codes) and satisfy it once with a passkey, once with a TOTP code.
 UX check: does the step-up page explain *why* you're being challenged?
 
@@ -104,7 +104,7 @@ Admin area: Emails → Mailbox.
 
 **2.1 Add the domain.** Accounts tab → + Add Domain. Security level:
 **Standard** (default). Note: even saving a level choice is step-up-gated —
-confirm the `/verify-stepup` redirect fires and returns you to the editor.
+confirm the `/profile/verify-stepup` redirect fires and returns you to the editor.
 
 **2.2 Negative test — Private before vault.** While still vault-less, edit
 the domain and try to set **Private**. Expect refusal with the "set up your
@@ -322,7 +322,7 @@ stays disabled — that's an account property now, not a domain one.
 |---|---|
 | `/profile/security` | 2FA, cadence, recovery address, passkeys, vault |
 | `/profile/mailbox/mailbox` | Member webmail reader |
-| `/verify-stepup` | Step-up confirmation (passkey or TOTP/backup) |
+| `/profile/verify-stepup` | Step-up confirmation (passkey or TOTP/backup) |
 | `/verify-totp` | Second factor at login (TOTP/backup or passkey) |
 | `/password-reset-1` / `-2` / `-2fa` / `-totp` | Reset authorizer flows |
 | `/recovery-verify` | External recovery address verification |

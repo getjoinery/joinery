@@ -187,7 +187,7 @@ check($session->require_recent_second_factor('/profile/password_edit') === null,
 $_SESSION['usr_user_id'] = $totp_user->key;
 $res = $session->require_recent_second_factor('/profile/password_edit');
 check($res !== null && $res->redirect !== null
-	&& strpos((string)$res->redirect, '/verify-stepup') === 0,
+	&& strpos((string)$res->redirect, '/profile/verify-stepup') === 0,
 	'an account with a factor and no recent confirmation is sent to the ceremony',
 	'redirect: ' . var_export($res ? $res->redirect : null, true));
 check($res !== null && strpos((string)$res->redirect, rawurlencode('/profile/password_edit')) !== false,
@@ -202,7 +202,7 @@ check($session->require_recent_second_factor('/profile/password_edit') === null,
 // The confirmation expires: the next sensitive action asks again.
 su_age_markers($sid, 400);
 $res = $session->require_recent_second_factor('/profile/password_edit');
-check($res !== null && strpos((string)$res->redirect, '/verify-stepup') === 0,
+check($res !== null && strpos((string)$res->redirect, '/profile/verify-stepup') === 0,
 	'once the confirmation goes stale the gate asks again',
 	'redirect: ' . var_export($res ? $res->redirect : null, true));
 
@@ -263,7 +263,7 @@ section('Outstanding vs recent');
 
 // The gate an API action calls. It differs from "was there a recent step-up?"
 // in exactly one case, and that case is the whole reason it exists: an account
-// with no second factor has nothing to step up WITH, so /verify-stepup returns
+// with no second factor has nothing to step up WITH, so /profile/verify-stepup returns
 // immediately and a gate keyed on the bare question refuses such an account
 // forever. Both halves are checked here — a version that always answered
 // "nothing outstanding" would pass the first check and fail the second.

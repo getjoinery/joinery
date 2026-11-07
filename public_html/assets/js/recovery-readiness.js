@@ -375,7 +375,7 @@ window.recoveryReadiness = (function () {
 
 	/**
 	 * The verify forms are marked data-stepup; the passkey script confirms
-	 * them in place before they post, and carries one across a /verify-stepup
+	 * them in place before they post, and carries one across a /profile/verify-stepup
 	 * trip (JoineryPasskeys.confirmForms). Same server gate either way.
 	 */
 	function attachStepUp(cfg) {

@@ -6,7 +6,7 @@
  * object back to the matching verify action.
  *
  * @version 1.8 - confirmForms(): a form marked data-stepup is confirmed here before it posts, and
- *   remembered across a /verify-stepup trip and submitted on return
+ *   remembered across a /profile/verify-stepup trip and submitted on return
  * @version 1.7 - stepUp() and withStepUp(): the one browser path for an API
  *   action that answers requires_stepup
  * @version 1.6 - derive() hands back a second PRF output apart and strips it from the response
@@ -311,7 +311,7 @@ window.JoineryPasskeys = (function () {
 	 * Run call() (a promise-returning API call). When it is refused with
 	 * requires_stepup, confirm with a passkey and run it once more. Without a
 	 * usable passkey, or when the ceremony is dismissed, send the person to
-	 * /verify-stepup — which also takes an authenticator code — and bring them
+	 * /profile/verify-stepup — which also takes an authenticator code — and bring them
 	 * back to returnUrl; with no returnUrl the refusal is rethrown.
 	 */
 	async function withStepUp(call, returnUrl) {
@@ -323,7 +323,7 @@ window.JoineryPasskeys = (function () {
 				await stepUp();
 			} catch (ceremonyError) {
 				if (!returnUrl) throw e;
-				window.location = '/verify-stepup?return=' + encodeURIComponent(returnUrl);
+				window.location = '/profile/verify-stepup?return=' + encodeURIComponent(returnUrl);
 				return new Promise(function () {});
 			}
 			return call();
@@ -341,7 +341,7 @@ window.JoineryPasskeys = (function () {
 	 *
 	 * Without one (an authenticator app only), or when the passkey prompt is
 	 * dismissed, the form submits anyway and the server sends the person to
-	 * /verify-stepup. The form is remembered for that trip (this site's own
+	 * /profile/verify-stepup. The form is remembered for that trip (this site's own
 	 * sessionStorage: a link from elsewhere cannot set it, as a URL could) and,
 	 * back on this page with the confirmation given, submitted again. A
 	 * password field's value is never kept: it is asked for again instead.

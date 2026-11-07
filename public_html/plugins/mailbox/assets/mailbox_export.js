@@ -2,7 +2,7 @@
  * The "Download a mailbox" page (/profile/mailbox/export).
  *
  * Asking is mailbox/mail_export_start, behind a fresh second factor
- * (JoineryPasskeys.withStepUp; without a usable passkey, /verify-stepup and
+ * (JoineryPasskeys.withStepUp; without a usable passkey, /profile/verify-stepup and
  * back, which resumes the ask). The list is mailbox/mail_export_list, polled
  * while anything is building; Delete is mailbox/mail_export_delete.
  *
@@ -158,12 +158,12 @@
 	function start(folder, resumed) {
 		var call = function () { return api('mail_export_start', { alias_id: String(cfg.alias_id), folder: folder }); };
 		// No return URL: without a usable passkey withStepUp hands the refusal
-		// back, and the trip to /verify-stepup below remembers the ask.
+		// back, and the trip to /profile/verify-stepup below remembers the ask.
 		var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call) : call();
 		return run.catch(function (e) {
 			if (e && e.data && e.data.requires_stepup && !resumed) {
 				try { sessionStorage.setItem(RESUME, JSON.stringify({ t: Date.now(), folder: folder, alias: cfg.alias_id })); } catch (x) {}
-				window.location = '/verify-stepup?return=' + encodeURIComponent(here + '#start');
+				window.location = '/profile/verify-stepup?return=' + encodeURIComponent(here + '#start');
 				return new Promise(function () {});
 			}
 			throw e;

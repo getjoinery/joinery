@@ -46,7 +46,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 		// A level-10 account yet to confirm oversight (mail_access_hardening WP3)
 		// is sent to confirm and comes back here; anyone else is sent away.
 		if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
-			return LogicResult::redirect('/verify-stepup?return='
+			return LogicResult::redirect('/profile/verify-stepup?return='
 				. urlencode('/plugins/mailbox/admin/admin_mailbox_message?iem_inbound_email_message_id=' . $id));
 		}
 		if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_SECOND_FACTOR) {

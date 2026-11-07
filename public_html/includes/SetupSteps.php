@@ -36,6 +36,8 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.25
+ * @changelog 1.25 - the step-up page lives at /profile/verify-stepup
  * @version 1.24
  * @changelog 1.24 - shouldInterrupt() never interrupts an app session's web pages
  * @version 1.23
@@ -68,7 +70,7 @@
  *   BackupNightly switches both on, so the backup task being on is the whole answer.
  * @version 1.13
  * @changelog 1.13 - interruptExempt(): the login interrupt's exemption list in one place,
- *   now including /profile/security and /verify-stepup so the encryption step's
+ *   now including /profile/security and /profile/verify-stepup so the encryption step's
  *   "add a passkey elsewhere" route is reachable while the wizard is pending.
  * @version 1.12
  * @changelog 1.12 - The Email step counts a connected account as receiving:
@@ -310,7 +312,7 @@ class SetupSteps {
 	 * and the wizard both run mid-flow and return from.
 	 */
 	public static function interruptExempt(string $path): bool {
-		if ($path === '/setup' || $path === '/logout' || $path === '/profile/security' || $path === '/verify-stepup') {
+		if ($path === '/setup' || $path === '/logout' || $path === '/profile/security' || $path === '/profile/verify-stepup') {
 			return true;
 		}
 		return strpos($path, '/api/v1/') === 0;

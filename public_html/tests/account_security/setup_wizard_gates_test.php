@@ -26,7 +26,7 @@ require_once(__DIR__ . '/../lib/logic.php');
 harness_boot();
 
 section('The login interrupt leaves the routes the wizard itself depends on alone');
-foreach (array('/setup', '/logout', '/profile/security', '/verify-stepup', '/api/v1/passkey_register_options') as $path) {
+foreach (array('/setup', '/logout', '/profile/security', '/profile/verify-stepup', '/api/v1/passkey_register_options') as $path) {
 	check(SetupSteps::interruptExempt($path), "$path is exempt");
 }
 foreach (array('/', '/profile', '/profile/security/other', '/admin/server_manager', '/api/v2/x', '/setupx') as $path) {

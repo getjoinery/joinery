@@ -176,7 +176,7 @@ if (!$has_session || session_id() === '') {
 		vault_fixture_server_vault(intval($twofa->key));
 		$domain = dlc_domain(InboundEmailDomain::LEVEL_STANDARD, intval($twofa->key));
 		$r = dlc_save($domain, InboundEmailDomain::LEVEL_PRIVATE, intval($twofa->key));
-		check($r->redirect !== null && strpos($r->redirect, '/verify-stepup') === 0
+		check($r->redirect !== null && strpos($r->redirect, '/profile/verify-stepup') === 0
 			&& strpos(rawurldecode($r->redirect), 'target_level=private') !== false,
 			'the save sends the admin to confirm, carrying the chosen level back', (string)$r->redirect);
 		check(dlc_level($domain) === InboundEmailDomain::LEVEL_STANDARD, 'and nothing was written');

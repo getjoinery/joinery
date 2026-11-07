@@ -306,7 +306,7 @@ final class MailReadBudget {
 		if (($state['reason'] ?? null) !== self::PAUSE_STEPUP) {
 			return null;
 		}
-		return LogicResult::redirect('/verify-stepup?return=' . urlencode($return));
+		return LogicResult::redirect('/profile/verify-stepup?return=' . urlencode($return));
 	}
 
 	/** Can this account answer a step-up at all? One with no second factor cannot (SessionControl::step_up_outstanding()). */

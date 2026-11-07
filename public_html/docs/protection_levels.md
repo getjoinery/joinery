@@ -83,7 +83,7 @@ A form flow answers `stepup` with `SessionControl::require_recent_second_factor(
 An API action answers it as an error carrying `requires_stepup`, and the page
 runs `JoineryPasskeys.withStepUp(call, returnUrl)` (`assets/js/passkeys.js`):
 a passkey confirms in place and the call runs again; without one the person goes
-through `/verify-stepup`, which also takes an authenticator code, and comes back.
+through `/profile/verify-stepup`, which also takes an authenticator code, and comes back.
 
 ### Writing a consumer
 

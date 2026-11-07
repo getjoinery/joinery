@@ -4,7 +4,7 @@
  *
  * Making one calls core's app_password_create, which asks the person to
  * confirm it is them first (requires_stepup): JoineryPasskeys.withStepUp()
- * runs the passkey confirmation, or sends them to /verify-stepup and back.
+ * runs the passkey confirmation, or sends them to /profile/verify-stepup and back.
  *
  * @version 1.0.0
  */

@@ -8,7 +8,7 @@
  *
  * @version 1.6
  * @changelog 1.6 - An account whose second factor must be confirmed first is
- *   taken to /verify-stepup and brought back, not left at a message.
+ *   taken to /profile/verify-stepup and brought back, not left at a message.
  * @changelog 1.5 - The authenticator-app copy names extra mail protection as
  *   what requires it.
  * @changelog 1.4 - Renders once the step is green too: an existing passkey shows
@@ -158,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function () {
 				// Confirm with the second factor this account has (its
 				// authenticator app, before any passkey), then come back here.
 				hint.textContent = 'Taking you to confirm with your second factor…';
-				window.location = '/verify-stepup?return=' + encodeURIComponent('/setup?step=signin_security');
+				window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/setup?step=signin_security');
 				return;
 			}
 			var credential = await JoineryPasskeys.register(opts.options);

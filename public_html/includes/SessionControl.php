@@ -1521,7 +1521,7 @@ class SessionControl{
 	 * This is the question a gate means to ask, and it differs from
 	 * has_recent_second_factor() in exactly one case — the case that makes it
 	 * necessary. An account with no second factor has nothing to step up WITH:
-	 * `/verify-stepup` knows that and returns immediately, so an action gated on
+	 * `/profile/verify-stepup` knows that and returns immediately, so an action gated on
 	 * the bare "was there a recent confirmation?" refuses such an account
 	 * forever. The client bounces to the ceremony, the ceremony bounces
 	 * straight back, and the action never becomes possible — usually while
@@ -1598,7 +1598,7 @@ class SessionControl{
 	 */
 	public static function stepup_redirect(string $return_url) {
 		require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-		return LogicResult::redirect('/verify-stepup?return=' . rawurlencode(self::same_site_return($return_url)));
+		return LogicResult::redirect('/profile/verify-stepup?return=' . rawurlencode(self::same_site_return($return_url)));
 	}
 
 	/**

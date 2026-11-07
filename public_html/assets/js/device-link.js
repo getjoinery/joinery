@@ -152,7 +152,7 @@
 			// still in the URL, so they land where they left off.
 			if (e && e.data && e.data.requires_stepup) {
 				var back = '/profile/devices/link?code=' + encodeURIComponent(code);
-				window.location = '/verify-stepup?return=' + encodeURIComponent(back);
+				window.location = '/profile/verify-stepup?return=' + encodeURIComponent(back);
 				return;
 			}
 			if (e && e.message === 'Unlock cancelled.') {

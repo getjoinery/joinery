@@ -328,7 +328,7 @@ class StaticPageCache {
             // emailed link opened. One copy served to the next visitor offers
             // them the wrong factors, and can leave them no way to finish.
             '/verify-totp',
-            '/verify-stepup',
+            '/profile/verify-stepup',
             '/password-reset-1',
             '/password-reset-2',
             '/password-reset-2fa',

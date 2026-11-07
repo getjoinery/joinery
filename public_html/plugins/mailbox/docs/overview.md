@@ -3789,7 +3789,7 @@ may they touch*:
   for a level-10 person reads the mailboxes that person holds. `oversightState()`
   says why a viewer is not all-access (`needs_stepup`, `needs_second_factor`,
   `none`), the switcher payload carries it, and the rail offers *Every mailbox
-  (confirm it is you)*, a link to `/verify-stepup?return=`, or the way to add a
+  (confirm it is you)*, a link to `/profile/verify-stepup?return=`, or the way to add a
   factor. The forensic page sends an unconfirmed level-10 viewer to confirm; a
   download of a mailbox they hold no grant on answers `requires_stepup`.
 - `scopeAliasIds(?int $aliasId)` — the **single** place audience becomes a query

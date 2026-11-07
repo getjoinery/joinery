@@ -128,7 +128,7 @@ section('the steps of a sign-in or a password reset are never cached or served')
 // list keeps these pages out. /verify-totp cached with one account's factor
 // choices (passkey only) was served to every later sign-in, and an account
 // that proves itself with an authenticator app was offered no way to finish.
-foreach (array('/verify-totp', '/verify-stepup', '/password-reset-1', '/password-reset-2', '/password-reset-2fa',
+foreach (array('/verify-totp', '/profile/verify-stepup', '/password-reset-1', '/password-reset-2', '/password-reset-2fa',
         '/password-reset-totp', '/password-set', '/recovery-verify') as $step) {
     check(StaticPageCache::shouldCache($step, [], $html) === false && StaticPageCache::shouldIgnore($step, []),
         "{$step} is not cached, and no verdict is written down for it");

@@ -999,7 +999,7 @@
 		}
 		return call().catch(function (e) {
 			if (!(e && e.data && e.data.requires_stepup)) throw e;
-			window.location = '/verify-stepup?return=' + encodeURIComponent(back);
+			window.location = '/profile/verify-stepup?return=' + encodeURIComponent(back);
 			return new Promise(function () {});
 		});
 	}

@@ -106,7 +106,7 @@ present at *this* keyboard *now*; a stolen session cookie cannot mint one.
 
 `SessionControl::require_recent_second_factor($return_url)` is the shared gate a
 sensitive **administration** action calls: it returns a redirect to the
-`/verify-stepup` ceremony (which confirms with a passkey or a TOTP/backup code,
+`/profile/verify-stepup` ceremony (which confirms with a passkey or a TOTP/backup code,
 stamps the marker, and returns to `$return_url`) when no recent confirmation
 exists, or proceeds otherwise. An API action, which must answer a caller rather
 than redirect, asks `SessionControl::step_up_outstanding($user, $ttl)` and
@@ -117,13 +117,13 @@ A form that posts a gated action carries `data-stepup="KEY"` on its form tag
 (`getFormWriter($id, ['data-stepup' => KEY])`, KEY unique on the page), and the
 page calls `JoineryPasskeys.confirmForms({needed, passkey})`. The form is then
 confirmed with a passkey before it posts. Without one, the redirect to
-`/verify-stepup` carries the form across: back on the page with the
+`/profile/verify-stepup` carries the form across: back on the page with the
 confirmation given, it is submitted again, or, if it held a password field
 (never kept), refilled and the secret asked for once more. An unmarked form
 reaches the redirect and comes back empty.
 
 Both are a no-op for an account with no second factor enrolled — there is
-nothing to step up with, and `/verify-stepup` returns immediately for exactly
+nothing to step up with, and `/profile/verify-stepup` returns immediately for exactly
 that reason. A gate built on the bare "was there a recent confirmation?"
 question instead of the outstanding-debt question refuses such an account
 **forever**: the page sends the user to the ceremony, the ceremony sends them
@@ -351,7 +351,7 @@ be able to quietly enroll their own key:
 - **Additional passkeys**: require a recent step-up, by a passkey or the
   authenticator app. Someone replacing a lost passkey holds only the app, so
   the security page tries a passkey on this device first and otherwise sends
-  them to `/verify-stepup`. Revoking a passkey and deactivating one for the
+  them to `/profile/verify-stepup`. Revoking a passkey and deactivating one for the
   vault work the same way, which is how the lost one is taken off the account.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
   a passphrase): require an unlocker the vault already has (a passkey, the
@@ -369,7 +369,7 @@ wizard's sign-in and encryption-key steps drive the identical API actions
 (`passkey_register_*`, the TOTP enrollment actions, `vault_setup_*`), so every
 guard above applies there unchanged. When an action answers that a second
 factor must be confirmed first (an account with an authenticator app adding its
-first passkey), the wizard sends the person to `/verify-stepup` and back to the
+first passkey), the wizard sends the person to `/profile/verify-stepup` and back to the
 step, as the security page does. `/setup` is exempt from the admin and
 vault 2FA navigation gates for the same reason `/profile/security` is: it
 is a place where the required factor gets enrolled.

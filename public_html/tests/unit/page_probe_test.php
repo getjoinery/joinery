@@ -20,6 +20,7 @@
  *     is refused before the database is asked.
  *   - A report carries a warning's type and place, never its text.
  *
+ * @version 1.2 - a refused page under a section (/profile/verify-stepup) is found at its own path
  * @version 1.1 - a page view does not write: GuardedPdo logs or refuses a write on GET, HEAD and OPTIONS
  * @version 1.0
  */
@@ -32,14 +33,14 @@ section('The pages a probe never renders');
 check(PageProbe::REFUSED_PAGES === array(
 	'/logout', '/oauth_callback', '/setup', '/app_bridge', '/services_connected', '/sm_ssl_probe',
 	'/survey_finish', '/recovery-verify', '/password-reset-1', '/password-reset-2', '/password-reset-2fa',
-	'/password-reset-totp', '/password-set', '/terms-accept', '/verify-stepup', '/verify-totp',
+	'/password-reset-totp', '/password-set', '/terms-accept', '/profile/verify-stepup', '/verify-totp',
 	'/change-password-required', '/admin/admin_user_login_as',
 ), 'the refused list is exactly the pinned one');
 
 $root = PathHelper::getRootDir();
 foreach (PageProbe::REFUSED_PAGES as $p) {
 	$name = basename($p);
-	$exists = is_file($root . '/views/' . $name . '.php') || is_file($root . '/adm/' . $name . '.php');
+	$exists = is_file($root . '/views' . $p . '.php') || is_file($root . '/views/' . $name . '.php') || is_file($root . '/adm/' . $name . '.php');
 	check($exists, "{$p} names a page this platform has");
 }
 

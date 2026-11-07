@@ -477,7 +477,7 @@
 		var link = el('a', 'mbx-mailbox-addr');
 		if (state === 'needs_stepup') {
 			link.textContent = 'Every mailbox (confirm it is you)';
-			link.href = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
+			link.href = '/profile/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
 			li.title = 'Reading mailboxes you are not a member of needs a fresh confirmation that it is you.';
 		} else {
 			link.textContent = 'Every mailbox (needs a second factor)';
@@ -1875,7 +1875,7 @@
 	var STEPUP_TRIP = 'mbx.stepupTrip';
 	function goStepUp() {
 		try { sessionStorage.setItem(STEPUP_TRIP, String(Date.now())); } catch (x) {}
-		window.location = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
+		window.location = '/profile/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
 	}
 	function justSteppedUp() {
 		try { return Date.now() - Number(sessionStorage.getItem(STEPUP_TRIP) || 0) < 180000; } catch (x) { return false; }
@@ -5541,7 +5541,7 @@
 				: 'Reading every mailbox needs a second factor on your account. ');
 			var go = el('a', '', seed.oversight === 'needs_stepup' ? 'Confirm it is you' : 'Add a second factor');
 			go.href = seed.oversight === 'needs_stepup'
-				? '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash)
+				? '/profile/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash)
 				: '/profile/security';
 			gate.appendChild(go);
 			$('#mbx-threads').appendChild(gate);
