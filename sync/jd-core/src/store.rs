@@ -2162,6 +2162,17 @@ impl Store {
         Ok(())
     }
 
+    /// A person asked for a sync now: nothing held for a refusal or waiting on
+    /// a back-off sits out the rest of it. What is refused again is held again.
+    pub fn ask_again_now(&self) -> StoreResult<()> {
+        self.conn.execute("DELETE FROM refusals", [])?;
+        self.conn.execute(
+            "UPDATE ops SET next_retry_time = NULL WHERE state = 'queued' AND next_retry_time IS NOT NULL",
+            [],
+        )?;
+        Ok(())
+    }
+
     /// Lift every refusal held for this entity. True when there was one.
     pub fn clear_refusal(&self, entity: EntityId) -> StoreResult<bool> {
         let n = self.conn.execute(

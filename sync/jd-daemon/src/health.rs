@@ -62,6 +62,8 @@ pub enum Blocker {
     RootUnavailable { path: String },
     /// The server cannot be reached.
     ServerUnreachable { detail: String },
+    /// The server answered, with an error or with nothing this client can use.
+    ServerTrouble { detail: String },
     /// Something on this computer stopped the pass: the disk, not the network
     /// (`jd_vfs::VfsError`). Said as this computer's, so nobody goes looking
     /// for a server outage.
@@ -80,6 +82,9 @@ impl Blocker {
             }
             Blocker::ServerUnreachable { detail } => {
                 format!("Cannot reach the server: {detail}. Retrying.")
+            }
+            Blocker::ServerTrouble { detail } => {
+                format!("The server reported a problem: {detail}. Retrying.")
             }
             Blocker::LocalError { detail } => {
                 format!("Sync stopped on this computer: {detail}. Retrying.")
@@ -614,6 +619,9 @@ mod tests {
             Blocker::RootUnavailable { path: "/x".into() },
             Blocker::ServerUnreachable {
                 detail: "timed out".into(),
+            },
+            Blocker::ServerTrouble {
+                detail: "it answered 503".into(),
             },
             Blocker::LocalError {
                 detail: "disk full".into(),

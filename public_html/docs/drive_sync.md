@@ -1537,7 +1537,8 @@ answers the same, so the next passes do not plan it. The hold lifts the moment
 any of it moves (an edit, a rename or a move here, a change on the server, any
 change to the account, which is what frees room for an upload refused over
 quota) or after an hour, the one change the feed does not carry, such as a
-limit an administrator raised. One `withdrawn` issue says what was refused, in
+limit an administrator raised. A person's sync-now lifts every hold and cuts
+short every back-off; what is refused again is held again. One `withdrawn` issue says what was refused, in
 the words of the latest refusal, and goes when the operation is carried out.
 Any other refusal is withdrawn and planned afresh on the next pass, and a
 transport failure, a timeout, a 5xx or an upload whose bytes did not all arrive

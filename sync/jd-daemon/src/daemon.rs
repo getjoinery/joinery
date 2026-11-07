@@ -391,7 +391,12 @@ impl Daemon {
                     // button.
                     self.last_poll_ms = 0;
                 }
-                Command::SyncNow => self.last_poll_ms = 0,
+                // Asked by a person, who may have just freed room or fixed
+                // what was wrong: nothing waits out a hold or a back-off.
+                Command::SyncNow => {
+                    self.last_poll_ms = 0;
+                    let _ = self.store.ask_again_now();
+                }
                 Command::DismissIssue(id) => {
                     let _ = self.store.dismiss_issue(id);
                 }
@@ -559,10 +564,19 @@ impl Daemon {
                 outcome.exec.stood_down
             }
             Err(e) => {
-                self.blocker = Some(blocker_for(&e));
+                self.say_what_stopped_the_pass(&e);
                 false
             }
         }
+    }
+
+    /// The status gets it in words; the log, once per change, gets it whole.
+    fn say_what_stopped_the_pass(&mut self, e: &jd_core::ExecError) {
+        let blocker = blocker_for(e);
+        if self.blocker.as_ref() != Some(&blocker) {
+            eprintln!("pass stopped: {e}");
+        }
+        self.blocker = Some(blocker);
     }
 
     /// Say once, in the log, that the server will not answer this device's
@@ -595,7 +609,7 @@ impl Daemon {
             stand_down: &|| false,
         };
         if let Err(e) = jd_core::recover(&env) {
-            self.blocker = Some(blocker_for(&e));
+            self.say_what_stopped_the_pass(&e);
         }
         let _ = self.vfs.sweep_spool();
     }
@@ -823,14 +837,52 @@ fn blocker_for(error: &jd_core::ExecError) -> Blocker {
         }
         jd_core::ExecError::Proto(_) | jd_core::ExecError::Contract(_) | jd_core::ExecError::StoodDown => {}
     }
+    use jd_proto::{ProtoError, NO_ERROR_MESSAGE};
     match error {
         // Refused for the credential, by the status: the words of an error can
         // hold "401" anywhere, a port or a file's name among them.
-        jd_core::ExecError::Proto(
-            jd_proto::ProtoError::Api { status: 401, .. } | jd_proto::ProtoError::NoCredentials,
-        ) => Blocker::NotAuthorized,
-        _ => Blocker::ServerUnreachable { detail: error.to_string() },
+        jd_core::ExecError::Proto(ProtoError::Api { status: 401, .. } | ProtoError::NoCredentials) => {
+            Blocker::NotAuthorized
+        }
+        jd_core::ExecError::Proto(ProtoError::Transport(text)) => {
+            Blocker::ServerUnreachable { detail: the_connection_failure_in_words(text) }
+        }
+        // It answered, so it can be reached: what it said, when it said anything.
+        jd_core::ExecError::Proto(ProtoError::Api { status, message, .. }) => {
+            let said = message.trim().trim_end_matches('.');
+            let detail = if said.is_empty() || said == NO_ERROR_MESSAGE {
+                format!("it answered {status}")
+            } else {
+                said.to_string()
+            };
+            Blocker::ServerTrouble { detail }
+        }
+        jd_core::ExecError::Proto(ProtoError::Contract(_)) => {
+            Blocker::ServerTrouble { detail: "it sent a reply this client could not read".into() }
+        }
+        _ => Blocker::ServerTrouble { detail: error.to_string() },
     }
+}
+
+/// A failed connection as a person can read it. The words are the HTTP
+/// library's and only choose a sentence: one it stops using falls to the last
+/// line, which is still true. The library's own text goes to the log.
+fn the_connection_failure_in_words(text: &str) -> String {
+    let text = text.to_lowercase();
+    let words = if text.contains("dns failed") {
+        "its name could not be looked up"
+    } else if text.contains("certificate") {
+        "its security certificate was not accepted"
+    } else if text.contains("tls") {
+        "a secure connection could not be set up"
+    } else if text.contains("connection refused") {
+        "the connection was refused"
+    } else if text.contains("timed out") {
+        "it did not answer in time"
+    } else {
+        "the connection failed"
+    };
+    words.to_string()
 }
 
 pub fn now_ms() -> u64 {
@@ -1932,6 +1984,29 @@ mod tests {
     }
 
     #[test]
+    fn a_sync_now_asks_again_for_what_a_refusal_is_holding() {
+        // Room made by a limit raised on the server: nothing on the feed says
+        // so, and the person who raised it should not wait out the hour.
+        let drive = Drive::start();
+        drive.server.set_quota_bytes(Some(1024));
+        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "quota");
+        std::fs::write(root.join("big.bin"), vec![7u8; 64 << 10]).unwrap();
+        let open_issues = || handle_control(&shared, &req("GET", "/status", Value::Null)).1["issues_total"].as_u64();
+        wait_for("the refusal being said", Duration::from_secs(45), || open_issues().is_some_and(|n| n > 0));
+
+        // Counted at the asking: this little server carries no chunks.
+        drive.server.set_quota_bytes(None);
+        let asked = drive.server.upload_inits();
+        std::thread::sleep(Duration::from_secs(3));
+        assert_eq!(drive.server.upload_inits(), asked, "asked again before anybody said to");
+
+        assert_eq!(handle_control(&shared, &req("POST", "/sync-now", Value::Null)).0, 200);
+        wait_for("the upload being asked for", Duration::from_secs(20), || drive.server.upload_inits() > asked);
+        assert_eq!(handle_control(&shared, &req("POST", "/stop", Value::Null)).0, 200);
+        exited.recv_timeout(Duration::from_secs(15)).expect("the daemon stopped");
+    }
+
+    #[test]
     fn a_stop_lands_in_the_middle_of_a_transfer_not_when_it_ends() {
         // Eight MiB at 160 KiB a second: fifty seconds of transfer, against a
         // stop that is to land at once. The installer and an update's restart
@@ -2049,13 +2124,43 @@ mod tests {
         // Only the status says so. A device told it is no longer authorized
         // goes to be linked again, and asks every fifteen minutes meanwhile.
         let in_the_address = proto(ProtoError::Transport(
-            "http://127.0.0.1:40123/api/v1/drive_upload/ab401c: Network Error: Connection refused".into(),
+            "https://s401.example.com:8401/api/v1/action/drive_changes: Connection Failed: Connect error: Connection refused (os error 111)".into(),
         ));
         assert!(matches!(in_the_address, Blocker::ServerUnreachable { .. }), "{in_the_address:?}");
         let in_the_words = api(403, "Unauthorized for folder 401");
-        assert!(matches!(in_the_words, Blocker::ServerUnreachable { .. }), "{in_the_words:?}");
+        assert!(matches!(in_the_words, Blocker::ServerTrouble { .. }), "{in_the_words:?}");
         let in_a_reply = proto(ProtoError::Contract("line 401: unauthorized".into()));
-        assert!(matches!(in_a_reply, Blocker::ServerUnreachable { .. }), "{in_a_reply:?}");
+        assert!(matches!(in_a_reply, Blocker::ServerTrouble { .. }), "{in_a_reply:?}");
+    }
+
+    #[test]
+    fn what_the_server_did_is_said_in_words() {
+        use jd_proto::ProtoError;
+        let says = |e: ProtoError| blocker_for(&jd_core::ExecError::Proto(e)).message();
+        // As the library words them, from runs against a bad server.
+        for (text, expected) in [
+            ("https://h/: Dns Failed: resolve dns name 'no-such-host.invalid:443': failed to lookup address information", "Cannot reach the server: its name could not be looked up. Retrying."),
+            ("https://h/: Connection Failed: tls connection init failed: invalid peer certificate: Other(OtherError(CaUsedAsEndEntity))", "Cannot reach the server: its security certificate was not accepted. Retrying."),
+            ("https://h/: Connection Failed: Connect error: Connection refused (os error 111)", "Cannot reach the server: the connection was refused. Retrying."),
+            ("https://h/: Network Error: Network Error: Error encountered in the status line: timed out reading response", "Cannot reach the server: it did not answer in time. Retrying."),
+            ("https://h/: Network Error: Unexpected EOF", "Cannot reach the server: the connection failed. Retrying."),
+        ] {
+            assert_eq!(says(ProtoError::Transport(text.into())), expected);
+        }
+        let api = |status: u16, errortype: &str, message: &str| ProtoError::Api {
+            status,
+            errortype: errortype.into(),
+            message: message.into(),
+            data: serde_json::Value::Null,
+        };
+        assert_eq!(
+            says(api(503, "(no errortype)", jd_proto::NO_ERROR_MESSAGE)),
+            "The server reported a problem: it answered 503. Retrying."
+        );
+        assert_eq!(
+            says(api(429, "RateLimitError", "Nothing is wrong — try again in 14 minutes.")),
+            "The server reported a problem: Nothing is wrong — try again in 14 minutes. Retrying."
+        );
     }
 
     #[test]

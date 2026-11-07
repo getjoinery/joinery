@@ -49,6 +49,9 @@ pub struct KeysNeeded {
     pub readers: Vec<(i64, String)>,
 }
 
+/// What an error answer with no message of its own is given (`ProtoError::Api`).
+pub const NO_ERROR_MESSAGE: &str = "(no error message)";
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProtoError {
     /// The server answered with an error envelope. `errortype` is from the
@@ -499,7 +502,7 @@ impl Client {
                     message: body
                         .get("error")
                         .and_then(Value::as_str)
-                        .unwrap_or("(no error message)")
+                        .unwrap_or(NO_ERROR_MESSAGE)
                         .to_string(),
                     data: body.get("data").cloned().unwrap_or(Value::Null),
                 })
