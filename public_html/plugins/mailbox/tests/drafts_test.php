@@ -256,7 +256,7 @@ $co_drafts = new MailboxDrafts($co_viewer);
 $co_service = new MailboxService($co_viewer);
 
 $super_user = make_user('DraftSuper', 10);
-$super_viewer = MailboxViewer::forUser((int)$super_user->key, 10); // all-access
+$super_viewer = MailboxViewer::confirmedForTest((int)$super_user->key, 10); // all-access (oversight confirmed, as a stepped-up session would be)
 $super_drafts = new MailboxDrafts($super_viewer);
 $super_service = new MailboxService($super_viewer);
 

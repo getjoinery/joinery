@@ -29,6 +29,7 @@
  * is not yet a contact. The lists come from iem_to / iem_cc, or from the retained header
  * block on a row stored before those columns existed.
  *
+ * @version 1.7.0 - an all-access viewer's look at a message they hold no grant on is written down (MailboxReadAudit)
  * @version 1.6.0 - a Fortress message answers {fortress: true}: its addresses open only on the owner's devices
  * @version 1.5.0
  */
@@ -66,6 +67,9 @@ function sender_context_logic(array $input): LogicResult {
 	if (!$viewer->isAllAccess() && ($alias_id <= 0 || !$viewer->canAccess($alias_id))) {
 		return LogicResult::error('Not authorized.');
 	}
+	// The panel reads the message's addresses: an all-access viewer asking about
+	// a message they hold no grant on is written down (mail_access_hardening WP1).
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_SENDER_CONTEXT, array($message_id));
 
 	// A Fortress message's addresses open only on its owner's devices; there is
 	// no counterparty here to look up (specs/client_custody_mail.md § R7).

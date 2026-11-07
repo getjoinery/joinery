@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.50 - $read_permission = 10: reading another person's message is the reader's all-access level (mail_access_hardening WP0)
  * @version 1.49 - ai_travel_filter(): an agent or chat read keeps to each domain's AI consent
  * @version 1.48 - access_owner_is(): a message is its mailbox's grant holders' and its sealed owner's (a draft its author's),
  *               so a holder below the personal level may change their own mail (MailboxViewer::holdsMessageRow)
@@ -229,6 +230,14 @@ class InboundEmailMessage extends SystemBase {
 	public static $prefix = 'iem';
 	public static $tablename = 'iem_inbound_email_messages';
 	public static $access_class = 'personal';
+	/**
+	 * Reading a message one holds no grant on is the reader's all-access rule,
+	 * level 10 (MailboxViewer::isAllAccess()), not the personal class's 6. The
+	 * two must agree: a level 6 to 9 staff chat with data access on is then
+	 * scoped to its own rows by ChatTurnContext::ownerScopedReads(), the same
+	 * fence the mailbox reader puts in front of such an account.
+	 */
+	public static $read_permission = 10;
 	public static $pkey_column = 'iem_inbound_email_message_id';
 
 	/**

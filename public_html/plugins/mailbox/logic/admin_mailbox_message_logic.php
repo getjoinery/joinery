@@ -9,6 +9,9 @@
  * the HTML body are rewritten to short-lived signed URLs by the shared
  * MailboxService::resolveInlineImages(), scoped to this message only.
  *
+ * @version 1.7 - an all-access viewer's open of a message they hold no grant on is written down (MailboxReadAudit);
+ *   the open counts against the person's read budget (MailReadBudget); a level-10 viewer yet to confirm
+ *   oversight is sent to confirm (WP3)
  * @version 1.6 - a message opens only for a viewer with a grant on its mailbox (MailboxViewer::canReadMessage); delete is a POST
  * @version 1.5 - a Fortress message renders locked, with fortress set
  * @version 1.4
@@ -40,6 +43,16 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	// mail that belongs to no mailbox. The permission-5 gate above only admits staff.
 	$viewer = MailboxViewer::fromSession($session);
 	if (!$viewer->canReadMessage($message)) {
+		// A level-10 account yet to confirm oversight (mail_access_hardening WP3)
+		// is sent to confirm and comes back here; anyone else is sent away.
+		if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
+			return LogicResult::redirect('/verify-stepup?return='
+				. urlencode('/plugins/mailbox/admin/admin_mailbox_message?iem_inbound_email_message_id=' . $id));
+		}
+		if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_SECOND_FACTOR) {
+			$session->save_message(new DisplayMessage('Reading a mailbox you are not a member of needs a second factor on your account. Add one under Security.',
+				'Second factor needed', '~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		}
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
 	}
 
@@ -52,6 +65,16 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+	}
+
+	// This page shows the message whole: an all-access viewer opening one they
+	// hold no grant on is written down (mail_access_hardening WP1).
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_FORENSIC, array($id));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array($id));
+	if ($budget['paused']) {
+		$session->save_message(new DisplayMessage(MailReadBudget::refusal($budget)->error, 'Paused',
+			'~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
 	}
 

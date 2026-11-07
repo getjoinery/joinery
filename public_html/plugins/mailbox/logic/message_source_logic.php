@@ -22,6 +22,8 @@
  * reading those needs an open unlock window and a locked one returns
  * {locked:true}, the same contract the body and draft reads use.
  *
+ * @version 1.2.0 - an all-access viewer's read of a message they hold no grant on is written down (MailboxReadAudit);
+ *   the read counts against the person's read budget (MailReadBudget)
  * @version 1.1.1
  */
 
@@ -52,6 +54,11 @@ function message_source_logic(array $input): LogicResult {
 	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
 	if (!$allowed) {
 		return LogicResult::error('You do not have access to this mailbox.');
+	}
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_SOURCE, array($id));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array($id));
+	if ($budget['paused']) {
+		return MailReadBudget::refusal($budget);
 	}
 
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/message_export.php'));

@@ -195,7 +195,7 @@ class MailboxReaderTest {
 
 	private function bethViewer() { return MailboxViewer::forUser($this->beth_user, 5); }
 	private function bobViewer()  { return MailboxViewer::forUser($this->bob_user, 5); }
-	private function superViewer(){ return MailboxViewer::forUser(0, 10); }
+	private function superViewer(){ return MailboxViewer::confirmedForTest(0, 10); }
 
 	private function threadKeys($result) {
 		$keys = array();

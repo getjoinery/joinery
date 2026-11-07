@@ -21,6 +21,7 @@
  * with no name or URL. The response's own `fortress: true` says some message
  * needs the mail key: a client without it shows that and opens the web reader.
  *
+ * @version 1.5.0 - the thread's messages count against the person's read budget; a paused budget answers the refusal (MailReadBudget)
  * @version 1.4.0 - a thread with a Fortress message counts as a content read (VaultUnlock::noteClientContentRead)
  * @version 1.3.0 - Fortress messages travel sealed; `fortress` on the response
  * @version 1.2.1
@@ -46,6 +47,16 @@ function thread_logic(array $input): LogicResult {
 	$alias_id = MailboxService::parseAliasParam($input['alias_id'] ?? null);
 
 	$trashed = !empty($input['trash']);
+
+	// The read budget (mail_access_hardening WP2): the thread's messages are
+	// counted against this person on this credential before the thread is
+	// opened, so a paused session drives neither the parse-on-open nor the
+	// mark-read, and a paused budget answers the refusal in place of the content.
+	$budget = MailReadBudget::messages((int)$session->get_user_id(),
+		$service->messageIdsInThread($alias_id, $thread_key, $trashed));
+	if ($budget['paused']) {
+		return MailReadBudget::refusal($budget);
+	}
 	$messages = $service->getThread($alias_id, $thread_key, $trashed);
 	$messages = $service->withSignedTransport($messages);
 

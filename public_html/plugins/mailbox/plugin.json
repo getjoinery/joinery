@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.144.31",
+    "version": "1.145.0",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -332,6 +332,66 @@
                     "min": "Must be 0 or more."
                 }
             }
+        },
+        {
+            "name": "mailbox_read_ledger_retention_days",
+            "default": "2",
+            "group": "retention",
+            "helptext": "How long the read budget's ledger (one row per message a person opened, per hour) is kept. The budget looks back one hour, so two days is plenty. 0 keeps it indefinitely.",
+            "label": "Read-ledger retention (days)",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 0,
+                "messages": {
+                    "min": "Must be 0 or more."
+                }
+            }
+        },
+        {
+            "name": "mailbox_read_budget_soft",
+            "default": "300",
+            "group": "read_budget",
+            "helptext": "Past this many distinct messages opened in an hour, the account is notified and an event is logged. A person reading by hand opens tens an hour. 0 turns the notice off.",
+            "label": "Read budget: notify past (messages/hour)",
+            "type": "number",
+            "validation": { "number": true, "min": 0, "messages": { "min": "Must be 0 or more." } }
+        },
+        {
+            "name": "mailbox_read_budget_hard",
+            "default": "1000",
+            "group": "read_budget",
+            "helptext": "Past this many distinct messages opened in an hour on the website, reading pauses until the person confirms a second factor (or, with none, until the hour passes). 0 turns the pause off.",
+            "label": "Read budget: pause past (messages/hour, website)",
+            "type": "number",
+            "validation": { "number": true, "min": 0, "messages": { "min": "Must be 0 or more." } }
+        },
+        {
+            "name": "mailbox_read_budget_app_hard",
+            "default": "20000",
+            "group": "read_budget",
+            "helptext": "The same pause for a person's mail programs and linked devices together, which answer a rate limit and back off. A program's first sync of a large mailbox reads everything it holds, so this is the transport limit's size. 0 turns the pause off.",
+            "label": "Read budget: pause past (messages/hour, programs and devices)",
+            "type": "number",
+            "validation": { "number": true, "min": 0, "messages": { "min": "Must be 0 or more." } }
+        },
+        {
+            "name": "mailbox_read_budget_pages_hard",
+            "default": "500",
+            "group": "read_budget",
+            "helptext": "Past this many pages of conversation previews in an hour on the website, the same pause: a page of previews carries the subject, the sender and the first line of every message on it. 0 turns the pause off.",
+            "label": "Read budget: pause past (list pages/hour, website)",
+            "type": "number",
+            "validation": { "number": true, "min": 0, "messages": { "min": "Must be 0 or more." } }
+        },
+        {
+            "name": "mailbox_oversight_stepup_minutes",
+            "default": "60",
+            "group": "oversight",
+            "helptext": "A level-10 account reads every mailbox on the site only after confirming a second factor, and for this many minutes afterwards. The confirmation itself lasts one hour, so 60 is the most this can be; a larger value would be capped. The account must have a second factor at all; without one it reads only its own mailboxes.",
+            "label": "Every-mailbox access lasts (minutes after a confirmation)",
+            "type": "number",
+            "validation": { "number": true, "min": 1, "max": 60, "messages": { "min": "At least 1 minute.", "max": "At most 60: the confirmation itself lasts one hour." } }
         },
         {
             "name": "mailbox_personal_address_retention_days",
@@ -725,6 +785,25 @@
                 "title_template": "Your download of {mailbox} is ready",
                 "body_template": "{messages} message(s) are waiting for you on the downloads page.",
                 "link_template": "/profile/mailbox/export"
+            }
+        },
+        "mail_read_budget.soft": {
+            "label": "Unusual amount of mail opened",
+            "description": "An account opened more distinct messages in an hour than the read budget's notice line (mailbox_read_budget_soft). Raised once per window; the account is told so a stolen session or a runaway program is noticed.",
+            "category": "Mailbox",
+            "payload": {
+                "count": "Messages opened in the window",
+                "limit": "The notice line",
+                "credential": "browser, device or app",
+                "recipients": "The account whose mail was opened"
+            },
+            "notify": {
+                "ntf_type": "mail_read_budget",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "An unusual amount of your mail was opened",
+                "body_template": "{count} messages were opened from your account in the last hour (the notice line is {limit}). If that was not you, change your password and sign out of other sessions.",
+                "link_template": "/profile/security"
             }
         },
         "mailbox.relay_scanner_down": {

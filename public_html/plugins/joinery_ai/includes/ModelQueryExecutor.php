@@ -44,6 +44,9 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchema
  *   field_min       -> field >= value     (numerics)
  *   field_max       -> field <= value
  *
+ * @version 1.6 - mail read across users is written down (MailboxReadAudit, mail_access_hardening WP1); mail rows
+ *   count against the acting person's read budget and a paused budget is the tool's error (MailReadBudget, WP2);
+ *   a recipe's reads are metered as a program's, and an owner-scoped read is budgeted too (reviewer2 B5)
  * @version 1.5 - rows a model's ai_travel_filter() holds back from the loop's endpoint are left out (mail AI consent)
  * @version 1.4 - a column stricter than its model is left out below its read level
  * @version 1.3 - owner scoping is per model: staff below a model's read level read only their own rows of it
@@ -196,8 +199,22 @@ class ModelQueryExecutor {
 
         $effective_limit = max(1, min($limit ?? self::DEFAULT_LIMIT, self::MAX_LIMIT));
 
+        // Mail read across users is written down (mail_access_hardening WP1,
+        // MailboxReadAudit): the audit needs each row's id, which rides along
+        // in the query when the caller did not ask for it and is taken back
+        // off before the rows are returned. An owner-scoped read is the
+        // reader's own mail and is never foreign.
+        $mail_read = $class === 'InboundEmailMessage' && class_exists('MailReadBudget');
+        // Every mail read is budgeted (an owner-scoped read of one's own mail
+        // too); only a read across users is audited as foreign.
+        $audit_pkey = $mail_read ? (string)$class::$pkey_column : null;
+        $audit_foreign = $mail_read && !$ctx->ownerScopedReads($class);
+        $sql_fields = $select_fields;
+        $audit_pkey_added = $audit_pkey !== null && !in_array($audit_pkey, $sql_fields, true);
+        if ($audit_pkey_added) $sql_fields[] = $audit_pkey;
+
         $table = $class::$tablename;
-        $sql = "SELECT " . implode(', ', $select_fields) . " FROM $table";
+        $sql = "SELECT " . implode(', ', $sql_fields) . " FROM $table";
         if ($where_parts) $sql .= " WHERE " . implode(' AND ', $where_parts);
         if ($order_parts) $sql .= " ORDER BY " . implode(', ', $order_parts);
         $sql .= " LIMIT ?";
@@ -208,6 +225,32 @@ class ModelQueryExecutor {
         $q->execute($params);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
         $rows = self::decryptSealedFields($rows, $class, $ctx->sealedReadsAllowed());
+
+        if ($audit_pkey !== null) {
+            $uid = $ctx->actingUserId();
+            $ids = array_column($rows, $audit_pkey);
+            if ($audit_foreign) {
+                // This path is scoped by the person's level, not by a mailbox
+                // viewer (a viewer built here has no session and is never
+                // all-access), so the audit is told the surface reached everything.
+                MailboxReadAudit::messages(MailboxViewer::forUser($uid, self::actingLevel($uid)),
+                    MailboxReadAudit::SURFACE_AI_QUERY, $ids, true);
+            }
+            // The rows count against the acting person's read budget; a paused
+            // budget surfaces as the tool's error (QueryModelTool catches it). A
+            // recipe runs unattended, on no request, so it is metered as a
+            // program (the app budget), never as the owner's browser: a
+            // scheduled job must not pause the person's own reader (reviewer2 B5).
+            $credential = ($ctx instanceof RecipeRunContext) ? MailReadBudget::CREDENTIAL_APP : null;
+            $budget = MailReadBudget::messages($uid, $ids, $credential);
+            if ($budget['paused']) {
+                throw new InvalidArgumentException(MailReadBudget::refusal($budget)->error);
+            }
+            if ($audit_pkey_added) {
+                foreach ($rows as &$row) unset($row[$audit_pkey]);
+                unset($row);
+            }
+        }
 
         return self::wrapUntrustedFields($rows, $info, $select_fields, $ctx);
     }

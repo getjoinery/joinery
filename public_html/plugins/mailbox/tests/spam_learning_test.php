@@ -172,7 +172,7 @@ try {
 	$box = sl_alias($std, array());
 	$alias_id = intval($box->key);
 	$router = new InboundEmailRouter();
-	$svc = new MailboxService(MailboxViewer::forUser(0, 10));
+	$svc = new MailboxService(MailboxViewer::confirmedForTest(0, 10));
 	$pass = array('dkim' => 'pass', 'spf' => 'pass', 'dmarc' => 'pass', 'source' => 'milter');
 	$none = array('signal' => 'none', 'score' => null, 'source' => null);
 	$parsed = function (string $from, string $refs = '', string $irt = '') {
@@ -287,7 +287,7 @@ try {
 	$out = sl_message($std, $box, array('iem_direction' => 'outbound'));
 	check(SpamLearning::recordEvidence(array($out), $SPAM) === 0, 'nor does the user\'s own outbound row');
 
-	$sender = new MailboxSender(MailboxViewer::forUser(0, 10));
+	$sender = new MailboxSender(MailboxViewer::confirmedForTest(0, 10));
 	$send = new ReflectionMethod('MailboxSender', 'recordForSpamFilter');
 	$src = sl_message($std, $box, array());
 	$fwd_to = 'fwd-' . bin2hex(random_bytes(3)) . '@else.example';

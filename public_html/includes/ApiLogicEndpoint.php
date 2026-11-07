@@ -30,7 +30,8 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.6
+ * @version 1.8.7
+ * @changelog 1.8.7 - a 429 refusal that names retry_after_seconds sends it as Retry-After (mail_access_hardening WP2)
  * @changelog 1.8.6 - the idempotency claim and outcome are written as the server's own (server_initiated_write)
  * @changelog 1.8.5 - executeAction() takes the acting level: the action face simulated its session with an
  *                undefined variable (null), so a browser session ran at its stored level
@@ -545,6 +546,14 @@ class ApiLogicEndpoint {
 
 		header("Content-Type: application/json");
 		http_response_code($translated['status_code']);
+		// A refusal that says when to try again carries it as the header a
+		// client's transport reads (api_rate_limited() sets the same one).
+		// (The data is an array on a refusal and an object on an empty success.)
+		$data = $translated['response']['data'] ?? null;
+		$retry_after = is_array($data) ? intval($data['retry_after_seconds'] ?? 0) : 0;
+		if ($translated['status_code'] === 429 && $retry_after > 0) {
+			header('Retry-After: ' . $retry_after);
+		}
 		echo $response_json . PHP_EOL;
 		exit;
 	}

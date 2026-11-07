@@ -1057,7 +1057,7 @@ class ImapSyncerTest {
 	private function allAccessViewer(): MailboxViewer {
 		// A permission-10 (all-access) viewer so service mutations/reads aren't
 		// grant-scoped in the CLI test (there is no logged-in session).
-		return MailboxViewer::forUser(1, 10);
+		return MailboxViewer::confirmedForTest(1, 10);
 	}
 
 	/**

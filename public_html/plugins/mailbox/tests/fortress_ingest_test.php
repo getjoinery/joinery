@@ -288,7 +288,7 @@ try {
 	// ------------------------------------------------------------ Sent copy
 	section('the Sent copy of a send from the mailbox has the same shape');
 
-	$sender = new MailboxSender(MailboxViewer::forUser($owner_id, 10));
+	$sender = new MailboxSender(MailboxViewer::confirmedForTest($owner_id, 10));
 	$store = new ReflectionMethod('MailboxSender', 'storeOutboundRow');
 	$parts = new ReflectionMethod('MailboxSender', 'storeCopyParts');
 	$email = new EmailMessage();
@@ -389,7 +389,7 @@ try {
 
 	check(empty($thread['sealed']['foreign']) && empty($m['sealed']['foreign']), 'the owner\'s own rows are not marked');
 	$admin = make_user('FortressApiAdmin');
-	$oversight = new MailboxService(MailboxViewer::forUser(intval($admin->key), 10));
+	$oversight = new MailboxService(MailboxViewer::confirmedForTest(intval($admin->key), 10));
 	$olist = $oversight->listThreads($alias_id, array('inbox' => true));
 	$ot = null;
 	foreach ($olist['threads'] as $t) { if (intval($t['latest_id']) === $mid) { $ot = $t; } }

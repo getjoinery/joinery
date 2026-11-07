@@ -25,6 +25,7 @@
  * With `device_only` (every mailbox in view is Fortress) there is no `q`: the
  * ids are the whole search, and the term never reaches the server.
  *
+ * @version 1.8.0 - a page counts against the person's read budget; a paused budget answers the refusal (MailReadBudget)
  * @version 1.7.0 - a list with Fortress threads counts as a content read (VaultUnlock::noteClientContentRead)
  * @version 1.6.1 - comment: Trash rows carry no purge_time
  * @version 1.6.0 - device_only: a search over end-to-end mail alone sends no term
@@ -87,6 +88,13 @@ function thread_list_logic(array $input): LogicResult {
 	$folder_id = isset($input['folder_id']) && $input['folder_id'] !== '' && $input['folder_id'] !== null
 		? intval($input['folder_id']) : null;
 
+	// The read budget (mail_access_hardening WP2): a page of previews is one
+	// page against this person on this credential, counted before the page is
+	// built; a paused budget answers the refusal in place of the page.
+	$budget = MailReadBudget::page((int)SessionControl::get_instance()->get_user_id());
+	if ($budget['paused']) {
+		return MailReadBudget::refusal($budget);
+	}
 	$listed = $service->listThreads($alias_id, $filters, $page, 50, $folder_id);
 	// Fortress threads are opened in the browser: listing them keeps the window open.
 	if (!empty($listed['fortress'])) {

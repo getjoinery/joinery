@@ -179,7 +179,7 @@ check($other_svc->purgeFromTrash(array($m_trash)) === 0, 'they cannot purge it')
 check($row_exists($m_trash), 'the message survived both out-of-scope attempts');
 
 // All-access sees it in the all-mail Trash, the way it sees the all-mail Spam.
-$super = new MailboxService(MailboxViewer::forUser(0, 10));
+$super = new MailboxService(MailboxViewer::confirmedForTest(0, 10));
 check(in_array('<gone@x>', $keys($super->listThreads(null, array('trash' => true))), true),
 	'a superadmin All mail Trash includes it');
 check(count($keys($super->listThreads(MailboxService::UNMATCHED, array('trash' => true)))) === 0,

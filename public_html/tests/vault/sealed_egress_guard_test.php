@@ -36,6 +36,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_egress_guard
  *
+ * @version 1.5 - MailboxReadAudit is a declared content-free writer (mail_access_hardening WP1)
  * @version 1.4 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.3 - v2 (X-Wing) seal and edge-seal prefixes count as sealed
  * @version 1.2 - consentToValues() and contentFree()
@@ -431,8 +432,9 @@ try {
 		'consent is given only by the action queue\'s approve step',
 		implode(', ', $callers['consentToValues(']));
 	sort($callers['contentFree(']);
-	check($callers['contentFree('] === array('includes/VaultAudit.php', 'includes/VaultCeremonies.php', 'includes/VaultPreviousKeys.php'),
-		'and only the vault audit and the vault row\'s own key writes declare a content-free write',
+	check($callers['contentFree('] === array('includes/VaultAudit.php', 'includes/VaultCeremonies.php', 'includes/VaultPreviousKeys.php',
+			'plugins/mailbox/includes/MailboxReadAudit.php'),
+		'and only the vault audit, the vault row\'s own key writes and the mail read audit declare a content-free write',
 		implode(', ', $callers['contentFree(']));
 
 	// =====================================================================

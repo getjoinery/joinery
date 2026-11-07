@@ -17,6 +17,10 @@
  * the reader decides visibility. Both reader mounts — the admin page and the
  * member page at /profile/mailbox/mailbox — sit on this one seam.
  *
+ * @version 1.4 - all-access is deliberate (mail_access_hardening WP3): a level-10 viewer is all-access only
+ *               with a second factor on the account and a step-up marker younger than
+ *               mailbox_oversight_stepup_minutes on the browser session; withOversight() / fromSession()
+ *               alone decide it, forUser() never does; oversightState() says why not
  * @version 1.3 - holdsMailbox() / holdsMessage(): the owner rule of the mailbox's rows
  *               (InboundEmailMessage, its labels, filters, attachments and folders), so a
  *               grant holder below the model's level may change their own mailbox's rows
@@ -35,6 +39,27 @@ final class MailboxViewer {
 	private $permission;
 	/** @var int[]|null lazily-resolved accessible alias ids */
 	private $accessible_cache = null;
+	/**
+	 * @var string Why this viewer is, or is not, all-access (the OVERSIGHT_* words).
+	 * Decided once, by withOversight(): a viewer built without a session has no
+	 * marker to show and is never all-access, whatever its level.
+	 */
+	private $oversight = self::OVERSIGHT_NONE;
+
+	// Oversight: a level-10 account reading every mailbox on the site (the merged
+	// All mail and Unmatched views included) is deliberate, not automatic
+	// (mail_access_hardening WP3). It needs a second factor on the account and a
+	// step-up marker on this browser session younger than
+	// mailbox_oversight_stepup_minutes (1 to 60; the marker itself lives one hour,
+	// PasskeyService::STEPUP_MARKER_TTL_SECONDS, so 60 is the ceiling). Without
+	// them the account reads like any grant holder: its own mailboxes.
+	const OVERSIGHT_CONFIRMED          = 'confirmed';            // all-access
+	const OVERSIGHT_NEEDS_STEPUP       = 'needs_stepup';         // level 10 with a factor, no fresh marker
+	const OVERSIGHT_NEEDS_SECOND_FACTOR = 'needs_second_factor'; // level 10 with no factor to confirm with
+	const OVERSIGHT_NONE               = 'none';                 // below level 10, or no session
+
+	const OVERSIGHT_DEFAULT_MINUTES = 60;
+	const OVERSIGHT_MAX_MINUTES     = 60;
 
 	private function __construct(int $user_id, int $permission) {
 		$this->user_id = $user_id;
@@ -42,27 +67,102 @@ final class MailboxViewer {
 	}
 
 	public static function fromSession(SessionControl $session): MailboxViewer {
-		return new MailboxViewer(
+		return self::withOversight(
 			intval($session->get_user_id()),
-			intval($session->get_permission())
+			intval($session->get_permission()),
+			(string)session_id()
 		);
 	}
 
 	/**
+	 * A viewer for a person on a browser session, which is the one place
+	 * all-access can be decided: the session is what carries the step-up
+	 * marker. fromSession() calls this with the live session id; a test calls
+	 * it with a session id it stamped itself.
+	 */
+	public static function withOversight(int $user_id, int $permission, string $session_id): MailboxViewer {
+		$viewer = new MailboxViewer($user_id, $permission);
+		$viewer->oversight = self::decideOversight($user_id, $permission, $session_id);
+		return $viewer;
+	}
+
+	/**
 	 * Build a viewer for an explicit user/permission, independent of the current
-	 * session. The session adapter above is the normal path; this exists for the
-	 * deferred member-mount and for tests.
+	 * session: the deferred member-mount, a mail program's grant-only viewer, a
+	 * board or recipe acting for a person, and tests. It has no session to show
+	 * a marker from, so it is never all-access: a level-10 person read this way
+	 * reads the mailboxes they hold, which is what acting for someone should mean.
 	 */
 	public static function forUser(int $user_id, int $permission): MailboxViewer {
 		return new MailboxViewer($user_id, $permission);
 	}
 
 	/**
+	 * Tests only: a viewer whose oversight is confirmed without a session or a
+	 * marker, for the suites that exercise all-access reads. Refused outside the
+	 * test harness, so there is no production path to an unconfirmed all-access.
+	 */
+	public static function confirmedForTest(int $user_id, int $permission): MailboxViewer {
+		if (!defined('JOINERY_HARNESS_LOADED')) {
+			throw new LogicException('MailboxViewer::confirmedForTest() is for the test harness alone.');
+		}
+		$viewer = new MailboxViewer($user_id, $permission);
+		$viewer->oversight = Access::allows(10, $permission) ? self::OVERSIGHT_CONFIRMED : self::OVERSIGHT_NONE;
+		return $viewer;
+	}
+
+	/** Why this viewer is, or is not, all-access: one of the OVERSIGHT_* words. */
+	public function oversightState(): string {
+		return $this->oversight;
+	}
+
+	/** The configured oversight window, clamped to 1 to OVERSIGHT_MAX_MINUTES. */
+	public static function oversightMinutes(): int {
+		try {
+			$v = Globalvars::get_instance()->get_setting('mailbox_oversight_stepup_minutes');
+		} catch (\Throwable $e) {
+			$v = null;
+		}
+		$minutes = ($v === null || $v === '') ? self::OVERSIGHT_DEFAULT_MINUTES : intval($v);
+		return max(1, min(self::OVERSIGHT_MAX_MINUTES, $minutes));
+	}
+
+	private static function decideOversight(int $user_id, int $permission, string $session_id): string {
+		if ($user_id <= 0 || !Access::allows(10, $permission)) {
+			return self::OVERSIGHT_NONE;
+		}
+		try {
+			$user = new User($user_id, TRUE);
+			if (!$user->key || !SessionControl::get_instance()->user_has_second_factor($user)) {
+				return self::OVERSIGHT_NEEDS_SECOND_FACTOR;
+			}
+			if ($session_id === '') {
+				return self::OVERSIGHT_NEEDS_STEPUP;
+			}
+			// The same marker SessionControl::has_recent_second_factor() reads
+			// (stamp_second_factor(), PasskeyService::verifyStepUp()), keyed by the
+			// browser session, read for this session id rather than the live one.
+			$q = DbConnector::get_instance()->get_db_link()->prepare(
+				"SELECT 1 FROM pks_passkey_ceremonies WHERE pks_session_id = ? AND pks_kind = 'stepup'
+				 AND pks_create_time > ? LIMIT 1");
+			$q->execute(array($session_id, gmdate('Y-m-d H:i:s', time() - self::oversightMinutes() * 60)));
+			return $q->fetchColumn() ? self::OVERSIGHT_CONFIRMED : self::OVERSIGHT_NEEDS_STEPUP;
+		} catch (\Throwable $e) {
+			// A question that cannot be answered is answered no: oversight is
+			// the exception, and a failure must never widen a viewer's scope.
+			error_log('MailboxViewer: could not decide oversight for user ' . $user_id . ' — ' . $e->getMessage());
+			return self::OVERSIGHT_NEEDS_STEPUP;
+		}
+	}
+
+	/**
 	 * Superadmin oversight: sees every mailbox plus the merged "All mail" /
-	 * "Unmatched" views without needing a grant per address.
+	 * "Unmatched" views without needing a grant per address. Level 10 AND
+	 * confirmed on this session (see the OVERSIGHT_* words above): the check
+	 * lives here, not in the callers, so no surface can forget it.
 	 */
 	public function isAllAccess(): bool {
-		return Access::allows(10, (int)$this->permission);
+		return Access::allows(10, (int)$this->permission) && $this->oversight === self::OVERSIGHT_CONFIRMED;
 	}
 
 	/**

@@ -13,6 +13,7 @@
  * Nothing is ever served in a message's place (specs/mail_apps_plugin.md
  * § Locked behaviour, rule 3).
  *
+ * @version 1.1.0 - the fetch counts against the person's read budget on the app credential; a paused budget answers 429 (MailReadBudget)
  * @version 1.0.0
  */
 
@@ -36,6 +37,26 @@ function mail_fetch_logic(array $input): LogicResult {
 			}
 		}
 		sort($uids);
+
+		// The read budget (mail_access_hardening WP2), on the program's own
+		// credential: whole messages count one each, once an hour; a header
+		// fetch is the program's list and counts as one page. A paused budget
+		// answers 429 with Retry-After, which the gateway turns into NO [LIMIT]
+		// so the program backs off and nothing is served in a message's place.
+		if ($what === 'full') {
+			$served = array();
+			foreach ($uids as $uid) {
+				if (isset($rows[$uid]) && !$rows[$uid]['notice']) {
+					$served[] = intval($rows[$uid]['message_id']);
+				}
+			}
+			$budget = MailReadBudget::messages($ctx->user_id, $served, MailReadBudget::CREDENTIAL_APP);
+		} else {
+			$budget = MailReadBudget::page($ctx->user_id, MailReadBudget::CREDENTIAL_APP);
+		}
+		if ($budget['paused']) {
+			return MailReadBudget::refusal($budget);
+		}
 
 		$deadline = microtime(true) + ($what === 'full' ? 20.0 : 10.0);
 		$byte_budget = $what === 'full' ? 12 * 1048576 : 4 * 1048576;

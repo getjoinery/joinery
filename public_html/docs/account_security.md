@@ -759,6 +759,7 @@ saved, naming the entry. `IpAddress::matchesEntry()` and
 | Unlock the vault with a passphrase | Session + the phrase's account half, derived in the browser. No sign-in second factor |
 | Open a browser-held vault (Drive's Fortress folders, the password vault, Fortress mail) | Opens with the vault: the one unlock opens the root vault in the browser, and the root opens each. No sign-in second factor |
 | Change a sealed mailbox's filters or alias routing | Session + open unlock window (the owner's own) |
+| Read a mailbox you hold no grant on (every-mailbox oversight) | Permission 10 + a factor on the acting admin's own account + a step-up on this browser session younger than `mailbox_oversight_stepup_minutes` (at most 60); without them the account reads only the mailboxes it holds. Every such read is written down (`mail_foreign_read`, shown to the holder) and counts against the read budget |
 | Send as a protected identity domain | Open unlock window, via the mailbox compose path only — ambient/transactional senders are refused outright |
 | Protect a domain / stage or cut over a DKIM rotation | Admin session + open unlock window (the key seals to the owner's vault) |
 

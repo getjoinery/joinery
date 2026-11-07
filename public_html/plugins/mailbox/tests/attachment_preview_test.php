@@ -27,11 +27,16 @@
  *
  * Run: php plugins/mailbox/tests/attachment_preview_test.php  (schema synced).
  *
+ * @version 1.2.0 - the superadmin reads a NULL-alias message only with a second factor and a fresh step-up (mail_access_hardening WP3)
  * @version 1.1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
+// Before any output: the superadmin's every-mailbox read needs a step-up marker
+// on a browser session (mail_access_hardening WP3).
+$has_session = vault_ensure_session();
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/attachment_text_logic.php'));
 
@@ -200,8 +205,24 @@ check(strpos((string)$r->error, 'access') !== false, 'and told it is an access r
 $r = $run($other_uid, $orphan_att_id);
 check($r->error !== null, 'a NULL-alias message refuses a non-superadmin', json_encode($r->data));
 
+// Every-mailbox access is deliberate (mail_access_hardening WP3): a second factor
+// on the superadmin's account and a fresh step-up on this session, or they read
+// like a grant holder and the NULL-alias message is refused to them too.
 $r = $run($super_uid, $orphan_att_id);
-check($r->error === null, 'a superadmin can read a NULL-alias message attachment', (string)$r->error);
+check($r->error !== null, 'a superadmin with no second factor is refused the NULL-alias message', json_encode($r->data));
+if ($has_session && session_id() !== '') {
+	$super->enable_totp('JBSWY3DPEHPK3PXP');
+	$session->set_api_user($super_uid);
+	$session->stamp_second_factor();
+	$session->clear_api_user();
+	harness_defer(function () use ($db) {
+		$db->prepare('DELETE FROM pks_passkey_ceremonies WHERE pks_session_id = ?')->execute(array(session_id()));
+	});
+	$r = $run($super_uid, $orphan_att_id);
+	check($r->error === null, 'a superadmin with a second factor and a fresh step-up can read a NULL-alias message attachment', (string)$r->error);
+} else {
+	harness_skip('superadmin step-up', 'no session could be started on the CLI');
+}
 
 $session->set_api_user(0);
 $r = attachment_text_logic(array('attachment_id' => $txt_id));

@@ -20,6 +20,7 @@
  * confirmation. The key and model name are kept in the browser, and Test
  * sends the model a real-sized judgement from here.
  *
+ * @version 2.7 - "Who has looked at your mail": reads of each mailbox by someone holding no grant on it
  * @version 2.6 - More links Contacts
  * @version 2.5 - "Your AI model" tests the model saved in this browser, and the page may
  *   reach the registered model's origin (CSP) to do it
@@ -152,6 +153,40 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 					echo $formwriter->end_form();
 					?>
 				</div>
+			</div>
+			<?php endif; ?>
+
+			<?php if (!empty($page_vars['mailboxes'])): ?>
+			<div class="jy-panel jy-form-actions" id="who-has-looked">
+				<h2>Who has looked at your mail</h2>
+				<p class="jy-muted">Every time someone who is not a member of one of your mailboxes opens its mail
+					is written down. The last <?php echo intval($page_vars['looked_at_days']); ?> days, by person and day.</p>
+				<?php foreach ($page_vars['mailboxes'] as $mb): $reads = $page_vars['looked_at'][$mb['alias_id']] ?? array(); ?>
+					<h3 class="mbx-sig-address"><?php echo htmlspecialchars($mb['address']); ?></h3>
+					<?php if (!$reads): ?>
+						<p class="jy-muted">No one.</p>
+					<?php else: ?>
+						<table class="jy-table jy-w-full">
+							<thead><tr><th>Day</th><th>Who</th><th>What</th><th>Messages</th></tr></thead>
+							<tbody>
+							<?php foreach ($reads as $r): ?>
+								<tr>
+									<td><?php echo htmlspecialchars($r['day']); ?></td>
+									<td><?php echo htmlspecialchars($r['viewer']); ?></td>
+									<td><?php
+										$what = array();
+										foreach ($r['surfaces'] as $surface => $times) {
+											$what[] = str_replace('_', ' ', $surface) . ($times > 1 ? ' ×' . intval($times) : '');
+										}
+										echo htmlspecialchars(implode(', ', $what));
+									?></td>
+									<td><?php echo intval($r['count']); ?></td>
+								</tr>
+							<?php endforeach; ?>
+							</tbody>
+						</table>
+					<?php endif; ?>
+				<?php endforeach; ?>
 			</div>
 			<?php endif; ?>
 

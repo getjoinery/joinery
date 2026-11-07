@@ -20,6 +20,8 @@
  * emits its bytes and exit()s, so anything that returns from here is a refusal
  * — a LogicResult the view turns into an honest message.
  *
+ * @version 1.3.0 - an all-access viewer's download of a message they hold no grant on is written down (MailboxReadAudit);
+ *   the download counts against the person's read budget (MailReadBudget)
  * @version 1.2.0 - a lean record downloads as a full rebuild instead of being refused (B1)
  * @version 1.1.0
  */
@@ -48,6 +50,13 @@ function profile_original_logic(array $input): LogicResult {
 	$viewer = MailboxViewer::fromSession($session);
 	if (!$viewer->canReadMessage($message)) {
 		return _profile_original_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
+	}
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_ORIGINAL, array($id));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array($id));
+	if ($budget['paused']) {
+		// A page, not an API answer: a pause that asks for a step-up goes there and comes back.
+		return MailReadBudget::stepUpRedirect($budget, (string)($_SERVER['REQUEST_URI'] ?? $reader_url))
+			?? _profile_original_error($session, $settings, MailReadBudget::refusal($budget)->error, $reader_url);
 	}
 
 	$format = ($input['format'] ?? 'eml') === 'print' ? 'print' : 'eml';

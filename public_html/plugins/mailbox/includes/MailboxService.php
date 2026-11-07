@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.67 - listMailboxes() says why a level-10 viewer is not all-access (oversight, mail_access_hardening WP3)
+ * @version 1.66 - getThread() and listThreads() write down an all-access viewer's foreign reads (MailboxReadAudit, mail_access_hardening WP1)
  * @version 1.65 - the reader reads cid: references through InlineParts, the same rule ingest uses (B5)
  * @version 1.64 - a singleton thread key (m:<id>) expands to the thread its message joined when replied to
  * @version 1.63 - purgeFromTrash() deletes as rule_checked_write(): trashMutationScopeSql() limits it to the viewer's mailboxes
@@ -752,6 +754,9 @@ class MailboxService {
 
 		$result = array(
 			'all_access' => $this->viewer->isAllAccess(),
+			// Why a level-10 viewer is not all-access, when they are not: the
+			// switcher offers the way to confirm (mail_access_hardening WP3).
+			'oversight'  => $this->viewer->oversightState(),
 			'mailboxes'  => $mailboxes,
 		);
 
@@ -1483,6 +1488,11 @@ class MailboxService {
 			}
 		}
 
+		// The page's previews are content: an all-access viewer listing mailboxes
+		// they hold no grant on is written down, one row per mailbox on the page
+		// (mail_access_hardening WP1).
+		MailboxReadAudit::messages($this->viewer, MailboxReadAudit::SURFACE_LIST, $latest_ids);
+
 		$result = array(
 			'threads'  => $threads,
 			'has_more' => $has_more,
@@ -1741,6 +1751,10 @@ class MailboxService {
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
 		$rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+		// Scope decided, content about to leave: an all-access viewer opening a
+		// thread they hold no grant on is written down (mail_access_hardening WP1).
+		MailboxReadAudit::messages($this->viewer, MailboxReadAudit::SURFACE_THREAD, $ids);
 
 		// Per-message attachment list for the reader (non-inline parts only — inline
 		// cid: parts belong to the HTML body). One query for the whole thread.

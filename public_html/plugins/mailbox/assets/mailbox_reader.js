@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 3.0 — one trip to the step-up ceremony per read budget pause (reviewer2 B2); @version 2.99 — a level-10 account reads every mailbox only after confirming a second factor: the rail offers "Every mailbox (confirm it is you)" or the way to add a factor (mail_access_hardening WP3); @version 2.98 — a read budget pause (requires_stepup) sends the page to confirm it is this person and back; a wait is said where the content would be; @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -469,6 +469,25 @@
 	}
 
 	// ---- mailbox switcher (left rail) ----
+
+	/** The rail's "every mailbox" row for a level-10 account yet to confirm, or null. */
+	function oversightRow(state) {
+		if (state !== 'needs_stepup' && state !== 'needs_second_factor') { return null; }
+		var li = el('li', 'mbx-mailbox mbx-oversight');
+		var link = el('a', 'mbx-mailbox-addr');
+		if (state === 'needs_stepup') {
+			link.textContent = 'Every mailbox (confirm it is you)';
+			link.href = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
+			li.title = 'Reading mailboxes you are not a member of needs a fresh confirmation that it is you.';
+		} else {
+			link.textContent = 'Every mailbox (needs a second factor)';
+			link.href = '/profile/security';
+			li.title = 'Reading mailboxes you are not a member of needs a second factor on your account. Add one under Security.';
+		}
+		li.appendChild(link);
+		return li;
+	}
+
 	function renderMailboxes(data) {
 		state.allAccess = !!data.all_access;
 		state.mailboxes = data.mailboxes || [];
@@ -503,6 +522,11 @@
 				list.appendChild(li);
 			});
 		}
+		// A level-10 account reads every mailbox only after confirming a second
+		// factor (mail_access_hardening WP3). Until then the rail says so, with
+		// the way to confirm, or the way to add a factor when there is none.
+		var oversight = oversightRow(data.oversight);
+		if (oversight) { list.appendChild(oversight); }
 
 		// Highlight current selection + render the active mailbox's folder rail.
 		highlightMailbox();
@@ -1418,6 +1442,10 @@
 			}
 		}).catch(function (err) {
 			if (seq !== listSeq) { return; }
+			if (err && err.data && err.data.read_budget_paused && err.data.requires_stepup && !justSteppedUp()) {
+				goStepUp();
+				return;
+			}
 			// The read failed. Say that — an unanswered request must never render
 			// as an empty mailbox. "Load more" leaves the rows it already has, and a
 			// soft refresh keeps everything on screen: a list that has mail is never
@@ -1824,6 +1852,7 @@
 					});
 			}
 		}).catch(function (err) {
+			if (readBudgetPaused(err)) { return; }
 			// A conversation that would not open says so in the reading pane; the
 			// list beside it keeps its rows.
 			var pane = $('#mbx-thread');
@@ -1832,6 +1861,41 @@
 				'Could not open this conversation' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
 				function () { openThread(t, rowEl); }, err));
 		});
+	}
+
+	// The read budget (mail_access_hardening WP2): past an unusual amount of
+	// mail opened in an hour, a content read answers requires_stepup, and the
+	// page goes to confirm it is this person and comes back here; an account
+	// with no second factor is told to wait, in the server's words, where the
+	// content would have been. True when the refusal was handled.
+	// One trip to the ceremony per pause: if the page came back from it less than
+	// three minutes ago and is paused again, it says so instead of going again
+	// (the ceremony answers at once for a session that just confirmed, which
+	// would otherwise loop).
+	var STEPUP_TRIP = 'mbx.stepupTrip';
+	function goStepUp() {
+		try { sessionStorage.setItem(STEPUP_TRIP, String(Date.now())); } catch (x) {}
+		window.location = '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
+	}
+	function justSteppedUp() {
+		try { return Date.now() - Number(sessionStorage.getItem(STEPUP_TRIP) || 0) < 180000; } catch (x) { return false; }
+	}
+	function readBudgetPaused(err) {
+		var d = err && err.data;
+		if (!d || !d.read_budget_paused) { return false; }
+		if (d.requires_stepup && !justSteppedUp()) {
+			goStepUp();
+			return true;
+		}
+		var pane = $('#mbx-thread');
+		if (pane) {
+			pane.innerHTML = '';
+			var note = document.createElement('div');
+			note.className = 'mbx-thread-empty';
+			note.textContent = err.message || 'Reading is paused for a while.';
+			pane.appendChild(note);
+		}
+		return true;
 	}
 
 	// The tracked folders + cardinality for a mailbox (by alias id), from the
@@ -5467,6 +5531,18 @@
 					openThread({ thread_key: deep.thread_key, subject: deep.subject || '', unread_count: 0 }, null);
 				}
 			}
+		} else if (seed.oversight === 'needs_stepup' || seed.oversight === 'needs_second_factor') {
+			// A level-10 account with no mailbox of its own: the rail already
+			// offers the way to every mailbox; the list says what is in between.
+			var gate = emptyRow(seed.oversight === 'needs_stepup'
+				? 'Reading every mailbox needs a fresh confirmation that it is you. '
+				: 'Reading every mailbox needs a second factor on your account. ');
+			var go = el('a', '', seed.oversight === 'needs_stepup' ? 'Confirm it is you' : 'Add a second factor');
+			go.href = seed.oversight === 'needs_stepup'
+				? '/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search + location.hash)
+				: '/profile/security';
+			gate.appendChild(go);
+			$('#mbx-threads').appendChild(gate);
 		} else {
 			var none = emptyRow(seed.all_access
 				? 'No mailboxes yet. '

@@ -20,6 +20,8 @@
  * A Fortress attachment streams as stored ciphertext, unnamed; the reader
  * fetches it and opens it in the browser (specs/client_custody_mail.md § R4).
  *
+ * @version 1.2.0 - an all-access viewer's download from a message they hold no grant on is written down (MailboxReadAudit);
+ *   the download counts against the person's read budget (MailReadBudget)
  * @version 1.1.0 - Fortress attachments stream as ciphertext
  * @version 1.0.0
  */
@@ -61,6 +63,15 @@ function profile_attachment_logic(array $input): LogicResult {
 	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
 	if (!$allowed) {
 		return _profile_attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
+	}
+	// Here, not in the retrieval helper: the helper does not authorize and is
+	// also called by unattended work (re-key, rebuild), which is no one looking.
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_ATTACHMENT, array(intval($message->key)));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array(intval($message->key)));
+	if ($budget['paused']) {
+		// A page, not an API answer: a pause that asks for a step-up goes there and comes back.
+		return MailReadBudget::stepUpRedirect($budget, (string)($_SERVER['REQUEST_URI'] ?? $reader_url))
+			?? _profile_attachment_error($session, $settings, MailReadBudget::refusal($budget)->error, $reader_url);
 	}
 
 	$result = mailbox_retrieve_attachment_bytes($att, $message);

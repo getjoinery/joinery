@@ -24,6 +24,8 @@
  * or any Standard mailbox for an all-access reader. Asking again while a
  * build of the same mailbox and folder is under way returns that build.
  *
+ * @version 1.1 - an all-access viewer's download of a mailbox they hold no grant on is written down (MailboxReadAudit);
+ *   the download counts against the person's read budget as its message count (MailReadBudget)
  * @version 1.0
  */
 
@@ -40,6 +42,11 @@ function mail_export_start_logic(array $input): LogicResult {
 	}
 	$viewer = MailboxViewer::fromSession($session);
 	if (!$viewer->canAccess($alias_id)) {
+		// A level-10 account yet to confirm oversight (mail_access_hardening WP3)
+		// gets the same answer the download's own step-up gives.
+		if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
+			return LogicResult::error('Confirm it is you before downloading a mailbox you are not a member of.', array('requires_stepup' => true));
+		}
 		return LogicResult::error('Not authorized.');
 	}
 	$alias = new InboundEmailAlias($alias_id, TRUE);
@@ -53,6 +60,14 @@ function mail_export_start_logic(array $input): LogicResult {
 
 	if ($session->step_up_outstanding(null, 300)) {
 		return LogicResult::error('Confirm it is you before downloading a mailbox.', array('requires_stepup' => true));
+	}
+	// A download hands over every message at once: it counts against the read
+	// budget as its message count, before the run is created, and a paused
+	// budget refuses it (mail_access_hardening WP2).
+	$export_folders = $folder !== '' ? array($folder) : array_keys(MailExport::FOLDERS);
+	$budget = MailReadBudget::mailbox($uid, MailExport::count($alias_id, $export_folders));
+	if ($budget['paused']) {
+		return MailReadBudget::refusal($budget);
 	}
 
 	$level = $alias->is_fortress() ? MailExportRun::LEVEL_FORTRESS
@@ -97,8 +112,11 @@ function mail_export_start_logic(array $input): LogicResult {
 	$run->set('mxr_level', $level);
 	$run->set('mxr_state', $level === MailExportRun::LEVEL_FORTRESS ? MailExportRun::STATE_BROWSER : MailExportRun::STATE_QUEUED);
 	// Counted now, so the list says how many from the first moment.
-	$run->set('mxr_total', MailExport::count($alias_id, $folder !== '' ? array($folder) : array_keys(MailExport::FOLDERS)));
+	$run->set('mxr_total', MailExport::count($alias_id, $export_folders));
 	$run->save();
+	// A download of a mailbox the viewer holds no grant on is written down once
+	// per run started, with the message count (mail_access_hardening WP1).
+	MailboxReadAudit::mailbox($viewer, MailboxReadAudit::SURFACE_EXPORT, $alias_id, intval($run->get('mxr_total')));
 	if ($vault !== null) {
 		MailExportRun::recordSealedKey(intval($run->key), $vault);
 	}

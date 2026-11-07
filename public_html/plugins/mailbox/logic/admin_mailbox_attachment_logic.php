@@ -24,6 +24,10 @@
  * (includes/attachment_retrieval.php); only the authorization posture here
  * is admin-specific.
  *
+ * @version 1.6 - the file-backed branch asks the mailbox's rule too (canReadMessage), so a level-6 staff member or an
+ *   unconfirmed level-10 cannot take an attachment the reader would refuse them (reviewer2 B3); a step-up pause redirects
+ * @version 1.5 - an all-access viewer's download from a message they hold no grant on is written down (MailboxReadAudit);
+ *   the download counts against the person's read budget (MailReadBudget)
  * @version 1.4 - a Fortress attachment streams as stored ciphertext, unnamed
  * @version 1.3
  */
@@ -73,16 +77,38 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 		if (!$file->is_viewable($session)) {
 			return _attachment_error($session, $settings, 'You do not have access to this attachment.', $reader_url);
 		}
+		// And the mailbox's own rule on top (reviewer2 B3): the File's level is
+		// the personal class's, which any level-6 staff meets, while an
+		// attachment is as private as its message. A level-10 viewer yet to
+		// confirm oversight is sent to confirm and comes back here.
+		$viewer = MailboxViewer::fromSession($session);
+		if (!$viewer->canReadMessage($message)) {
+			if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
+				return LogicResult::redirect('/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
+			}
+			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
+		}
 	} else {
 		// Section-pointer / IMAP rows: grant check — identical to the reader (an
 		// attachment is as private as its message). A NULL-alias (catch-all/
 		// unmatched) message is superadmin-only.
 		$viewer = MailboxViewer::fromSession($session);
-		$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
-		$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
-		if (!$allowed) {
+		if (!$viewer->canReadMessage($message)) {
+			if ($viewer->oversightState() === MailboxViewer::OVERSIGHT_NEEDS_STEPUP) {
+				return LogicResult::redirect('/verify-stepup?return=' . urlencode((string)($_SERVER['REQUEST_URI'] ?? $reader_url)));
+			}
 			return _attachment_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 		}
+	}
+	// Both branches: an all-access viewer taking an attachment from a message
+	// they hold no grant on is written down. Here, not in the retrieval helper,
+	// which does not authorize and is also called by unattended work.
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_ATTACHMENT, array(intval($message->key)));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array(intval($message->key)));
+	if ($budget['paused']) {
+		// A page, not an API answer: a pause that asks for a step-up goes there and comes back.
+		return MailReadBudget::stepUpRedirect($budget, (string)($_SERVER['REQUEST_URI'] ?? $reader_url))
+			?? _attachment_error($session, $settings, MailReadBudget::refusal($budget)->error, $reader_url);
 	}
 
 	$result = mailbox_retrieve_attachment_bytes($att, $message);

@@ -168,7 +168,7 @@ check(SealedEgressGuard::isHot(), 'and the process now holds sealed plaintext, a
 // it runs before their teardown.
 harness_defer(function () { SealedEgressGuard::setArmed(false); });
 
-$sender = new MailboxSender(MailboxViewer::forUser($uid, 10));
+$sender = new MailboxSender(MailboxViewer::confirmedForTest($uid, 10));
 $store = new ReflectionMethod('MailboxSender', 'storeOutboundRow');
 $make_id = new ReflectionMethod('MailboxSender', 'generateMessageId');
 

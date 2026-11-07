@@ -151,7 +151,7 @@ class InboundAttachmentTest {
 		// The endpoint's access decision == MailboxViewer (the reader's seam).
 		$grantedViewer = MailboxViewer::forUser($this->granted_user, 5);
 		$otherViewer   = MailboxViewer::forUser($this->other_user, 5);
-		$superViewer   = MailboxViewer::forUser(0, 10);
+		$superViewer   = MailboxViewer::confirmedForTest(0, 10);
 
 		$this->ok($grantedViewer->canAccess($this->alias_id), 'granted user can access the mailbox');
 		$this->ok(!$otherViewer->canAccess($this->alias_id), 'ungranted user is refused');

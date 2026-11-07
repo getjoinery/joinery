@@ -162,7 +162,7 @@ class ProfileMailboxTest {
 
 	private function memberViewer() { return MailboxViewer::forUser($this->member_user, 1); }
 	private function lonelyViewer() { return MailboxViewer::forUser($this->lonely_user, 1); }
-	private function superViewer()  { return MailboxViewer::forUser(0, 10); }
+	private function superViewer()  { return MailboxViewer::confirmedForTest(0, 10); }
 
 	// ── sections ────────────────────────────────────────────────────────────
 

@@ -162,7 +162,7 @@ $idx->wipe($owner_id);
 InboundMailboxSearchIndex::loadOrCreateForUser($owner_id)->set('imi_fts_high_water', 0);
 
 $svc = new MailboxService(MailboxViewer::forUser($owner_id, 5));
-$admin_svc = new MailboxService(MailboxViewer::forUser($admin_id, 10));
+$admin_svc = new MailboxService(MailboxViewer::confirmedForTest($admin_id, 10));
 $keys = function ($result) {
 	$out = array();
 	foreach ($result['threads'] as $t) { $out[] = $t['thread_key']; }

@@ -144,7 +144,7 @@ try {
 	// ---------------------------------------------------------------- promoted-row repair
 	section('the promoted-row repair does not take a Fortress Sent copy for debt');
 
-	$sender = new MailboxSender(MailboxViewer::forUser($owner_id, 10));
+	$sender = new MailboxSender(MailboxViewer::confirmedForTest($owner_id, 10));
 	$store = new ReflectionMethod('MailboxSender', 'storeOutboundRow');
 	$email = new EmailMessage();
 	$email->text('outbound body');

@@ -237,7 +237,7 @@ class InboundAttachmentStorageTest {
 		$email = new EmailMessage();
 
 		// attachOriginal is private — invoke via reflection.
-		$sender = new MailboxSender(MailboxViewer::forUser(0, 10));
+		$sender = new MailboxSender(MailboxViewer::confirmedForTest(0, 10));
 		$ref = new ReflectionMethod('MailboxSender', 'attachOriginal');
 		$total = $ref->invoke($sender, $email, $source);
 

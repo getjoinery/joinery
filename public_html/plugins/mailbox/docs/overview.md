@@ -2069,7 +2069,10 @@ normally.
 ### AI processing
 
 Recipes read mail through the `query_model` tool (`InboundEmailMessage` is
-`$ai_readable`, with sender/subject/body wrapped as untrusted input). On a protected
+`$ai_readable`, with sender/subject/body wrapped as untrusted input). The model's
+read level is 10 (`$read_permission`), the reader's all-access level, so a chat
+below it reads only the messages its account owns (its grant, its sealed
+owner), as `docs/permissions.md` § The REST API and the AI chat says. On a protected
 domain a locked row is **excluded** from AI results (never a placeholder) and stays
 pending for post-unlock catch-up; `query_model` reports the excluded count so the model
 knows the result set is partial. The LLM provider is a disclosure, not a level gate.
@@ -2572,8 +2575,8 @@ The mailbox list never parses. One parse includes the spam scan, which can wait
 seconds on the scanner's network lookups, so a list that parsed first would hold
 the whole mailbox back behind the night's mail. The list shows a pending row with
 the sealed placeholder and answers `parsing: true` while the viewer's open window
-has mail waiting; the reader then starts a drain at once
-(`JoineryVaultPresence.drainNow()`, past the beacon's quiet period) and re-reads
+has mail waiting; the reader then starts a foreground drain
+(`JoineryVaultPresence.drainNow()`, past the beacon's quiet period, in short slices) and re-reads
 the list each time a drain reports `mailbox_parse` done
 (`joinery:vault-work-done`). Opening a thread parses that thread's pending rows
 first (`DeferredIngest::parseMessages`), so the mail someone clicks is readable
@@ -3768,10 +3771,21 @@ part that survived DKIM.
 `MailboxViewer` (`includes/MailboxViewer.php`) answers *who is looking and what
 may they touch*:
 
-- `accessibleAliasIds()` — for a permission-10 superadmin, **every** alias
-  (all-access oversight: every mailbox plus a merged "All mail" view that also
-  surfaces unmatched NULL-alias mail); otherwise the aliases the viewer holds a
-  grant for.
+- `accessibleAliasIds()` — for an all-access viewer, **every** alias
+  (oversight: every mailbox plus a merged "All mail" view that also surfaces
+  unmatched NULL-alias mail); otherwise the aliases the viewer holds a grant
+  for. **All-access is deliberate**: `isAllAccess()` is true only for a level-10
+  account with a second factor enrolled and a step-up marker on this browser
+  session younger than `mailbox_oversight_stepup_minutes` (1 to 60; the marker
+  itself lives one hour, so 60 is the ceiling). `fromSession()` decides it from
+  the live session (`withOversight()`); a viewer built with `forUser()` has no
+  session and is never all-access, so a board, a recipe or a mail program acting
+  for a level-10 person reads the mailboxes that person holds. `oversightState()`
+  says why a viewer is not all-access (`needs_stepup`, `needs_second_factor`,
+  `none`), the switcher payload carries it, and the rail offers *Every mailbox
+  (confirm it is you)*, a link to `/verify-stepup?return=`, or the way to add a
+  factor. The forensic page sends an unconfirmed level-10 viewer to confirm; a
+  download of a mailbox they hold no grant on answers `requires_stepup`.
 - `scopeAliasIds(?int $aliasId)` — the **single** place audience becomes a query
   filter: an accessible alias → `[id]`; a null selection → the full accessible
   set; a non-accessible alias → `[]` (matches nothing). The superadmin "All mail"
@@ -3781,6 +3795,62 @@ may they touch*:
 so a crafted id/thread/alias for an un-granted mailbox returns nothing and mutates
 nothing. `MailboxViewer::forUser($user_id, $permission)` builds a viewer
 independent of the session.
+
+**Reading mail you hold no grant on is written down.** A read is *foreign* when
+an all-access viewer reaches a message's content without holding it
+(`MailboxViewer::holdsMessageRow()`: no grant on its mailbox, not its sealed
+owner, not the draft's author), or the message belongs to no mailbox. Each such
+read lands as one `mail_foreign_read` row in the general event log
+(`MailboxReadAudit`, `includes/MailboxReadAudit.php`), one row per mailbox
+touched, with the note `alias={id} domain={id} surface={word} count={n}
+ids={list}`: metadata only, never a subject, an address or a body. The code that
+authorized the read writes it, after the scope decision and before the content
+leaves: `getThread()` (surface `thread`), `listThreads()` (`list`, the previewed
+messages), the source, original, attachment, attachment-text, forensic and
+sender-context pages, a download started (`export`, with the count) and
+`query_model` over `InboundEmailMessage` (`ai_query`). The attachment retrieval
+helper itself never writes one: it does not authorize and unattended work calls
+it too. A grant holder is never written down, a member cannot reach a foreign
+message at all, and `mail_fetch` builds a grant-only viewer so a program never
+can either. The write runs under `SystemBase::server_initiated_write()` and is a
+declared content-free write (`SealedEgressGuard::contentFree('mail_read_audit')`),
+so a page that has already opened sealed mail still records the row.
+`MailboxReadAudit::parseNote()` reads a note back with every value checked, and
+`forMailbox($alias_id, $days)` lists a mailbox's reads over the
+`(evl_event, evl_create_time)` index; the member's Email settings page shows
+them under *Who has looked at your mail*, by person and day, for the last 90
+days. Nothing on that page deletes a row.
+
+**A person's hour of mail content is bounded.** Every surface that hands a
+viewer message content, foreign or not, first notes it with `MailReadBudget`
+(`includes/MailReadBudget.php`): the thread (`thread_logic`), a page of previews
+(`thread_list_logic`), the source, the original, an attachment and its text, the
+forensic page, a download started (as its message count), `query_model` rows
+(against the acting person) and a mail program's `mail_fetch` (whole messages
+one each, a header fetch one page). The ledger (`MailReadLedger`,
+`mrb_mail_read_ledger`) holds one row per person, credential kind, hour and
+message, written `INSERT … ON CONFLICT DO NOTHING`, so a message opened ten
+times in an hour is one; the window is the current hour and the one before.
+Three credential kinds are metered apart (browser, device, app), so a program's
+first sync never spends the browser's budget. Sealed mail counts like plain
+mail: the count is taken at the viewer surface, which the search fold and the
+drains never cross, so it bounds a stolen session's use of an open window
+without touching the unseal daemon's rule. The thresholds are the plugin's
+settings `mailbox_read_budget_soft` (notify the account once per window and log
+`mail_read_budget_soft`), `mailbox_read_budget_hard` (the browser pauses),
+`mailbox_read_budget_app_hard` (devices and programs together pause) and
+`mailbox_read_budget_pages_hard` (browser list pages); 0 turns one off. A pause
+writes no ledger row and one `mail_read_budget_hard` event row per window. On
+the browser it answers `requires_stepup` and the reader goes to confirm and
+comes back; a fresh step-up stamp restarts the count from the stamp for that
+session. An account with no second factor is told to wait for the hour, and
+where a second factor is added. A program's pause is a 429 with `Retry-After`
+(the action names its status with `http_status` and `retry_after_seconds` in
+the refusal's data), which the mail gateway turns into `NO [LIMIT]`, so the
+program backs off and nothing is served in a message's place. Unattended work
+never calls the budget: the cron export build, the deferred-work consumers, the
+DEK prefetch, the re-key and the rebuild hand no content to a viewer. The
+ledger is kept `mailbox_read_ledger_retention_days` (two) and swept.
 
 **What each view holds** is defined once, in `MailboxService`:
 `viewScopeSql(int $aliasId, string $view, ?int $labelId = null)` answers one

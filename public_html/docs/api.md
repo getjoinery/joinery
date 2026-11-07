@@ -1315,6 +1315,11 @@ The management API is permanently read-only. Mutating operations (backups, resto
 | 409 | ActionError | `Idempotency-Key` reused with a different body/action, or its original request is still in progress |
 | 422 | ActionError | Business logic error (e.g., feature disabled, invalid state) |
 | 422 | ValidationError | Input validation failed — check `validation_errors` for field-level detail |
+| 429 | ActionError | An action's own rate limit (the mailbox read budget on a program's credential): `data.retry_after_seconds` says when to try again and is sent as `Retry-After` |
+
+An action's refusal is 422 unless its error data names another status in
+`http_status` (400 to 599); a 429 that carries `retry_after_seconds` also sends
+it as the `Retry-After` header.
 
 ## Request Logging
 

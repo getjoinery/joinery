@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.9 - mail_read_audit: MailboxReadAudit's foreign-read rows are a declared content-free write (mail_access_hardening WP1)
  * @version 1.8 - the X25519 frames (v1.seal., v1.edgeseal.) are not sealed blobs
  * @version 1.7 - vault_keys: an account vault row's own key material is a declared content-free write
  * @version 1.6 - v2.seal. and v2.edgeseal. (the post-quantum seal) are sealed blobs
@@ -140,8 +141,11 @@ class SealedEgressGuard {
 	 *                 secret wrapped under a KEK, the KEK sealed to the
 	 *                 current key). VaultCeremonies::rotate's flip and
 	 *                 VaultPreviousKeys::add.
+	 *   mail_read_audit — MailboxReadAudit's foreign-read rows (who looked,
+	 *                 which mailbox, which surface, how many, which ids): a
+	 *                 page that showed sealed mail is hot when it writes one.
 	 */
-	const CONTENT_FREE_WRITE_SITES = array('vault_audit', 'vault_keys');
+	const CONTENT_FREE_WRITE_SITES = array('vault_audit', 'vault_keys', 'mail_read_audit');
 
 	/** @var bool has this process opened sealed content? */
 	private static $hot = false;

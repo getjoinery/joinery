@@ -2,7 +2,9 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.33
+ * @version 2.34
+ * @changelog 2.34 - A logic action's refusal may name its HTTP status (data.http_status, 400-599) in place
+ *   of 422; the read budget's pause on a program's credential is 429 (mail_access_hardening WP2)
  * @changelog 2.33 - A session key is not held to the failed-auth limit: it guessed nothing
  * @changelog 2.32 - the HTTPS requirement believes X-Forwarded-Proto only from a proxy we know
  *   (LibraryFunctions::isSecure()).
@@ -224,7 +226,18 @@ function api_translate_logic_result($result, $action_name) {
 			$response['error_ref'] = $ref;
 		}
 
-		return array('response' => $response, 'status_code' => 422);
+		// An action may name the status its refusal carries: a read budget's
+		// pause on a program's credential is 429 with Retry-After (the transport
+		// limit's contract, MailReadBudget::refusal()), so the mail gateway
+		// backs the program off instead of reporting a failed request.
+		$status = 422;
+		if (is_array($result->data) && isset($result->data['http_status'])) {
+			$named = intval($result->data['http_status']);
+			if ($named >= 400 && $named <= 599) {
+				$status = $named;
+			}
+		}
+		return array('response' => $response, 'status_code' => $status);
 	}
 
 	$response = array(

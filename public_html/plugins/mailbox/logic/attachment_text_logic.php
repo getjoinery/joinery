@@ -24,6 +24,8 @@
  * reading it needs an open unlock window; a locked one returns {locked:true},
  * the same contract the body, source and draft reads use.
  *
+ * @version 1.3.0 - an all-access viewer's preview from a message they hold no grant on is written down (MailboxReadAudit);
+ *   the preview counts against the person's read budget (MailReadBudget)
  * @version 1.2.0 - a Fortress attachment is never previewed as text
  * @version 1.1.1
  * @changelog 1.1.0 - review fixes: the byte ceiling refuses from the recorded size BEFORE any fetch/decrypt, and every path that fetched bytes (or refused for size) writes a throttle row — refusals were the one unthrottled, most expensive request
@@ -73,6 +75,11 @@ function attachment_text_logic(array $input): LogicResult {
 	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
 	if (!$allowed) {
 		return LogicResult::error('You do not have access to this mailbox.');
+	}
+	MailboxReadAudit::messages($viewer, MailboxReadAudit::SURFACE_ATTACHMENT_TEXT, array(intval($message->key)));
+	$budget = MailReadBudget::messages((int)$session->get_user_id(), array(intval($message->key)));
+	if ($budget['paused']) {
+		return MailReadBudget::refusal($budget);
 	}
 
 	// A Fortress attachment opens only in its owner's browser; reading its text

@@ -168,7 +168,7 @@ section('A2: a compose attempt from EmailSender\'s report');
 
 $uid = mailbox_make_user('tl-user-' . $suffix . '@' . $domain_name);
 harness_register_row('usr_users', 'usr_user_id', $uid);
-$sender = new MailboxSender(MailboxViewer::forUser($uid, 10));
+$sender = new MailboxSender(MailboxViewer::confirmedForTest($uid, 10));
 $record = new ReflectionMethod('MailboxSender', 'recordAttempt');
 $hosted = OutboundTransport::forHostedAlias('store' . $suffix . '@' . $domain_name);
 $source = new InboundEmailMessage($stored_id, TRUE);

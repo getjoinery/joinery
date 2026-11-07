@@ -21,6 +21,16 @@ class EventLog extends SystemBase {	public static $prefix = 'evl';
 		'evl_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
 	);
 
+	/**
+	 * The readers that ask for one event over a time range: the mailbox
+	 * holder's "who has looked" view (MailboxReadAudit::forMailbox(), every
+	 * mailbox settings page view) and the plane's vault window view over
+	 * log_table_tail. Without it each is a sequential scan of the whole log.
+	 */
+	public static $index_specifications = array(
+		array('columns' => array('evl_event', 'evl_create_time')),
+	);
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

@@ -8,6 +8,7 @@
  * per-session reader CSRF token the admin mount uses, so the shared AJAX
  * endpoints accept either mount.
  *
+ * @version 1.5.0 - a level-10 account yet to confirm oversight gets the reader, not the empty state (mail_access_hardening WP3)
  * @version 1.4.0 - ?open=N hands the reader a message to open (open_message)
  * @version 1.3.0 - no device_ai_site_model: Email settings is where the site's model is offered
  * @version 1.2.0 - device_ai_site_model: the site's own model, offered with one click
@@ -37,10 +38,13 @@ function profile_mailbox_logic(array $input): LogicResult {
 	$service = new MailboxService($viewer);
 	$initial_mailboxes = $service->listMailboxes();
 
-	// listMailboxes() returns {all_access, mailboxes, [all_mail, unmatched]}.
-	// An all-access superadmin always has the merged views to look at; anyone
-	// else needs at least one granted mailbox or they get the empty state.
+	// listMailboxes() returns {all_access, oversight, mailboxes, [all_mail, unmatched]}.
+	// An all-access superadmin always has the merged views to look at; a level-10
+	// account that has yet to confirm (oversight says why) gets the reader with
+	// the way to confirm in its rail; anyone else needs at least one granted
+	// mailbox or they get the empty state.
 	$has_mailboxes = !empty($initial_mailboxes['all_access'])
+		|| ($initial_mailboxes['oversight'] ?? MailboxViewer::OVERSIGHT_NONE) !== MailboxViewer::OVERSIGHT_NONE
 		|| count($initial_mailboxes['mailboxes'] ?? array()) > 0;
 
 	// ?open=N opens that message's conversation, for a link from another feature (a Boards

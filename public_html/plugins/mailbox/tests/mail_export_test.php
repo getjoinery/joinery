@@ -34,6 +34,7 @@
  *
  * Run: php plugins/mailbox/tests/mail_export_test.php
  *
+ * @version 1.3 - the superadmin fixture has a second factor: every-mailbox access needs one (mail_access_hardening WP3)
  * @version 1.2 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.1 - Status and X-Mozilla-Status carry read and starred for mail programs (B70)
  */
@@ -619,6 +620,9 @@ if (!$has_session || session_id() === '') {
 
 	if (isset($palias)) {
 		$super = make_user('MailExportSuper' . $suffix, 10);
+		// Every-mailbox access is deliberate (mail_access_hardening WP3): the
+		// superadmin needs a second factor on their account and a fresh step-up.
+		$super->enable_totp('JBSWY3DPEHPK3PXP');
 		$clear();
 		$as($super);
 		SessionControl::get_instance()->stamp_second_factor();

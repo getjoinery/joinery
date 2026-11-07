@@ -66,7 +66,7 @@ section('canReadMessage(): the one rule');
 
 $v_member = MailboxViewer::forUser($member, 5);
 $v_other = MailboxViewer::forUser($other, 5);
-$v_super = MailboxViewer::forUser($other, 10);
+$v_super = MailboxViewer::confirmedForTest($other, 10);
 check($v_member->canReadMessage($boxed), 'a grant on the mailbox reads its messages');
 check(!$v_other->canReadMessage($boxed), 'no grant does not');
 check($v_super->canReadMessage($boxed), 'an all-access viewer does');
