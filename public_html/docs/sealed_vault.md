@@ -1737,7 +1737,10 @@ batch, and retried on the next.
 milliseconds its turns took in that slice, so `ms.mailbox_parse` divided by
 `done.mailbox_parse` is milliseconds per message. A turn that overruns its end by
 more than 2 seconds is logged once per slice as `VaultDeferredWork: consumer X
-overran its turn by N s (user U)`.
+overran its turn by N s (user U)`. A consumer whose `has_work` answer takes more
+than 250 ms is logged as `VaultDeferredWork: consumer X took N ms to answer whether
+it has work (user U)`: every heartbeat asks the consumers in turn until one says
+yes, so that line names what a slow heartbeat waits on.
 
 **Background work is not user activity.** `secretKey()` normally stamps the
 content-decrypt time the hardened idle cap measures from. If a drain's reads

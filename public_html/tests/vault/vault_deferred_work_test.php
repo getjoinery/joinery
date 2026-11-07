@@ -199,6 +199,29 @@ $res = VaultDeferredWork::drain($uid, $scope, 2.0);
 check(is_int($res['ms']['t_timed'] ?? null) && $res['ms']['t_timed'] >= 150,
 	'ms reports the consumer\'s time (' . ($res['ms']['t_timed'] ?? 'none') . ')');
 
+section('A slow has_work answer is logged, a quick one is not');
+VaultDeferredWork::resetForTests();
+VaultDeferredWork::register('t_slow_check',
+	function () { usleep(300000); return false; },
+	function (int $u, VaultKey $k, float $d): int { return 0; });
+VaultDeferredWork::register('t_quick_check',
+	function () { return false; },
+	function (int $u, VaultKey $k, float $d): int { return 0; });
+$slow_log = tempnam(sys_get_temp_dir(), 'vdw_slow_');
+harness_defer(function () use ($slow_log) { @unlink($slow_log); });
+$previous_log = ini_set('error_log', $slow_log);
+try {
+	$answer = VaultDeferredWork::hasWork($uid);
+} finally {
+	ini_set('error_log', $previous_log);
+}
+$logged = (string)file_get_contents($slow_log);
+check($answer === false, 'the slow consumer still answers');
+check(strpos($logged, 'consumer t_slow_check took ') !== false
+	&& strpos($logged, ' ms to answer whether it has work (user ' . $uid . ')') !== false,
+	'the slow one is logged by name');
+check(strpos($logged, 't_quick_check') === false, 'the quick one is not');
+
 section('The deadline bounds the slice');
 VaultDeferredWork::resetForTests();
 list($greedy) = fake_consumer('t_greedy', 10000, 0.005);

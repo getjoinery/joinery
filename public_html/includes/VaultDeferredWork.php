@@ -45,6 +45,7 @@
  * more than anyone else. Leads are not fair to each other: while the first keeps
  * progressing, a second foreground consumer waits for it to finish.
  *
+ * @version 1.3.0 - a slow has_work answer is logged, naming the consumer
  * @version 1.2.0 - foreground consumers and drains; ms per consumer in each answer; an overrun turn is logged
  * @version 1.1.1 - comment wording: the hardened idle cap
  * @version 1.1.0 - drain callbacks receive the window's VaultKey, not bytes
@@ -67,6 +68,9 @@ class VaultDeferredWork {
 
 	/** A turn this far past its end is logged: it is what a redraw was waiting on. */
 	const OVERRUN_LOG_SECONDS = 2.0;
+
+	/** A has_work answer slower than this is logged: the heartbeat waits on it. */
+	const SLOW_CHECK_LOG_SECONDS = 0.25;
 
 	/**
 	 * @var array<string, array{has_work: callable, drain: callable, foreground: bool}>
@@ -117,13 +121,8 @@ class VaultDeferredWork {
 		}
 		self::loadConsumers();
 		foreach (self::$consumers as $id => $consumer) {
-			try {
-				if (call_user_func($consumer['has_work'], $user_id) === true) {
-					return true;
-				}
-			} catch (\Throwable $e) {
-				error_log('VaultDeferredWork: has_work failed for consumer ' . $id
-					. ' (user ' . $user_id . '): ' . $e->getMessage());
+			if (self::askHasWork($id, $consumer, $user_id)) {
+				return true;
 			}
 		}
 		return false;
@@ -294,16 +293,34 @@ class VaultDeferredWork {
 			if ($foreground_only && !$consumer['foreground']) {
 				continue;
 			}
-			try {
-				if (call_user_func($consumer['has_work'], $user_id) === true) {
-					$active[] = $id;
-				}
-			} catch (\Throwable $e) {
-				error_log('VaultDeferredWork: has_work failed for consumer ' . $id
-					. ' (user ' . $user_id . '): ' . $e->getMessage());
+			if (self::askHasWork($id, $consumer, $user_id)) {
+				$active[] = $id;
 			}
 		}
 		return $active;
+	}
+
+	/**
+	 * One consumer's has_work answer. A predicate that throws answers no and is
+	 * logged. One slower than SLOW_CHECK_LOG_SECONDS is logged too: every
+	 * heartbeat asks each consumer in turn until one says yes, so a slow
+	 * predicate is what a slow heartbeat is waiting on.
+	 */
+	private static function askHasWork(string $id, array $consumer, int $user_id): bool {
+		$started = microtime(true);
+		try {
+			$answer = call_user_func($consumer['has_work'], $user_id) === true;
+		} catch (\Throwable $e) {
+			error_log('VaultDeferredWork: has_work failed for consumer ' . $id
+				. ' (user ' . $user_id . '): ' . $e->getMessage());
+			$answer = false;
+		}
+		$took = microtime(true) - $started;
+		if ($took > self::SLOW_CHECK_LOG_SECONDS) {
+			error_log('VaultDeferredWork: consumer ' . $id . ' took ' . (int)round($took * 1000)
+				. ' ms to answer whether it has work (user ' . $user_id . ')');
+		}
+		return $answer;
 	}
 
 	/**
