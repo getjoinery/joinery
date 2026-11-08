@@ -320,7 +320,7 @@ impl Personality {
         let base = format!("{}probe-caf\u{e9}-{}", crate::names::INTERNAL_PREFIX, token);
         let path = dir.join(&base);
         let _ = std::fs::remove_file(&path);
-        if std::fs::write(&path, b"probe").is_err() {
+        if write_or_leave_nothing(&path, |p| std::fs::write(p, b"probe")).is_err() {
             // The platform's names are its safe guess; for identity the safe
             // guess is none, which costs only the older rules.
             p.stable_file_identity = false;
@@ -487,8 +487,38 @@ impl Default for Personality {
     }
 }
 
+/// A write that fails on a full disk has often made the file already, empty, and
+/// a probe's name is one nobody else will ever clear: it stayed in the person's
+/// folder, and the disk was blamed on them.
+fn write_or_leave_nothing(
+    path: &std::path::Path,
+    write: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let written = write(path);
+    if written.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    written
+}
+
 #[cfg(test)]
 mod tests {
+    /// B10: RED with the empty file left where the write failed.
+    #[test]
+    fn a_probe_that_fails_part_way_leaves_nothing() {
+        let dir = std::env::temp_dir().join(format!("jd-probe-pin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("probe");
+        let out = super::write_or_leave_nothing(&path, |p| {
+            std::fs::File::create(p)?;
+            Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+        });
+        let left = path.exists();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(out.is_err());
+        assert!(!left, "the probe stayed behind");
+    }
+
     use super::*;
 
     #[test]

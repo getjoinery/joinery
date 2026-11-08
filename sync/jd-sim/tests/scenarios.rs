@@ -27972,6 +27972,11 @@ fn a_synced_folder_replaced_by_a_link_is_held_not_deleted() {
     assert!(tree.contains_key("Dir/in.txt") && tree.contains_key("Dir/Sub/deep.txt"), "read as deleted: {tree:?}");
     assert!(b.fs.exists("Dir/in.txt"), "{:?}", b.fs.all_paths());
     assert_eq!(issues_of(a, jd_core::pass::NAME_OCCUPIED).len(), 1, "{:?}", a.store.open_issues().unwrap());
+    for _ in 0..3 {
+        world.pass(a);
+    }
+    assert!(a.fs.all_paths().iter().all(|p| !p.starts_with("Dir/")), "landed through the link: {:?}", a.fs.all_paths());
+    assert!(a.store.queued_ops().unwrap().is_empty(), "work kept queued behind the link");
 }
 
 /// B5: taking the link away is an ordinary delete of what stood there, by the
@@ -28100,4 +28105,63 @@ fn a_link_at_the_name_of_a_file_deleted_elsewhere_is_left_alone() {
     let root = jd_vfs::Vfs::root(&a.fs).unwrap();
     let names: Vec<String> = jd_vfs::Vfs::read_dir_all(&a.fs, &root).unwrap().into_iter().map(|e| e.name).collect();
     assert!(names.iter().any(|n| n == "f.txt"), "the link was taken: {names:?}");
+}
+
+/// B-W1: a placeholder folder whose listing fails for any reason, not only a
+/// refused one, keeps its tie: nothing is known of what is in it. RED with only
+/// `PermissionDenied` held: the folder was handed over to be adopted plain, and
+/// what was held in it went up in the clear.
+#[test]
+fn a_placeholder_that_fails_to_list_for_any_reason_keeps_its_tie() {
+    let vault = SimVault::new(10_216);
+    let mut world = World::new(10_216, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "V");
+    let w = world.server.seed_encrypted_folder(Some(v), "W");
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("V");
+    guest.fs.user_mkdir("V/W");
+    guest.fs.user_write("V/W/x.txt", b"held under the placeholder");
+    assert!(world.settle().is_some(), "never settled before the folder failed");
+    let tied = |d: &jd_sim::Device| d.store.get_entry(jd_core::EntityId::folder(w)).unwrap().is_some_and(|e| e.stand_in.is_some());
+    assert!(tied(guest), "the premise: W stands here as a placeholder");
+
+    guest.fs.fail_next(FsOp::ReadDir, Some("V/W"), FailureKind::Io, 1_000_000);
+    world.pass(guest);
+    world.pass(guest);
+    assert!(tied(guest), "the placeholder's tie lapsed while it could not be listed");
+
+    guest.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled after the folder listed again");
+    assert!(tied(guest), "the placeholder's tie lapsed once it listed");
+    assert!(!world.server.tree().keys().any(|k| k.ends_with("x.txt")), "went up in the clear: {:?}", world.server.tree());
+}
+
+/// B-W1: a placeholder folder a file has replaced lets its tie go: the folder is
+/// gone, and a tie kept would be held for ever. RED with the listing answering
+/// a file at the path as anything but not found.
+#[test]
+fn a_placeholder_replaced_by_a_file_lets_its_tie_go() {
+    let vault = SimVault::new(10_217);
+    let mut world = World::new(10_217, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let v = world.server.seed_encrypted_folder(None, "V");
+    let w = world.server.seed_encrypted_folder(Some(v), "W");
+    assert!(world.settle().is_some());
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("V");
+    guest.fs.user_mkdir("V/W");
+    guest.fs.user_write("V/W/x.txt", b"held under the placeholder");
+    assert!(world.settle().is_some(), "never settled before the swap");
+    let tied = |d: &jd_sim::Device| d.store.get_entry(jd_core::EntityId::folder(w)).unwrap().is_some_and(|e| e.stand_in.is_some());
+    assert!(tied(guest), "the premise: W stands here as a placeholder");
+    guest.fs.user_remove("V/W");
+    guest.fs.user_write("V/W", b"a file where the folder stood");
+    for _ in 0..3 {
+        world.pass(guest);
+    }
+    assert!(!tied(guest), "the tie stayed on a folder a file has replaced");
 }

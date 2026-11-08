@@ -2094,8 +2094,7 @@ impl MemFs {
         let st = self.state.lock().unwrap();
         match st.nodes.get(&key) {
             Some(Node::Dir) => {}
-            Some(_) => return Err(VfsError::NotADirectory(path.to_path_buf())),
-            None => return Err(VfsError::NotFound(path.to_path_buf())),
+            Some(_) | None => return Err(VfsError::NotFound(path.to_path_buf())),
         }
         let prefix = if key.is_empty() {
             String::new()

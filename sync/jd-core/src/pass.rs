@@ -5078,18 +5078,18 @@ fn placeholders_follow_the_server(
         if !away.is_empty() && under_unsettled(away, &here) {
             continue;
         }
-        // Refused, its directory still stands: what is in it is not known, and
-        // lapsed, the tie leaves the vault's directory to be adopted as a plain
-        // folder and what is held in it goes up in the clear. It waits, as a
-        // stand-in on a disk not there does.
+        // A listing that fails for any reason but the directory being gone says
+        // nothing about what is in it, and lapsed, the tie leaves the vault's
+        // directory to be adopted as a plain folder and what is held in it goes
+        // up in the clear. It waits, as a stand-in on a disk not there does.
         match env.vfs.read_dir(&root.join(&here)) {
             Ok(_) => {}
-            Err(jd_vfs::VfsError::PermissionDenied(_)) => continue,
-            Err(_) => {
+            Err(jd_vfs::VfsError::NotFound(_)) => {
                 entry.stand_in = None;
                 env.store.put_entry(&entry)?;
                 continue;
             }
+            Err(_) => continue,
         }
         let there = {
             let mut probe = entry.clone();
@@ -6311,7 +6311,9 @@ fn detect_folder_moves(
 ) -> Result<FolderScan, ExecError> {
     let mut scan = FolderScan::default();
     // Where each tracked folder believes it is, and which of those are gone.
-    let mut tracked: HashMap<String, EntityId> = HashMap::new();
+    // In path order, because the folders found gone claim directories in the
+    // order they are found: by hash order, one disk could end two ways.
+    let mut tracked: std::collections::BTreeMap<String, EntityId> = std::collections::BTreeMap::new();
     // Which directory each tracked folder knows to be its own, where it
     // knows (`record_directory_identities`), and which are vaults.
     let mut record_identity: HashMap<EntityId, u64> = HashMap::new();

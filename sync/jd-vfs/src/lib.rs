@@ -323,6 +323,9 @@ pub trait Vfs: Send + Sync {
     ///
     /// Lookups are unaffected: a volume that decomposes also accepts either
     /// spelling when asked for a file by name.
+    ///
+    /// A path with no directory at it, a file standing there included, is
+    /// [`VfsError::NotFound`].
     fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>>;
 
     /// The same listing INCLUDING the engine's own reserved names.

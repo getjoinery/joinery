@@ -4188,6 +4188,62 @@ fn one_seed_leaves_one_trace() {
     }
 }
 
+/// A seed in a shared vault leaves one trace too, with the sealed noise taken
+/// out: every run names and seals with fresh random bytes.
+///
+/// This seed lets two folders claim one directory. Taken in hash order they
+/// ended it two ways, about one run in two, so one pair of runs could miss it:
+/// four threads, four hash orders.
+#[test]
+fn a_seed_in_a_shared_vault_leaves_one_trace() {
+    fn without_sealed_noise(line: &str) -> String {
+        let is_hex = |s: &str, n: usize| s.len() >= n && s.as_bytes()[..n].iter().all(u8::is_ascii_hexdigit);
+        let mut out = String::with_capacity(line.len());
+        let mut rest = line;
+        while !rest.is_empty() {
+            if let Some(after) = rest.strip_prefix("enc-") {
+                if is_hex(after, 32) {
+                    out.push_str("enc-X");
+                    rest = &after[32..];
+                    continue;
+                }
+            }
+            if is_hex(rest, 64) {
+                out.push('H');
+                rest = &rest[64..];
+                continue;
+            }
+            let c = rest.chars().next().unwrap();
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+        out
+    }
+    let seed = 71666;
+    let names = ["a", "b", "c"];
+    let runs: Vec<_> = (0..4)
+        .map(|_| {
+            std::thread::spawn(move || {
+                let devices: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
+                let root = sweep_root(Vault::Shared);
+                let world = sweep_world(seed, &devices, 90, true, Vault::Shared);
+                drive(&world, seed, 90, true, root, Vault::Shared, false, Names::Ordinary);
+                let _ = world.settle();
+                seed_trace(&world).iter().map(|l| without_sealed_noise(l)).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let traces: Vec<Vec<String>> = runs.into_iter().map(|r| r.join().unwrap()).collect();
+    for other in &traces[1..] {
+        let first = traces[0].iter().zip(other.iter()).position(|(x, y)| x != y);
+        assert!(
+            first.is_none() && traces[0].len() == other.len(),
+            "seed {seed}: two runs left two traces; first difference at line {}",
+            first.unwrap_or(traces[0].len().min(other.len())),
+        );
+    }
+}
+
 /// Are these two paths on the same side of the vault's edge?
 ///
 /// Encryption is a property of where a thing lives, and the server cannot

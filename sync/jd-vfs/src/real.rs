@@ -115,7 +115,16 @@ path: &Path,
 personality: &Personality,
 include_internal: bool,
 ) -> VfsResult<Vec<DirEntry>> {
-    let rd = fs::read_dir(path).map_err(|e| io_err(path, e))?;
+    // A file standing at the path is no folder there, which is what the callers
+    // ask: said as a failure, a folder swapped for a file reads as one that may
+    // still hold what it held.
+    let rd = fs::read_dir(path).map_err(|e| {
+        if not_there(&e) {
+            VfsError::NotFound(path.to_path_buf())
+        } else {
+            io_err(path, e)
+        }
+    })?;
     let mut out = Vec::new();
     for entry in rd {
         let entry = entry.map_err(|e| io_err(path, e))?;
@@ -252,6 +261,9 @@ fn io_err(path: &Path, e: std::io::Error) -> VfsError {
         // ERROR_FILENAME_EXCED_RANGE. EINVAL is not read as one: it says many
         // other things too (a folder moved into itself).
         std::io::ErrorKind::InvalidFilename => VfsError::NameRefused(path.to_path_buf()),
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
+            VfsError::OutOfSpace(path.to_path_buf())
+        }
         _ => VfsError::Io {
             path: path.to_path_buf(),
             source: e,
@@ -1570,7 +1582,10 @@ impl OsSpoolFile {
             Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
                 self.land_across(target, expect)?
             }
-            Err(e) => return Err(io_err(&self.path, e)),
+            // What refused is the folder it lands in, or that folder's disk.
+            // The spool is the engine's own and means nothing to the person
+            // reading this.
+            Err(e) => return Err(io_err(target, e)),
         };
         Ok(as_seen(landed, &self.personality))
     }
@@ -1907,6 +1922,53 @@ mod tests {
             return; // running as root
         }
         assert!(matches!(listed, Err(VfsError::PermissionDenied(_))), "{listed:?}");
+    }
+
+    /// B-W1: a file at the path is no folder there. RED with the listing failing
+    /// as an I/O error, which holds a vault placeholder's tie for ever.
+    #[test]
+    fn a_file_listed_as_a_folder_is_not_found() {
+        let dir = TempDir::new("file_as_folder");
+        let f = dir.path().join("f");
+        fs::write(&f, b"f").unwrap();
+        let listed = vfs(&dir).read_dir(&f);
+        assert!(matches!(listed, Err(VfsError::NotFound(_))), "{listed:?}");
+    }
+
+    /// B8: a full disk or a used-up quota is called that, not a bare I/O error.
+    #[test]
+    fn a_full_disk_is_called_out_of_space() {
+        for kind in [std::io::ErrorKind::StorageFull, std::io::ErrorKind::QuotaExceeded] {
+            let e = io_err(Path::new("/x/a.txt"), std::io::Error::from(kind));
+            assert!(matches!(e, VfsError::OutOfSpace(_)), "{e:?}");
+        }
+    }
+
+    /// B8: a landing the folder refuses names the file it was for. RED with the
+    /// error naming the spool file, which is all the person was told. Not run
+    /// as root, which no permission stops.
+    #[cfg(unix)]
+    #[test]
+    fn a_landing_the_folder_refuses_names_the_file_not_the_spool() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("no_landing");
+        let sub = dir.path().join("ro");
+        fs::create_dir(&sub).unwrap();
+        let v = vfs(&dir);
+        let target = sub.join("new.txt");
+        let mut w = v.spool(&target, 0).unwrap();
+        w.write_all(b"new").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o555)).unwrap();
+        let writable = fs::write(sub.join("probe"), b"p").is_ok();
+        let landed = w.commit(&target, None);
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+        if writable {
+            return; // running as root
+        }
+        match landed {
+            Err(VfsError::PermissionDenied(p)) => assert_eq!(p, target),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// B2, B3: a name that is not text is listed for what it is, never under a
