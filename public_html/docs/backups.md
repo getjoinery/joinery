@@ -1606,11 +1606,41 @@ own project and refuses a job naming any other.
 composes its own statement of what it would do — which project, which database,
 which archive, the archive's real age, size and fingerprint — from its own
 records, seals a
-one-time challenge to the backup recovery public key it already holds, binds it
-to that job and that statement, and stages it for the node's own site. The
+one-time challenge to the backup recovery public key root recorded for the site
+(below), binds it to that job and that statement, and stages it for the node's
+own site. The
 node's Backups page shows the pending approval; the operator opens the challenge
 there with their recovery key, in their browser, and answers. The agent verifies
 the answer against what it sealed and only then restores.
+
+**Root keeps its own record of the recovery key.** The site holds its recovery
+public key in its settings, which its web tier can write, and its web tier can
+also point the agent at another management node. So the agent does not trust
+the setting alone: the first proven key it sees is recorded as root's own, in
+`/etc/joinery-agent/recovery_key.json` (root, 0600; a container carries it on
+its `_agent` volume), and every restore and copy approval is sealed to the key
+in that file. A file open beyond its owner, or whose key and fingerprint
+disagree, is refused, and so is every approval until it is fixed. When the
+site's proven key is not the recorded one, approvals refuse and name both
+fingerprints, and the agent asks for the change to be confirmed: the Backups
+page shows *Confirm the new recovery key* (the `rekey` approval scope), a
+challenge sealed to the **previous** key, so a key that only reached the
+settings cannot vouch for itself. Once it is opened the agent records the new
+key; a decline quiets the question about that key for a day. An answer
+counts only if root's record is still the one it was asked against, so a
+decline cannot undo a root accept made while the screen was open. The agent
+checks once a minute. When the previous key is lost, `joinery-agent
+recovery-key accept`, run as root on the machine, records the site's current
+proven key; `joinery-agent recovery-key`, as root, shows both. A database
+restored from before a rotation puts the older key back in the settings and
+the screen appears; the right answer there is to decline and set the current
+key again, since confirming would record the older key. The node's
+`check_status` reports the record and the site's key by fingerprint, and the
+node page's Overview shows them in its **Recovery key** box (amber when they
+differ). On the management node that page is rendered by the same web tier the
+record guards against, so there the root CLI is the view to trust. A removal of a container
+site is approved with that site's own key, which the host has no record of: a
+compromise of that site's web tier gains no more than that site's removal.
 
 A chain staged without a key (another server made it) carries its key box in
 the statement: the recovery recipient's box as the page needs it (its X-Wing

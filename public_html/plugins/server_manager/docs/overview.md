@@ -904,8 +904,6 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 
 Destructive operations take no safety copy of the state they replace: a restore happens because the current state is wrong, and the operator approves a statement that anything written since the archive was taken is gone. The UI requires explicit confirmation checkboxes.
 
-**The management node's own site takes no destructive job through its own queue.** Every destructive job has two parties: the management node queues it, and the site it restores, copies or removes approves it on its own admin with its own recovery key. On the management node's own site those are one web tier, so the agent refuses the job there (`restore_database`, `restore_project`, `restore_chain`, `copy_export`, and a host's `decommission_site` of that site), naming why, before anyone is asked; it does the same when it cannot tell. That site is restored and copied as root at its machine. The agent decides from what root holds: the management node's address in its identity file, and the site's own domain from its config; the site is the management node when the two name the same domain (with or without `www.`), or, for a machine's own site, when the management node's name resolves to an address of this machine (`selfplane.go`).
-
 **Note on bare-metal nodes:** `install.sh server` disables root SSH during the bootstrap; the session that ran it is the last one the plane opens. Everything after it — backups, restores, certificates, upgrades — runs on the node's own agent, which is root.
 
 ### One-Click Node Install

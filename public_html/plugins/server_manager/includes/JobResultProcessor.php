@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.127 - status_recovery_key(): root's record of the site's recovery key, reported by check_status
+ *                  (agent 1.116.0)
  * @version 1.126 - dns_target_ip() + dns_record_type(), shared with the sites page; the welcome emails name
  *                 an AAAA record for an IPv6 target, and for a hostname target its address or an ALIAS/ANAME
  * @version 1.125 - process_never_do_check counts the alarm and the review list (NeverDoCheck 1.1)
@@ -592,6 +594,11 @@ class JobResultProcessor {
 		// shape, as the dashboard reads it (specs/release_key_rotation.md R6).
 		if (array_key_exists('release_trust', $result)) {
 			$result['release_trust'] = self::status_release_trust($result['release_trust']);
+		}
+		// Root's record of the site's recovery key beside the site's own key
+		// (agent 1.116.0), by fingerprint only.
+		if (array_key_exists('recovery_key', $result)) {
+			$result['recovery_key'] = self::status_recovery_key($result['recovery_key']);
 		}
 		// The PHP it runs, and whether old code still serves (agent 1.88.0).
 		if (array_key_exists('php', $result)) {
@@ -5088,6 +5095,31 @@ HTML;
 	public static function status_release_trust($v) {
 		if (!is_array($v)) { return null; }
 		return ['site' => self::reported_trust($v['site'] ?? null), 'agent' => self::reported_trust($v['agent'] ?? null)];
+	}
+
+	/**
+	 * check_status's recovery_key, kept only in its own shape: root's record of
+	 * the site's recovery key (fingerprint, how and when it was recorded, a
+	 * declined change) and the site's proven key, by fingerprint, with whether
+	 * they agree. Null for anything else.
+	 */
+	public static function status_recovery_key($v) {
+		if (!is_array($v)) { return null; }
+		$fpr = function ($x) { return (is_string($x) && preg_match('/^[0-9a-f]{64}$/', $x)) ? $x : null; };
+		$time = function ($x) { return (is_string($x) && preg_match('/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/', $x)) ? $x : null; };
+		$how = in_array($v['how'] ?? null, array('first seen', 'confirmed on the site with the previous key',
+			'accepted as root at this machine'), true) ? $v['how'] : null;
+		return array(
+			'recorded'             => ($v['recorded'] ?? null) === true,
+			'unusable'             => isset($v['error']),
+			'fingerprint'          => $fpr($v['fingerprint'] ?? null),
+			'how'                  => $how,
+			'pinned_time'          => $time($v['pinned_time'] ?? null),
+			'declined_fingerprint' => $fpr($v['declined_fingerprint'] ?? null),
+			'declined_time'        => $time($v['declined_time'] ?? null),
+			'site_fingerprint'     => $fpr($v['site_fingerprint'] ?? null),
+			'matches'              => is_bool($v['matches'] ?? null) ? $v['matches'] : null,
+		);
 	}
 
 	/** One side of status_release_trust(). */

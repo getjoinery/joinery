@@ -59,6 +59,8 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.8 - the rekey scope: the holder of the previous recovery key confirms a change of it, which the
+ *                agent then records as root's own (specs/shell_command_audit_wp2_results.md D2)
  * @version 1.7 - a key box is X-Wing only: a box with no ciphertext (an X25519 ephemeral key) is not one
  * @version 1.6 - the challenge's scope is always this scope's own label; a request row naming another is refused
  *                (reviewer2 WP2 B1)
@@ -83,6 +85,7 @@ class ApprovalChallenge {
 	const RESTORE      = 'restore';
 	const DECOMMISSION = 'decommission';
 	const EXPORT       = 'export';
+	const REKEY        = 'rekey';
 
 	/** A second answer to a request already answered, before the agent has taken the first. */
 	const ALREADY_ANSWERED = 'This request has already been answered. This machine\'s agent picks the answer up within a few seconds.';
@@ -230,6 +233,51 @@ class ApprovalChallenge {
 			'approved_notice' => 'Approved. This machine is checking your answer and will seal the keys to the copy.',
 			'declined_notice' => 'Declined. Nothing was handed over, and the copy is reported refused.',
 		),
+
+		// This site's recovery key is not the one its agent recorded as root.
+		// The agent seals restores and copies only to the key it recorded, so
+		// a key written into this site's settings, by its owner or by anyone
+		// else who can write them, approves nothing until the holder of the
+		// PREVIOUS key confirms the change here. The challenge is sealed to
+		// that previous key.
+		self::REKEY => array(
+			'request_setting' => 'recovery_key_change_approval_request',
+			'answer_setting'  => 'recovery_key_change_approval_answer',
+			'info'            => 'joinery-recovery-key-change-approval:',
+			'approve_action'  => 'approve_recovery_key_change',
+			'decline_action'  => 'decline_recovery_key_change',
+			'approve_form'    => 'recovery_key_change_approval_form',
+			'decline_form'    => 'recovery_key_change_decline_form',
+			'id_prefix'       => 'rk',
+
+			'none_waiting'    => 'There is no recovery key change waiting for confirmation on this machine. Its agent '
+			                   . 'asks again within a minute while the key differs from the one it recorded.',
+			'wrong_job'       => 'That confirmation is for a different request than the one waiting. Reload this page.',
+			'none_to_decline' => 'There is no recovery key change waiting for confirmation on this machine.',
+
+			'box_title'       => 'Confirm the new recovery key',
+			'headline'        => 'This site\'s backup recovery key has changed. Restores and copies of this site wait '
+			                   . 'until the change is confirmed with the previous key.',
+			// The previous key is the point: the agent recorded it as root, and
+			// a key that only reached this site's settings cannot vouch for
+			// itself. If nobody here changed the key, the decline is right.
+			'intro'           => 'This machine\'s agent seals every restore and copy approval to the recovery key it '
+			                   . 'recorded, not to the one in this site\'s settings. Confirm the change with your '
+			                   . 'PREVIOUS recovery key. If you did not change the key, decline: someone who can write '
+			                   . 'this site\'s settings may have. If this follows a restore of an older '
+			                   . 'database, decline, then set your current key again on this page: confirming would put the '
+			                   . 'older key back. If the previous key is lost, run joinery-agent recovery-key accept as root '
+			                   . 'on this machine instead.',
+			'expiry_tail'     => '. Nothing else on this machine waits for it. If it expires, the agent asks again within '
+			                   . 'a minute; declining stops it asking about this key for a day.',
+			'key_label'       => 'Paste your PREVIOUS recovery key to confirm',
+			'key_help'        => 'The key this site used before the change. It is used in your browser and never sent '
+			                   . 'anywhere — confirming proves you hold it.',
+			'approve_button'  => 'Confirm the new key',
+			'decline_button'  => 'No — I did not change the key',
+			'approved_notice' => 'Confirmed. This machine is checking your answer and will record the new key.',
+			'declined_notice' => 'Declined. Restores and copies stay sealed to the previous key.',
+		),
 	);
 
 	/**
@@ -238,7 +286,7 @@ class ApprovalChallenge {
 	 * recovery-readiness.js binds one window.rrApproval and two key boxes on
 	 * one screen is how a person answers the wrong one.
 	 */
-	const PRECEDENCE = array(self::DECOMMISSION, self::RESTORE, self::EXPORT);
+	const PRECEDENCE = array(self::DECOMMISSION, self::RESTORE, self::EXPORT, self::REKEY);
 
 	/** One scope's entry. An unknown name is a programming error. */
 	public static function scope(string $name): array {

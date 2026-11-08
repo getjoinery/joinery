@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.100 - a Recovery key box: root's record of the site's recovery key beside the site's own
  * @version 1.99 - the never-do box shows the alarm (Mark safe) and Changes to review (Clear) apart
  * @version 1.98 - the never-do box reads Security sentinel: suspicious activity, its button Mark safe (not red)
  * @version 1.97 - Recent jobs leaves out completed routine never-do checks
@@ -2309,6 +2310,46 @@
 			echo '<div class="text-muted">The release key signs each release\'s files; the statement key signs its public record of what was released; '
 				. 'the last column is the keys allowed to approve a change of keys.</div>';
 			echo '</details>';
+			echo '</div></div>';
+		}
+
+		// Recovery key: root's record of the site's backup recovery key beside
+		// the site's own. Every restore and copy approval is sealed to the
+		// record, so a site key that differs from it approves nothing until the
+		// change is confirmed on the site with the previous key (agent 1.116.0).
+		$rk_status = json_decode((string)$node->get('mgn_last_status_data'), true);
+		$rk = is_array($rk_status) ? JobResultProcessor::status_recovery_key($rk_status['recovery_key'] ?? null) : null;
+		if ($rk !== null) {
+			$short = function ($f) { return $f ? htmlspecialchars(substr($f, 0, 16)) : 'none'; };
+			echo '<div class="svm-span-2"><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Recovery key</div>';
+			if ($rk['unusable']) {
+				$ag_tone = 'bad';
+				$ag_bits[] = 'recovery key record unusable';
+				echo '<div><span class="badge bg-danger">Unusable</span> Root\'s record of this site\'s recovery key cannot be read, '
+					. 'so no restore or copy of it can be approved. Fix it as root at the machine, then run '
+					. '<code>joinery-agent recovery-key accept</code>.</div>';
+			} elseif (!$rk['recorded']) {
+				echo '<div class="small text-muted">Not recorded yet: the site has no proven recovery key, so nothing of it can be restored by approval.</div>';
+			} elseif ($rk['site_fingerprint'] === null) {
+				$ag_tone = $worse($ag_tone, 'warn');
+				$ag_bits[] = 'no proven recovery key';
+				echo '<div><span class="badge bg-warning text-dark">No site key</span> Root recorded <code>' . $short($rk['fingerprint'])
+					. '</code>, but the site has no proven recovery key right now, so nothing of it can be restored by approval. '
+					. 'If nobody here removed it, someone who can write the site\'s settings may have.</div>';
+			} elseif ($rk['matches'] === false) {
+				$ag_tone = $worse($ag_tone, 'warn');
+				$ag_bits[] = 'recovery key changed';
+				echo '<div><span class="badge bg-warning text-dark">Changed</span> The site\'s recovery key ('
+					. $short($rk['site_fingerprint']) . ') is not the one root recorded (' . $short($rk['fingerprint'])
+					. '). Restores and copies of it wait until the change is confirmed on its Backups page with the previous key. '
+					. 'If nobody here changed it, someone who can write the site\'s settings may have.</div>';
+			} else {
+				echo '<div><span class="badge bg-success">Recorded</span> Restores and copies of this site are approved with the key root recorded: <code>'
+					. $short($rk['fingerprint']) . '</code>, ' . htmlspecialchars((string)$rk['how'])
+					. ($rk['pinned_time'] ? ', ' . htmlspecialchars($rk['pinned_time']) . ' UTC' : '') . '.</div>';
+			}
+			echo '<div class="small text-muted mt-2">Reported by the node\'s own agent. On the management node itself, read it as root with <code>joinery-agent recovery-key</code>: its own web tier renders this page.</div>';
 			echo '</div></div>';
 		}
 

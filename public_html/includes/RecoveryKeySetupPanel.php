@@ -21,6 +21,7 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.6 - the rotation box says restores wait for the change to be confirmed with the current key
  * @version 2.5 - loads vault-crypto.js, whose X-Wing the ceremony runs on (post_quantum_sealing WP2)
  * @version 2.4 - the command-line proof command comes from BackupRecoveryKey::cli_unseal_command()
  * @version 2.3 - Rotate key asks whether the current key could have been seen, where an encrypted data
@@ -156,6 +157,13 @@ class RecoveryKeySetupPanel {
 		   . 'current key (' . htmlspecialchars($state['fingerprint']) . '…) — keep that private key until '
 		   . 'every chain sealed to it has been retired. Once the new key is verified, every backup from '
 		   . 'then on seals to it, starting with a fresh chain on the next run.';
+		// Restores and copies are approved with the key this machine's agent
+		// recorded as root, so the change has to be confirmed with the current
+		// key (agent 1.116.0, the rekey approval scope).
+		echo '<p class="mt-2 mb-0"><strong>Restores and copies wait for the change to be confirmed.</strong> This machine\'s '
+		   . 'agent approves them only with the key it recorded. Once the new key is verified, this page asks you to confirm '
+		   . 'the change with the current key; keep it to hand. If the current key is lost, restores and copies of this site '
+		   . 'need root at this machine (<code>joinery-agent recovery-key accept</code>) until the new key is accepted there.</p>';
 		// An encrypted data root sealed to this key (D8): its break-glass copy
 		// is sealed again to the new key on its own; the question is whether
 		// the old key could have been seen.
