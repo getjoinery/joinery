@@ -1,5 +1,8 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.9 - the host setup line says whether the plugin declares a host remover; an uninstalled plugin's row
+//               names the removal request's kind, links its transcript and offers Run removal again when it
+//               failed (specs/plugin_host_removal.md D7)
 // @version 1.8 - Host setup: each active plugin with a host installer shows its last install run and Run setup
 //               again, which also replaces the sudo command on an unmet setup check
 //               (plugin_installer_from_the_browser.md)
@@ -35,7 +38,11 @@ $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
 // name => the last host installer run (null: not run yet), for every active
 // plugin with a host installer (PluginInstallerStatus).
 $installer_status = $page_vars['installer_status'] ?? array();
-// Run setup again queues a root request, which the API takes from a superadmin.
+// name => whether the plugin on disk declares a host_remover (the host setup
+// line says so; Run removal again needs one).
+$remover_declared = $page_vars['remover_declared'] ?? array();
+// Run setup again and Run removal again queue a root request, which the API
+// takes from a superadmin.
 $can_run_installer = Access::permits(10, $session);
 // What a plugin whose setup has not run yet is waiting for; read once.
 $installer_next = RootRequest::actorState() === 'present'
@@ -307,17 +314,34 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // removed by the host on its next tick, and the request
                     // that asked for it is named so its transcript can be read.
                     if ($plugin['directory_exists']) {
-                        $status_cell .= '<br><small class="text-muted">Data removed; files being removed by the host';
+                        // A run_plugin_remover request takes the plugin's
+                        // machine state off first (plugin_host_removal.md D6);
+                        // a remove_plugin request removes the files alone.
                         $remove_id = $plugin['plugin']->get_remove_request_id();
-                        if ($remove_id !== '') {
-                            $remove_state = RootRequest::status($remove_id);
+                        $remove_state = $remove_id !== '' ? RootRequest::status($remove_id) : null;
+                        $removal_kind = $remove_state !== null ? (string)$remove_state['kind'] : '';
+                        $status_cell .= '<br><small class="text-muted">Data removed; '
+                            . ($removal_kind === 'run_plugin_remover'
+                                ? 'its machine state and files being removed by the host'
+                                : 'files being removed by the host');
+                        if ($remove_state !== null) {
                             $status_cell .= ' (request ' . htmlspecialchars($remove_state['state']);
                             if ($remove_state['state'] === 'failed') {
-                                $status_cell .= ', exit ' . (int)$remove_state['exit_code'] . '; see logs/root_requests/' . htmlspecialchars($remove_id) . '.log';
+                                $status_cell .= ', exit ' . (int)$remove_state['exit_code'];
+                            }
+                            if ($remove_state['state'] !== 'unknown') {
+                                $status_cell .= '; <a href="/admin/admin_plugins?installer_request=' . rawurlencode($remove_id) . '">transcript</a>';
                             }
                             $status_cell .= ')';
                         }
                         $status_cell .= '</small>';
+                        // The remover is idempotent: once the cause is fixed, a
+                        // fresh request finishes the job.
+                        if ($can_run_installer && $remove_state !== null && $remove_state['state'] === 'failed'
+                            && !empty($remover_declared[$plugin['name']])) {
+                            $status_cell .= ' <button type="button" class="btn btn-sm btn-outline-secondary plugin-run-remover"'
+                                . ' data-run-remover="' . htmlspecialchars($plugin['name']) . '">Run removal again</button>';
+                        }
                     } else {
                         $status_cell .= '<br><small class="text-muted">Data and files removed</small>';
                     }
@@ -344,6 +368,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                     if ($record === null) {
                         $status_cell .= ' &mdash; ' . htmlspecialchars($installer_next);
                     }
+                    // Whether a site removal or an uninstall has a script to
+                    // take the plugin's machine state off again.
+                    $status_cell .= ' &middot; ' . (!empty($remover_declared[$plugin['name']])
+                        ? 'declares a host remover' : 'declares no host remover');
                     if ($can_run_installer) {
                         $status_cell .= ' <button type="button" class="btn btn-sm btn-outline-secondary plugin-run-installer"'
                             . ' data-run-installer="' . htmlspecialchars($plugin['name']) . '">Run setup again</button>';
@@ -612,6 +640,25 @@ document.addEventListener('click', function(e) {
             button.disabled = false;
             button.textContent = 'Run setup again';
             JoineryModal.alert('Could not queue the setup run' + (err && err.message ? ': ' + err.message : '.'));
+        });
+});
+// Run removal again: queue the uninstalled plugin's host remover (and then its
+// file removal) as a root request, then show that request's panel.
+document.addEventListener('click', function(e) {
+    var button = e.target.closest('[data-run-remover]');
+    if (!button) { return; }
+    e.preventDefault();
+    button.disabled = true;
+    button.textContent = 'Queuing…';
+    joineryApi.post('plugin_remover_run', { plugin: button.getAttribute('data-run-remover') })
+        .then(function(data) {
+            if (!data || !data.request_id) { throw new Error('no request'); }
+            window.location = '/admin/admin_plugins?installer_request=' + encodeURIComponent(data.request_id);
+        })
+        .catch(function(err) {
+            button.disabled = false;
+            button.textContent = 'Run removal again';
+            JoineryModal.alert('Could not queue the removal' + (err && err.message ? ': ' + err.message : '.'));
         });
 });
 </script>

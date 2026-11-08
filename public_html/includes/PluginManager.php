@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.21 - uninstall() queues run_plugin_remover in place of remove_plugin when the plugin's manifest declares a host_remover: one request runs the remover and then removes the files (specs/plugin_host_removal.md D6)
  * @version 1.20 - sync, syncTables, the namespace check and activation's hook pass iterate PluginHelper::activePluginRows(); runSyncHook() refuses a name that is not a plugin name (unseal_daemon.md C3)
  * @version 1.19 - activate() loads the newly active plugin's bootstrap before its content packs save anything
  * @version 1.18 - a plugin's content packs (content_packs/{pack}/) land once per install: after its activation
@@ -1546,12 +1547,21 @@ class PluginManager extends AbstractExtensionManager {
         $plugin->set('plg_install_error', null);
 
         // Step 9: Ask root to remove the files. The request carries the name
-        // and nothing else; PluginRemoval::refusal() is what root checks.
+        // and nothing else; PluginRemoval::refusal() is what root checks. A
+        // plugin whose manifest declares a host_remover gets one request that
+        // runs the remover (what its installer put on the machine goes) and
+        // then removes the files: one request, not two, because two from one
+        // call run in random order (specs/plugin_host_removal.md D6).
         $request_id = '';
         $plugin_dir = PathHelper::getAbsolutePath("plugins/{$name}");
         if (is_dir($plugin_dir)) {
-            $request_id = RootRequest::submit('remove_plugin', array('name' => $name),
-                $requested_by === null ? null : (int)$requested_by);
+            if (PluginRemoval::declared_remover($name, PathHelper::getAbsolutePath('plugins')) !== '') {
+                $request_id = RootRequest::submit('run_plugin_remover', array('plugin' => $name),
+                    $requested_by === null ? null : (int)$requested_by);
+            } else {
+                $request_id = RootRequest::submit('remove_plugin', array('name' => $name),
+                    $requested_by === null ? null : (int)$requested_by);
+            }
         }
         $this->setRemoveRequestId($plugin, $request_id);
         $plugin->save();
@@ -1559,7 +1569,18 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Record (or clear, with '') the remove_plugin request on the row, under a
+     * Record a removal request (remove_plugin or run_plugin_remover) queued
+     * after the uninstall, so the Plugins page has one id to show: Run removal
+     * again (plugin_remover_run) replaces the failed request's id with the
+     * fresh one's.
+     */
+    public function recordRemoveRequest(Plugin $plugin, string $request_id): void {
+        $this->setRemoveRequestId($plugin, $request_id);
+        $plugin->save();
+    }
+
+    /**
+     * Record (or clear, with '') the removal request on the row, under a
      * runtime key of plg_metadata so sync()'s metadata refresh carries it over.
      */
     protected function setRemoveRequestId(Plugin $plugin, string $request_id): void {

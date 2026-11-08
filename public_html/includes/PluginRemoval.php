@@ -21,10 +21,28 @@
  * test removing its own scratch plugin) are as removed as root would leave
  * them.
  *
+ * @version 1.2 - declared_remover(): the host_remover a plugin's manifest declares, which decides whether an
+ *                uninstall queues run_plugin_remover (remover, then files) or remove_plugin (files alone)
+ *                (specs/plugin_host_removal.md D6)
  * @version 1.1 - already_gone(): a removal whose directory is already gone is done (B22: 534 test requests failed)
  * @version 1.0 - specs/post_release_fleet_defects.md B1
  */
 class PluginRemoval {
+
+	/**
+	 * The host_remover plugins/<name>/plugin.json declares, relative to the
+	 * plugin directory, or '' when it declares none (or the manifest cannot be
+	 * read). Read from the file, not through PluginHelper: at the uninstall
+	 * moment the plugin is inactive and its helper does not resolve.
+	 */
+	public static function declared_remover(string $name, string $plugins_dir): string {
+		if ($name === '' || !Plugin::is_valid_plugin_name($name)) {
+			return '';
+		}
+		$manifest = json_decode((string)@file_get_contents(rtrim($plugins_dir, '/') . '/' . $name . '/plugin.json'), true);
+		$declared = is_array($manifest) ? ($manifest['host_remover'] ?? '') : '';
+		return is_string($declared) ? $declared : '';
+	}
 
 	/**
 	 * Whether plugins/<name> is already gone: a plugin name, and nothing at

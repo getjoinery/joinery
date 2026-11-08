@@ -24,6 +24,14 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.11 - run_plugin_remover: the runner asks the checks remove_plugin asks (--check) before it runs an
+ *                 uninstalled plugin's host_remover, and removes the files through the same function afterwards
+ *                 (--remover-ran); the kind handed here whole is refused as run_plugin_installer is
+ *                 (specs/plugin_host_removal.md D6)
+ * @version 1.10 - the request and its transcript are read and written where RootState says
+ *                 (specs/shell_command_audit.md D1)
+ * @version 1.9 - install_plugin and install_theme validate the name before it is a shell word: a name beginning
+ *                with - was read by install_extension.php as an option (specs/shell_command_audit.md U1)
  * @version 1.8 - run_plugin_installer is refused here: the host converger carries it out itself, and a
  *                runner older than the tree would otherwise report it done with nothing run
  * @version 1.7 - remove_plugin: a directory already gone is done, not refused, as a retried request is (B22)
@@ -74,7 +82,7 @@ if (!in_array($kind, RootRequest::KINDS, true)) {
 
 // The runner has already moved the file into running/ by the time this starts.
 $site_root = PathHelper::getSiteRoot();
-$request_path = $site_root . '/' . RootRequest::QUEUE_DIR . '/running/' . $request_id . '.json';
+$request_path = RootState::outcomeDir($site_root) . '/running/' . $request_id . '.json';
 if (!is_file($request_path)) {
 	fwrite(STDERR, "root_request: no request at $request_path\n");
 	exit(2);
@@ -112,6 +120,39 @@ function root_request_own(string $path): void {
 	}
 }
 
+/**
+ * The file half of a plugin uninstall, one function for remove_plugin and
+ * run_plugin_remover so the two kinds cannot drift: PluginRemoval's checks (a
+ * plugin name, a real directory directly under plugins/, a manifest that does
+ * not say is_system, a row that says uninstalled and not active), then, unless
+ * $check_only, the removal. A directory already gone is done. Exits: 0 removed
+ * (or may be removed, with $check_only), 3 already gone with $check_only (0
+ * without), 1 refused with the reason on stderr.
+ */
+function root_request_plugin_files(string $name, string $kind, bool $check_only): never {
+	$plugins_dir = PathHelper::getAbsolutePath('plugins');
+	if (PluginRemoval::already_gone($name, $plugins_dir)) {
+		echo "plugins/$name is already gone\n";
+		exit($check_only ? 3 : 0);
+	}
+	$row = null;
+	if ($name !== '' && Plugin::is_valid_plugin_name($name)) {
+		$row = Plugin::get_by_plugin_name($name);
+	}
+	$why = PluginRemoval::refusal($name, $plugins_dir, $row);
+	if ($why !== '') {
+		fwrite(STDERR, "root_request: $kind refused: $why\n");
+		exit(1);
+	}
+	if ($check_only) {
+		echo "plugins/$name may be removed: its row says uninstalled\n";
+		exit(0);
+	}
+	$count = PluginRemoval::remove($name, $plugins_dir);
+	echo "removed plugins/$name ($count files and directories)\n";
+	exit(0);
+}
+
 echo "root request $request_id: $kind\n";
 
 switch ($kind) {
@@ -129,9 +170,20 @@ switch ($kind) {
 		// verified in a root-owned working directory before it replaces
 		// anything; the marketplace is first-party, so an unverified archive
 		// there is refused outright (exit 3, verdict in the transcript).
+		// The name is validated HERE, before it is a shell word. install_extension.php
+		// reads any argument that starts with "-" as one of its own options, so an
+		// unvalidated name of "--staged=<dir>" would turn this by-name install into a
+		// staged install of a directory the web user chose, past the checks the
+		// install_package kind puts on staged_dir (specs/shell_command_audit.md U1).
+		$name = (string)($args['name'] ?? '');
+		$manager = $kind === 'install_theme' ? new ThemeManager() : new PluginManager();
+		if (!$manager->validateName($name)) {
+			fwrite(STDERR, "root_request: '" . substr($name, 0, 80) . "' is not a plain extension name\n");
+			exit(2);
+		}
 		$cmd = escapeshellarg(PHP_BINARY) . ' '
 			. escapeshellarg(PathHelper::getIncludePath('utils/install_extension.php'))
-			. ($kind === 'install_theme' ? ' theme ' : ' plugin ') . escapeshellarg((string)($args['name'] ?? ''));
+			. ($kind === 'install_theme' ? ' theme ' : ' plugin ') . escapeshellarg($name);
 		passthru($cmd, $code);
 		exit((int)$code);
 
@@ -316,24 +368,32 @@ switch ($kind) {
 		// them failing leaves the directory and says why (exit 1). A directory
 		// already gone is done: a retried request, or files removed first by
 		// whoever made them (a test's scratch plugin).
-		$name = (string)($args['name'] ?? '');
-		$plugins_dir = PathHelper::getAbsolutePath('plugins');
-		if (PluginRemoval::already_gone($name, $plugins_dir)) {
-			echo "plugins/$name is already gone\n";
-			exit(0);
+		root_request_plugin_files((string)($args['name'] ?? ''), $kind, false);
+
+	case 'run_plugin_remover':
+		// The uninstall moment of a plugin with a host_remover
+		// (specs/plugin_host_removal.md D6): the runner carries the kind out
+		// in its own request loop, and comes here twice, for the two halves
+		// that must be the same checks remove_plugin asks:
+		//   --check        before the remover runs: exit 0 when the plugin may
+		//                  be removed (the row says uninstalled and not active,
+		//                  the manifest not is_system, a real directory under
+		//                  plugins/), 3 when the directory is already gone, 1
+		//                  refused with the reason;
+		//   --remover-ran  after the remover exited 0: the checks again, then
+		//                  the directory goes.
+		// Neither word is sent by a runner older than the tree, which hands
+		// the kind here whole; that is refused, as run_plugin_installer is,
+		// because removing the files without the remover is the very thing
+		// one request exists to prevent.
+		if (in_array('--check', $argv, true)) {
+			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, true);
 		}
-		$row = null;
-		if ($name !== '' && Plugin::is_valid_plugin_name($name)) {
-			$row = Plugin::get_by_plugin_name($name);
+		if (in_array('--remover-ran', $argv, true)) {
+			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, false);
 		}
-		$why = PluginRemoval::refusal($name, $plugins_dir, $row);
-		if ($why !== '') {
-			fwrite(STDERR, "root_request: remove_plugin refused: $why\n");
-			exit(1);
-		}
-		$count = PluginRemoval::remove($name, $plugins_dir);
-		echo "removed plugins/$name ($count files and directories)\n";
-		exit(0);
+		fwrite(STDERR, "root_request: this kind is carried out by the host converger itself; this runner is older than the tree\n");
+		exit(2);
 
 	case 'run_plugin_installer':
 		// The runner carries this kind out in its own request loop
@@ -405,7 +465,7 @@ switch ($kind) {
 		// here, it keeps the filesystem mounted and the start refuses. So
 		// this process lets go of it for the start and adds what the start
 		// said once it is over.
-		$transcript = $site_root . '/' . RootRequest::LOG_DIR . '/' . $request_id . '.log';
+		$transcript = RootState::requestLogDir($site_root) . '/' . $request_id . '.log';
 		ini_set('display_errors', '0');
 		fflush(STDOUT);
 		fclose(STDOUT);

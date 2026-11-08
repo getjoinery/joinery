@@ -19,7 +19,9 @@
 # a fixture lineage (specs/implemented/tls_and_origin_trust.md WP11). The
 # release verification key the runner writes from the agent bundle is pinned
 # from a throwaway key (specs/package_signing.md WP1). A host whose declared data
-# root is not mounted runs nothing (specs/one_data_root.md WP1).
+# root is not mounted runs nothing (specs/one_data_root.md WP1). --remove-site
+# runs every plugin's declared host remover under the caller's lock, and only
+# under it (specs/plugin_host_removal.md WP1).
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -240,7 +242,12 @@ chk "the unit runs the copy, not the tree (a site's command and a machine's)" \
 # A queued root request should not wait for the next tick: someone pressed
 # Upgrade and is watching a transcript.
 chk "a path unit watches the request queue" \
-    "$(grep -c 'PathChanged=\${SITE_ROOT}/cache/root_requests' "$INSTALLER")" "1"
+    "$(grep -c 'PathChanged=\${STATE_DIR}/root_requests' "$INSTALLER")" "1"
+# Root's queue is root's directory, never the site's cache/ (shell_command_audit D1).
+chk "the queue root watches is under /var/lib/joinery/sites" \
+    "$(grep -c '^    STATE_DIR="/var/lib/joinery/sites/\${SITENAME}"$' "$INSTALLER")" "1"
+chk "and nothing of root's is made under the site's cache/ or logs/" \
+    "$(grep -c 'SITE_ROOT}/cache/root_requests\|SITE_ROOT}/logs/host_converger' "$INSTALLER")" "0"
 
 # The copy runs from /usr/local/sbin, so anything the runner resolves against
 # its own directory is missing there. It has to find the installers, the
@@ -294,7 +301,7 @@ chk "the summary is not world-readable" "$(stat -c '%a' "$SUMMARY")" "640"
 # No letsencrypt directory at all: the empty form, never a missing file.
 out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_LETSENCRYPT_DIR="$T/no-such-dir" JOINERY_APACHE_SITES_DIR="$T/sites" \
     bash "$T/nogate.sh" --site-root="$T" 2>&1)
-chk "no letsencrypt directory still writes the summary" "$(echo "$out" | grep -c 'certificates: summary written to cache/certificates.json (0 lineage')" "1"
+chk "no letsencrypt directory still writes the summary" "$(echo "$out" | grep -c 'certificates: summary written to .*/certificates.json (0 lineage')" "1"
 chk "with no lineages" "$(read_summary 'len(d["lineages"])')" "0"
 chk "and says letsencrypt is absent" "$(read_summary 'd["letsencrypt"]')" "False"
 
@@ -472,9 +479,9 @@ chk "an unprivileged run honours the hooks without saying it ignored one" "$(ech
 unset JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS
 # The verification sits after the ownership refusal and before the run.
 chk "verification follows the ownership refusal" \
-    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}"' "$RUNNER" | cut -d: -f1)" -gt "$(grep -n 'installer_is_trusted "\${INSTALLER}"' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
+    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}" 2>&1' "$RUNNER" | cut -d: -f1)" -gt "$(grep -n 'installer_is_trusted "\${INSTALLER}"' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
 chk "and precedes the run" \
-    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}"' "$RUNNER" | cut -d: -f1)" -lt "$(grep -n 'running \${INSTALLER_REL}' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
+    "$( [ "$(grep -n 'plugin_package_verified "\${PLUGIN}" 2>&1' "$RUNNER" | cut -d: -f1)" -lt "$(grep -n 'running \${INSTALLER_REL}' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
 chk "the kind list carries install_package and install_theme" "$(grep -c 'upgrade|install_plugin|install_theme|install_package|reconcile_composer' "$RUNNER")" "1"
 
 echo "== remove_plugin: the file half of an uninstall, refused unless the row and the manifest agree =="
@@ -489,7 +496,7 @@ chk "the runner admits remove_plugin" "$(grep -cE '^[[:space:]]*write_agent_file
 chk "the dispatcher handles it" "$(grep -c "^	case 'remove_plugin':" "$DISPATCHER")" "1"
 chk "and asks the checks before it removes" \
     "$( [ "$(grep -n 'PluginRemoval::refusal(\$name, \$plugins_dir, \$row)' "$DISPATCHER" | cut -d: -f1)" -lt "$(grep -n 'PluginRemoval::remove(\$name, \$plugins_dir)' "$DISPATCHER" | cut -d: -f1)" ] && echo yes )" "yes"
-chk "a refusal exits non-zero with the reason" "$(grep -A2 'remove_plugin refused' "$DISPATCHER" | grep -c 'exit(1)')" "1"
+chk "a refusal exits non-zero with the reason" "$(grep -A2 'refused: \$why' "$DISPATCHER" | grep -c 'exit(1)')" "1"
 chk "the row is read from the database, not the request" "$(grep -c 'Plugin::get_by_plugin_name(\$name)' "$DISPATCHER")" "1"
 chk "the checks refuse an is_system manifest" "$(grep -c "manifest\['is_system'\]" "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
 chk "and a row that is not uninstalled" "$(grep -c 'is_uninstalled()' "$(dirname "$RUNNER")/../../public_html/includes/PluginRemoval.php")" "1"
@@ -504,7 +511,7 @@ chk "nor is one enabled" "$(grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\] && !
 chk "a site's unit is left alone" "$(grep -c "a site's converger owns \${UNIT_NAME}.service - leaving it" "$INSTALLER")" "1"
 chk "decided by whether the unit already says --machine" "$(grep -c "grep -q -- '--machine' \"\${SERVICE_FILE}\"" "$INSTALLER")" "1"
 chk "the machine branch neither checks a site config nor makes a root_requests queue" "$(sed -n '/^if \[\[ "\${MACHINE}" == "1" \]\]; then$/,/^else$/p' "$INSTALLER" | grep -c 'Globalvars_site.php\|root_requests')" "0"
-chk "the site branch still does both" "$(grep -c '^    \[\[ -f "\${SITE_ROOT}/config/Globalvars_site.php" \]\] || { say "site not initialised yet - skipping"; exit 0; }$\|^    mkdir -p "\${SITE_ROOT}/logs" "\${SITE_ROOT}/cache" "\${SITE_ROOT}/cache/root_requests"$' "$INSTALLER")" "2"
+chk "the site branch still does both" "$(grep -c '^    \[\[ -f "\${SITE_ROOT}/config/Globalvars_site.php" \]\] || { say "site not initialised yet - skipping"; exit 0; }$\|^    install -d -m 770 -o root -g "\${WEB_GROUP}" "\${STATE_DIR}/root_requests"$' "$INSTALLER")" "2"
 chk "the bundle carries no specs, so the machine unit has no Documentation line" "$(grep -c '^        DOC_LINE=""' "$INSTALLER")" "1"
 out="$(bash "$INSTALLER" --machine "$T" 2>&1)"; rc=$?
 chk "not root: --machine ROOT skips with exit 0" "$rc:$(printf '%s\n' "$out" | grep -c 'not root - skipping')" "0:1"
@@ -531,6 +538,205 @@ chk "and the timer's tick" "$(echo "$out" | grep -c 'core installers: running')|
 rm -f "$DR/etc/joinery/data_root"
 out=$(JOINERY_HOST_ROOT="$DR" bash "$RUNNER" --site-root="$T" 2>&1)
 chk "a host with no data root runs as it always has" "$(echo "$out" | grep -c 'core installers: running')|$(echo "$out" | grep -c 'data root')" "$CORE_COUNT|0"
+
+echo "== --remove-site: every plugin's host remover, under the caller's lock (specs/plugin_host_removal.md WP1) =="
+# A fresh fixture site. Six plugins on disk: one whose remover records that it
+# ran (and what it was told), one whose remover exits 3, one that declares a
+# remover outside its directory, one that declares none, one the active list
+# does not name (the mode reads no row: it runs), and one not signed. The
+# caller holds the site's cache lock on descriptor 9, as hold_host_runner_lock
+# does, and the mode runs as its child.
+R="$T/rmsite"
+mkdir -p "$R/public_html/plugins" "$R/config" "$R/cache" "$R/maintenance_scripts/install_tools"
+cp "$(dirname "$RUNNER")"/*.sh "$R/maintenance_scripts/install_tools/" 2>/dev/null || true
+echo 0.8.384 > "$R/public_html/VERSION"
+echo '<?php' > "$R/config/Globalvars_site.php"
+php -r '
+    $R = $argv[1];
+    require $argv[2] . "/includes/PathHelper.php";
+    $pair = sodium_crypto_sign_keypair();
+    $keys = array("secret" => sodium_crypto_sign_secretkey($pair), "public" => sodium_crypto_sign_publickey($pair));
+    file_put_contents("$R/config/release_verify_keys", base64_encode($keys["public"]) . "\n");
+    $plugins = array(
+        "okp"       => array("host_remover" => "provisioning/remove.sh", "body" => "echo \"\$1 \$2\" > \"\$(dirname \"\$0\")/../../../../told\"; echo ran-okp\n"),
+        "failp"     => array("host_remover" => "provisioning/remove.sh", "body" => "echo ran-failp; echo still-here; exit 3\n"),
+        "escapep"   => array("host_remover" => "../okp/provisioning/remove.sh", "body" => "echo ran-escapep\n"),
+        "nonep"     => array("host_installer" => "provisioning/install.sh", "body" => "echo ran-nonep\n"),
+        "inactivep" => array("host_remover" => "provisioning/remove.sh", "body" => "echo ran-inactivep\n"),
+        "unsignedp" => array("host_remover" => "provisioning/remove.sh", "body" => "echo ran-unsignedp\n"),
+    );
+    foreach ($plugins as $n => $p) {
+        $d = "$R/public_html/plugins/$n";
+        @mkdir("$d/provisioning", 0755, true);
+        $manifest = array("name" => $n);
+        foreach (array("host_installer", "host_remover") as $k) { if (isset($p[$k])) { $manifest[$k] = $p[$k]; } }
+        file_put_contents("$d/plugin.json", json_encode($manifest));
+        file_put_contents("$d/provisioning/remove.sh", "#!/bin/bash\n" . $p["body"]);
+        chmod("$d/provisioning/remove.sh", 0755);
+        chmod("$d/plugin.json", 0644);
+        if ($n !== "unsignedp") { TreeManifestPublisher::write($d, $R, $keys); }
+    }
+' "$R" "$(dirname "$(dirname "$TOOLS")")/public_html" >/dev/null 2>&1
+export JOINERY_VERIFY_PACKAGE="$(dirname "$(dirname "$TOOLS")")/public_html/utils/verify_package.php"
+export JOINERY_VERIFY_KEYS="$R/config/release_verify_keys"
+RLOCK="$R/cache/host_installers.lock"
+# The caller: holds the lock on 9 and runs the mode as a child; RC= carries the child's exit.
+remove_site_under_lock() { ( exec 9>>"$RLOCK"; flock -n 9 || { echo "fixture: lock not taken"; exit 99; }; bash "$RUNNER" --remove-site --site-root="$R" "$@" 2>&1; echo "RC=$?" ); }
+out=$(JOINERY_ACTIVE_PLUGINS='okp' remove_site_under_lock)
+chk "under the caller's lock the mode runs and exits 1 (a remover left something behind)" "$(echo "$out" | grep -c '^RC=1$')" "1"
+chk "the remover that finishes ran, told the site name and the site root" "$(cat "$R/told" 2>/dev/null)" "rmsite $R"
+chk "and is said ok" "$(echo "$out" | grep -c '^plugin removers: okp: ok$')" "1"
+chk "the failing remover ran, its output in the transcript" "$(echo "$out" | grep -c '^still-here$')" "1"
+chk "and is said to have left something behind, with its exit code" "$(echo "$out" | grep -c '^plugin removers: failp: left something behind (exit 3)$')" "1"
+chk "a remover declared outside its plugin directory is refused, never run" "$(echo "$out" | grep -c '^ran-escapep$')|$(echo "$out" | grep -c '^plugin removers: escapep: left something behind (host_remover escapes plugin directory - refused)$')" "0|1"
+chk "a plugin with no remover is skipped and said" "$(echo "$out" | grep -c '^plugin removers: nonep: declares no host remover - skipped$')|$(echo "$out" | grep -c '^ran-nonep$')" "1|0"
+chk "a plugin the active list does not name runs anyway (every plugin on disk)" "$(echo "$out" | grep -c '^ran-inactivep$')" "1"
+chk "an unsigned plugin's remover is refused and counted as left" "$(echo "$out" | grep -c '^ran-unsignedp$')|$(echo "$out" | grep -c '^plugin removers: unsignedp: left something behind (.*not a package we built - host remover skipped')" "0|1"
+chk "the last line names every plugin that left something" "$(echo "$out" | grep -c '^plugin removers: machine state left behind by: escapep failp unsignedp$')" "1"
+chk "nothing below the lock block ran: no lock taken, no core installer, no record, no stamp" \
+    "$(echo "$out" | grep -c 'core installers:\|another run holds the lock\|certificates:\|release key:')|$(test -e "$R/cache/host_converger.last" && echo record || echo none)|$(ls "$R/cache/plugin_installers" 2>/dev/null | wc -l)" "0|none|0"
+# The lock not held: nothing runs, exit 2.
+rm -f "$R/told"
+out=$(bash "$RUNNER" --remove-site --site-root="$R" 2>&1); rc=$?
+chk "with the lock not held the mode is refused with exit 2" "$rc:$(echo "$out" | grep -c 'is not held by a caller of this run - refused, nothing ran')" "2:1"
+chk "and no remover ran" "$(test -e "$R/told" && echo ran || echo none)|$(echo "$out" | grep -c '^ran-')" "none|0"
+# Descriptor 9 open on the lock file but not locked: flock -n 9 would pass
+# trivially; the fresh descriptor is not refused, so this is not held.
+out=$( ( exec 9>>"$RLOCK"; bash "$RUNNER" --remove-site --site-root="$R" 2>&1; echo "RC=$?" ) )
+chk "descriptor 9 open on the file without the lock does not count as held" "$(echo "$out" | grep -c '^RC=2$')|$(echo "$out" | grep -c '^ran-')" "1|0"
+# Descriptor 9 locked on some other file: the lock file itself is free.
+out=$( ( exec 9>>"$R/cache/other.lock"; flock -n 9; bash "$RUNNER" --remove-site --site-root="$R" 2>&1; echo "RC=$?" ) )
+chk "a lock held on another file does not count either" "$(echo "$out" | grep -c '^RC=2$')|$(echo "$out" | grep -c '^ran-')" "1|0"
+# The lock held by someone who is not an ancestor: refused on the fresh
+# descriptor, but 9 is not the file.
+( exec 9>>"$RLOCK"; flock -n 9; sleep 3 ) &
+sleep 0.5
+out=$(bash "$RUNNER" --remove-site --site-root="$R" 2>&1); rc=$?
+wait
+chk "a lock held by a stranger (not in this process's line) is not the caller's" "$rc:$(echo "$out" | grep -c '^ran-')" "2:0"
+# No site config: the removers read it, so nothing runs.
+mv "$R/config/Globalvars_site.php" "$R/config/Globalvars_site.php.off"
+out=$(remove_site_under_lock)
+chk "a site root without config/Globalvars_site.php is refused with exit 2, said" "$(echo "$out" | grep -c '^RC=2$')|$(echo "$out" | grep -c 'has no config/Globalvars_site.php, which the removers read - refused, nothing ran')|$(echo "$out" | grep -c '^ran-')" "1|1|0"
+mv "$R/config/Globalvars_site.php.off" "$R/config/Globalvars_site.php"
+# A site with no plugins directory: nothing declares a remover, exit 0.
+R2="$T/rmsite2"; mkdir -p "$R2/public_html" "$R2/config" "$R2/cache"; echo '<?php' > "$R2/config/Globalvars_site.php"
+out=$( ( exec 9>>"$R2/cache/host_installers.lock"; flock -n 9; bash "$RUNNER" --remove-site --site-root="$R2" 2>&1; echo "RC=$?" ) )
+chk "a site with no plugins directory exits 0 with nothing to take off" "$(echo "$out" | grep -c '^RC=0$')|$(echo "$out" | grep -c 'no plugins directory - nothing to take off the machine')" "1|1"
+# Every remover finishing: exit 0.
+rm -rf "${R:?}/public_html/plugins/failp" "${R:?}/public_html/plugins/escapep" "${R:?}/public_html/plugins/unsignedp"
+out=$(remove_site_under_lock)
+chk "with every declared remover finishing the mode exits 0" "$(echo "$out" | grep -c '^RC=0$')|$(echo "$out" | grep -c '^plugin removers: every declared remover finished$')" "1|1"
+out=$(bash "$RUNNER" --remove-site --when-changed --site-root="$R" 2>&1); rc=$?
+chk "--remove-site beside another mode is refused with exit 2" "$rc" "2"
+# Source order: the mode branches before the lock block, with the definitions it
+# needs above it, and proves the lock on a fresh descriptor, never with flock -n 9.
+MODE_LINE="$(grep -n '^if \[\[ "\${REMOVE_SITE}" == "1" \]\]; then$' "$RUNNER" | tail -1 | cut -d: -f1)"
+LOCK_LINE="$(grep -n '^# --- One runner at a time' "$RUNNER" | cut -d: -f1)"
+chk "the mode sits before the lock block" "$( [ "$MODE_LINE" -lt "$LOCK_LINE" ] && echo yes )" "yes"
+for def in 'TREE_OWNER_TARGET="$(joinery_tree_owner_record' '^installer_is_trusted() {' '^plugin_package_verified() {' '^run_one_plugin_remover() {' '^caller_holds_runner_lock() {'; do
+    chk "defined above it: ${def:0:40}" "$( [ "$(grep -n -- "$def" "$RUNNER" | head -1 | cut -d: -f1)" -lt "$MODE_LINE" ] && echo yes )" "yes"
+done
+for below in '^assert_tree_ownership$' 'bash "\${DATA_ROOT_TOOL}" tick || DATA_ROOT_RC' '^run_root_requests$' '^refresh_converger_entry$' '^    run_core_installer "\${ONLY_INSTALLER}"$'; do
+    chk "below it, never reached: ${below:0:40}" "$( [ "$(grep -n -- "$below" "$RUNNER" | head -1 | cut -d: -f1)" -gt "$LOCK_LINE" ] && echo yes )" "yes"
+done
+chk "the lock is never tried on descriptor 9 itself" "$(grep -c '^[^#]*flock -n 9' "$RUNNER")" "0"
+chk "the fresh descriptor is closed before any remover runs" "$( [ "$(grep -n 'exec 8<&-' "$RUNNER" | cut -d: -f1)" -lt "$(grep -n 'run_one_plugin_remover "\$(basename' "$RUNNER" | cut -d: -f1)" ] && echo yes )" "yes"
+unset JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS
+
+echo "== run_plugin_remover: the uninstall moment, carried out by the request loop (specs/plugin_host_removal.md WP5) =="
+# A fresh fixture site whose dispatcher is a stand-in: it answers --check and
+# --remover-ran from a row state the gate writes per plugin ($RQ/rows/NAME:
+# uninstalled or active; absent = no row), removing the directory on
+# --remover-ran, and refuses the kind handed over whole as the real one does.
+# The runner's own request loop is what runs here (root gate stripped).
+RQ="$T/rqsite"; RPH="$RQ/public_html"; RQQ="$RQ/cache/root_requests"
+mkdir -p "$RPH/plugins" "$RPH/utils" "$RQ/config" "$RQQ" "$RQ/logs" "$RQ/maintenance_scripts/install_tools" "$RQ/rows"
+cp "$(dirname "$RUNNER")"/*.sh "$RQ/maintenance_scripts/install_tools/" 2>/dev/null || true
+echo 0.8.999 > "$RPH/VERSION"
+echo '<?php' > "$RQ/config/Globalvars_site.php"
+cat > "$RPH/utils/root_request.php" <<'PHP'
+<?php
+// Stand-in dispatcher for the gate: the real one's answers, from a fixture.
+$site = dirname(dirname(__DIR__));
+$kind = $argv[1] ?? ''; $id = '';
+foreach (array_slice($argv, 2) as $a) { if (strpos($a, '--request=') === 0) { $id = substr($a, 10); } }
+$req = json_decode((string)@file_get_contents("$site/cache/root_requests/running/$id.json"), true);
+$name = (string)($req['args']['plugin'] ?? '');
+echo "DISPATCHER $kind " . implode(' ', array_slice($argv, 3)) . "\n";
+if ($kind !== 'run_plugin_remover') { echo "DISPATCHER WHOLE\n"; exit(2); }
+$check = in_array('--check', $argv, true); $ran = in_array('--remover-ran', $argv, true);
+if (!$check && !$ran) { fwrite(STDERR, "root_request: this runner is older than the tree\n"); exit(2); }
+$dir = "$site/public_html/plugins/$name";
+if (!is_dir($dir)) { echo "plugins/$name is already gone\n"; exit($check ? 3 : 0); }
+$row = @file_get_contents("$site/rows/$name");
+if ($row === false) { fwrite(STDERR, "root_request: run_plugin_remover refused: plugin '$name' has no database row\n"); exit(1); }
+if (trim($row) !== 'uninstalled') { fwrite(STDERR, "root_request: run_plugin_remover refused: plugin '$name' is '" . trim($row) . "', not uninstalled\n"); exit(1); }
+if ($check) { echo "plugins/$name may be removed: its row says uninstalled\n"; exit(0); }
+exec('rm -rf ' . escapeshellarg($dir));
+echo "removed plugins/$name\n"; exit(0);
+PHP
+# Signed fixture plugins (a throwaway key), each with a remover that records
+# that it ran, except as named.
+php -r '
+    $R = $argv[1];
+    require $argv[2] . "/includes/PathHelper.php";
+    $pair = sodium_crypto_sign_keypair();
+    $keys = array("secret" => sodium_crypto_sign_secretkey($pair), "public" => sodium_crypto_sign_publickey($pair));
+    file_put_contents("$R/config/release_verify_keys", base64_encode($keys["public"]) . "\n");
+    $plugins = array(
+        "remp"     => "echo ran-remp; echo x >> \"$R/remp.count\"\n",
+        "activep"  => "echo ran-activep\n",
+        "failremp" => "echo ran-failremp; echo role-left; exit 3\n",
+        "gonep"    => "echo ran-gonep\n",
+    );
+    foreach ($plugins as $n => $body) {
+        $d = "$R/public_html/plugins/$n";
+        @mkdir("$d/provisioning", 0755, true);
+        file_put_contents("$d/plugin.json", json_encode(array("name" => $n, "host_remover" => "provisioning/remove.sh")));
+        file_put_contents("$d/provisioning/remove.sh", "#!/bin/bash\n" . $body);
+        chmod("$d/provisioning/remove.sh", 0755); chmod("$d/plugin.json", 0644);
+        TreeManifestPublisher::write($d, $R, $keys);
+    }
+    @mkdir("$R/public_html/plugins/nonep", 0755, true);
+    file_put_contents("$R/public_html/plugins/nonep/plugin.json", json_encode(array("name" => "nonep")));
+    TreeManifestPublisher::write("$R/public_html/plugins/nonep", $R, $keys);
+' "$RQ" "$(dirname "$(dirname "$TOOLS")")/public_html" >/dev/null 2>&1
+rm -rf "${RPH:?}/plugins/gonep"                       # its row says uninstalled, its files are already gone
+for p in remp failremp gonep nonep; do echo uninstalled > "$RQ/rows/$p"; done
+echo active > "$RQ/rows/activep"
+export JOINERY_VERIFY_PACKAGE="$(dirname "$(dirname "$TOOLS")")/public_html/utils/verify_package.php"
+export JOINERY_VERIFY_KEYS="$RQ/config/release_verify_keys"
+sed 's/\[\[ "$(id -u)" == "0" \]\] || return 0//' "$RUNNER" > "$RQ/nogate.sh"
+rq_request() { printf '{"kind":"run_plugin_remover","args":{"plugin":"%s"},"requested_by":1,"requested_at":%s}' "$2" "$(date +%s)" > "$RQQ/$1.json"; }
+rq_exit() { cat "$RQQ/$1/$2.exit" 2>/dev/null; }
+rq_log() { cat "$RQ/logs/root_requests/$1.log" 2>/dev/null; }
+N=$(date +%s)
+rq_request "$N-b0000001" remp
+rq_request "$N-b0000002" activep
+rq_request "$N-b0000003" failremp
+rq_request "$N-b0000004" gonep
+rq_request "$N-b0000005" nonep
+rq_request "$N-b0000006" 'Bad;name'
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS='' timeout 120 bash "$RQ/nogate.sh" --site-root="$RQ" 2>&1); rc=$?
+chk "the pass finishes, exit 0" "$rc" "0"
+chk "the runner admits the kind beside run_plugin_installer" "$(grep -c '^[[:space:]]*run_plugin_installer|run_plugin_remover) : ;;$' "$RUNNER")" "1"
+chk "an uninstalled plugin: the request is done, its remover ran once, its directory is gone" \
+    "$(rq_exit done "$N-b0000001")|$(wc -l < "$RQ/remp.count" 2>/dev/null | tr -d ' ')|$(test -d "$RPH/plugins/remp" && echo kept || echo gone)" "0|1|gone"
+chk "in that order: the check, the remover, then the files" \
+    "$(rq_log "$N-b0000001" | grep -n -e 'DISPATCHER run_plugin_remover --check' -e '^ran-remp$' -e 'DISPATCHER run_plugin_remover --remover-ran' -e '^removed plugins/remp$' | cut -d: -f2- | tr '\n' '|')" \
+    "DISPATCHER run_plugin_remover --check|ran-remp|DISPATCHER run_plugin_remover --remover-ran|removed plugins/remp|"
+chk "a plugin whose row is active: refused before anything ran, exit 2, directory kept" \
+    "$(rq_exit failed "$N-b0000002")|$(rq_log "$N-b0000002" | grep -c '^ran-activep$')|$(rq_log "$N-b0000002" | grep -c "is 'active', not uninstalled")|$(test -d "$RPH/plugins/activep" && echo kept || echo gone)" "2|0|1|kept"
+chk "a remover that left something: exit 1, its output in the transcript, directory kept, the files never asked for" \
+    "$(rq_exit failed "$N-b0000003")|$(rq_log "$N-b0000003" | grep -c '^role-left$')|$(rq_log "$N-b0000003" | grep -c 'left something behind (failed); plugins/failremp is kept so the removal can be run again')|$(test -d "$RPH/plugins/failremp" && echo kept || echo gone)|$(rq_log "$N-b0000003" | grep -c -- '--remover-ran')" "1|1|1|kept|0"
+chk "a directory already gone: done, exit 0, nothing run" "$(rq_exit done "$N-b0000004")|$(rq_log "$N-b0000004" | grep -c 'already gone - done')|$(rq_log "$N-b0000004" | grep -c '^ran-')" "0|1|0"
+chk "a plugin that declares no remover: said, and its files go" "$(rq_exit done "$N-b0000005")|$(rq_log "$N-b0000005" | grep -c 'declares no host remover; its files go')|$(test -d "$RPH/plugins/nonep" && echo kept || echo gone)" "0|1|gone"
+chk "a name that is not a plugin name: refused, exit 2" "$(rq_exit failed "$N-b0000006")|$(rq_log "$N-b0000006" | grep -c 'names no plugin this box could have - refused')" "2|1"
+chk "the dispatcher was never handed the kind whole" "$(cat "$RQ"/logs/root_requests/*.log | grep -c 'DISPATCHER WHOLE')" "0"
+chk "the real dispatcher carries both halves and refuses the whole" \
+    "$(grep -c "in_array('--check', \$argv, true)" "$DISPATCHER")|$(grep -c "in_array('--remover-ran', \$argv, true)" "$DISPATCHER")|$(grep -c 'this runner is older than the tree' "$DISPATCHER")" "1|1|2"
+unset JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS
 
 echo
 echo "host_converger gate: $passed passed, $failed failed"

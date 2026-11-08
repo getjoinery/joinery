@@ -81,8 +81,11 @@ chk "and before the permissions sweep" "$( [ "$LOCK_AT" -lt "$PERMS_AT" ] && ech
 chk "--only runs after the ownership assertion" "$( [ -n "$ONLY_AT" ] && [ "$ONLY_AT" -gt "$ASSERT_AT" ] && echo yes )" "yes"
 chk "and before the entry-point refresh, which it must not do" "$( [ "$ONLY_AT" -lt "$REFRESH_AT" ] && echo yes )" "yes"
 # One lock the runner holds: the queue's own is gone, descriptor 9 is already
-# held. The only other flock is a non-blocking probe of the upgrade's lock.
-chk "exactly one lock the runner holds" "$(grep '^[^#]*flock ' "$RUNNER" | grep -c -v 'flock -n 8 8<"\${SITE_ROOT}/uploads/.upgrade.lock"')" "1"
+# held. The only other flocks are non-blocking probes on descriptor 8: of the
+# upgrade's lock, and in --remove-site of the caller's lock (held by an
+# ancestor, so a fresh descriptor must be refused it).
+chk "exactly one lock the runner holds" "$(grep '^[^#]*flock ' "$RUNNER" | grep -c -v 'flock -n 8 8<"\${SITE_ROOT}/uploads/.upgrade.lock"\|flock -n 8 2>/dev/null')" "1"
+chk "the two probes never block" "$(grep '^[^#]*flock ' "$RUNNER" | grep -c 'flock -n 8 ')" "2"
 chk "and it waits, bounded" "$(grep -c '^if ! flock -w "\${LOCK_WAIT_SECONDS}" 9; then$' "$RUNNER")" "1"
 # The wait is compiled: minutes, long enough for a full converge or an
 # upgrade's installer run, and far under the service's hour.

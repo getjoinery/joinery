@@ -30,6 +30,8 @@
  *
  * Run:  php tests/functional/plugins/plugin_uninstall_test.php
  *
+ * @version 1.4 - the queue is where RootState says (specs/shell_command_audit.md D1)
+ * @version 1.3 - a plugin with a host_remover queues run_plugin_remover, one request for the remover and the files (specs/plugin_host_removal.md WP5)
  * @version 1.2 - uninstall deletes the plugin's app credentials
  * @version 1.1 - fixture plugins are written with the tree's modes (755/644), not group-writable
  */
@@ -43,11 +45,12 @@ harness_test_mode();
 $manager = PluginManager::getInstance();
 $db = DbConnector::get_instance()->get_db_link();
 $site_root = PathHelper::getSiteRoot();
-$queue_dir = $site_root . '/' . RootRequest::QUEUE_DIR;
+$queue_dir = RootState::queueDir($site_root);
 
 $NAME = 'zzuninstallfix';
 $SYS  = 'zzuninstallsys';
 $APPS = 'zzuninstallapps';
+$REM  = 'zzuninstallrem';
 $TABLE = 'zuf_fixture_rows';
 
 /**
@@ -93,21 +96,26 @@ $rm_tree = function (string $dir) {
     }
     @rmdir($dir);
 };
-$queued_removals = function (string $name = '') use ($queue_dir, $NAME) {
+// The queued requests of one removal kind for a plugin: remove_plugin carries
+// {name}, run_plugin_remover carries {plugin}.
+$queued_removals = function (string $name = '', string $kind = 'remove_plugin') use ($queue_dir, $NAME) {
     $name = $name !== '' ? $name : $NAME;
+    $field = $kind === 'run_plugin_remover' ? 'plugin' : 'name';
     $ids = array();
     foreach (glob($queue_dir . '/*.json') ?: array() as $f) {
         $r = json_decode((string)file_get_contents($f), true);
-        if (is_array($r) && ($r['kind'] ?? '') === 'remove_plugin' && ($r['args']['name'] ?? '') === $name) {
+        if (is_array($r) && ($r['kind'] ?? '') === $kind && ($r['args'][$field] ?? '') === $name) {
             $ids[] = basename($f, '.json');
         }
     }
     return $ids;
 };
-$drop_queued = function () use ($queue_dir, $queued_removals, $APPS) {
+$drop_queued = function () use ($queue_dir, $queued_removals, $APPS, $REM) {
     // The dev host timer would otherwise pick a fixture request up: root reads
     // the LIVE database, finds no row, and records a failed request.
-    foreach (array_merge($queued_removals(), $queued_removals($APPS)) as $id) { @unlink($queue_dir . '/' . $id . '.json'); }
+    foreach (array_merge($queued_removals(), $queued_removals($APPS), $queued_removals($REM), $queued_removals($REM, 'run_plugin_remover')) as $id) {
+        @unlink($queue_dir . '/' . $id . '.json');
+    }
 };
 $table_exists = function () use ($db, $TABLE) {
     return (bool)$db->query("SELECT to_regclass('" . $TABLE . "') IS NOT NULL")->fetchColumn();
@@ -122,16 +130,16 @@ $throws = function (callable $fn) {
 };
 
 // Nothing of an earlier run may be lying about.
-foreach (array($NAME, $SYS, $APPS) as $n) {
+foreach (array($NAME, $SYS, $APPS, $REM) as $n) {
     $rm_tree(PathHelper::getIncludePath('plugins/' . $n));
     $db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($n));
 }
 $db->exec("DROP TABLE IF EXISTS $TABLE CASCADE");
 $drop_queued();
 
-harness_defer(function () use ($rm_tree, $db, $NAME, $SYS, $APPS, $TABLE, $drop_queued) {
+harness_defer(function () use ($rm_tree, $db, $NAME, $SYS, $APPS, $REM, $TABLE, $drop_queued) {
     AppAccess::setDeclarationsForTests(null);
-    foreach (array($NAME, $SYS, $APPS) as $n) {
+    foreach (array($NAME, $SYS, $APPS, $REM) as $n) {
         $rm_tree(PathHelper::getIncludePath('plugins/' . $n));
         $db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($n));
     }
@@ -168,6 +176,34 @@ $body = json_decode((string)file_get_contents($queue_dir . '/' . $request_id . '
 check(($body['args'] ?? null) === array('name' => $NAME) && ($body['requested_by'] ?? 0) === 4500,
     'the request carries the name and who asked, nothing else', json_encode($body['args'] ?? null));
 check(!$plugin->is_active(), 'is_active() is false');
+check($queued_removals($NAME, 'run_plugin_remover') === array(), 'a plugin with no host_remover queues no run_plugin_remover request');
+$drop_queued();
+
+// ---------------------------------------------------------------------------
+section('A plugin that declares a host_remover queues run_plugin_remover instead (specs/plugin_host_removal.md D6)');
+
+// One request, not two: the remover runs and then the files go, in that order,
+// which two requests submitted in the same second could not promise.
+$rem_dir = $write_plugin($REM, array('host_remover' => 'provisioning/remove.sh'), false);
+@mkdir($rem_dir . '/provisioning', 0755);
+file_put_contents($rem_dir . '/provisioning/remove.sh', "#!/bin/bash\nexit 0\n");
+@chmod($rem_dir . '/provisioning/remove.sh', 0644);
+check(PluginRemoval::declared_remover($REM, PathHelper::getIncludePath('plugins')) === 'provisioning/remove.sh',
+    'PluginRemoval::declared_remover() reads the manifest');
+check(PluginRemoval::declared_remover($NAME, PathHelper::getIncludePath('plugins')) === '',
+    'and answers nothing for a plugin that declares none');
+$manager->install($REM, false);
+$rem_request = $manager->uninstall($REM, 4500);
+$rem_plugin = Plugin::get_by_plugin_name($REM);
+check($rem_plugin !== null && $rem_plugin->is_uninstalled(), 'the row says uninstalled');
+check($queued_removals($REM, 'remove_plugin') === array(), 'no remove_plugin request is queued for it');
+$rem_queued = $queued_removals($REM, 'run_plugin_remover');
+check($rem_queued === array($rem_request) && $rem_request !== '', 'exactly one run_plugin_remover request is, and uninstall() returned its id', implode(',', $rem_queued));
+check($rem_plugin->get_remove_request_id() === $rem_request, 'the row records that id (one id, whichever kind)');
+$rem_body = json_decode((string)file_get_contents($queue_dir . '/' . $rem_request . '.json'), true);
+check(($rem_body['args'] ?? null) === array('plugin' => $REM) && ($rem_body['requested_by'] ?? 0) === 4500,
+    'the request carries the plugin name and who asked, nothing else', json_encode($rem_body['args'] ?? null));
+check(is_dir($rem_dir), 'the directory is untouched (root runs the remover, then removes it)');
 $drop_queued();
 
 // ---------------------------------------------------------------------------

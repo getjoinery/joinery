@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.24 - Root's records for the site under /var/lib/joinery/sites/SITE and its converger log under
+#               /var/log/joinery go with the site (shell_command_audit D1)
+#VERSION 2.23 - A bare-metal removal runs every plugin's declared host remover first (the host runner's
+#               --remove-site mode, under the lock this removal holds, while the site's config is still here
+#               for the removers to read), and a plugin that left machine state behind is named in the
+#               verdict; a re-run whose config is already gone says the removers cannot run, with no
+#               leftover; the postgres pair goes down to the removers as PGPASSWORD (specs/plugin_host_removal.md WP2)
 #VERSION 2.22 - A site tree that cannot be removed (a folder of it still mounted) ends the removal with the
 #               reason; under set -e it ended unsaid, with the databases and the role left behind. The role's
 #               name is composed (joinery_{site}) like the database names, and the postgres pair falls back
@@ -701,6 +708,8 @@ if [ "$IS_BAREMETAL" = true ]; then
     else
         echo "=== Removing bare-metal site ==="
     fi
+    # What the plugins' host removers left, for the verdict (VERIFY GONE).
+    PLUGIN_LEFTOVERS=""
 
     # Disable Apache site if enabled
     echo "Disabling Apache site..."
@@ -728,6 +737,45 @@ if [ "$IS_BAREMETAL" = true ]; then
         echo "WARNING: Failed to reload Apache, but continuing with cleanup"
     fi
 
+    # The plugins' machine state goes before the tree. Every plugin on disk
+    # with a declared host_remover (plugin.json) is run as root by the host
+    # runner's --remove-site mode, under the lock this removal holds on
+    # descriptor 9, while the site's config is still here for the removers to
+    # read (a Postfix role and maps, DKIM keys, a gateway entry). A remover
+    # that leaves something behind is named in the verdict below and the
+    # removal goes on; the mode's own refusal (exit 2) is named too. A re-run
+    # after a removal that stopped part way has no config: the removers cannot
+    # run, and nothing a remover could do is left, so that is said with no
+    # leftover. A container site's plugins install nothing on the host or
+    # converge from the host's own files, so the proxy case runs none.
+    if [ "$HOST_PROXY" = false ]; then
+        PLUGIN_REMOVERS_TOOL="$HERE/../install_tools/_plugin_installers_start.sh"
+        if [ ! -f "$SITE_ROOT/config/Globalvars_site.php" ]; then
+            echo "The plugins' host removers cannot run: $SITE_ROOT/config/Globalvars_site.php is gone (a removal that stopped part way), and nothing a remover could do is left."
+        elif [ ! -f "$PLUGIN_REMOVERS_TOOL" ]; then
+            echo "WARNING: $PLUGIN_REMOVERS_TOOL is not beside this script, so the plugins' machine state was not taken off."
+        else
+            echo "Running the plugins' host removers..."
+            REMOVERS_LOG="$(mktemp)"
+            # Through tee, so the transcript shows each remover as it runs; the
+            # mode's exit is the pipeline's first. The postgres pair this script
+            # resolved (db_admin.php, the config, PGPASSWORD or root's record)
+            # goes down as PGPASSWORD, so a remover that drops a role on a site
+            # with no db_admin.php does not have to find it again (reviewer2 F3).
+            PGPASSWORD="${DB_PASSWORD:-$ADMIN_PW_FALLBACK}" bash "$PLUGIN_REMOVERS_TOOL" --remove-site "$SITE_NAME" "$SITE_ROOT" 2>&1 | tee "$REMOVERS_LOG"
+            REMOVERS_RC="${PIPESTATUS[0]}"
+            case "$REMOVERS_RC" in
+                0) ;;
+                1) while read -r left_plugin; do
+                       PLUGIN_LEFTOVERS="${PLUGIN_LEFTOVERS}  - plugin ${left_plugin} left machine state behind; see its lines above"$'\n'
+                   done < <(sed -n 's/^plugin removers: \([a-z][a-z0-9_]*\): left something behind (.*/\1/p' "$REMOVERS_LOG")
+                   [ -n "$PLUGIN_LEFTOVERS" ] || PLUGIN_LEFTOVERS="  - a plugin left machine state behind; see the removers' lines above"$'\n' ;;
+                *) PLUGIN_LEFTOVERS="${PLUGIN_LEFTOVERS}  - the plugins' removers did not run: $(grep '^plugin removers:' "$REMOVERS_LOG" | tail -n 1 | sed 's/^plugin removers: //')"$'\n' ;;
+            esac
+            rm -f "$REMOVERS_LOG"
+        fi
+    fi
+
     # Remove website directories. On a data root the site's folders are
     # mounts of /srv/joinery/sites/<site>: those go first, with the data
     # behind them, so rm meets ordinary directories.
@@ -750,6 +798,15 @@ if [ "$IS_BAREMETAL" = true ]; then
         rm -rf "${SITE_ROOT:?}" \
             || { echo "ERROR: $SITE_ROOT could not be removed (above): a folder of it is still mounted (findmnt -R $SITE_ROOT); nothing more was removed."; exit 1; }
         echo "Removed: $SITE_ROOT"
+    fi
+    # Root's own records for the site (the request queue, transcripts, installer
+    # records, the converge stamp): root's directory, beside no data of the site's.
+    if [ -d "$FS/var/lib/joinery/sites/${SITE_NAME:?}" ]; then
+        rm -rf "$FS/var/lib/joinery/sites/${SITE_NAME:?}"
+        echo "Removed: $FS/var/lib/joinery/sites/${SITE_NAME}"
+    fi
+    if [ -f "$FS/var/log/joinery/host_converger.${SITE_NAME:?}.log" ]; then
+        rm -f "$FS/var/log/joinery/host_converger.${SITE_NAME:?}.log"*
     else
         echo "Directory $SITE_ROOT does not exist"
     fi
@@ -897,7 +954,9 @@ fi
 # marker is what a caller trusts — not the exit codes of the removal commands
 # above, several of which warn-and-continue.
 
-LEFTOVERS=""
+# A plugin whose host remover left machine state behind is a leftover like any
+# other: the verdict names it, and the plane shows a failed decommission.
+LEFTOVERS="${PLUGIN_LEFTOVERS:-}"
 ENGINE_LEFT=false
 
 if [ "$DOCKER" = true ]; then

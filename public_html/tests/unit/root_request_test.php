@@ -21,6 +21,13 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.8 - the PHP-side checks run against a scratch RootState directory, with the outcomes beside the queue
+ *                as root keeps them (specs/shell_command_audit.md D1)
+ * @version 1.7 - fifteen kinds: run_plugin_remover, the uninstall moment of a plugin with a host_remover, carried
+ *                out by the runner itself like run_plugin_installer and deduplicated per plugin like it; the
+ *                dispatcher's file half is one function for both removal kinds (specs/plugin_host_removal.md WP5)
+ * @version 1.6 - install_plugin validates the name before the passthru: a name beginning with - was an
+ *                install_extension.php option (specs/shell_command_audit.md U1)
  * @version 1.5 - fourteen kinds: run_plugin_installer, carried out by the runner itself, the one kind whose
  *                argument becomes a (checked) shell word; a second submit for the same plugin returns the
  *                first while it is queued or running (plugin_installer_from_the_browser.md D1)
@@ -103,7 +110,7 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 // verifies a staged upload, writes something that is not executed, or seals
 // this server's data root to the site's own recovery key, which its backups
 // already trust. If that stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 14, 'there are fourteen kinds', implode(', ', RootRequest::KINDS));
+check(count(RootRequest::KINDS) === 15, 'there are fifteen kinds', implode(', ', RootRequest::KINDS));
 
 // B43: the TPM2 choice. The queue is the web user's to write, so only the
 // stricter way is read from a request: data_root_encrypt's tpm2 'off' (and
@@ -129,8 +136,27 @@ section('remove_plugin: root deletes a plugin directory only when the row and th
 // below is what root does before it deletes, run here against a scratch
 // plugins directory and rows built by hand.
 check(in_array('remove_plugin', RootRequest::KINDS, true), "'remove_plugin' is a kind");
-$remove_case = substr($dispatcher, strpos($dispatcher, "case 'remove_plugin'"));
+// The file half is one function, root_request_plugin_files(), which the
+// remove_plugin case calls whole and the run_plugin_remover case calls twice
+// (--check before the remover, --remover-ran after it), so the two kinds
+// cannot drift (specs/plugin_host_removal.md D6).
+$remove_case = substr($dispatcher, strpos($dispatcher, 'function root_request_plugin_files('));
 $remove_case = substr($remove_case, 0, strpos($remove_case, "\n}\n"));
+check(strpos($dispatcher, "case 'remove_plugin':") !== false
+	&& preg_match("/case 'remove_plugin':.*?root_request_plugin_files\(\(string\)\(\\\$args\['name'\] \?\? ''\), \\\$kind, false\);/s", $dispatcher) === 1,
+	'remove_plugin calls the shared file half with the request\'s name');
+$remover_case = substr($dispatcher, strpos($dispatcher, "case 'run_plugin_remover':"));
+$remover_case = substr($remover_case, 0, strpos($remover_case, "\tcase '", 5));
+check(strpos($remover_case, "in_array('--check', \$argv, true)") !== false
+	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, true);") !== false,
+	'run_plugin_remover --check asks the checks and removes nothing');
+check(strpos($remover_case, "in_array('--remover-ran', \$argv, true)") !== false
+	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, false);") !== false,
+	'run_plugin_remover --remover-ran asks them again and removes the files');
+check(strpos($remover_case, 'this runner is older than the tree') !== false && strpos($remover_case, 'exit(2)') !== false,
+	'and the kind handed over whole (a runner older than the tree) is refused, nothing removed');
+check(strpos($remove_case, "exit(\$check_only ? 3 : 0);") !== false,
+	'a directory already gone answers 3 to the check and done to a removal');
 $refusal_at = strpos($remove_case, 'PluginRemoval::refusal($name, $plugins_dir, $row)');
 $remove_at  = strpos($remove_case, 'PluginRemoval::remove($name, $plugins_dir)');
 check($refusal_at !== false && $remove_at !== false && $refusal_at < $remove_at,
@@ -235,11 +261,22 @@ check(strpos($submit, 'docs_dir') === false,
 
 section('Submitting writes one request and nothing else');
 
+// A scratch queue: RootState points every submit, status and transcript read
+// at it, so nothing lands in this box's real queue for its converger to carry
+// out, and the test may move files between queued and running itself.
+$rq_scratch = sys_get_temp_dir() . '/joinery_rq_state_' . bin2hex(random_bytes(4));
+foreach (array('/root_requests', '/root_request_outcomes/running', '/root_request_outcomes/done',
+               '/root_request_outcomes/failed', '/root_request_logs') as $sub) {
+	@mkdir($rq_scratch . $sub, 0700, true);
+}
+RootState::$override = $rq_scratch;
+
 $id = RootRequest::submit('write_agent_files', array('note' => 'test'), 4500);
 check(preg_match('/^\d{9,12}-[0-9a-f]{8}$/', $id) === 1, 'the id carries a time and a nonce', $id);
 
-$path = PathHelper::getSiteRoot() . '/' . RootRequest::QUEUE_DIR . '/' . $id . '.json';
+$path = RootState::queueDir() . '/' . $id . '.json';
 check(is_file($path), 'the request file is in the queue');
+check(strpos($path, $rq_scratch) === 0, 'and the queue is where RootState says');
 $body = json_decode((string)file_get_contents($path), true);
 check(is_array($body) && $body['kind'] === 'write_agent_files', 'it names the kind');
 check(($body['args']['note'] ?? '') === 'test', 'and carries its arguments verbatim');
@@ -283,28 +320,37 @@ foreach (array('../../../etc/passwd', 'a/../b', '../secrets', '1789000000-ZZZZZZ
 
 @unlink($path);
 
-section('run_plugin_installer: the one kind whose argument reaches a shell, and only once per plugin');
+section('run_plugin_installer and run_plugin_remover: the two kinds whose argument reaches a shell, and only once per plugin');
 
-// The invariant is stated in three places, and each names its one exception.
+// The invariant is stated in three places, and each names its two exceptions.
 $rr_source = (string)file_get_contents(PathHelper::getIncludePath('includes/RootRequest.php'));
-check(strpos($rr_source, 'It is the only kind that does.') !== false,
-	'RootRequest\'s header names run_plugin_installer as the only kind whose argument becomes a shell word');
-check(strpos($runner, 'with one exception,') !== false && strpos($runner, '^[a-z][a-z0-9_]{1,49}$') !== false,
+check(strpos($rr_source, 'They are the only kinds that do.') !== false,
+	'RootRequest\'s header names run_plugin_installer and run_plugin_remover as the only kinds whose argument becomes a shell word');
+check(strpos($runner, 'with two exceptions,') !== false && strpos($runner, '^[a-z][a-z0-9_]{1,49}$') !== false,
 	'so does the runner, with the pattern the name must match first');
-check(strpos($dispatcher, 'this runner is older than the tree') !== false,
-	'the dispatcher refuses it: only the runner carries it out');
+check(substr_count($dispatcher, 'this runner is older than the tree') === 2,
+	'the dispatcher refuses both handed over whole: only the runner carries them out');
+check(in_array('run_plugin_remover', RootRequest::KINDS, true), "'run_plugin_remover' is a kind");
+$rem_first = RootRequest::submit('run_plugin_remover', array('plugin' => 'rqtest_remover'), 4500);
+check(RootRequest::submit('run_plugin_remover', array('plugin' => 'rqtest_remover'), 4500) === $rem_first,
+	'a second removal request for the same plugin while one is queued returns the first');
+$rem_inst = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_remover'), 4500);
+check($rem_inst !== $rem_first, 'an installer request for the same plugin is its own request (the kinds do not share)');
+$qdir0 = RootState::queueDir();
+@unlink($qdir0 . '/' . $rem_first . '.json');
+@unlink($qdir0 . '/' . $rem_inst . '.json');
 
 $first = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
 $second = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
 check($second === $first, 'a second click while one is queued returns the first request');
 $other = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_other'), 4500);
 check($other !== $first, 'a different plugin gets its own request');
-$qdir = PathHelper::getSiteRoot() . '/' . RootRequest::QUEUE_DIR;
-@mkdir($qdir . '/running', 0770, true);
-rename($qdir . '/' . $first . '.json', $qdir . '/running/' . $first . '.json');
+$qdir = RootState::queueDir();
+$odir = RootState::outcomeDir();
+rename($qdir . '/' . $first . '.json', $odir . '/running/' . $first . '.json');
 check(RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500) === $first,
 	'and while it is running');
-@unlink($qdir . '/running/' . $first . '.json');
+@unlink($odir . '/running/' . $first . '.json');
 @unlink($qdir . '/' . $other . '.json');
 $third = RootRequest::submit('run_plugin_installer', array('plugin' => 'rqtest_plugin'), 4500);
 check($third !== $first, 'once it is finished, a click queues a new one');
@@ -414,6 +460,31 @@ check(strpos($runner_text, 'flock -w "${LOCK_WAIT_SECONDS}" 9') !== false,
 
 // Clean up the scratch site.
 shell_exec('rm -rf ' . escapeshellarg($site));
+
+section('install_plugin: the name is validated by root before it is a shell word');
+
+// install_extension.php reads any argument that starts with "-" as one of its own
+// options, so a by-name install carrying "--staged=<dir>" would become a staged
+// install of a directory the web user chose. The dispatcher is read, not run:
+// running it needs a request in this site's own queue, which the host converger
+// would carry out. The pin is that validateName() stands between the request's
+// name and the passthru in both the install_plugin and install_theme case.
+$dispatcher = (string)file_get_contents(PathHelper::getRootDir() . '/utils/root_request.php');
+$case_start = strpos($dispatcher, "case 'install_plugin':");
+$case_end = strpos($dispatcher, "case 'install_package':", $case_start ?: 0);
+$install_case = ($case_start !== false && $case_end !== false) ? substr($dispatcher, $case_start, $case_end - $case_start) : '';
+check($install_case !== '', 'the install_plugin case is where it was', 'root_request.php changed shape; re-pin this check');
+$validate_at = strpos($install_case, 'validateName(');
+$passthru_at = strpos($install_case, 'passthru(');
+check($validate_at !== false && $passthru_at !== false && $validate_at < $passthru_at,
+	'validateName() is called on the request\'s name before the passthru',
+	'a name beginning with - is an install_extension.php option (specs/shell_command_audit.md U1)');
+check(strpos($install_case, "escapeshellarg((string)(\$args['name']") === false,
+	'the raw request value is no longer the thing escaped into the command');
+check((new PluginManager())->validateName('--staged=/var/www/html/x/uploads/staging/evil') === false
+	&& (new PluginManager())->validateName('-register') === false
+	&& (new PluginManager())->validateName('event_manager') === true,
+	'validateName() refuses a name beginning with - and accepts a plain one');
 
 section('A page knows whether anything will act on its request');
 

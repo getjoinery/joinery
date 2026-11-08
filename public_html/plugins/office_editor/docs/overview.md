@@ -203,7 +203,11 @@ is there and `sudo -n office-editor-ctl status` answers.
   signing key, `/opt/cool`, the `cool` user), the drop-ins, the cron job, `/etc/joinery/office_editor`, the
   sudoers rule and the control command itself. If it fails the plugin stays
   installed, so the uninstall can be run again.
-- A container site has none of it, so both are no-ops there.
+- **A site removal** (`remove_account.sh`) runs the same `remove` through the
+  plugin's declared `host_remover`, `provisioning/remove_office_editor.sh`, when
+  the control command is on the server, and does nothing when it is not, so the
+  editor leaves the server with the site.
+- A container site has none of it, so all three are no-ops there.
 
 Moving to a paid licence later swaps the package in step 2 and drops home mode
 in step 3; nothing else changes. Never put the vendor's name in a product or

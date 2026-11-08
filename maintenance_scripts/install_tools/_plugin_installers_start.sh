@@ -3,6 +3,23 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.56 - root's state for a site lives in /var/lib/joinery/sites/SITENAME (the queue and its outcomes,
+#                 transcripts, plugin installer records and logs, the stamp, last run and certificate summary),
+#                 never in the site's cache/ or logs/, whose owner could rename root's folders aside and put a
+#                 link under the name; the queue is the one web-writable place, sticky. Waiting requests are
+#                 carried over on the first run; a container publishes host_converger.last into cache/ through
+#                 mktemp and a rename for its host's observer (specs/shell_command_audit.md D1)
+# Version: 2.55 - run_one_plugin_installer holds the plugin name to ^[a-z][a-z0-9_]{1,49}$ at every entry (the full
+#                 run read it from a database row unchecked), and the upgrade hold reads uploads/.upgrade.lock
+#                 only as a plain non-link file (specs/shell_command_audit.md A5, A7)
+# Version: 2.54 - run_plugin_remover: a plugin uninstall whose manifest declares a host_remover is carried out
+#                 here, in the request loop: the dispatcher's checks (--check), the remover through
+#                 run_one_plugin_remover, then the files through the dispatcher (--remover-ran); a remover that
+#                 left something keeps the directory and fails the request (specs/plugin_host_removal.md WP5)
+# Version: 2.53 - --remove-site: every plugin's declared host_remover runs under the caller's lock before
+#                 a site removal deletes the tree, through run_one_plugin_remover, the installer's four
+#                 checks read the other way; the trust and signature definitions sit above the lock block
+#                 so the mode reaches nothing that changes the host (specs/plugin_host_removal.md WP1)
 # Version: 2.51 - install_unseal_daemon.sh joins CORE_INSTALLERS, after the parser jail's: every site gets its
 #                 unseal daemon, supervised, at every root moment (specs/unseal_daemon.md WP3).
 # Version: 2.50 - The agent runs wherever it is installed: the tick's hold no longer reads an
@@ -282,7 +299,7 @@
 # unreachable, or an installer failure all exit 0, so a broken installer can
 # never block the container from starting.
 #
-# Usage:  _plugin_installers_start.sh [--when-changed | --only=INSTALLER | --only-plugin=PLUGIN] [--site-root=DIR] [SITENAME] [SITE_ROOT]
+# Usage:  _plugin_installers_start.sh [--when-changed | --only=INSTALLER | --only-plugin=PLUGIN | --remove-site] [--site-root=DIR] [SITENAME] [SITE_ROOT]
 #         All optional. SITENAME names a site OTHER than the one this copy
 #         of the script was delivered in; with no argument the script works on
 #         its own site. Nothing is required in the environment - the database
@@ -296,6 +313,12 @@
 #         extensions, no plugin installers, no root requests. A name outside
 #         the list is a caller error, refused with exit 2 before the lock is
 #         taken; an installer that fails still exits 0, as in a full run.
+#         --remove-site runs every plugin's declared host_remover (every
+#         plugin on disk, whatever its row says) under the CALLER's runner
+#         lock, which must already be held on descriptor 9, and nothing else:
+#         remove_account.sh's call before it deletes the tree. Exit 0 when
+#         every remover finished, 1 when one left machine state behind (said
+#         per plugin), 2 when refused before anything ran.
 #
 # One runner at a time. Whatever the mode, the run holds a kernel flock from
 # before its first change to the host until it exits. A run that finds the
@@ -342,6 +365,7 @@ ONLY_PLUGIN_GIVEN=0
 ONLY_PLUGIN=""
 EXPLICIT_ROOT=""
 MACHINE=0
+REMOVE_SITE=0
 POSITIONAL=()
 # As called, for a run that hands itself to a refreshed copy of this runner.
 CALLED_WITH=("$@")
@@ -352,6 +376,7 @@ for arg in "$@"; do
         --only-plugin=*) ONLY_PLUGIN_GIVEN=1; ONLY_PLUGIN="${arg#--only-plugin=}" ;;
         --site-root=*)  EXPLICIT_ROOT="${arg#--site-root=}" ;;
         --machine)      MACHINE=1 ;;
+        --remove-site)  REMOVE_SITE=1 ;;
         *)              POSITIONAL+=("${arg}") ;;
     esac
 done
@@ -400,6 +425,16 @@ if [[ "${ONLY_PLUGIN_GIVEN}" == "1" ]]; then
     fi
     if [[ "${MACHINE}" == "1" || "${WHEN_CHANGED}" == "1" || "${ONLY_GIVEN}" == "1" ]]; then
         echo "host installers: --only-plugin runs alone, on a site - refused" >&2
+        exit 2
+    fi
+fi
+
+# --remove-site SITENAME [SITE_ROOT]: every plugin's declared host_remover and
+# nothing else, under the caller's lock (the mode itself is below, with what it
+# needs). A mode of its own; beside any other it is refused.
+if [[ "${REMOVE_SITE}" == "1" ]]; then
+    if [[ "${MACHINE}" == "1" || "${WHEN_CHANGED}" == "1" || "${ONLY_GIVEN}" == "1" || "${ONLY_PLUGIN_GIVEN}" == "1" ]]; then
+        echo "host installers: --remove-site runs alone, on a site - refused" >&2
         exit 2
     fi
 fi
@@ -473,6 +508,267 @@ CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
 # what makes running them safe.
 TOOLS_DIR="${SITE_ROOT}/maintenance_scripts/install_tools"
 [[ -d "${TOOLS_DIR}" ]] || TOOLS_DIR="${SCRIPT_DIR}"
+
+# --- Who owns this tree ------------------------------------------------------
+# Written by fix_permissions.sh, which is told --dev or --production and so
+# knows the answer; never by anything on the web side. Read here before the
+# assertion, with no database and without including a line of the tree.
+#
+# The reading itself, and the refusal below, live in _tree_trust.sh, because
+# install_host_converger.sh has to reach the identical answer when it decides
+# whether to refresh the root timer's entry point. Two copies would drift.
+if [[ -f "${TOOLS_DIR}/_tree_trust.sh" ]]; then
+    # shellcheck source=_tree_trust.sh
+    . "${TOOLS_DIR}/_tree_trust.sh"
+else
+    # Nothing below this point is safe without it: every installer runs as root,
+    # and the check that says which ones may is in that file.
+    echo "plugin installers: _tree_trust.sh missing from ${TOOLS_DIR} - refusing to run anything as root" >&2
+    exit 0
+fi
+
+TREE_OWNER_TARGET="$(joinery_tree_owner_record "${SITE_ROOT}")"
+TREE_OWNER_GROUP="$(id -gn "${TREE_OWNER_TARGET}" 2>/dev/null || echo "${TREE_OWNER_TARGET}")"
+
+# --- An installer this box did not author is not run -------------------------
+# Every script below is executed AS ROOT. The tree owner is whoever owns
+# public_html — root on a node, the developer account on the developer box — and
+# an installer owned by anyone else, or writable by anyone but its owner, is a
+# script we cannot say where it came from. Refusing is loud: the reason goes to
+# stderr and the outcome to cache/host_converger.last, so a box whose ownership
+# has drifted reports it instead of running whatever it finds.
+# The recorded owner is the authority where there is one. Reading it off
+# public_html instead would let whoever owns the tree vouch for the scripts in
+# it. A box with no record keeps the old reading, so an installer still runs on
+# a site that has not been through the new fix_permissions.sh yet.
+#
+# Bound by bind_tree_owner: in a full run after the ownership assertion, which
+# may have just re-owned public_html; in --remove-site with no assertion, the
+# tree read as it stands.
+TREE_OWNER=""
+bind_tree_owner() {
+    if [[ -f "${SITE_ROOT}/config/tree_owner" ]]; then
+        TREE_OWNER="${TREE_OWNER_TARGET}"
+    else
+        TREE_OWNER="$(stat -c '%U' "${PUBLIC_HTML}" 2>/dev/null || echo root)"
+    fi
+}
+
+# The tree owner is whoever owns public_html - root on a node, the developer
+# account on the developer box. Binding that global here keeps all the call
+# sites below reading as the question they are actually asking.
+installer_is_trusted() {
+    joinery_file_is_trusted "$1" "${TREE_OWNER}"
+}
+
+# --- Only a package we built gets its host installer run ---------------------
+# Every script below runs as root, and a plugin's host_installer is a plugin's
+# own file. The ownership refusal above says root PUT it there; this says WE
+# BUILT it: utils/verify_package.php checks the plugin directory against its
+# signed listing and the keys in config/release_verify_keys
+# (specs/package_signing.md WP5) and, on a node that requires the release log,
+# finds its release statement in the public log (release_transparency D5; a
+# package signed by us but not logged is `unlogged`). A plugin installed on the
+# owner's acknowledgement of the unsigned or unlogged warning stays installed
+# and active - it simply never has a script run as root out of its directory,
+# and the log says so on every converge. So does a plugin kept from before the
+# log existed that never took an upgrade: it carries no statement.
+#
+# The publishing box is the one exemption: it holds the secret half of the
+# release key, every plugin there is the source the archives are built from,
+# and its live manifests are stale the moment a file is edited. A site on a
+# host that refuses unsigned code is never the publishing box, whatever is in
+# its config/ (specs/host_restrictions.md D4).
+#
+# JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
+# a test at the real tool, a throwaway key and a fixture's plugin list. They
+# are honoured only when this is NOT root: the gate runs unprivileged, and a
+# root run - the timer, the container start, an operator's sudo - uses its own
+# tool, its own key file (with the ownership guard an explicit key path skips)
+# and the database's answer, whatever the environment says. Root says once
+# that it ignored a hook, so a stray one is visible rather than silent.
+if [[ "$(id -u)" == "0" ]]; then
+    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS JOINERY_ACTIVE_PLUGINS_NOW; do
+        if [[ -n "${!_hook:-}" ]]; then
+            echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
+            unset "${_hook}"
+        fi
+    done
+fi
+VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
+plugin_host_refuses_unsigned() {
+    [[ -f "${TOOLS_DIR}/_host_restrictions.sh" ]] || return 1
+    # shellcheck source=_host_restrictions.sh
+    . "${TOOLS_DIR}/_host_restrictions.sh"
+    host_restriction_on "${PUBLIC_HTML}" unsigned_packages
+}
+# PLUGIN [WHAT]: WHAT names the script in the refusal (host installer unless
+# the caller is running the plugin's host remover).
+plugin_package_verified() {
+    local plugin="$1" what="${2:-host installer}"
+    local dir="${PUBLIC_HTML}/plugins/${plugin}"
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] && ! plugin_host_refuses_unsigned; then
+        return 0
+    fi
+    if [[ ! -f "${VERIFY_TOOL}" ]]; then
+        echo "plugin installers: ${plugin}: no verify_package.php to check the package with - ${what} skipped" >&2
+        return 1
+    fi
+    local -a keys_arg=()
+    [[ -n "${JOINERY_VERIFY_KEYS:-}" ]] && keys_arg=(--keys="${JOINERY_VERIFY_KEYS}")
+    local out
+    if out="$(php "${VERIFY_TOOL}" "${dir}" "${keys_arg[@]+"${keys_arg[@]}"}" 2>&1)"; then
+        return 0
+    fi
+    echo "plugin installers: ${plugin}: not a package we built - ${what} skipped (${out##*$'\n'})" >&2
+    return 1
+}
+
+# --- --remove-site: every plugin's declared host remover, and nothing else -----
+# A site removal (remove_account.sh) takes the plugins' machine state off before
+# it deletes the tree: for every plugin ON DISK, whatever its row says
+# (deactivation runs nothing on the host, so a deactivated plugin's state is
+# still there), the declared host_remover is run as root through
+# run_one_plugin_remover, the same four checks as the installer's (path inside
+# the plugin directory, file present, trusted ownership, signed package).
+#
+# Under the CALLER's lock, never its own: the caller holds the host runner lock
+# for the whole removal, so a run here that took it would wait out ten minutes
+# and run nothing. The lock is proven held and in this process's inheritance
+# line: a fresh read-only descriptor on the file must be refused the lock
+# (someone holds it), and descriptor 9 must be that file (the holder is an
+# ancestor; hold_host_runner_lock and this runner lock on 9). Never flock -n 9:
+# on the inherited descriptor it succeeds trivially. The fresh descriptor is
+# closed before any remover runs; nothing above stdio but 9 reaches a child.
+#
+# Nothing below the lock block is reached: no lock, no cron settle, no
+# ownership assertion, no data-root tick, no stamp, no records (the tree is
+# about to go), no root requests, no packages, no core installers. The
+# definitions it needs sit above it.
+#
+# Exit 0: every declared remover exited 0 (or none declares one). 1: at least
+# one left something behind, said per plugin as
+# "plugin removers: NAME: left something behind (...)"; the others ran anyway.
+# 2: refused before anything ran (not a directory, no site config, lock not
+# proven held).
+# Every declared remover reads the site's config, so it must still be here.
+REMOVERS_LEFT=""
+REMOVER_OUTCOME=""
+
+# PLUGIN OUTCOME REASON: a remover that did not finish; its plugin's machine
+# state is taken as still there, whatever the reason.
+plugin_remover_left() {
+    REMOVER_OUTCOME="$2"
+    REMOVERS_LEFT="${REMOVERS_LEFT} $1"
+    echo "plugin removers: $1: left something behind ($3)"
+}
+
+# One plugin's declared host_remover: resolved through its own plugin.json,
+# refused when the path escapes the plugin directory, when root did not put it
+# there, or when we did not build the package - run_one_plugin_installer's
+# checks, read the other way, and the one body --remove-site and the
+# run_plugin_remover request share. Told the site name and the site root, as a
+# core installer is. Always returns 0; how it went is REMOVER_OUTCOME: ok,
+# failed, refused-untrusted, refused-unsigned, missing, or none (the plugin
+# declares no remover), and every outcome but ok and none adds the plugin to
+# REMOVERS_LEFT.
+run_one_plugin_remover() {
+    local PLUGIN="$1" MANIFEST REMOVER_REL REMOVER REASON rc=0
+    REMOVER_OUTCOME="none"
+    if [[ ! "${PLUGIN}" =~ ^[a-z][a-z0-9_]{1,49}$ ]]; then
+        echo "plugin removers: '${PLUGIN:0:60}' is not a plugin name - skipped" >&2
+        return 0
+    fi
+    MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
+    [[ -f "${MANIFEST}" ]] || return 0
+    REMOVER_REL="$(php -r '
+        $m = json_decode(file_get_contents($argv[1]), true);
+        echo isset($m["host_remover"]) && is_string($m["host_remover"]) ? $m["host_remover"] : "";
+    ' "${MANIFEST}" 2>/dev/null || true)"
+    if [[ -z "${REMOVER_REL}" ]]; then
+        echo "plugin removers: ${PLUGIN}: declares no host remover - skipped"
+        return 0
+    fi
+    REMOVER="${PUBLIC_HTML}/plugins/${PLUGIN}/${REMOVER_REL}"
+    case "$(realpath -m "${REMOVER}")" in
+        "$(realpath -m "${PUBLIC_HTML}/plugins/${PLUGIN}")"/*) : ;;
+        *)
+            plugin_remover_left "${PLUGIN}" refused-untrusted "host_remover escapes plugin directory - refused"
+            return 0
+            ;;
+    esac
+    if [[ ! -f "${REMOVER}" ]]; then
+        plugin_remover_left "${PLUGIN}" missing "declared remover missing: ${REMOVER_REL}"
+        return 0
+    fi
+    if ! REASON="$(installer_is_trusted "${REMOVER}" 2>&1)"; then
+        plugin_remover_left "${PLUGIN}" refused-untrusted "${REASON}"
+        return 0
+    fi
+    if ! REASON="$(plugin_package_verified "${PLUGIN}" "host remover" 2>&1)"; then
+        plugin_remover_left "${PLUGIN}" refused-unsigned "${REASON}"
+        return 0
+    fi
+    echo "plugin removers: ${PLUGIN}: running ${REMOVER_REL}"
+    bash "${REMOVER}" "${SITENAME}" "${SITE_ROOT}" || rc=$?
+    if (( rc == 0 )); then
+        REMOVER_OUTCOME="ok"
+        echo "plugin removers: ${PLUGIN}: ok"
+    else
+        plugin_remover_left "${PLUGIN}" failed "exit ${rc}"
+    fi
+}
+
+# Is the host runner lock LOCK_FILE held by an ancestor of this process? See
+# the mode's comment: a fresh descriptor refused the lock, and descriptor 9 on
+# that very file. A missing file is not held, and the read-only open creates
+# nothing.
+caller_holds_runner_lock() {
+    local lock_file="$1" held=0
+    [[ -f "${lock_file}" ]] || return 1
+    exec 8< "${lock_file}" || return 1
+    if ! flock -n 8 2>/dev/null && [[ /dev/fd/9 -ef "${lock_file}" ]]; then
+        held=1
+    fi
+    exec 8<&-
+    (( held == 1 ))
+}
+
+if [[ "${REMOVE_SITE}" == "1" ]]; then
+    if [[ ! -d "${SITE_ROOT}" ]]; then
+        echo "plugin removers: ${SITE_ROOT} is not a directory - refused, nothing ran" >&2
+        exit 2
+    fi
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "plugin removers: ${SITE_ROOT} has no config/Globalvars_site.php, which the removers read - refused, nothing ran" >&2
+        exit 2
+    fi
+    # The two lock-file rules of the lock block below, and of hold_host_runner_lock.
+    if [[ "$(id -u)" == "0" ]]; then
+        REMOVE_LOCK_FILE="/run/joinery/host-installers.${SITENAME}.lock"
+    else
+        REMOVE_LOCK_FILE="${SITE_ROOT}/cache/host_installers.lock"
+    fi
+    if ! caller_holds_runner_lock "${REMOVE_LOCK_FILE}"; then
+        echo "plugin removers: the host runner lock ${REMOVE_LOCK_FILE} is not held by a caller of this run - refused, nothing ran" >&2
+        exit 2
+    fi
+    if [[ ! -d "${PUBLIC_HTML}/plugins" ]]; then
+        echo "plugin removers: no plugins directory - nothing to take off the machine"
+        exit 0
+    fi
+    bind_tree_owner
+    for _pdir in "${PUBLIC_HTML}"/plugins/*/; do
+        [[ -f "${_pdir}plugin.json" ]] || continue
+        run_one_plugin_remover "$(basename "${_pdir}")"
+    done
+    if [[ -n "${REMOVERS_LEFT}" ]]; then
+        echo "plugin removers: machine state left behind by:${REMOVERS_LEFT}"
+        exit 1
+    fi
+    echo "plugin removers: every declared remover finished"
+    exit 0
+fi
 
 if [[ "${MACHINE}" == "0" ]] && [[ ! -d "${PUBLIC_HTML}/plugins" ]]; then
     echo "plugin installers: no plugins directory - skipping"
@@ -650,7 +946,11 @@ fi
 # fix_permissions.sh had finished, so the deploy gate rolled the upgrade back.
 # The upgrade's own installer run is not --when-changed and never waits here
 # (it holds the lock this would wait on). The tick after the upgrade converges.
-if [[ "${WHEN_CHANGED}" == "1" && "${MACHINE}" == "0" && -e "${SITE_ROOT}/uploads/.upgrade.lock" ]]; then
+# A regular file and not a link: uploads/ is the web user's, and a FIFO or a
+# link planted under this name would stall or redirect root's open
+# (specs/shell_command_audit.md A5). Anything but the plain lock file the
+# upgrade writes is ignored.
+if [[ "${WHEN_CHANGED}" == "1" && "${MACHINE}" == "0" && -f "${SITE_ROOT}/uploads/.upgrade.lock" && ! -L "${SITE_ROOT}/uploads/.upgrade.lock" ]]; then
     if ! flock -n 8 8<"${SITE_ROOT}/uploads/.upgrade.lock"; then
         echo "host installers: ${SITENAME} is upgrading - leaving this tick to the upgrade"
         exit 0
@@ -658,18 +958,116 @@ if [[ "${WHEN_CHANGED}" == "1" && "${MACHINE}" == "0" && -e "${SITE_ROOT}/upload
 fi
 
 # --- The converge record ------------------------------------------------------
-# The stamp and the record of the last run live in cache/, root-owned, readable
-# by the site so the admin notice and the health check can say when the
-# converger last ran. Declared here, ahead of the quiet gate, which records too.
-# Where the converge stamp lives. A site keeps it in its cache. A machine has
-# no cache that survives a bundle refresh (the tree is replaced whole), so
-# root keeps it under /var/lib/joinery/host; a fixture keeps it in ROOT/cache.
-STATE_DIR="${SITE_ROOT}/cache"
-if [[ "${MACHINE}" == "1" && "$(id -u)" == "0" ]]; then
+# Where root keeps what it writes for a site: the request queue and its
+# outcomes, the transcripts, the plugin installer records and logs, the
+# converge stamp, the record of the last run and the certificate summary.
+#
+# Root's own directory, /var/lib/joinery/sites/SITENAME, never the site's
+# cache/ or logs/. Those belong to the web user, and the owner of a directory
+# can rename any entry in it: a root-owned folder there could be moved aside
+# and a link put under its name, and root's next mkdir, chown or write would
+# follow the link (specs/shell_command_audit.md D1). Here every parent is
+# root's, so a name root uses is one only root can change. The web user needs
+# exactly one place to write, the queue itself: a root-owned directory that
+# holds nothing of root's (a request's outcomes live beside it, not in it), so
+# there is no entry there for the web user to rename aside. The pool reads
+# the rest through group www-data.
+#
+# A machine with no site keeps its stamp under /var/lib/joinery/host as before.
+# A fixture (a run that is not root, the tests) keeps everything under
+# ROOT/cache and ROOT/logs, where a scratch site can hold it. The PHP side
+# (includes/RootState.php) reads the same rule: the site directory when it
+# exists, the fixture layout otherwise.
+SITE_STATE_DIR=""
+if [[ "$(id -u)" == "0" && "${MACHINE}" == "0" ]]; then
+    SITE_STATE_DIR="/var/lib/joinery/sites/${SITENAME}"
+fi
+if [[ -n "${SITE_STATE_DIR}" ]]; then
+    STATE_DIR="${SITE_STATE_DIR}"
+    QUEUE_DIR="${SITE_STATE_DIR}/root_requests"
+    OUTCOME_DIR="${SITE_STATE_DIR}/root_request_outcomes"
+    REQUEST_LOG_DIR="${SITE_STATE_DIR}/root_request_logs"
+    PLUGIN_RECORD_DIR="${SITE_STATE_DIR}/plugin_installers"
+    PLUGIN_LOG_DIR="${SITE_STATE_DIR}/plugin_installer_logs"
+    CERT_SUMMARY_FILE="${SITE_STATE_DIR}/certificates.json"
+elif [[ "${MACHINE}" == "1" && "$(id -u)" == "0" ]]; then
     STATE_DIR="/var/lib/joinery/host"
+    QUEUE_DIR=""; OUTCOME_DIR=""; REQUEST_LOG_DIR=""; PLUGIN_RECORD_DIR=""; PLUGIN_LOG_DIR=""; CERT_SUMMARY_FILE=""
+else
+    STATE_DIR="${SITE_ROOT}/cache"
+    QUEUE_DIR="${SITE_ROOT}/cache/root_requests"
+    OUTCOME_DIR="${SITE_ROOT}/cache/root_requests"
+    REQUEST_LOG_DIR="${SITE_ROOT}/logs/root_requests"
+    PLUGIN_RECORD_DIR="${SITE_ROOT}/cache/plugin_installers"
+    PLUGIN_LOG_DIR="${SITE_ROOT}/logs/plugin_installers"
+    CERT_SUMMARY_FILE="${SITE_ROOT}/cache/certificates.json"
 fi
 STAMP_FILE="${STATE_DIR}/host_converger.stamp"
 LAST_FILE="${STATE_DIR}/host_converger.last"
+
+# Make root's site directory, with its modes, and carry over what an earlier
+# release left under cache/ and logs/: a request still waiting moves into the
+# new queue (a regular file with a request id for a name, never a link), and
+# the old root-owned folders and records go. Idempotent; a tick with nothing
+# to do touches nothing.
+ensure_site_state_dir() {
+    [[ -n "${SITE_STATE_DIR}" ]] || return 0
+    local grp="www-data"
+    getent group www-data >/dev/null 2>&1 || grp="root"
+    install -d -m 755 -o root -g root /var/lib/joinery /var/lib/joinery/sites 2>/dev/null || return 1
+    install -d -m 755 -o root -g root "${SITE_STATE_DIR}" 2>/dev/null || return 1
+    install -d -m 770 -o root -g "${grp}" "${QUEUE_DIR}" 2>/dev/null || return 1
+    install -d -m 750 -o root -g "${grp}" "${OUTCOME_DIR}" "${OUTCOME_DIR}/running" "${OUTCOME_DIR}/done" \
+        "${OUTCOME_DIR}/failed" "${REQUEST_LOG_DIR}" "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || return 1
+
+    local legacy="${SITE_ROOT}/cache/root_requests" f id
+    if [[ -d "${legacy}" && ! -L "${legacy}" ]]; then
+        for f in "${legacy}"/*.json; do
+            [[ -f "${f}" && ! -L "${f}" ]] || continue
+            id="$(basename "${f}" .json)"
+            [[ "${id}" =~ ^[0-9]{9,12}-[0-9a-f]{8}$ ]] || continue
+            mv -f -T "${f}" "${QUEUE_DIR}/${id}.json" 2>/dev/null \
+                && echo "root request: ${id} carried over from cache/root_requests"
+        done
+    fi
+    # Nothing of root's lives inside the queue: outcome folders an earlier layout
+    # kept there go (their contents are records, kept thirty days at most).
+    for f in "${QUEUE_DIR}/running" "${QUEUE_DIR}/done" "${QUEUE_DIR}/failed"; do
+        [[ -d "${f}" && ! -L "${f}" ]] && rm -rf -- "${f}" 2>/dev/null
+    done
+    # rm on a link removes the link, never what it points at.
+    for f in "${SITE_ROOT}/cache/root_requests" "${SITE_ROOT}/cache/plugin_installers" \
+             "${SITE_ROOT}/logs/root_requests" "${SITE_ROOT}/logs/plugin_installers"; do
+        [[ -e "${f}" || -L "${f}" ]] && rm -rf -- "${f}" 2>/dev/null
+    done
+    for f in "${SITE_ROOT}/cache/host_converger.stamp" "${SITE_ROOT}/cache/host_converger.last" \
+             "${SITE_ROOT}/cache/certificates.json" "${SITE_ROOT}/cache/host_installers.lock"; do
+        [[ -e "${f}" || -L "${f}" ]] && rm -f -- "${f}" 2>/dev/null
+    done
+    return 0
+}
+ensure_site_state_dir || echo "host installers: could not make ${SITE_STATE_DIR}; root requests wait" >&2
+
+# A site in a container is watched from its host through the cache volume
+# (sysadmin_tools/site_converger.sh reads host_converger.last there). Root
+# publishes a copy of a state file into the site's cache for that reader,
+# through a fresh file mktemp made (O_EXCL, a random name nothing can have
+# planted) and a rename over the name, which replaces a planted link rather
+# than following it. Only in a container; on a host the pool reads root's
+# directory directly.
+publish_state_copy() {  # SRC NAME
+    [[ -n "${SITE_STATE_DIR}" && -f "$1" ]] || return 0
+    [[ -f /.dockerenv || -f /run/.containerenv ]] || return 0
+    local dir="${SITE_ROOT}/cache" tmp
+    [[ -d "${dir}" && ! -L "${dir}" ]] || return 0
+    tmp="$(mktemp -p "${dir}" ".${2}.XXXXXX" 2>/dev/null)" || return 0
+    if cat "$1" > "${tmp}" 2>/dev/null; then
+        chmod 644 "${tmp}" 2>/dev/null
+        mv -f -T "${tmp}" "${dir}/${2}" 2>/dev/null || rm -f -- "${tmp}"
+    else
+        rm -f -- "${tmp}"
+    fi
+}
 CONVERGE_MAX_AGE=86400
 # The code check's own cadence (specs/multi_tenant_host_hardening.md D8, WP7). On
 # a host that refuses unsigned code, site housekeeping checks the whole tree
@@ -756,6 +1154,7 @@ agent_running_hold() {
 record_last() {
     mkdir -p "${STATE_DIR}" 2>/dev/null || true
     printf '%s %s\n' "$(date -u +%s)" "$1" > "${LAST_FILE}.tmp" 2>/dev/null && chmod 644 "${LAST_FILE}.tmp" 2>/dev/null && mv -f "${LAST_FILE}.tmp" "${LAST_FILE}" 2>/dev/null || true
+    publish_state_copy "${LAST_FILE}" host_converger.last
 }
 
 # --- A quiet site runs nothing (specs/site_copy.md WP5) -----------------------
@@ -832,27 +1231,6 @@ for _d in public_html maintenance_scripts vendor; do
     [[ -d "${SITE_ROOT}/${_d}" ]] && EXEC_ROOTS+=("${SITE_ROOT}/${_d}")
 done
 
-# --- Who owns this tree ------------------------------------------------------
-# Written by fix_permissions.sh, which is told --dev or --production and so
-# knows the answer; never by anything on the web side. Read here before the
-# assertion, with no database and without including a line of the tree.
-#
-# The reading itself, and the refusal below, live in _tree_trust.sh, because
-# install_host_converger.sh has to reach the identical answer when it decides
-# whether to refresh the root timer's entry point. Two copies would drift.
-if [[ -f "${TOOLS_DIR}/_tree_trust.sh" ]]; then
-    # shellcheck source=_tree_trust.sh
-    . "${TOOLS_DIR}/_tree_trust.sh"
-else
-    # Nothing below this point is safe without it: every installer runs as root,
-    # and the check that says which ones may is in that file.
-    echo "plugin installers: _tree_trust.sh missing from ${TOOLS_DIR} - refusing to run anything as root" >&2
-    exit 0
-fi
-
-TREE_OWNER_TARGET="$(joinery_tree_owner_record "${SITE_ROOT}")"
-TREE_OWNER_GROUP="$(id -gn "${TREE_OWNER_TARGET}" 2>/dev/null || echo "${TREE_OWNER_TARGET}")"
-
 assert_tree_ownership() {
     local ph_owner
     # A bundle is root's by construction (the agent unpacked it); there is no
@@ -907,30 +1285,7 @@ assert_tree_ownership() {
 }
 
 assert_tree_ownership
-
-# --- An installer this box did not author is not run -------------------------
-# Every script below is executed AS ROOT. The tree owner is whoever owns
-# public_html — root on a node, the developer account on the developer box — and
-# an installer owned by anyone else, or writable by anyone but its owner, is a
-# script we cannot say where it came from. Refusing is loud: the reason goes to
-# stderr and the outcome to cache/host_converger.last, so a box whose ownership
-# has drifted reports it instead of running whatever it finds.
-# The recorded owner is the authority where there is one. Reading it off
-# public_html instead would let whoever owns the tree vouch for the scripts in
-# it. A box with no record keeps the old reading, so an installer still runs on
-# a site that has not been through the new fix_permissions.sh yet.
-if [[ -f "${SITE_ROOT}/config/tree_owner" ]]; then
-    TREE_OWNER="${TREE_OWNER_TARGET}"
-else
-    TREE_OWNER="$(stat -c '%U' "${PUBLIC_HTML}" 2>/dev/null || echo root)"
-fi
-
-# The tree owner is whoever owns public_html - root on a node, the developer
-# account on the developer box. Binding that global here keeps all the call
-# sites below reading as the question they are actually asking.
-installer_is_trusted() {
-    joinery_file_is_trusted "$1" "${TREE_OWNER}"
-}
+bind_tree_owner
 
 # --- The data root (specs/one_data_root.md D3, D7) ---------------------------
 # On a host that has one, everything that is data lives under /srv/joinery,
@@ -1011,67 +1366,6 @@ run_core_installer() {
 # secrets, no key file, no plugin installers, no root requests. The caller
 # (an agent word with a compiled constant for the name) reads the transcript
 # and verifies the aspect it asked for, never this exit code.
-# --- Only a package we built gets its host installer run ---------------------
-# Every script below runs as root, and a plugin's host_installer is a plugin's
-# own file. The ownership refusal above says root PUT it there; this says WE
-# BUILT it: utils/verify_package.php checks the plugin directory against its
-# signed listing and the keys in config/release_verify_keys
-# (specs/package_signing.md WP5) and, on a node that requires the release log,
-# finds its release statement in the public log (release_transparency D5; a
-# package signed by us but not logged is `unlogged`). A plugin installed on the
-# owner's acknowledgement of the unsigned or unlogged warning stays installed
-# and active - it simply never has a script run as root out of its directory,
-# and the log says so on every converge. So does a plugin kept from before the
-# log existed that never took an upgrade: it carries no statement.
-#
-# The publishing box is the one exemption: it holds the secret half of the
-# release key, every plugin there is the source the archives are built from,
-# and its live manifests are stale the moment a file is edited. A site on a
-# host that refuses unsigned code is never the publishing box, whatever is in
-# its config/ (specs/host_restrictions.md D4).
-#
-# JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
-# a test at the real tool, a throwaway key and a fixture's plugin list. They
-# are honoured only when this is NOT root: the gate runs unprivileged, and a
-# root run - the timer, the container start, an operator's sudo - uses its own
-# tool, its own key file (with the ownership guard an explicit key path skips)
-# and the database's answer, whatever the environment says. Root says once
-# that it ignored a hook, so a stray one is visible rather than silent.
-if [[ "$(id -u)" == "0" ]]; then
-    for _hook in JOINERY_VERIFY_PACKAGE JOINERY_VERIFY_KEYS JOINERY_ACTIVE_PLUGINS JOINERY_ACTIVE_PLUGINS_NOW; do
-        if [[ -n "${!_hook:-}" ]]; then
-            echo "plugin installers: ${_hook} is set but this is root - hook ignored" >&2
-            unset "${_hook}"
-        fi
-    done
-fi
-VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
-plugin_host_refuses_unsigned() {
-    [[ -f "${TOOLS_DIR}/_host_restrictions.sh" ]] || return 1
-    # shellcheck source=_host_restrictions.sh
-    . "${TOOLS_DIR}/_host_restrictions.sh"
-    host_restriction_on "${PUBLIC_HTML}" unsigned_packages
-}
-plugin_package_verified() {
-    local plugin="$1"
-    local dir="${PUBLIC_HTML}/plugins/${plugin}"
-    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] && ! plugin_host_refuses_unsigned; then
-        return 0
-    fi
-    if [[ ! -f "${VERIFY_TOOL}" ]]; then
-        echo "plugin installers: ${plugin}: no verify_package.php to check the package with - host installer skipped" >&2
-        return 1
-    fi
-    local -a keys_arg=()
-    [[ -n "${JOINERY_VERIFY_KEYS:-}" ]] && keys_arg=(--keys="${JOINERY_VERIFY_KEYS}")
-    local out
-    if out="$(php "${VERIFY_TOOL}" "${dir}" "${keys_arg[@]+"${keys_arg[@]}"}" 2>&1)"; then
-        return 0
-    fi
-    echo "plugin installers: ${plugin}: not a package we built - host installer skipped (${out##*$'\n'})" >&2
-    return 1
-}
-
 read_active_plugins() {
     php -r '
         $config = file_get_contents($argv[1]);
@@ -1128,8 +1422,7 @@ plugin_still_active() {
 # Every run writes them, however it was started. The log is written as .tmp and
 # moved into place, so a daemon the last run left holding its descriptor writes
 # into the old file, never at an offset in the new one.
-PLUGIN_RECORD_DIR="${SITE_ROOT}/cache/plugin_installers"
-PLUGIN_LOG_DIR="${SITE_ROOT}/logs/plugin_installers"
+# PLUGIN_RECORD_DIR and PLUGIN_LOG_DIR are declared with the site state directory above.
 
 # The names this pass ran, and how each went: a root request for one of them
 # copies that run instead of installing a second time.
@@ -1142,9 +1435,13 @@ declare -A PASS_OUTCOME=()
 # (plugin_record_tmp). Once the directory is root's 750, nothing else can put
 # a name in it.
 plugin_record_dirs() {
+    [[ -n "${PLUGIN_RECORD_DIR}" && -n "${PLUGIN_LOG_DIR}" ]] || return 1
     mkdir -p "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || return 1
-    chown root:www-data "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
-    chmod 750 "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
+    if [[ -z "${SITE_STATE_DIR}" ]]; then
+        # A fixture's directories; root's were made with their modes by ensure_site_state_dir.
+        chown root:www-data "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
+        chmod 750 "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || true
+    fi
 }
 
 # A fresh .tmp: whatever is at the name (a planted link) is removed, never
@@ -1199,6 +1496,14 @@ plugin_record_refusal() {
 run_one_plugin_installer() {
     local PLUGIN="$1" MANIFEST INSTALLER_REL INSTALLER STARTED REASON LOG
     INSTALLER_OUTCOME=""
+    # The name is a path segment below. The full run reads it from a database
+    # row (plg_name), which the web user writes, so it is held to the same
+    # shape here as at the other two entry points, whoever called
+    # (specs/shell_command_audit.md A7).
+    if [[ ! "${PLUGIN}" =~ ^[a-z][a-z0-9_]{1,49}$ ]]; then
+        echo "plugin installers: '${PLUGIN:0:60}' is not a plugin name - skipped" >&2
+        return 0
+    fi
     MANIFEST="${PUBLIC_HTML}/plugins/${PLUGIN}/plugin.json"
     [[ -f "${MANIFEST}" ]] || return 0
 
@@ -1539,7 +1844,7 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
     # script the moment a request lands.
     REQUESTS_WAITING=0
     if [[ "${MACHINE}" == "0" ]]; then
-        for _req in "${SITE_ROOT}"/cache/root_requests/*.json; do
+        for _req in "${QUEUE_DIR}"/*.json; do
             [[ -f "${_req}" ]] && { REQUESTS_WAITING=1; break; }
         done
     fi
@@ -1693,7 +1998,8 @@ write_certificate_summary() {
     [[ "${MACHINE}" == "0" ]] || return 0            # host_report describes a machine
     local le="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}"
     local sites="${JOINERY_APACHE_SITES_DIR:-/etc/apache2/sites-available}"
-    local out="${SITE_ROOT}/cache/certificates.json"
+    local out="${CERT_SUMMARY_FILE}"
+    [[ -n "${out}" ]] || return 0
     local in_container=false letsencrypt=false timer_active=false
     local site_name=""
     local -a own_a=() apex_a=() www_a=()
@@ -1732,17 +2038,22 @@ write_certificate_summary() {
         count=$((count + 1))
     done
 
-    mkdir -p "${SITE_ROOT}/cache" 2>/dev/null || true
+    mkdir -p "$(dirname "${out}")" 2>/dev/null || true
     printf '{"written":%s,"in_container":%s,"letsencrypt":%s,"timer_active":%s,"site":{"name":%s,"own_addresses":%s,"apex_addresses":%s,"www_addresses":%s},"lineages":[%s]}\n' \
         "$(date -u +%s)" "${in_container}" "${letsencrypt}" "${timer_active}" \
         "$(json_string "${site_name}")" "$(json_string_list "${own_a[@]}")" \
         "$(json_string_list "${apex_a[@]}")" "$(json_string_list "${www_a[@]}")" "${lineages}" \
         > "${out}.tmp" 2>/dev/null || { rm -f "${out}.tmp"; return 0; }
-    # Readable by the PHP pool, which is what reads it; nobody else needs to.
-    chown www-data:www-data "${out}.tmp" 2>/dev/null || true
-    chmod 640 "${out}.tmp" 2>/dev/null || true
+    # Root's file, readable by the PHP pool, which is what reads it. In a
+    # fixture the pool owns the directory and the file is its.
+    if [[ -n "${SITE_STATE_DIR}" ]]; then
+        chmod 644 "${out}.tmp" 2>/dev/null || true
+    else
+        chown www-data:www-data "${out}.tmp" 2>/dev/null || true
+        chmod 640 "${out}.tmp" 2>/dev/null || true
+    fi
     mv -f "${out}.tmp" "${out}" 2>/dev/null || true
-    echo "certificates: summary written to cache/certificates.json (${count} lineage(s))"
+    echo "certificates: summary written to ${out} (${count} lineage(s))"
 }
 write_certificate_summary
 
@@ -1754,14 +2065,16 @@ write_certificate_summary
 #
 # What crosses is a NAME. `kind` is matched against a fixed list below; the
 # arguments stay in the file and are read by the PHP that acts on them, so
-# nothing a web request wrote becomes a shell word - with one exception,
-# run_plugin_installer, the only kind this loop carries out itself. It reads
-# exactly one field, `plugin`, and uses it only after it matches
-# ^[a-z][a-z0-9_]{1,49}$ and names an active plugin with a host_installer; it
-# is then one quoted word, and everything else (the installer, its trust, its
-# signature) comes from the root-owned tree, as in the daily pass. A forged
-# request can make an install happen sooner; it cannot change what runs.
-# (plugin_installer_from_the_browser.md D1.)
+# nothing a web request wrote becomes a shell word - with two exceptions,
+# run_plugin_installer and run_plugin_remover, the kinds this loop carries out
+# itself. Each reads exactly one field, `plugin`, and uses it only after it
+# matches ^[a-z][a-z0-9_]{1,49}$ and names, for the installer, an active
+# plugin with a host_installer, or, for the remover, a plugin whose row the
+# dispatcher reads as uninstalled; it is then one quoted word, and everything
+# else (the script, its trust, its signature) comes from the root-owned tree,
+# as in the daily pass. A forged request can make an install happen sooner, or
+# ask for a removal the dispatcher refuses; it cannot change what runs.
+# (plugin_installer_from_the_browser.md D1; plugin_host_removal.md D6.)
 #
 # One at a time, oldest first: these are installs and upgrades, and two of them
 # at once on one machine is not a thing anybody wants to debug.
@@ -1826,20 +2139,62 @@ run_plugin_installer_request() {
     esac
 }
 
+# Carries out one run_plugin_remover request (plugin_host_removal.md D6): the
+# uninstall moment of a plugin that declares a host_remover. The dispatcher is
+# asked first whether the plugin may be removed at all (--check: the row says
+# uninstalled and not active, the manifest not is_system, a real directory
+# under plugins/; the same checks remove_plugin asks, so the two kinds cannot
+# drift); then the declared remover runs through run_one_plugin_remover, under
+# the installer's trust and signature checks; then the directory goes through
+# the dispatcher again (--remover-ran), the path remove_plugin takes. A remover
+# that left something keeps the directory, so Run removal again can finish the
+# job once the cause is fixed. Returns the request's exit code: 0 done, 1 the
+# remover or the removal failed, 2 refused with nothing run.
+run_plugin_remover_request() {
+    local name="$1" id="$2" rc=0
+    if [[ ! "${name}" =~ ^[a-z][a-z0-9_]{1,49}$ ]]; then
+        echo "run_plugin_remover: the request names no plugin this box could have - refused"
+        return 2
+    fi
+    php "${PUBLIC_HTML}/utils/root_request.php" run_plugin_remover "--request=${id}" --check 2>&1 || rc=$?
+    case "${rc}" in
+        0) ;;
+        3) echo "run_plugin_remover: plugins/${name} is already gone - done"; return 0 ;;
+        *) echo "run_plugin_remover: ${name}: refused before anything ran (above)"; return 2 ;;
+    esac
+    REMOVERS_LEFT=""
+    run_one_plugin_remover "${name}" 2>&1
+    case "${REMOVER_OUTCOME}" in
+        ok)   ;;
+        none) echo "run_plugin_remover: ${name} declares no host remover; its files go" ;;
+        *)
+            echo "run_plugin_remover: ${name}: the remover left something behind (${REMOVER_OUTCOME}); plugins/${name} is kept so the removal can be run again"
+            return 1
+            ;;
+    esac
+    rc=0
+    php "${PUBLIC_HTML}/utils/root_request.php" run_plugin_remover "--request=${id}" --remover-ran 2>&1 || rc=$?
+    (( rc == 0 )) || return 1
+    return 0
+}
+
 run_root_requests() {
     [[ "${MACHINE}" == "0" ]] || return 0            # no web user queues anything on a machine
-    local queue="${SITE_ROOT}/cache/root_requests"
-    local logs="${SITE_ROOT}/logs/root_requests"
-    [[ -d "${queue}" ]] || return 0
+    local queue="${QUEUE_DIR}"
+    local outcomes="${OUTCOME_DIR}"
+    local logs="${REQUEST_LOG_DIR}"
+    [[ -n "${queue}" && -d "${queue}" ]] || return 0
     [[ "$(id -u)" == "0" ]] || return 0
 
-    mkdir -p "${queue}/running" "${queue}/done" "${queue}/failed" "${logs}" 2>/dev/null || true
-    # The transcripts are root's: the web user reads them and writes none. A
-    # directory it owned would let the submitter, who chose the id, plant a
-    # link at <id>.log for root to truncate and chown through
-    # (fix_permissions.sh pins it out of the data-set sweep).
-    chown root:www-data "${logs}" 2>/dev/null || true
-    chmod 750 "${logs}" 2>/dev/null || true
+    # Root's directories, made with their modes by ensure_site_state_dir: the
+    # queue is the one place the web user writes; running/, done/, failed/ and
+    # the transcripts are root's, read by the pool through the group. A fixture
+    # makes them here, inside its queue.
+    if [[ -z "${SITE_STATE_DIR}" ]]; then
+        mkdir -p "${outcomes}/running" "${outcomes}/done" "${outcomes}/failed" "${logs}" 2>/dev/null || true
+        chown root:www-data "${logs}" 2>/dev/null || true
+        chmod 750 "${logs}" 2>/dev/null || true
+    fi
 
     # No lock of its own: the runner lock on descriptor 9, taken at the top
     # before anything changed the host, is still held here and covers the
@@ -1862,8 +2217,8 @@ run_root_requests() {
             # A number, because status() reads this as an exit code: the word
             # `abandoned` cast to 0 and the page said "Failed - exit 0".
             printf '%s\n' "${REQUEST_ABANDONED_CODE}" > "${stale%.json}.exit" 2>/dev/null || true
-            mv -f "${stale}" "${queue}/failed/" 2>/dev/null || true
-            mv -f "${stale%.json}.exit" "${queue}/failed/" 2>/dev/null || true
+            mv -f "${stale}" "${outcomes}/failed/" 2>/dev/null || true
+            mv -f "${stale%.json}.exit" "${outcomes}/failed/" 2>/dev/null || true
         fi
     done
 
@@ -1872,11 +2227,18 @@ run_root_requests() {
     # Upgrade button actually did, so they are not deleted on the way out - but
     # a site that upgrades weekly and saves a doc daily accumulates them
     # forever otherwise, in a directory every queue scan walks.
-    find "${queue}/done" "${queue}/failed" -maxdepth 1 -type f -mtime +30 -delete 2>/dev/null || true
+    find "${outcomes}/done" "${outcomes}/failed" -maxdepth 1 -type f -mtime +30 -delete 2>/dev/null || true
     find "${logs}" -maxdepth 1 -type f -name '*.log' -mtime +30 -delete 2>/dev/null || true
 
     local req id kind rc
     for req in $(ls -1 "${queue}"/*.json 2>/dev/null | sort); do
+        # A regular file, never a link: the queue is the web user's to write,
+        # and a link under a request's name would be read by root through it.
+        if [[ -L "${req}" ]]; then
+            echo "root request: $(basename "${req}" .json) is a link - removed, not read" >&2
+            rm -f -- "${req}" 2>/dev/null
+            continue
+        fi
         [[ -f "${req}" ]] || continue
         id="$(basename "${req}" .json)"
 
@@ -1893,20 +2255,21 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same fourteen as RootRequest::KINDS, and no more. install_package
+            # The same fifteen as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
             # remove_plugin deletes plugins/<name> only after root has read the
-            # row as uninstalled and the manifest as not is_system (PluginRemoval).
+            # row as uninstalled and the manifest as not is_system (PluginRemoval);
+            # run_plugin_remover runs the plugin's host_remover first, then the same.
             upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
             write_agent_files|save_doc|set_receives_upgrades|remove_plugin|\
             data_root_encrypt|data_root_reseal|data_root_rekey|data_root_tpm2_off|\
-            run_plugin_installer) : ;;
+            run_plugin_installer|run_plugin_remover) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2
-                printf '2\n' > "${queue}/failed/${id}.exit" 2>/dev/null || true
-                mv -f "${req}" "${queue}/failed/" 2>/dev/null || true
+                printf '2\n' > "${outcomes}/failed/${id}.exit" 2>/dev/null || true
+                mv -f "${req}" "${outcomes}/failed/" 2>/dev/null || true
                 continue
                 ;;
         esac
@@ -1925,10 +2288,10 @@ run_root_requests() {
         fi
 
         echo "root request: ${id} (${kind})"
-        mv -f "${req}" "${queue}/running/${id}.json" || continue
+        mv -f -T "${req}" "${outcomes}/running/${id}.json" || continue
         # mv keeps the submission mtime; the stale sweep above ages by when a
         # request STARTED, so stamp it now.
-        touch "${queue}/running/${id}.json" 2>/dev/null || true
+        touch "${outcomes}/running/${id}.json" 2>/dev/null || true
 
         # The transcript is what the admin page polls, so it is written as the
         # run goes rather than collected at the end.
@@ -1942,7 +2305,13 @@ run_root_requests() {
             # from a request would wait on this run's own lock and report
             # success with nothing run.
             rc=0
-            run_plugin_installer_request "$(plugin_request_name "${queue}/running/${id}.json")" "${req_active}" \
+            run_plugin_installer_request "$(plugin_request_name "${outcomes}/running/${id}.json")" "${req_active}" \
+                >> "${logs}/${id}.log" 2>&1 || rc=$?
+        elif [[ "${kind}" == "run_plugin_remover" ]]; then
+            # Here too: the remover runs under this run's lock, and the
+            # dispatcher is asked only for the checks and the files.
+            rc=0
+            run_plugin_remover_request "$(plugin_request_name "${outcomes}/running/${id}.json")" "${id}" \
                 >> "${logs}/${id}.log" 2>&1 || rc=$?
         else
             php "${PUBLIC_HTML}/utils/root_request.php" "${kind}" "--request=${id}" \
@@ -1950,14 +2319,14 @@ run_root_requests() {
             rc=$?
         fi
 
-        printf '%s\n' "${rc}" > "${queue}/running/${id}.exit" 2>/dev/null || true
+        printf '%s\n' "${rc}" > "${outcomes}/running/${id}.exit" 2>/dev/null || true
         if (( rc == 0 )); then
-            mv -f "${queue}/running/${id}.json" "${queue}/done/" 2>/dev/null || true
-            mv -f "${queue}/running/${id}.exit" "${queue}/done/" 2>/dev/null || true
+            mv -f "${outcomes}/running/${id}.json" "${outcomes}/done/" 2>/dev/null || true
+            mv -f "${outcomes}/running/${id}.exit" "${outcomes}/done/" 2>/dev/null || true
             echo "root request: ${id} done"
         else
-            mv -f "${queue}/running/${id}.json" "${queue}/failed/" 2>/dev/null || true
-            mv -f "${queue}/running/${id}.exit" "${queue}/failed/" 2>/dev/null || true
+            mv -f "${outcomes}/running/${id}.json" "${outcomes}/failed/" 2>/dev/null || true
+            mv -f "${outcomes}/running/${id}.exit" "${outcomes}/failed/" 2>/dev/null || true
             echo "root request: ${id} failed (exit ${rc})" >&2
             # A run that already reported a failed or refused installer keeps
             # saying so: a Run setup again on a failing installer is exactly

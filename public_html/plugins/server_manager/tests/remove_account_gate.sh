@@ -135,6 +135,10 @@ cat > "$BIN/psql" <<STUB
 #!/bin/bash
 echo "psql pw=\${PGPASSWORD:-}" >> "$D/log"
 [ -f "$D/pgdown" ] && { echo 'psql: error: connection to server on socket failed: fe_sendauth: no password supplied' >&2; exit 2; }
+# "Is there a database of this name?" (site_database_here) answers 1 or nothing.
+case "\$*" in
+    *"pg_database WHERE datname = '"*) a="\$*"; n="\${a##*datname = \\'}"; n="\${n%%\\'*}"; grep -qxF -- "\$n" "$D/databases" && echo 1; exit 0 ;;
+esac
 cat "$D/databases"
 STUB
 chmod +x "$BIN"/* "$RUN"/*.sh
@@ -144,7 +148,7 @@ chmod +x "$BIN"/* "$RUN"/*.sh
 NOD="$T/nodocker"; SYS="$T/sys"
 mkdir -p "$NOD" "$SYS"
 for c in a2dissite apache2ctl systemctl dropdb psql; do cp "$BIN/$c" "$NOD/$c"; done
-for c in bash grep sed sort tr cut dirname rm mkdir cat ls mv tail head wc timeout touch cp env id flock date chmod; do
+for c in bash grep sed sort tr cut dirname rm mkdir cat ls mv tail head wc timeout touch cp env id flock date chmod tee mktemp; do
     ln -s "$(command -v "$c")" "$SYS/$c"
 done
 run_nodocker() { PATH="$NOD:$SYS" REMOVE_ACCOUNT_ROOT="$T/fs" bash "$RUN/remove_account.sh" "$@" -y 2>&1; }
@@ -298,7 +302,9 @@ chk "G: dropdb is handed the site's password and never prompts" \
     "$(grep -c '^dropdb -w --force --if-exists -U postgres gee pw=s3cret-gee$' "$D/log")" "1"
 chk "G: the test suite's database goes with it" "$(grep -cxF test_gee "$D/databases")" "0"
 chk "G: databases named like it stay" "$(grep -cE '^(test_)?gee_other$' "$D/databases")" "2"
-chk "G: the verdict asked PostgreSQL" "$(grep -c '^psql pw=s3cret-gee$' "$D/log")" "2"
+# The database list before the drops and at the verdict, and each of the two
+# roles (joinery_gee, joinery_test_gee) asked before its drop and at the verdict.
+chk "G: PostgreSQL is asked with the site's password every time" "$(grep -c '^psql pw=s3cret-gee$' "$D/log")|$(grep -c '^psql pw=$' "$D/log")" "6|0"
 
 # --- G2: a drop that fails is said, and the site is not verified gone.
 reset
@@ -538,6 +544,81 @@ chk "P:   the claim is written before the first removal step clears the run spec
     "$([ -n "$claim_at" ] && [ -n "$removal_at" ] && [ "$claim_at" -lt "$removal_at" ] && echo yes)" "yes"
 chk "P:   a later run that takes them verifies, and the claim goes (the block read back from it)" \
     "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')|$(there /etc/joinery/sites/getjoinery/idblock)" "1|no"
+
+# --- Q: the plugins' host removers run first (specs/plugin_host_removal.md WP2).
+# --- A stub of the host runner's --remove-site mode beside the script's tree
+# --- records how it was called, whether the caller's lock was held on 9 and
+# --- whether the config and the tree were still there, and answers as
+# --- $D/removers (its transcript) and $D/removers_rc (its exit) say.
+mkdir -p "$T/install_tools"
+cat > "$T/install_tools/_plugin_installers_start.sh" <<STUB
+#!/bin/bash
+D="$D"
+echo "runner \$*" >> "\$D/log"
+echo "runner-pw=\${PGPASSWORD:-}" >> "\$D/log"
+[ "\$1" = "--remove-site" ] || { echo "stub: not --remove-site"; exit 2; }
+root="\$3"; lock="\$root/cache/host_installers.lock"; held=no
+if [ -f "\$lock" ]; then
+    exec 8< "\$lock"
+    if ! flock -n 8 2>/dev/null && [ /dev/fd/9 -ef "\$lock" ]; then held=yes; fi
+    exec 8<&-
+fi
+echo "runner-saw lock-held=\$held config=\$([ -f "\$root/config/Globalvars_site.php" ] && echo yes || echo no) tree=\$([ -d "\$root/public_html" ] && echo yes || echo no)" >> "\$D/log"
+if [ -f "\$D/removers" ]; then cat "\$D/removers"; exit "\$(cat "\$D/removers_rc")"; fi
+echo "plugin removers: every declared remover finished"; exit 0
+STUB
+chmod +x "$T/install_tools/_plugin_installers_start.sh"
+reset
+bare_site gee
+printf 'gee\ntest_gee\npostgres\n' > "$D/databases"
+printf 'plugin removers: mailbox: running provisioning/remove_email.sh\nDROP ROLE refused: role iemap_gee is still granted in database gee_copy\nplugin removers: mailbox: left something behind (exit 1)\nplugin removers: office_editor: ok\nplugin removers: machine state left behind by: mailbox\n' > "$D/removers"
+echo 1 > "$D/removers_rc"
+out="$(run_nodocker gee)"; rc=$?
+chk "Q: the runner is told --remove-site, the site name and the site root" "$(grep -c "^runner --remove-site gee $T/fs/var/www/html/gee\$" "$D/log")" "1"
+chk "Q: under the removal's lock, with the config and the tree still there" "$(grep -c '^runner-saw lock-held=yes config=yes tree=yes$' "$D/log")" "1"
+chk "Q: handed the postgres pair the removal resolved, as PGPASSWORD (reviewer2 F3)" "$(grep -c '^runner-pw=s3cret-gee$' "$D/log")" "1"
+chk "Q: the removers' transcript is in the removal's" "$(echo "$out" | grep -c '^DROP ROLE refused: role iemap_gee is still granted in database gee_copy$')" "1"
+chk "Q: and runs before the tree goes" "$([ "$(echo "$out" | grep -n '^Running the plugins. host removers' | cut -d: -f1)" -lt "$(echo "$out" | grep -n '^Removing website directories' | cut -d: -f1)" ] && echo yes)" "yes"
+chk "Q: the removal goes on: the tree and the databases go" "$(there /var/www/html/gee)|$(grep -cxF gee "$D/databases")" "no|0"
+chk "Q: the plugin that left something is a leftover, and the verdict fails" \
+    "$(echo "$out" | grep -c '^  - plugin mailbox left machine state behind; see its lines above$')|$(echo "$out" | grep -c '^  - plugin office_editor')|$(echo "$out" | grep -c '^DECOMMISSION_FAILED_VERIFY gee$')|$rc" "1|0|1|1"
+# Every remover finishing: the removal verifies.
+reset
+bare_site gee
+printf 'gee\npostgres\n' > "$D/databases"
+out="$(run_nodocker gee)"; rc=$?
+chk "Q2: with every remover finishing the removal verifies" "$(echo "$out" | grep -c '^plugin removers: every declared remover finished$')|$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED gee$')|$rc" "1|1|0"
+# The mode refused (exit 2): said as a leftover in the mode's words.
+reset
+bare_site gee
+printf 'gee\npostgres\n' > "$D/databases"
+printf 'plugin removers: the host runner lock /x/cache/host_installers.lock is not held by a caller of this run - refused, nothing ran\n' > "$D/removers"
+echo 2 > "$D/removers_rc"
+out="$(run_nodocker gee)"; rc=$?
+chk "Q3: a mode that refused is a leftover naming its reason" \
+    "$(echo "$out" | grep -c "^  - the plugins' removers did not run: the host runner lock /x/cache/host_installers.lock is not held by a caller of this run - refused, nothing ran\$")|$(echo "$out" | grep -c '^DECOMMISSION_FAILED_VERIFY gee$')" "1|1"
+# A re-run after a removal that stopped part way: only the database is left,
+# the config is gone, so the removers cannot run; said, no leftover.
+reset
+printf 'gee\npostgres\n' > "$D/databases"
+out="$(run_nodocker gee)"; rc=$?
+chk "Q4: with the config already gone the removers are not run, said, and the removal verifies" \
+    "$(grep -c '^runner ' "$D/log")|$(echo "$out" | grep -c "^The plugins' host removers cannot run: .*/gee/config/Globalvars_site.php is gone (a removal that stopped part way), and nothing a remover could do is left.\$")|$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED gee$')|$rc" "0|1|1|0"
+# A container site behind its proxy on the host runs no remover.
+reset
+container_site foo
+out="$(run foo)"; rc=$?
+chk "Q5: a container site's removal runs no remover" "$(grep -c '^runner ' "$D/log")|$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED foo$')" "0|1"
+# The runner not beside the script: a warning, and the removal verifies.
+rm -f "$T/install_tools/_plugin_installers_start.sh"
+reset
+bare_site gee
+printf 'gee\npostgres\n' > "$D/databases"
+out="$(run_nodocker gee)"; rc=$?
+chk "Q6: without the runner beside it the removal warns and verifies" "$(echo "$out" | grep -c 'is not beside this script, so the plugins. machine state was not taken off')|$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED gee$')" "1|1"
+# Source order: the call sits after the lock is held and before the tree goes.
+chk "Q7: the removers run after the lock is held and before the website directories go" \
+    "$([ "$(grep -n 'hold_host_runner_lock "$SITE_NAME"' "$SCRIPT" | cut -d: -f1)" -lt "$(grep -n -- '--remove-site "$SITE_NAME" "$SITE_ROOT"' "$SCRIPT" | cut -d: -f1)" ] && [ "$(grep -n -- '--remove-site "$SITE_NAME" "$SITE_ROOT"' "$SCRIPT" | cut -d: -f1)" -lt "$(grep -n '^    echo "Removing website directories..."$' "$SCRIPT" | cut -d: -f1)" ] && echo yes)" "yes"
 
 rm -rf "${T:?}"
 

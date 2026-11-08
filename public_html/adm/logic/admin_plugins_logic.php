@@ -4,6 +4,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.8 - `remover_declared`: which plugins on disk declare a host_remover, and ?installer_request= also
+ *                shows a run_plugin_remover request's panel (specs/plugin_host_removal.md D7)
  * @version 1.7 - `installer_status`: each active plugin's last host installer run, and ?installer_request=
  *                shows a Run setup again request's panel (plugin_installer_from_the_browser.md)
  * @version 1.6 - Sync counts only the plugin migrations that applied; a failed or deferred one is named in the list, not counted
@@ -440,11 +442,23 @@ function admin_plugins_logic(array $input): LogicResult {
 		error_log('admin_plugins_logic: installer status failed: ' . $e->getMessage());
 	}
 
-	// Run setup again posts to plugin_installer_run and comes back here with
-	// the request's id. Only that kind is shown from the URL.
+	// Which plugins on disk declare a host_remover (plugin_host_removal.md D7):
+	// the host setup line says so, and an uninstalled plugin whose removal
+	// failed offers Run removal again only when there is a remover to run. A
+	// manifest read per plugin directory; nothing is run.
+	$remover_declared = array();
+	$plugins_dir = PathHelper::getAbsolutePath('plugins');
+	foreach (glob($plugins_dir . '/*/plugin.json') ?: array() as $manifest_path) {
+		$dir_name = basename(dirname($manifest_path));
+		$remover_declared[$dir_name] = PluginRemoval::declared_remover($dir_name, $plugins_dir) !== '';
+	}
+
+	// Run setup again posts to plugin_installer_run, Run removal again to
+	// plugin_remover_run, and each comes back here with the request's id. Only
+	// those two kinds are shown from the URL.
 	if ($root_request_id === '' && !empty($input['installer_request'])) {
 		$status = RootRequest::status((string)$input['installer_request']);
-		if ($status['kind'] === 'run_plugin_installer') {
+		if ($status['kind'] === 'run_plugin_installer' || $status['kind'] === 'run_plugin_remover') {
 			$root_request_id = $status['id'];
 		}
 	}
@@ -452,6 +466,7 @@ function admin_plugins_logic(array $input): LogicResult {
 	return LogicResult::render(array(
 		'system_health' => $system_health,
 		'installer_status' => $installer_status,
+		'remover_declared' => $remover_declared,
 		'message' => $message,
 		'message_type' => $message_type,
 		'plugins' => $plugins,

@@ -18,16 +18,23 @@
  * set here and mapped to a command by the runner; `args` are stored verbatim
  * and validated by the CLI that carries the kind out, which is the only thing
  * that knows what a valid argument for it looks like. Nothing in a request file
- * is ever passed to a shell by this class. One kind, run_plugin_installer, is
- * carried out by the runner itself, and its `plugin` argument becomes one
- * quoted shell word there - only after it matches ^[a-z][a-z0-9_]{1,49}$ and
- * names an active plugin with a host_installer. It is the only kind that does.
+ * is ever passed to a shell by this class. Two kinds, run_plugin_installer and
+ * run_plugin_remover, are carried out by the runner itself, and their `plugin`
+ * argument becomes one quoted shell word there - only after it matches
+ * ^[a-z][a-z0-9_]{1,49}$ and names, for the installer, an active plugin with a
+ * host_installer, or, for the remover, a plugin whose row says uninstalled
+ * (PluginRemoval::refusal). They are the only kinds that do.
  *
  * A request is a file rather than a database row on purpose: the root actor
  * runs with no settings and no database, and adding either to the one process
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.8 - the queue and the transcripts are where RootState says: root's /var/lib/joinery/sites/<site>
+ *                when it exists, the fixture layout under the site root otherwise (specs/shell_command_audit.md D1)
+ * @version 1.7 - run_plugin_remover {plugin}: a plugin uninstall whose manifest declares a host_remover runs it
+ *                as root and then removes the plugin's files, in one request (specs/plugin_host_removal.md D6).
+ *                One per plugin at a time, as run_plugin_installer.
  * @version 1.6 - run_plugin_installer {plugin}: the Plugins page's Run setup again. A second click while one
  *                is queued or running returns the first one's id (plugin_installer_from_the_browser.md D1).
  * @version 1.5 - actorState() reads HostConvergerNotice::runState(): a converger installed minutes ago is
@@ -77,6 +84,7 @@ class RootRequest {
 		'data_root_rekey',         // re-encrypt this server's data root under a new volume key (a key that may have been seen)
 		'data_root_tpm2_off',      // {}: the TPM2 chip no longer opens this server's data root; each boot asks for its key
 		'run_plugin_installer',    // {plugin}: run one active plugin's host_installer now (carried out by the runner itself)
+		'run_plugin_remover',      // {plugin}: run an uninstalled plugin's host_remover, then delete plugins/<name> (the runner itself)
 	);
 	/*
 	 * run_plugin_installer (plugin_installer_from_the_browser.md D1)
@@ -85,6 +93,17 @@ class RootRequest {
 	 * tree, exactly as the daily pass does. A forged request makes an install
 	 * happen sooner; it cannot change what runs. utils/root_request.php
 	 * refuses it, since only the runner may carry it out.
+	 *
+	 * run_plugin_remover (plugin_host_removal.md D6) is the uninstall moment
+	 * of a plugin that declares a host_remover: one request, because two from
+	 * one call run in random order and the files would be gone before the
+	 * remover half the time. Root reads the plugin's name, asks the same
+	 * checks remove_plugin asks (the row says uninstalled and not active, the
+	 * manifest not is_system, a real directory under plugins/) through
+	 * utils/root_request.php, runs the declared remover under the installer's
+	 * trust and signature checks, and only then removes the directory through
+	 * the same path remove_plugin uses. A forged request for an installed
+	 * plugin is refused before anything runs.
 	 */
 	/*
 	 * data_root_encrypt, data_root_reseal, data_root_rekey, data_root_tpm2_off
@@ -157,6 +176,7 @@ class RootRequest {
 	const EXIT_UNVERIFIED = 3;
 
 	/** Where requests, their transcripts and their outcomes live. */
+	/** The fixture layout, under the site root, where no root directory exists (RootState). */
 	const QUEUE_DIR = 'cache/root_requests';
 	const LOG_DIR   = 'logs/root_requests';
 
@@ -188,11 +208,11 @@ class RootRequest {
 				'RootRequest: unknown kind "' . $kind . '". Known kinds: ' . implode(', ', self::KINDS));
 		}
 
-		// One install at a time per plugin: a second click returns the request
-		// already queued or running. pending() carries no arguments, so each
-		// body is read.
-		if ($kind === 'run_plugin_installer') {
-			$existing = self::open_installer_request((string)($args['plugin'] ?? ''));
+		// One install (or removal) at a time per plugin: a second click returns
+		// the request already queued or running. pending() carries no
+		// arguments, so each body is read.
+		if ($kind === 'run_plugin_installer' || $kind === 'run_plugin_remover') {
+			$existing = self::open_plugin_request($kind, (string)($args['plugin'] ?? ''));
 			if ($existing !== null) {
 				return $existing;
 			}
@@ -238,13 +258,13 @@ class RootRequest {
 		return $id;
 	}
 
-	/** The id of a run_plugin_installer request for this plugin still queued or running, or null. */
-	private static function open_installer_request(string $plugin): ?string {
+	/** The id of a $kind (run_plugin_installer or run_plugin_remover) request for this plugin still queued or running, or null. */
+	private static function open_plugin_request(string $kind, string $plugin): ?string {
 		$paths = array_merge(glob(self::queue_dir() . '/*.json') ?: array(),
-		                     glob(self::queue_dir() . '/running/*.json') ?: array());
+		                     glob(RootState::outcomeDir() . '/running/*.json') ?: array());
 		foreach ($paths as $path) {
 			$body = json_decode((string)@file_get_contents($path), true);
-			if (is_array($body) && ($body['kind'] ?? null) === 'run_plugin_installer'
+			if (is_array($body) && ($body['kind'] ?? null) === $kind
 				&& is_array($body['args'] ?? null) && ($body['args']['plugin'] ?? null) === $plugin) {
 				return basename($path, '.json');
 			}
@@ -276,7 +296,8 @@ class RootRequest {
 
 		foreach (array('' => 'queued', 'running/' => 'running',
 		               'done/' => 'done', 'failed/' => 'failed') as $sub => $state) {
-			$path = self::queue_dir() . '/' . $sub . $id . '.json';
+			$base = ($sub === '' ? self::queue_dir() . '/' : RootState::outcomeDir() . '/' . $sub);
+			$path = $base . $id . '.json';
 			if (!is_file($path)) {
 				continue;
 			}
@@ -286,7 +307,7 @@ class RootRequest {
 				$out['kind'] = isset($body['kind']) ? (string)$body['kind'] : null;
 				$out['requested_at'] = isset($body['requested_at']) ? (int)$body['requested_at'] : null;
 			}
-			$exit_file = self::queue_dir() . '/' . $sub . $id . '.exit';
+			$exit_file = $base . $id . '.exit';
 			if (is_file($exit_file)) {
 				$raw = trim((string)@file_get_contents($exit_file));
 				// Only a number is an exit code. Anything else is a file that
@@ -314,7 +335,7 @@ class RootRequest {
 			return null;
 		}
 		foreach (array('', 'running/', 'done/', 'failed/') as $sub) {
-			$path = self::queue_dir() . '/' . $sub . $id . '.json';
+			$path = ($sub === '' ? self::queue_dir() . '/' : RootState::outcomeDir() . '/' . $sub) . $id . '.json';
 			if (!is_file($path)) {
 				continue;
 			}
@@ -330,7 +351,7 @@ class RootRequest {
 		if ($id === '') {
 			return '';
 		}
-		$path = PathHelper::getSiteRoot() . '/' . self::LOG_DIR . '/' . $id . '.log';
+		$path = RootState::requestLogDir() . '/' . $id . '.log';
 		return is_file($path) ? (string)@file_get_contents($path) : '';
 	}
 
@@ -411,7 +432,7 @@ class RootRequest {
 	// ---- internals ---------------------------------------------------------
 
 	private static function queue_dir(): string {
-		return PathHelper::getSiteRoot() . '/' . self::QUEUE_DIR;
+		return RootState::queueDir();
 	}
 
 	/**

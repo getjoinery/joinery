@@ -1819,7 +1819,14 @@ check(strpos($runner_s10, 'refusing to run anything as root') !== false,
     'the check that says which installers may run is in that file');
 
 $assert_at  = strpos($runner_s10, 'assert_tree_ownership()');
-$refuse_at  = strpos($runner_s10, 'installer_is_trusted()');
+// The refusal (installer_is_trusted) is defined above the lock block, where
+// --remove-site can reach it, and reads TREE_OWNER, which bind_tree_owner sets:
+// in a full run right after the assertion, which may have just re-owned the
+// tree. The binding is what must follow the assertion and precede every run.
+$refuse_at  = strpos($runner_s10, "assert_tree_ownership\nbind_tree_owner\n");
+check(strpos($runner_s10, 'installer_is_trusted()') !== false
+    && strpos($runner_s10, 'joinery_file_is_trusted "$1" "${TREE_OWNER}"') !== false,
+    'the refusal reads the bound tree owner');
 // Where installers RUN: the core loop, and the --only branch. The
 // CORE_INSTALLERS constant itself is declared at the top, beside the --only
 // check that reads it, so it is not the anchor.
@@ -1827,7 +1834,7 @@ $core_at_s10 = strpos($runner_s10, 'for CORE_INSTALLER in ${INSTALLER_SET}; do')
 $only_at_s10 = strpos($runner_s10, 'if [[ -n "${ONLY_INSTALLER}" ]]; then');
 check($assert_at !== false && $refuse_at !== false && $core_at_s10 !== false && $only_at_s10 !== false
     && $assert_at < $refuse_at && $refuse_at < $core_at_s10 && $refuse_at < $only_at_s10,
-    'the runner asserts ownership, then defines the refusal, then runs installers',
+    'the runner asserts ownership, then binds the owner the refusal reads, then runs installers',
     'running an installer before either check is running a script we cannot attribute');
 
 // The stamp check's own section, not the first WHEN_CHANGED test in the file

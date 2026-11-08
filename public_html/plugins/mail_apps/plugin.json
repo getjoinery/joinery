@@ -1,6 +1,6 @@
 {
     "name": "Mail Apps",
-    "version": "1.3.11",
+    "version": "1.3.12",
     "description": "Read and send Joinery mail from a desktop or phone mail program (Thunderbird, Apple Mail, any IMAP and SMTP client) with an app password. Standard and Private mailboxes; Private ones while the vault is unlocked on the website.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -14,6 +14,7 @@
         "mailbox": ">=1.139.0"
     },
     "host_installer": "provisioning/install_mail_gateway.sh",
+    "host_remover": "provisioning/remove_mail_gateway.sh",
     "tags": [
         "email",
         "mail-programs",
