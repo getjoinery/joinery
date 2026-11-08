@@ -6,6 +6,9 @@
 # the site's code check, whether the container carries the converger's cron
 # entry and has cron running, and the last N lines of its converger log.
 #
+# Version: 1.1 - reads the converger's last run, stamp and log from the site's state volume
+#                (SITE_state at /var/lib/joinery/sites, _site_run_spec.sh 1.19), where root keeps them;
+#                a container made before that volume falls back to cache/ and logs/.
 # Version: 1.0 - the site_converger observe word (specs/agent_recipes_and_vocabulary.md,
 #                running list). se1's site sa ran no converge for four days while its
 #                cron ran its scheduled tasks (incident 10975); the host's agent could see
@@ -17,12 +20,13 @@
 #     on this host whose SITENAME is that name (the check hold_container.sh
 #     makes): a name alone proves nothing. The line count is 1..200 and is
 #     clamped here, not trusted.
-#   - It reads the site's own files, from the site's named volumes (cache,
-#     logs, config) and its running root filesystem (/etc/cron.d), as root,
+#   - It reads the site's own files, from the site's named volumes (state,
+#     cache, logs, config) and its running root filesystem (/etc/cron.d), as root,
 #     and every one of them is the site's to plant: a link is never followed,
 #     a folder on the way that is a link is not entered, and only a regular
 #     file is read, under a timeout. A volume is the one the container mounts
-#     at the site's own folder, under a path of the engine's own shape; a bind
+#     at the site's own folder (state: at /var/lib/joinery/sites), under a
+#     path of the engine's own shape; a bind
 #     mount is never read.
 #   - Every key is ALWAYS present. A fact this run cannot read is the string
 #     unknown, or false, for that key and never an error for the whole
@@ -94,10 +98,10 @@ PID="$(run "$ENGINE" inspect -f '{{.State.Pid}}' "$SITE")"
 # The volume the container mounts at /var/www/html/SITE/WHAT, when it is a
 # named volume of the engine's shape (.../SITE_WHAT/_data). Empty otherwise.
 MOUNTS="$(run "$ENGINE" inspect -f '{{range .Mounts}}{{.Destination}}|{{.Source}}{{println}}{{end}}' "$SITE")"
-volume_dir() {  # WHAT
-    local dest src
+volume_dir() {  # WHAT [DESTINATION, absolute; default the site's own folder WHAT]
+    local dest src want="${2:-/var/www/html/${SITE}/$1}"
     while IFS='|' read -r dest src; do
-        [[ "$dest" == "/var/www/html/${SITE}/$1" ]] || continue
+        [[ "$dest" == "$want" ]] || continue
         [[ "$src" =~ ^/[A-Za-z0-9._/-]+/${SITE}_$1/_data$ && "$src" != *..* ]] || continue
         [[ -d "$src" && ! -L "$src" ]] || continue
         printf '%s' "$src"
@@ -107,6 +111,12 @@ volume_dir() {  # WHAT
 CACHE_DIR="$(volume_dir cache)"
 LOGS_DIR="$(volume_dir logs)"
 CONFIG_DIR="$(volume_dir config)"
+# Root's record of the site: the state volume holds /var/lib/joinery/sites, and
+# the site's folder is under it. A folder there that is a link is not read.
+STATE_DIR="$(volume_dir state /var/lib/joinery/sites)"
+if [[ -n "$STATE_DIR" ]]; then
+    if [[ -d "$STATE_DIR/$SITE" && ! -L "$STATE_DIR/$SITE" ]]; then STATE_DIR="$STATE_DIR/$SITE"; else STATE_DIR=""; fi
+fi
 
 # A file of the site's that may be read: a regular file, not a link.
 readable() { [[ -n "$1" && -f "$1" && ! -L "$1" ]]; }
@@ -116,15 +126,18 @@ mtime_of() { run stat -c %Y -- "$1"; }
 # cache/host_converger.last is "<unix seconds> <outcome>", written by the
 # converger at the start and end of every run (record_last).
 LAST_AT=""; LAST_OUTCOME="unknown"; LAST_PRESENT=0; STAMP=0
-if [[ -n "$CACHE_DIR" ]]; then
-    f="$CACHE_DIR/host_converger.last"
+# Read from the state volume; a container made before it has a published copy
+# in its cache.
+RECORD_DIR="${STATE_DIR:-$CACHE_DIR}"
+if [[ -n "$RECORD_DIR" ]]; then
+    f="$RECORD_DIR/host_converger.last"
     if readable "$f"; then
         LAST_PRESENT=1
         read -r LAST_AT LAST_OUTCOME < <(run head -c 200 -- "$f" | head -n 1)
         [[ "${LAST_AT:-}" =~ ^[0-9]+$ ]] || LAST_AT=""
         LAST_OUTCOME="${LAST_OUTCOME:-unknown}"
     fi
-    readable "$CACHE_DIR/host_converger.stamp" && STAMP=1
+    readable "$RECORD_DIR/host_converger.stamp" && STAMP=1
 fi
 
 # --- The code check ----------------------------------------------------------
@@ -199,11 +212,19 @@ emit_lines() {
     printf '%s:%s' "$n" "$out"
 }
 EMITTED="0:[]"
-if [[ -n "$LOGS_DIR" ]] && readable "$LOGS_DIR/host_converger.log"; then
+# The converger's log: in the state volume; before it, in the container's
+# own layer, which the host does not read, or (before 2.55) in its logs/.
+LOG_FILE=""
+if [[ -n "$STATE_DIR" ]] && readable "$STATE_DIR/host_converger.log"; then
+    LOG_FILE="$STATE_DIR/host_converger.log"
+elif [[ -n "$LOGS_DIR" ]] && readable "$LOGS_DIR/host_converger.log"; then
+    LOG_FILE="$LOGS_DIR/host_converger.log"
+fi
+if [[ -n "$LOG_FILE" ]]; then
     LOG_PRESENT=1
-    LOG_SIZE="$(run stat -c %s -- "$LOGS_DIR/host_converger.log")"
-    LOG_AT="$(mtime_of "$LOGS_DIR/host_converger.log")"
-    EMITTED="$(emit_lines "$LOGS_DIR/host_converger.log")"
+    LOG_SIZE="$(run stat -c %s -- "$LOG_FILE")"
+    LOG_AT="$(mtime_of "$LOG_FILE")"
+    EMITTED="$(emit_lines "$LOG_FILE")"
 fi
 LINES_RETURNED="${EMITTED%%:*}"
 LOG_LINES="${EMITTED#*:}"

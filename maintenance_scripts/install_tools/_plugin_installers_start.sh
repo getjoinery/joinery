@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.57 - the converger's old log and its rotations in the site's logs/ are removed on every run,
+#                 a site migrated by 2.56 included (nothing writes them since 2.55)
 # Version: 2.56 - root's state for a site lives in /var/lib/joinery/sites/SITENAME (the queue and its outcomes,
 #                 transcripts, plugin installer records and logs, the stamp, last run and certificate summary),
 #                 never in the site's cache/ or logs/, whose owner could rename root's folders aside and put a
@@ -1037,6 +1039,11 @@ ensure_site_state_dir() {
     # The carry-over from the layout before this one runs until it has run once
     # as root: a marker says so, and after it nothing here touches cache/ or
     # logs/ again, however their owner recreates the old names.
+    # The converger's log and its rotations in the site's logs/, from before it
+    # was root's: nothing writes them, so they go, on every run (a site migrated
+    # before this line had them left). find -P does not follow a link it meets,
+    # and -delete unlinks the name, whatever it now is.
+    find "${SITE_ROOT}/logs" -maxdepth 1 \( -type f -o -type l \) -name 'host_converger.log*' -delete 2>/dev/null || true
     [[ -f "${SITE_STATE_DIR}/migrated" ]] && return 0
     local legacy="${SITE_ROOT}/cache/root_requests" f id
     if [[ -d "${legacy}" && ! -L "${legacy}" ]]; then

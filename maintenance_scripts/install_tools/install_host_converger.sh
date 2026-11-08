@@ -3,6 +3,8 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.9 - In a site container the converger's log is ${STATE_DIR}/host_converger.log, in the state
+#                volume (_site_run_spec.sh 1.19), where it outlives a rebuild and the host reads it
 # Version: 1.8 - Root's state for the site is /var/lib/joinery/sites/SITENAME (made here with its modes: the queue
 #                770 root:www-data holding nothing of root's, the rest root's, read by the pool through the group); the path trigger watches
 #                that queue; the converger's log is /var/log/joinery/host_converger.SITENAME.log. Nothing of root's
@@ -147,6 +149,12 @@ else
     LOG_FILE="/var/log/joinery/host_converger.${SITENAME}.log"
     mkdir -p /var/log/joinery
     chmod 755 /var/log/joinery 2>/dev/null || true
+    # In a site container it is in the state volume with the rest of root's
+    # record, so it outlives a rebuild and the host reads it there
+    # (sysadmin_tools/site_converger.sh).
+    if [[ -f /.dockerenv || -f /run/.containerenv ]]; then
+        LOG_FILE="${STATE_DIR}/host_converger.log"
+    fi
 fi
 
 # The root timer's entry point is a copy outside the tree, not the file in it.

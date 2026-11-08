@@ -3,6 +3,10 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.19 - the state volume (SITE_state at /var/lib/joinery/sites): root's own record of the site,
+#                the root-request queue, its outcomes and the converger's log (specs/shell_command_audit.md
+#                D1), kept across a rebuild and read by the host. run_spec_add_standard_volumes gives an
+#                older spec every standard volume it lacks, so a rebuild from it gains them.
 # Version: 1.18 - a site with a memory budget runs with --ulimit memlock=-1:-1, so its unseal daemon can
 #                lock every page (specs/unseal_daemon.md Q1). Only with a budget: locked pages count
 #                against it, so the worst a process in the container can pin is its own site's
@@ -178,6 +182,7 @@ RUN_SPEC_VOLUMES=(
     "pg_logs:/var/log/postgresql"
     "agent:/etc/joinery-agent"
     "deploy:deploy"
+    "state:/var/lib/joinery/sites"
 )
 
 # The container ports install.sh publishes itself: the web server and the
@@ -854,6 +859,27 @@ run_spec_add_volume() {  # SITE NAME DEST
     [[ -f "$p" ]] || { echo "run spec: ${1} has none to change" >&2; return 1; }
     run_spec_list "$1" volume | grep -qE ":$3(:r[ow])?\$" && return 0
     { grep -v '^#' "$p"; printf 'volume=%s:%s\n' "$2" "$3"; } | run_spec_write "$1"
+}
+
+# Every standard volume SITE's spec lacks, added; prints the name of each one
+# added, so the caller can make it (empty is what a new standard volume holds:
+# a spec written before it existed had nothing to put there). A rebuild from an
+# older spec calls this first, so the container it runs has the whole set.
+run_spec_add_standard_volumes() {  # SITE
+    local site="$1" p entry suffix dest have add="" names=""
+    p="$(run_spec_path "$site")" || return 1
+    [[ -f "$p" ]] || return 0
+    have=" $(sed -n 's/^volume=[^:]*:\([^:]*\).*/\1/p' "$p" | tr '\n' ' ') "
+    for entry in "${RUN_SPEC_VOLUMES[@]}"; do
+        suffix="${entry%%:*}"; dest="${entry#*:}"
+        [[ "$dest" == /* ]] || dest="/var/www/html/${site}/${dest}"
+        [[ "$have" == *" ${dest} "* ]] && continue
+        add+="volume=${site}_${suffix}:${dest}"$'\n'
+        names+="${site}_${suffix}"$'\n'
+    done
+    [[ -n "$add" ]] || return 0
+    { grep -v '^#' "$p"; printf '%s' "$add"; } | run_spec_write "$site" || return 1
+    printf '%s' "$names"
 }
 
 run_spec_remove() {  # SITE

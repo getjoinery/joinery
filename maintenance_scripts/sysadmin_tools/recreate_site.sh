@@ -6,6 +6,9 @@
 # environment and its signed release manifest
 # (specs/multi_tenant_host_hardening.md D9).
 #
+# Version: 1.6 - A spec written before a standard volume existed gains it, made empty, before the
+#                run (run_spec_add_standard_volumes): the state volume, root's record of the site
+#                (_site_run_spec.sh 1.19). A site with a disk allowance has it put back over the new one.
 # Version: 1.5 - A site Docker made before run specs (docker-prod's six) is no longer refused for having
 #                none: once it is known to be the site's own, its container's arguments are recorded as
 #                its run spec (run_spec_adopt, the step install.sh site takes), so the nightly
@@ -261,6 +264,22 @@ if [ "$ADOPT" -eq 1 ]; then
     ADOPT_ERR="$(run_spec_adopt "$SITE" 2>&1 > /dev/null)" \
         || refuse "${SITE} has no run spec, and its container could not be recorded as one: ${ADOPT_ERR#run spec: }"
     say "recorded ${SITE}'s run spec from its container, which Docker made before run specs"
+fi
+
+# A standard volume the spec predates (the state volume, _site_run_spec.sh
+# 1.19) is added and made empty, which is what it holds on a new site; the
+# check below then finds it. Its allowance covers it like the rest.
+ADDED_VOLUMES="$(run_spec_add_standard_volumes "$SITE")" \
+    || refuse "could not add the standard volumes ${SITE}'s run spec lacks"
+while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    site_engine volume create "$v" > /dev/null || refuse "could not make the volume ${v}"
+    say "added the volume ${v} to ${SITE}'s run spec"
+done <<< "$ADDED_VOLUMES"
+SPEC_DISK="$(run_spec_get "$SITE" disk)"
+if [ -n "$ADDED_VOLUMES" ] && [ -n "$SPEC_DISK" ]; then
+    bash "${HERE}/../install_tools/docker_disk_pool.sh" allow "$SITE" "$SPEC_DISK" > /dev/null \
+        || say "WARNING: ${SITE}'s new volumes are outside its disk allowance; run: bash ${HERE}/../install_tools/docker_disk_pool.sh allow ${SITE} ${SPEC_DISK}"
 fi
 
 while IFS= read -r v; do

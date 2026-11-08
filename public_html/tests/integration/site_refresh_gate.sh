@@ -4,7 +4,7 @@
 # tier: safe
 # env: any
 # needs: []
-# timeout: 300
+# timeout: 420
 # covers: [maintenance_scripts/install_tools/site_refresh.sh, maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/sysadmin_tools/recreate_site.sh, maintenance_scripts/install_tools/Dockerfile.template, maintenance_scripts/install_tools/Dockerfile.base]
 #
 # A site container's OS is replaced when Ubuntu ships a fix
@@ -110,7 +110,9 @@ case "$1" in
       prune) echo pruned >> "$S/pruned" ;;
     esac ;;
   volume)
-    shift; [ "$1" = inspect ] || exit 0; shift
+    shift
+    if [ "$1" = create ]; then mkdir -p "$S/volumes/$2"; echo "volume create $2" >> "$S/volumes_made"; exit 0; fi
+    [ "$1" = inspect ] || exit 0; shift
     f=""; [ "$1" = "-f" ] && { f="$2"; shift 2; }
     [ -d "$S/volumes/$1" ] || exit 1
     [ -n "$f" ] && echo "$S/volumes/$1" || echo "{}" ;;
@@ -286,6 +288,8 @@ chk "none of these stopped, removed or ran a container" "$(nothing_stopped)" "0"
 chk "  and the site runs its own image still" "$(cimg sa)|$(cat "$STUB/containers/sa/state")" "$OLD_A|running"
 chk "  and no image is left tagged next" "$(ls "$STUB/tags" | grep -m1 -c ':next')" "0"
 chk "  and no mark is left" "$(ls "$R/etc/joinery/sites/sa/")" "run_spec"
+chk "a spec older than the state volume gains it, made empty, once" \
+    "$(grep -cx 'volume=sa_state:/var/lib/joinery/sites' "$R/etc/joinery/sites/sa/run_spec")|$(grep -cx 'volume create sa_state' "$STUB/volumes_made")" "1|1"
 exec 9>>"$R/run/joinery/recreate.sa.lock"; flock 9
 chk "a second replacement of the same site while one runs: refused" "$(rec sa)|$(grep -m1 -c 'under way' "$T/out")" "1|1"
 exec 9>&-

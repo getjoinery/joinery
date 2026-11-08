@@ -24,6 +24,7 @@
  * construction: the converger makes the directory on its first root run and
  * carries over any request still waiting under cache/root_requests.
  *
+ * @version 1.1 - the log hint names a site container's log, in its state volume
  * @version 1.0
  */
 final class RootState {
@@ -98,10 +99,14 @@ final class RootState {
 
 	/**
 	 * Where the converger's own log is: root's file beside the machine log on a
-	 * host, the journal on a host with a data root. The admin notices name it.
+	 * host, the journal on a host with a data root, the state volume in a site
+	 * container. The admin notices name it.
 	 */
 	public static function convergerLogHint(?string $site_root = null): string {
 		$name = basename(rtrim($site_root ?? PathHelper::getSiteRoot(), '/'));
+		if (is_file('/.dockerenv') || is_file('/run/.containerenv')) {
+			return self::BASE . '/' . $name . '/host_converger.log in the site container';
+		}
 		return '/var/log/joinery/host_converger.' . $name . '.log on the host (journalctl -u joinery-host-converger on a host with a data root)';
 	}
 

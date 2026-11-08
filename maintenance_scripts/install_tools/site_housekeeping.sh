@@ -4,6 +4,8 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.11 - The converger's log block also names a site container's, in its state volume
+#                (/var/lib/joinery/sites/SITENAME/host_converger.log); the 11-08 rendering is an earlier rendering
 # Version: 1.10 - The converger's log is root's, /var/log/joinery/host_converger.SITENAME.log, rotated without su;
 #                the 11-07 rendering, with the block in the site's logs/, is an earlier rendering
 #                (specs/shell_command_audit.md D1)
@@ -339,6 +341,57 @@ earlier_renderings() {
 }
 {{SITE_ROOT}}/logs/host_converger.log {
     su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
+----
+# from 2026-11-08
+{{SITE_ROOT}}/logs/error.log {
+    su www-data www-data
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/access.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0660 www-data www-data
+    size 50M
+    sharedscripts
+    postrotate
+        if pgrep -f ^/usr/sbin/apache2 > /dev/null; then
+            apache2ctl graceful > /dev/null 2>&1 || true
+        fi
+    endscript
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+/var/log/joinery/host_converger.{{SITENAME}}.log {
     weekly
     rotate 4
     compress

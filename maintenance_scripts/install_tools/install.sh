@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.43 - every site container has a state volume (SITE_state at /var/lib/joinery/sites): root's
+#               record of the site and its converger log, kept across a rebuild (_site_run_spec.sh 1.19)
 #VERSION 3.42 - The closing summary says the site connects as its own database role and where the postgres
 #               password is kept (config/db_admin.php, root-only), not that it is in Globalvars_site.php (WP4)
 #VERSION 3.41 - The agent runs on every site and Docker host: --enable-agent is accepted and changes
@@ -5137,7 +5139,7 @@ CODE_VOLUMES=(
 ALL_SITE_VOLUMES=(
     code vendor scripts
     postgres uploads storage config backups static
-    logs cache sessions apache_logs pg_logs agent deploy
+    logs cache sessions apache_logs pg_logs agent deploy state
 )
 
 # Delete every volume belonging to a site. Irreversible: this is the database,

@@ -2,6 +2,8 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.19 - the rollback keeps the state volume (SITE_state, root's record of the site) when the
+#                rebuilt container made one, as it keeps the agent's (_site_run_spec.sh 1.19)
 # Version: 1.18 - a site recreate_site.sh is replacing (its lock held, or its mark under an hour old) is refused
 #                (reviewer2 WP8 re-check (4)).
 # Version: 1.17 - keeps the release manifest the code matches (run_spec_code_manifest), the site root's or
@@ -804,6 +806,9 @@ if [ "$STAGE" = "rollback" ]; then
         || die "could not put the old container's run spec back; the copy is still in ${BACKUP_VOL}, the spec in ${WORK}/run_spec"
     if site_engine volume inspect "${SITE}_agent" > /dev/null 2>&1; then
         run_spec_add_volume "$SITE" "${SITE}_agent" /etc/joinery-agent || die "could not add ${SITE}_agent to ${SITE}'s run spec"
+    fi
+    if site_engine volume inspect "${SITE}_state" > /dev/null 2>&1; then
+        run_spec_add_volume "$SITE" "${SITE}_state" /var/lib/joinery/sites || die "could not add ${SITE}_state to ${SITE}'s run spec"
     fi
     mapfile -d '' ARGS < <(run_spec_args "$SITE")
     [ "${#ARGS[@]}" -gt 0 ] || die "${SITE}'s run spec gave no arguments; the copy is still in ${BACKUP_VOL}"

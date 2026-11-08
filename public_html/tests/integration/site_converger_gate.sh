@@ -58,7 +58,8 @@ case "\$1" in
             *State.Pid*) echo "$SLEEPER" ;;
             *Mounts*) printf '/var/www/html/siteone/cache|$V/siteone_cache/_data\n'
                       printf "/var/www/html/siteone/logs|\${STUB_LOGS_SRC:-$V/siteone_logs/_data}\\n"
-                      printf '/var/www/html/siteone/config|$V/siteone_config/_data\n' ;;
+                      printf '/var/www/html/siteone/config|$V/siteone_config/_data\n'
+                      [ -n "\${STUB_STATE_SRC:-}" ] && printf "/var/lib/joinery/sites|\${STUB_STATE_SRC}\\n" ;;
         esac ;;
 esac
 STUB
@@ -116,6 +117,24 @@ echo "== a bind mount is never read =="
 mkdir -p "$T/bind"; for i in 1 2 3; do echo "bound $i"; done > "$T/bind/host_converger.log"
 STUB_LOGS_SRC="$T/bind" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
 chk "a logs mount outside the engine's volume shape is not read" "$(jv "$T/o.json" log.present)/$(grep -c bound "$T/o.json")" "false/0"
+
+echo "== the state volume is read first =="
+SD="$V/siteone_state/_data"
+mkdir -p "$SD/siteone"
+echo '1793070000 converged' > "$SD/siteone/host_converger.last"
+echo 'def456' > "$SD/siteone/host_converger.stamp"
+for i in 1 2 3; do echo "state line $i"; done > "$SD/siteone/host_converger.log"
+STUB_STATE_SRC="$SD" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "the last run is root's record in the state volume" "$(jv "$T/o.json" last_run.at_unix)" "1793070000"
+chk "the stamp is the state volume's" "$(jv "$T/o.json" stamp_present)" "true"
+chk "the log is the state volume's" "$(jv "$T/o.json" log.lines_returned)|$(php -r '$o=json_decode(file_get_contents($argv[1]),true); echo end($o["log"]["lines"]);' "$T/o.json")" "3|state line 3"
+mv "$SD/siteone" "$T/state.real"
+mkdir -p "$T/elsewhere/st"; echo '1999999999 converged' > "$T/elsewhere/st/host_converger.last"
+ln -s "$T/elsewhere/st" "$SD/siteone"
+STUB_STATE_SRC="$SD" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "a site folder in the state volume that is a link is not entered" "$(grep -c 1999999999 "$T/o.json")" "0"
+STUB_STATE_SRC="$T/bind" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "a state mount outside the engine's volume shape is not read" "$(grep -c 1999999999 "$T/o.json")/$(grep -c 'state line' "$T/o.json")" "0/0"
 
 echo "== a fact that cannot be read keeps its key =="
 rm -rf "$V/siteone_cache"

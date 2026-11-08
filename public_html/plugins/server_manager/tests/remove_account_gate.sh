@@ -159,7 +159,7 @@ reset() {
     mkdir -p "$D" "$T/fs/var/www/html" "$T/fs/etc/apache2/sites-available" "$T/fs/etc/joinery/sites" "$T/fs/root"
     for f in containers volumes networks images in_use log databases; do : > "$D/$f"; done
 }
-# A container site: container, its fifteen volumes, network, image, state dir,
+# A container site: container, its volumes, network, image, state dir,
 # host-side logs folder and proxy vhost naming its certificate.
 container_site() {
     local s="$1" v
@@ -203,8 +203,8 @@ cp "$T/fs/etc/apache2/sites-available/getjoinery.conf" "$T/fs/etc/apache2/sites-
 out="$(run getjoinery)"; rc=$?
 chk "A: getjoinery removal verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')" "1"
 chk "A: exit 0" "$rc" "0"
-chk "A: none of getjoinery's volumes left" "$(grep -cE '^getjoinery_[a-z_]+$' "$D/volumes" | tr -d ' ')" "48"
-chk "A: getjoinery's own sixteen gone" "$(for v in $mine; do grep -xF "getjoinery_$v" "$D/volumes"; done | wc -l | tr -d ' ')" "0"
+chk "A: none of getjoinery's volumes left" "$(grep -cE '^getjoinery_[a-z_]+$' "$D/volumes" | tr -d ' ')" "51"
+chk "A: getjoinery's own seventeen gone" "$(for v in $mine; do grep -xF "getjoinery_$v" "$D/volumes"; done | wc -l | tr -d ' ')" "0"
 chk "A: its disk allowance's projects and mark go; the neighbours' stay, a_deploy's too" \
     "$(cut -d: -f1 "$T/fs/etc/projid" | paste -sd,)|$(cut -d: -f1 "$T/fs/etc/projects" | sort -u | paste -sd,)|$(there /etc/joinery/sites/getjoinery/disk_allowance)" \
     "joinery_getjoinery_developers,joinery_getjoinery_deploy|1000000004,1000000005|no"
@@ -476,7 +476,7 @@ for case in image bind foreign rollback restrictions restrictions_rw restriction
         chk "I: $case: refused (exit 1)" "$rc" "1"
         chk "I: $case: says it is not install.sh's" "$(echo "$out" | grep -c "is not one install.sh made")" "1"
         chk "I: $case: container, volumes and vhost untouched" \
-            "$(grep -cxF handmade "$D/containers")|$(grep -c '^handmade_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/handmade.conf)" "1|16|yes"
+            "$(grep -cxF handmade "$D/containers")|$(grep -c '^handmade_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/handmade.conf)" "1|17|yes"
         chk "I: $case: nothing was stopped or removed" "$(grep -cE '^(stop|rm|volume rm|network rm|rmi) ' "$D/log")" "0"
     fi
 done
@@ -521,7 +521,7 @@ chk "P: the data root not mounted: refused (exit 1)" "$rc" "1"
 chk "P:   saying the data root is not mounted" "$(echo "$out" | grep -c 'the data root is not mounted')" "1"
 chk "P:   before the engine was asked anything" "$(wc -l < "$D/log" | tr -d ' ')" "0"
 chk "P:   container, volumes and vhost untouched" \
-    "$(grep -cxF getjoinery "$D/containers")|$(grep -c '^getjoinery_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/getjoinery.conf)" "1|16|yes"
+    "$(grep -cxF getjoinery "$D/containers")|$(grep -c '^getjoinery_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/getjoinery.conf)" "1|17|yes"
 reset; podman_site getjoinery
 out="$(prun / getjoinery)"; rc=$?
 chk "P: mounted: a site whose image reads back as localhost/joinery-getjoinery is ours, and verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')" "1"

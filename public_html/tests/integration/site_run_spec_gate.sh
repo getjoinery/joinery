@@ -109,7 +109,8 @@ chk "cpus" "$(echo "$A" | grep -c -- '--cpus=1.0 ')" "1"
 chk "pids limit" "$(echo "$A" | grep -c -- '--pids-limit=512 ')" "1"
 chk "web port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:8087:80 ')" "1"
 chk "database port on 127.0.0.1" "$(echo "$A" | grep -c -- '-p 127.0.0.1:9087:5432 ')" "1"
-chk "sixteen volumes" "$(echo "$A" | grep -o -- '-v mysite_' | wc -l)" "16"
+chk "seventeen volumes" "$(echo "$A" | grep -o -- '-v mysite_' | wc -l)" "17"
+chk "the state volume, root's record of the site, at /var/lib/joinery/sites" "$(echo "$A" | grep -c -- '-v mysite_state:/var/lib/joinery/sites ')" "1"
 chk "no environment and no image" "$(echo "$A" | grep -c -- '-e \|--env\|joinery-mysite')" "0"
 chk "every capability dropped, then exactly the six a site needs" \
     "$(echo "$A" | grep -o -- '--cap-[a-z]*=[A-Z_]*' | paste -sd ' ')" \
@@ -172,12 +173,23 @@ echo "=== One key changes, every other line is kept; a volume is added once ==="
 run_spec_set mysite memory 512m
 chk "memory changed" "$(run_spec_get mysite memory)" "512m"
 chk "cpus kept" "$(run_spec_get mysite cpus)" "1.0"
-chk "volumes kept" "$(run_spec_list mysite volume | wc -l)" "16"
+chk "volumes kept" "$(run_spec_list mysite volume | wc -l)" "17"
 run_spec_add_volume mysite mysite_extra /var/www/html/mysite/extra
 run_spec_add_volume mysite mysite_extra /var/www/html/mysite/extra
 chk "added once" "$(run_spec_list mysite volume | grep -c ':/var/www/html/mysite/extra$')" "1"
 run_spec_add_volume mysite other_code /var/www/html/mysite/public_html
 chk "a destination already mounted is not mounted twice" "$(run_spec_list mysite volume | grep -c ':/var/www/html/mysite/public_html$')" "1"
+
+echo "=== A spec older than a standard volume gains it, and only it, once ==="
+had="$(cat "$SPECS/mysite/run_spec")"
+printf '%s\n' "$had" | grep -v '^volume=mysite_state:' > "$SPECS/mysite/run_spec"
+chk "the older spec lacks the state volume" "$(run_spec_list mysite volume | grep -c ':/var/lib/joinery/sites$')" "0"
+chk "the one volume added is named" "$(run_spec_add_standard_volumes mysite)" "mysite_state"
+chk "now mounted at /var/lib/joinery/sites" "$(run_spec_list mysite volume | grep -cx 'mysite_state:/var/lib/joinery/sites')" "1"
+chk "a second call adds nothing" "$(run_spec_add_standard_volumes mysite)|$(run_spec_list mysite volume | grep -c ':/var/lib/joinery/sites$')" "|1"
+chk "the spec still gives arguments" "$( [ "$(run_spec_args mysite | wc -c)" -gt 0 ] && echo yes)" "yes"
+printf '%s\n' "$had" > "$SPECS/mysite/run_spec"
+chk "no spec: nothing added, nothing written" "$(run_spec_add_standard_volumes nosuchsite)|$(test -e "$SPECS/nosuchsite" && echo made)" "|"
 
 echo "=== What install.sh does not own is the site's, and a rebuild keeps it ==="
 run_spec_render keeper 127.0.0.1 8089 9089 "" "" "" > "$T/lines"

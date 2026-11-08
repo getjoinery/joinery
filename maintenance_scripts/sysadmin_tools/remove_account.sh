@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 2.25 - a site container's state volume (SITE_state) is one of the site's volumes and goes with it
 #VERSION 2.24 - Root's records for the site under /var/lib/joinery/sites/SITE and its converger log under
 #               /var/log/joinery go with the site (shell_command_audit D1)
 #VERSION 2.23 - A bare-metal removal runs every plugin's declared host remover first (the host runner's
@@ -234,7 +235,7 @@ fi
 # _site_run_spec.sh's RUN_SPEC_VOLUMES, spelled here because this script runs
 # with or without install_tools beside it and sources only the engine helper
 # (remove_account_gate checks the three agree).
-SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent deploy"
+SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent deploy state"
 
 # _site_run_spec.sh's RUN_SPEC_RESTRICTIONS_DIR: the host's restrictions, which
 # every site on a host that has them mounts read-only (specs/host_restrictions.md).
