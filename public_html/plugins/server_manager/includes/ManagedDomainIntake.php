@@ -24,6 +24,7 @@
  *    domain: a half-configured deployment must never take money for hosting
  *    and silently not buy the name.
  *
+ * @version 1.3 - availabilityScript() may reveal a block (the registrant's details) only once the name is free
  * @version 1.2 - the registrant's address and phone are the platform's own form blocks (Address and
  *                PhoneNumber), so a country and a phone country code are chosen from the country table
  *                by id and the phone is composed as "+CC number" for the registrar seam
@@ -397,10 +398,11 @@ class ManagedDomainIntake {
 	 * register/own split); empty means always.
 	 */
 	public static function availabilityScript(string $input_id, string $status_id,
-			string $when_name = '', string $when_value = ''): string {
+			string $when_name = '', string $when_value = '', string $reveal_id = ''): string {
 		$cfg = json_encode(array(
 			'input' => $input_id, 'status' => $status_id,
 			'when_name' => $when_name, 'when_value' => $when_value,
+			'reveal' => $reveal_id,
 		));
 		return <<<JS
 (function () {
@@ -410,6 +412,10 @@ class ManagedDomainIntake {
 		var status = document.getElementById(cfg.status);
 		if (!input || !status || !window.joineryApi) { return; }
 		var timer = null, last = '';
+		// The block asked for only once the name can be bought: shown on a free
+		// name, or when the check could not run, and kept open once it holds
+		// answers (data-keep, set by the page on a re-shown form).
+		var reveal = cfg.reveal ? document.getElementById(cfg.reveal) : null;
 		function armed() {
 			if (!cfg.when_name) { return true; }
 			var picked = document.querySelector('input[name="' + cfg.when_name + '"]:checked');
@@ -418,6 +424,9 @@ class ManagedDomainIntake {
 		function show(text, state) {
 			status.textContent = text;
 			status.setAttribute('data-state', state);
+			if (reveal && reveal.getAttribute('data-keep') !== '1') {
+				reveal.hidden = (state !== 'available' && state !== 'error');
+			}
 		}
 		function check() {
 			if (!armed()) { last = ''; show('', ''); return; }
@@ -444,6 +453,7 @@ class ManagedDomainIntake {
 				radio.addEventListener('change', function () { last = ''; check(); });
 			});
 		}
+		if (reveal && reveal.getAttribute('data-keep') !== '1') { reveal.hidden = true; }
 		check();
 	}
 	if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', wire); } else { wire(); }

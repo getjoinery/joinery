@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.1 - the time zone starts as the browser's (timezone-from-browser.js)
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1 (the account step)
  */
 
@@ -117,6 +118,7 @@ $page->public_header(array(
 @media (max-width: 760px) { .sms-start-cols { grid-template-columns: 1fr; } }
 </style>
 
+<script defer src="/assets/js/timezone-from-browser.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/timezone-from-browser.js')) ?: '1'; ?>"></script>
 <?php if ($passkeys_enabled): ?>
 <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
 <script defer>

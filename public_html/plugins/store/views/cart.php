@@ -20,6 +20,7 @@
 <section class="jy-cart-section">
 <div class="jy-container jy-cart-wrap">
 
+<?php foreach ($page_vars['purchase_path_headings'] as $heading) { echo $heading; } ?>
 <h1 class="jy-cart-title">Your Cart</h1>
 
 <?php if (empty($cart->items)): ?>

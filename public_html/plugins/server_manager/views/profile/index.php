@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.3 - a built site on the buyer's own domain shows the address record to add until it takes effect
  * @version 2.2 - the Move to your own Linode account card: its steps, the transfer code behind a button, and
  *                Stop managing this site after the move (specs/managed_to_self_hosted_transfer.md §6)
  * @version 2.1 - the pre-payment cards (draft, pending_payment) with Continue, Finish payment, Edit and
@@ -129,6 +130,21 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				} ?></dd>
 			<?php endif; ?>
 		</dl>
+
+		<?php if ($site['dns_record'] !== null): ?>
+		<section class="sms-dns">
+			<h3>Point your domain at your site</h3>
+			<p>Your site has no address and no security certificate until you add this record where your domain
+				is registered:</p>
+			<dl class="sms-facts">
+				<dt>Type</dt><dd><?php echo htmlspecialchars($site['dns_record']['type']); ?></dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (often written as <code>@</code>)</dd>
+				<dt>Value</dt><dd><code><?php echo htmlspecialchars($site['dns_record']['value']); ?></code></dd>
+			</dl>
+			<p class="sms-note">It usually takes effect within a few minutes to a few hours. The certificate follows
+				on its own, and this box goes away once the name points here.</p>
+		</section>
+		<?php endif; ?>
 
 		<?php if ($site['status'] === 'done'): ?>
 			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="sms-visit">Visit your site</a></p>

@@ -59,6 +59,7 @@
 </div>
 </div>
 
+<script defer src="/assets/js/timezone-from-browser.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/timezone-from-browser.js')) ?: '1'; ?>"></script>
 <?php
     $page->public_footer(['header_only' => true, 'track' => true]);
 ?>

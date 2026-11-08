@@ -234,6 +234,7 @@ function checkout_logic(array $input): LogicResult{
 
 	$page_vars['cart'] = $cart;
 
+	$page_vars['purchase_path_headings'] = $cart->purchase_path_headings();
 	return LogicResult::render($page_vars);
 }
 

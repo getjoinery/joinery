@@ -32,6 +32,8 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.4 - dns_record: a built Managed site on the buyer's own domain shows its A or AAAA record until the
+ *                certificate issues or the name resolves to the server
  * @version 1.3 - the move card asks CustomerCloudProvision::is_sold()
  * @version 1.2 - the move-to-your-own-Linode card's state per site
  * @version 1.1 - the pre-payment cards (draft, pending_payment) with Edit/Delete, and the taken-name
@@ -175,6 +177,7 @@ function profile_sites_logic(array $input): LogicResult {
 		}
 
 		$sites[] = array(
+			'dns_record'      => profile_sites_dns_record($provision),
 			'id'              => (int)$provision->key,
 			'domain'          => (string)$provision->get('cvp_domain'),
 			'url'             => 'https://' . (string)$provision->get('cvp_domain'),
@@ -214,6 +217,48 @@ function profile_sites_logic(array $input): LogicResult {
 		'configure_url'     => ManagedSiteDraft::CONFIGURE_URL,
 		'availability_js'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
 	));
+}
+
+/**
+ * The address record a built Managed site on its buyer's own domain still
+ * waits for, as array('type' => 'A'|'AAAA', 'value' => address), or null when
+ * there is nothing to add: a name we registered and published, no server yet,
+ * a certificate already issued (which proves the name reached the server, a
+ * proxied one included), or the name already resolving to the address.
+ * Until then the site has no address and no certificate.
+ */
+function profile_sites_dns_record($provision): ?array {
+	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
+			|| JobResultProcessor::plane_registered_domain($provision)) {
+		return null;
+	}
+	$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+	if ($node_id <= 0) {
+		return null;
+	}
+	$node = new ManagedNode($node_id, TRUE);
+	if ((string)$node->get('mgn_ssl_state') === 'active') {
+		return null;
+	}
+	$ip = JobResultProcessor::dns_target_ip($node);
+	$packed = $ip !== '' ? @inet_pton($ip) : false;
+	if ($packed === false) {
+		return null;   // a hostname (resolving it may give a proxy's address), or nothing
+	}
+	$type = strlen($packed) === 16 ? 'AAAA' : 'A';
+	try {
+		$resolved = $type === 'A' ? DnsResolver::getA((string)$provision->get('cvp_domain'))
+			: DnsResolver::getAaaa((string)$provision->get('cvp_domain'));
+		foreach ($resolved as $address) {
+			if (@inet_pton($address) === $packed) {
+				return null;
+			}
+		}
+	} catch (DnsLookupException $e) {
+		// Unknown is shown: the record is harmless to repeat.
+	}
+	return array('type' => $type, 'value' => $ip);
 }
 
 /**

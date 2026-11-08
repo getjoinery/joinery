@@ -8,6 +8,7 @@
  * Core classes are registered at the bottom of this file.
  * Plugin classes register themselves via AbstractProductRequirement::register().
  *
+ * @version 2.2 - purchase_path_heading(): a requirement may put a heading above the cart and checkout
  * @version 2.1 - extra_cart_lines(): a requirement may contribute a server-priced companion line
  */
 abstract class AbstractProductRequirement {
@@ -184,6 +185,14 @@ abstract class AbstractProductRequirement {
      * @return array of ['product_id' => int, 'form_data' => array]
      */
     public function extra_cart_lines($form_data, $product) { return []; }
+
+    /**
+     * HTML this line puts above the cart and checkout pages while it is in the
+     * cart, from the buyer's own answers: a step strip for a product bought at
+     * the end of a longer path, say. The same string from two lines shows once.
+     * Built server-side and already escaped; '' for none.
+     */
+    public function purchase_path_heading($form_data, $product): string { return ''; }
 
     /** Does this requirement affect pricing? */
     public function affects_pricing(): bool { return false; }

@@ -30,6 +30,7 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.3 - purchase_path_heading(): the step strip, at Payment, on the cart and checkout
  * @version 1.2 - the draft id and its freeze time are marked internal: the cart shows the site, the
  *                admin's order page still shows all three
  * @version 1.1 - every stored key is question/answer-shaped with a label a person can read, and the
@@ -269,5 +270,13 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 				'managed_domain'      => array('question' => 'Registered domain', 'answer' => $domain),
 			),
 		));
+	}
+
+	/**
+	 * The cart and checkout carry the buyer's step strip at step 3, Payment,
+	 * so the path reads as one: account, site, payment.
+	 */
+	public function purchase_path_heading($form_data, $product): string {
+		return ManagedSiteDraft::steps_html(3);
 	}
 }

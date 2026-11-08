@@ -80,20 +80,31 @@
         }
     ?>
 
+        <?php
+        // A line bought at the end of a longer path shows that path's own
+        // steps; checkout's sections then go by name, not by a second count.
+        $purchase_path_headings = $page_vars['purchase_path_headings'];
+        foreach ($purchase_path_headings as $heading) { echo $heading; }
+        ?>
+
         <!-- Progress Indicator -->
         <?php
         $total_sections = count($sections);
         $completed_count = 0;
         $active_number = 1;
+        $active_title = '';
         foreach ($sections as $sk => $sv) {
             if ($sv['state'] == 'completed') $completed_count++;
-            if ($sv['state'] == 'active') $active_number = $sv['number'];
+            if ($sv['state'] == 'active') { $active_number = $sv['number']; $active_title = $sv['title']; }
         }
+        $step_label = (!empty($purchase_path_headings) && $active_title !== '')
+            ? $active_title
+            : 'Step ' . $active_number . ' of ' . $total_sections;
         $progress_pct = ($total_sections > 0) ? round(($completed_count / $total_sections) * 100) : 0;
         ?>
         <div class="jy-checkout-progress">
             <div class="jy-checkout-progress-head">
-                <span class="jy-checkout-step-label" aria-current="step">Step <?php echo $active_number; ?> of <?php echo $total_sections; ?></span>
+                <span class="jy-checkout-step-label" aria-current="step"><?php echo htmlspecialchars($step_label); ?></span>
             </div>
             <div class="jy-checkout-track">
                 <div id="progress-bar" class="jy-checkout-bar" style="--jy-checkout-progress: <?php echo $progress_pct; ?>%;"></div>

@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.126 - dns_target_ip() + dns_record_type(), shared with the sites page; the welcome emails name
+ *                 an AAAA record for an IPv6 target, and for a hostname target its address or an ALIAS/ANAME
  * @version 1.125 - process_never_do_check counts the alarm and the review list (NeverDoCheck 1.1)
  * @version 1.124 - web_workers keeps the pool's request_terminate_seconds; a limit a model call can outlast is in its verdict
  * @version 1.123 - apply_result() keeps the upgrade's warnings (a role step that left the site on postgres), shown on the job page
@@ -1905,20 +1907,7 @@ class JobResultProcessor {
 
 		if (!$admin_email || !$domain) return;
 
-		// Resolve host IP for the DNS A-record instruction: shared-host nodes
-		// live on a ManagedHost machine; customer-cloud nodes have no host row
-		// — the node's own address is the DNS target.
-		$host_ip = '';
-		$host_id = $node->get('mgn_mgh_managed_host_id');
-		if ($host_id) {
-			try {
-				$host    = new ManagedHost($host_id, true);
-				$host_ip = (string)$host->get('mgh_host');
-			} catch (Exception $e) {}
-		}
-		if ($host_ip === '') {
-			$host_ip = (string)$node->get('mgn_host');
-		}
+		$host_ip = self::dns_target_ip($node);
 
 		// A site whose DNS this plane published needs no A-record instruction,
 		// and a site whose admin password this plane sealed needs a link to
@@ -1955,6 +1944,56 @@ class JobResultProcessor {
 		]);
 	}
 
+	/**
+	 * The address a site's A or AAAA record points at: a shared-host node
+	 * lives on a ManagedHost machine; a customer-cloud node has no host row,
+	 * and its own address is the target. It may be stored as a hostname,
+	 * which is returned as it is: resolving it can answer with a proxy's
+	 * address instead of the server's.
+	 */
+	public static function dns_target_ip($node): string {
+		$target = '';
+		$host_id = $node->get('mgn_mgh_managed_host_id');
+		if ($host_id) {
+			try {
+				$host = new ManagedHost($host_id, true);
+				$target = (string)$host->get('mgh_host');
+			} catch (Exception $e) {}
+		}
+		if ($target === '') {
+			$target = (string)$node->get('mgn_host');
+		}
+		return $target;
+	}
+
+	/** The record that points a name at $target: A for IPv4, AAAA for IPv6, '' for a hostname. */
+	public static function dns_record_type(string $target): string {
+		$packed = @inet_pton($target);
+		if ($packed === false) {
+			return '';
+		}
+		return strlen($packed) === 16 ? 'AAAA' : 'A';
+	}
+
+	/**
+	 * The welcome email's instruction for pointing $dom at $target, as HTML
+	 * ($dom and $target already escaped). A bare domain cannot take a CNAME at
+	 * most registrars, so a hostname target asks for its address, or an
+	 * ALIAS/ANAME record where the registrar offers one.
+	 */
+	private static function dns_instruction_html(string $dom, string $target, string $rtype, bool $at_registrar): string {
+		$lead = $at_registrar ? 'At your domain registrar, ' : '';
+		if ($rtype === '') {
+			return '<p>' . ($at_registrar ? $lead . 'point' : 'Point') . " <code>{$dom}</code> at the server <strong>{$target}</strong>: add an "
+				. "<strong>A record</strong> with that server's address (your hosting provider's control panel shows it), "
+				. "or an <strong>ALIAS</strong> or <strong>ANAME</strong> record to <code>{$target}</code> if your registrar "
+				. "offers one.</p>\n";
+		}
+		return '<p>' . ($at_registrar ? $lead . 'add' : 'Add') . " this <strong>{$rtype} record</strong> for <code>{$dom}</code> pointing to:</p>\n"
+			. "<p style=\"font-size:1.5em;text-align:center;font-weight:bold;letter-spacing:.05em;background:#f4f4f4;"
+			. "padding:12px;border-radius:4px\">{$target}</p>\n";
+	}
+
 	/** Did this plane register the provision's domain (a registration row on its order)? */
 	public static function plane_registered_domain($provision): bool {
 		$order_item_id = (int)$provision->get('cvp_external_order_item_id');
@@ -1972,6 +2011,7 @@ class JobResultProcessor {
 		$name      = htmlspecialchars($user_name);
 		$dom       = htmlspecialchars($domain);
 		$ip        = htmlspecialchars($host_ip);
+		$dns_block = self::dns_instruction_html($dom, $ip, self::dns_record_type((string)$host_ip), false);
 		$login_url = htmlspecialchars('https://' . $domain . '/admin');
 
 		return <<<HTML
@@ -1981,9 +2021,7 @@ class JobResultProcessor {
 <p>Your Joinery site for <strong>{$dom}</strong> has been installed successfully.</p>
 
 <h3>Next step: point your DNS</h3>
-<p>Add an <strong>A record</strong> for <code>{$dom}</code> pointing to:</p>
-<p style="font-size:1.5em;text-align:center;font-weight:bold;letter-spacing:.05em;background:#f4f4f4;padding:12px;border-radius:4px">{$ip}</p>
-<p>DNS changes typically propagate in a few minutes to a few hours. Once your domain resolves to that IP, HTTPS will be provisioned automatically — no action needed on your part.</p>
+{$dns_block}<p>DNS changes typically propagate in a few minutes to a few hours. Once your domain resolves to that IP, HTTPS will be provisioned automatically — no action needed on your part.</p>
 
 <h3>Log in</h3>
 <p>After DNS resolves, your admin panel is at:<br>
@@ -2009,6 +2047,7 @@ HTML;
 		$login_url = htmlspecialchars('https://' . $domain . '/admin');
 		$sites     = htmlspecialchars($sites_url);
 		$ip        = htmlspecialchars($dns_ip);
+		$dns_block = self::dns_instruction_html($dom, $ip, self::dns_record_type((string)$dns_ip), true);
 
 		$password_block = $has_password && $sites_url !== ''
 			? "<h3>Your password</h3>\n<p>For safety it is not in this email. Sign in to your account "
@@ -2023,9 +2062,7 @@ HTML;
 			? "<p>Your site for <strong>{$dom}</strong> is built. The server, its email and its offsite "
 				. "backups are all set up and running — one thing is left, and it is yours to do.</p>\n"
 				. "<h3>Next step: point your domain at it</h3>\n"
-				. "<p>At your domain registrar, add an <strong>A record</strong> for <code>{$dom}</code> pointing to:</p>\n"
-				. "<p style=\"font-size:1.5em;text-align:center;font-weight:bold;letter-spacing:.05em;background:#f4f4f4;"
-				. "padding:12px;border-radius:4px\">{$ip}</p>\n"
+				. $dns_block
 				. "<p>DNS changes typically take a few minutes to a few hours. Once your domain resolves to that "
 				. "address, HTTPS is provisioned automatically — nothing more to do on your part.</p>"
 			: "<p>Your site is live at <strong><a href=\"https://{$dom}\">https://{$dom}</a></strong>. The server, its\n"

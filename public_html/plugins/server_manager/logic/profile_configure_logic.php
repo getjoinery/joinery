@@ -21,6 +21,7 @@
  * before the buyer confirms. Delete removes a draft; a paid site is never
  * deletable here.
  *
+ * @version 1.2 - the availability check reveals the registrant's details (md_registrant) on a free name
  * @version 1.1 - a visitor without a session goes to the start page (step 1, the account), and the
  *                page carries the step strip
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1, §4.2
@@ -125,7 +126,7 @@ function profile_configure_logic(array $input): LogicResult {
 		'payment_form'     => ($row && $mode === 'summary') ? ManagedSiteDraft::payment_form($row, $product) : '',
 		'in_cart'          => ($row && $mode === 'summary') ? ManagedSiteDraft::in_cart($row) : false,
 		'availability_js'  => ManagedDomainIntake::availabilityScript('cvp_domain', 'managed_domain_status',
-			'cvp_domain_source', 'register'),
+			'cvp_domain_source', 'register', 'md_registrant'),
 		// The form is step 2; the summary, whose one button is Continue to
 		// payment, is the start of step 3.
 		'steps_html'       => ManagedSiteDraft::steps_html($mode === 'summary' ? 3 : 2),

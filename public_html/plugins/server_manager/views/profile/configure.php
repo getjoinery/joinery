@@ -10,6 +10,8 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.3 - the registrant's details wait for a free name; no Site name field (derived from the domain);
+ *                an own domain says the site has no address or certificate until its A record is added
  * @version 1.2 - the registrant's address and phone are the platform's Address and PhoneNumber form blocks
  * @version 1.1 - the step strip (step 2 on the form, step 3 on the summary)
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1, §4.2
@@ -44,10 +46,9 @@ echo $steps_html;
 				echo ' — we register it for you, ' . htmlspecialchars(ManagedSiteDraft::money((string)$row->get('cvp_domain_quote')))
 					. ' for the first year. You are its legal owner from day one.';
 			} else {
-				echo ' — your own domain. When the site is ready we email you the one record to add at your registrar.';
+				echo ' — your own domain. The site has no address or certificate until you add one record where the domain '
+					. 'is registered; we email it to you when the site is built, and your sites page shows it.';
 			} ?></dd>
-		<dt>Site name</dt>
-		<dd><?php echo htmlspecialchars($row->get('cvp_sitename')); ?></dd>
 		<?php if (count($regions) > 1): ?>
 		<dt>Region</dt>
 		<dd><?php echo htmlspecialchars($row->get('cvp_region')); ?></dd>
@@ -115,6 +116,9 @@ if ($row) {
 }
 
 $registrant_fields = array_merge(array('managed_domain_status', 'md_intro'), array_keys(ManagedDomainIntake::CONTACT_FIELDS));
+$own_domain_note = '<p id="own_domain_note" class="form-text">Your site has no address and no security certificate '
+	. 'until your domain points at it. After payment we email you the one record to add where your domain is '
+	. 'registered (an A record), and your sites page shows it too until it is in place.</p>';
 if ($sellable) {
 	$formwriter->radioinput('cvp_domain_source', 'Your domain', array(
 		'options' => array(
@@ -123,8 +127,8 @@ if ($sellable) {
 		),
 		'value' => $values['cvp_domain_source'],
 		'visibility_rules' => array(
-			'register' => array('show' => $registrant_fields),
-			'own'      => array('hide' => $registrant_fields),
+			'register' => array('show' => $registrant_fields, 'hide' => array('own_domain_note')),
+			'own'      => array('hide' => $registrant_fields, 'show' => array('own_domain_note')),
 		),
 	));
 } else {
@@ -137,12 +141,18 @@ $formwriter->textinput('cvp_domain', 'Domain name', array(
 	'placeholder' => 'smithfamily.com',
 	'helptext'    => $sellable
 		? 'If we register it: ' . $offered_tlds . ' names, priced at cost for the first year. If you own it: exactly as you own it.'
-		: 'Exactly as you own it. When the site is ready we email you the one record to add at your registrar.',
+		: 'Exactly as you own it.',
 	'validation'  => array('required' => true),
 ));
 echo '<div id="managed_domain_status" class="form-text" aria-live="polite"></div>';
+echo $own_domain_note;
 
 if ($sellable) {
+	// Asked once the name is known to be free. A saved draft, or a form shown
+	// again with errors, stays open: the name prefills from the account, so it
+	// says nothing about whether the buyer has answered.
+	$registrant_kept = $row !== null || !empty($errors);
+	echo '<div id="md_registrant"' . ($registrant_kept ? ' data-keep="1"' : '') . '>';
 	echo '<p id="md_intro" class="form-text">Who owns the domain. This becomes the public registration record, so it '
 		. 'has to be a real contact — private registration keeps it hidden from WHOIS lookups, and we turn that on '
 		. 'for you at no cost.</p>';
@@ -165,14 +175,8 @@ if ($sellable) {
 
 	$formwriter->textinput('md_email', 'Email for the registration record', array(
 		'value' => $values['md_email'] ?? '', 'maxlength' => 255));
+	echo '</div>';
 }
-
-$formwriter->textinput('cvp_sitename', 'Site name', array(
-	'value'     => $values['cvp_sitename'],
-	'maxlength' => 50,
-	'helptext'  => 'Used internally as the site\'s folder and database name: letters, digits and underscores. '
-		. 'Leave it blank to use the first part of the domain.',
-));
 
 if (count($regions) > 1) {
 	$region_options = array();

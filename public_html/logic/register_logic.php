@@ -256,9 +256,12 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 		'required' => true,
 	]);
 
+	// A form shown again keeps the zone the visitor chose.
+	$timezone_options = Address::get_timezone_drop_array();
+	$posted_timezone = (string)($input['usr_timezone'] ?? '');
 	$formwriter->dropinput('usr_timezone', 'Timezone:', [
-		'options' => Address::get_timezone_drop_array(),
-		'value' => $settings->get_setting('default_timezone'),
+		'options' => $timezone_options,
+		'value' => isset($timezone_options[$posted_timezone]) ? $posted_timezone : $settings->get_setting('default_timezone'),
 	]);
 
 	// Labels are plain text — FormWriter escapes every label, so markup in one

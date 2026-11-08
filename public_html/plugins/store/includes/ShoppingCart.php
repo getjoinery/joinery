@@ -591,6 +591,30 @@ class ShoppingCart {
 		return $item_array;
 	}	
 
+	/**
+	 * The headings the cart's lines put above the cart and checkout pages
+	 * (AbstractProductRequirement::purchase_path_heading), one per requirement
+	 * class: two lines of one product show its heading once, even when the
+	 * heading's markup differs between calls (styles emitted only the first time).
+	 */
+	public function purchase_path_headings(): array {
+		$headings = array();
+		foreach ($this->items as $cart_item) {
+			list($quantity, $product, $data) = $cart_item;
+			foreach ($product->get_product_requirements() as $requirement) {
+				$class = get_class($requirement);
+				if (isset($headings[$class])) {
+					continue;
+				}
+				$html = $requirement->purchase_path_heading((array)$data, $product);
+				if ($html !== '') {
+					$headings[$class] = $html;
+				}
+			}
+		}
+		return array_values($headings);
+	}
+
 	public function get_detailed_items() {
 		$detailed_items = array();
 		foreach ($this->items as $key => $cart_item) {

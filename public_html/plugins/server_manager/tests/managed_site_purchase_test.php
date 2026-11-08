@@ -405,6 +405,16 @@ $cart = ShoppingCart::current();
 $cart->items[] = array(1, $managed, $data_c + array('product_version' => (int)$managed_version->key), 12.99, 0, $managed_version);
 $cart->persist();
 check(FulfillmentRegistry::cartRefusal($cart) === null, 'the cart helper passes a cart whose line is current');
+$headings = $cart->purchase_path_headings();
+check(count($headings) === 1 && strpos($headings[0], 'aria-current="step"><span class="sms-step-n">3</span>') !== false,
+	'the cart and checkout carry the buyer\'s step strip once, at Payment', var_export($headings, true));
+$cart->items[] = $cart->items[0];
+check(count($cart->purchase_path_headings()) === 1, 'two Managed lines still show one strip');
+array_pop($cart->items);
+check(JobResultProcessor::dns_record_type('173.255.229.58') === 'A'
+	&& JobResultProcessor::dns_record_type('2600:3c00::f03c:91ff:fe00:1') === 'AAAA'
+	&& JobResultProcessor::dns_record_type('dev.getjoinery.com') === '',
+	'the record named for a target follows its kind: A, AAAA, none for a hostname');
 ManagedSiteDraft::unfreeze($carted);
 $cart = ShoppingCart::current();
 check(count($cart->items) === 0, 'Edit drops the line from the session cart');
