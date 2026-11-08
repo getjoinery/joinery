@@ -3,6 +3,12 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.20 - a site's database is published on loopback alone, on every engine: a spec line that
+#                publishes it anywhere else (scrolldaddy's 192.168.206.198:9087, recorded from its
+#                container on 10-22 and put back by its 11-06 rebuild) is rewritten to 127.0.0.1 on the
+#                same port before any rebuild runs from it (run_spec_db_on_loopback), and
+#                run_spec_adopt records it there. Nothing on another machine can log in to it (pg_hba),
+#                so only the host's own reads, the agent's among them, ever used the binding.
 # Version: 1.19 - the state volume (SITE_state at /var/lib/joinery/sites): root's own record of the site,
 #                the root-request queue, its outcomes and the converger's log (specs/shell_command_audit.md
 #                D1), kept across a rebuild and read by the host. run_spec_add_standard_volumes gives an
@@ -384,6 +390,32 @@ run_spec_check_line() {  # LINE
         outbound_set_by)    [[ -z "$v" || "$v" == plane ]] ;;
         *)            false ;;
     esac
+}
+
+# A site's database is published on loopback alone (pg_hba admits nothing from
+# another machine, so a binding anywhere else serves no one and leaves the host's
+# own reads nowhere to go). A spec line publishing container port 5432 on any
+# other address, or on every interface, is rewritten to 127.0.0.1 on the same
+# host port, all or nothing, and the change is said on stderr. A spec already on
+# loopback is left as it is.
+run_spec_db_on_loopback() {  # SITE
+    local site="$1" p line v lines="" changed=""
+    p="$(run_spec_path "$site")" || return 1
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        if [[ "$line" == publish=* ]]; then
+            v="${line#publish=}"
+            if [[ "$v" =~ :5432(/tcp)?$ && "$v" != 127.0.0.1:* && "$v" != "[::1]:"* ]]; then
+                changed="${changed:+${changed} }${v}"
+                v="${v%:5432*}"; v="${v##*:}"
+                line="publish=127.0.0.1:${v}:5432"
+            fi
+        fi
+        lines="${lines}${line}"$'\n'
+    done < "$p"
+    [[ -n "$changed" ]] || return 0
+    printf '%s' "$lines" | run_spec_write_to "$p" "$site" || return 1
+    echo "run spec: ${site}'s database was published on ${changed}; its spec now publishes it on 127.0.0.1 alone, as every site's is" >&2
 }
 
 # Write the lines on stdin (no comments, no blanks) to PATH, all or nothing:
@@ -769,6 +801,9 @@ run_spec_args() {  # SITE
     run_spec_quiet_refusal "$site" && return 1
     p="$(run_spec_path "$site")" || return 1
     run_spec_check_file "$p" || return 1
+    # A site's database is published on loopback alone, on every engine; a spec
+    # that cannot be put there runs no site.
+    run_spec_db_on_loopback "$site" || return 1
     run_spec_fits_host "$p" || return 1
     run_spec_restrictions_present || return 1
     run_spec_ensure_network "$site" || return 1
@@ -782,13 +817,6 @@ run_spec_args() {  # SITE
         idbase="$(site_engine_idblock_base "$v")" || return 1
         filter="$(run_spec_seccomp_hash)" && [[ -n "$filter" ]] \
             || { echo "run spec: no site system call filter at ${RUN_SPEC_SITE_SECCOMP}, so ${site} would run under the engine's own, which lets it make user namespaces; run install_tools/install_site_engine.sh converge as root" >&2; return 1; }
-        # A site's database is published on loopback alone: there is no
-        # DOCKER-USER chain here to drop the rest (install.sh docker's rule).
-        while IFS= read -r v; do
-            [[ "$v" =~ :5432(/tcp)?$ ]] || continue
-            [[ "$v" == 127.0.0.1:* || "$v" == "[::1]:"* ]] \
-                || { echo "run spec: ${site} publishes its database beyond this host (publish=${v}); on the site container engine a site's database is published on 127.0.0.1 alone" >&2; return 1; }
-        done < <(run_spec_list "$site" publish)
     fi
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
     v="$(run_spec_get "$site" network)"
@@ -981,6 +1009,9 @@ run_spec_adopt() {  # SITE
         while IFS='|' read -r hip hport cport; do
             [[ -z "$cport" ]] && continue
             proto="${cport#*/}"; [[ "$proto" == "$cport" ]] && proto="tcp"
+            # The database is recorded on loopback, wherever the container
+            # had it (run_spec_db_on_loopback).
+            [[ "${cport%%/*}" == 5432 && "$proto" == tcp && "$hip" != 127.0.0.1 && "$hip" != ::1 ]] && hip=127.0.0.1
             [[ "$hip" == *:* ]] && hip="[${hip}]"
             printf 'publish=%s%s:%s%s\n' "${hip:+${hip}:}" "$hport" "${cport%%/*}" "$([[ "$proto" == tcp ]] || echo "/${proto}")"
         done <<< "$ports"

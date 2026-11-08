@@ -242,6 +242,29 @@ STUB_INSPECT_FAIL=1 run_spec_adopt oldsite 2> "$T/err"; rc=$?
 chk "a failed read of the container is refused, not read as no limits" \
     "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)|$(grep -c 'could not read' "$T/err")" "1||1"
 
+echo "=== A site's database is published on loopback alone: recorded there, and put there before a rebuild ==="
+STUB_PORTS='127.0.0.1|8087|80/tcp\n192.168.206.198|9087|5432/tcp\n' run_spec_adopt dbsite
+chk "a container with its database on a private address is recorded on loopback" "$(run_spec_list dbsite publish | paste -sd ' ')" "127.0.0.1:8087:80 127.0.0.1:9087:5432"
+rm -f "$SPECS/dbsite/run_spec"
+STUB_PORTS='127.0.0.1|8087|80/tcp\n|9087|5432/tcp\n' run_spec_adopt dbsite
+chk "  and so is one on every interface" "$(run_spec_list dbsite publish | paste -sd ' ')" "127.0.0.1:8087:80 127.0.0.1:9087:5432"
+STUB_PORTS='127.0.0.1|8087|80/tcp\n::1|9087|5432/tcp\n' bash -c ". '$HELPER'; rm -f '$SPECS/dbsite/run_spec'; run_spec_adopt dbsite"
+chk "  one on IPv6 loopback stays there" "$(run_spec_list dbsite publish | paste -sd ' ')" "127.0.0.1:8087:80 [::1]:9087:5432"
+for pub in 192.168.206.198:9087:5432 9087:5432 0.0.0.0:9087:5432 '[::]:9087:5432/tcp'; do
+    run_spec_render dbsite 127.0.0.1 8087 9087 "" "" "" | run_spec_write dbsite
+    sed -i "s|^publish=127.0.0.1:9087:5432\$|publish=${pub}|" "$SPECS/dbsite/run_spec"
+    A="$(args_of dbsite 2> "$T/err")"
+    chk "a spec publishing the database on ${pub}: the rebuild runs it on 127.0.0.1" \
+        "$(echo "$A" | grep -c -- '-p 127.0.0.1:9087:5432 ')|$(echo "$A" | grep -o -- '-p [^ ]*:5432' | wc -l)" "1|1"
+    chk "  the spec itself now says 127.0.0.1, and nothing else changed" \
+        "$(run_spec_list dbsite publish | paste -sd ' ')|$(run_spec_list dbsite volume | wc -l)" "127.0.0.1:8087:80 127.0.0.1:9087:5432|17"
+    chk "  and the change is said" "$(grep -cF "database was published on ${pub}; its spec now publishes it on 127.0.0.1" "$T/err")" "1"
+done
+before="$(stat -c %Y.%i "$SPECS/dbsite/run_spec")"
+args_of dbsite > /dev/null 2> "$T/err"
+chk "a spec already on loopback is not rewritten and says nothing" "$(stat -c %Y.%i "$SPECS/dbsite/run_spec")|$(grep -c 'database was published' "$T/err")" "${before}|0"
+rm -rf "$SPECS/dbsite"
+
 echo "=== The host's restrictions: every site mounts them read-only; none runs without them where Docker remaps ids ==="
 RDIR="$T/root/etc/joinery/host_restrictions"
 chk "no restrictions directory and Docker not remapping ids: no mount, the site still runs" \

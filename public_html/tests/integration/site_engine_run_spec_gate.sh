@@ -153,7 +153,9 @@ printf 'publish=127.0.0.1:9081:5432\n' >> "$T/root/etc/joinery/sites/h/run_spec"
 chk "a database published on loopback runs" "$(args h | grep -c -x -- '127.0.0.1:9081:5432')" "1"
 for pub in 9081:5432 0.0.0.0:9081:5432 '[::]:9081:5432/tcp' 10.0.0.5:9081:5432; do
     sed -i '/:5432/d' "$T/root/etc/joinery/sites/h/run_spec"; printf 'publish=%s\n' "$pub" >> "$T/root/etc/joinery/sites/h/run_spec"
-    chk "a database published beyond the host (${pub}) runs no site" "$(args h | grep -c .)|$(grep -c 'publishes its database beyond this host' "$T/err")" "0|1"
+    A="$(args h)"; said="$(grep -cF 'its spec now publishes it on 127.0.0.1' "$T/err")"
+    chk "a database published beyond the host (${pub}) runs on loopback alone, and says so" \
+        "$(grep -A1 -x -- '-p' <<< "$A" | grep -c ':5432')|$(grep -c -x -- '127.0.0.1:9081:5432' <<< "$A")|${said}" "1|1|1"
 done
 A="$(args e)"
 chk "the site is named to the engine's quiet hook (D9)" "$(grep -A1 -x -- '--annotation' <<< "$A" | tail -n1)" "io.joinery.site=e"
