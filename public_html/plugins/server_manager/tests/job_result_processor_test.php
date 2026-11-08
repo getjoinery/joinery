@@ -2650,6 +2650,15 @@ check(strpos($ww_none['verdict'], 'no site of its own') !== false, 'a machine wi
 $ww_free = JobResultProcessor::sanitise_web_workers(array('site' => 's', 'apache' => array('busy' => 1, 'idle' => 40, 'slots' => 150, 'scoreboard' => array()),
 	'fpm' => array('active' => 1, 'listen_queue' => 0, 'max_children' => 8), 'fpm_max_children_events_24h' => 0));
 check(strpos($ww_free['verdict'], 'Workers free.') === 0, 'free workers say so', $ww_free['verdict']);
+check(strpos($ww_free['verdict'], 'request_terminate_timeout') === false, 'a pool with no kill timeout says nothing of one', $ww_free['verdict']);
+$ww_term = JobResultProcessor::sanitise_web_workers(array('site' => 's', 'apache' => array('busy' => 1, 'idle' => 40, 'slots' => 150, 'scoreboard' => array()),
+	'fpm' => array('active' => 1, 'listen_queue' => 0, 'max_children' => 8, 'request_terminate_seconds' => 60), 'fpm_max_children_events_24h' => 0));
+check($ww_term['fpm']['request_terminate_seconds'] === 60
+	&& strpos($ww_term['verdict'], 'PHP kills a request after 60 s (request_terminate_timeout), which can cut off an AI model call partway') !== false,
+	'a kill timeout a model call can outlast is in the verdict', $ww_term['verdict']);
+$ww_long = JobResultProcessor::sanitise_web_workers(array('site' => 's', 'apache' => 'unknown',
+	'fpm' => array('active' => 1, 'listen_queue' => 0, 'request_terminate_seconds' => 600), 'fpm_max_children_events_24h' => 0));
+check(strpos($ww_long['verdict'], 'request_terminate_timeout') === false, 'one longer than any model call is not', $ww_long['verdict']);
 foreach (array('net_health', 'web_workers') as $t) {
 	check(in_array($t, JobResultProcessor::processable_types(), true), "{$t} is a type this processor knows");
 }

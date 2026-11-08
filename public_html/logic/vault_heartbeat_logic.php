@@ -7,9 +7,12 @@
  * `alive:false` when there is no open window so the client stops beating.
  *
  * Also reports `work_pending` — whether any feature has deferred work waiting on
- * this window (specs/in_window_deferred_work.md). Reporting only: the drain runs
- * in its own request so a slow model can never stall the beat.
+ * this window (specs/in_window_deferred_work.md) in the slice lane — and
+ * `long_pending` for the long lane (VaultDeferredWork § Two lanes). Reporting
+ * only: the drain runs in its own request so a slow model can never stall the
+ * beat.
  *
+ * @version 1.2 - long_pending; work_pending covers the slice lane only
  * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -32,14 +35,16 @@ function vault_heartbeat_logic(array $input): LogicResult {
 	// specs/in_window_deferred_work.md). The beat only ANSWERS this — it never
 	// does the work, because the work can involve a language model and the beat
 	// must stay fast enough to keep the window open reliably. The client fires
-	// vault_deferred_work as a separate request when this is true.
+	// vault_deferred_work as a separate request when this is true, one per lane.
 	$work_pending = false;
+	$long_pending = false;
 	if ($alive) {
-		require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
-		$work_pending = VaultDeferredWork::hasWork($user_id);
+		$pending = VaultDeferredWork::pendingByLane($user_id);
+		$work_pending = $pending[VaultDeferredWork::LANE_SLICE];
+		$long_pending = $pending[VaultDeferredWork::LANE_LONG];
 	}
 
-	return LogicResult::render(['alive' => $alive, 'work_pending' => $work_pending]);
+	return LogicResult::render(['alive' => $alive, 'work_pending' => $work_pending, 'long_pending' => $long_pending]);
 }
 
 function vault_heartbeat_logic_descriptor() {

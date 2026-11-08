@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 3.1 — a drain's redraw leaves a list opened past its first page alone; @version 3.0 — one trip to the step-up ceremony per read budget pause (reviewer2 B2); @version 2.99 — a level-10 account reads every mailbox only after confirming a second factor: the rail offers "Every mailbox (confirm it is you)" or the way to add a factor (mail_access_hardening WP3); @version 2.98 — a read budget pause (requires_stepup) sends the page to confirm it is this person and back; a wait is said where the content would be; @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 3.2 — an AI run (done.ai_pipeline) redraws the list like a parse does; @version 3.1 — a drain's redraw leaves a list opened past its first page alone; @version 3.0 — one trip to the step-up ceremony per read budget pause (reviewer2 B2); @version 2.99 — a level-10 account reads every mailbox only after confirming a second factor: the rail offers "Every mailbox (confirm it is you)" or the way to add a factor (mail_access_hardening WP3); @version 2.98 — a read budget pause (requires_stepup) sends the page to confirm it is this person and back; a wait is said where the content would be; @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -5268,9 +5268,10 @@
 
 		// A background drain parsed relay-sealed mail: those rows were listed
 		// sealed, so re-read them (counts too — a mail rule may have filed one).
+		// An AI run (triage) may have filed mail into folders the same way.
 		document.addEventListener('joinery:vault-work-done', function (e) {
 			var done = (e && e.detail && e.detail.done) || {};
-			if (!(done.mailbox_parse > 0)) { return; }
+			if (!(done.mailbox_parse > 0) && !(done.ai_pipeline > 0)) { return; }
 			refreshMailboxes();
 			// A soft refresh goes back to page 1. Someone who pressed "Load more"
 			// keeps their place; a thread they open is parsed as it opens.

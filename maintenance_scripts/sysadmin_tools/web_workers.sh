@@ -3,6 +3,8 @@
 # web_workers.sh - is the web tier out of workers? Apache's scoreboard and
 # PHP-FPM's pool, as ONE JSON object on stdout.
 #
+# Version: 1.2 - fpm.request_terminate_seconds: the [www] pool's request_terminate_timeout, the
+#                limit that kills a worker mid-request (specs/ai_recipes_own_request.md)
 # Version: 1.1 - a PHP-FPM log that is there and cannot be read counts unknown, never 0 (reviewer2 K6)
 # Version: 1.0 - the web_workers observe word of
 #                specs/slow_request_diagnosis_words.md WP3. The agent runs this
@@ -23,7 +25,9 @@
 #     them for local callers only (default_virtualhost.conf 2.10).
 #   - The pool's configured ceiling (pm.max_children) is read from the pool
 #     files of the PHP version Apache hands PHP to: the status page does not
-#     say it. Only that one number is read; no line of a pool file is sent.
+#     say it. So is its request_terminate_timeout, in seconds (0 where no
+#     file sets one: PHP-FPM's default, no limit). Only those two numbers are
+#     read; no line of a pool file is sent.
 #   - How often the ceiling was hit in the last day, counted from PHP-FPM's
 #     own log: the history the live status cannot give.
 #   - Every key is ALWAYS present: a source that cannot be read is the string
@@ -101,13 +105,35 @@ pool_max_children() {
         END { if (m != "") print m }'
 }
 
+# The pool's request_terminate_timeout in seconds, last value wins in file
+# order, [www] only. PHP-FPM takes a bare number as seconds, or a number with
+# s, m, h or d. 0 when no file says (PHP-FPM's default: no limit); empty when
+# the value cannot be read.
+pool_terminate_seconds() {
+    local ver="$1"
+    cat "${ROOT}/etc/php/${ver}/fpm/pool.d/"*.conf 2>/dev/null | awk '
+        /^[ \t]*\[/ { sec = $0; gsub(/[ \t\[\]]/, "", sec); next }
+        sec == "www" && /^[ \t]*request_terminate_timeout[ \t]*=/ { v = $0; sub(/.*=[ \t]*/, "", v); gsub(/[ \t;].*/, "", v); t = v; set = 1 }
+        END {
+            if (!set) { print 0; exit }
+            u = substr(t, length(t)); n = t; mul = 1
+            if (u == "s") { n = substr(t, 1, length(t) - 1) }
+            else if (u == "m") { n = substr(t, 1, length(t) - 1); mul = 60 }
+            else if (u == "h") { n = substr(t, 1, length(t) - 1); mul = 3600 }
+            else if (u == "d") { n = substr(t, 1, length(t) - 1); mul = 86400 }
+            if (n ~ /^[0-9]+$/) print n * mul
+        }'
+}
+
 emit_fpm() {
-    local body ver max
+    local body ver max term
     [[ -n "$DOMAIN" ]] || { printf '"not_reported"'; return; }
     body="$(fetch '/fpm-status?json')" || { printf '"unknown"'; return; }
     ver="$(active_php)"
     max=""
+    term=""
     [[ -n "$ver" ]] && max="$(pool_max_children "$ver")"
+    [[ -n "$ver" ]] && term="$(pool_terminate_seconds "$ver")"
     # Only the numeric fields, by name; the pool's name reduced to a safe set.
     php -r '
         $d = json_decode(stream_get_contents(STDIN), true);
@@ -128,8 +154,10 @@ emit_fpm() {
         );
         $m = $argv[1] ?? "";
         $out["max_children"] = preg_match("/^[0-9]{1,5}$/", $m) ? (int)$m : null;
+        $t = $argv[2] ?? "";
+        $out["request_terminate_seconds"] = preg_match("/^[0-9]{1,9}$/", $t) ? (int)$t : null;
         echo json_encode($out);
-    ' -- "$max" <<< "$body" 2>/dev/null || printf '"unknown"'
+    ' -- "$max" "$term" <<< "$body" 2>/dev/null || printf '"unknown"'
 }
 
 # Lines saying the pool reached its ceiling, in the last 24 hours, from the

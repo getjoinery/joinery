@@ -13,6 +13,13 @@
  * posts `foreground`: the slice runs only the work a page can wait on, and
  * `foreground_more` says whether any of that remains.
  *
+ * `lane` picks which work runs (VaultDeferredWork § Two lanes): `slice`, the
+ * default, or `long`, the work that may wait on a language model, which the
+ * browser sends on a track of its own. `more` answers for the slice lane and
+ * `long_more` for the long lane. Nothing a page waits on is in the long lane,
+ * so a foreground long drain is refused.
+ *
+ * @version 1.2 - the lane input; long_more in the answer
  * @version 1.1 - the foreground input; foreground_more and ms in the answer
  * @version 1.0
  */
@@ -27,17 +34,27 @@ function vault_deferred_work_logic(array $input): LogicResult {
 	$session->check_permission(0);
 	$user_id = (int)$session->get_user_id();
 	if ($user_id <= 0) {
-		return LogicResult::render(['locked' => true, 'done' => [], 'more' => false, 'foreground_more' => false, 'ms' => []]);
+		return LogicResult::render(['locked' => true, 'done' => [], 'more' => false, 'long_more' => false, 'foreground_more' => false, 'ms' => []]);
+	}
+
+	$lane = (string)($input['lane'] ?? VaultDeferredWork::LANE_SLICE);
+	if ($lane !== VaultDeferredWork::LANE_SLICE && $lane !== VaultDeferredWork::LANE_LONG) {
+		return LogicResult::error('Unknown lane.');
+	}
+	$foreground = !empty($input['foreground']);
+	if ($foreground && $lane === VaultDeferredWork::LANE_LONG) {
+		return LogicResult::error('A long drain cannot be foreground.');
 	}
 
 	// A caller cannot ask for a bigger slice than the site allows — the budget
 	// is a server policy, not a client hint. Foreground can only shrink it.
-	$result = VaultDeferredWork::drain($user_id, UserEncryptionVault::SCOPE_USER, null, !empty($input['foreground']));
+	$result = VaultDeferredWork::drain($user_id, UserEncryptionVault::SCOPE_USER, null, $foreground, $lane);
 
 	return LogicResult::render([
 		'locked' => (bool)$result['locked'],
 		'done'   => $result['done'],
 		'more'   => (bool)$result['more'],
+		'long_more' => (bool)$result['long_more'],
 		'foreground_more' => (bool)$result['foreground_more'],
 		'ms'     => $result['ms'],
 	]);
@@ -53,6 +70,7 @@ function vault_deferred_work_logic_descriptor() {
 		'description' => 'Run one slice of deferred work that requires the caller\'s vault to be unlocked',
 		'input' => [
 			'foreground' => ['type' => 'bool', 'required' => false, 'label' => 'A page is waiting on this work'],
+			'lane'       => ['type' => 'string', 'required' => false, 'enum' => ['slice', 'long'], 'label' => 'Which work to run: slice (default) or long (may wait on a model)'],
 		],
 	];
 }

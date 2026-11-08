@@ -16,6 +16,7 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
+ * @version 1.6 - ai_pipeline runs in the long lane (VaultDeferredWork § Two lanes)
  * @version 1.5 - the reseal callback covers RecipeRun and AiQueuedAction: a rotation left
  *   every run and queued action on the old key
  * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
@@ -41,8 +42,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.p
 // A pipeline job that reads sealed content cannot run from cron, because a
 // command-line worker never holds an unlock window. Those recipes run here
 // instead: in slices, inside the owner's own request, while their vault is open.
-// Registered AFTER mailbox (a higher vaultConsumer `order` in plugin.json)
-// because the email jobs skip unparsed mail — parsing has to lead.
+// The long lane gives them a request of their own: a model call can take
+// minutes, and nothing a page waits on should queue behind it. Parsing still
+// leads: a long consumer reports no work while mail is waiting to be parsed,
+// because the email jobs skip unparsed mail.
 require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 VaultDeferredWork::register(
@@ -52,7 +55,8 @@ VaultDeferredWork::register(
     },
     function (int $user_id, VaultKey $key, float $deadline): int {
         return RecipeVaultScope::drain($user_id, $key, $deadline);
-    }
+    },
+    array('lane' => 'long')
 );
 
 // A chat whose privacy level changed converges in bounded passes; the page drives

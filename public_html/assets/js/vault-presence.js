@@ -62,7 +62,18 @@
  * Every drain that answers dispatches 'joinery:vault-work-done' with the
  * server's {done, more}, so a page can refresh what a drain just made readable.
  *
- * @version 1.7
+ * Work that may wait on a language model (the long lane, VaultDeferredWork
+ * § Two lanes) runs on a second, independent track: a beat answering
+ * long_pending, or any answer saying long_more, sends a lane=long request.
+ * One long request at a time per tab, DRAIN_GAP_MS between them, BACKOFF_MS
+ * after a failure (a proxy that stops waiting on a slow model fails the
+ * request, though the server finishes the call). The slice track never looks at
+ * it, so a foreground run starts at once while a model call is in flight. Like
+ * the slice track's background chain it keeps going in a hidden tab, and stops
+ * with the beacon. Its answers dispatch 'joinery:vault-work-done' too.
+ *
+ * @version 1.8
+ * @changelog 1.8 - the long lane's own track (specs/ai_recipes_own_request.md)
  * @changelog 1.7 - foreground runs (specs/sealed_mail_after_unlock.md); drainNow()
  *   no longer cuts short a chain gap or a back-off from a hidden page or after
  *   the cap; an answer from a run stop() ended changes nothing; the header states
@@ -90,6 +101,11 @@
 	var backoffUntil = 0;
 	var epoch = 0;              // stop() moves it: a drain still in flight then answers for a run that ended
 
+	// The long track's own state: nothing above reads it, nothing here reads theirs.
+	var longDraining = false;
+	var longTimer = null;
+	var longNextAt = 0;
+
 	function isHidden() { return document.visibilityState === 'hidden'; }
 
 	function madeProgress(done) {
@@ -104,6 +120,7 @@
 				return;
 			}
 			if (res && res.work_pending) { drain(); }
+			if (res && res.long_pending) { longDrain(); }
 		}).catch(function () { /* transient failure - keep beating */ });
 	}
 
@@ -131,6 +148,7 @@
 					{ detail: { done: res.done || {}, more: !!res.more } }));
 			}
 			if (stale) { return; }
+			if (res && res.long_more && !res.locked) { longDrain(); }
 			if (res && !res.foreground_more) { foregroundSlices = 0; }
 			if (foreground && (!res || res.locked || !res.foreground_more || !madeProgress(res.done)
 					|| isHidden() || foregroundSlices >= FOREGROUND_MAX_SLICES)) {
@@ -159,6 +177,41 @@
 		});
 	}
 
+	// The long lane: work that may wait on a model, in a request of its own.
+	// Its pacing is its own: start() gives it the same quiet period, so the
+	// page's own requests go first, and the slice track's gaps and back-offs
+	// never hold it, nor its theirs.
+	function longDrain() {
+		if (longDraining || !timer) { return; }
+		var wait = longNextAt - Date.now();
+		if (wait > 0) {
+			if (!longTimer) {
+				longTimer = setTimeout(function () { longTimer = null; longDrain(); }, wait);
+			}
+			return;
+		}
+		longDraining = true;
+		var sentIn = epoch;
+		joineryApi.post('vault_deferred_work', { lane: 'long' }).then(function (res) {
+			var stale = sentIn !== epoch;
+			// Like a slice answer, a stale one still says what it finished, so
+			// the page can show it; it changes nothing else.
+			if (res) {
+				document.dispatchEvent(new CustomEvent('joinery:vault-work-done',
+					{ detail: { done: res.done || {}, more: !!res.more } }));
+			}
+			if (stale) { return; }
+			longDraining = false;
+			longNextAt = Date.now() + DRAIN_GAP_MS;
+			if (res && res.more && !res.locked) { drain(); }
+			if (res && res.long_more && !res.locked) { longDrain(); }
+		}).catch(function () {
+			if (sentIn !== epoch) { return; }
+			longDraining = false;
+			longNextAt = Date.now() + BACKOFF_MS;
+		});
+	}
+
 	// Start a foreground run, past the quiet period and the chain gap. A run
 	// under way keeps its own schedule; a drain in flight is left to finish and
 	// the run carries on from its answer. A hidden page, a spent cap and a
@@ -178,6 +231,7 @@
 	function start() {
 		if (timer) { return; }
 		quietUntil = Date.now() + QUIET_MS;
+		longNextAt = quietUntil;
 		beat();
 		timer = setInterval(beat, 25000);
 	}
@@ -185,7 +239,10 @@
 	function stop() {
 		if (timer) { clearInterval(timer); timer = null; }
 		if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+		if (longTimer) { clearTimeout(longTimer); longTimer = null; }
 		draining = false;   // a drain in flight is stale from here on and changes nothing
+		longDraining = false;
+		longNextAt = 0;
 		epoch++;
 		foreground = false;
 		foregroundSlices = 0;

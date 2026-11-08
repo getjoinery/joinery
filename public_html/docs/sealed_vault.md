@@ -1677,12 +1677,13 @@ VaultDeferredWork::register(
     fn(int $user_id) => bool,                                   // cheap, indexed, no decrypt
     fn(int $user_id, VaultKey $key, float $deadline) => int,     // work until the deadline
     ['foreground' => true]                                       // optional: a page may wait on this work
-);
+);                                                               // or ['lane' => 'long']: may wait on a model
 ```
 
 **What starts it.** `assets/js/vault-presence.js` beats `vault_heartbeat`
 every 25s from every signed-in page with an open vault. The beat also reports
-`work_pending`, and the client fires the separate `vault_deferred_work` action
+`work_pending` (slice-lane work) and `long_pending` (long-lane work, below), and
+the client fires the separate `vault_deferred_work` action
 when it is true, chaining while work remains. Drains observe a 10-second quiet
 period after the beacon starts (an unlock, or a page load with the window
 already open): `work_pending` schedules the drain for the end of the period
@@ -1707,19 +1708,43 @@ work remains or the beacon stops, so a row that fails to parse every time costs
 thirty short requests a page and no more. On a hidden page `drainNow()` starts the
 beacon if none is running and changes nothing else.
 
+**Two lanes.** A consumer is in the slice lane, the default, or the long lane
+(`'lane' => 'long'`): work that may block on something outside the site for as
+long as one call takes, a language model. `ai_pipeline` (the AI recipes) is the
+long-lane consumer. The lanes never share a request. `vault_deferred_work` runs
+the slice lane, and with `lane=long` the long lane: one turn per long consumer
+that has work, one pass, no loop. The browser sends long requests on a track of
+its own: one at a time per tab, the same quiet period after the beacon starts,
+15 seconds between one ending and the next starting, a minute's back-off after a
+failure. It keeps going in a hidden tab and stops with the beacon. The slice
+track never waits on it, so a page's foreground run starts at once while a model
+call is in flight, and every slice keeps to its budget. A drain answer's `more`
+is the slice lane's, `long_more` the long lane's. A long consumer cannot be
+foreground, and a foreground long drain is refused.
+
+A model call is never cut off. A long turn ends a slice after it starts, which
+only decides when the consumer stops starting items; the item in flight
+finishes and is saved. A long request runs with no PHP time limit and
+`ignore_user_abort`, so a proxy that stops waiting (Cloudflare answers 524
+after 100 seconds) fails only the browser's wait: the server finishes the call,
+and the browser's long track backs off and picks up from there.
+
 Every drain that answers dispatches `joinery:vault-work-done` on `document` with
 the server's `{done, more}` (`done` maps consumer id to items completed), so the
 page re-reads what the drain made readable. The mail reader does both for
 relay-sealed mail: its list answers `parsing` instead of parsing, it calls
-`drainNow()`, and it refreshes on `done.mailbox_parse`.
+`drainNow()`, and it refreshes on `done.mailbox_parse`. It refreshes on
+`done.ai_pipeline` the same way, since triage files mail into folders.
 
 The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind
 itself while the window it exists to protect lapsed.
 
 **Order and budget.** Consumers run in registration order — the `order` each
-declares in its `vaultConsumer` block, and it is meaningful: mail parsing
-precedes AI judging, because an unparsed message has no fields to read. Each batch is bounded by
+declares in its `vaultConsumer` block. Parsing leads across lanes: a long-lane
+consumer reports no work while any foreground consumer (mail parsing) reports
+work for that user, because an unparsed message has no fields to read and a
+recipe would judge half a backlog. Each slice-lane batch is bounded by
 `vault_deferred_work_slice_seconds` (default 10), shared round-robin so one slow
 consumer cannot starve another. Foreground consumers go first in each pass. A
 foreground consumer's first turn is an equal share; if it completed something it
@@ -1737,7 +1762,9 @@ batch, and retried on the next.
 milliseconds its turns took in that slice, so `ms.mailbox_parse` divided by
 `done.mailbox_parse` is milliseconds per message. A turn that overruns its end by
 more than 2 seconds is logged once per slice as `VaultDeferredWork: consumer X
-overran its turn by N s (user U)`. A consumer whose `has_work` answer takes more
+overran its turn by N s (user U)`. A long-lane turn is never logged this way: it
+runs past its end by one model call by design, and a streamed model call has no
+total cap, only a bound on silence between tokens. Its time is in `ms`. A consumer whose `has_work` answer takes more
 than 250 ms is logged as `VaultDeferredWork: consumer X took N ms to answer whether
 it has work (user U)`: every heartbeat asks the consumers in turn until one says
 yes, so that line names what a slow heartbeat waits on.

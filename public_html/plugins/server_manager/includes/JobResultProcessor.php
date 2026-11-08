@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.125 - process_never_do_check counts the alarm and the review list (NeverDoCheck 1.1)
+ * @version 1.124 - web_workers keeps the pool's request_terminate_seconds; a limit a model call can outlast is in its verdict
  * @version 1.123 - apply_result() keeps the upgrade's warnings (a role step that left the site on postgres), shown on the job page
  * @version 1.122 - process_log_table_tail keeps an event read's event and hours and its larger row count (agent_event_log_filter.md)
  * @version 1.121 - process_never_do_check: the never-do list folded into its node (NeverDoCheck), the job keeping counts only
@@ -3721,7 +3723,7 @@ HTML;
 
 	/**
 	 * A never_do_check job's result (agent 1.106.0): folded into its node by
-	 * NeverDoCheck, which keeps the baseline and what it holds unexplained.
+	 * NeverDoCheck, which keeps the baseline, the alarm and the review list.
 	 * The job keeps only counts, and its output is dropped: it runs every five
 	 * minutes, and what matters is already on the node row.
 	 */
@@ -3733,7 +3735,8 @@ HTML;
 			try {
 				$node = new ManagedNode($node_id, TRUE);
 				$state = NeverDoCheck::record($node, $report, time());
-				$summary['unexplained'] = count($state['unexplained']);
+				$summary['alarm'] = count($state['alarm']);
+				$summary['review'] = count($state['review']);
 				$summary['partial'] = $state['partial'];
 				foreach (NeverDoCheck::INVENTORY as $k) {
 					$summary['counts'][$k] = count($report['inventory'][$k]);
@@ -3877,6 +3880,10 @@ HTML;
 	 * A web_workers job's result (agent 1.93.0): Apache's scoreboard and
 	 * PHP-FPM's pool, numbers held to their shape, and how often the pool hit
 	 * its ceiling in a day. Pure; the processor test drives it.
+	 *
+	 * request_terminate_seconds is the pool's kill timeout (0: none). A limit
+	 * under WEB_WORKERS_MODEL_CALL_SECONDS kills a worker mid model call, a
+	 * paid answer lost (specs/ai_recipes_own_request.md), so the verdict says so.
 	 */
 	public static function sanitise_web_workers($d) {
 		if (!is_array($d) || !array_key_exists('apache', $d) || !array_key_exists('fpm', $d)) {
@@ -3898,7 +3905,7 @@ HTML;
 				'pool'            => substr(preg_replace('/[^A-Za-z0-9._-]/', '', (string)($d['fpm']['pool'] ?? '')), 0, 64),
 				'process_manager' => substr(preg_replace('/[^a-z]/', '', (string)($d['fpm']['process_manager'] ?? '')), 0, 16),
 			];
-			foreach (['active', 'idle', 'total', 'max_active', 'listen_queue', 'max_listen_queue', 'max_children_reached', 'accepted', 'start_since_seconds', 'max_children'] as $k) {
+			foreach (['active', 'idle', 'total', 'max_active', 'listen_queue', 'max_listen_queue', 'max_children_reached', 'accepted', 'start_since_seconds', 'max_children', 'request_terminate_seconds'] as $k) {
 				$fpm[$k] = $nat($d['fpm'][$k] ?? null);
 			}
 		}
@@ -3910,6 +3917,15 @@ HTML;
 		$out['verdict'] = self::web_workers_verdict($out);
 		return $out;
 	}
+
+	/**
+	 * A PHP-FPM kill timeout shorter than this is plainly too short for an AI
+	 * recipe's request. A streamed model call has no total cap (the clients
+	 * bound only the silence between tokens: 120 s for Anthropic, 300 s for a
+	 * local model), so any kill timeout can cut a long call off; one under
+	 * 300 s cuts off ordinary ones, a local model's single pause included.
+	 */
+	const WEB_WORKERS_MODEL_CALL_SECONDS = 300;
 
 	/** One line a person reads first, from a sanitised web_workers result. */
 	public static function web_workers_verdict(array $r) {
@@ -3939,6 +3955,11 @@ HTML;
 		$ev = $r['fpm_max_children_events_24h'] ?? 'unknown';
 		if (is_int($ev) && $ev > 0) {
 			$parts[] = 'PHP hit its ceiling ' . $ev . ' time' . ($ev === 1 ? '' : 's') . ' in the last day';
+		}
+		$term = is_array($fpm) ? ($fpm['request_terminate_seconds'] ?? null) : null;
+		if (is_int($term) && $term > 0 && $term < self::WEB_WORKERS_MODEL_CALL_SECONDS) {
+			$parts[] = 'PHP kills a request after ' . $term . ' s (request_terminate_timeout), which can cut off an AI model call partway; set it to 0 or at least '
+				. self::WEB_WORKERS_MODEL_CALL_SECONDS . ' s';
 		}
 		return ($saturated ? 'Out of workers now. ' : (is_int($ev) && $ev > 0 ? 'Free now, short at times. ' : 'Workers free. '))
 			. implode('; ', $parts) . '.';

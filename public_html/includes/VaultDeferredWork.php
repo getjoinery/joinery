@@ -3,11 +3,11 @@
  * VaultDeferredWork — work that can only run while a user's vault is unlocked
  * (specs/in_window_deferred_work.md).
  *
- * The vault key is held for the browser session, so a CLI
- * process can never hold a window: VaultUnlock::secretKey() returns null under
- * the CLI SAPI by construction. Anything that must read sealed content
- * therefore cannot run from cron — it has to run inside a web request carrying
- * a live window for that user. This class is where that work is scheduled.
+ * The vault key is held for the browser session, so a process with no session
+ * can never hold a window: VaultUnlock::secretKey() returns null for it by
+ * construction. Anything that must read sealed content therefore cannot run
+ * from cron — it has to run inside a web request carrying a live window for
+ * that user. This class is where that work is scheduled.
  *
  * Features register a cheap "is there anything to do?" predicate and a drain
  * callable. The browser's presence beacon reports work_pending on each
@@ -45,6 +45,20 @@
  * more than anyone else. Leads are not fair to each other: while the first keeps
  * progressing, a second foreground consumer waits for it to finish.
  *
+ * § Two lanes. A consumer is in the slice lane (the default) or the long lane
+ * ('lane' => 'long'). Long-lane work may block on something outside the site,
+ * a language model, for as long as one call takes. It never shares a request
+ * with the slice lane: a slice drain runs slice consumers only, and a long
+ * drain runs long consumers only, each in a request of its own, so nothing a
+ * page waits on queues behind a model call. A long drain gives each long
+ * consumer one turn, starts no new item after the slice, and never cuts off
+ * an item in flight: it runs with no PHP time limit and survives the client
+ * going away, so a paid model call always finishes and is saved. Parsing still
+ * leads across lanes: a long consumer reports no work while any foreground
+ * consumer reports work for that user, so a recipe never judges a half-parsed
+ * backlog.
+ *
+ * @version 1.4.0 - two lanes: the long lane runs model work in its own request
  * @version 1.3.0 - a slow has_work answer is logged, naming the consumer
  * @version 1.2.0 - foreground consumers and drains; ms per consumer in each answer; an overrun turn is logged
  * @version 1.1.1 - comment wording: the hardened idle cap
@@ -69,11 +83,14 @@ class VaultDeferredWork {
 	/** A turn this far past its end is logged: it is what a redraw was waiting on. */
 	const OVERRUN_LOG_SECONDS = 2.0;
 
+	const LANE_SLICE = 'slice';
+	const LANE_LONG  = 'long';
+
 	/** A has_work answer slower than this is logged: the heartbeat waits on it. */
 	const SLOW_CHECK_LOG_SECONDS = 0.25;
 
 	/**
-	 * @var array<string, array{has_work: callable, drain: callable, foreground: bool}>
+	 * @var array<string, array{has_work: callable, drain: callable, foreground: bool, lane: string}>
 	 *      Registration order is preserved and is the execution order.
 	 */
 	private static $consumers = array();
@@ -98,12 +115,24 @@ class VaultDeferredWork {
 	 *                            asks that person's rules itself.
 	 * @param array    $options   'foreground' => true marks work a page may be
 	 *                            waiting on (§ A page waiting on a drain).
+	 *                            'lane' => 'long' marks work that may block on a
+	 *                            model (§ Two lanes). A page never waits on the
+	 *                            long lane, so a long consumer cannot be foreground.
 	 */
 	public static function register(string $id, callable $has_work, callable $drain, array $options = array()): void {
+		$lane = $options['lane'] ?? self::LANE_SLICE;
+		if ($lane !== self::LANE_SLICE && $lane !== self::LANE_LONG) {
+			throw new InvalidArgumentException('VaultDeferredWork: consumer ' . $id . ' names an unknown lane: ' . $lane);
+		}
+		$foreground = !empty($options['foreground']);
+		if ($foreground && $lane === self::LANE_LONG) {
+			throw new InvalidArgumentException('VaultDeferredWork: consumer ' . $id . ' cannot be both foreground and long');
+		}
 		self::$consumers[$id] = array(
 			'has_work'   => $has_work,
 			'drain'      => $drain,
-			'foreground' => !empty($options['foreground']),
+			'foreground' => $foreground,
+			'lane'       => $lane,
 		);
 	}
 
@@ -114,18 +143,71 @@ class VaultDeferredWork {
 	 *
 	 * A predicate that throws is treated as "no work" and logged: a broken
 	 * consumer must not be able to break the heartbeat.
+	 *
+	 * Answers for one lane (§ Two lanes). The long lane answers no while any
+	 * foreground consumer has work.
 	 */
-	public static function hasWork(int $user_id): bool {
+	public static function hasWork(int $user_id, string $lane = self::LANE_SLICE): bool {
+		self::assertLane($lane);
 		if ($user_id <= 0) {
 			return false;
 		}
 		self::loadConsumers();
+		$pending = self::pending($user_id, $lane === self::LANE_SLICE, $lane === self::LANE_LONG);
+		return $pending[$lane];
+	}
+
+	/**
+	 * Both lanes' answers in one pass, for the heartbeat: the foreground
+	 * consumers are asked once and their answer serves both lanes.
+	 *
+	 * @return array{slice: bool, long: bool}
+	 */
+	public static function pendingByLane(int $user_id): array {
+		if ($user_id <= 0) {
+			return array(self::LANE_SLICE => false, self::LANE_LONG => false);
+		}
+		self::loadConsumers();
+		$pending = self::pending($user_id, true, true);
+		return array(self::LANE_SLICE => $pending[self::LANE_SLICE], self::LANE_LONG => $pending[self::LANE_LONG]);
+	}
+
+	/**
+	 * The one pass behind hasWork(), pendingByLane() and a drain's answer.
+	 * Foreground consumers are asked first, until one says yes; that answer is
+	 * the slice lane's yes and the long lane's no. Otherwise the rest of the
+	 * lanes asked for are asked in registration order, each until one says yes.
+	 *
+	 * @return array{foreground: bool, slice: bool, long: bool}
+	 */
+	private static function pending(int $user_id, bool $want_slice, bool $want_long): array {
+		$foreground = false;
 		foreach (self::$consumers as $id => $consumer) {
-			if (self::askHasWork($id, $consumer, $user_id)) {
-				return true;
+			if ($consumer['foreground'] && self::askHasWork($id, $consumer, $user_id)) {
+				$foreground = true;
+				break;
 			}
 		}
-		return false;
+		$out = array('foreground' => $foreground, self::LANE_SLICE => $foreground, self::LANE_LONG => false);
+		$lanes = array();
+		if ($want_slice && !$foreground) {
+			$lanes[] = self::LANE_SLICE;
+		}
+		if ($want_long && !$foreground) {
+			$lanes[] = self::LANE_LONG;
+		}
+		foreach ($lanes as $lane) {
+			foreach (self::$consumers as $id => $consumer) {
+				if ($consumer['foreground'] || $consumer['lane'] !== $lane) {
+					continue;
+				}
+				if (self::askHasWork($id, $consumer, $user_id)) {
+					$out[$lane] = true;
+					break;
+				}
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -141,20 +223,36 @@ class VaultDeferredWork {
 	 * FOREGROUND_SLICE_SECONDS. With no foreground work it runs nothing, and the
 	 * answer tells the client to fall back to background pacing.
 	 *
-	 * `ms` maps consumer id to the milliseconds its turns took in this slice.
-	 * `foreground_more` is whether a foreground consumer still reports work.
+	 * A long drain ($lane 'long', § Two lanes) gives each long consumer that has
+	 * work one turn of the slice, and runs nothing else. It cannot be foreground.
 	 *
-	 * @return array{locked: bool, done: array<string,int>, more: bool, foreground_more: bool, ms: array<string,int>}
+	 * `ms` maps consumer id to the milliseconds its turns took in this slice.
+	 * `more` is whether a slice-lane consumer still reports work, `long_more`
+	 * whether a long-lane one does, and `foreground_more` whether a foreground
+	 * consumer does.
+	 *
+	 * @return array{locked: bool, done: array<string,int>, more: bool, long_more: bool, foreground_more: bool, ms: array<string,int>}
 	 */
-	public static function drain(int $user_id, ?string $scope = null, ?float $budget_seconds = null, bool $foreground = false): array {
+	public static function drain(int $user_id, ?string $scope = null, ?float $budget_seconds = null, bool $foreground = false, string $lane = self::LANE_SLICE): array {
+		self::assertLane($lane);
+		if ($foreground && $lane === self::LANE_LONG) {
+			throw new InvalidArgumentException('VaultDeferredWork: a long drain cannot be foreground');
+		}
 		$scope = $scope ?? UserEncryptionVault::SCOPE_USER;
-		$empty = array('locked' => true, 'done' => array(), 'more' => false, 'foreground_more' => false, 'ms' => array());
+		$empty = array('locked' => true, 'done' => array(), 'more' => false, 'long_more' => false, 'foreground_more' => false, 'ms' => array());
 		if ($user_id <= 0) {
 			return $empty;
 		}
 		self::loadConsumers();
 		if (empty(self::$consumers)) {
-			return array('locked' => false, 'done' => array(), 'more' => false, 'foreground_more' => false, 'ms' => array());
+			return array('locked' => false, 'done' => array(), 'more' => false, 'long_more' => false, 'foreground_more' => false, 'ms' => array());
+		}
+		if ($lane === self::LANE_LONG) {
+			// A model call in flight always finishes (§ Two lanes): no PHP time
+			// limit, and a browser that gave up waiting (a proxy's timeout) does
+			// not stop it.
+			ignore_user_abort(true);
+			set_time_limit(0);
 		}
 
 		$budget = $budget_seconds !== null ? $budget_seconds : self::sliceSeconds();
@@ -167,25 +265,43 @@ class VaultDeferredWork {
 		// One suppression wrapper around the whole slice, so nested consumer
 		// reads of secretKey() are covered too.
 		$locked = true;
-		self::withBackgroundWork(function () use ($user_id, $scope, $deadline, $foreground, &$slice, &$locked) {
+		$budget = max(0.1, $budget);
+		self::withBackgroundWork(function () use ($user_id, $scope, $deadline, $budget, $foreground, $lane, &$slice, &$locked) {
 			$key = VaultUnlock::secretKey($user_id, $scope);
 			if ($key === null) {
 				return;   // locked, lapsed, or ended by policy — nothing to do
 			}
 			$locked = false;
-			self::runTurns($user_id, $key, $deadline, $foreground, $slice);
+			if ($lane === self::LANE_LONG) {
+				self::runLongTurns($user_id, $key, $budget, $slice);
+			} else {
+				self::runTurns($user_id, $key, $deadline, $foreground, $slice);
+			}
 		});
 
 		if ($locked) {
 			return $empty;
 		}
+		$pending = self::pending($user_id, true, true);
 		return array(
 			'locked'          => false,
 			'done'            => $slice['done'],
-			'more'            => self::hasWork($user_id),
-			'foreground_more' => !empty(self::activeConsumers($user_id, true)),
+			'more'            => $pending[self::LANE_SLICE],
+			'long_more'       => $pending[self::LANE_LONG],
+			'foreground_more' => $pending['foreground'],
 			'ms'              => array_map('intval', array_map('round', $slice['ms'])),
 		);
+	}
+
+	/**
+	 * A long drain: one pass, one turn per long consumer with work, in
+	 * registration order. Each turn ends a slice after it starts; the consumer
+	 * checks that before each item and finishes the one in flight.
+	 */
+	private static function runLongTurns(int $user_id, VaultKey $key, float $budget, array &$slice): void {
+		foreach (self::activeConsumers($user_id, false, self::LANE_LONG) as $id) {
+			self::runOneTurn($id, $user_id, $key, microtime(true) + $budget, $slice);
+		}
 	}
 
 	/**
@@ -203,7 +319,7 @@ class VaultDeferredWork {
 	private static function runTurns(int $user_id, VaultKey $key, float $deadline, bool $foreground_only, array &$slice): void {
 		$forfeited = array();
 		while (microtime(true) < $deadline) {
-			$active = self::activeConsumers($user_id, $foreground_only);
+			$active = self::activeConsumers($user_id, $foreground_only, self::LANE_SLICE);
 			if (empty($active)) {
 				return;
 			}
@@ -277,7 +393,12 @@ class VaultDeferredWork {
 			$ended = microtime(true);
 			$slice['ms'][$id] = ($slice['ms'][$id] ?? 0) + ($ended - $started) * 1000;
 			$overrun = $ended - $turn_end;
-			if ($overrun > self::OVERRUN_LOG_SECONDS && empty($slice['overran'][$id])) {
+			// A long turn runs past its end by one model call by design, and a
+			// streamed call has no total cap (only a bound on silence between
+			// tokens), so there is no number past which it is wrong: the long
+			// lane is not overrun-logged. Its time is in the answer's ms.
+			if (self::$consumers[$id]['lane'] === self::LANE_SLICE
+					&& $overrun > self::OVERRUN_LOG_SECONDS && empty($slice['overran'][$id])) {
 				$slice['overran'][$id] = true;
 				error_log('VaultDeferredWork: consumer ' . $id . ' overran its turn by '
 					. round($overrun, 1) . ' s (user ' . $user_id . ')');
@@ -286,10 +407,19 @@ class VaultDeferredWork {
 		}
 	}
 
-	/** Consumer ids reporting work, in registration order. */
-	private static function activeConsumers(int $user_id, bool $foreground_only = false): array {
+	/**
+	 * Consumer ids in one lane reporting work, in registration order. The long
+	 * lane reports none while a foreground consumer has work (§ Two lanes).
+	 */
+	private static function activeConsumers(int $user_id, bool $foreground_only, string $lane): array {
+		if ($lane === self::LANE_LONG && self::pending($user_id, false, false)['foreground']) {
+			return array();
+		}
 		$active = array();
 		foreach (self::$consumers as $id => $consumer) {
+			if ($consumer['lane'] !== $lane) {
+				continue;
+			}
 			if ($foreground_only && !$consumer['foreground']) {
 				continue;
 			}
@@ -337,6 +467,12 @@ class VaultDeferredWork {
 		} finally {
 			self::$in_background_work = $was;
 			VaultUnlock::setActivitySuppressed($was);
+		}
+	}
+
+	private static function assertLane(string $lane): void {
+		if ($lane !== self::LANE_SLICE && $lane !== self::LANE_LONG) {
+			throw new InvalidArgumentException('VaultDeferredWork: unknown lane ' . $lane);
 		}
 	}
 

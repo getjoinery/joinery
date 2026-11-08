@@ -43,8 +43,8 @@ jv() {
 R="$T/root"
 mkdir -p "$R/etc/apache2/conf-enabled" "$R/etc/php/8.3/fpm/pool.d" "$R/etc/php/8.1/fpm/pool.d" "$R/var/log" "$T/bin"
 touch "$R/etc/apache2/conf-enabled/php8.3-fpm.conf"
-printf '[www]\npm = ondemand\npm.max_children = 5\n' > "$R/etc/php/8.3/fpm/pool.d/www.conf"
-printf '[global]\nprocess_control_timeout = 10s\n[www]\npm.max_children = 9\n[other]\npm.max_children = 40\n' > "$R/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf"
+printf '[www]\npm = ondemand\npm.max_children = 5\nrequest_terminate_timeout = 30\n' > "$R/etc/php/8.3/fpm/pool.d/www.conf"
+printf '[global]\nprocess_control_timeout = 10s\n[www]\npm.max_children = 9\nrequest_terminate_timeout = 2m ; two minutes\n[other]\npm.max_children = 40\nrequest_terminate_timeout = 5\n' > "$R/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf"
 printf '[www]\npm.max_children = 77\n' > "$R/etc/php/8.1/fpm/pool.d/www.conf"
 now=$(date +'%d-%b-%Y %H:%M:%S'); old=$(date -d '30 hours ago' +'%d-%b-%Y %H:%M:%S')
 printf '[%s] WARNING: [pool www] server reached pm.max_children setting (5), consider raising it\n' "$old" > "$R/var/log/php8.3-fpm.log.1"
@@ -76,6 +76,7 @@ chk "Apache's busy and idle" "$(jv "$T/site.json" apache.busy)/$(jv "$T/site.jso
 chk "the scoreboard by state" "$(jv "$T/site.json" apache.scoreboard.writing)/$(jv "$T/site.json" apache.scoreboard.reading)/$(jv "$T/site.json" apache.scoreboard.keepalive)/$(jv "$T/site.json" apache.scoreboard.open_slot)" "2/2/2/2"
 chk "PHP-FPM's pool numbers" "$(jv "$T/site.json" fpm.active)/$(jv "$T/site.json" fpm.listen_queue)/$(jv "$T/site.json" fpm.max_children_reached)/$(jv "$T/site.json" fpm.process_manager)" "9/4/3/ondemand"
 chk "the ceiling from the active version's pool files, [www], last file wins" "$(jv "$T/site.json" fpm.max_children)" "9"
+chk "the kill timeout from the same files, [www], last file wins, in seconds" "$(jv "$T/site.json" fpm.request_terminate_seconds)" "120"
 chk "nothing but the named numbers passes: no request URI" "$(grep -c -E 'LEAK|request uri|secret' "$T/site.json")" "0"
 chk "ceiling reached in the last day, from the log and its rotation" "$(jv "$T/site.json" fpm_max_children_events_24h)" "2"
 chk "only the site's own name, pinned to loopback" "$(grep -c -v -- '--resolve mysite.example:[0-9]*:127.0.0.1' "$T/curl.log")" "0"
@@ -84,7 +85,7 @@ chk "never ?full" "$(grep -c 'full' "$T/curl.log")" "0"
 echo "=== Under mawk ==="
 ln -s "$(command -v mawk || command -v awk)" "$T/bin/awk"
 PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" mysite.example > "$T/mawk.json" 2>/dev/null
-chk "the same answer with mawk as awk" "$(jv "$T/mawk.json" apache.busy)/$(jv "$T/mawk.json" fpm.max_children)/$(jv "$T/mawk.json" fpm_max_children_events_24h)" "7/9/2"
+chk "the same answer with mawk as awk" "$(jv "$T/mawk.json" apache.busy)/$(jv "$T/mawk.json" fpm.max_children)/$(jv "$T/mawk.json" fpm.request_terminate_seconds)/$(jv "$T/mawk.json" fpm_max_children_events_24h)" "7/9/120/2"
 rm -f "$T/bin/awk"
 
 if [ "$(id -u)" != 0 ]; then

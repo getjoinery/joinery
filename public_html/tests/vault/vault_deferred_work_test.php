@@ -272,6 +272,123 @@ $res = VaultDeferredWork::drain($uid, $scope, 1.0);
 check($res['locked'] === true, 'once the cap is exceeded a drain reports locked');
 check(!VaultUnlock::isOpen($uid), 'and the window really ended');
 
+section('A slice drain never runs a long consumer');
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+VaultDeferredWork::resetForTests();
+list($s_slice) = fake_consumer('t_s_slice', 2);
+list($s_long) = fake_consumer('t_s_long', 2, 0.0, false, array('lane' => 'long'));
+$res = VaultDeferredWork::drain($uid, $scope, 1.0);
+check($s_slice['done'] === 2, 'the slice consumer ran');
+check($s_long['turns'] === 0, 'the long consumer was not given a turn');
+check($res['more'] === false, 'more answers for the slice lane only');
+check($res['long_more'] === true, 'long_more says the long lane still has work');
+
+section('A long drain runs only long consumers, one turn each');
+$res = VaultDeferredWork::drain($uid, $scope, 1.0, false, 'long');
+check($s_long['turns'] === 1 && $s_long['done'] === 2, 'the long consumer had one turn and finished');
+check(($res['done']['t_s_long'] ?? 0) === 2, 'the tally reports it');
+check($res['long_more'] === false && $res['more'] === false, 'and neither lane has work left');
+VaultDeferredWork::resetForTests();
+list($l_slice) = fake_consumer('t_l_slice', 3);
+list($l_long) = fake_consumer('t_l_long', 1000, 0.01, false, array('lane' => 'long'));
+$started = microtime(true);
+$res = VaultDeferredWork::drain($uid, $scope, 0.3, false, 'long');
+$elapsed = microtime(true) - $started;
+check($l_slice['turns'] === 0, 'a long drain never runs a slice consumer');
+check($l_long['turns'] === 1, 'a long drain is one pass, not a loop (' . $l_long['turns'] . ' turns)');
+check($elapsed < 1.0 && $l_long['remaining'] > 0, 'the turn stops starting items at the slice end (' . round($elapsed, 2) . 's)');
+check($res['more'] === true && $res['long_more'] === true, 'both lanes still report their work');
+
+section('Each lane answers hasWork for itself');
+check(VaultDeferredWork::hasWork($uid) === true, 'the slice lane has work');
+check(VaultDeferredWork::hasWork($uid, 'long') === true, 'the long lane has work');
+$p = VaultDeferredWork::pendingByLane($uid);
+check($p['slice'] === true && $p['long'] === true, 'pendingByLane answers both');
+VaultDeferredWork::resetForTests();
+list($o_long) = fake_consumer('t_o_long', 1, 0.0, false, array('lane' => 'long'));
+check(VaultDeferredWork::hasWork($uid) === false, 'a long consumer alone is no slice work');
+check(VaultDeferredWork::hasWork($uid, 'long') === true, 'but it is long work');
+
+section('Parsing leads: a long consumer waits for foreground work');
+VaultDeferredWork::resetForTests();
+list($pl_parse) = fake_consumer('t_pl_parse', 2, 0.0, false, array('foreground' => true));
+list($pl_plain) = fake_consumer('t_pl_plain', 2);
+list($pl_long) = fake_consumer('t_pl_long', 2, 0.0, false, array('lane' => 'long'));
+check(VaultDeferredWork::hasWork($uid, 'long') === false, 'the long lane reports no work while foreground work waits');
+$p = VaultDeferredWork::pendingByLane($uid);
+check($p['slice'] === true && $p['long'] === false, 'pendingByLane agrees');
+$res = VaultDeferredWork::drain($uid, $scope, 1.0, false, 'long');
+check($pl_long['turns'] === 0, 'a long drain runs nothing while foreground work waits');
+check($res['foreground_more'] === true && $res['long_more'] === false, 'and its answer says why');
+VaultDeferredWork::drain($uid, $scope, 1.0, true);
+check($pl_parse['remaining'] === 0, 'once the foreground work is done');
+check(VaultDeferredWork::hasWork($uid, 'long') === true, 'the long lane has work again');
+check($pl_plain['remaining'] === 2 && VaultDeferredWork::hasWork($uid, 'long') === true,
+	'an ordinary slice consumer with work does not hold the long lane off');
+
+section('Lanes are checked');
+$refused = 0;
+try { VaultDeferredWork::register('t_bad', function () { return false; }, function () { return 0; }, array('lane' => 'other')); }
+catch (InvalidArgumentException $e) { $refused++; }
+try { VaultDeferredWork::register('t_bad2', function () { return false; }, function () { return 0; }, array('lane' => 'long', 'foreground' => true)); }
+catch (InvalidArgumentException $e) { $refused++; }
+try { VaultDeferredWork::drain($uid, $scope, 1.0, true, 'long'); }
+catch (InvalidArgumentException $e) { $refused++; }
+check($refused === 3, 'an unknown lane, a foreground long consumer and a foreground long drain are refused');
+
+section('A long turn past its slice is not an overrun, a slice turn is');
+VaultDeferredWork::resetForTests();
+VaultDeferredWork::register('t_ov_slice',
+	function () { static $n = 0; return $n++ < 1; },
+	function (int $u, VaultKey $k, float $d): int { usleep(2600000); return 1; });
+VaultDeferredWork::register('t_ov_long',
+	function () { static $n = 0; return $n++ < 2; },
+	function (int $u, VaultKey $k, float $d): int { usleep(2600000); return 1; },
+	array('lane' => 'long'));
+$ov_log = tempnam(sys_get_temp_dir(), 'vdw_ov_');
+harness_defer(function () use ($ov_log) { @unlink($ov_log); });
+$previous_log = ini_set('error_log', $ov_log);
+try {
+	VaultDeferredWork::drain($uid, $scope, 0.2);
+	VaultDeferredWork::drain($uid, $scope, 0.2, false, 'long');
+} finally {
+	ini_set('error_log', $previous_log);
+}
+$logged = (string)file_get_contents($ov_log);
+check(strpos($logged, 'consumer t_ov_slice overran') !== false, 'the slice turn is logged');
+check(strpos($logged, 't_ov_long') === false, 'the long turn, a model call long, is not');
+
+section('The heartbeat answers each lane');
+require_once(PathHelper::getIncludePath('logic/vault_heartbeat_logic.php'));
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
+$hb_session = SessionControl::get_instance();
+$hb_session->set_api_user($uid);
+harness_defer(function () use ($hb_session) { $hb_session->clear_api_user(); });
+VaultDeferredWork::resetForTests();
+list($hb_long) = fake_consumer('t_hb_long', 1, 0.0, false, array('lane' => 'long'));
+$hb = vault_heartbeat_logic(array());
+check(!$hb->error && $hb->data['alive'] === true, 'the beat finds the window open', (string)$hb->error);
+check($hb->data['work_pending'] === false && $hb->data['long_pending'] === true,
+	'long work alone is long_pending, not work_pending', json_encode($hb->data));
+list($hb_parse) = fake_consumer('t_hb_parse', 1, 0.0, false, array('foreground' => true));
+$hb = vault_heartbeat_logic(array());
+check($hb->data['work_pending'] === true && $hb->data['long_pending'] === false,
+	'foreground work is work_pending and holds long_pending off', json_encode($hb->data));
+$hb_session->clear_api_user();
+
+section('A long drain is not user activity');
+VaultDeferredWork::resetForTests();
+list($la) = fake_consumer('t_la', 2, 0.0, false, array('lane' => 'long'));
+vault_fixture_open_window($uid, $secret, $scope, ['idle' => 600, 'absolute' => null]);
+$aged = time() - 500;
+$meta = vault_store_get($meta_key);
+$meta['content'] = $aged;
+vault_store_put($meta_key, $meta);
+VaultDeferredWork::drain($uid, $scope, 1.0, false, 'long');
+check($la['done'] === 2, 'the long drain read the key and did its work');
+$meta = vault_store_get($meta_key);
+check((int)$meta['content'] === $aged, 'and did NOT refresh the idle clock');
+
 section('Suppression is scoped and restored');
 vault_fixture_open_window($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
 check(!VaultUnlock::isActivitySuppressed(), 'suppression is off outside a drain');

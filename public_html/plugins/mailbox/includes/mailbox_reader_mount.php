@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.32.0 - the AI catch-up button drains the long lane, where AI work runs
  * @version 1.31.0 - openMessage: the conversation a ?open=N link asks the reader to open
  * @version 1.30.0 - messageActions: the buttons other plugins declare (MailboxMessageActions)
  * @version 1.29.0 - contactsPageUrl: the contacts pane's pencils open the Contacts page
@@ -527,8 +528,13 @@ function mailbox_reader_emit_unseal_convergence(): void {
  * session or two — this prompt exists for the case where someone comes back to
  * a pile, and appears only then.
  *
- * The button runs the same deferred-work drain the background batches run,
- * under the same advisory lock, just repeatedly and with the count visible.
+ * The button runs the same deferred-work drains the background batches run,
+ * under the same advisory locks, just repeatedly and with the count visible.
+ * AI work is the long lane, and it waits while mail is still to be parsed, so
+ * a pass that the server says is held by parsing runs a slice drain instead
+ * (foreground while the answer says foreground_more). A pass that completes
+ * nothing (another tab holds the lock, mid model call) waits a few seconds;
+ * after a run of those it stops and says so rather than spin.
  *
  * joinery_ai is looked up defensively: mail works perfectly well with the AI
  * plugin absent or inactive, and the dependency only ever points
@@ -572,21 +578,36 @@ function mailbox_reader_emit_ai_catchup(): void {
 	if (!box) { return; }
 	var btn = box.querySelector('.mbx-catchup-btn');
 	var out = box.querySelector('.mbx-catchup-progress');
-	var done = 0, running = false;
+	var done = 0, running = false, idlePasses = 0;
+	var IDLE_WAIT_MS = 5000, IDLE_MAX = 24;   // about two minutes of passes that finish nothing
+	var input = { lane: 'long' };
 
 	function pass() {
-		joineryApi.post('vault_deferred_work', {}).then(function (d) {
+		joineryApi.post('vault_deferred_work', input).then(function (d) {
 			d = d || {};
 			if (d.locked) {
 				out.textContent = 'Unlock your vault to continue.';
 				stop();
 				return;
 			}
-			Object.keys(d.done || {}).forEach(function (k) { done += d.done[k]; });
+			var did = 0;
+			Object.keys(d.done || {}).forEach(function (k) { did += d.done[k]; });
+			done += did;
 			out.textContent = done ? ('Processed ' + done + '\u2026') : 'Working\u2026';
-			if (d.more) { pass(); return; }
-			out.textContent = 'All caught up.';
-			stop();
+			if (!d.long_more && !d.more) {
+				out.textContent = 'All caught up.';
+				stop();
+				return;
+			}
+			// AI work first; while parsing holds it off, parse.
+			input = d.long_more ? { lane: 'long' } : (d.foreground_more ? { foreground: 1 } : {});
+			if (did > 0) { idlePasses = 0; pass(); return; }
+			if (++idlePasses >= IDLE_MAX) {
+				out.textContent = 'Nothing more could be done right now \u2014 try again later.';
+				stop();
+				return;
+			}
+			setTimeout(pass, IDLE_WAIT_MS);
 		}).catch(function () {
 			out.textContent = 'Stopped \u2014 try again.';
 			stop();
@@ -602,6 +623,8 @@ function mailbox_reader_emit_ai_catchup(): void {
 	btn.addEventListener('click', function () {
 		if (running) { return; }
 		running = true;
+		idlePasses = 0;
+		input = { lane: 'long' };
 		btn.disabled = true;
 		btn.textContent = 'Working';
 		out.textContent = 'Working\u2026';
