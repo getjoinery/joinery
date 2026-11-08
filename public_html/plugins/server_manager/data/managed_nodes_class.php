@@ -204,9 +204,9 @@ class ManagedNode extends SystemBase {
 		// site, host_report is the machine, and the shapes stay apart.
 		'mgn_last_host_report'      => array('type'=>'jsonb'),
 		'mgn_last_host_report_time' => array('type'=>'timestamp(6)'),
-		// The never-do check (NeverDoCheck): the machine's accepted lists, the
-		// items held unexplained until a person accepts them, and when it last
-		// answered. Kept here, never on the machine, so a machine's attacker
+		// The never-do check (NeverDoCheck): the machine's expected lists, the
+		// alarm held until a person marks it safe, the review list, and when it
+		// last answered. Kept here, never on the machine, so a machine's attacker
 		// cannot rewrite what it used to be.
 		'mgn_never_do'              => array('type'=>'jsonb'),
 		'mgn_never_do_time'         => array('type'=>'timestamp(6)'),

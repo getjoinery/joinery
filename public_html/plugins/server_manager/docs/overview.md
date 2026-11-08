@@ -639,19 +639,19 @@ Some things have no legitimate source on a machine Joinery runs. Every five minu
 
 What it finds:
 
-- setuid and setgid programs no package installed, sorted into setuid-root ones and the rest (setgid, or setuid to an account other than root), and packaged ones whose bytes changed since. Each is a path and the first 16 hex of its sha256. A program inside a directory that holds a whole root filesystem of its own (its own `etc/passwd` and `usr/bin`: a copied image, a build tree) is left out wherever it is, and the container engines' storage and the site engine's build tree are never walked. The parser jail's launcher counts as ours only while its bytes match the prebuilt jail binary a signed site tree on the machine ships.
+- setuid and setgid programs no package installed, sorted into setuid-root ones, the rest (setgid, or setuid to an account other than root), and those inside a directory that holds a whole root filesystem of its own (a copied image, a build tree: an `etc/passwd` with a root line, a `usr/bin` and a shell; never a top-level directory or `/usr/local`); and packaged ones whose bytes changed since. A program at a packaged path with no recorded checksum counts as no package's. Each is a path and the first 16 hex of its sha256 (the path alone when it cannot be read). The container engines' storage and the site engine's build tree are never walked; storage an engine's own configuration names is skipped only outside the system's own trees (`/usr`, `/etc`, the top-level directories), and those configuration files are in the startup list. The parser jail's launcher counts as ours only while its bytes match the prebuilt jail binary a signed site tree on the machine ships.
 - accounts other than root with uid 0
 - a kernel tainted by a forced, out-of-tree or unsigned module
 - programs running from `/tmp`, `/var/tmp`, `/dev/shm` or from memory, or an interpreter running a script from one of those
 - root programs whose file is gone
-- each library in `/etc/ld.so.preload`, as one a package installed with its bytes intact, or not
+- each library in `/etc/ld.so.preload`, with `$LIB` and `$PLATFORM` expanded, as one a package installed with its bytes intact, one that is not, or a name that is not there. An entry carrying any other `$` token counts as not packaged, since it cannot be checked.
 
 The inventory:
 
 - the SSH keys in every account's `authorized_keys`, as fingerprints
 - the accounts that can log in
 - the sudoers files
-- the unit and cron files no package installed, each as a path and a hash, with enabled-unit links as their target
+- the unit and cron files no package installed, each as a path and a hash, with enabled-unit links as their target, and the container engines' configuration files, packaged or not
 - the listening TCP ports, with the program that holds each. A port in the kernel's ephemeral range reads `eph`.
 - the inode and size of the login logs: `wtmp`, `btmp`, `lastlog` and `auth.log`
 
@@ -666,20 +666,20 @@ Nothing travels but paths, fingerprints, hashes, uids, ports and sizes: no key c
 - an account other than root with uid 0
 - a library no package installed in `/etc/ld.so.preload`
 
-No job excuses an alarm item. It is held when two checks in a row (about five minutes apart) report it: a package upgrade replaces a file and its checksum list in separate steps, and a check landing between them sees one without the other. A run whose setuid walk ran out of time does not count as a check that missed it. What is held stays held until a person marks it safe, even when a later report no longer shows it: an attacker who removes what they added does not remove the record of it. While anything is held, the `plane:never_do` incident is open (critical).
+No job excuses an alarm item. It is held when two checks in a row (about five minutes apart) report it: a package upgrade replaces a file and its checksum list in separate steps, and a check landing between them sees one without the other. A run whose setuid walk ran out of time does not count as a check that missed it. The alarm's lists keep up to 200 items on the machine; a list cut there counts as a run that could not see everything, and the Security box says so. A held file whose content changes takes its current hash. What is held stays held until a person marks it safe, even when a later report no longer shows it: an attacker who removes what they added does not remove the record of it. While anything is held, the `plane:never_do` incident is open (critical).
 
 **Mark safe** (superadmin, behind a confirm) is for something you made yourself, such as a setuid program you built. Each item is remembered by path and content hash, so the same file stays quiet in every later check and a change to its content alarms again. Mark safe clears the incident; what was marked is written to the error log with the person's id. Anything held after that opens a new incident and alerts, even within the hour and even if the cleared one was set to Ignored: the source is an `IncidentSourceEveryOccurrenceNew`, which the reconciler never reopens.
 
 **Changes to review** is everything else the check sees, each of which can happen in ordinary operation, and it raises no incident and no alert:
 
-- other setuid or setgid programs no package installed
+- other setuid or setgid programs no package installed, and setuid programs inside a copied root filesystem (one row per program, taking its current hash)
 - a tainted kernel (a DKMS driver from apt)
 - a program in a scratch directory (an installer) and a root program whose file is gone (a package removed while its service runs), unless a machine-changing job's window covers them
 - a packaged library in `/etc/ld.so.preload`, or a name there that is not on the machine
 - a login log that kept its inode and got shorter (an operator emptying `btmp`)
 - every inventory change: the first complete report is the baseline, and a later item not in it is listed unless this management node's own job history explains it, by a machine-changing job (an upgrade, an installer, a site placement, a restart; `NeverDoCheck::EXPLAINING_TYPES`) running on the node or finished within the last 30 minutes, in which case it is taken into the baseline. A changed file reads as a new item. A run that could not read everything (not root) neither lists nor teaches. A list the script cut keeps what it could not show.
 
-**Clear** (superadmin, behind a confirm) empties the list and makes the machine's last report what is expected; a finding that stays, such as a taint, is not listed again until it goes and comes back. What was cleared is written to the error log with the person's id.
+**Clear** (superadmin, behind a confirm) empties the list and makes the machine's last report what is expected; a finding that stays, such as a taint, is not listed again until it goes and comes back, whether or not a job's window covers it in between. What was cleared is written to the error log with the person's id.
 
 The node page's **Security** box, under **Security sentinel**, shows the alarm with its Mark safe and Changes to review with its Clear, each item with when it was first seen, and what the machine is expected to have. The incident's own page carries the alarm and its Mark safe, since resolving the incident does not clear it. Each job keeps only counts, and its output is dropped. Its completed runs are left out of job lists (the node page's Recent jobs, its Jobs tab, the Jobs page and the dashboard) unless **never do check** is picked as the type; a failed run still shows.
 

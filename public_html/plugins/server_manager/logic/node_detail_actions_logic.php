@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.89 - never_do_accept marks only the alarm safe, remembered by path and content; never_do_clear clears
+ *                 the review list (specs/never_do_false_alarms.md)
  * @version 1.88 - log_table_tail passes event and hours (the Vault windows button, agent_event_log_filter.md)
  * @version 1.87 - never_do_accept says Marked safe
  * @version 1.86 - never_do_accept: the never-do check's held changes accepted as the person's own (level 10)
@@ -221,6 +223,7 @@ class NodeDetailActions {
 		'reboot_machine'           => 'overview',
 		'disable_root_login'       => 'overview',
 		'never_do_accept'          => 'overview',
+		'never_do_clear'           => 'overview',
 		'reset_failed_unit'        => 'overview',
 		'restart_unit'             => 'overview',
 		'move_to_plane'            => 'api_keys',
@@ -669,22 +672,43 @@ class NodeDetailActions {
 			}
 
 			case 'never_do_accept': {
-				// A person says every change the never-do check holds is theirs
-				// (NeverDoCheck). Recorded with their name, and what was
-				// accepted goes to the error log so it outlives the state.
+				// A person says everything the never-do alarm holds is theirs
+				// (NeverDoCheck). Each item is remembered by path and content;
+				// recorded with their name, and what was accepted goes to the
+				// error log so it outlives the state.
 				$nd = NeverDoCheck::state($node);
-				if (!$nd || empty($nd['unexplained'])) {
-					self::fail($session, $page_regex, 'The security sentinel holds nothing on this machine.');
+				if (!$nd || empty($nd['alarm'])) {
+					self::fail($session, $page_regex, 'The security sentinel\'s alarm holds nothing on this machine.');
 					return $base_url;
 				}
-				foreach ($nd['unexplained'] as $u) {
-					error_log('[NeverDoCheck] node ' . (int)$node->key . ' accepted by user ' . (int)$uid . ': ' . NeverDoCheck::describe($u));
+				foreach ($nd['alarm'] as $u) {
+					error_log('[NeverDoCheck] node ' . (int)$node->key . ' marked safe by user ' . (int)$uid . ': ' . NeverDoCheck::describe($u));
 				}
 				$node->set('mgn_never_do', json_encode(NeverDoCheck::accept($nd, (int)$uid, time())));
 				$node->save();
 				$session->save_message(new DisplayMessage(
-					'Marked safe, with your name. The machine\'s lists as it last reported them are what is expected now; the incident clears on the next pass.',
+					'Marked safe, with your name. Each of these stays quiet until its content changes; the incident clears on the next pass.',
 					'Marked safe', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
+			}
+
+			case 'never_do_clear': {
+				// The never-do review list looked at (NeverDoCheck): what the
+				// machine last showed becomes what is expected. It raises
+				// nothing, but what was cleared goes to the error log too.
+				$nd = NeverDoCheck::state($node);
+				if (!$nd || empty($nd['review'])) {
+					self::fail($session, $page_regex, 'There is nothing to review on this machine.');
+					return $base_url;
+				}
+				foreach ($nd['review'] as $u) {
+					error_log('[NeverDoCheck] node ' . (int)$node->key . ' review cleared by user ' . (int)$uid . ': ' . NeverDoCheck::describe($u));
+				}
+				$node->set('mgn_never_do', json_encode(NeverDoCheck::clear($nd, (int)$uid, time())));
+				$node->save();
+				$session->save_message(new DisplayMessage(
+					'Cleared, with your name. The machine\'s lists as it last reported them are what is expected now.',
+					'Cleared', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 				return $base_url;
 			}
 

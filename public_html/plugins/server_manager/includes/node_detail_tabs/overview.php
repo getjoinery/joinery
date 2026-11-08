@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.99 - the never-do box shows the alarm (Mark safe) and Changes to review (Clear) apart
  * @version 1.98 - the never-do box reads Security sentinel: suspicious activity, its button Mark safe (not red)
  * @version 1.97 - Recent jobs leaves out completed routine never-do checks
  * @version 1.96 - a node being deleted reads "Being deleted", not "Switched off by its owner"
@@ -229,6 +230,7 @@
 <?php foreach (['nodeActionRebootMachine' => 'reboot_machine',
 	'nodeActionDisableRootLogin' => 'disable_root_login',
 	'nodeActionNeverDoAccept' => 'never_do_accept',
+	'nodeActionNeverDoClear' => 'never_do_clear',
 	'nodeActionInstallSecurityUpdates' => 'install_security_updates',
 	'nodeActionRefreshSiteContainers' => 'refresh_site_containers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -2428,38 +2430,57 @@
 		}
 		echo '</div></div>';
 
-		// The never-do list (NeverDoCheck, specs/node_unexplained_root.md § 5.1):
-		// what has no legitimate source here, and what changed that no job of
-		// this plane explains. Held until a person accepts it.
+		// The never-do list (NeverDoCheck, specs/node_unexplained_root.md § 5.1,
+		// specs/never_do_false_alarms.md): the alarm, what nothing legitimate puts
+		// on a machine, held until a person marks it safe; and the review list,
+		// what can happen in ordinary operation, which raises nothing.
 		if (JobCommandBuilder::has_primitive($node, 'never_do_check')) {
 			$nd = NeverDoCheck::state($node);
 			echo '<div class="svm-span-all"><div class="border rounded p-3 h-100">';
-			echo '<div class="text-muted small text-uppercase mb-2">Security sentinel: suspicious activity</div>';
+			echo '<div class="text-muted small text-uppercase mb-2">Security sentinel</div>';
 			if ($nd === null) {
 				echo '<div class="text-muted">Not checked yet: the machine is asked every five minutes.</div>';
 			} else {
-				$nd_held = is_array($nd['unexplained'] ?? null) ? $nd['unexplained'] : array();
+				$nd_alarm = $nd['alarm'];
+				$nd_review = $nd['review'];
 				$nd_at = (int)($nd['checked_at'] ?? 0);
-				if ($nd_held) {
-					$sec_tone = 'bad';
-					$sec_bits[] = count($nd_held) . ' unexplained change' . (count($nd_held) === 1 ? '' : 's') . ' on the machine';
-					echo '<div class="text-danger"><strong>' . count($nd_held) . ' unexplained</strong>: nothing on a machine Joinery runs does this, '
-						. 'and no job of this management node ran when it appeared.</div>';
+				$nd_list = function (array $items) {
 					echo '<ul class="small mt-2 mb-2">';
-					foreach ($nd_held as $u) {
+					foreach ($items as $u) {
 						echo '<li>' . htmlspecialchars(NeverDoCheck::describe($u)) . ' <span class="text-muted">(first seen '
 							. htmlspecialchars(gmdate('Y-m-d H:i', (int)$u['seen'])) . ' UTC)</span></li>';
 					}
 					echo '</ul>';
-					$nd_ask = 'Mark these as safe? Only if you, or a job you ran, made every one of these changes, or they are a known false alarm. '
-						. 'The machine\'s lists as it last reported them become what is expected, and the incident clears. '
+				};
+				if ($nd_alarm) {
+					$sec_tone = 'bad';
+					$sec_bits[] = 'security alarm: ' . count($nd_alarm) . ' item' . (count($nd_alarm) === 1 ? '' : 's');
+					echo '<div class="text-danger"><strong>Alarm: ' . count($nd_alarm) . ' item' . (count($nd_alarm) === 1 ? '' : 's')
+						. '</strong>. Nothing Joinery, Ubuntu\'s own packages or a normal operator does puts this on a machine, '
+						. 'and two checks in a row saw it.</div>';
+					$nd_list($nd_alarm);
+					$nd_ask = 'Mark these as safe? Only if you made every one of them yourself (a setuid program you built, say). '
+						. 'Each stays quiet until its content changes, and the incident clears. '
 						. 'If you did not make them, do not mark them safe: treat the machine as broken into.';
 					echo '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 svm-fs-075"'
 						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
 						. ', function(){ document.getElementById(\'nodeActionNeverDoAccept\').submit(); })">Mark safe</button>';
 				} else {
-					echo '<div>Nothing unexplained.</div>';
+					echo '<div>No alarm.</div>';
 				}
+				echo '<div class="mt-3"><strong>Changes to review</strong>';
+				if ($nd_review) {
+					$sec_bits[] = count($nd_review) . ' change' . (count($nd_review) === 1 ? '' : 's') . ' to review';
+					echo ' <span class="text-muted small">(' . count($nd_review) . '; these can happen in ordinary operation, so they raise no incident)</span>';
+					$nd_list($nd_review);
+					$nd_clear = 'Clear the list? What the machine last reported becomes what is expected. Clear it once you know where each change came from.';
+					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_clear), ENT_QUOTES, 'UTF-8')
+						. ', function(){ document.getElementById(\'nodeActionNeverDoClear\').submit(); })">Clear</button>';
+				} else {
+					echo '<span class="text-muted small">: nothing.</span>';
+				}
+				echo '</div>';
 				$nd_base = is_array($nd['baseline'] ?? null) ? $nd['baseline'] : array();
 				$nd_counts = array();
 				foreach (array('ssh_keys' => 'SSH keys', 'accounts' => 'login accounts', 'sudoers' => 'sudoers files',
@@ -2470,6 +2491,10 @@
 					. '. Checked ' . ($nd_at ? htmlspecialchars(gmdate('Y-m-d H:i', $nd_at)) . ' UTC' : 'never')
 					. (!empty($nd['partial']) ? '; the last check could not read everything, so its lists were not compared' : '')
 					. (!empty($nd['accepted_at']) ? '; last marked safe ' . htmlspecialchars(gmdate('Y-m-d H:i', (int)$nd['accepted_at'])) . ' UTC' : '')
+					. (!empty($nd['cleared_at']) ? '; last cleared ' . htmlspecialchars(gmdate('Y-m-d H:i', (int)$nd['cleared_at'])) . ' UTC' : '')
+					. ((int)($nd['format'] ?? 2) < 2 ? '; this machine\'s release reports setgid programs and ld.so.preload as alarms, until it upgrades' : '')
+					. (array_intersect(NeverDoCheck::ALARM_LISTS, (array)($nd['truncated'] ?? array()))
+						? '; the machine cut an alarm list at ' . NeverDoCheck::MAX_ALARM . ' items, so some may not be shown' : '')
 					. '.</div>';
 			}
 			echo '</div></div>';

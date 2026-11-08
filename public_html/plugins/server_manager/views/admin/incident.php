@@ -14,6 +14,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.5 - the never-do box holds only the alarm; Mark safe remembers each file by its content
  * @version 1.4 - a never-do incident carries its own Mark safe (Security sentinel: suspicious activity), the one thing that clears it
  * @version 1.3 - the triage reads as a fix waiting for its proof when resolved and still happening; help names Reopen
  * @version 1.2 - Resolve asks what fixed it in a modal; the answer is a note on the timeline
@@ -126,21 +127,21 @@ echo '<p class="small text-muted mt-2 mb-0">Resolve when it is dealt with, or wh
 	. 'from anyone; the next time it happens is news again. A snooze puts it back in Needs you when it ends. Reopen puts it back now.</p>';
 $page->end_box();
 
-// ── A never-do incident clears only when a person accepts what it holds ──
-// (NeverDoCheck): the same Accept as the node page's Security box, here,
+// ── A never-do incident clears only when a person marks its alarm safe ──
+// (NeverDoCheck): the same Mark safe as the node page's Security box, here,
 // where the incident is read. Resolve alone does not clear it.
 if ((string)$inc->get('inc_source') === IncidentSourceNeverDo::NAME && $node_id) {
 	$nd_node = new ManagedNode($node_id, TRUE);
 	$nd_state = $nd_node->key ? NeverDoCheck::state($nd_node) : null;
-	$nd_held = is_array($nd_state['unexplained'] ?? null) ? $nd_state['unexplained'] : array();
-	$page->begin_box(['title' => 'Security sentinel: suspicious activity']);
+	$nd_held = $nd_state['alarm'] ?? array();
+	$page->begin_box(['title' => 'Security sentinel: alarm']);
 	if ($nd_held) {
-		echo '<p>This incident clears only when someone marks what the machine holds as safe (' . count($nd_held)
+		echo '<p>This incident clears only when someone marks what the alarm holds as safe (' . count($nd_held)
 			. ' item' . (count($nd_held) === 1 ? '' : 's') . ', listed under Evidence and on the node page). Resolving it does not.</p>';
-		echo '<p>Mark safe if you, or a job you ran, made every one of these changes, or they are a known false alarm. '
-			. 'The machine\'s lists as it last reported them become what is expected. If you do not recognise them, do not mark them safe: '
+		echo '<p>Mark safe only if you made every one of these yourself (a setuid program you built, say). '
+			. 'Each stays quiet until its content changes. If you do not recognise them, do not mark them safe: '
 			. 'treat the machine as broken into.</p>';
-		$nd_ask = 'Mark every change the security sentinel holds on ' . IncidentViews::node_label($node_id) . ' as safe? Only if you know where each one came from.';
+		$nd_ask = 'Mark everything the security sentinel\'s alarm holds on ' . IncidentViews::node_label($node_id) . ' as safe? Only if you made each one yourself.';
 		$nd_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id;
 		echo '<form method="post" action="' . $e($nd_url) . '" id="incident_never_do_accept">'
 			. '<input type="hidden" name="action" value="never_do_accept">' . SmAdminCsrf::field()
@@ -148,7 +149,7 @@ if ((string)$inc->get('inc_source') === IncidentSourceNeverDo::NAME && $node_id)
 			. htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
 			. ', function(){ document.getElementById(\'incident_never_do_accept\').submit(); })">Mark safe</button></form>';
 	} else {
-		echo '<p class="mb-0">Nothing is held now: it was marked safe, and the incident clears on the next pass.</p>';
+		echo '<p class="mb-0">The alarm holds nothing now: it was marked safe, or what it held moved to Changes to review on the node page. The incident clears on the next pass.</p>';
 	}
 	$page->end_box();
 }

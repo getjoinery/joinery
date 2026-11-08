@@ -4,6 +4,25 @@
 # (section 5.1), as ONE JSON object on stdout: the things that have no
 # legitimate source on a machine Joinery runs, checked as they stand now.
 #
+# Version: 1.7 - the alarm and the review list (specs/never_do_false_alarms.md). The object says
+#                "format":2. A setuid-root program no package installed is split from the rest
+#                (setgid, or setuid to another user: setid_other), and each setuid item is "path hash"
+#                so a Mark safe remembers its content. A program inside a directory that holds a whole
+#                root filesystem of its own (a copied image, a build tree) is listed apart, wherever
+#                it is (setuid_copied_root). Each ld.so.preload library is reported packaged or not (ld_preload_unpackaged,
+#                ld_preload_packaged); ld_preload keeps its old string for an older management node.
+#                Review (reviewer2): a copied root filesystem must look like one (a root line in its
+#                passwd, a shell in its bin) and is never a top-level directory or /usr/local, and
+#                its setuid programs are listed (setuid_copied_root), never dropped; a setuid file
+#                at a packaged path with no recorded checksum counts as no package's; a preload
+#                entry with $LIB or $PLATFORM is expanded, and one that still names nothing alarms;
+#                an engine's configured storage is skipped only outside the system's own trees,
+#                and its three configuration files are in the startup list; the alarm's lists
+#                keep up to 200 items; an item whose hash could not be read is its path alone.
+#                Second review: the walk reads NUL-separated records, so a name ending in a space or
+#                holding a newline is its own file, never the one beside it; $LIB is expanded without
+#                a glob against the working directory; /usr/share/containers/storage.conf is in the
+#                startup list too; the preload scan reads PRELOAD_FILE.
 # Version: 1.6 - a port is named after the holder that started first, by start time: pids wrap, and a
 #                postfix smtpd forked after the wrap outranked its master (getjoinery, xandy).
 # Version: 1.5 - Allow mail apps leaves the rest of the gateway's footprint out too: its enable link to
@@ -24,12 +43,15 @@
 #
 # TWO HALVES, and the difference between them is the whole design:
 #
-#   findings   wrong on sight, no history needed: a setuid program no package
-#              installed or one a package installed and something changed, an
-#              account other than root with uid 0, a kernel tainted by an
-#              out-of-tree, unsigned or forced module, a program running from
-#              /tmp, /var/tmp, /dev/shm or from memory, a root program whose
-#              file is gone, /etc/ld.so.preload with anything in it.
+#   findings   seen as they stand, no history needed: a setuid-root program no
+#              package installed, a setuid or setgid program a package installed
+#              whose bytes changed, an account other than root with uid 0, a
+#              library in /etc/ld.so.preload no package installed (these four are
+#              the management node's alarm), and, for its review list, other
+#              setgid or setuid programs no package installed, a kernel tainted by
+#              an out-of-tree, unsigned or forced module, a program running from
+#              /tmp, /var/tmp, /dev/shm or from memory, a root program whose file
+#              is gone and a packaged library in /etc/ld.so.preload.
 #   inventory  lists that are only wrong when they CHANGE: SSH keys, login
 #              accounts, sudoers, the files that start things (systemd units,
 #              cron), listening TCP ports, and the size of the login logs.
@@ -57,6 +79,7 @@ export LC_ALL=C
 
 MAX_ITEMS=400           # entries kept in any inventory list
 MAX_FINDINGS=20         # entries kept in any findings list
+MAX_ALARM=200           # entries kept in a list the management node alarms on
 MAX_STR=200             # characters kept of any string
 FIND_TIMEOUT=150        # seconds for the whole setuid walk
 
@@ -111,8 +134,24 @@ usr_twins() {  # PREFIX: "/" for .list paths, "" for .md5sums paths
 }
 cat /var/lib/dpkg/info/*.list 2>/dev/null | usr_twins / | sort -u > "$T/pkgfiles"
 awk '{ $1 = $1; print }' /var/lib/dpkg/info/*.md5sums 2>/dev/null | usr_twins "" > "$T/pkgmd5"
-is_packaged() { grep -Fxq -- "$1" "$T/pkgfiles"; }
+# A name holding a newline is never a package's: grep -F would read it as two names.
+is_packaged() { [[ "$1" != *$'\n'* ]] && grep -Fxq -- "$1" "$T/pkgfiles"; }
 hash16() { sha256sum -- "$1" 2>/dev/null | cut -c1-16; }
+# An item: "path hash", or the path alone when the file cannot be read.
+item_line() {  # PATH [FILE TO HASH]
+    local h
+    h="$(hash16 "${2:-$1}")"
+    if [[ -n "$h" ]]; then printf '%s %s\n' "$(safe "$1")" "$h"; else printf '%s\n' "$(safe "$1")"; fi
+}
+# A package installed this file and its bytes are still the package's.
+packaged_intact() {
+    local want have
+    is_packaged "$1" || return 1
+    want="$(awk -v p="${1#/}" '$2 == p { print $1; exit }' "$T/pkgmd5")"
+    [[ -n "$want" ]] || return 1
+    have="$(md5sum -- "$1" 2>/dev/null | cut -d' ' -f1)"
+    [[ "$have" == "$want" ]]
+}
 
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 jail_is_shipped() {
@@ -153,18 +192,61 @@ gateway_is_shipped() {
 # container is the engine's business, not this list's. An engine's storage is
 # read from its own configuration, wherever the install put it (Docker and the
 # site engine move it onto the data root), beside the engines' defaults.
-walk_skips() {
-    printf '%s\n' /proc /sys /snap /var/lib/docker /var/lib/containerd /var/lib/containers \
-        /var/lib/joinery-site-engine-build '/var/tmp/site-engine-build.*' \
-        '*/.local/share/containers' '*/.local/share/containerd'
+#
+# A configured place is skipped only when it is outside the system's own trees:
+# those files are root's to write, and "data-root": "/usr" must not take /usr
+# out of the walk. The files themselves are in the startup list (ENGINE_CONFIGS).
+ENGINE_CONFIGS=(/etc/docker/daemon.json /etc/containers/storage.conf /usr/share/containers/storage.conf
+                /etc/containerd/config.toml)
+system_tree() {  # PATH: the machine's own trees, or a top-level directory itself
+    case "$1" in
+        /|/usr|/usr/*|/etc|/etc/*|/bin|/bin/*|/sbin|/sbin/*|/lib*|/boot|/boot/*|/opt|/var|/srv|/home|/root|/tmp) return 0 ;;
+    esac
+    [[ "$1" == /* && "$1" != */../* && "$1" != */.. && "${1#/}" == */* ]] || return 0
+    return 1
+}
+configured_storage() {
     sed -n 's/.*"data-root"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /etc/docker/daemon.json 2>/dev/null
     sed -n 's/^[[:space:]]*graphroot[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
         /etc/containers/storage.conf /usr/share/containers/storage.conf 2>/dev/null
     sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' /etc/containerd/config.toml 2>/dev/null
 }
+walk_skips() {
+    local d
+    printf '%s\n' /proc /sys /snap /var/lib/docker /var/lib/containerd /var/lib/containers \
+        /var/lib/joinery-site-engine-build '/var/tmp/site-engine-build.*' \
+        '*/.local/share/containers' '*/.local/share/containerd'
+    while IFS= read -r d; do
+        d="${d%/}"
+        [[ -n "$d" ]] && ! system_tree "$d" && printf '%s\n' "$d"
+    done < <(configured_storage)
+}
+
+# The directory holding a whole root filesystem of its own that PATH is inside,
+# on stdout: a copied image or a build tree, wherever it is, which carries its
+# own setuid programs the way the engines' storage does. One looks like a root
+# filesystem: an etc/passwd (a file, not a link) with a root line, a usr/bin,
+# and a shell in bin or usr/bin. A top-level directory and /usr/local never
+# count, nor does the machine's own root. Its setuid programs are listed for
+# review (setuid_copied_root), never dropped, so a planted "copy" is still seen.
+# walk_skips stays the fast path: a skipped tree is never walked at all.
+copied_root_of() {
+    local d="${1%/*}"
+    while [[ -n "$d" && "$d" != / ]]; do
+        if [[ "${d#/}" == */* && "$d" != /usr/local \
+              && -f "$d/etc/passwd" && ! -L "$d/etc/passwd" && -d "$d/usr/bin" \
+              && ( -e "$d/bin/sh" || -e "$d/usr/bin/sh" ) ]] \
+           && grep -q '^root:[^:]*:0:0:' "$d/etc/passwd" 2>/dev/null; then
+            printf '%s' "$d"
+            return 0
+        fi
+        d="${d%/*}"
+    done
+    return 1
+}
 
 # Setuid and setgid programs on every local filesystem that allows them.
-: > "$T/setuid_unpackaged"; : > "$T/setuid_modified"
+: > "$T/setuid_unpackaged"; : > "$T/setuid_modified"; : > "$T/setid_other"; : > "$T/setuid_copied_root"
 # Each filesystem once, from its own top: a data root bind-mounted in ten
 # places is one walk, not ten (mountinfo field 4 is the root within the fs).
 mounts=()
@@ -189,26 +271,38 @@ if (( ${#mounts[@]} )); then
     done < <(walk_skips)
     timeout "$FIND_TIMEOUT" "${nice_cmd[@]}" find "${mounts[@]}" -xdev \
         \( "${prune_expr[@]}" \) -prune \
-        -o -type f -perm /6000 -print 2>/dev/null | sort -u > "$T/setuid"
+        -o -type f -perm /6000 -printf '%U %m %p\0' 2>/dev/null | sort -zu > "$T/setuid"
     (( ${PIPESTATUS[0]} == 0 )) || partial=true
-    while IFS= read -r f; do
-        [[ -n "$f" ]] || continue
+    # NUL-separated: a name may end in a space or hold a newline, and read
+    # would trim or split it into the name of the file beside it.
+    while IFS= read -r -d '' rec; do
+        owner="${rec%% *}"; rec="${rec#* }"
+        mode="${rec%% *}"; f="${rec#* }"
+        [[ -n "$f" && "$owner" =~ ^[0-9]+$ && "$mode" =~ ^[0-7]+$ ]] || continue
         # The parser jail's launcher is ours and setuid by design; it is
         # explained only while its bytes are the prebuilt a signed site tree on
         # this machine ships (install_parser_jail.sh copies it byte for byte).
         if [[ "$f" == /usr/local/sbin/joinery-jail ]] && jail_is_shipped "$f"; then
             continue
         fi
-        if ! is_packaged "$f"; then
-            safe "$f" >> "$T/setuid_unpackaged"; echo >> "$T/setuid_unpackaged"
+        # A packaged path with no recorded checksum (a conffile, a package
+        # that ships no md5sums) proves nothing about the bytes there: it
+        # counts as no package's.
+        want=""
+        is_packaged "$f" && want="$(awk -v p="${f#/}" '$2 == p { print $1; exit }' "$T/pkgmd5")"
+        if [[ -z "$want" ]]; then
+            if croot="$(copied_root_of "$f")"; then
+                item_line "$f" >> "$T/setuid_copied_root"
+            elif [[ "$owner" == 0 ]] && (( 8#$mode & 04000 )); then
+                item_line "$f" >> "$T/setuid_unpackaged"
+            else
+                item_line "$f" >> "$T/setid_other"
+            fi
             continue
         fi
-        want="$(awk -v p="${f#/}" '$2 == p { print $1; exit }' "$T/pkgmd5")"
-        if [[ -n "$want" ]]; then
-            have="$(md5sum -- "$f" 2>/dev/null | cut -d' ' -f1)"
-            if [[ -n "$have" && "$have" != "$want" ]]; then
-                safe "$f" >> "$T/setuid_modified"; echo >> "$T/setuid_modified"
-            fi
+        have="$(md5sum -- "$f" 2>/dev/null | cut -d' ' -f1)"
+        if [[ -n "$have" && "$have" != "$want" ]]; then
+            item_line "$f" >> "$T/setuid_modified"
         fi
     done < "$T/setuid"
 fi
@@ -260,12 +354,70 @@ done
 sort -u -o "$T/tmp_programs" "$T/tmp_programs"
 sort -u -o "$T/deleted_root" "$T/deleted_root"
 
-# /etc/ld.so.preload loads its libraries into every program: a classic rootkit.
+# /etc/ld.so.preload loads its libraries into every program: a library no
+# package installed there is a classic rootkit. One a package installed, bytes
+# intact (snoopy's logger), or a name that is not there is only worth a look.
+# ld.so splits the file on white space and colons; a bare name is looked up in
+# the library directories, and $LIB and $PLATFORM (braced or not) are expanded.
+# An entry that still names no file loads nothing, unless it carries a token
+# this cannot expand ($ORIGIN, or any other $): that one alarms, since it
+# cannot be checked. ld_preload is the whole file as one string, for a
+# management node older than 1.7.
 preload=""
-if [[ -s /etc/ld.so.preload ]]; then
-    preload="$(grep -v '^[[:space:]]*#' /etc/ld.so.preload | tr -s ' \n' ',' | sed 's/^,//; s/,$//')"
+: > "$T/preload_unpackaged"; : > "$T/preload_packaged"
+preload_candidates() {  # ENTRY -> each path it can name, one per line
+    local e="$1" d lib plat
+    if [[ "$e" != */* ]]; then
+        for d in /lib/*-linux-gnu /usr/lib/*-linux-gnu /lib64 /usr/lib64 /lib /usr/lib; do
+            printf '%s\n' "$d/$e"
+        done
+        return
+    fi
+    # The values ld.so gives $LIB, from the machine's own library directories
+    # (absolute globs, never against the working directory), plus the usual.
+    local libs=(lib lib64 "lib/$(uname -m)-linux-gnu" "usr/lib/$(uname -m)-linux-gnu")
+    for d in /lib/*-linux-gnu /usr/lib/*-linux-gnu; do [[ -d "$d" ]] && libs+=("${d#/}"); done
+    for lib in "${libs[@]}"; do
+        for plat in "$(uname -m)" haswell xeon_phi x86_64 i686 aarch64 v8 power9; do
+            d="${e//\$\{LIB\}/$lib}"; d="${d//\$LIB/$lib}"
+            d="${d//\$\{PLATFORM\}/$plat}"; d="${d//\$PLATFORM/$plat}"
+            printf '%s\n' "$d"
+        done
+    done | sort -u
+}
+preload_scan() {  # FILE: sorts its entries into preload_unpackaged and preload_packaged
+    local lib lp found bad stripped
+    [[ -s "$1" ]] || return 0
+    preload="$(grep -v '^[[:space:]]*#' "$1" | tr -s ' \n' ',' | sed 's/^,//; s/,$//')"
     [[ -n "$preload" ]] && preload="$(safe "$preload")"
-fi
+    while IFS= read -r lib; do
+        [[ -n "$lib" ]] || continue
+        found=0; bad=""
+        while IFS= read -r lp; do
+            [[ -f "$lp" ]] || continue
+            found=1
+            packaged_intact "$lp" || packaged_intact "$(readlink -f -- "$lp")" || { bad="$lp"; break; }
+        done < <(preload_candidates "$lib")
+        if [[ -n "$bad" ]]; then
+            item_line "$lib" "$bad" >> "$T/preload_unpackaged"
+        elif (( found )); then
+            safe "$lib" >> "$T/preload_packaged"; echo >> "$T/preload_packaged"
+        else
+            # $LIB and $PLATFORM were tried; any $ left is one this cannot check.
+            stripped="${lib//\$\{LIB\}/}"; stripped="${stripped//\$LIB/}"
+            stripped="${stripped//\$\{PLATFORM\}/}"; stripped="${stripped//\$PLATFORM/}"
+            if [[ "$stripped" == *'$'* ]]; then
+                safe "$lib" >> "$T/preload_unpackaged"; echo >> "$T/preload_unpackaged"
+            else
+                printf '%s missing\n' "$(safe "$lib")" >> "$T/preload_packaged"
+            fi
+        fi
+    done < <(grep -v '^[[:space:]]*#' "$1" | tr -s ' \t:' '\n')
+    sort -u -o "$T/preload_unpackaged" "$T/preload_unpackaged"
+    sort -u -o "$T/preload_packaged" "$T/preload_packaged"
+}
+PRELOAD_FILE=/etc/ld.so.preload
+preload_scan "$PRELOAD_FILE"
 
 # ---------------------------------------------------------------------------
 # inventory
@@ -333,6 +485,11 @@ while IFS= read -r f; do startup_entry "$f"; done < <(
          /etc/cron.monthly /var/spool/cron/crontabs -maxdepth 3 \( -type f -o -type l \) 2>/dev/null
     for f in /etc/crontab /etc/rc.local; do [[ -e "$f" ]] && echo "$f"; done
 ) >> "$T/startup"
+# The engines' configuration, packaged or not: it says where the setuid walk
+# does not go.
+for f in "${ENGINE_CONFIGS[@]}"; do
+    [[ -f "$f" ]] && printf '%s %s\n' "$(safe "$f")" "$(hash16 "$f")" >> "$T/startup"
+done
 sort -u -o "$T/startup" "$T/startup"
 
 # Listening TCP ports: "tcp address:port program". A port in the kernel's
@@ -399,26 +556,35 @@ note_cap() {  # NAME FILE CAP
     (( ${n:-0} > $3 )) && truncated_lists+="${truncated_lists:+,}\"$1\""
     return 0
 }
-for x in setuid_unpackaged setuid_modified scratch_programs deleted_root_programs logs; do
+note_cap setuid_copied_root "$T/setuid_copied_root" "$MAX_ALARM"
+for x in setid_other scratch_programs deleted_root_programs logs ld_preload_packaged; do
     case $x in
-        setuid_unpackaged|setuid_modified) f="$T/$x" ;;
+        setid_other) f="$T/$x" ;;
+        ld_preload_packaged) f="$T/preload_packaged" ;;
         scratch_programs) f="$T/tmp_programs" ;;
         deleted_root_programs) f="$T/deleted_root" ;;
         logs) f="$T/logs" ;;
     esac
     note_cap "$x" "$f" "$MAX_FINDINGS"
 done
-note_cap uid0_accounts "$T/uid0" "$MAX_FINDINGS"
+note_cap uid0_accounts "$T/uid0" "$MAX_ALARM"
+note_cap setuid_unpackaged "$T/setuid_unpackaged" "$MAX_ALARM"
+note_cap setuid_modified "$T/setuid_modified" "$MAX_ALARM"
+note_cap ld_preload_unpackaged "$T/preload_unpackaged" "$MAX_ALARM"
 for x in ssh_keys accounts sudoers startup ports; do note_cap "$x" "$T/$x" "$MAX_ITEMS"; done
 
-printf '{"findings":{'
-printf '"setuid_unpackaged":%s,' "$(json_list setuid_unpackaged "$T/setuid_unpackaged" "$MAX_FINDINGS")"
-printf '"setuid_modified":%s,' "$(json_list setuid_modified "$T/setuid_modified" "$MAX_FINDINGS")"
-printf '"uid0_accounts":%s,' "$(json_list uid0_accounts "$T/uid0" "$MAX_FINDINGS")"
+printf '{"format":2,"findings":{'
+printf '"setuid_unpackaged":%s,' "$(json_list setuid_unpackaged "$T/setuid_unpackaged" "$MAX_ALARM")"
+printf '"setuid_modified":%s,' "$(json_list setuid_modified "$T/setuid_modified" "$MAX_ALARM")"
+printf '"setid_other":%s,' "$(json_list setid_other "$T/setid_other" "$MAX_FINDINGS")"
+printf '"setuid_copied_root":%s,' "$(json_list setuid_copied_root "$T/setuid_copied_root" "$MAX_ALARM")"
+printf '"uid0_accounts":%s,' "$(json_list uid0_accounts "$T/uid0" "$MAX_ALARM")"
 printf '"kernel_taint":"%s",' "$taint_flags"
 printf '"scratch_programs":%s,' "$(json_list scratch_programs "$T/tmp_programs" "$MAX_FINDINGS")"
 printf '"deleted_root_programs":%s,' "$(json_list deleted_root_programs "$T/deleted_root" "$MAX_FINDINGS")"
-printf '"ld_preload":"%s"' "$preload"
+printf '"ld_preload":"%s",' "$preload"
+printf '"ld_preload_unpackaged":%s,' "$(json_list ld_preload_unpackaged "$T/preload_unpackaged" "$MAX_ALARM")"
+printf '"ld_preload_packaged":%s' "$(json_list ld_preload_packaged "$T/preload_packaged" "$MAX_FINDINGS")"
 printf '},"inventory":{'
 printf '"ssh_keys":%s,' "$(json_list ssh_keys "$T/ssh_keys" "$MAX_ITEMS")"
 printf '"accounts":%s,' "$(json_list accounts "$T/accounts" "$MAX_ITEMS")"
