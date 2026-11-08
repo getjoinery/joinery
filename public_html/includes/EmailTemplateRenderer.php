@@ -236,6 +236,10 @@ class EmailTemplateRenderer {
             $outer_parts[$k] = $this->_substitute_variables($outer_part, $all_values);
         }
         $html = implode($html, $outer_parts);
+
+        // A link written for a page ('/profile/...') goes nowhere from a mail
+        // client: it is made absolute on this site's address.
+        $html = self::absolute_links($html, (string)$this->template_values['web_dir']);
         
         // Add tracking to links if needed
         if (isset($values['utm_source'])) {
@@ -358,6 +362,18 @@ class EmailTemplateRenderer {
         return $email_body;
     }
     
+    /**
+     * Root-relative href and src attributes ('/path', not '//host') made
+     * absolute on $base, the site's own address. Everything else is untouched.
+     */
+    public static function absolute_links(string $html, string $base): string {
+        $base = rtrim($base, '/');
+        if ($base === '') {
+            return $html;
+        }
+        return (string)preg_replace('~(?<![\w:-])(href|src)=(["\'])/(?!/)~i', '$1=$2' . $base . '/', $html);
+    }
+
     private function _value_exists($value, $values) {
         $value_levels = explode('->', $value);
         $current_array_level = $values;

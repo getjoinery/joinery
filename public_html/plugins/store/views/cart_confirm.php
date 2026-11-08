@@ -52,7 +52,7 @@ $page->public_header([
             <div class="jy-cc-hero">
                 <div class="jy-cc-icon-ok">&#10003;</div>
                 <h1 class="jy-cc-h1">Purchase Confirmed!</h1>
-                <p class="jy-muted">Thank you for your purchase. An email has been sent to the email address of all registrants with your purchase confirmation and a link to provide any further info that we need.</p>
+                <p class="jy-muted">Thank you for your purchase. Your receipt is on its way to your email.</p>
             </div>
 
             <!-- Order Summary -->

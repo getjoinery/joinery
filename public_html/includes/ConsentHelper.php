@@ -5,6 +5,7 @@
  * Provides a minimal-friction cookie consent system that enables compliance
  * with major privacy regulations while minimizing disruption to users.
  *
+ * @version 1.3 - the banner adds room below the page, so nothing at the bottom stays under it (B5)
  * @version 1.2 - a consent record keeps no IP address
  * @version 1.1 - an unset privacy-policy link or webDir reads as empty (no trim(null) deprecation)
  * @version 1.0
@@ -288,6 +289,13 @@ class ConsentHelper {
             (config.privacyPolicyUrl ? '<a class="joinery-cc-link" href="' + config.privacyPolicyUrl + '">Privacy Policy</a>' : '') +
             '</div>';
         document.body.appendChild(banner);
+        // The banner floats over the bottom of the page. Room is added below
+        // the content so whatever sits there (a Checkout button) can be
+        // scrolled clear of it instead of staying unclickable underneath.
+        var body = document.body;
+        body.setAttribute('data-joinery-cc-padding', body.style.paddingBottom || '');
+        var current = parseFloat(window.getComputedStyle(body).paddingBottom) || 0;
+        body.style.paddingBottom = (current + banner.offsetHeight + 40) + 'px';
 
         document.getElementById('joinery-cc-accept').onclick = function() { saveConsent(true, true); hideBanner(); };
         document.getElementById('joinery-cc-reject').onclick = function() { saveConsent(false, false); hideBanner(); };
@@ -297,6 +305,11 @@ class ConsentHelper {
     function hideBanner() {
         var banner = document.getElementById('joinery-cc-banner');
         if (banner) banner.remove();
+        var body = document.body;
+        if (body.hasAttribute('data-joinery-cc-padding')) {
+            body.style.paddingBottom = body.getAttribute('data-joinery-cc-padding');
+            body.removeAttribute('data-joinery-cc-padding');
+        }
     }
 
     function showModal() {

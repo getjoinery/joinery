@@ -164,7 +164,9 @@ than a step of every customer's provisioning. It sends JSON, for the *Email
 processed* event only (a message counts once, when the provider accepts it, as
 its own monthly count does), with Basic authorization whose password is the
 deployment's webhook secret; the username is not checked. The endpoint requires both that
-secret and a source address the provider publishes; it refuses anything else,
+secret and a known sending address: SMTP2GO's own, resolved from `webhooks.smtp2go.com`, or
+one of Svix's, the delivery service SMTP2GO sends its webhooks through
+(`Smtp2GoWebhookSources`, from Svix's published US and EU list). It refuses anything else,
 and it refuses everything if no secret is configured, because an open counter
 looks like evidence and is not. What those events can do is bounded on purpose:
 they move the banner's *sent this month* figure and nothing else. Bounces and

@@ -11,7 +11,8 @@
  *
  * WHAT THIS IS ALLOWED TO DO IS DELIBERATELY SMALL. SMTP2GO does not sign its
  * webhooks — the only checks available are a basic-auth secret and
- * the provider's own sending addresses — so a spoofed or dropped delivery can
+ * the sending addresses (SMTP2GO's own, and those of Svix, which it delivers
+ * its webhooks through) — so a spoofed or dropped delivery can
  * move a number on a banner and can never move a cap. The cap is the
  * provider's own month-to-date count against the subaccount limit, and nothing
  * that arrives here influences it in either direction.
@@ -31,6 +32,9 @@
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.5 - deliveries come from Svix, which SMTP2GO sends its webhooks through:
+ *   Svix's published US and EU addresses are accepted beside webhooks.smtp2go.com,
+ *   and addresses are compared as addresses (ranges for IPv6); Smtp2GoWebhookSources
  * @version 1.4 - one send counts once: only 'processed' moves the figure, so a webhook
  *   that also sends 'delivered' does not count each message twice (B158)
  * @version 1.3 - writes after the secret checks are the server's own (declared_permissions 3.2)
@@ -61,8 +65,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 // asks for the auth-grade answer — a forwarded header is trusted only from a
 // verified edge, never from anyone who sets one.
 $source_ip = SessionControl::get_client_ip(true);
-$allowed = smtp2go_webhook_allowed_addresses();
-if (!$allowed || !in_array($source_ip, $allowed, true)) {
+$allowed = Smtp2GoWebhookSources::allowed();
+if (!$allowed || !Smtp2GoWebhookSources::matches((string)$source_ip, $allowed)) {
 	// Logged, because the alternative is a silent 403 and a counter that
 	// mysteriously stays at zero. The address is the whole diagnosis.
 	error_log('smtp2go_webhook: refused a delivery from ' . ($source_ip ?: 'an unknown address')
@@ -152,38 +156,6 @@ foreach ($events as $event) {
 
 http_response_code(200);
 echo 'ok ' . $counted;
-
-/**
- * The addresses SMTP2GO delivers webhooks from.
- *
- * Resolved from the name the provider publishes rather than hardcoded: moving
- * them is their business, not a setting somebody here has to remember. Returns
- * [] when DNS gives no answer, which the caller treats as a REFUSAL — for an
- * unsigned webhook the address is half of the entire check, and an allowlist
- * that fell open under DNS failure would be worth nothing on exactly the day it
- * mattered.
- *
- * Cached only for the life of the request. A file cache under the system temp
- * directory would be world-readable and written by the web user, so any local
- * account could pre-seed the allowlist; the resolver in front of this already
- * caches the lookup, so the file bought nothing for that.
- */
-function smtp2go_webhook_allowed_addresses(): array {
-	static $cached = null;
-	if ($cached !== null) {
-		return $cached;
-	}
-	$out = array();
-	foreach (array('webhooks.smtp2go.com') as $name) {
-		foreach ((array)@dns_get_record($name, DNS_A) as $record) {
-			if (!empty($record['ip'])) { $out[] = (string)$record['ip']; }
-		}
-		foreach ((array)@dns_get_record($name, DNS_AAAA) as $record) {
-			if (!empty($record['ipv6'])) { $out[] = (string)$record['ipv6']; }
-		}
-	}
-	return $cached = array_values(array_unique($out));
-}
 
 /**
  * Which customer an event belongs to.

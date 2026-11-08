@@ -21,6 +21,7 @@
  * assertions had gone stale (a removed CreateLegacyTemplate method, a
  * missing-subject "exception" the model never actually raised).
  *
+ * @version 1.3 - a link written for a page ('/profile/...') arrives absolute on the site's address
  * @version 1.2 - a site with no name yet is named by its address
  * @version 1.1 - subjects and the outer template take placeholders; a soft-deleted
  *                template is not sent (spec email_template_defaults)
@@ -143,6 +144,16 @@ section('quickSend\'s HTML path keeps the body');
 $quick = new EmailTemplateRenderer('blank_template', (string)Globalvars::get_instance()->get_setting('default_email_template'), 'blank_footer');
 $quick_msg = $quick->createMessage(['subject' => 'Q', 'body' => '<p>QUICK-BODY</p>']);
 check(strpos((string)$quick_msg->getHtmlBody(), 'QUICK-BODY') !== false, 'the blank inner template inside the default outer carries the body');
+
+section('a page link in an email is made absolute');
+$site = rtrim(LibraryFunctions::get_absolute_url(''), '/');
+$link_tpl = tpl_fixture('Links', '<p><a href="/profile/server_manager">your sites</a> <a href="https://elsewhere.example/x">out</a> <a href="//cdn.example/y">cdn</a> *after*</p>');
+$link_html = (string)EmailMessage::fromTemplate($link_tpl, ['after' => '<a href="/profile/server_manager/services">connected</a>'])->getHtmlBody();
+check(strpos($link_html, 'href="' . $site . '/profile/server_manager"') !== false, 'a root-relative link in the template gets the site address', $link_html);
+check(strpos($link_html, 'href="' . $site . '/profile/server_manager/services"') !== false, 'and one in a substituted value (a product\'s after-purchase message)');
+check(strpos($link_html, 'href="https://elsewhere.example/x"') !== false, 'a full link is left alone');
+check(strpos($link_html, 'href="//cdn.example/y"') !== false, 'a protocol-relative link is left alone');
+check(strpos($link_html, 'href="/profile') === false, 'no root-relative link survives');
 
 section('a missing template fails loudly');
 $threw = false;

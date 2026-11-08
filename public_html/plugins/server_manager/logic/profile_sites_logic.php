@@ -32,6 +32,8 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.5 - mail_records: a Managed site on the buyer's own domain lists the email records SMTP2GO
+ *                asked for that do not resolve yet, so its mail can be signed (B3)
  * @version 1.4 - dns_record: a built Managed site on the buyer's own domain shows its A or AAAA record until the
  *                certificate issues or the name resolves to the server
  * @version 1.3 - the move card asks CustomerCloudProvision::is_sold()
@@ -178,6 +180,7 @@ function profile_sites_logic(array $input): LogicResult {
 
 		$sites[] = array(
 			'dns_record'      => profile_sites_dns_record($provision),
+			'mail_records'    => profile_sites_mail_records($provision),
 			'id'              => (int)$provision->key,
 			'domain'          => (string)$provision->get('cvp_domain'),
 			'url'             => 'https://' . (string)$provision->get('cvp_domain'),
@@ -259,6 +262,52 @@ function profile_sites_dns_record($provision): ?array {
 		// Unknown is shown: the record is harmless to repeat.
 	}
 	return array('type' => $type, 'value' => $ip);
+}
+
+/**
+ * The email records a Managed site on its buyer's own domain still needs, as
+ * a list of array('type', 'name', 'value', 'note'), or [] when there is
+ * nothing to add: a name we registered (we publish them ourselves), no mail
+ * set up yet, or every record already resolving to what SMTP2GO asked for.
+ * Until they are in place the site's mail goes out unsigned and is more
+ * likely to be filtered. Only CNAMEs can be checked here; a record of another
+ * type is listed until mail setup has verified the domain.
+ */
+function profile_sites_mail_records($provision): array {
+	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+			|| JobResultProcessor::plane_registered_domain($provision)) {
+		return array();
+	}
+	$records = ProvisionHostedMail::records_of($provision);
+	if (!$records) {
+		return array();
+	}
+	$verified = in_array((string)$provision->get('cvp_mail_state'), array('domain_verified', 'smtp_user_created', 'done'), true)
+		&& trim((string)$provision->get('cvp_mail_error')) === '';
+	$missing = array();
+	foreach ($records as $record) {
+		$type = strtoupper((string)($record['type'] ?? ''));
+		$name = rtrim((string)($record['name'] ?? ''), '.');
+		$value = rtrim((string)($record['value'] ?? ''), '.');
+		if ($name === '' || $value === '') {
+			continue;
+		}
+		if ($type === 'CNAME') {
+			try {
+				$found = DnsResolver::getCname($name);
+				if ($found !== null && strcasecmp(rtrim($found, '.'), $value) === 0) {
+					continue;
+				}
+			} catch (DnsLookupException $e) {
+				// Unknown is shown: the record is harmless to repeat.
+			}
+		} elseif ($verified) {
+			continue;
+		}
+		$missing[] = array('type' => $type, 'name' => $name, 'value' => $value,
+			'note' => (string)($record['note'] ?? ''));
+	}
+	return $missing;
 }
 
 /**
