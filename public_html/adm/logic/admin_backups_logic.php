@@ -6,6 +6,7 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.28 - an unentitled services_shelf_use says the operator's sentence as its own sentence
  * @version 1.27 - services_shelf_use: store backups in getjoinery's backup storage, enrolled over the site's
  *                getjoinery connection (specs/easy_signup_completion.md WP4)
  * @version 1.26 - verify_recovery_key records the proof as a recovery-key ceremony (BackupRecoveryKey::prove_for, B177)
@@ -497,8 +498,8 @@ function _admin_backups_handle($action, array $input, $session) {
 				$answer = (new ServicesClient())->enrolShelf();
 				if (empty($answer['entitled'])) {
 					$where = (string)($answer['manage_url'] ?? '');
-					$say('getjoinery is not providing backup storage for this site'
-						. ((string)($answer['notice'] ?? '') !== '' ? ': ' . $answer['notice'] : '.')
+					$say('getjoinery is not providing backup storage for this site.'
+						. ((string)($answer['notice'] ?? '') !== '' ? ' ' . $answer['notice'] : '')
 						. (preg_match('#^https://#', $where) ? ' See ' . $where . '.' : ''), false);
 					return $url;
 				}

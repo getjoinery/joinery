@@ -6,6 +6,7 @@
  * was connected, and per service the state, the paid-through date and the
  * figure against the allowance. Disconnect (a POST) cuts a site off.
  *
+ * @version 1.2 - the services are bought here, per site: Buy, Keep going, or renewing by subscription
  * @version 1.1 - a site moved off Managed reads as such, with no Disconnect
  * @version 1.0.1 - the page carries its own styles (site block, facts grid, buttons)
  * @version 1.0 - specs/services_phase2_platform.md §4, E6
@@ -39,8 +40,14 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 <p class="sms-lead">Sites you have linked to this account for Joinery-run services. A linked site holds one
 	credential of its own; disconnecting it stops that credential working and releases every service it holds.</p>
 
+<?php if ($offers): ?>
+<p class="sms-lead">getjoinery's email and backup storage for one self-hosted site:
+	<strong><?php echo htmlspecialchars($offers[0]['price']); ?></strong>, with <?php echo htmlspecialchars($includes); ?>. Your own accounts work just as well: your site's Email and Backups setup steps take either.</p>
+<?php endif; ?>
+
 <?php if (count($sites) === 0): ?>
-	<p>No site is connected to this account. A site connects from its own setup wizard's Email or Backups step.</p>
+	<p>No site is connected to this account. A site connects from its own setup wizard's Email or Backups step;
+		choose getjoinery there, and the site appears here to buy for.</p>
 <?php else: ?>
 <section class="sms-sites">
 <?php foreach ($sites as $site): ?>
@@ -72,6 +79,19 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 			</dd>
 			<?php endforeach; ?>
 		</dl>
+		<?php if ($site['card'] === 'renewing'): ?>
+		<p class="sms-note">Paid by a subscription that renews on its own. To stop it, cancel it on
+			<a href="/profile/subscriptions">your subscriptions</a>; the services run to the end of the period paid for.</p>
+		<?php elseif ($site['card'] === 'buy' || $site['card'] === 'keep'): ?>
+		<div class="sms-actions">
+			<?php foreach ($offers as $offer): ?>
+				<?php echo JoineryServicesFulfillment::buy_form($offer, (int)$site['row_id'],
+					($site['card'] === 'keep' ? 'Keep going' : 'Buy') . ' — ' . $offer['label'] . ', ' . $offer['price']); ?>
+			<?php endforeach; ?>
+		</div>
+		<p class="sms-note">Once it is paid, go back to your site's setup and press Save on the Email step, or
+			Store backups with getjoinery on the Backups step.</p>
+		<?php endif; ?>
 		<?php if ($site['node_linked']): ?>
 		<p class="sms-note">To send email another way, use your site's own setup wizard (its Email step) to switch to
 			your own email account, then tell us and we close this one.</p>
@@ -98,6 +118,8 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 .sms-facts dd { margin: 0; }
 .sms-note { color: #555; font-size: .9em; }
 .sms-actions form { display: inline-block; margin-right: .5em; }
+.sms-buy-btn { background: #1f2937; color: #fff; border: 1px solid #1f2937; padding: 8px 18px;
+	border-radius: 4px; font-size: .95em; cursor: pointer; }
 .sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
 	border-radius: 4px; font-size: .95em; cursor: pointer; }
 </style>

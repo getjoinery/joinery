@@ -837,4 +837,22 @@ return [
 			error_log('sm_029: ' . (int)$q->rowCount() . ' provisioning service account(s) marked as machine accounts.');
 		},
 	],
+	[
+		// The reminder email a self-hosted site's owner gets about the
+		// getjoinery services it rents (ServicesNudge): one body, the subject
+		// and the sentences composed per event.
+		'id' => 'sm_030_services_nudge_template',
+		'version' => '1.30.164',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			$insert->execute(array('services_nudge', 'About getjoinery email and backups for your site',
+				'<p>Hi *name*,</p>
+<p>*sentence*</p>
+*doors*
+<p>*keeps*</p>', 'services_nudge'));
+		},
+	],
 ];

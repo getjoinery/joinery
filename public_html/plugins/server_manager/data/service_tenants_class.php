@@ -10,9 +10,10 @@
  * its backup storage.
  *
  * What decides whether the service works is the date: svt_paid_until, null
- * meaning never entitled. In this phase an operator writes it from the
- * Service Tenants admin page; a payment writes the same column later. The
- * reconcile compares it every pass and walks the row down the core
+ * meaning never entitled. A payment writes it (JoineryServicesFulfillment,
+ * the line named in svt_odi_order_item_id), and an operator can write it from
+ * the Service Tenants admin page. The reconcile compares it every pass, moves
+ * it to a paying subscription's period end, and walks the row down the core
  * ServiceTenantLadder when it has passed.
  *
  * The states:
@@ -44,6 +45,8 @@
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.4 - svt_odi_order_item_id: the store line that pays for the row (a subscription's period end is
+ *               followed by the reconcile); svt_nudged: the reminder emails already sent, so each goes once
  * @version 1.3 - permanent_delete() refuses while the row holds anything at a provider (provider_holding()):
  *               an open mail subaccount, or backup copies not yet pruned; so an account is removed only after
  *               its services are released and their retention has run
@@ -95,6 +98,8 @@ class ServiceTenant extends SystemBase {
 		'svt_usr_user_id'     => array('action' => 'permanent_delete'),
 		'svt_apk_api_key_id'  => array('action' => 'null'),
 		'svt_mgn_managed_node_id' => array('action' => 'null'),
+		// The line stops being followed; the date it last wrote stands.
+		'svt_odi_order_item_id' => array('action' => 'null'),
 	);
 
 	public static $test_fixture = array(
@@ -126,6 +131,13 @@ class ServiceTenant extends SystemBase {
 		// shelf), snapshotted from the plan setting on every reconcile.
 		'svt_paid_until'         => array('type'=>'timestamp(6)'),
 		'svt_allowance'          => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
+		// The store line that paid for the date (JoineryServicesFulfillment).
+		// While it is a subscription that has not been cancelled, the
+		// reconcile moves the date to its period end on every pass.
+		'svt_odi_order_item_id'  => array('type'=>'int8'),
+		// The reminder emails already sent for this row, as a JSON object of
+		// event key => UTC time (ServicesNudge), so each is sent once.
+		'svt_nudged'             => array('type'=>'text'),
 		// The figure against the allowance and when it was measured, plus when
 		// the plane last looked at this row at all.
 		'svt_figure'             => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
@@ -235,6 +247,28 @@ class ServiceTenant extends SystemBase {
 		}
 		$node = new ManagedNode($id, TRUE);
 		return ($node->key && !$node->get('mgn_delete_time')) ? $node : null;
+	}
+
+	/**
+	 * Every live row of the same site, this one included, keyed by service:
+	 * the rows sharing its connected key, or for a node-linked row its node.
+	 */
+	public function siteRows(): array {
+		$opts = $this->is_node_linked()
+			? array('node_id' => (int)$this->get('svt_mgn_managed_node_id'))
+			: array('api_key_id' => (int)$this->get('svt_apk_api_key_id'));
+		$out = array();
+		if (reset($opts) <= 0) {
+			return array((string)$this->get('svt_service') => $this);
+		}
+		$rows = new MultiServiceTenant($opts + array('deleted' => false), array('svt_service_tenant_id' => 'ASC'));
+		foreach ($rows as $row) {
+			if ((int)$row->get('svt_usr_user_id') === (int)$this->get('svt_usr_user_id')) {
+				$out[(string)$row->get('svt_service')] = $row;
+			}
+		}
+		$out[(string)$this->get('svt_service')] = $this;
+		return $out;
 	}
 
 	/** A node's node-linked row for one service, or null. */

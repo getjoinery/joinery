@@ -32,6 +32,8 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.8 - selling (specs/services_phase3_selling_nudge.md §1, §2): status carries the offer on sale and
+ *               each row's renews; an unpaid row's notice names the offer and where to buy it; noticeDays()
  * @version 1.7 - the released-mail notice names the provider's two records on the site's domain
  * @version 1.6 - the mail subaccount is created at the allowance, with no member email (B160)
  * @version 1.5 - releasing mail removes the sender domain and the SMTP user before closing the subaccount
@@ -55,6 +57,42 @@ class JoineryServices {
 	public static function graceDays(): int {
 		$raw = trim((string)Globalvars::get_instance()->get_setting('server_manager_services_grace_days', false, true));
 		return $raw === '' ? 14 : max(0, intval($raw));
+	}
+
+	/** Days before a paid-through date that the reminders begin. Blank reads as the default. */
+	public static function noticeDays(): int {
+		$raw = trim((string)Globalvars::get_instance()->get_setting('server_manager_services_notice_days', false, true));
+		return $raw === '' ? 21 : max(0, intval($raw));
+	}
+
+	/**
+	 * The cheapest product on sale for these services, as the site is told it:
+	 * {label, price, url}, or null when nothing is on sale. The price is the
+	 * product's; the url is the connected sites page, where the buying is.
+	 */
+	public static function offer(): ?array {
+		if (!class_exists('JoineryServicesFulfillment')) {
+			return null;
+		}
+		$offers = JoineryServicesFulfillment::offers();
+		if (!$offers) {
+			return null;
+		}
+		return array(
+			'label' => $offers[0]['label'],
+			'price' => $offers[0]['price'],
+			'url'   => self::manageUrl(),
+		);
+	}
+
+	/** What an unpaid row tells the site: what is on sale, and where to buy it. */
+	public static function unpaidNotice(): string {
+		$offer = self::offer();
+		if ($offer === null) {
+			return 'getjoinery\'s email and backup storage are not on sale yet.';
+		}
+		return 'This site is not paid for yet. getjoinery\'s email and backup storage are ' . $offer['price']
+			. ' for one site, bought from your connected sites on getjoinery.';
 	}
 
 	/** The allowance in the service's own unit: sends a month, or bytes in backup storage. */
@@ -373,6 +411,8 @@ class JoineryServices {
 			'account'    => $account,
 			'manage_url' => self::manageUrl(),
 			'services'   => $services,
+			'offer'      => self::offer(),
+			'notice_days' => self::noticeDays(),
 		);
 	}
 
@@ -394,7 +434,11 @@ class JoineryServices {
 			'used_label'   => self::formatFigure($service, $figure),
 			'allowance_label' => self::formatFigure($service, $allowance),
 			'percent'      => $percent,
-			'notice'       => (string)$row->get('svt_notice'),
+			'notice'       => (string)$row->get('svt_notice') !== '' ? (string)$row->get('svt_notice')
+				: ((string)$row->get('svt_state') === ServiceTenant::STATE_UNPAID && !$row->entitled() ? self::unpaidNotice() : ''),
+			// The date advances on its own (a subscription that has not been
+			// cancelled): no reminder about it is owed.
+			'renews'       => class_exists('JoineryServicesFulfillment') && JoineryServicesFulfillment::row_renews($row),
 			'action_label' => self::actionLabel($service),
 			'action_url'   => self::referralUrl($service),
 			'manage_url'   => self::manageUrl(),

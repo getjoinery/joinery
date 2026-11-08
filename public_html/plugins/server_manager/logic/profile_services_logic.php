@@ -5,14 +5,18 @@
  * (specs/services_phase2_platform.md §4, E6). Every site that holds a key
  * for this account: its host, when it was connected, and each service it
  * holds with the paid-through date, the figure and the state — the page the
- * site's status answer points at as manage_url. In this phase there is
- * nothing to buy here; the date is what the operator set.
+ * site's status answer points at as manage_url. It is also where the services
+ * are bought, per site (specs/services_phase3_selling_nudge.md §1): a site
+ * never paid for, or past its date, shows each product on sale as Buy; one
+ * whose date is inside the notice window shows them as Keep going; one paying
+ * by a subscription that renews shows nothing to buy.
  *
  * Disconnect is a POST: every service the site holds is released (mail's
  * subaccount closed; backup storage kept 90 days and then pruned) and the site's
  * key is deactivated. It is how the account holder cuts off a site they no
  * longer run, or one they were tricked into approving.
  *
+ * @version 1.1 - each site's card state and the products on sale (JoineryServicesFulfillment)
  * @version 1.0
  */
 
@@ -46,9 +50,23 @@ function profile_services_logic(array $input): LogicResult {
 		return LogicResult::redirect($self_url);
 	}
 
+	$sites = ServicesConnect::sitesFor($user_id);
+	$offers = class_exists('JoineryServicesFulfillment') ? JoineryServicesFulfillment::offers() : array();
+	$now = gmdate('Y-m-d H:i:s');
+	foreach ($sites as $i => $site) {
+		$sites[$i]['card'] = $offers
+			? JoineryServicesFulfillment::card_state($site, $now, JoineryServices::noticeDays()) : '';
+	}
+
 	return LogicResult::render(array(
 		'session'  => $session,
-		'sites'    => ServicesConnect::sitesFor($user_id),
+		'sites'    => $sites,
+		'offers'   => $offers,
+		// What a purchase includes, from the plane's own allowances.
+		'includes' => JoineryServices::formatFigure(ServiceTenant::SERVICE_MAIL, JoineryServices::allowance(ServiceTenant::SERVICE_MAIL))
+			. ' emails a month and '
+			. JoineryServices::formatFigure(ServiceTenant::SERVICE_SHELF, JoineryServices::allowance(ServiceTenant::SERVICE_SHELF))
+			. ' of backup storage',
 		'self_url' => $self_url,
 	));
 }

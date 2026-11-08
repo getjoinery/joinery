@@ -21,6 +21,11 @@
  *   own mail provider or their own bucket, and this notice says so rather than
  *   selling them something.
  *
+ *   A self-hosted site renting services (the services state) has one more row
+ *   inside the notice window before its paid-through date: that date, and two
+ *   doors in this order — its own accounts, then paying getjoinery again at
+ *   the price on sale. A date that renews on its own gets no row.
+ *
  * ADMINS ONLY. Everything here is about the operator's arrangement with the
  * site's owner; a member reading the site has no part in it and no way to act
  * on it. Callers render it behind a permission check.
@@ -29,6 +34,9 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.4 - a services site's rows may be due (the paid period, from the notice window out) and urgent
+ *               (past the date), and carry a second door after the first: the offer on sale
+ *               (specs/services_phase3_selling_nudge.md §2.1)
  * @version 1.3 - a hosted site with no proven backup recovery key is told, urgently and on every admin
  *                page, that its backups are off until the key exists; the trial no longer says
  *                there is nothing to do while that is untrue (specs/easy_signup_completion.md WP3)
@@ -186,8 +194,14 @@ class HostedPlanNotice {
 				'used'         => (string)($entry['used'] ?? ''),
 				'allowance'    => (string)($entry['allowance'] ?? ''),
 				'percent'      => max(0, min(999, (int)($entry['percent'] ?? 0))),
+				// A row about a date rather than a figure: its doors show
+				// whatever the percent, and an urgent one sharpens the notice.
+				'due'          => !empty($entry['due']),
+				'urgent'       => !empty($entry['urgent']),
 				'action_label' => (string)($entry['action_label'] ?? ''),
 				'action_url'   => (string)($entry['action_url'] ?? ''),
+				'second_label' => (string)($entry['second_label'] ?? ''),
+				'second_url'   => (string)($entry['second_url'] ?? ''),
 			);
 		}
 		return $out;
@@ -224,7 +238,10 @@ class HostedPlanNotice {
 			return 'soon';
 		}
 		foreach ($allowances as $a) {
-			if ($a['percent'] >= self::ALLOWANCE_URGE_PERCENT) { return 'urgent'; }
+			if ($a['percent'] >= self::ALLOWANCE_URGE_PERCENT || !empty($a['urgent'])) { return 'urgent'; }
+		}
+		foreach ($allowances as $a) {
+			if (!empty($a['due'])) { return 'soon'; }
 		}
 		if ($days !== null && $days <= self::URGENT_DAYS) {
 			return 'soon';
@@ -302,20 +319,26 @@ class HostedPlanNotice {
 	private static function renderAllowances(array $allowances): string {
 		$rows = '';
 		foreach ($allowances as $a) {
-			$near = $a['percent'] >= self::ALLOWANCE_WARN_PERCENT;
+			$near = $a['percent'] >= self::ALLOWANCE_WARN_PERCENT || !empty($a['due']);
 			$usage = trim($a['used'] . ($a['allowance'] !== '' ? ' of ' . $a['allowance'] : ''));
 			$rows .= '<div class="jy-hosted-plan__allowance' . ($near ? ' is-near' : '') . '">'
 				. '<span class="jy-hosted-plan__allowance-label">'
 				. htmlspecialchars($a['label'], ENT_QUOTES, 'UTF-8') . '</span>'
 				. '<span class="jy-hosted-plan__allowance-usage">'
 				. htmlspecialchars($usage, ENT_QUOTES, 'UTF-8') . '</span>';
-			// The one action for a service that is running out is always "open
-			// your own account", and it is only offered when it is actually
-			// needed — a quiet allowance is not a sales opportunity.
-			if ($near && $a['action_label'] !== '' && preg_match('#^https://#i', $a['action_url'])) {
-				$rows .= '<a class="jy-hosted-plan__allowance-action" href="'
-					. htmlspecialchars($a['action_url'], ENT_QUOTES, 'UTF-8') . '" rel="noopener">'
-					. htmlspecialchars($a['action_label'], ENT_QUOTES, 'UTF-8') . '</a>';
+			// The first door is always "open your own account"; a second, where
+			// one is sent, is paying getjoinery again at what is on sale. Both
+			// only when needed — a quiet allowance is not a sales opportunity.
+			if ($near) {
+				$doors = array();
+				foreach (array('action', 'second') as $door) {
+					if ($a[$door . '_label'] !== '' && preg_match('#^https://#i', $a[$door . '_url'])) {
+						$doors[] = '<a class="jy-hosted-plan__allowance-action" href="'
+							. htmlspecialchars($a[$door . '_url'], ENT_QUOTES, 'UTF-8') . '" rel="noopener">'
+							. htmlspecialchars($a[$door . '_label'], ENT_QUOTES, 'UTF-8') . '</a>';
+					}
+				}
+				$rows .= implode(' <span class="jy-hosted-plan__or">or</span> ', $doors);
 			}
 			$rows .= '</div>';
 		}

@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.162",
+  "version": "1.30.164",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -593,6 +593,21 @@
         }
       },
       "helptext": "How long a self-hosted site keeps using our outbound mail and backup storage after its paid-through date passes. At the end mail's subaccount is closed and the backup storage broker refuses the site; backup storage is kept 90 days from that day and then pruned. Blank means 14."
+    },
+    {
+      "name": "server_manager_services_notice_days",
+      "default": "21",
+      "group": "services",
+      "label": "Services reminders before the paid-through date (days)",
+      "type": "number",
+      "validation": {
+        "number": true,
+        "min": 0,
+        "messages": {
+          "min": "Must be 0 or more."
+        }
+      },
+      "helptext": "How far ahead of a self-hosted site's paid-through date its banner, setup steps and one email remind the owner, naming both ways to keep going: their own accounts, or paying getjoinery again. A subscription that renews on its own gets no reminder. Blank means 21."
     },
     {
       "name": "server_manager_backup_target_id",

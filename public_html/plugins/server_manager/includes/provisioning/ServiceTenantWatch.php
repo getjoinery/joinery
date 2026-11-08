@@ -51,6 +51,10 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.11 - a row paid by a subscription takes the line's period end every pass (JoineryServicesFulfillment::
+ *                 follow_line), before the ladder compares the date; a self-hosted site's reminder emails
+ *                 (ServicesNudge), once per event, a paid site never switched on included
+ *                 (specs/services_phase3_selling_nudge.md §1, §2.3)
  * @version 1.10 - the re-review: the offloaded-file pass leaves a space alone while one of the tenant's runs is open
  *                 there (it may name what no kept index does yet); a draining space with no point left, once the
  *                 move's hold is released, drops its offloaded files so it can retire; a ledger time is read as UTC
@@ -105,7 +109,15 @@ class ServiceTenantWatch {
 			'deleted' => false,
 		), array('svt_service_tenant_id' => 'ASC'));
 		$rows->load();
-		if (count($rows) === 0) {
+		// Rows paid for whose site never enrolled (unpaid with a date): only
+		// the reminders reach them.
+		$idle_paid = array();
+		$idle = new MultiServiceTenant(array('state' => ServiceTenant::STATE_UNPAID, 'deleted' => false),
+			array('svt_service_tenant_id' => 'ASC'));
+		foreach ($idle as $row) {
+			if (trim((string)$row->get('svt_paid_until')) !== '') { $idle_paid[] = $row; }
+		}
+		if (count($rows) === 0 && !$idle_paid) {
 			return array('status' => 'skipped', 'message' => 'No service tenants to watch.');
 		}
 
@@ -121,6 +133,17 @@ class ServiceTenantWatch {
 			if ($row->is_node_linked()) {
 				$linked_nodes[(int)$row->get('svt_mgn_managed_node_id')] = true;
 			}
+		}
+
+		// A self-hosted site's owner hears by email at 80% and 100% of an
+		// allowance, ahead of the date, when it passes and when it stops.
+		try {
+			$nudge_rows = $idle_paid;
+			foreach ($rows as $row) { $nudge_rows[] = $row; }
+			$acted += ServicesNudge::sendDue($nudge_rows, gmdate('Y-m-d H:i:s'));
+		} catch (Throwable $e) {
+			$this->errors[] = 'reminder emails: ' . $e->getMessage();
+			error_log('ServiceTenantWatch: reminder emails: ' . $e->getMessage());
 		}
 
 		// A node-linked site hears about its services from here, not from a
@@ -154,6 +177,10 @@ class ServiceTenantWatch {
 		$acted = 0;
 		$service = (string)$row->get('svt_service');
 
+		// A subscription's period end, before the ladder reads the date.
+		if (class_exists('JoineryServicesFulfillment')) {
+			$acted += JoineryServicesFulfillment::follow_line($row);
+		}
 		$acted += $this->refresh_allowance($row);
 
 		// The ladder. The two acts are the service's own (JoineryServices).

@@ -25,6 +25,7 @@ See also: [Questions & Surveys](questions_surveys.md) — the underlying questio
 | `QuestionRequirement` | Question | Any single `Question` (all types supported) |
 | `SurveyRequirement` | Survey | All questions in a `Survey`, saves `SurveyAnswer` records on purchase |
 | `ManagedSiteRequirement` | Managed site | One hidden answer: the id of the site the buyer configured on Server Manager's configure page before paying. Renders no fields; refuses anything but the signed-in buyer's own frozen draft; adds the one-year domain line from the quote frozen on that draft. Contributed by the `customer_cloud` fulfillment provider, never attached as a `pri_` row — see [Server Manager](../../server_manager/docs/overview.md#the-buyer-configures-first-then-pays-payment-activates) |
+| `JoineryServiceRequirement` | Site | One hidden answer: the id of one of the buyer's connected self-hosted site's service rows, posted by the Buy button on Server Manager's Connected sites page. Renders no fields; refuses anything but a live row of the signed-in buyer's whose key is still active. Contributed by the `joinery_services` fulfillment provider, never attached as a `pri_` row — see [Server Manager](../../server_manager/docs/overview.md#joinery-run-services-for-self-hosted-sites) |
 
 ## Admin UI
 

@@ -369,7 +369,7 @@ class ShoppingCart {
 
 			if ($current_count >= $product->get('pro_max_cart_count')) {
 				throw new ShoppingCartException(
-					'Sorry, you can not add this item to you cart more than ' . $product->get('pro_max_cart_count') 
+					'Sorry, you can not add this item to your cart more than ' . $product->get('pro_max_cart_count') 
 					. (($product->get('pro_max_cart_count') == 1) ? ' time' : ' times') . '.  <a href="/cart">
 					View your current shopping cart</a> for more details.');
 			}

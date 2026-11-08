@@ -31,6 +31,7 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.7 - a connected site is told getjoinery's email is a paid service for a self-hosted site, and where it is bought
  * @version 3.6
  * @changelog 3.6 - getjoinery's included email service is a provider choice: an unlinked
  *   site shows the Connect button, a linked one enrols on Save; the prove stage names the
@@ -825,7 +826,9 @@ $formwriter->end_form();
 	</form>
 <?php } else { ?>
 	<p class="jy-muted">This site is connected to getjoinery<?php echo $setup_services_account !== '' ? ' as <strong>' . htmlspecialchars($setup_services_account) . '</strong>' : ''; ?>.
-		Save above to send through it; the records to publish follow on the next screen.
+		Save above to send through it; the records to publish follow on the next screen. For a self-hosted site it is a
+		paid service, with backup storage included, bought for this site on your connected sites at getjoinery; Save says
+		so if it is not paid for yet.
 		<?php if (!empty($setup_services_mail['manage_url']) && preg_match('#^https://#', (string)$setup_services_mail['manage_url'])) { ?>
 			<a href="<?php echo htmlspecialchars((string)$setup_services_mail['manage_url']); ?>">Your sites on getjoinery</a>.
 		<?php } ?></p>

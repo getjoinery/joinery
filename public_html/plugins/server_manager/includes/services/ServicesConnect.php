@@ -25,6 +25,7 @@
  * never leaves the key live. A site someone was tricked into approving keeps
  * a key only until its owner finds this page.
  *
+ * @version 1.3 - sitesFor names each site's row_id, the row a purchase for the site names
  * @version 1.2 - a node-linked row (a site moved off Managed) is not a connection: sitesFor marks it, disconnect leaves it
  * @version 1.1 - disconnect cuts the key before it releases the services
  */
@@ -162,6 +163,8 @@ class ServicesConnect {
 				}
 				$sites[$host] = array(
 					'host'           => $host,
+					// The row a purchase for this site names (JoineryServiceRequirement).
+					'row_id'         => (int)$row->key,
 					'key_id'         => $key_id,
 					'node_linked'    => $row->is_node_linked(),
 					'active'         => $active,

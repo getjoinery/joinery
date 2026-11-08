@@ -1860,15 +1860,73 @@ releases the row.
 **Operator pages.** The **Service Tenants** page
 (`/admin/server_manager/service_tenants`) lists every row with state, figure,
 date and the ladder's timestamps, and carries the two acts: **Grant** (write
-the paid-through date — what entitles a tenant in this phase; a stopped row
-with a date ahead comes back in place now, an unpaid row waits for the site's
-next enrol) and **Release**. Managed sites have no row and never appear; a
-moved site's node-linked rows do, naming their node. The
-account holder's **Connected sites** page (`/profile/server_manager/services`)
-lists their linked sites with each service's state, date and figure, and
-carries **Disconnect**, which deactivates the site's key and then releases
-every service it holds; a provider refusal on one release is surfaced after
-the rest have run, with the key already off.
+the paid-through date by hand; a stopped row with a date ahead comes back in
+place now, an unpaid row waits for the site's next enrol) and **Release**.
+Managed sites have no row and never appear; a moved site's node-linked rows
+do, naming their node. The account holder's **Connected sites** page
+(`/profile/server_manager/services`) lists their linked sites with each
+service's state, date and figure, carries **Disconnect**, which deactivates
+the site's key and then releases every service it holds (a provider refusal
+on one release is surfaced after the rest have run, with the key already
+off), and is where the services are bought.
+
+**Selling the services.** A product grants them by its Purchase grants picker:
+`pro_fulfillment_provider` = `joinery_services` and a **plan** number
+(`JoineryServicesFulfillment::PLANS`; plan 1 is mail and backup storage
+together). The price and the billing period are the product's; the plan says
+which services it grants and, for a product bought once, how many days one
+purchase buys (31). The allowances are the plane's own settings for every plan.
+The line carries one requirement, `JoineryServiceRequirement`: the id of one of
+the site's rows, posted by the **Buy** button on Connected sites to the
+product's URL, refused unless it is a live row of the signed-in buyer's whose
+key is still active. A site appears there to buy for once its Email or Backups
+step has asked (which made its row at `unpaid`). Each site shows:
+
+| The site | Connected sites shows |
+|---|---|
+| never paid, or past its date | each product on sale as **Buy**, with its price |
+| paid, the date inside `server_manager_services_notice_days` (21) | the same as **Keep going** |
+| paid by a subscription that has not been cancelled | that it renews, and where to cancel it |
+| paid and not due, released, or its key inactive | nothing to buy |
+
+Before the charge, `checkAvailability()` refuses a line whose site is no longer
+the buyer's or connected, a product naming no plan, and a site already paying
+by a renewing subscription. At payment, `fulfill()` writes the date on every
+row the plan grants, creating a row the site has not asked for yet (a bundle
+bought from the Email step covers backups too), and names the paying line on
+the row (`svt_odi_order_item_id`). Bought once: the term from the later of
+today and the current date. By subscription: the line's period end (a term
+from today while the payment provider has not said it). A date is never
+shortened, and the same order item is granted once. Every reconcile pass then
+moves a subscription row's date to the line's period end while the line pays
+(`JoineryServicesFulfillment::follow_line()`); a cancelled or failing line
+stops moving, so the date falls into the past and the ladder's grace and
+suspension follow with nothing else to do. A paid order that cannot be granted
+is logged and emailed to the alert recipient with its order item id. Managed
+sites never buy this: the hosting is the entitlement.
+
+**What the site is told.** The status answer carries `offer` (the cheapest
+product on sale: its label, its price, and the Connected sites address),
+`notice_days`, and per service `renews` (the date advances on its own). An
+unpaid row's notice names the offer and where to buy it, which is what the
+site's Email and Backups steps show when they enrol a site not paid for. The
+site's daily status poll writes the paid period onto its banner as a row of
+its own from `notice_days` before the date, never for a date that renews:
+*paid through* the date, or *ended on* it with the day they stop, urgent
+after it, with two doors, the site's own setup steps first and then
+*keep going* at the offer's price (`ServicesStatusPoll::periodRow()`,
+`HostedPlanNotice` rows with `due`, `urgent` and a second door). A banner
+whose every date renews carries no date and says so.
+
+**Reminder emails.** `ServicesNudge`, from the reconcile, emails the account
+holder of a self-hosted site (template `services_nudge`, one per event, the
+subject and sentences composed per event): at 80% and at 100% of an allowance
+(once per service per month, naming the own-account referral link), when the
+date comes inside the notice window, when it passes, and when the services
+stop; the three date emails never for a date that renews. Each names the two
+doors and says the site keeps working. Each event is recorded on every row of
+the site (`svt_nudged`) so it is sent once; one that fails to send is tried
+again next pass. A moved site's node-linked rows keep their own two emails.
 
 **Removing an account waits for its services.** An account is removed for good
 only once none of its tenant rows holds anything at a provider
@@ -2994,6 +3052,8 @@ Used by the backup browser on the Backups tab.
 | `includes/domain_registrar/DomainRegistrarRegistry.php` | Interface-based registrar discovery, plus the shared domain-name and TLD gates |
 | `includes/domain_registrar/NamecheapRegistrar.php` | Namecheap: availability, pricing, registration, WHOIS privacy, expiry, custody probe |
 | `includes/requirements/ManagedSiteRequirement.php` | The one answer a customer-cloud line carries: the buyer's frozen draft id, plus the domain-year line from its frozen quote |
+| `includes/requirements/JoineryServiceRequirement.php` | The one answer a services line carries: the id of one of the buyer's connected site's service rows |
+| `includes/fulfillment_providers/JoineryServicesFulfillment.php` | The `joinery_services` provider: the plan ladder, the checks before the charge, the date at payment, following a subscription's period end, what is on sale |
 | `includes/ManagedSiteDraft.php` | The draft before payment: find, validate and freeze, unfreeze, delete, the Managed product and its price, the Continue-to-payment form |
 | `includes/ManagedDomainIntake.php` | The one gate for what a domain and a registrant may be, and the live quote |
 | `includes/provisioning/SweepSiteDrafts.php` | Expire old drafts, thaw old frozen ones |
@@ -3005,6 +3065,7 @@ Used by the backup browser on the Backups tab.
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage: requests, the one presigner, and paginated listing |
 | `includes/StorageProvider.php` | The one provider catalogue: labels, endpoint patterns, region rules, addressing, console links |
 | `includes/BackupTargetForm.php` | The one backup target form and save path, the same one the core Backups page draws |
+| `includes/services/ServicesNudge.php` | The reminder emails to a self-hosted site's owner: 80% and 100% of an allowance, the notice window, the date, the stop; each once |
 | `includes/services/NodeBroker.php` | A Managed node's broker runs: opened at job hand-out with a token, begin, sign, finish, abort, and the expiry pass |
 | `includes/services/BrokerEndpoint.php` | `/api/v1/broker/*`: the token-authenticated HTTP shell a node's backup run calls |
 | `includes/TargetTester.php` | Connection test on Save for Backup Targets |
