@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.8 - the title and tabs come from the logic: Cloud Accounts alone where this site does not sell hosting
  * @version 2.7 - the SMTP2GO master key row says why its permissions could not be read
  * @version 2.6 - the Hosted tier tab names the SMTP2GO master key's missing permissions (B179)
  * @version 2.5 - API not responding says why (the HTTP status and the API's own error, or the connection's) (B21)
@@ -91,11 +92,11 @@ $page = new AdminPage();
 
 $page->admin_header(array(
 	'menu-id' => 'server-manager',
-	'page_title' => 'Provisioning Setup',
-	'readable_title' => 'Provisioning Setup',
+	'page_title' => $page_vars['page_title'],
+	'readable_title' => $page_vars['page_title'],
 	'breadcrumbs' => array(
 		'Server Manager' => '/admin/server_manager',
-		'Provisioning Setup' => '',
+		$page_vars['page_title'] => '',
 	),
 	'session' => $session,
 ));

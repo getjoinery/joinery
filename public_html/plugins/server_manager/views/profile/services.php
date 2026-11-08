@@ -6,6 +6,7 @@
  * was connected, and per service the state, the paid-through date and the
  * figure against the allowance. Disconnect (a POST) cuts a site off.
  *
+ * @version 1.3 - not found where this site does not sell hosting (SmHosting)
  * @version 1.2 - the services are bought here, per site: Buy, Keep going, or renewing by subscription
  * @version 1.1 - a site moved off Managed reads as such, with no Disconnect
  * @version 1.0.1 - the page carries its own styles (site block, facts grid, buttons)
@@ -15,6 +16,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('profile_services_logic.php', 'logic', 'system', null, 'server_manager'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(profile_services_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

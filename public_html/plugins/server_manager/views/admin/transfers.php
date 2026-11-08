@@ -10,10 +10,17 @@
  * any to-do. The buttons call the transfer_operator API action. The code itself
  * is never shown here: only the customer's own signed-in page shows it.
  *
+ * @version 1.1 - shown only where this site sells hosting (SmHosting)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_transfers_logic.php'));
+
+// Only a management node that sells hosting has anything here (SmHosting).
+if (!SmHosting::enabled()) {
+	SmHosting::render_off_page(SessionControl::get_instance(), 'Server Transfers');
+	return;
+}
 
 $page_vars = process_logic(admin_transfers_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

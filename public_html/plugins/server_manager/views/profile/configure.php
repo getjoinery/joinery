@@ -10,6 +10,7 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.4 - not found where this site does not sell hosting (SmHosting)
  * @version 1.3 - the registrant's details wait for a free name; no Site name field (derived from the domain);
  *                an own domain says the site has no address or certificate until its A record is added
  * @version 1.2 - the registrant's address and phone are the platform's Address and PhoneNumber form blocks
@@ -20,6 +21,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('profile_configure_logic.php', 'logic', 'system', null, 'server_manager'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(profile_configure_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

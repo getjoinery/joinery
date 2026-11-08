@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.2 - not found where this site does not sell hosting (SmHosting)
  * @version 1.1 - the time zone starts as the browser's (timezone-from-browser.js)
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1 (the account step)
  */
@@ -15,6 +16,9 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('start_logic.php', 'logic', 'system', null, 'server_manager'));
 require_once(PathHelper::getThemeFilePath('register_logic.php', 'logic'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(start_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

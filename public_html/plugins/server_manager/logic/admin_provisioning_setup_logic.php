@@ -9,6 +9,8 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.4 - where this site does not sell hosting (SmHosting), only the cloud accounts (and the test-account
+ *               cleanup where a test account is held): the selling tabs are not shown and their actions refused
  * @version 2.3 - an account is added for its provider (Linode or Hetzner), with the name a provider that names none
  *               needs; a replacement key is checked against the same account by the account itself
  * @version 2.2 - each of our accounts carries the encrypted machines it opens at Tier 2, for Remove's question (B77 N1)
@@ -65,9 +67,19 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 	$page_regex = '/\/admin\/server_manager\/provisioning_setup/';
 
 	$action = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($input['action'] ?? '') : '';
+	// A management node that does not sell hosting keeps the cloud accounts its
+	// own servers are created and copied in, and the test-account cleanup when it
+	// holds a test account; the selling tabs are not shown (SmHosting).
+	$tabs = SMPS_TABS;
+	if (!SmHosting::enabled()) {
+		$tabs = array('hosting' => 'Cloud accounts');
+		if (TestCloudCleanup::accounts()) {
+			$tabs['cleanup'] = SMPS_TABS['cleanup'];
+		}
+	}
 	$tab = (string)($input['tab'] ?? '');
-	if (!isset(SMPS_TABS[$tab])) {
-		$tab = 'setup';
+	if (!isset($tabs[$tab])) {
+		$tab = array_key_first($tabs);
 	}
 
 	// A stored credential is a locked field: not posted, it is kept; after
@@ -89,6 +101,11 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 		$warning = null;
 		$error = null;
 		$return_tab = SMPS_ACTION_TABS[$action] ?? $tab;
+		if (!isset($tabs[$return_tab])) {
+			$session->save_message(new DisplayMessage(SmHosting::off_text(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect($page_url . '?tab=' . $tab);
+		}
 		$account_of = function () use ($input): OperatorCloudAccount {
 			$account = new OperatorCloudAccount((int)($input['oca_id'] ?? 0), TRUE);
 			if (!$account->key || $account->removed()) {
@@ -326,7 +343,8 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 
 	return LogicResult::render(array(
 		'tab'    => $tab,
-		'tabs'   => SMPS_TABS,
+		'tabs'   => $tabs,
+		'page_title' => isset($tabs['setup']) ? 'Provisioning Setup' : 'Cloud Accounts',
 		'status' => ProvisioningSetup::status(),
 		'accounts' => array(
 			'ours'      => $ours,

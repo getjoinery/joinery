@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.62 - the Main and Test tabs only where something is on the Test side
  * @version 1.61 - Publish New Upgrade is offered only where this site publishes releases (SmPublishing)
  * @version 1.60 - a held hosted order (over the per-buyer limit) offers Approve, Refuse and a link to its order
  * @version 1.59 - recent jobs leave out completed routine never-do checks
@@ -747,6 +748,14 @@ $host_default_open_max = 6;
 $total_nodes = count($machines);
 foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 ?>
+<?php
+// Main and Test are the two kinds of cloud account this node creates servers
+// in. Where nothing is on the Test side (no test account, no box, no join),
+// there is one kind, and no tabs to choose between.
+$show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccounts::TEST] > 0
+	|| $join_tabs[CloudAccounts::TEST] > 0 || TestCloudCleanup::accounts();
+?>
+<?php if ($show_account_tabs): ?>
 <nav class="svm-tabs" aria-label="Cloud account">
 	<?php foreach (CloudAccounts::LABELS as $tab => $tab_label):
 		$tab_attention = $tab_incidents[$tab] + $join_tabs[$tab]; ?>
@@ -758,6 +767,7 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 		</a>
 	<?php endforeach; ?>
 </nav>
+<?php endif; ?>
 <!-- Hosts & Sites (left) | Recent Jobs (right) -->
 <div class="svm-board">
 	<div class="svm-board-main">

@@ -6,6 +6,7 @@
  * button (a POST) and a Cancel that sends the visitor back to the site with
  * nothing minted. The key never appears on this page.
  *
+ * @version 1.1 - not found where this site does not sell hosting (SmHosting)
  * @version 1.0.1 - the two buttons stack full-width; the lead paragraph is styled here, not by the start page
  * @version 1.0 - specs/services_phase2_platform.md §4 (the Connect flow)
  */
@@ -13,6 +14,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('services_authorize_logic.php', 'logic', 'system', null, 'server_manager'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(services_authorize_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

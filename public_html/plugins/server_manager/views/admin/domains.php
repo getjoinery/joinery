@@ -9,10 +9,17 @@
  * registrations that failed and need a decision, then everything else as a
  * ledger.
  *
+ * @version 1.1 - shown only where this site sells hosting (SmHosting)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_domains_logic.php'));
+
+// Only a management node that sells hosting has anything here (SmHosting).
+if (!SmHosting::enabled()) {
+	SmHosting::render_off_page(SessionControl::get_instance(), 'Domains');
+	return;
+}
 
 $page_vars = process_logic(admin_domains_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

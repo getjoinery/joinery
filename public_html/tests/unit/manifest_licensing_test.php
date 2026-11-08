@@ -13,7 +13,7 @@
  * license is PolyForm Noncommercial with the plugin/theme exception intact,
  * every
  * first-party plugin carries its own LICENSE.md that agrees with its
- * manifest's license field, the two commercial plugins (and only they)
+ * manifest's license field, the commercial plugins (and only they)
  * declare requires_entitlement, no plugin declares is_system anymore, and
  * the maturity status field only ever holds a known value. Each of those is
  * a one-line regression if a manifest edit drops it, so this suite pins them.
@@ -29,6 +29,7 @@
  *
  * Run: php tests/unit/manifest_licensing_test.php
  *
+ * @version 1.3.0 - server_manager is a free plugin: boards, forum and store are the ones that require entitlement
  * @version 1.2.0 - themes must declare a maturity status too
  * @version 1.1.0
  */
@@ -149,8 +150,8 @@ foreach ($manifests as $name => $manifest) {
 }
 
 sort($entitled);
-check($entitled === array('boards', 'forum', 'server_manager', 'store'),
-	'exactly boards, forum, store and server_manager require entitlement', implode(',', $entitled));
+check($entitled === array('boards', 'forum', 'store'),
+	'exactly boards, forum and store require entitlement', implode(',', $entitled));
 
 // Every plugin states its maturity outright. The catalog reads an absent
 // status as stable, so silence is the one answer a plugin can give by

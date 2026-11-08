@@ -1,11 +1,11 @@
 {
   "name": "Server Manager",
-  "version": "1.30.164",
+  "version": "1.30.165",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
-  "license": "Joinery-Commercial",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "status": "stable",
-  "requires_entitlement": true,
+  "requires_entitlement": false,
   "receives_upgrades": true,
   "included_in_publish": true,
   "requires": {
@@ -24,7 +24,8 @@
       "title": "Server Account",
       "url": "/profile/server_manager/connect_cloud",
       "icon": "cloud",
-      "order": 95
+      "order": 95,
+      "settingActivate": "server_manager_offer_hosting"
     }
   ],
   "adminMenu": [
@@ -59,6 +60,12 @@
           "order": 5
         },
         {
+          "slug": "server-manager-cloud-accounts",
+          "title": "Cloud Accounts",
+          "url": "/admin/server_manager/provisioning_setup?tab=hosting",
+          "order": 5
+        },
+        {
           "slug": "server-manager-upgrades",
           "title": "Upgrades",
           "url": "/admin/server_manager/publish_upgrade",
@@ -82,7 +89,8 @@
           "slug": "server-manager-provisioning",
           "title": "Provisioning",
           "url": "/admin/server_manager/provisioning_setup",
-          "order": 6
+          "order": 6,
+          "settingActivate": "server_manager_offer_hosting"
         },
         {
           "slug": "server-manager-jobs",
@@ -94,25 +102,29 @@
           "slug": "system-specs",
           "title": "Specifications",
           "url": "/admin/server_manager/specs",
-          "order": 8
+          "order": 8,
+          "settingActivate": "upgrade_server_active"
         },
         {
           "slug": "server-manager-domains",
           "title": "Domains",
           "url": "/admin/server_manager/domains",
-          "order": 10
+          "order": 10,
+          "settingActivate": "server_manager_offer_hosting"
         },
         {
           "slug": "server-manager-service-tenants",
           "title": "Service Tenants",
           "url": "/admin/server_manager/service_tenants",
-          "order": 11
+          "order": 11,
+          "settingActivate": "server_manager_offer_hosting"
         },
         {
           "slug": "server-manager-transfers",
           "title": "Server Transfers",
           "url": "/admin/server_manager/transfers",
-          "order": 12
+          "order": 12,
+          "settingActivate": "server_manager_offer_hosting"
         }
       ]
     }
@@ -633,6 +645,14 @@
         }
       },
       "helptext": "How many backup chains (restore points) the plane keeps in backup storage for each tenant site, per profile. Older chains are pruned whole by the reconcile; a chain still being written is never touched. Blank means 4."
+    },
+    {
+      "name": "server_manager_offer_hosting",
+      "default": "0",
+      "group": "provisioning",
+      "label": "This management node sells hosting",
+      "type": "checkbox",
+      "helptext": "Shows the pages for selling hosting to others: Provisioning, Domains, Service Tenants, Server Transfers, and the buyer's pages. A management node that has sold hosting shows them either way. Cloud accounts stay under Cloud Accounts whatever this says."
     },
     {
       "name": "server_manager_auto_approve_joins",

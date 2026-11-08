@@ -10,12 +10,16 @@
  * the renewal until they are, and a lapsed domain takes the site and the email
  * address with it.
  *
+ * @version 1.1 - not found where this site does not sell hosting (SmHosting)
  * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('profile_domain_logic.php', 'logic', 'system', null, 'server_manager'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(profile_domain_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

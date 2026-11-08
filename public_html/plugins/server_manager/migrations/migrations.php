@@ -855,4 +855,22 @@ return [
 <p>*keeps*</p>', 'services_nudge'));
 		},
 	],
+	[
+		// A management node that has sold hosting keeps its hosting pages and
+		// menus: server_manager_offer_hosting is turned on wherever something
+		// sold is on record (SmHosting::in_use()). One that never sold keeps
+		// the default, off.
+		'id' => 'sm_031_offer_hosting_where_sold',
+		'version' => '1.30.165',
+		'up' => function($dbconnector) {
+			if (!SmHosting::in_use()) {
+				return;
+			}
+			$dblink = $dbconnector->get_db_link();
+			$q = $dblink->prepare("INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) VALUES ('server_manager_offer_hosting', '1', 'general')
+				ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1', stg_update_time = now()");
+			$q->execute();
+			error_log('sm_031: this management node has sold hosting; server_manager_offer_hosting turned on.');
+		},
+	],
 ];

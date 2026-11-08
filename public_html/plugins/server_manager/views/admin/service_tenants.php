@@ -7,6 +7,7 @@
  * Every self-hosted site renting this plane's outbound mail or backup storage,
  * one row per service, with the grant (a date) and release acts.
  *
+ * @version 1.4 - shown only where this site sells hosting (SmHosting)
  * @version 1.3 - a site's own getjoinery backup storage target is never offered as where a customer's backups move
  * @version 1.2 - a backup storage row says which target holds it (and any it was moved away from) and moves
  * @version 1.1 - a node-linked row (a site moved off Managed) names its node instead of a key
@@ -14,6 +15,12 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_service_tenants_logic.php'));
+
+// Only a management node that sells hosting has anything here (SmHosting).
+if (!SmHosting::enabled()) {
+	SmHosting::render_off_page(SessionControl::get_instance(), 'Service Tenants');
+	return;
+}
 
 $page_vars = process_logic(admin_service_tenants_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);

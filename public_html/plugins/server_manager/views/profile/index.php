@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.4 - not found where this site does not sell hosting (SmHosting)
  * @version 2.3 - a built site on the buyer's own domain shows the address record to add until it takes effect
  * @version 2.2 - the Move to your own Linode account card: its steps, the transfer code behind a button, and
  *                Stop managing this site after the move (specs/managed_to_self_hosted_transfer.md §6)
@@ -19,6 +20,9 @@
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 require_once(PathHelper::getThemeFilePath('profile_sites_logic.php', 'logic', 'system', null, 'server_manager'));
+
+// A buyer's page exists only where this site sells hosting (SmHosting).
+SmHosting::not_found_unless_enabled();
 
 $page_vars = process_logic(profile_sites_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
