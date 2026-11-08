@@ -63,4 +63,18 @@ try {
 check($refused !== '' && stripos($refused, 'SSH host') !== false,
 	'a host beginning with - is refused the same way', $refused);
 
+// A node made without an SSH user (an agent join, a site copy, a provisioned
+// server) gets the column's default, root, on insert; prepare() lets it by.
+$bare = new ManagedNode(NULL);
+$bare->set('mgn_slug', 'ssh-fields-' . bin2hex(random_bytes(3)));
+$bare->set('mgn_name', 'ssh fields test');
+$bare->set('mgn_host', '203.0.113.9');
+$refused = '';
+try {
+	$bare->prepare();
+} catch (ManagedNodeException $e) {
+	$refused = $e->getMessage();
+}
+check(stripos($refused, 'SSH user') === false, 'a node with no SSH user set is not refused for it', $refused);
+
 harness_finish();

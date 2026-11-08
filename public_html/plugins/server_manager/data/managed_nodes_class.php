@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.76 - prepare() lets an empty SSH user through to the column's default (root): a node made
+ *                 without one (agent join, site copy, provisioning) logged a model-rule refusal on every save
  * @version 1.75 - prepare() refuses an SSH user that is not a plain account name and a host that is not a
  *                 hostname or IP address: both reach ssh as user@host, and a leading dash is an ssh option
  *                 (specs/shell_command_audit.md U2); is_ssh_user() / is_ssh_host() are the one definition
@@ -1536,7 +1538,10 @@ class ManagedNode extends SystemBase {
 		// a plain account name and the host a hostname or IP address, nothing else
 		// (specs/shell_command_audit.md U2). The same test runs where the command is
 		// built, in InstallJobExecutor, so a row written any other way is refused there too.
-		if (!self::is_ssh_user((string)$this->get('mgn_ssh_user'))) {
+		// An empty user is a node made without one (an agent join, a copy, a
+		// provisioned server): the column's default, root, fills it on insert.
+		$ssh_user = (string)$this->get('mgn_ssh_user');
+		if ($ssh_user !== '' && !self::is_ssh_user($ssh_user)) {
 			throw new ManagedNodeException('SSH user must be a plain account name (letters, digits, _ . -; not starting with a dash).');
 		}
 		if (!self::is_ssh_host((string)$this->get('mgn_host'))) {

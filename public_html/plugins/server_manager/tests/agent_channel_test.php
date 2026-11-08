@@ -30,6 +30,7 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.12 - no setAccessible() (a no-op since PHP 8.1, deprecated in 8.5, where it crashed the test before its cleanup and left its nodes behind)
  * @version 1.11 - a claim's root_access is a closed set, and mgn_agent_root_access moves with the machine (beta_break_glass_root_access 5.1)
  * @version 1.10 - host addresses are drawn from those no live node, placement record or provision has, so a
  *                 run never links its node to another fixture's placement record
@@ -387,7 +388,6 @@ check(ManagementJob::MAX_PARAMS_BYTES < AgentChannelEndpoint::MAX_JOB_BODY,
 // PHP decodes {} to [] and re-encodes [] to [], so a parameterless job would
 // reach the node as a list its validator refuses. Corrected on PHP's side.
 $as_object = new ReflectionMethod('AgentChannelEndpoint', 'params_as_object');
-$as_object->setAccessible(true);
 check(json_encode($as_object->invoke(null, [])) === '{}',
 	'Empty params render as a JSON object, not an empty list');
 check(json_encode($as_object->invoke(null, null)) === '{}', 'Absent params render as an object');
@@ -737,7 +737,6 @@ section('A result that arrives after a job was given up on still lands');
 // agent keeps a result until it is delivered (1.72.0), so it can arrive after
 // a restart, or after the plane itself was down.
 $load_reportable = new ReflectionMethod('AgentChannelEndpoint', 'load_reportable_job');
-$load_reportable->setAccessible(true);
 $db->prepare("UPDATE mjb_management_jobs SET mjb_result='{\"stale\":true}' WHERE mjb_management_job_id=?")
 	->execute([$just_claimed->key]);
 $late = $load_reportable->invoke(null, (int)$just_claimed->key, (int)$idle_node->key);
@@ -766,7 +765,6 @@ $late_take = $load_reportable->invokeArgs(null, [(int)$take->key, (int)$take_cop
 AgentChannelEndpoint::record_result($take_copy, $late_take, ['status' => 'completed',
 	'data' => ['staged' => true, 'node_id' => (int)$take_src->key]]);
 $settle = new ReflectionMethod('AgentChannelEndpoint', 'settle_take');
-$settle->setAccessible(true);
 $taken = $settle->invoke(null, $late_take, 'completed', $was_lost);
 $take_copy->load(); $take_src->load(); $take->load();
 $take_result = json_decode((string)$take->get('mjb_result'), true);
@@ -795,7 +793,6 @@ check(JobResultProcessor::process_if_due($late_old) === false,
 
 // reviewer2 F5: a lost upgrade keeps its own message, never 'finished but still on X'.
 $verdict = new ReflectionMethod('JobResultProcessor', 'behind_verdict');
-$verdict->setAccessible(true);
 $v = $verdict->invoke(null, ManagementJob::OUTCOME_LOST, 'What it did on the node is unknown.', '', '0.8.1', '0.8.2');
 check($v['rewrite_message'] === false && $v['reason'] === 'What it did on the node is unknown.',
 	'A lost apply_update keeps its own message', json_encode($v));
