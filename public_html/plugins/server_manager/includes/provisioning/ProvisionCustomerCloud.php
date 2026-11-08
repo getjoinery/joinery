@@ -58,6 +58,9 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.22 - a server whose data root we do not encrypt asks the provider's own disk encryption ON at create,
+ *                 wherever the region offers it, rather than leaving it to the provider's default: the provider's
+ *                 layer is the one every new server is born under
  * @version 2.21 - the install password may be kept for the beta (specs/implemented/beta_break_glass_root_access.md 3.2, 4.1): a fresh
  *                 install that may be kept passes beta_root_access and records cvp_root_access_offered; a held box whose
  *                 agents are admitted is kept (BreakGlassRootAccess::keep) instead of retired when every condition holds;
@@ -281,6 +284,17 @@ class ProvisionCustomerCloud {
 		if ($encrypted) {
 			$create['disk_encryption'] = 'disabled';
 			$create['swap_size'] = 0;
+		} elseif ($driver instanceof CloudRegionFacts) {
+			// Every other server is born under the provider's own disk
+			// encryption, asked for by name wherever the region offers it
+			// (Linode's "Disk Encryption"), never left to the provider's default.
+			try {
+				if (!empty($driver->regionInfo((string)$region)['disk_encryption'])) {
+					$create['disk_encryption'] = 'enabled';
+				}
+			} catch (CloudComputeException $e) {
+				return $this->handle_compute_failure($provision, $e, 'ready');
+			}
 		}
 		try {
 			$instance = $driver->createInstance($create);

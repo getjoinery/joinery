@@ -6,7 +6,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 
 - [Quick Start](https://getjoinery.com/page/quickstart) -- **New? Start here.** Rent a server, point your domain, and install Joinery from a web browser — no prior experience required
 - [Installation](installation.md) -- Full reference: Docker or bare-metal, SSL, domain management, multi-site, cloning
-- [Encrypted data root](encrypted_data_root.md) -- The data root on a LUKS2 volume: what moves onto it, unlocking at boot, the escrow holder and Tier 2, key rotation
+- [Encrypted data root](encrypted_data_root.md) -- The data root on a LUKS2 volume (untested, off on every machine; servers use the provider's disk encryption): what moves onto it, unlocking at boot, the escrow holder and Tier 2, key rotation
 
 ## Core Systems
 

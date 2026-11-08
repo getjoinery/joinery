@@ -65,7 +65,7 @@
       "group": "backups",
       "label": "Offer data root encryption",
       "type": "checkbox",
-      "helptext": "While this is off, nothing on this site or its management node makes or offers an encrypted data root: new hosted servers are born unencrypted and no Encrypt action is shown. It is on only where encryption is being tested, until the release that launches it (specs/hosted_data_promise_disk_encryption.md, How it is built)."
+      "helptext": "Untested: leave this off. While it is off, nothing on this site or its management node makes or offers an encrypted data root of our own: new servers are born under the cloud provider's own disk encryption (Linode's, wherever the region offers it) and no Encrypt action is shown. Turn it on only on a machine used for testing this feature (docs/encrypted_data_root.md)."
     },
     {
       "name": "backup_recovery_public_key",

@@ -2,7 +2,7 @@
 
 A host's data root (`/srv/joinery`, see [Installation § The data root](installation.md#the-data-root)) can sit on a LUKS2 volume, so an offline copy of the machine's disk (a provider backup, a snapshot, a disk taken out of a data centre) holds its data only as ciphertext. This page covers what is encrypted, how the volume is opened at boot, who holds its keys, and the commands and files involved. The design and its reasons are in `specs/hosted_data_promise_disk_encryption.md`.
 
-Nothing offers or creates an encrypted data root unless the core setting `data_root_encryption_offered` is on (off by default). Everything below acts only on a machine whose data root is encrypted; a plain data root behaves as Installation describes.
+**Status: untested, and off on every machine.** This encryption has been proven only on a test VM, never on a live server, and no machine runs it. The disk encryption every server uses is the cloud provider's own: a new server is created with Linode's Disk Encryption asked on wherever the region offers it (Hetzner has none; see [Server Manager § One layer of encryption](../plugins/server_manager/docs/overview.md)). Nothing offers or creates an encrypted data root unless the core setting `data_root_encryption_offered` is on (off by default); turn it on only on a machine used for testing this feature. Everything below acts only on a machine whose data root is encrypted; a plain data root behaves as Installation describes.
 
 ## What is encrypted, and what is not
 

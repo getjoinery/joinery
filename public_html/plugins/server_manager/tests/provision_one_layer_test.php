@@ -33,6 +33,7 @@
  *
  * Run: php plugins/server_manager/tests/provision_one_layer_test.php
  *
+ * @version 1.4 - an unencrypted provision asks the provider's own disk encryption on by name where the region offers it
  * @version 1.3 - each adoption case's address is one no provision holds and the other case did not draw
  * @version 1.2 - the adopted servers are in a real account of ours, whose provider adoption records (B40)
  * @version 1.1 - a copy's layer is decided by SiteCopyRunner::copy_encryption(), never ticked, and a copy into its
@@ -262,12 +263,21 @@ if (!$key_ready) {
 
 	$p = $make_provision('plain', false);
 	$probe = new OneLayerProbe();
-	$probe->driver = pol_driver(array(pol_instance('880102', 'enabled')), $h);
+	$probe->driver = pol_driver(array(pol_region('us-east', 'core', true), pol_instance('880102', 'enabled')), $h);
 	$probe->ready($p);
 	$p->load();
 	$body = pol_create_body($h);
-	check(count($h) === 1 && is_array($body) && !array_key_exists('disk_encryption', $body) && !array_key_exists('swap_size', $body),
-		'an unencrypted provision sends neither, and asks nothing of the region', json_encode(pol_requests($h)));
+	check(is_array($body) && ($body['disk_encryption'] ?? null) === 'enabled' && !array_key_exists('swap_size', $body),
+		'an unencrypted provision asks the provider\'s own disk encryption on, by name, and leaves swap alone', json_encode(pol_requests($h)));
+
+	$p2 = $make_provision('plainnocap', false, array('cvp_region' => 'us-west'));
+	$probe2 = new OneLayerProbe();
+	$probe2->driver = pol_driver(array(pol_region('us-west', 'core', false), pol_instance('880107', null)), $h2);
+	$probe2->ready($p2);
+	$p2->load();
+	$body2 = pol_create_body($h2);
+	check(is_array($body2) && !array_key_exists('disk_encryption', $body2) && $p2->get('cvp_status') === 'booting',
+		'in a region that does not offer it, nothing is asked and the provision still boots', json_encode(pol_requests($h2)));
 	check($p->get('cvp_status') === 'booting' && $p->get('cvp_provider_disk_encryption') === 'enabled',
 		'and records the provider\'s layer as it answered, for the node page\'s count of layers (E4)');
 

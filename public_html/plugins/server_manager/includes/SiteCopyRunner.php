@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.43 - copy_encryption() says a copy not encrypted by us is born under the provider's own disk encryption,
+ *                asked on where the region offers it
  * @version 1.42 - a host whose agent has not been heard from within ALIVE_WITHIN_SECONDS takes no copy (B100); an agent
  *                never heard from no longer reads as heard just now, for the source too (B101); an old container its
  *                host does not answer (gone, or down) never stops the switch-over: its stop stays queued on that host
@@ -881,7 +883,7 @@ class SiteCopyRunner {
 	 *     recovery key, with the provider's own layer off.
 	 *   - In its owner's account, with the site's recovery key proven (and its
 	 *     public half on record): ours, sealed to that key, the provider's off.
-	 *   - In its owner's account without one: the provider's default, and none
+	 *   - In its owner's account without one: the provider's own disk encryption, and none
 	 *     of ours.
 	 *
 	 * Nothing of ours while this management node does not offer it.
@@ -891,8 +893,8 @@ class SiteCopyRunner {
 	 */
 	public static function copy_encryption(ManagedNode $source, string $hosting_mode): array {
 		if (!CustomerCloudProvision::data_root_encryption_offered()) {
-			return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s default, if it has '
-				. 'one: this management node does not encrypt data roots yet.');
+			return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s own disk encryption, '
+				. 'asked on wherever the region offers it (Linode does; Hetzner has none). This management node does not encrypt data roots itself.');
 		}
 		if ($hosting_mode === 'operator') {
 			return array('ours' => true, 'recipient' => '', 'says' => 'Its data is encrypted by us, sealed to this management node\'s '
@@ -903,7 +905,7 @@ class SiteCopyRunner {
 			return array('ours' => true, 'recipient' => $pub, 'says' => 'Its data is encrypted by us, sealed to this site\'s own '
 				. 'recovery key, and the provider\'s own disk encryption is off: one layer.');
 		}
-		return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s default only. Prove '
+		return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s own disk encryption only, where the region offers it. Prove '
 			. 'this site\'s recovery key on its Backups page first, and a copy into its owner\'s account is encrypted by us instead.');
 	}
 
