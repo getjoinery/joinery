@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.16 - isUpgradeServer(): an active Server Manager makes a site an upgrade server only once it has
+ *                 published a release; before that only the upgrade_server_active setting does
  * @version 1.15 - the dead sparse-fetch, preserve-across-deploy and createBackup functions are gone: no caller
  *                 in the tree, and createBackup handed two unescaped paths to cp (specs/shell_command_audit.md C1)
  * @version 1.14 - servedVersion(): the release this site's ?serve-upgrade offers, which is what its nodes
@@ -51,8 +53,14 @@ class DeploymentHelper {
      *
      * The distinction matters wherever a control edits a file the upgrade replaces
      * wholesale: on a consuming install the edit is discarded at the next upgrade,
-     * so the control has no business being there. Publishing instances are the dev
-     * checkout and anything running Server Manager.
+     * so the control has no business being there.
+     *
+     * A publishing instance says so with the upgrade_server_active setting. A
+     * site running Server Manager that has already published a release is one
+     * too, setting or not: its nodes and the sites that upgrade from it depend on
+     * what it serves. A Server Manager site that has never published is a
+     * management node for its own sites and nothing more; it serves no releases
+     * and offers no Publish until the setting is turned on.
      *
      * It lives HERE, and not in a general core helper, because upgrade.php is one
      * of its callers. The four deployment files self-update as a unit ahead of the
@@ -72,7 +80,13 @@ class DeploymentHelper {
         if (!class_exists('PluginHelper')) {
             require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         }
-        return PluginHelper::isPluginActive('server_manager');
+        if (!PluginHelper::isPluginActive('server_manager')) return false;
+        try {
+            $q = DbConnector::get_instance()->get_db_link()->query('SELECT 1 FROM upg_upgrades LIMIT 1');
+            return $q !== false && $q->fetchColumn() !== false;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /**

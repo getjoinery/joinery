@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.161",
+  "version": "1.30.162",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -62,13 +62,15 @@
           "slug": "server-manager-upgrades",
           "title": "Upgrades",
           "url": "/admin/server_manager/publish_upgrade",
-          "order": 3
+          "order": 3,
+          "settingActivate": "upgrade_server_active"
         },
         {
           "slug": "server-manager-rollouts",
           "title": "Staged Rollout",
           "url": "/admin/server_manager/rollouts",
-          "order": 3
+          "order": 3,
+          "settingActivate": "upgrade_server_active"
         },
         {
           "slug": "server-manager-targets",

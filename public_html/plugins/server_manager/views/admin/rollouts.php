@@ -12,6 +12,7 @@
  * reload, shows where it is, and can be stopped. The AdvanceStagedRollouts
  * task moves it; loading this page moves it too.
  *
+ * @version 1.5 - a site that does not publish (SmPublishing) sees only the sentence saying so, and its POSTs do nothing
  * @version 1.4 - stages: # is the step's stage, and a rollout whose step failed says it is halting while the
  *                applies under way finish
  * @version 1.3 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running rollout
@@ -35,6 +36,11 @@ $flash = function ($text, $type) use ($session, $page_regex) {
 
 // Each action needs its own level (SmActionLevels), whatever the page's.
 SmActionLevels::refuse_post('rollouts', $session, $self_url);
+// A rollout applies the release this site serves; a site that publishes none has nothing to roll out.
+if (!SmPublishing::enabled()) {
+	SmPublishing::render_off_page($session, 'Staged rollout');
+	return;
+}
 
 if ($_POST) {
 	if (!SmAdminCsrf::valid()) { header('Location: ' . $self_url); exit; }

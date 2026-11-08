@@ -2857,7 +2857,7 @@
       "group": "upgrade",
       "label": "This deployment publishes upgrades",
       "type": "checkbox",
-      "helptext": "Marks the deployment as an upgrade source. utils/upgrade.php also treats an active server_manager plugin as one."
+      "helptext": "Marks the deployment as an upgrade source: it offers Publish and Staged Rollout, and serves the releases it publishes. A Server Manager site that has already published a release counts as one either way."
     },
     {
       "name": "database_version",

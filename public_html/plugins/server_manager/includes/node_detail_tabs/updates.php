@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.14 - on a management node that serves no releases, a node is compared with what this site's upgrade
+ *                source offers, which is where the node's own update comes from; Publish Release on this site's own
+ *                node is offered only where it publishes (SmPublishing)
  * @version 1.13 - a node is compared with the release this management node OFFERS (DeploymentHelper::servedVersion),
  *                not the one it runs: applied here but not yet published here, a release reaches no node
  * @version 1.12 - this site's own node offers no Publish of a version it has already published (the publisher
@@ -76,12 +79,22 @@
 					. $served . '. Publish ' . $local_version . ' first: on the management node that manages this one, '
 					. 'open this site\'s row, Updates tab, Publish Release on This Node.';
 			}
+		} elseif (!DeploymentHelper::isOriginNode()) {
+			// This management node serves no releases, so the node takes its
+			// own from its upgrade source, as this one does: the yardstick is
+			// what that source offers, not the release this node happens to run.
+			$source = trim((string)$settings->get_setting('upgrade_source'));
+			$offered = ReleaseProvenance::offered($source);
+			$offer_error = $offered['error'];
+			$compare_label = 'Upgrade source (' . ($source !== '' ? $source : 'none set') . ') offers';
+			$compare_version = $offered['version'] !== '' ? $offered['version'] : 'unknown';
 		} else {
 			$compare_label = 'Management Node Version';
 			$compare_version = $local_version;
 		}
-		$up_to_date = ($node_version === $compare_version)
-			|| (preg_match('/^\d+\.\d+\.\d+$/', $node_version) && version_compare($node_version, $compare_version) >= 0);
+		$up_to_date = $compare_version === 'unknown' ? null
+			: (($node_version === $compare_version)
+				|| (preg_match('/^\d+\.\d+\.\d+$/', $node_version) && version_compare($node_version, $compare_version) >= 0));
 	}
 
 	$pageoptions = ['title' => 'Version Status'];

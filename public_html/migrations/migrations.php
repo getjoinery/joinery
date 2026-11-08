@@ -1918,3 +1918,14 @@
 	$migration['migration_file'] = 'remove_agent_enabled_setting.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// A site that has published releases has upgrade_server_active on. An
+	// active Server Manager no longer makes a site an upgrade server by itself:
+	// one that has never published is a management node for its own sites, and
+	// its Upgrades and Staged Rollout menus follow the setting.
+	$migration = array();
+	$migration['database_version'] = '231';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'upgrade_server_active' AND stg_value = '1') OR NOT EXISTS (SELECT 1 FROM upg_upgrades) THEN 1 ELSE 0 END AS count";
+	$migration['migration_file'] = 'upgrade_server_active_from_published.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

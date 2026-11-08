@@ -12,6 +12,7 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.19 - a site that does not publish (SmPublishing) sees only the sentence saying so, and its POSTs do nothing
  * @version 1.18 - the archives on disk are counted whole: the releases this management node applied, which
  *                carry no release record here, are counted beside the published ones and said
  * @version 1.17 - a site that republishes is offered Apply and publish while its upgrade source offers a newer
@@ -53,6 +54,11 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdmin
 $session = SessionControl::get_instance();
 $session->set_return();
 SmActionLevels::refuse_post('publish_upgrade', $session, '/admin/server_manager/publish_upgrade');
+// A site that does not publish has no releases to list, keep or delete here.
+if (!SmPublishing::enabled()) {
+	SmPublishing::render_off_page($session, 'Upgrades');
+	return;
+}
 
 $page_regex = '/\/admin\/server_manager/';
 $static_dir = dirname(PathHelper::getIncludePath('')) . '/static_files';

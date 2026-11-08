@@ -1294,7 +1294,7 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 | `root_node` | Domain of the deployment this code is written and published from. Empty everywhere else. Machine-written, not shown on the settings page. |
 | `composerAutoLoad` | Composer vendor path |
 
-**Note:** A site acts as an upgrade server when the **Server Manager** plugin is active or the `upgrade_server_active` setting is on. `DeploymentHelper::isUpgradeServer()` answers that question; use it rather than re-deriving the pair, so publishing and consuming behaviour cannot drift apart. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
+**Note:** A site acts as an upgrade server when the `upgrade_server_active` setting (*This deployment publishes upgrades*) is on, or when the **Server Manager** plugin is active and the site has published at least one release. A Server Manager site that has never published is a management node for its own sites only: it serves no releases, its Upgrades and Staged Rollout menus are hidden, and it offers no Publish until the setting is turned on. `DeploymentHelper::isUpgradeServer()` answers that question; use it rather than re-deriving it, so publishing and consuming behaviour cannot drift apart. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
 
 The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Version-controlled manifests like Joinery AI's [recipes.json](../plugins/joinery_ai/docs/overview.md#shipped-recipes) are for the same reason edited only on the publishing checkout.
 

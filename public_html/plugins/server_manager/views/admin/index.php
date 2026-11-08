@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.61 - Publish New Upgrade is offered only where this site publishes releases (SmPublishing)
  * @version 1.60 - a held hosted order (over the per-buyer limit) offers Approve, Refuse and a link to its order
  * @version 1.59 - recent jobs leave out completed routine never-do checks
  * @version 1.58 - a holder owed a second-factor confirmation is offered it first, in place of Reveal and Retire, and comes
@@ -681,7 +682,9 @@ $confirm_submit = function (string $form_id, string $message): string {
 		<?php if (PluginHelper::isPluginActive('mailbox')): ?>
 			<a href="/plugins/mailbox/admin/admin_mailbox_fleet" class="btn btn-sm btn-outline-secondary">Relay Fleet</a>
 		<?php endif; ?>
-		<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+		<?php if (SmPublishing::enabled()): ?>
+			<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+		<?php endif; ?>
 	</div>
 </div>
 <?php if ($agent_update_alert): ?>

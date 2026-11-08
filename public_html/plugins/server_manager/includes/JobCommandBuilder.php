@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.161 - this site's own publish is offered and built only where it publishes releases (SmPublishing)
  * @version 1.160 - log_table_tail takes event and hours (agent 1.113.0, sent only to agents that have them), up to
  *   LOG_EVENT_MAX_COUNT rows for an event read (specs/agent_event_log_filter.md)
  * @version 1.159 - both copy floors at 0.8.580, the first release signed by the rotated release key
@@ -4274,6 +4275,11 @@ class JobCommandBuilder {
 				. 'published from a site with the Server Manager plugin active, which is what serves it; '
 				. 'this node has not reported that it is one (server_manager at poll, or check_status server_manager_active).');
 		}
+		// This site's own release: only where it publishes. Another node's
+		// publisher answers the same question for itself and refuses there.
+		if ($node->is_self() && !SmPublishing::enabled()) {
+			throw new Exception(SmPublishing::off_text());
+		}
 		return self::build_publish_upgrade_primitive($node, $params);
 	}
 
@@ -4285,7 +4291,8 @@ class JobCommandBuilder {
 	 * reads (specs/publish_as_node_action.md: "A plain node. Never publishes.").
 	 */
 	public static function can_publish_release($node): bool {
-		return self::has_primitive($node, 'publish_upgrade') && $node->is_management_node();
+		return self::has_primitive($node, 'publish_upgrade') && $node->is_management_node()
+			&& (!$node->is_self() || SmPublishing::enabled());
 	}
 
 	/**
