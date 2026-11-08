@@ -41,6 +41,7 @@
  * aeadEncryptGcm produce these same bytes. selfCheck() proves that against the
  * shared vectors in tests/vault/fixtures/xwing_vector.json and edge_vector.json.
  *
+ * @version 2.3 - openChallenge opens the recovery key change challenge too (ApprovalChallenge rekey scope): five labels
  * @version 2.2 - v1 retired (v1_key_retirement WP2): no X25519 open, no 48-byte secret, no v1 key box;
  *   selfCheck opens the edge vector's field with its DEK directly
  * @version 2.1 - recoveryCodeProblem(): a typed recovery code's shape, checked before anything runs
@@ -457,6 +458,7 @@ window.VaultCrypto = (function () {
 		'joinery-restore-approval:',
 		'joinery-decommission-approval:',
 		'joinery-copy-export-approval:',
+		'joinery-recovery-key-change-approval:',
 	];
 
 	// Open a v2 challenge sealed to a 1216-byte key with the 32-byte seed under

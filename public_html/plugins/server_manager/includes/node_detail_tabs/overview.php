@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.102 - Recovery key box: a decline past its day says a confirmation waits; Recorded only when the keys match
+ * @version 1.101 - the Recovery key box says a proven key not yet recorded is recorded within a minute, not that there is none,
+ *                  and a declined change says it was declined
  * @version 1.100 - a Recovery key box: root's record of the site's recovery key beside the site's own
  * @version 1.99 - the never-do box shows the alarm (Mark safe) and Changes to review (Clear) apart
  * @version 1.98 - the never-do box reads Security sentinel: suspicious activity, its button Mark safe (not red)
@@ -2329,6 +2332,9 @@
 				echo '<div><span class="badge bg-danger">Unusable</span> Root\'s record of this site\'s recovery key cannot be read, '
 					. 'so no restore or copy of it can be approved. Fix it as root at the machine, then run '
 					. '<code>joinery-agent recovery-key accept</code>.</div>';
+			} elseif (!$rk['recorded'] && $rk['site_fingerprint'] !== null) {
+				echo '<div class="small text-muted">Not recorded yet: the site\'s proven key <code>' . $short($rk['site_fingerprint'])
+					. '</code> is recorded by the agent within a minute; refresh the status to see it.</div>';
 			} elseif (!$rk['recorded']) {
 				echo '<div class="small text-muted">Not recorded yet: the site has no proven recovery key, so nothing of it can be restored by approval.</div>';
 			} elseif ($rk['site_fingerprint'] === null) {
@@ -2338,16 +2344,28 @@
 					. '</code>, but the site has no proven recovery key right now, so nothing of it can be restored by approval. '
 					. 'If nobody here removed it, someone who can write the site\'s settings may have.</div>';
 			} elseif ($rk['matches'] === false) {
+				// A decline quiets the question for a day (the agent's
+				// declineQuiet); after that the agent asks again.
+				$rk_declined_quiet = $rk['declined_fingerprint'] !== null && $rk['declined_fingerprint'] === $rk['site_fingerprint']
+					&& $rk['declined_time'] !== null && strtotime($rk['declined_time'] . ' UTC') + 86400 > time();
 				$ag_tone = $worse($ag_tone, 'warn');
 				$ag_bits[] = 'recovery key changed';
 				echo '<div><span class="badge bg-warning text-dark">Changed</span> The site\'s recovery key ('
 					. $short($rk['site_fingerprint']) . ') is not the one root recorded (' . $short($rk['fingerprint'])
 					. '). Restores and copies of it wait until the change is confirmed on its Backups page with the previous key. '
-					. 'If nobody here changed it, someone who can write the site\'s settings may have.</div>';
-			} else {
+					. 'If nobody here changed it, someone who can write the site\'s settings may have.'
+					. ($rk_declined_quiet
+						? ' The change was declined there at ' . htmlspecialchars($rk['declined_time']) . ' UTC; the agent asks again a day '
+							. 'after the decline, or root accepts it sooner with <code>joinery-agent recovery-key accept</code>.'
+						: ' A confirmation waits on its Backups page.')
+					. '</div>';
+			} elseif ($rk['matches'] === true) {
 				echo '<div><span class="badge bg-success">Recorded</span> Restores and copies of this site are approved with the key root recorded: <code>'
-					. $short($rk['fingerprint']) . '</code>, ' . htmlspecialchars((string)$rk['how'])
+					. $short($rk['fingerprint']) . '</code>, ' . htmlspecialchars($rk['how'] ?? 'recorded')
 					. ($rk['pinned_time'] ? ', ' . htmlspecialchars($rk['pinned_time']) . ' UTC' : '') . '.</div>';
+			} else {
+				echo '<div class="small text-muted">The agent\'s report of root\'s record could not be read; refresh the status, or read it as root with '
+					. '<code>joinery-agent recovery-key</code>.</div>';
 			}
 			echo '<div class="small text-muted mt-2">Reported by the node\'s own agent. On the management node itself, read it as root with <code>joinery-agent recovery-key</code>: its own web tier renders this page.</div>';
 			echo '</div></div>';

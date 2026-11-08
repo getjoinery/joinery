@@ -22,6 +22,7 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.6 - the answered notice is the scope's own (answered_approved, answered_declined)
  * @version 1.5 - the key box is X-Wing only: no ephemeralPublic
  * @version 1.4 - loads vault-crypto.js, which opens the challenge and the key box (post_quantum_sealing WP2)
  * @version 1.3 - the key box carries its seal version and, for v2, the X-Wing ciphertext
@@ -69,9 +70,7 @@ class ApprovalChallengePanel {
 		if ($pending['answered'] !== null) {
 			echo '<div class="alert alert-info mb-3">';
 			echo '<strong>' . htmlspecialchars($s['headline']) . '</strong> ';
-			echo htmlspecialchars($pending['answered'] === 'declined'
-				? 'You declined this. This machine\'s agent is picking up the answer and will report the job refused.'
-				: 'You approved this. This machine\'s agent is picking up the answer and carries on in a few seconds.');
+			echo htmlspecialchars($pending['answered'] === 'declined' ? $s['answered_declined'] : $s['answered_approved']);
 			echo '</div>';
 			echo '<script>setTimeout(function () { window.location.reload(); }, 4000);</script>';
 			return true;

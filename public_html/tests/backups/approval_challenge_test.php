@@ -300,6 +300,24 @@ if ($go === false) {
 	}
 }
 
+foreach (ApprovalChallenge::SCOPES as $name => $s) {
+	check(($s['answered_approved'] ?? '') !== '' && ($s['answered_declined'] ?? '') !== '',
+		"the $name scope says what happens once it is answered, both ways");
+}
+
+// ── The browser opens each scope ────────────────────────────────────────────
+section('The browser opens each scope\'s challenge');
+
+// vault-crypto.js opens only the challenge contexts it lists, so a scope whose
+// context is missing there stages a challenge no page can open.
+$vc = (string)file_get_contents(PathHelper::getIncludePath('assets/js/vault-crypto.js'));
+check(preg_match('/var CHALLENGE_SCOPES = \[(.*?)\];/s', $vc, $vm) === 1, 'vault-crypto.js lists the challenge contexts it opens');
+foreach (ApprovalChallenge::SCOPES as $name => $s) {
+	// Line by line, so an entry commented out does not count.
+	$listed = preg_match('/^\s*\'' . preg_quote($s['info'], '/') . '\',?\s*$/m', $vm[1] ?? '') === 1;
+	check($listed, "vault-crypto.js opens the $name challenge ($s[info])");
+}
+
 // ── The panel renders each scope ────────────────────────────────────────────
 section('The panel says each scope\'s own words');
 
@@ -322,7 +340,7 @@ foreach (ApprovalChallenge::SCOPES as $name => $s) {
 	ob_start();
 	ApprovalChallengePanel::render($page, $name);
 	$html = ob_get_clean();
-	check(strpos($html, 'You approved this.') !== false && strpos($html, $s['approve_action']) === false,
+	check(strpos($html, htmlspecialchars($s['answered_approved'])) !== false && strpos($html, $s['approve_action']) === false,
 		'once answered, it says so and offers no second approval');
 	ac_clear_all();
 	ob_start();

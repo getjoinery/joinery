@@ -59,6 +59,8 @@
  * Beyond that, a machine whose web tier you suspect is not a machine to
  * restore in place — it is a machine to rebuild.
  *
+ * @version 1.10 - answered_approved and answered_declined: what the panel says once a request is answered, per scope
+ * @version 1.9 - vault-crypto.js opens the rekey challenge; its headline no longer repeats the agent's summary
  * @version 1.8 - the rekey scope: the holder of the previous recovery key confirms a change of it, which the
  *                agent then records as root's own (specs/shell_command_audit_wp2_results.md D2)
  * @version 1.7 - a key box is X-Wing only: a box with no ciphertext (an X25519 ephemeral key) is not one
@@ -100,7 +102,7 @@ class ApprovalChallenge {
 	 *   approve_action / decline_action   the Backups page's POST actions
 	 *   approve_form / decline_form       FormWriter ids, and so the CSRF token names
 	 *   id_prefix        DOM id prefix for the key box
-	 *   box_title … declined_notice       the screen, in reading order; plain text,
+	 *   box_title … answered_declined     the screen, in reading order; plain text,
 	 *                    escaped by the panel, except expiry_tail, which is
 	 *                    markup written here and echoed as it is
 	 */
@@ -146,6 +148,8 @@ class ApprovalChallenge {
 			'decline_button'  => 'No — do not restore',
 			'approved_notice' => 'Approved. This machine is checking your answer and will start the restore.',
 			'declined_notice' => 'Declined. Nothing was restored, and the job is reported refused.',
+			'answered_approved' => 'You approved this. This machine\'s agent is picking up the answer and carries on in a few seconds.',
+			'answered_declined' => 'You declined this. This machine\'s agent is picking up the answer and will report the job refused.',
 		),
 
 		// The site being destroyed renders this on ITS admin and answers with
@@ -187,6 +191,8 @@ class ApprovalChallenge {
 			'decline_button'  => 'No — keep this site',
 			'approved_notice' => 'Approved. The host is checking your answer and will remove this site permanently.',
 			'declined_notice' => 'Declined. Nothing was deleted, and the removal is reported refused.',
+			'answered_approved' => 'You approved this. This machine\'s agent is picking up the answer and carries on in a few seconds.',
+			'answered_declined' => 'You declined this. The host\'s agent is picking up the answer and will report the removal refused.',
 		),
 
 		// A copy of this site is being made on another machine, and this
@@ -232,6 +238,8 @@ class ApprovalChallenge {
 			'decline_button'  => 'No — keep this site\'s keys here',
 			'approved_notice' => 'Approved. This machine is checking your answer and will seal the keys to the copy.',
 			'declined_notice' => 'Declined. Nothing was handed over, and the copy is reported refused.',
+			'answered_approved' => 'You approved this. This machine\'s agent is picking up the answer and carries on in a few seconds.',
+			'answered_declined' => 'You declined this. This machine\'s agent is picking up the answer and will report the job refused.',
 		),
 
 		// This site's recovery key is not the one its agent recorded as root.
@@ -256,8 +264,7 @@ class ApprovalChallenge {
 			'none_to_decline' => 'There is no recovery key change waiting for confirmation on this machine.',
 
 			'box_title'       => 'Confirm the new recovery key',
-			'headline'        => 'This site\'s backup recovery key has changed. Restores and copies of this site wait '
-			                   . 'until the change is confirmed with the previous key.',
+			'headline'        => 'A change of this site\'s backup recovery key is waiting for your confirmation.',
 			// The previous key is the point: the agent recorded it as root, and
 			// a key that only reached this site's settings cannot vouch for
 			// itself. If nobody here changed the key, the decline is right.
@@ -277,6 +284,8 @@ class ApprovalChallenge {
 			'decline_button'  => 'No — I did not change the key',
 			'approved_notice' => 'Confirmed. This machine is checking your answer and will record the new key.',
 			'declined_notice' => 'Declined. Restores and copies stay sealed to the previous key.',
+			'answered_approved' => 'You confirmed this. This machine\'s agent is picking up the answer and records the new key in a few seconds.',
+			'answered_declined' => 'You declined this. This machine\'s agent is picking up the answer; restores and copies stay sealed to the previous key, and it asks again in a day.',
 		),
 	);
 
