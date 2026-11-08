@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.160",
+  "version": "1.30.161",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -491,11 +491,11 @@
     },
     {
       "name": "server_manager_hosted_shelf_allowance_gb",
-      "default": "10",
+      "default": "500",
       "group": "hosted",
       "label": "Backup storage per customer (GB)",
       "type": "number",
-      "helptext": "How much of the fleet's backup storage a hosted customer's backups may occupy before their runs stop. Measured from the listing the retention pass already takes."
+      "helptext": "How much backup storage a customer's kept backups may occupy, all together, before their runs stop. Covers Managed sites and self-hosted sites on the services bundle. Measured from the listing the retention pass already takes."
     },
     {
       "name": "server_manager_hosted_trial_days",
