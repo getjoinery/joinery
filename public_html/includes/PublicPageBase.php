@@ -1149,7 +1149,8 @@ abstract class PublicPageBase {
 		$csp = self::csp_header(
 			(bool)$settings->get_setting('enable_csp', false, true),
 			(bool)$settings->get_setting('csp_report_only', false, true),
-			$this->csp_connect_origins
+			$this->csp_connect_origins,
+			$this->csp_form_origins
 		);
 		if ($csp !== null) {
 			header($csp[0] . ': ' . $csp[1]);
@@ -1189,9 +1190,15 @@ abstract class PublicPageBase {
 	 * tests/security/csp_header_test.php pins the shape, including the
 	 * absence of a script CDN and of a bare https: in connect-src.
 	 *
+	 * A page whose form's POST answers with a redirect to one more host names
+	 * it with allow_form_action_origin(): form-action governs that redirect
+	 * too, so without it the browser blocks the hop (the services Connect
+	 * approval, which hands the linking site its key at the site's own address).
+	 *
 	 * @param string[] $extra_connect origins (scheme://host[:port]) this render adds to connect-src
+	 * @param string[] $extra_form    origins this render adds to form-action
 	 */
-	public static function csp_policy(array $extra_connect = array()) {
+	public static function csp_policy(array $extra_connect = array(), array $extra_form = array()) {
 		$policy = array(
 			'default-src'     => array("'self'"),
 			'script-src'      => array("'self'", "'unsafe-inline'",
@@ -1255,6 +1262,12 @@ abstract class PublicPageBase {
 				$policy['connect-src'][] = $origin;
 			}
 		}
+		foreach ($extra_form as $origin) {
+			$origin = self::normalize_connect_origin((string)$origin);
+			if ($origin !== null && !in_array($origin, $policy['form-action'], true)) {
+				$policy['form-action'][] = $origin;
+			}
+		}
 		return $policy;
 	}
 
@@ -1275,6 +1288,22 @@ abstract class PublicPageBase {
 
 	/** Origins this render adds to connect-src (allow_connect_origin()). */
 	protected $csp_connect_origins = array();
+
+	/** Origins this render adds to form-action (allow_form_action_origin()). */
+	protected $csp_form_origins = array();
+
+	/**
+	 * Let this page's form POST be answered with a redirect to $origin
+	 * (scheme://host[:port]), before the headers are sent. For one page and
+	 * one destination it has already checked: the services Connect approval
+	 * names the linking site's own address. Any other shape is ignored.
+	 */
+	public function allow_form_action_origin(string $origin): void {
+		$origin = self::normalize_connect_origin($origin);
+		if ($origin !== null && !in_array($origin, $this->csp_form_origins, true)) {
+			$this->csp_form_origins[] = $origin;
+		}
+	}
 
 	/**
 	 * Let this page's own script call $origin (scheme://host[:port]), before
@@ -1298,14 +1327,15 @@ abstract class PublicPageBase {
 	 *                          blocks nothing, so a policy can be watched before
 	 *                          it is enforced
 	 * @param string[] $extra_connect origins this render adds to connect-src
+	 * @param string[] $extra_form    origins this render adds to form-action
 	 * @return array|null [header name, header value]
 	 */
-	public static function csp_header($enabled, $report_only, array $extra_connect = array()) {
+	public static function csp_header($enabled, $report_only, array $extra_connect = array(), array $extra_form = array()) {
 		if (!$enabled) {
 			return null;
 		}
 		$parts = array();
-		foreach (self::csp_policy($extra_connect) as $directive => $sources) {
+		foreach (self::csp_policy($extra_connect, $extra_form) as $directive => $sources) {
 			$parts[] = $directive . ' ' . implode(' ', $sources);
 		}
 		return array(

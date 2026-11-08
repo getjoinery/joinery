@@ -7,6 +7,7 @@
  * figure against the allowance. Disconnect (a POST) cuts a site off.
  *
  * @version 1.3 - not found where this site does not sell hosting (SmHosting)
+ * @version 1.3 - a row paid for that the site has not switched on says so, not 'Not yet entitled'
  * @version 1.2 - the services are bought here, per site: Buy, Keep going, or renewing by subscription
  * @version 1.1 - a site moved off Managed reads as such, with no Disconnect
  * @version 1.0.1 - the page carries its own styles (site block, facts grid, buttons)
@@ -70,7 +71,10 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 			<?php foreach ($site['services'] as $service => $s): ?>
 			<dt><?php echo htmlspecialchars($service_labels[$service] ?? $service); ?></dt>
 			<dd>
-				<?php echo htmlspecialchars($state_labels[$s['state']] ?? $s['state']); ?>
+				<?php // Paid, and the site has not asked since: not "not entitled".
+				echo htmlspecialchars(($s['state'] === 'unpaid' && !empty($s['entitled']))
+					? 'Paid, not switched on yet: your site\'s setup step does that'
+					: ($state_labels[$s['state']] ?? $s['state'])); ?>
 				<?php if ($s['paid_until']): ?>
 					&mdash; paid through <?php echo htmlspecialchars(LibraryFunctions::convert_time($s['paid_until'], 'UTC', $session->get_timezone(), 'F j, Y')); ?>
 				<?php endif; ?>

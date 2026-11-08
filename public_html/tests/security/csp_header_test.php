@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.4 - a page may add one origin to form-action (allow_form_action_origin), for a POST answered by a redirect
  * @version 1.3 - a page may add one origin to connect-src (allow_connect_origin)
  * @version 1.2 - 'wasm-unsafe-eval' in script-src, never 'unsafe-eval'
  * @version 1.1 - no CDN, hosts not schemes, and the tree sweep that keeps the inventory current
@@ -118,6 +119,25 @@ foreach (array('https://evil.test/path', 'https://*.evil.test', "https://evil.te
 }
 check(PublicPageBase::normalize_connect_origin('HTTPS://Models.Example.TEST') === 'https://models.example.test', 'origins are lower-cased');
 check(PublicPageBase::normalize_connect_origin('http://[::1]:11434') === 'http://[::1]:11434', 'an IPv6 loopback origin is accepted');
+
+section('A page may add one origin to form-action, and nothing else moves');
+// The services Connect approval: its POST answers with a redirect to the
+// linking site, which form-action governs (allow_form_action_origin()).
+$site = 'https://pmn.example.test';
+$with_form = PublicPageBase::csp_policy(array(), array($site));
+check(array_values(array_diff($with_form['form-action'], $policy['form-action'])) === array($site),
+	'form-action gains exactly that origin');
+$others_same = true;
+foreach ($policy as $d => $sources) {
+	if ($d !== 'form-action' && $with_form[$d] !== $sources) $others_same = false;
+}
+check($others_same, 'every other directive is unchanged');
+foreach (array('https://*.evil.test', "https://evil.test; script-src *", '*', "'self'", 'https://evil.test/path') as $bad) {
+	check(PublicPageBase::csp_policy(array(), array($bad))['form-action'] === $policy['form-action'],
+		'refused in form-action too: ' . json_encode($bad));
+}
+$hdr = PublicPageBase::csp_header(true, false, array(), array($site));
+check(strpos($hdr[1], 'form-action ' . implode(' ', $with_form['form-action'])) !== false, 'the header carries it in form-action');
 
 section('Every external host the tree loads is in the policy (the standing inventory)');
 // Walk the browser-facing code for <script src>, stylesheet <link>, @import,

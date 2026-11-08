@@ -6,6 +6,8 @@
  * button (a POST) and a Cancel that sends the visitor back to the site with
  * nothing minted. The key never appears on this page.
  *
+ * @version 1.2 - the linking site's origin is allowed in form-action for this render, so Approve's
+ *                redirect to it is not blocked by the content security policy
  * @version 1.1 - not found where this site does not sell hosting (SmHosting)
  * @version 1.0.1 - the two buttons stack full-width; the lead paragraph is styled here, not by the start page
  * @version 1.0 - specs/services_phase2_platform.md §4 (the Connect flow)
@@ -22,6 +24,16 @@ $page_vars = process_logic(services_authorize_logic(array_merge($_GET, $_POST, $
 extract($page_vars);
 
 $page = new PublicPage();
+// Approve answers with a redirect to the site's return address, carrying its
+// key; form-action governs that hop, so the site's origin is allowed for this
+// render. Only once the logic has accepted the address (same host, https).
+if ($problem === '') {
+	$return_parts = parse_url((string)$return);
+	if (is_array($return_parts) && !empty($return_parts['scheme']) && !empty($return_parts['host'])) {
+		$page->allow_form_action_origin($return_parts['scheme'] . '://' . $return_parts['host']
+			. (isset($return_parts['port']) ? ':' . (int)$return_parts['port'] : ''));
+	}
+}
 $page->public_header(array(
 	'is_valid_page' => true,
 	'title'         => 'Link your site',

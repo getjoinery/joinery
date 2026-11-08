@@ -1,4 +1,5 @@
 <?php
+	// @version 1.3 - each subscription names its product and its first answer a buyer reads (the site, for a per-site product)
 	// @version 1.2 - a subscription cancelled to end at the period end stays listed, 'Cancelled — active until <date>' (B91);
 	//                the price shows the plan's own period and the site's currency, not '$X/month' (B92)
 	// @version 1.1 - Cancel is a POST button with a confirm (it was a link any site could send a buyer to);
@@ -92,6 +93,28 @@
                         ?>
                         <div class="jy-subs-row">
                             <div>
+                                <?php
+                                // What the subscription is for: a buyer with two at the same
+                                // price cannot otherwise tell which one to cancel.
+                                $sub_product = new Product((int)$subscription->get('odi_pro_product_id'), TRUE);
+                                $sub_name = $sub_product->key ? trim((string)$sub_product->get('pro_name')) : '';
+                                // And the line's first answer a buyer reads (the site, for a
+                                // per-site product); bookkeeping answers are marked internal.
+                                $sub_site = '';
+                                foreach ((array)$subscription->get_raw_data() as $sub_answer) {
+                                    // A bare number is an id an older line stored unmarked.
+                                    if (is_array($sub_answer) && empty($sub_answer['internal'])
+                                            && trim((string)($sub_answer['answer'] ?? '')) !== ''
+                                            && !ctype_digit(trim((string)$sub_answer['answer']))) {
+                                        $sub_site = trim((string)$sub_answer['answer']);
+                                        break;
+                                    }
+                                }
+                                ?>
+                                <?php if($sub_name !== ''): ?>
+                                <p class="jy-tight"><strong><?php echo htmlspecialchars($sub_name); ?></strong><?php
+                                    echo $sub_site !== '' ? ' — ' . htmlspecialchars((string)$sub_site) : ''; ?></p>
+                                <?php endif; ?>
                                 <p class="jy-subs-amt"><?php echo htmlspecialchars($subscription->subscription_price_label()); ?></p>
                                 <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($status); ?></p>
                             </div>
