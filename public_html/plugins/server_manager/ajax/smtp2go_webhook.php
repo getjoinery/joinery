@@ -32,6 +32,8 @@
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.6 - the secret is read from the header itself: base64 or unencoded Basic, or Bearer,
+ *   as SMTP2GO's header field sends what is typed; a refusal logs scheme, username, lengths
  * @version 1.5 - deliveries come from Svix, which SMTP2GO sends its webhooks through:
  *   Svix's published US and EU addresses are accepted beside webhooks.smtp2go.com,
  *   and addresses are compared as addresses (ranges for IPv6); Smtp2GoWebhookSources
@@ -84,17 +86,44 @@ if ($expected === '') {
 	exit();
 }
 
-// The secret arrives as the basic-auth password the provider was
-// given. hash_equals so a wrong secret takes the same time as a right one.
-$supplied = (string)($_SERVER['PHP_AUTH_PW'] ?? '');
-if ($supplied === '' && !empty($_SERVER['HTTP_AUTHORIZATION'])
-		&& preg_match('/^Basic\s+(.+)$/i', (string)$_SERVER['HTTP_AUTHORIZATION'], $m)) {
-	$decoded = base64_decode($m[1], true);
-	if (is_string($decoded) && strpos($decoded, ':') !== false) {
-		$supplied = substr($decoded, strpos($decoded, ':') + 1);
+// The secret arrives in the Authorization header SMTP2GO was given. Its
+// dashboard sends the typed value as it stands after the scheme word: Basic
+// with base64(user:secret) is the standard form, but the same field takes the
+// secret or user:secret unencoded, and Bearer with the secret; each is
+// accepted. PHP's own PHP_AUTH_PW is not used: it decodes leniently, so an
+// unencoded value becomes a password of noise. hash_equals so a wrong secret
+// takes the same time as a right one.
+$supplied = '';
+$auth_user = '';
+$auth = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+if (preg_match('/^(Basic|Bearer)\s+(\S+)\s*$/i', $auth, $m)) {
+	$value = $m[2];
+	if (strtolower($m[1]) === 'basic') {
+		$decoded = base64_decode($value, true);
+		if (is_string($decoded) && strpos($decoded, ':') !== false) {
+			$value = $decoded;
+		}
+		if (strpos($value, ':') !== false) {
+			$auth_user = substr($value, 0, strpos($value, ':'));
+			$value = substr($value, strpos($value, ':') + 1);
+		}
 	}
+	$supplied = $value;
 }
 if (!hash_equals($expected, $supplied)) {
+	// What arrived, never the secret: whether an Authorization header came,
+	// its scheme, the username (not secret here) and the password's length,
+	// which is enough to tell a missing header, a header the provider did not
+	// encode, a username pasted into the password, and a different secret apart.
+	$scheme = $auth === '' ? 'none' : strtolower((string)strtok($auth, ' '));
+	if (!in_array($scheme, array('basic', 'bearer', 'digest'), true)) {
+		$scheme = 'unrecognised';   // a header that is only a value may be the secret itself
+	}
+	$user = strpos($auth_user, $expected) !== false ? '(the secret)'
+		: substr(preg_replace('/[^\x21-\x7e]/', '?', $auth_user), 0, 40);
+	error_log('smtp2go_webhook: refused a delivery from ' . ($source_ip ?: 'an unknown address')
+		. ': authorization ' . $scheme . ', username ' . ($user === '' ? '(none)' : "'" . $user . "'")
+		. ', password ' . strlen($supplied) . ' characters, the secret ' . strlen($expected));
 	http_response_code(401);
 	echo 'Unauthorized';
 	exit();

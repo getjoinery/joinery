@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.9 - the webhook secret help says how SMTP2GO's Authorization header field takes it
  * @version 2.8 - the title and tabs come from the logic: Cloud Accounts alone where this site does not sell hosting
  * @version 2.7 - the SMTP2GO master key row says why its permissions could not be read
  * @version 2.6 - the Hosted tier tab names the SMTP2GO master key's missing permissions (B179)
@@ -505,7 +506,7 @@ $fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this 
 		. 'delivered. For a rehearsal plane. Leave off where real customers are hosted.']);
 $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
 	'stored' => $hosted['webhook_present'],
-	'helptext' => 'Set the same value as the basic-auth password on the SMTP2GO webhook.'
+	'helptext' => 'On the SMTP2GO webhook, choose Basic under Authorization header and enter this value; joinery:value or its base64 also works.'
 		. ' SMTP2GO does not sign its webhooks, so a spoofed one can move a banner and never a cap.']);
 $fw_hosted->textinput('send_allowance', 'Sends per month, per customer',
 	['value' => $hosted['send_allowance'],
