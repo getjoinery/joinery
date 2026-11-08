@@ -36,6 +36,8 @@
  * repair's: it is sealed whole by whoever wrote it, and its key opens only on
  * its owner's devices (specs/client_custody_mail.md § R7).
  *
+ * @version 1.3 - the owing rows are the model's PROMOTED_RESEAL_OWED_SQL, read by its index: the
+ *   heartbeat probe walked every sealed message the owner has (0.4-2 s on 73k)
  * @version 1.2 - a recipient in the browser's format (v1.edge., a mailbox moved
  *   back off end-to-end) is sealed, not debt; Fortress means the mail vault
  * @version 1.1 - leaves Fortress rows out; their `v1.edge.` recipient read as debt
@@ -53,7 +55,9 @@ class PromotedRowRepair {
 
 	/**
 	 * Is there a promoted row still owing its recipient seal for this owner?
-	 * Cheap, indexed, no decrypt — it runs on every vault heartbeat.
+	 * Cheap, no decrypt — it runs on every vault heartbeat. The model indexes
+	 * exactly the owing rows by owner (PROMOTED_RESEAL_OWED_SQL), so the probe
+	 * reads only those, never the owner's other sealed mail.
 	 *
 	 * Scoped by iem_sealed_owner_user_id, like every per-owner drain: a legacy
 	 * row sealed before that column existed can't be attributed to a window
@@ -67,15 +71,9 @@ class PromotedRowRepair {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			"SELECT 1 FROM iem_inbound_email_messages
-			  WHERE iem_direction = 'outbound'
-			    AND iem_content_sealed = true
-			    AND iem_sealed_owner_user_id = ?
-			    AND iem_delete_time IS NULL
+			  WHERE iem_sealed_owner_user_id = ?
+			    AND " . InboundEmailMessage::PROMOTED_RESEAL_OWED_SQL . "
 			    AND NOT " . InboundEmailMessage::mailKeySql() . "
-			    AND (iem_reseal_pending = true
-			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
-			             AND iem_recipient NOT LIKE 'v1.aead.%'
-			             AND iem_recipient NOT LIKE 'v1.edge.%'))
 			  LIMIT 1");
 		$stmt->execute(array($user_id));
 		return (bool)$stmt->fetchColumn();
@@ -127,15 +125,9 @@ class PromotedRowRepair {
 			        iem_message_id_header, iem_recipient, iem_sealed_key, iem_reseal_pending,
 			        iem_iia_inbound_imap_account_id, iem_imap_uid, iem_imap_uidvalidity, iem_imap_folder
 			   FROM iem_inbound_email_messages
-			  WHERE iem_direction = 'outbound'
-			    AND iem_content_sealed = true
-			    AND iem_sealed_owner_user_id = ?
-			    AND iem_delete_time IS NULL
+			  WHERE iem_sealed_owner_user_id = ?
+			    AND " . InboundEmailMessage::PROMOTED_RESEAL_OWED_SQL . "
 			    AND NOT " . InboundEmailMessage::mailKeySql() . "
-			    AND (iem_reseal_pending = true
-			         OR (iem_recipient IS NOT NULL AND iem_recipient <> ''
-			             AND iem_recipient NOT LIKE 'v1.aead.%'
-			             AND iem_recipient NOT LIKE 'v1.edge.%'))
 			  ORDER BY iem_inbound_email_message_id ASC
 			  LIMIT " . intval($max));
 		$stmt->execute(array($user_id));

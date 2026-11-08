@@ -106,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.52 - PROMOTED_RESEAL_OWED_SQL and an index of exactly those rows by owner (PromotedRowRepair);
+ *                live rows waiting to be parsed, by owner (DeferredIngest)
  * @version 1.51 - indexes for the Fortress raise backlog (rows by mailbox and domain not yet on the mail key)
  *                and the lowering's settle backlog (rows by owner with an attachment manifest)
  * @version 1.50 - $read_permission = 10: reading another person's message is the reader's all-access level (mail_access_hardening WP0)
@@ -717,6 +719,16 @@ class InboundEmailMessage extends SystemBase {
 		// settle backlog, asked on every vault heartbeat).
 		array('columns' => array('iem_sealed_owner_user_id'),
 			'where' => "iem_attachment_manifest IS NOT NULL AND iem_attachment_manifest <> ''"),
+		// Live rows waiting to be parsed, by owner (DeferredIngest, asked on
+		// every vault heartbeat): a handful at most, where the owner's sealed
+		// rows are their whole mailbox.
+		array('columns' => array('iem_sealed_owner_user_id'),
+			'where' => 'iem_pending_parse = true AND iem_delete_time IS NULL'),
+		// Promoted rows still owing their recipient seal, by owner: asked on
+		// every vault heartbeat, and normally empty, where the owner's sealed
+		// rows are their whole mailbox.
+		array('columns' => array('iem_sealed_owner_user_id'),
+			'where' => self::PROMOTED_RESEAL_OWED_SQL),
 		// Rows with something to teach (SpamLearning): a handful in a whole
 		// mailbox, looked up by owner on every vault heartbeat.
 		array('columns' => array('iem_sealed_owner_user_id'),
@@ -1073,6 +1085,16 @@ class InboundEmailMessage extends SystemBase {
 	const MAIL_KEY_PREFIX = VaultCrypto::EDGE_SEAL_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
 
 	/** LIKE prefix for a key sealed to the mail key in either seal version ('mail' holds no wildcard). */
+	/**
+	 * A promoted outbound row still owing its recipient seal (PromotedRowRepair):
+	 * marked for a reseal, or its recipient still in plain text. One string for
+	 * the query and the partial index that serves it, so the planner can match
+	 * them. Normally no row matches.
+	 */
+	const PROMOTED_RESEAL_OWED_SQL = "iem_direction = 'outbound' AND iem_content_sealed = true AND iem_delete_time IS NULL"
+		. " AND (iem_reseal_pending = true OR (iem_recipient IS NOT NULL AND iem_recipient <> ''"
+		. " AND iem_recipient NOT LIKE 'v1.aead.%' AND iem_recipient NOT LIKE 'v1.edge.%'))";
+
 	const MAIL_KEY_LIKE = VaultCrypto::EDGE_SEAL_LIKE_PREFIX . self::SEAL_SCOPE_FORTRESS . '.';
 
 	/** Is $key sealed to the mail key (a Fortress message), in either seal version? */

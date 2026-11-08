@@ -30,6 +30,9 @@
  * file-backed the moment any path turns up the real bytes — an archive import
  * of the same message adopts them, whichever order the two happened in.
  *
+ * @version 1.8 - indexed by message (every lookup and cascade read the whole table), and the rows the
+ *                inline-flag backfill has not decided and the inline images not yet adopted as files
+ *                (both asked on every vault heartbeat)
  * @version 1.7 - ima_inline_by_body: the inline flag was decided by the HTML body (B5)
  * @version 1.6 - access_owner_is(): an attachment is its message's holders' (MailboxViewer::holdsMessage)
  * @version 1.5
@@ -66,7 +69,7 @@ class InboundMessageAttachment extends SystemBase {
 		// A real constraint, not just a declared cascade: a manifest row is worth
 		// nothing without its message, and with no FK a delete that goes round the
 		// model leaves one behind where nothing looks for it.
-		'ima_iem_inbound_email_message_id'  => array('type'=>'int8', 'is_nullable'=>false,
+		'ima_iem_inbound_email_message_id'  => array('type'=>'int8', 'is_nullable'=>false, 'index'=>true,
 			'foreign_key'=>array('table'=>'iem_inbound_email_messages',
 				'column'=>'iem_inbound_email_message_id', 'on_delete'=>'CASCADE')),
 		'ima_filename'      => array('type'=>'varchar(500)'),
@@ -99,6 +102,18 @@ class InboundMessageAttachment extends SystemBase {
 		// inside the owner's window) recomputes those once.
 		'ima_inline_by_body' => array('type'=>'bool', 'is_nullable'=>true),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
+	);
+
+	public static $index_specifications = array(
+		// Rows whose inline flag no body has decided yet (InlineFlagBackfill,
+		// asked on every vault heartbeat): empty once the backfill is done,
+		// where the table is every attachment of every message.
+		array('columns' => array('ima_iem_inbound_email_message_id'),
+			'where' => "ima_inline_by_body IS NULL AND coalesce(ima_content_id, '') <> ''"),
+		// Inline images not yet adopted as files (InlineImageBackfill, asked on
+		// every vault heartbeat): a few, and the ones it gave up on for a day.
+		array('columns' => array('ima_iem_inbound_email_message_id'),
+			'where' => "ima_is_inline = true AND ima_fil_file_id IS NULL AND ima_content_type LIKE 'image/%'"),
 	);
 
 	/** Create and persist one manifest row. */
