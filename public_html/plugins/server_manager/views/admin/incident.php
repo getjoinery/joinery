@@ -14,6 +14,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.6 - a cleared never-do incident says it cleared, not that it clears on the next pass
  * @version 1.5 - the never-do box holds only the alarm; Mark safe remembers each file by its content
  * @version 1.4 - a never-do incident carries its own Mark safe (Security sentinel: suspicious activity), the one thing that clears it
  * @version 1.3 - the triage reads as a fix waiting for its proof when resolved and still happening; help names Reopen
@@ -135,7 +136,11 @@ if ((string)$inc->get('inc_source') === IncidentSourceNeverDo::NAME && $node_id)
 	$nd_state = $nd_node->key ? NeverDoCheck::state($nd_node) : null;
 	$nd_held = $nd_state['alarm'] ?? array();
 	$page->begin_box(['title' => 'Security sentinel: alarm']);
-	if ($nd_held) {
+	if (!$inc->is_open()) {
+		echo '<p class="mb-0">This incident has cleared: what it held was marked safe, or moved to Changes to review on the node page.'
+			. ($nd_held ? ' The alarm holds ' . count($nd_held) . ' item' . (count($nd_held) === 1 ? '' : 's') . ' now, under its own incident.' : '')
+			. '</p>';
+	} elseif ($nd_held) {
 		echo '<p>This incident clears only when someone marks what the alarm holds as safe (' . count($nd_held)
 			. ' item' . (count($nd_held) === 1 ? '' : 's') . ', listed under Evidence and on the node page). Resolving it does not.</p>';
 		echo '<p>Mark safe only if you made every one of these yourself (a setuid program you built, say). '
