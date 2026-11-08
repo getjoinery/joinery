@@ -18,6 +18,7 @@
  * fixed there reads as fixed the moment the operator returns to the mailbox;
  * fresh=1 (the reader's Refresh control) forces a re-run regardless.
  *
+ * @version 1.2.0 - no session_write: the checks run with the session released
  * @version 1.1.0
  */
 
@@ -71,11 +72,11 @@ function setup_status_logic_descriptor(): array {
 		'description'      => 'The Setup tab verdict for one mailbox: ok, attention (with the first non-green row), or unknown (admin only).',
 		'requires_session' => true,
 		'mutates'          => false,
-		// Not a mutation, but it does write: the cached verdict lives in the
-		// caller's session, which the API otherwise releases as soon as it has
-		// read identity — without this the cache would never survive the request
-		// and every reader load would re-run the DNS lookups.
-		'auth'             => array('min_user_permission' => 0, 'session_write' => true),
+		// The cached verdict lives in the caller's session, but this does not
+		// declare session_write: that would hold the session lock through the
+		// DNS lookups and stall every other request from the browser. The
+		// remember step reopens the session for its one write instead.
+		'auth'             => array('min_user_permission' => 0),
 		'input'            => array(
 			'alias_id' => array('type' => 'int', 'required' => true, 'label' => 'Mailbox'),
 			'fresh'    => array('type' => 'string', 'required' => false, 'label' => 'Bypass the cached verdict'),

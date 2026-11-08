@@ -8,6 +8,8 @@
  * from a feed being saved on a cron poll without dragging the DNS/host probe
  * suite in behind it.
  *
+ * @version 1.1 - writes reopen a released session for the one write instead of
+ *   needing the session held for the whole request
  * @version 1.0
  */
 
@@ -28,6 +30,31 @@
 
 /** How long a remembered verdict stays good, in seconds. */
 const MAILBOX_SETUP_STATUS_TTL = 300;
+
+/**
+ * Make one write to the operator's session.
+ *
+ * An API action has its session released as soon as identity is read, so the
+ * DNS and host probes behind a verdict never hold the session lock: a request
+ * holding it makes every other request from that browser wait, the vault
+ * heartbeat included. A released session is reopened for the write and released
+ * again. A request with no session (a cron poll) has nothing to write to.
+ */
+function mailbox_setup_session_write(callable $write): void {
+	if (session_status() === PHP_SESSION_ACTIVE) {
+		$write();
+		return;
+	}
+	if (php_sapi_name() === 'cli' || session_id() === '') {
+		return;
+	}
+	SessionControl::get_instance()->reopen();
+	if (session_status() !== PHP_SESSION_ACTIVE) {
+		return;
+	}
+	$write();
+	session_write_close();
+}
 
 /** The wire shape both the reader and the writers use. */
 function mailbox_setup_status_payload(int $alias_id, array $verdict): array {
@@ -51,12 +78,12 @@ function mailbox_setup_status_remember(int $alias_id, array $verdict): array {
 	if ($verdict['status'] === 'unknown') {
 		return $payload;
 	}
-	if (session_status() === PHP_SESSION_ACTIVE) {
+	mailbox_setup_session_write(function () use ($alias_id, $payload) {
 		if (!isset($_SESSION['mailbox_setup_status']) || !is_array($_SESSION['mailbox_setup_status'])) {
 			$_SESSION['mailbox_setup_status'] = array();
 		}
 		$_SESSION['mailbox_setup_status'][$alias_id] = array('checked' => time(), 'payload' => $payload);
-	}
+	});
 	return $payload;
 }
 
@@ -83,8 +110,10 @@ function mailbox_setup_status_recall(int $alias_id): ?array {
  * them to ignore the one that matters.
  */
 function mailbox_setup_status_forget(int $alias_id): void {
-	if ($alias_id <= 0 || session_status() !== PHP_SESSION_ACTIVE) {
+	if ($alias_id <= 0) {
 		return;
 	}
-	unset($_SESSION['mailbox_setup_status'][$alias_id]);
+	mailbox_setup_session_write(function () use ($alias_id) {
+		unset($_SESSION['mailbox_setup_status'][$alias_id]);
+	});
 }
