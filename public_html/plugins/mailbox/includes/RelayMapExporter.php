@@ -29,6 +29,7 @@
  * no SRS secret. The forwarding domains stay: bounces of the forwards this site
  * sends return to them, and the relay spools those too.
  *
+ * @version 2.10 - mail_apps' settings are read silently: they are absent wherever that plugin is not installed
  * @version 2.9 - relayTakes() asks only the relay's version: every key is X-Wing
  * @version 2.8 - a key the relay cannot take (an X-Wing key, to a relay older than 3.16) is never put
  *                in the map: that mailbox takes the transport key until the relay reports 3.16
@@ -219,12 +220,13 @@ class RelayMapExporter {
 	 * programs through this relay: its switch is on and the name it serves is
 	 * the relay's mail host name. Read from mail_apps' own settings, which do
 	 * not exist where that plugin is not installed, so mailbox depends on
-	 * nothing of it. Never a private or reserved address: the relay refuses
-	 * those, and would refuse the whole fragment with them.
+	 * nothing of it, and read silently, since their absence is expected.
+	 * Never a private or reserved address: the relay refuses those, and would
+	 * refuse the whole fragment with them.
 	 */
 	private function mailAppsOrigins(): array {
-		$name = strtolower(trim((string)$this->settings->get_setting('mail_apps_served_name')));
-		if (!$this->settings->get_setting('mail_apps_enabled') || $name === ''
+		$name = strtolower(trim((string)$this->settings->get_setting('mail_apps_served_name', true, true)));
+		if (!$this->settings->get_setting('mail_apps_enabled', true, true) || $name === ''
 				|| $name !== strtolower(trim((string)$this->relay->get('mrl_mx_hostname')))) {
 			return array();
 		}
