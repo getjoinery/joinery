@@ -40,6 +40,8 @@
  * is one string. Those kinds are read as they always were (the alarm), so they
  * alarm no more than before; everything else goes on the review list.
  *
+ * @version 1.2 - a host's job window also counts its own container sites' jobs: a site upgrade there brings
+ *                the release the host runs this check from (docker-prod listed its engine files after one)
  * @version 1.1 - the alarm (ALARM_KINDS, two checks in a row, Mark safe remembers path and hash; a held item
  *                takes the file's current hash; an alarm list the script cut keeps its first sightings, as a
  *                partial run does) and the review list (no incident, Clear, which remembers findings present
@@ -437,20 +439,30 @@ class NeverDoCheck {
 		return $state;
 	}
 
-	/** Whether a machine-changing job ran on this node in the window ending now. */
+	/**
+	 * Whether a machine-changing job ran on this node, or on a container site
+	 * this node hosts, in the window ending now. A host runs this check from a
+	 * site tree on it, so a site's upgrade changes what the host reports.
+	 */
 	public static function explained_by_jobs(int $node_id, int $now): bool {
 		$db = DbConnector::get_instance()->get_db_link();
 		$types = implode(',', array_fill(0, count(self::EXPLAINING_TYPES), '?'));
 		$q = $db->prepare(
 			"SELECT 1 FROM mjb_management_jobs
-			  WHERE mjb_mgn_managed_node_id = ?
+			  WHERE (mjb_mgn_managed_node_id = ?
+			         OR mjb_mgn_managed_node_id IN (
+			             SELECT mgn_managed_node_id FROM mgn_managed_nodes
+			              WHERE mgn_delete_time IS NULL
+			                AND mgn_mgh_managed_host_id IN (
+			                    SELECT mgh_managed_host_id FROM mgh_managed_hosts
+			                     WHERE mgh_mgn_managed_node_id = ? AND mgh_delete_time IS NULL)))
 			    AND mjb_job_type IN ($types)
 			    AND mjb_delete_time IS NULL
 			    AND (mjb_status = 'running'
 			         OR (mjb_status IN ('completed', 'failed')
 			             AND COALESCE(mjb_completed_time, mjb_update_time) >= ?))
 			  LIMIT 1");
-		$q->execute(array_merge(array($node_id), self::EXPLAINING_TYPES,
+		$q->execute(array_merge(array($node_id, $node_id), self::EXPLAINING_TYPES,
 			array(gmdate('Y-m-d H:i:s', $now - self::EXPLAIN_WINDOW_SECONDS))));
 		return (bool)$q->fetchColumn();
 	}
