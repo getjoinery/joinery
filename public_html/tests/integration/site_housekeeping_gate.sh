@@ -123,7 +123,8 @@ R7="$T/fs7"; mkdir -p "$R7/etc/logrotate.d" "$R7/etc/cron.d"
 old_rendering "$SITE" > "$R7/etc/logrotate.d/joinery-mysite"
 out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" 2>&1)"; rc=$?
 chk "it is rewritten from the template, saying so" "$rc:$(printf '%s' "$out" | grep -c 'earlier rendering')" "0:1"
-chk "and runs as www-data's own group" "$(grep -c 'su www-data www-data' "$R7/etc/logrotate.d/joinery-mysite")/$(grep -c 'user1' "$R7/etc/logrotate.d/joinery-mysite")" "4/0"
+chk "and runs as www-data's own group" "$(grep -c 'su www-data www-data' "$R7/etc/logrotate.d/joinery-mysite")/$(grep -c 'user1' "$R7/etc/logrotate.d/joinery-mysite")" "3/0"
+chk "and the converger's log is root's, under /var/log/joinery, named by site" "$(grep -c '^/var/log/joinery/host_converger\.mysite\.log {$' "$R7/etc/logrotate.d/joinery-mysite")" "1"
 out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" 2>&1)"
 chk "the next converge leaves it alone" "$(printf '%s' "$out" | grep -c 'rewrote')" "0"
 old_rendering "$SITE" | sed 's/rotate 2$/rotate 9/' > "$R7/etc/logrotate.d/joinery-mysite"
@@ -132,7 +133,7 @@ chk "one directive changed by an owner: the file is theirs and survives" "$(grep
 old_rendering "$T/html/othersite" > "$R7/etc/logrotate.d/joinery-mysite"
 JOINERY_SITE_HOUSEKEEPING_ROOT="$R7" bash "$SCRIPT" mysite "$SITE" >/dev/null 2>&1
 chk "the earlier rendering for another site's root is not this site's, and survives" "$(grep -c 'othersite' "$R7/etc/logrotate.d/joinery-mysite")" "4"
-chk "the template runs as www-data's own group, never user1" "$(grep -c '^[[:space:]]*su www-data www-data$' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")/$(grep -c 'user1' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")" "4/0"
+chk "the template runs as www-data's own group, never user1" "$(grep -c '^[[:space:]]*su www-data www-data$' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")/$(grep -c 'user1' "$ROOT/maintenance_scripts/install_tools/logrotate_joinery.conf")" "3/0"
 
 echo "=== The rendering before access.log was rotated is rewritten; nothing else is ==="
 # The file every server installed from 10-04 has, byte for byte: it
@@ -233,14 +234,26 @@ chk "the access log is renamed, never copied (a months-old log is gigabytes)" "$
 chk "and Apache is told to reopen it" "$(grep -c 'apache2ctl graceful' <<<"$access_block")" "1"
 # logrotate, as root, refuses a block without an su line in a directory a
 # group other than root can write, and a site's logs directory is www-data's,
-# mode 0770. The file from 10-22 left host_converger.log's block without one.
-chk "every block in the template runs under su" "$(grep -c '^[^#[:space:]].* {$' "$LR")/$(grep -c '^[[:space:]]*su ' "$LR")" "4/4"
-# The 10-22 file is the template less that one line.
-awk '/\/logs\/host_converger\.log \{/ { on = 1 } on && /^[[:space:]]*su / { next } { print } /^}/ { on = 0 }' "$LR" \
+# mode 0770. Every block in the site's logs/ runs under su; the converger's
+# log is root's own file under /var/log/joinery and needs none
+# (shell_command_audit D1).
+chk "every block in the site's logs runs under su, and the converger block is root's" \
+    "$(grep -c '^[^#[:space:]].* {$' "$LR")/$(grep -c '^[[:space:]]*su ' "$LR")/$(grep -c '^/var/log/joinery/host_converger\.{{SITENAME}}\.log {$' "$LR")" "4/3/1"
+# The 11-07 rendering kept the converger's log in the site's logs/, under su;
+# the 10-22 one had that block without su. Both are earlier renderings and
+# are rewritten to the template.
+site_block='{{SITE_ROOT}}/logs/host_converger.log {\n    su www-data www-data\n    weekly\n    rotate 4\n    compress\n    delaycompress\n    missingok\n    notifempty\n    copytruncate\n    size 5M\n}'
+awk -v blk="$site_block" '/^\/var\/log\/joinery\/host_converger/ { on = 1; printf "%s\n", blk; next } on && /^}/ { on = 0; next } on { next } { print }' "$LR" \
     | sed -e "s|{{SITE_ROOT}}|${SITE}|g" > "$R8/etc/logrotate.d/joinery-mysite"
 out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R8" bash "$SCRIPT" mysite "$SITE" 2>&1)"
-converger_block="$(awk '/\/logs\/host_converger\.log \{/ { on = 1 } on { print } on && /^}/ { on = 0 }' "$R8/etc/logrotate.d/joinery-mysite")"
-chk "the 10-22 rendering is rewritten, and its converger log block gains su" "$(printf '%s' "$out" | grep -c "it was the platform's earlier rendering")/$(grep -c '^[[:space:]]*su www-data www-data$' <<<"$converger_block")" "1/1"
+chk "the 11-07 rendering is rewritten, and the converger block moves to root's log" \
+    "$(printf '%s' "$out" | grep -c "it was the platform's earlier rendering")/$(grep -c '/logs/host_converger\.log {' "$R8/etc/logrotate.d/joinery-mysite")/$(grep -c '^/var/log/joinery/host_converger\.mysite\.log {$' "$R8/etc/logrotate.d/joinery-mysite")" "1/0/1"
+awk -v blk="$site_block" '/^\/var\/log\/joinery\/host_converger/ { on = 1; printf "%s\n", blk; next } on && /^}/ { on = 0; next } on { next } { print }' "$LR" \
+    | awk '/\/logs\/host_converger\.log \{/ { on = 1 } on && /^[[:space:]]*su / { next } { print } /^}/ { on = 0 }' \
+    | sed -e "s|{{SITE_ROOT}}|${SITE}|g" > "$R8/etc/logrotate.d/joinery-mysite"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$R8" bash "$SCRIPT" mysite "$SITE" 2>&1)"
+converger_block="$(awk '/^\/var\/log\/joinery\/host_converger/ { on = 1 } on { print } on && /^}/ { on = 0 }' "$R8/etc/logrotate.d/joinery-mysite")"
+chk "the 10-22 rendering is rewritten too, and its converger block is root's log" "$(printf '%s' "$out" | grep -c "it was the platform's earlier rendering")/$(grep -c '^/var/log/joinery/host_converger\.mysite\.log {$' <<<"$converger_block")" "1/1"
 
 echo "=== Another file already rotating the site's logs is left to do so ==="
 R4="$T/fs4"; mkdir -p "$R4/etc/logrotate.d" "$R4/etc/cron.d"

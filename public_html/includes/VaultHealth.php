@@ -23,6 +23,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.20 - the stalled-queue reason names RootState::requestLogDir() (specs/shell_command_audit.md D1)
  * @version 1.19 - the previous-build row states the launcher's rule (four starts with no five-minute run)
  * @version 1.18 - the unseal daemon row says when new windows are held in the pool (the fallback after five silent minutes)
  * @version 1.17 - a row for the unseal daemon (specs/unseal_daemon.md WP3): installed, answering, on the
@@ -403,7 +404,7 @@ class VaultHealth {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 				'reason' => 'A root request has been queued for ' . (int)round($oldest / 3600)
 					. ' hours without being carried out. The host converger is installed and running, '
-					. 'so the requests themselves are failing; see logs/root_requests/ on the host.'];
+					. 'so the requests themselves are failing; see ' . RootState::requestLogDir() . '/ on the host.'];
 		}
 		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 	}

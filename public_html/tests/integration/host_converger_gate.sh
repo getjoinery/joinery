@@ -241,6 +241,19 @@ chk "the unit runs the copy, not the tree (a site's command and a machine's)" \
 
 # A queued root request should not wait for the next tick: someone pressed
 # Upgrade and is watching a transcript.
+# The queue debris sweep (ensure_site_state_dir, root only) must keep every
+# request: find's default regex flavour reads {9,12} literally, under which no
+# request name matched and every request a minute old was swept (reviewer1 B11).
+# The runner's own expression is read out of it and run on a fixture.
+SWEEP_EXPR="$(grep -A1 -- '-mmin +1 -regextype posix-extended' "$RUNNER" | tr -d '\\\n' | sed -e 's/.*find "\${QUEUE_DIR}"//' -e 's/-exec rm -rf.*//')"
+chk "the queue sweep names its regex flavour" "$(grep -c -- '-mmin +1 -regextype posix-extended' "$RUNNER")" "1"
+SQ="$T/sweepq"; mkdir -p "$SQ"
+touch -d '3 minutes ago' "$SQ/1762560000-0a1b2c3d.json" "$SQ/junk.txt" "$SQ/1762560000-0a1b2c3d.json.tmp"
+touch "$SQ/1762560001-ffffffff.json.tmp"
+eval "find \"$SQ\" $SWEEP_EXPR -exec rm -rf -- {} +" 2>/dev/null
+chk "a request two minutes old survives the sweep, debris does not, a fresh .tmp is left alone" \
+    "$(ls "$SQ" | sort | tr '\n' ' ')" "1762560000-0a1b2c3d.json 1762560001-ffffffff.json.tmp "
+
 chk "a path unit watches the request queue" \
     "$(grep -c 'PathChanged=\${STATE_DIR}/root_requests' "$INSTALLER")" "1"
 # Root's queue is root's directory, never the site's cache/ (shell_command_audit D1).

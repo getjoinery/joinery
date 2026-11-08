@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.10 - The converger's log is root's, /var/log/joinery/host_converger.SITENAME.log, rotated without su;
+#                the 11-07 rendering, with the block in the site's logs/, is an earlier rendering
+#                (specs/shell_command_audit.md D1)
 # Version: 1.9 - The 10-22 logrotate file is an earlier rendering too: its host_converger.log block had
 #                no su line, so logrotate, as root in the site's group-writable logs directory, refused
 #                it and exited 1 every night.
@@ -124,7 +127,7 @@ OTHER_ROTATION="$(grep -lF "${SITE_ROOT}/logs/" "$(dirname "${LOGROTATE}")"/* 2>
 # logrotate refuses in the site's logs directory. A version is added here
 # whenever the template's directives change.
 directives() { grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$@"; }
-rendered() { sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}"; }
+rendered() { sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" -e "s|{{SITENAME}}|${SITENAME}|g" "${TEMPLATE}"; }
 earlier_renderings() {
     cat <<'EARLIER'
 # from 2026-03-28
@@ -293,13 +296,65 @@ earlier_renderings() {
     copytruncate
     size 5M
 }
+----
+# from 2026-11-07
+{{SITE_ROOT}}/logs/error.log {
+    su www-data www-data
+    weekly
+    rotate 2
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 20M
+}
+{{SITE_ROOT}}/logs/access.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0660 www-data www-data
+    size 50M
+    sharedscripts
+    postrotate
+        if pgrep -f ^/usr/sbin/apache2 > /dev/null; then
+            apache2ctl graceful > /dev/null 2>&1 || true
+        fi
+    endscript
+}
+{{SITE_ROOT}}/logs/cron_scheduled_tasks.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+{{SITE_ROOT}}/logs/host_converger.log {
+    su www-data www-data
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    size 5M
+}
 EARLIER
 }
 earlier_rendering() {
     local have one
     have="$(directives "${LOGROTATE}")"
     while IFS= read -r -d $'\x1e' one; do
-        [[ "${have}" == "$(printf '%s\n' "${one}" | sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" | directives)" ]] && return 0
+        [[ "${have}" == "$(printf '%s\n' "${one}" | sed -e "s|{{SITE_ROOT}}|${SITE_ROOT}|g" -e "s|{{SITENAME}}|${SITENAME}|g" | directives)" ]] && return 0
     done < <(earlier_renderings | awk 'BEGIN { ORS = "" } /^----$/ { print "\036"; next } { print $0 "\n" } END { print "\036" }')
     return 1
 }
@@ -316,7 +371,7 @@ elif [[ ! -f "${TEMPLATE}" ]]; then
     warn "no logrotate template at ${TEMPLATE} - log rotation not written"
     FAILED=1
 elif [[ -d "$(dirname "${LOGROTATE}")" ]]; then
-    sed "s|{{SITE_ROOT}}|${SITE_ROOT}|g" "${TEMPLATE}" > "${LOGROTATE}" && chmod 644 "${LOGROTATE}" \
+    rendered > "${LOGROTATE}" && chmod 644 "${LOGROTATE}" \
         && say "wrote ${LOGROTATE} (it was absent)" \
         || { warn "could not write ${LOGROTATE}"; FAILED=1; }
 else

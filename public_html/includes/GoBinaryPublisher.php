@@ -31,6 +31,8 @@
  * publish() never throws — a broken build must not abort an unrelated platform
  * publish by exception; it reports a status and the caller decides.
  *
+ * @version 1.6 - privateCacheRoot(): the build cache is this user's own directory (/var/lib/joinery/build as root,
+ *                ~/.cache/joinery otherwise), owner- and mode-checked, never /var/tmp (specs/shell_command_audit.md C5)
  * @version 1.5 - PLUGIN_PUBLISHERS: the one list of Go programs a plugin ships prebuilt, which publish,
  *                the release statement and the verifier each walk; artifactName()
  * @version 1.4 - built binaries are written 0644: no installer runs one from the tree, and a 755 file
@@ -59,8 +61,51 @@ abstract class GoBinaryPublisher {
 	const BINARY = '';
 	/** Prefix for every line of output. */
 	const LABEL = 'Go binary';
-	/** Persistent build cache, so a root or user1 run does not depend on a home directory. */
-	const CACHE_ROOT = '/var/tmp/joinery-go-build';
+	/** Name of this publisher's build cache; the directory is privateCacheRoot(). */
+	const CACHE_ROOT = 'joinery-go-build';
+
+	/**
+	 * This process's own build cache for $name: a directory nobody else can
+	 * write, under /var/lib/joinery/build as root and under the account's cache
+	 * directory otherwise. The toolchain Go unpacks here is what the build then
+	 * RUNS, so a cache in a world-writable place (/var/tmp) was a planted go
+	 * binary away from running the web user's code as root at publish, or a
+	 * poisoned object away from signing it (specs/shell_command_audit.md C5).
+	 * Refused unless it is a real directory owned by this user with no group or
+	 * other write bit.
+	 */
+	public static function privateCacheRoot($name) {
+		$name = basename((string)$name);
+		if ($name === '' || $name === '.' || $name === '..') {
+			throw new Exception('a build cache needs a name');
+		}
+		$uid = function_exists('posix_geteuid') ? posix_geteuid() : null;
+		if ($uid === 0) {
+			$root = '/var/lib/joinery/build/' . $name;
+		} else {
+			$home = (string)getenv('HOME');
+			if ($home === '' && function_exists('posix_getpwuid') && $uid !== null) {
+				$home = (string)(posix_getpwuid($uid)['dir'] ?? '');
+			}
+			$root = ($home !== '' ? $home . '/.cache/joinery' : sys_get_temp_dir() . '/joinery-build-' . (string)$uid) . '/' . $name;
+		}
+		if (!is_dir($root)) {
+			$old = umask(077);
+			@mkdir($root, 0700, true);
+			umask($old);
+		}
+		clearstatcache(true, $root);
+		if (is_link($root) || !is_dir($root)) {
+			throw new Exception("build cache {$root} is not a directory");
+		}
+		if ($uid !== null && fileowner($root) !== $uid) {
+			throw new Exception("build cache {$root} is not owned by this user (uid {$uid}); refusing to build in it");
+		}
+		if ((fileperms($root) & 0022) !== 0) {
+			throw new Exception("build cache {$root} is writable by others; refusing to build in it");
+		}
+		return $root;
+	}
 
 	/**
 	 * Output name => GOARCH. The KEYS are `uname -m` names, not Go's, because
@@ -187,7 +232,8 @@ abstract class GoBinaryPublisher {
 			// A box publishing a release owns the source it ships. A missing
 			// toolchain here is a broken publishing box, not a reason to ship a
 			// consumer with nothing to run.
-			$official = static::officialGo(static::findGo(), $src, static::CACHE_ROOT . '/gomodcache', static::CACHE_ROOT);
+			$cache_root = static::privateCacheRoot(static::CACHE_ROOT);
+			$official = static::officialGo(static::findGo(), $src, $cache_root . '/gomodcache', $cache_root);
 			$go = $official['go'];
 			$say($label . ': toolchain ' . $official['toolchain'] . ' (official, checksum-verified)');
 
@@ -334,7 +380,7 @@ abstract class GoBinaryPublisher {
 		if ($downloader === null || $downloader === '') {
 			throw new Exception("no Go found to fetch {$pinned} with (any Go 1.21 or later can)");
 		}
-		@mkdir($modcache, 0777, true);
+		@mkdir($modcache, 0700, true);
 		// The checksum database is named here, not inherited: a caller whose
 		// environment turned it off (GOSUMDB=off, GONOSUMDB=golang.org, a
 		// GOPROXY that is not Go's) would otherwise fetch an unverified
@@ -404,9 +450,9 @@ abstract class GoBinaryPublisher {
 		// the reason AgentDistPublisher records: VCS stamping fails whenever the
 		// publish runs as a user other than the repo's owner (git reports
 		// "dubious ownership" and exits 128).
-		$cache_root = static::CACHE_ROOT;
-		@mkdir($cache_root . '/gocache', 0777, true);
-		@mkdir($cache_root . '/gomodcache', 0777, true);
+		$cache_root = static::privateCacheRoot(static::CACHE_ROOT);
+		@mkdir($cache_root . '/gocache', 0700, true);
+		@mkdir($cache_root . '/gomodcache', 0700, true);
 
 		$cmd = sprintf(
 			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',

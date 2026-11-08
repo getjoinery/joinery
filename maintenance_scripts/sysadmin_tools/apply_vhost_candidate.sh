@@ -85,8 +85,8 @@ probe /static_files/index.php 403
 probe /static_files/x.phtml 403
 
 say "5. Converger state on the node"
-"${SSH[@]}" "echo -n 'last run: '; cat '${SITE_ROOT}/cache/host_converger.last' 2>/dev/null || echo '(none yet)'
-echo -n 'pending requests: '; ls '${SITE_ROOT}/cache/root_requests/'*.json 2>/dev/null | wc -l
+"${SSH[@]}" "echo -n 'last run: '; cat '/var/lib/joinery/sites/${SITE}/host_converger.last' 2>/dev/null || echo '(none yet)'
+echo -n 'pending requests: '; ls '/var/lib/joinery/sites/${SITE}/root_requests/'*.json 2>/dev/null | wc -l
 systemctl is-active joinery-host-converger.timer 2>/dev/null || true"
 
 if [[ "${fail}" == 1 ]]; then

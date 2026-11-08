@@ -43,6 +43,8 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.11 - the node's SSH user and host are checked against ManagedNode::is_ssh_user / is_ssh_host before
+ *                 any step: a value starting with - was an ssh option inside user@host (specs/shell_command_audit.md U2)
  * @version 1.10 - a management node without sshpass or ssh fails the job before any step, naming the tool
  *                 (B36), instead of waiting out the SSH budget and blaming the server; holds_install_password()
  *                 says whether a retry can log in (B37)
@@ -167,6 +169,16 @@ class InstallJobExecutor {
 			// that declared it needs it. Absent is the ordinary case.
 			'admin_password' => $this->resolve_admin_password($node),
 		);
+		// user@host is one ssh argument. The shell never sees inside it, but ssh
+		// reads an argument that starts with "-" as an option, and -oProxyCommand=
+		// runs a command on this machine as the job worker. The row is held to the
+		// same shape on save (ManagedNode::prepare); this is the check at the point
+		// of use, so a row written any other way still never reaches ssh
+		// (specs/shell_command_audit.md U2).
+		if (!ManagedNode::is_ssh_user($ctx['user']) || !ManagedNode::is_ssh_host($ctx['host'])) {
+			$this->finish($job, false, 'The target node\'s SSH user or host is not a plain account name, hostname or IP address; nothing was run.');
+			return;
+		}
 		if ($ctx['host'] === '') {
 			$this->finish($job, false, 'The target node has no host address.');
 			return;

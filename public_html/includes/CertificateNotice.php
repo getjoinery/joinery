@@ -47,6 +47,7 @@
  *             would take the www address dark while the apex looks healthy
  *   met     — renewing on schedule; the expiry date is stated
  *
+ * @version 1.2 - the summary is read from RootState::certificatesFile() (specs/shell_command_audit.md D1)
  * @version 1.1 - the edge advice names the placeholder Strict refuses (WP12)
  * @version 1.0
  */
@@ -82,7 +83,7 @@ class CertificateNotice {
 	 */
 	public static function facts(?string $site_root = null): ?array {
 		$site_root = $site_root ?? PathHelper::getSiteRoot();
-		$raw = @file_get_contents($site_root . '/cache/certificates.json');
+		$raw = @file_get_contents(RootState::certificatesFile($site_root));
 		if (!is_string($raw) || $raw === '') {
 			return null;
 		}
@@ -118,7 +119,7 @@ class CertificateNotice {
 
 		if ($facts === null) {
 			return $out('unknown', 'No certificate summary has been written on this box yet.',
-				'The host converger writes cache/certificates.json on every run; until it has, nothing can be said about the certificate from here.');
+				'The host converger writes its certificate summary on every run; until it has, nothing can be said about the certificate from here.');
 		}
 		$written = (int)($facts['written'] ?? 0);
 		if ($written <= 0 || $now - $written >= self::STALE_AFTER) {

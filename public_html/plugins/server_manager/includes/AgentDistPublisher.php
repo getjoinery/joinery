@@ -26,6 +26,8 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.13 - the build cache is GoBinaryPublisher::privateCacheRoot(), this user's own directory, never
+ *                 /var/tmp (specs/shell_command_audit.md C5)
  * @version 2.12 - repoAuthority(): the keys allowed to change the trusted set, from release_keys/authority
  *                (specs/release_key_rotation.md R1, F2); the agent is built with every listed release key
  *                (baked_keys.release_keys, R3), and a key list or signing key changed at the same agent
@@ -102,7 +104,8 @@ class AgentDistPublisher {
 	const STATUS_FAILED = 'failed';
 
 	/** Build caches, and the official toolchain's module cache, shared by root and user runs. */
-	const BUILD_CACHE = '/var/tmp/joinery-agent-build';
+	/** Name of the build cache; the directory is GoBinaryPublisher::privateCacheRoot(). */
+	const BUILD_CACHE = 'joinery-agent-build';
 
 	/** The only shape an agent version takes: three numbers. */
 	const VERSION_PATTERN = '/^[0-9]+\.[0-9]+\.[0-9]+$/';
@@ -634,7 +637,8 @@ class AgentDistPublisher {
 
 	/** The official toolchain the agent's go.mod pins (GoBinaryPublisher::officialGo), fetched into the build cache. */
 	private static function officialGo($src) {
-		return GoBinaryPublisher::officialGo(self::findGo(), $src, self::BUILD_CACHE . '/gomodcache', self::BUILD_CACHE);
+		$cache_root = GoBinaryPublisher::privateCacheRoot(self::BUILD_CACHE);
+		return GoBinaryPublisher::officialGo(self::findGo(), $src, $cache_root . '/gomodcache', $cache_root);
 	}
 
 	/** Locate the Go that fetches the official toolchain. */
@@ -707,9 +711,9 @@ class AgentDistPublisher {
 	private static function buildBinary($go, $src, $arch, $version, $public_b64, array $key_lists, $out_path) {
 		// Persistent caches so repeat publishes are fast and root/user1 runs
 		// do not depend on either account's home directory.
-		$cache_root = self::BUILD_CACHE;
-		@mkdir($cache_root . '/gocache', 0777, true);
-		@mkdir($cache_root . '/gomodcache', 0777, true);
+		$cache_root = GoBinaryPublisher::privateCacheRoot(self::BUILD_CACHE);
+		@mkdir($cache_root . '/gocache', 0700, true);
+		@mkdir($cache_root . '/gomodcache', 0700, true);
 
 		$baked = self::bakedKeyFlags($key_lists);
 		$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s -X main.releaseStatementKeysB64=%s -X main.releaseLogKeysB64=%s',

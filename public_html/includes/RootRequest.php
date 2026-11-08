@@ -30,6 +30,8 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.9 - a request written into a queue that moved while it was being written is taken back and
+ *                refused out loud (reviewer1 B4)
  * @version 1.8 - the queue and the transcripts are where RootState says: root's /var/lib/joinery/sites/<site>
  *                when it exists, the fixture layout under the site root otherwise (specs/shell_command_audit.md D1)
  * @version 1.7 - run_plugin_remover {plugin}: a plugin uninstall whose manifest declares a host_remover runs it
@@ -253,6 +255,15 @@ class RootRequest {
 		if (!@rename($temp, $path)) {
 			@unlink($temp);
 			throw new RuntimeException('RootRequest: could not place the request at ' . $path);
+		}
+		// Root's first run makes its own queue and carries over what waited in
+		// the old one exactly once. A request written into the old queue in the
+		// moment between that run's start and this write would be removed with
+		// the old queue and never carried out, so it is taken back and the caller
+		// told, rather than lost in silence (specs/shell_command_audit.md B4).
+		if (RootState::queueDir() !== $dir) {
+			@unlink($path);
+			throw new RuntimeException('RootRequest: the server is moving its request queue; try again in a moment.');
 		}
 
 		return $id;

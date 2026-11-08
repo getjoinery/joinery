@@ -5,17 +5,15 @@
  *
  * Root writes one record per plugin on every run, however it was started (the
  * converger's pass, --only-plugin, a run_plugin_installer request, a managed
- * node's job): cache/plugin_installers/<plugin>.json and the run's output in
- * logs/plugin_installers/<plugin>.log, both root:www-data 640
- * (_plugin_installers_start.sh, plugin_installer_from_the_browser.md D2).
- * This class only reads them.
+ * node's job): <plugin>.json and the run's output in <plugin>.log, in root's
+ * directory for the site (RootState::pluginRecordDir(), pluginLogDir()),
+ * root:www-data 640 (_plugin_installers_start.sh,
+ * plugin_installer_from_the_browser.md D2). This class only reads them.
  *
+ * @version 1.1 - the records are read from RootState's directories (specs/shell_command_audit.md D1)
  * @version 1.0
  */
 class PluginInstallerStatus {
-
-	const RECORD_DIR = 'cache/plugin_installers';
-	const LOG_DIR    = 'logs/plugin_installers';
 
 	/** How many lines of the log the page shows. */
 	const TAIL_LINES = 20;
@@ -32,8 +30,7 @@ class PluginInstallerStatus {
 		if (preg_match('/^[a-z][a-z0-9_]{1,49}$/', $name) !== 1) {
 			return null;
 		}
-		$root = PathHelper::getSiteRoot();
-		$raw = @file_get_contents($root . '/' . self::RECORD_DIR . '/' . $name . '.json');
+		$raw = @file_get_contents(RootState::pluginRecordDir() . '/' . $name . '.json');
 		if ($raw === false) {
 			return null;
 		}
@@ -51,7 +48,7 @@ class PluginInstallerStatus {
 			'release'     => (string)($record['release'] ?? ''),
 			'tail'        => '',
 		);
-		$log = @file($root . '/' . self::LOG_DIR . '/' . $name . '.log', FILE_IGNORE_NEW_LINES);
+		$log = @file(RootState::pluginLogDir() . '/' . $name . '.log', FILE_IGNORE_NEW_LINES);
 		if (is_array($log)) {
 			$out['tail'] = implode("\n", array_slice($log, -self::TAIL_LINES));
 		}

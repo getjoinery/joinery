@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.7 - the web user's sudoers rule names the six verbs PHP runs (on, off, status, remove, csr,
+#                install-cert) instead of the bare command, and valid_ip refuses an IPv6 scope id and the
+#                unspecified addresses (specs/shell_command_audit.md B2, B3)
 # Version: 2.6 - the site container engine is installed where its current link is (-L), and one whose
 #                podman is unusable is said and skipped, never read as Docker (reviewer2 R7).
 # Version: 2.5 - a host whose sites run on the site container engine (specs/site_container_engine.md WP3)
@@ -436,10 +439,17 @@ valid_host() {
 }
 
 valid_ip() {
+    # An address and nothing else: ip_address() also accepts an IPv6 scope id
+    # ("fe80::1%anything"), which would carry arbitrary text into ufw and
+    # proxy_from, and the unspecified addresses, which name no relay
+    # (specs/shell_command_audit.md B3).
     python3 -c 'import ipaddress, sys
+s = sys.argv[1]
 try:
-    ipaddress.ip_address(sys.argv[1])
+    ip = ipaddress.ip_address(s)
 except ValueError:
+    sys.exit(1)
+if "%" in s or ip.is_unspecified:
     sys.exit(1)' "$1"
 }
 
@@ -1066,7 +1076,14 @@ if ! id "${WEB_USER}" >/dev/null 2>&1; then
 fi
 SUDOERS="/etc/sudoers.d/joinery-mail-gateway"
 CANDIDATE="$(mktemp)"
-echo "${WEB_USER} ALL=(root) NOPASSWD: ${HELPER}" > "${CANDIDATE}"
+# The verbs the site's PHP runs, each with its arguments, and no other: refresh,
+# converge and access are root's own passes (the timer, the installer) and a
+# bare-command rule would have let the web user start them too
+# (specs/shell_command_audit.md B2).
+{
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${HELPER} on *, ${HELPER} off *, ${HELPER} status *, \\"
+    echo "    ${HELPER} remove *, ${HELPER} csr *, ${HELPER} install-cert *"
+} > "${CANDIDATE}"
 if visudo -cf "${CANDIDATE}" >/dev/null 2>&1; then
     if ! cmp -s "${CANDIDATE}" "${SUDOERS}"; then
         install -m 440 "${CANDIDATE}" "${SUDOERS}"

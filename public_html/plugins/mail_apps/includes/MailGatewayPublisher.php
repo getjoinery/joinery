@@ -23,6 +23,6 @@ class MailGatewayPublisher extends GoBinaryPublisher {
 	const BIN_SUBDIR    = 'public_html/plugins/mail_apps/provisioning/bin';
 	const BINARY        = 'mail-gateway';
 	const LABEL         = 'Mail gateway';
-	const CACHE_ROOT    = '/var/tmp/joinery-mail-gateway-build';
+	const CACHE_ROOT    = 'joinery-mail-gateway-build';
 }
 ?>

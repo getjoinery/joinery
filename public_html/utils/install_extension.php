@@ -61,6 +61,9 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.12 - the private copy of a staged package must itself be a real directory, and the staging
+ *                 directory is deleted only after its path is re-read as a chain of real directories
+ *                 (specs/shell_command_audit.md A8, A9)
  * @version 1.11 - the trusted set a package's release leaves is written once the package is in place, the log
  *                keys before (specs/release_key_rotation.md R1)
  * @version 1.10 - a sandboxed plugin (exactly manifest.json and one .wasm, SandboxPlugins) is its own kind:
@@ -261,6 +264,31 @@ function install_extension_copy_tree(string $from, string $to): bool {
 }
 
 /** Remove a directory tree. Used to clear staging, and to clean up a half-copy. */
+/**
+ * Is $path, from $base down, a chain of real directories: no link at any step
+ * and a realpath equal to the literal path? Root re-asks this at the moment it
+ * deletes inside a web-writable directory.
+ */
+function install_extension_plain_path(string $path, string $base): bool {
+	if ($path === '' || strpos($path, $base . '/') !== 0) {
+		return false;
+	}
+	if (is_link($base) || realpath($base) !== $base) {
+		return false;
+	}
+	$walk = $base;
+	foreach (explode('/', substr($path, strlen($base) + 1)) as $seg) {
+		if ($seg === '' || $seg === '.' || $seg === '..') {
+			return false;
+		}
+		$walk .= '/' . $seg;
+		if (is_link($walk) || !file_exists($walk)) {
+			return false;
+		}
+	}
+	return realpath($path) === $path;
+}
+
 function install_extension_rmtree(string $path): void {
 	if (!is_dir($path)) {
 		@unlink($path);
@@ -623,9 +651,19 @@ try {
 			. escapeshellarg($dir) . ' 2>&1', $cp_out, $cp_rc);
 		if ($cp_rc !== 0 || !is_dir($dir)) {
 			fwrite(STDERR, "install_extension: could not copy the staged $type out of staging\n"
-				. implode("\n", array_slice($cp_out, -5)) . "\n");
+				. implode("\n", array_slice($cp_out, -5) ) . "\n");
 			install_extension_rmtree($work);
 			exit(1);
+		}
+		// The copy is what is checked from here on, so the copy itself has to be
+		// a real directory under the working directory: a staged leaf swapped for
+		// a link between the realpath check and the cp arrives as a link, and
+		// is_dir() would follow it to wherever it points
+		// (specs/shell_command_audit.md A8).
+		if (is_link($dir) || realpath($dir) !== $dir) {
+			fwrite(STDERR, "install_extension: the staged $type is a link, not a directory - refused\n");
+			install_extension_rmtree($work);
+			exit(2);
 		}
 
 		// The manifest is read again here rather than trusted from the request:
@@ -775,7 +813,15 @@ try {
 			exit(1);
 		}
 		install_extension_rmtree($work);
-		install_extension_rmtree($staging_dir);
+		// Root deletes inside uploads/staging, which is the web user's. The path
+		// was checked long ago; a parent swapped for a link since would send the
+		// deletion elsewhere, so the chain is re-read right here: no link at any
+		// step and a realpath equal to the literal path (specs/shell_command_audit.md A9).
+		if (install_extension_plain_path($staging_dir, dirname(dirname($staging_dir)))) {
+			install_extension_rmtree($staging_dir);
+		} else {
+			fwrite(STDERR, "install_extension: staging path changed under us - left in place\n");
+		}
 		// stage() wraps the package in <staging id>/<name>; the wrapper goes too,
 		// or every install leaves an empty directory behind in staging.
 		@rmdir(dirname($staging_dir));

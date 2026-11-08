@@ -31,6 +31,6 @@ class RelaySealerPublisher extends GoBinaryPublisher {
 	const BIN_SUBDIR    = 'public_html/plugins/mailbox/provisioning/bin';
 	const BINARY        = 'relay-sealer';
 	const LABEL         = 'Relay sealer';
-	const CACHE_ROOT    = '/var/tmp/joinery-relay-sealer-build';
+	const CACHE_ROOT    = 'joinery-relay-sealer-build';
 }
 ?>

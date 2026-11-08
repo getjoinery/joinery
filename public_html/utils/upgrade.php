@@ -34,6 +34,12 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.40 - a declared package name may not end in a dash (NAME- is a remove), and only a name
+	 *                 apt-cache knows exactly reaches apt-get, which otherwise reads an unmatched name as a
+	 *                 regular expression over every package (reviewer1 B2)
+	 * @version 1.39 - a declared package name is held to apt's own alphabet before dpkg-query or apt-get sees it,
+	 *                 and both are called with -- : a plugin.json extension named to start with - was an apt
+	 *                 option, run as root (specs/shell_command_audit.md U3)
 	 * @version 1.38 - site_db_role.sh runs as root after the last schema-touching step of every upgrade: a site
 	 *   still connecting as postgres gets its own database role, and the objects this process (connected as the
 	 *   old role) created are handed to the site's role (mail_access_hardening WP4, reviewer2 B3)
@@ -2096,6 +2102,18 @@
 			$installed_any = false;
 			foreach ($resolver_output as $apt_spec) {
 				[$apt_primary, $apt_fallback] = array_pad(explode('|', $apt_spec, 2), 2, '');
+				// Both halves are handed to dpkg-query and apt-get as root. The resolver
+				// drops a name that is not a plain apt package name, and this is the same
+				// test at the point of use: anything else is reported and skipped, never
+				// run, since a name starting with - is an apt option (specs/shell_command_audit.md U3).
+				// A trailing dash is apt's remove (NAME- removes NAME), so a name ends
+				// in a letter, digit or + (reviewer1 B2).
+				$apt_name_ok = function ($n) { return $n === '' || preg_match('/^[a-z0-9][a-z0-9+._-]*[a-z0-9+]$/', $n); };
+				if ($apt_primary === '' || !$apt_name_ok($apt_primary) || !$apt_name_ok($apt_fallback)) {
+					out_alert('warning', 'A declared package name was skipped',
+						'"' . htmlspecialchars(substr($apt_spec, 0, 80)) . '" is not a plain apt package name, so it was not installed.');
+					continue;
+				}
 				// Status, not mere presence in the dpkg database. `dpkg -s` exits 0
 				// for a package apt removed without purging — it lingers as
 				// "deinstall ok config-files" with its files deleted. Reading that
@@ -2106,7 +2124,7 @@
 				// changing (unpacked, half-configured) is present: reading it as
 				// missing ran apt-get mid-upgrade (the lost .deb).
 				$status_test = function ($pkg) {
-					return 'dpkg-query -W -f=\'${Status}\' ' . escapeshellarg($pkg)
+					return 'dpkg-query -W -f=\'${Status}\' -- ' . escapeshellarg($pkg)
 						. ' 2>/dev/null | grep -Eq \'^(install|hold) [a-z]+ (installed|unpacked|half-configured|half-installed|triggers-awaited|triggers-pending)$\'';
 				};
 				$check_cmd = $status_test($apt_primary)
@@ -2127,9 +2145,28 @@
 				// for install but not for update's list lock, so an update that fails is
 				// not allowed to skip the install.
 				$apt_out = [];
-				exec('apt-get -o DPkg::Lock::Timeout=300 update -qq 2>&1; (apt-get -o DPkg::Lock::Timeout=300 install -y '
-					. escapeshellarg($apt_primary) . ' 2>&1'
-					. ' || apt-get -o DPkg::Lock::Timeout=300 install -y ' . escapeshellarg($apt_fallback) . ' 2>&1)', $apt_out, $apt_return);
+				exec('apt-get -o DPkg::Lock::Timeout=300 update -qq 2>&1', $apt_out, $unused_rc);
+				// apt-get install treats a name that matches no package exactly as a
+				// regular expression over every package name ("zlib1." selects zlib1g
+				// and zlib1g-dev; "lib." hundreds). Only a name apt knows EXACTLY
+				// reaches it: apt-cache show matches patterns too, so the answer has
+				// to carry a Package line that is the name itself (reviewer1 B2).
+				$known = function ($n) {
+					if ($n === '') { return false; }
+					exec('apt-cache show -- ' . escapeshellarg($n) . ' 2>/dev/null | grep -qxF -- ' . escapeshellarg('Package: ' . $n), $unused, $rc);
+					return $rc === 0;
+				};
+				$candidates = array_values(array_filter([$apt_primary, $apt_fallback], $known));
+				if (!$candidates) {
+					out_alert('warning', 'Package ' . htmlspecialchars($apt_primary) . ' is not a package apt knows',
+						'Neither ' . htmlspecialchars($apt_primary) . ' nor ' . htmlspecialchars($apt_fallback)
+						. ' is an exact package name in this machine\'s apt sources, so nothing was installed.');
+					continue;
+				}
+				$install_cmd = implode(' || ', array_map(function ($n) {
+					return 'apt-get -o DPkg::Lock::Timeout=300 install -y -- ' . escapeshellarg($n) . ' 2>&1';
+				}, $candidates));
+				exec('(' . $install_cmd . ')', $apt_out, $apt_return);
 				if ($apt_return === 0) {
 					echo '✓ Installed ' . htmlspecialchars($apt_primary) . "<br>";
 					$installed_any = true;

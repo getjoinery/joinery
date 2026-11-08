@@ -4113,7 +4113,12 @@ foreach ($lock_paths as $label => $path) {
 	check(count($bare) === 0, "every apt-get update/install in {$label} waits for the lock", implode(' | ', $bare));
 }
 $upgrade_lk = (string)file_get_contents($lock_paths['upgrade.php']);
-check(strpos($upgrade_lk, "update -qq 2>&1 && (apt-get") === false && strpos($upgrade_lk, "update -qq 2>&1; (apt-get") !== false,
+// The update's exit status is read into a variable nothing tests, and the
+// install is its own exec after it: an update that could not take the list
+// lock never gates the install (the install waits for its own lock).
+check(strpos($upgrade_lk, "update -qq 2>&1 && (apt-get") === false
+	&& strpos($upgrade_lk, "update -qq 2>&1', \$apt_out, \$unused_rc);") !== false
+	&& strpos($upgrade_lk, "exec('(' . \$install_cmd . ')', \$apt_out, \$apt_return);") !== false,
 	'upgrade.php installs even when apt-get update could not take its list lock');
 check(strpos($upgrade_lk, 'A plugin requiring it will refuse activation') === false,
 	'upgrade.php\'s warning does not blame a plugin for a core-declared package');

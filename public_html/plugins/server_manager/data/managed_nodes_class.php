@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.75 - prepare() refuses an SSH user that is not a plain account name and a host that is not a
+ *                 hostname or IP address: both reach ssh as user@host, and a leading dash is an ssh option
+ *                 (specs/shell_command_audit.md U2); is_ssh_user() / is_ssh_host() are the one definition
  * @version 1.74 - mgn_agent_unseal_daemon: the site's unseal daemon in one word as the agent last reported it at poll
  *                (specs/unseal_daemon.md WP3); a degraded one is an incident (IncidentSourceUnsealDaemon)
  * @version 1.73 - mgn_agent_quiet_time means a node this plane is deleting; no agent says it is switched off
@@ -1493,6 +1496,23 @@ class ManagedNode extends SystemBase {
 			: 'Its cloud server is its Docker host\'s and stays recorded on the host\'s node (provision #' . (int)$link->key . '), so the host\'s escrow checks and reverse DNS work as before.';
 	}
 
+	/** A plain account name: what ssh may be handed before the @ without reading it as an option. */
+	public static function is_ssh_user(string $user): bool {
+		return preg_match('/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$/', $user) === 1;
+	}
+
+	/** A hostname, an IPv4 or an IPv6 address: letters, digits, dots, colons and hyphens, never a leading dash. */
+	public static function is_ssh_host(string $host): bool {
+		$host = trim($host);
+		if ($host === '' || strlen($host) > 255) {
+			return false;
+		}
+		if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+			return true;
+		}
+		return preg_match('/^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/', $host) === 1;
+	}
+
 	function prepare() {
 		// Normalize slug to lowercase alphanumeric + hyphens
 		$slug = strtolower(trim($this->get('mgn_slug')));
@@ -1509,6 +1529,18 @@ class ManagedNode extends SystemBase {
 
 		if (empty($this->get('mgn_host'))) {
 			throw new ManagedNodeException('SSH host is required.');
+		}
+		// Both reach ssh as one argument, user@host. escapeshellarg keeps the shell
+		// out of it, but ssh itself reads an argument that starts with "-" as an
+		// option, and -oProxyCommand= runs a command on this machine. So the user is
+		// a plain account name and the host a hostname or IP address, nothing else
+		// (specs/shell_command_audit.md U2). The same test runs where the command is
+		// built, in InstallJobExecutor, so a row written any other way is refused there too.
+		if (!self::is_ssh_user((string)$this->get('mgn_ssh_user'))) {
+			throw new ManagedNodeException('SSH user must be a plain account name (letters, digits, _ . -; not starting with a dash).');
+		}
+		if (!self::is_ssh_host((string)$this->get('mgn_host'))) {
+			throw new ManagedNodeException('SSH host must be a hostname or an IP address.');
 		}
 
 		// Check for duplicate slug

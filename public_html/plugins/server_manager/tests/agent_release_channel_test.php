@@ -321,7 +321,8 @@ if ($go_version === '') {
 	$fixture['signing_public_key'] = AgentDistPublisher::ensureKeys($site_d . '/config')['public_b64'];
 	$fixture['source_commit'] = str_repeat('0', 40);
 	$built = $tmp_root . '/fixture_build';
-	$official = GoBinaryPublisher::officialGo($go, $git_src, AgentDistPublisher::BUILD_CACHE . '/gomodcache', AgentDistPublisher::BUILD_CACHE)['go'];
+	$cache_root = GoBinaryPublisher::privateCacheRoot(AgentDistPublisher::BUILD_CACHE);
+	$official = GoBinaryPublisher::officialGo($go, $git_src, $cache_root . '/gomodcache', $cache_root)['go'];
 	exec('cd ' . escapeshellarg($git_src) . ' && env GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 ' . escapeshellarg($official)
 		. ' build -buildvcs=false -trimpath -ldflags ' . escapeshellarg('-X main.version=3.0.0 -X main.updatePubKeyB64=' . $fixture['signing_public_key']
 		. ' -X main.releaseStatementKeysB64= -X main.releaseLogKeysB64=') . ' -o ' . escapeshellarg($built) . ' . 2>&1');

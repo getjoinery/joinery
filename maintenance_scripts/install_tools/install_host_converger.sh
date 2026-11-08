@@ -3,6 +3,10 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.8 - Root's state for the site is /var/lib/joinery/sites/SITENAME (made here with its modes: the queue
+#                770 root:www-data holding nothing of root's, the rest root's, read by the pool through the group); the path trigger watches
+#                that queue; the converger's log is /var/log/joinery/host_converger.SITENAME.log. Nothing of root's
+#                is in the site's cache/ or logs/ any more (specs/shell_command_audit.md D1)
 # Version: 1.7 - Every host with a data root logs to the journal, not only an encrypted one: a plain data root
 #                that failed to mount stopped the converger, and with it the tick that repairs it (T-F2).
 # Version: 1.6 - The path trigger is not ordered before paths.target: its queue is under cache/,
@@ -123,10 +127,26 @@ if [[ "${MACHINE}" == "1" ]]; then
 else
     [[ -f "${SITE_ROOT}/config/Globalvars_site.php" ]] || { say "site not initialised yet - skipping"; exit 0; }
 
-    LOG_FILE="${SITE_ROOT}/logs/host_converger.log"
-    mkdir -p "${SITE_ROOT}/logs" "${SITE_ROOT}/cache" "${SITE_ROOT}/cache/root_requests"
-    chown www-data:www-data "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
-    chmod 770 "${SITE_ROOT}/cache/root_requests" 2>/dev/null || true
+    # Root's state for the site, the queue the web user submits into first among
+    # it: root's own directory, never the site's cache/ or logs/, whose owner
+    # could put a link under a name root uses (specs/shell_command_audit.md D1).
+    # The runner makes the same directories with the same modes on every run;
+    # this is so the queue exists, and the path trigger has a folder to watch,
+    # from the first minute.
+    STATE_DIR="/var/lib/joinery/sites/${SITENAME}"
+    WEB_GROUP="www-data"
+    getent group www-data >/dev/null 2>&1 || WEB_GROUP="root"
+    install -d -m 755 -o root -g root /var/lib/joinery /var/lib/joinery/sites "${STATE_DIR}"
+    install -d -m 770 -o root -g "${WEB_GROUP}" "${STATE_DIR}/root_requests"
+    install -d -m 750 -o root -g "${WEB_GROUP}" "${STATE_DIR}/root_request_outcomes" \
+        "${STATE_DIR}/root_request_outcomes/running" "${STATE_DIR}/root_request_outcomes/done" \
+        "${STATE_DIR}/root_request_outcomes/failed" "${STATE_DIR}/root_request_logs" \
+        "${STATE_DIR}/plugin_installers" "${STATE_DIR}/plugin_installer_logs"
+    # The converger's own log is root's too, beside the machine log: a file
+    # systemd opens as root must not sit in a directory the web user owns.
+    LOG_FILE="/var/log/joinery/host_converger.${SITENAME}.log"
+    mkdir -p /var/log/joinery
+    chmod 755 /var/log/joinery 2>/dev/null || true
 fi
 
 # The root timer's entry point is a copy outside the tree, not the file in it.
@@ -249,11 +269,10 @@ WantedBy=timers.target"
     # A queued root request should not wait for the next tick: an operator who
     # pressed Upgrade is watching a transcript. PathChanged fires the same
     # oneshot service the moment anything lands in the queue directory.
-    # Not ordered before paths.target, as a path unit is by default: the queue
-    # is under cache/, which on an encrypted data root is mounted only after
-    # the unlock, and a path unit early boot waits for would be an ordering
-    # cycle (specs/hosted_data_promise_disk_encryption.md D10). It starts once
-    # its folder is there.
+    # Not ordered before paths.target, as a path unit is by default: a path
+    # unit early boot waits for would be an ordering cycle
+    # (specs/hosted_data_promise_disk_encryption.md D10). It starts once its
+    # folder is there.
     PATH_TEXT="[Unit]
 Description=Joinery host converger path trigger for ${SITENAME}: carry out a queued root request at once
 DefaultDependencies=no
@@ -262,7 +281,7 @@ Conflicts=shutdown.target
 Before=shutdown.target
 
 [Path]
-PathChanged=${SITE_ROOT}/cache/root_requests
+PathChanged=${STATE_DIR}/root_requests
 Unit=${UNIT_NAME}.service
 
 [Install]

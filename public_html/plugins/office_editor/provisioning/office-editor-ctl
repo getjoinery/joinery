@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # office-editor-ctl - start, report on and idle-stop the document editor.
+# Version: 0.3.0 - idle-check holds the open-document count to digits before bash arithmetic sees it: a
+#                  crafted metric from the editor process was a command run as root (shell_command_audit B1)
 # Version: 0.2.0 - off and remove, for switching the plugin off and uninstalling it
 # Version: 0.1.0
 #
@@ -68,9 +70,14 @@ case "${1:-}" in
         install -d -m 755 "${RUN_DIR}"
         metrics="$(curl -s --max-time 5 http://127.0.0.1:9980/cool/getMetrics || true)"
         open=$(printf '%s\n' "${metrics}" | awk '$1 == "kit_assigned_count" {print $2}')
+        # The count is text from a local process that parses strangers'
+        # documents. Bash arithmetic evaluates what it is given (an array
+        # subscript runs a command), so only digits reach it; anything else
+        # counts as nothing open (specs/shell_command_audit.md B1).
+        [[ "${open}" =~ ^[0-9]+$ ]] || open=0
         # No answer counts as nothing open: a service just started has its
         # mark from `start`, and one stuck past IDLE_MINUTES is stopped.
-        if (( ${open:-0} > 0 )) || [[ ! -f "${BUSY_MARK}" ]]; then
+        if (( open > 0 )) || [[ ! -f "${BUSY_MARK}" ]]; then
             touch "${BUSY_MARK}"
             exit 0
         fi

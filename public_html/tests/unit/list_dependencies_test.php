@@ -20,6 +20,8 @@
  *   - --extensions lists extension names only; a system package is not one
  *   - a package name that is not a plain apt name is dropped, not emitted
  *
+ * @version 1.2 - a name ending in a dash is dropped (reviewer1 B2)
+ * @version 1.1 - an extension name that is not a plain apt name is dropped (specs/shell_command_audit.md U3)
  * @version 1.0
  */
 
@@ -54,11 +56,22 @@ $dir = harness_scratch_dir('list_dependencies');
 copy($resolver, $dir . '/utils/list_dependencies.php');
 file_put_contents($dir . '/composer.json', json_encode(array('require' => array('ext-gd' => '*'), 'extra' => array('joinery-system-packages' => array('Zip')))));
 file_put_contents($dir . '/plugins/goodplug/plugin.json', json_encode(array('requires' => array('packages' => array('jq')))));
-file_put_contents($dir . '/plugins/badplug/plugin.json', json_encode(array('requires' => array('packages' => array('rm -rf /', 'curl;x', '')))));
+file_put_contents($dir . '/plugins/badplug/plugin.json', json_encode(array('requires' => array(
+	'packages' => array('rm -rf /', 'curl;x', ''),
+	// An extension name is half of an apt package name the installer runs as root;
+	// one that is not a plain name is dropped here, not left for apt to read as an
+	// option (specs/shell_command_audit.md U3).
+	'extensions' => array('a|-oAPT::X=1', '-oDPkg::Pre-Invoke::=id', 'x y', 'apache2-', 'intl'),
+))));
 exec('php ' . escapeshellarg($dir . '/utils/list_dependencies.php') . ' --apt 2>/dev/null', $scratch, $rc3);
 check($rc3 === 0 && in_array('jq|jq', $scratch, true), 'a plugin requires.packages entry is emitted', implode(', ', $scratch));
 check(in_array('zip|zip', $scratch, true), 'a core entry is lowercased and emitted');
 check(count(preg_grep('/rm|curl|;| /', $scratch)) === 0, 'a name that is not a plain apt name is dropped, never emitted', implode(', ', $scratch));
 check(in_array($php . '-gd|php-gd', $scratch, true), 'extensions are unaffected');
+check(in_array($php . '-intl|php-intl', $scratch, true), 'a plain extension name declared by a plugin is emitted');
+check(count(preg_grep('/\||-o|\s/', array_map(function ($l) { return substr_count($l, '|') > 1 ? $l : preg_replace('/^[^|]*\|/', '', $l); }, $scratch))) === 0,
+	'an extension name that is not a plain apt name is dropped, so no line can start apt on an option', implode(', ', $scratch));
+check(count(preg_grep('/^-|\|-/', $scratch)) === 0, 'no emitted package name begins with a dash');
+check(count(preg_grep('/-$|-\|/', $scratch)) === 0, 'and none ends in one: NAME- is a remove to apt-get (reviewer1 B2)', implode(', ', $scratch));
 
 harness_finish();

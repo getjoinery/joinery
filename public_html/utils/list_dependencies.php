@@ -31,6 +31,9 @@
  * Exit codes: 0 success, 1 usage/parse error, 2 --active-only without a
  * reachable database.
  *
+ * @version 1.4 - a name ending in a dash is dropped too: to apt-get install, NAME- means remove NAME (reviewer1 B2)
+ * @version 1.3 - an extension name that is not a plain apt-safe name is dropped, as a system package already
+ *                was: the installer hands these to apt as root (specs/shell_command_audit.md U3)
  * @version 1.2 - --apt also emits declared system packages (extra.joinery-system-packages,
  *                plugin requires.packages), so djpeg and the like converge at every root moment
  * @version 1.1 - --active-only means plg_active = 1; plg_status can read 'stale' while a plugin runs
@@ -136,7 +139,14 @@ function ld_extensions($public_html, $manifests) {
 			$extensions[] = strtolower(trim($ext));
 		}
 	}
-	$extensions = array_values(array_unique(array_filter($extensions)));
+	// An extension name becomes half of an apt package name on the resolver's
+	// output, and the installing side runs that through apt as root. A name that
+	// is not plain letters, digits and the characters apt allows is dropped here,
+	// exactly as ld_system_packages drops a package (specs/shell_command_audit.md U3).
+	// A trailing dash is apt's remove, so a name ends in a letter, digit or +.
+	$extensions = array_values(array_unique(array_filter($extensions, function ($e) {
+		return $e !== '' && preg_match('/^[a-z0-9][a-z0-9+._-]*[a-z0-9+]$/', $e);
+	})));
 	sort($extensions);
 	return $extensions;
 }
@@ -188,7 +198,7 @@ function ld_system_packages($public_html, $manifests) {
 		}
 	}
 	$packages = array_values(array_unique(array_filter($packages, function ($p) {
-		return $p !== '' && preg_match('/^[a-z0-9][a-z0-9+.-]*$/', $p);
+		return $p !== '' && preg_match('/^[a-z0-9][a-z0-9+.-]*[a-z0-9+]$/', $p);
 	})));
 	sort($packages);
 	return $packages;

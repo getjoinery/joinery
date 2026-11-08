@@ -200,6 +200,30 @@ func dropTo(uid, gid int) {
 
 // ---- stage 1: the supervisor -------------------------------------------------
 
+// closeInheritedDescriptors closes every descriptor above 2 this process was
+// started with, so none of them reaches the fenced child. It walks
+// /proc/self/fd and closes by number, skipping the directory handle itself.
+func closeInheritedDescriptors() {
+	d, err := os.Open("/proc/self/fd")
+	if err != nil {
+		fail(exitUsage, "cannot list open descriptors: %v", err)
+	}
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		d.Close()
+		fail(exitUsage, "cannot list open descriptors: %v", err)
+	}
+	self := int(d.Fd())
+	for _, n := range names {
+		fd, convErr := strconv.Atoi(n)
+		if convErr != nil || fd <= 2 || fd == self {
+			continue
+		}
+		_ = syscall.Close(fd)
+	}
+	d.Close()
+}
+
 func supervise() {
 	if syscall.Geteuid() != 0 {
 		fail(exitUsage, "not running as root: the binary must be installed 4755 root:root (install_parser_jail.sh)")
@@ -214,6 +238,12 @@ func supervise() {
 	if err != nil || self == "" {
 		fail(exitUsage, "cannot find my own binary: %v", err)
 	}
+
+	// Only 0, 1 and 2 go to the child. Go hands ForkExec's Files list to the
+	// child but does not close what the caller left open without CLOEXEC, so a
+	// file, session or socket the web worker held would otherwise sit inside
+	// the fence beside the parser (specs/shell_command_audit.md D2).
+	closeInheritedDescriptors()
 
 	env := append(append([]string{}, childEnv...), stageEnv+"="+stageMark)
 	pid, err := syscall.ForkExec(self, os.Args, &syscall.ProcAttr{

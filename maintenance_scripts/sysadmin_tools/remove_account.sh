@@ -798,6 +798,8 @@ if [ "$IS_BAREMETAL" = true ]; then
         rm -rf "${SITE_ROOT:?}" \
             || { echo "ERROR: $SITE_ROOT could not be removed (above): a folder of it is still mounted (findmnt -R $SITE_ROOT); nothing more was removed."; exit 1; }
         echo "Removed: $SITE_ROOT"
+    else
+        echo "Directory $SITE_ROOT does not exist"
     fi
     # Root's own records for the site (the request queue, transcripts, installer
     # records, the converge stamp): root's directory, beside no data of the site's.
@@ -807,8 +809,6 @@ if [ "$IS_BAREMETAL" = true ]; then
     fi
     if [ -f "$FS/var/log/joinery/host_converger.${SITE_NAME:?}.log" ]; then
         rm -f "$FS/var/log/joinery/host_converger.${SITE_NAME:?}.log"*
-    else
-        echo "Directory $SITE_ROOT does not exist"
     fi
 
     if [ "$OWN_TEST_SITE" = true ]; then

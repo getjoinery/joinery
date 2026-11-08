@@ -17,6 +17,7 @@
  * that never had one — a container converges at every start
  * and a managed node through its upgrade job.
  *
+ * @version 1.4 - the last-run record and the converger log are where RootState says (specs/shell_command_audit.md D1)
  * @version 1.3 - A failed or refused plugin installer is named, with the Plugins page where its output and
  *                Run setup again are; reinstalling the converger fixes neither. A failed core installer
  *                names logs/host_converger.log. The reinstall command stays for an absent or stale
@@ -97,8 +98,8 @@ class HostConvergerNotice {
 				. ' setup on this server. The output, and Run setup again, are on the Plugins page.';
 		}
 		return $outcome === 'installer-refused'
-			? 'A core installer was refused because it could not be attributed: it is owned by the wrong account or is writable by more than its owner. The reason is in logs/host_converger.log on the host (journalctl -u joinery-host-converger on a host with a data root).'
-			: 'A core installer failed. Its output is in logs/host_converger.log on the host (journalctl -u joinery-host-converger on a host with a data root).';
+			? 'A core installer was refused because it could not be attributed: it is owned by the wrong account or is writable by more than its owner. The reason is in ' . RootState::convergerLogHint() . '.'
+			: 'A core installer failed. Its output is in ' . RootState::convergerLogHint() . '.';
 	}
 
 	/**
@@ -141,7 +142,7 @@ class HostConvergerNotice {
 		}
 		$last_run = null;
 		$outcome = '';
-		$raw = @file_get_contents($site_root . '/cache/host_converger.last');
+		$raw = @file_get_contents(RootState::convergerLastFile($site_root));
 		if (is_string($raw) && preg_match('/^(\d+)\s*(\S*)/', trim($raw), $m)) {
 			$last_run = (int)$m[1];
 			$outcome = $m[2];
@@ -197,7 +198,7 @@ class HostConvergerNotice {
 				. '</strong> '
 				. htmlspecialchars('The host converger is running, so the requests themselves are failing. '
 					. 'Upgrades, extension installs and doc saves queued from the browser are not being carried out; '
-					. 'the transcripts are in logs/root_requests/ on the host.', ENT_QUOTES, 'UTF-8')
+					. 'the transcripts are in ' . RootState::requestLogDir() . '/ on the host.', ENT_QUOTES, 'UTF-8')
 				. '</div></div>';
 		}
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.17 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are no longer pinned: root
+#               keeps them in /var/lib/joinery/sites/SITENAME, outside the data set (shell_command_audit D1)
 #VERSION 4.16 - config/db_admin.php (the postgres pair, site_db_role.sh) is pinned 600 root:root and left out of
 #               the config/*.php sweep, so no run hands the web server user the superuser password (WP4)
 #VERSION 4.15 - A setgid data directory (2770) is no longer picked on every run: chmod 770 keeps the bit, so the exact test churned its ctime each minute (reviewer2 B2)
@@ -292,14 +294,10 @@ PINNED=(
 # -not -path skips the directory and then walks straight into it.
 PINNED_DIRS=(
     "$SITE_ROOT/config/backup-ledger"
-    # Root writes these and the pool only reads them, 750 root:www-data with
-    # 640 files, set by the host converger's runner. In the data set they
-    # would be the web user's between converges, and a link planted at a name
-    # root writes would have root write through it.
-    "$SITE_ROOT/cache/plugin_installers"
-    "$SITE_ROOT/logs/plugin_installers"
-    "$SITE_ROOT/logs/root_requests"
 )
+# Root writes nothing under cache/ or logs/: its records for the site live in
+# /var/lib/joinery/sites/SITENAME (specs/shell_command_audit.md D1), so the
+# data set needs no pins for them.
 
 PRUNE=()
 for p in "${PINNED[@]}"; do PRUNE+=( -not -path "$p" ); done

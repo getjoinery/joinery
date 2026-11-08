@@ -8,6 +8,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.15 - the log list names the converger's log where root keeps it (specs/shell_command_audit.md D1)
  * @version 1.14 - The agent's on/off switch and the "Turn off the agent" card are gone: the agent runs on every machine,
  *                 and the page is about joining a management node; What the agent does splits what it does on its own from what
  *                 it does for a management node (it takes no backups); log access says it starts off
@@ -222,7 +223,7 @@ echo '<ul style="' . $bullets . '">'
    . '<li>Scheduled tasks log: <code>logs/cron_scheduled_tasks.log</code></li>'
    . '<li>AI worker log: <code>logs/joinery_ai_worker.log</code></li>'
    . '<li>Install executor log: <code>logs/install_executor.log</code></li>'
-   . '<li>Host converger log: <code>logs/host_converger.log</code></li>'
+   . '<li>Host converger log: <code>/var/log/joinery/host_converger.' . htmlspecialchars(basename(PathHelper::getSiteRoot())) . '.log</code> (the journal on a host with a data root)</li>'
    . '<li>PostgreSQL cluster log</li>'
    . '</ul>';
 

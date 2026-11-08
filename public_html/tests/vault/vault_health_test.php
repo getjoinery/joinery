@@ -253,7 +253,7 @@ check($hcq('converged', null)['state'] === 'verified', 'a fresh converger with a
 check($hcq('converged', 600)['state'] === 'verified', 'and one with a request queued ten minutes ago is still verified');
 $stalled = $hcq('converged', 2 * 86400);
 check($stalled['state'] === 'unmet', 'a request queued two days ago is unmet even though the timer is running');
-check(strpos($stalled['reason'], 'logs/root_requests/') !== false,
+check(strpos($stalled['reason'], RootState::requestLogDir() . '/') !== false,
 	'and the reason says where the transcripts are', $stalled['reason']);
 check($hcq('installer-refused', null)['state'] === 'unmet',
 	'an installer the runner refused to attribute is unmet');
@@ -279,7 +279,7 @@ check(strpos($plugin_failed, 'mailbox') !== false && strpos($plugin_failed, '/ad
 check(strpos($plugin_failed, 'sudo bash x') === false,
 	'and the converger reinstall is not offered: it fixes nothing when one plugin failed');
 $core_failed = HostConvergerNotice::forState(true, $now - 300, 'installer-failed', $now, 'sudo bash x');
-check(strpos($core_failed, 'core installer') !== false && strpos($core_failed, 'logs/host_converger.log') !== false,
+check(strpos($core_failed, 'core installer') !== false && strpos($core_failed, '/var/log/joinery/host_converger.') !== false,
 	'with no failed plugin record, a core installer failed and its log is named', $core_failed);
 check(strpos($core_failed, 'sudo bash x') === false && strpos($core_failed, 'admin_plugins') === false,
 	'with neither the reinstall nor the Plugins page, which has no button for core');
@@ -287,7 +287,7 @@ $hcp = VaultHealth::checkHostConverger(['installed' => true, 'last_run' => $now 
 	'failed_plugins' => array('office_editor')], $now);
 check($hcp['state'] === 'unmet' && strpos($hcp['reason'], 'office_editor') !== false && strpos($hcp['reason'], 'Plugins page') !== false,
 	'the health check names the failed plugin and the Plugins page', $hcp['reason']);
-check(strpos($hc(true, $now - 300, 'installer-failed')['reason'], 'logs/host_converger.log') !== false,
+check(strpos($hc(true, $now - 300, 'installer-failed')['reason'], '/var/log/joinery/host_converger.') !== false,
 	'and a core failure names the log');
 check(array_key_exists('failed_plugins', $facts), 'the live fact reader reports the failed plugin installers');
 

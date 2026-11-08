@@ -23,6 +23,6 @@ class SandboxHostPublisher extends GoBinaryPublisher {
 	const BIN_SUBDIR    = 'maintenance_scripts/install_tools/sandbox_host/bin';
 	const BINARY        = 'sandbox-host';
 	const LABEL         = 'Sandbox host';
-	const CACHE_ROOT    = '/var/tmp/joinery-sandbox-host-build';
+	const CACHE_ROOT    = 'joinery-sandbox-host-build';
 }
 ?>

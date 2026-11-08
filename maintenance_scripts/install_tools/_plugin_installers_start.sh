@@ -8,7 +8,10 @@
 #                 never in the site's cache/ or logs/, whose owner could rename root's folders aside and put a
 #                 link under the name; the queue is the one web-writable place, sticky. Waiting requests are
 #                 carried over on the first run; a container publishes host_converger.last into cache/ through
-#                 mktemp and a rename for its host's observer (specs/shell_command_audit.md D1)
+#                 noclobber and a rename for its host's observer; the carry-over runs once (a marker), the
+#                 stale sweep reads running/ where it is, a request is checked again once it is root's, and
+#                 the queue is cleared of anything that is not a request (specs/shell_command_audit.md D1,
+#                 reviewer1 B1, B3, B4, B5, B10)
 # Version: 2.55 - run_one_plugin_installer holds the plugin name to ^[a-z][a-z0-9_]{1,49}$ at every entry (the full
 #                 run read it from a database row unchecked), and the upgrade hold reads uploads/.upgrade.lock
 #                 only as a plain non-link file (specs/shell_command_audit.md A5, A7)
@@ -1020,6 +1023,21 @@ ensure_site_state_dir() {
     install -d -m 750 -o root -g "${grp}" "${OUTCOME_DIR}" "${OUTCOME_DIR}/running" "${OUTCOME_DIR}/done" \
         "${OUTCOME_DIR}/failed" "${REQUEST_LOG_DIR}" "${PLUGIN_RECORD_DIR}" "${PLUGIN_LOG_DIR}" 2>/dev/null || return 1
 
+    # The queue holds requests and nothing else. An entry that is not a request
+    # (the web user can make any name there) is removed once it is a minute old,
+    # so a submit in progress (its .tmp, renamed within the second) is never
+    # touched and the queue cannot fill the host's disk with debris
+    # (specs/shell_command_audit.md B10). rm of a link removes the link.
+    # posix-extended: find's default regex flavour reads {9,12} as literal
+    # braces, under which no request name matched and every request a minute
+    # old was debris (reviewer1 B11).
+    find "${QUEUE_DIR}" -mindepth 1 -maxdepth 1 -mmin +1 -regextype posix-extended \
+        ! -regex '.*/[0-9]{9,12}-[0-9a-f]{8}\.json' -exec rm -rf -- {} + 2>/dev/null || true
+
+    # The carry-over from the layout before this one runs until it has run once
+    # as root: a marker says so, and after it nothing here touches cache/ or
+    # logs/ again, however their owner recreates the old names.
+    [[ -f "${SITE_STATE_DIR}/migrated" ]] && return 0
     local legacy="${SITE_ROOT}/cache/root_requests" f id
     if [[ -d "${legacy}" && ! -L "${legacy}" ]]; then
         for f in "${legacy}"/*.json; do
@@ -1044,6 +1062,7 @@ ensure_site_state_dir() {
              "${SITE_ROOT}/cache/certificates.json" "${SITE_ROOT}/cache/host_installers.lock"; do
         [[ -e "${f}" || -L "${f}" ]] && rm -f -- "${f}" 2>/dev/null
     done
+    date -u +%s > "${SITE_STATE_DIR}/migrated" 2>/dev/null || true
     return 0
 }
 ensure_site_state_dir || echo "host installers: could not make ${SITE_STATE_DIR}; root requests wait" >&2
@@ -1053,20 +1072,20 @@ ensure_site_state_dir || echo "host installers: could not make ${SITE_STATE_DIR}
 # publishes a copy of a state file into the site's cache for that reader,
 # through a fresh file mktemp made (O_EXCL, a random name nothing can have
 # planted) and a rename over the name, which replaces a planted link rather
-# than following it. Only in a container; on a host the pool reads root's
-# directory directly.
+# than following it. The temp file is made with noclobber, whose open is
+# O_CREAT|O_EXCL: a name already there, a link included, refuses the write,
+# so a watcher that sees the name appear cannot swap it under root (a mktemp
+# name was visible to inotify the instant it was made, and the write came
+# after). Its mode comes from the umask; nothing is chmod'd by path. Only in a
+# container; on a host the pool reads root's directory directly.
 publish_state_copy() {  # SRC NAME
     [[ -n "${SITE_STATE_DIR}" && -f "$1" ]] || return 0
     [[ -f /.dockerenv || -f /run/.containerenv ]] || return 0
     local dir="${SITE_ROOT}/cache" tmp
     [[ -d "${dir}" && ! -L "${dir}" ]] || return 0
-    tmp="$(mktemp -p "${dir}" ".${2}.XXXXXX" 2>/dev/null)" || return 0
-    if cat "$1" > "${tmp}" 2>/dev/null; then
-        chmod 644 "${tmp}" 2>/dev/null
-        mv -f -T "${tmp}" "${dir}/${2}" 2>/dev/null || rm -f -- "${tmp}"
-    else
-        rm -f -- "${tmp}"
-    fi
+    tmp="${dir}/.${2}.${RANDOM}${RANDOM}.$$"
+    ( umask 022; set -C; cat "$1" > "${tmp}" ) 2>/dev/null || return 0
+    mv -f -T "${tmp}" "${dir}/${2}" 2>/dev/null || rm -f -- "${tmp}"
 }
 CONVERGE_MAX_AGE=86400
 # The code check's own cadence (specs/multi_tenant_host_hardening.md D8, WP7). On
@@ -2209,8 +2228,9 @@ run_root_requests() {
     # abandoned the moment it began.
     local now stamp
     now="$(date -u +%s)"
-    for stale in "${queue}"/running/*.json; do
-        [[ -f "${stale}" ]] || continue
+    for stale in "${outcomes}"/running/*.json; do
+        [[ -f "${stale}" && ! -L "${stale}" ]] || continue
+        [[ "$(basename "${stale}" .json)" =~ ^[0-9]{9,12}-[0-9a-f]{8}$ ]] || continue
         stamp="$(stat -c '%Y' "${stale}" 2>/dev/null || echo "${now}")"
         if (( now - stamp > 3600 )); then
             echo "root request: $(basename "${stale}" .json) abandoned (a run was killed while it held it)" >&2
@@ -2289,6 +2309,15 @@ run_root_requests() {
 
         echo "root request: ${id} (${kind})"
         mv -f -T "${req}" "${outcomes}/running/${id}.json" || continue
+        # Checked again where nothing but root can change it: a link swapped in
+        # between the check above and the move is a link in running/ now, and is
+        # set aside unread, never touched or opened through.
+        if [[ -L "${outcomes}/running/${id}.json" || ! -f "${outcomes}/running/${id}.json" ]]; then
+            echo "root request: ${id} became a link before it was taken - refused" >&2
+            printf '2\n' > "${outcomes}/failed/${id}.exit" 2>/dev/null || true
+            mv -f -T "${outcomes}/running/${id}.json" "${outcomes}/failed/${id}.json" 2>/dev/null || true
+            continue
+        fi
         # mv keeps the submission mtime; the stale sweep above ages by when a
         # request STARTED, so stamp it now.
         touch "${outcomes}/running/${id}.json" 2>/dev/null || true

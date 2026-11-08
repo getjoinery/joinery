@@ -968,11 +968,6 @@ DeploymentHelper::validatePHPSyntax($directory, $verbose)
 DeploymentHelper::testBootstrap($stage_dir, $verbose)
 ```
 
-**Theme/Plugin Preservation:**
-```php
-DeploymentHelper::preserveExtensionsAcrossDeploy($stage_dir, $backup_dir, $verbose)
-```
-
 **Rollback:**
 ```php
 DeploymentHelper::performRollback($target_site, $preserve_failed, $verbose)
@@ -1036,7 +1031,7 @@ It downloads the core archive from the upgrade source (`/static_files/joinery-co
 
 Installing a plugin, upgrading, saving a doc from the admin editor — anything
 that writes the code — is a **root request**: a small JSON file the web side
-writes into `{site}/cache/root_requests/` naming a kind from a fixed list.
+writes into root's queue for the site, `/var/lib/joinery/sites/{site}/root_requests/`, naming a kind from a fixed list. Everything root writes back lives beside it in that root-owned directory: the request's outcome under `root_request_outcomes/`, its transcript under `root_request_logs/`, the plugin installer records, the converge stamp and `host_converger.last`, and `certificates.json`. Nothing of root's is under the site's `cache/` or `logs/`; `includes/RootState.php` is where PHP reads the paths.
 
 | kind | what root does |
 |---|---|
@@ -1149,7 +1144,7 @@ needs the second factor at the keyboard.
 The converger runs every active plugin's declared `host_installer` as root.
 Before it does, it verifies the plugin directory — `php utils/verify_package.php
 <dir>`, a thin CLI over `PackageSignature` — and skips the installer, with the
-verdict in the converger's log (the journal, `journalctl -u joinery-host-converger`, on a host with a data root; `logs/host_converger.log` on one without), on anything but `signed`. An unsigned
+verdict in the converger's log (the journal, `journalctl -u joinery-host-converger`, on a host with a data root; `/var/log/joinery/host_converger.{site}.log` on one without), on anything but `signed`. An unsigned
 plugin stays installed and active; it simply never has a script run as root out
 of its directory. The publishing box, which holds `config/agent_signing_key`,
 trusts its own tree: every plugin there is the source the archives are built
@@ -1248,7 +1243,7 @@ A node guarantees this to an owner who flips Cloudflare to Full (Strict), with n
 
 - The origin presents a certificate that names the apex **and `www`** under SNI, issued over HTTP-01 through the edge, with no credential file and no operator step.
 - It renews on certbot's timer, and a renewal never edits the vhost.
-- When renewal stops — more than a day past the two-thirds-of-life due date with the same certificate still on disk, or the timer off, or `www` uncovered — the admin header and the health panel (`includes/CertificateNotice.php`, `VaultHealth::checkCertificates()`) say so, with the command. They read `cache/certificates.json`, which the host converger writes on every run from `/etc/letsencrypt`; a managed node's management node watches the same origin certificate over the wire (`RunNodeUptimeChecks::check_cert_expiry()`).
+- When renewal stops — more than a day past the two-thirds-of-life due date with the same certificate still on disk, or the timer off, or `www` uncovered — the admin header and the health panel (`includes/CertificateNotice.php`, `VaultHealth::checkCertificates()`) say so, with the command. They read the converger's certificate summary (`RootState::certificatesFile()`, root's `/var/lib/joinery/sites/{site}/certificates.json`), which the host converger writes on every run from `/etc/letsencrypt`; a managed node's management node watches the same origin certificate over the wire (`RunNodeUptimeChecks::check_cert_expiry()`).
 - It answers TLS from the first minute, with the placeholder until the real certificate lands, so an edge that redirects the challenge to https can deliver it.
 - The one limit: the edge must be on Full, not Strict, until the first certificate has landed. Strict refuses the placeholder, and the HTTP-01 challenge cannot get through. The retry timer keeps asking; the health panel says to set Full until then.
 - On a managed node the management node also says when the origin answers with a certificate for other names — the placeholder, or a shared fallback vhost — because that is exactly what Strict would reject.

@@ -3,6 +3,8 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
+# Version: 1.3 - the grant on cache/ is the directory and its default ACL alone, no recursive walk of the
+#                web user's tree as root (specs/shell_command_audit.md D3)
 # Version: 1.2 - the grant on public_html and vendor states group r-x, mask and defaults, so it can
 #              never leave the executable set group-writable; a wider grant made earlier is narrowed.
 # Version: 1.1 - checks for util-linux prlimit, which the launcher uses to apply
@@ -143,11 +145,23 @@ if [[ "${grant_needed}" == "1" ]]; then
     # Traverse the site root, read the three directories (and, by default ACL,
     # whatever an upgrade adds to them later).
     setfacl -m "u:${JAIL_USER}:x" "${SITE_ROOT}" 2>/dev/null || true
-    for d in public_html vendor cache; do
+    for d in public_html vendor; do
         [[ -d "${SITE_ROOT}/${d}" ]] || continue
         setfacl -R -m "$(jail_acl "${d}")" "${SITE_ROOT}/${d}" 2>/dev/null \
             || echo "parser jail: WARNING - setfacl failed on ${SITE_ROOT}/${d}" >&2
     done
+    # cache/ is the web user's: a recursive walk there as root would follow an
+    # entry swapped for a link between the walk and the call. The directory
+    # alone gets the grant and the default, so what the pool writes there later
+    # (the class map, rewritten through a temp file and a rename, so it inherits
+    # the default) is readable; nothing already inside is touched, not even by
+    # name: setfacl follows a link argument, and a name in the web user's
+    # directory can be a link by the time it is reached
+    # (specs/shell_command_audit.md D3, reviewer1 B9).
+    if [[ -d "${SITE_ROOT}/cache" && ! -L "${SITE_ROOT}/cache" ]]; then
+        setfacl -m "$(jail_acl cache)" "${SITE_ROOT}/cache" 2>/dev/null \
+            || echo "parser jail: WARNING - setfacl failed on ${SITE_ROOT}/cache" >&2
+    fi
     echo "parser jail: granted ${JAIL_USER} read access under ${SITE_ROOT}"
     for probe in "${PROBE_CODE}" "${SITE_ROOT}/vendor/autoload.php"; do
         [[ -e "${probe}" ]] || continue

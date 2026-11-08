@@ -24,6 +24,6 @@ class UnsealDaemonPublisher extends GoBinaryPublisher {
 	const BIN_SUBDIR    = 'maintenance_scripts/install_tools/joinery_unseal/bin';
 	const BINARY        = 'joinery-unseal';
 	const LABEL         = 'Unseal daemon';
-	const CACHE_ROOT    = '/var/tmp/joinery-unseal-build';
+	const CACHE_ROOT    = 'joinery-unseal-build';
 }
 ?>

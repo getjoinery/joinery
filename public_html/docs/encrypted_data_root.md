@@ -34,7 +34,7 @@ Two early-boot units need `/var/log` before any unlock can happen: `systemd-upda
 
 On a machine encrypted where it stands, `/var/log`, PHP's sessions and temporary files and the DKIM keys move onto the data root only once `encrypt` has finished, never into a volume still part plain. The move restarts what holds a log it moved: PostgreSQL, whose log is its standard error, among them. So `encrypt` stops the services twice for a few seconds: at its start, and when it finishes. The Backups page and the node page say so before they ask.
 
-The host converger's path trigger (`joinery-host-converger.path`) is not ordered before `paths.target`, since its folder (`cache/root_requests`) is on the data root.
+The host converger's path trigger (`joinery-host-converger.path`) is not ordered before `paths.target`, since a path unit early boot waits for would be an ordering cycle; its folder is root's `/var/lib/joinery/sites/{site}/root_requests`.
 
 ## Making one
 

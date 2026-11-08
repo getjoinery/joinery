@@ -11,6 +11,8 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
+ * @version 1.8 - root's composer home is /var/lib/joinery/composer_home, root-owned, not the web user's
+ *                cache/composer_home (specs/shell_command_audit.md A11)
  * @version 1.7 - a composerAutoLoad that PathHelper refuses is a validate() warning: it is never loaded
  * @version 1.6 - a plugin's packages install with --no-plugins: no package code runs as root, whatever allow-plugins lists
  * @version 1.5 - composer runs under umask 022: what it writes into vendor/ is never group- or world-writable,
@@ -586,15 +588,26 @@ class ComposerValidator {
      * installer refusal, which is what got us to root in the first place.
      */
     private function composerEnvPrefix() {
-        $composer_home = dirname(PathHelper::getBasePath()) . '/cache/composer_home';
+        // Composer reads its global config.json, auth.json and plugin list from
+        // COMPOSER_HOME. When root runs it (a root request's reconcile), that
+        // directory is root's own under /var/lib, never cache/, which the web
+        // user owns and could seed (specs/shell_command_audit.md A11). The web
+        // user's own validation runs keep the site's cache/ copy.
+        $is_root = function_exists('posix_geteuid') && posix_geteuid() === 0;
+        $composer_home = $is_root
+            ? '/var/lib/joinery/composer_home'
+            : dirname(PathHelper::getBasePath()) . '/cache/composer_home';
         if (!is_dir($composer_home)) {
-            @mkdir($composer_home, 0770, true);
+            @mkdir($composer_home, $is_root ? 0700 : 0770, true);
+        }
+        if ($is_root && (is_link($composer_home) || fileowner($composer_home) !== 0)) {
+            throw new RuntimeException('composer home ' . $composer_home . ' is not a root-owned directory');
         }
         // umask 022 first: vendor/ is part of the executable set
         // (specs/read_only_tree.md), and a package composer writes under a
         // permissive caller umask arrives group- or world-writable.
         $prefix = 'umask 022 && COMPOSER_HOME=' . escapeshellarg($composer_home) . ' ';
-        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+        if ($is_root) {
             $prefix .= 'COMPOSER_ALLOW_SUPERUSER=1 ';
         }
         return $prefix;

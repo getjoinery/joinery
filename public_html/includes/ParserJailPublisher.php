@@ -24,6 +24,6 @@ class ParserJailPublisher extends GoBinaryPublisher {
 	const BIN_SUBDIR    = 'maintenance_scripts/install_tools/joinery_jail/bin';
 	const BINARY        = 'joinery-jail';
 	const LABEL         = 'Parser jail';
-	const CACHE_ROOT    = '/var/tmp/joinery-jail-build';
+	const CACHE_ROOT    = 'joinery-jail-build';
 }
 ?>
