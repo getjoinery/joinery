@@ -172,7 +172,6 @@ try {
 	section('keep decides which saved parts stay');
 
 	$persist = new ReflectionMethod('MailboxDrafts', 'persistFortressPart');
-	$persist->setAccessible(true);
 	$part_a = 'draft:' . bin2hex(random_bytes(6));
 	$part_b = 'draftinl:' . bin2hex(random_bytes(6));
 	foreach (array($part_a => false, $part_b => true) as $p => $inline) {
@@ -194,7 +193,6 @@ try {
 		'each part carries a signed URL, for a phone reopening the draft');
 	VaultUnlock::loadConsumerBootstraps();
 	$resolve = new ReflectionMethod('File', 'resolve_decrypt_hook');
-	$resolve->setAccessible(true);
 	$hook = $resolve->invoke(null, $file->get('fil_source'));
 	check($hook && call_user_func($hook, (string)$file->read_bytes('original'), $file) === (string)$file->read_bytes('original'),
 		'which serves the stored ciphertext unchanged');
@@ -211,9 +209,7 @@ try {
 
 	$sender = new MailboxSender($viewer);
 	$quote = new ReflectionMethod('MailboxSender', 'sourceQuote');
-	$quote->setAccessible(true);
 	$build = new ReflectionMethod('MailboxSender', 'buildBody');
-	$build->setAccessible(true);
 	$source = new InboundEmailMessage($src, TRUE);
 	$msg = $refusal(function () use ($quote, $sender, $source) { $quote->invoke($sender, $source, null); });
 	check($msg !== null && stripos($msg, 'open it again') !== false, 'without source_open the reply is refused', (string)$msg);
@@ -233,7 +229,6 @@ try {
 	section('a draft is sent by the custody it was saved in');
 
 	$is_fortress = new ReflectionMethod('MailboxSender', 'isFortressDraft');
-	$is_fortress->setAccessible(true);
 	$draft_row = new InboundEmailMessage($id, TRUE);
 	check($is_fortress->invoke($sender, $draft_row, $fx['alias']) === true, 'a sealed draft on its Fortress mailbox is sent as one');
 	$standard = new InboundEmailAlias($alias_id, TRUE);

@@ -35,7 +35,6 @@ $g = Globalvars::get_instance();
 $g->get_setting("theme_template");
 if ($theme !== "") {
 	$r = new ReflectionProperty(Globalvars::class, "settings");
-	$r->setAccessible(true);
 	$all = $r->getValue($g);
 	$all["theme_template"] = $theme;
 	if ($plugin !== "") { $all["active_theme_plugin"] = $plugin; }

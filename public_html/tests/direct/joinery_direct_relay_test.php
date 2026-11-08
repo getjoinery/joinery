@@ -161,7 +161,6 @@ DirectRecipients::registerResolver(function (string $address) use ($TEST_DOMAIN,
 // Register a kind so the container is servable, the way a plugin's declaration
 // would. The registry is instance configuration, so it is set the same way.
 $registry = new ReflectionProperty('DirectKinds', 'registry');
-$registry->setAccessible(true);
 $registry->setValue(null, array(
 	'mail' => array('kind' => 'mail', 'handler' => '', 'class' => '', 'gate' => 'contacts', 'plugin' => ''),
 ));
@@ -183,7 +182,6 @@ $SENDER_DOMAIN = 'sender-test.invalid';
 // (an IMAP-source anchor like gmail.com) -- a different question from this one,
 // so it is answered for this domain only and put back afterwards.
 $authority_prop = new ReflectionProperty('DirectSigningIdentity', 'authority_resolver');
-$authority_prop->setAccessible(true);
 $authority_prev = $authority_prop->getValue();
 $authority_prop->setValue(null, function (string $domain) use ($SENDER_DOMAIN, $authority_prev): bool {
 	if ($domain === $SENDER_DOMAIN) {
@@ -302,7 +300,6 @@ section('A relayed delivery to an UNENCRYPTED mailbox is gated at commit, not he
 // pre-fix relay path did for every delivery, would strand it forever. Install a
 // handler so there is something to ingest into.
 $handlers = new ReflectionProperty('DirectKinds', 'handlers');
-$handlers->setAccessible(true);
 $handlers->setValue(null, array('mail' => new RelayTestHandler()));
 RelayTestHandler::$ingested = array();
 

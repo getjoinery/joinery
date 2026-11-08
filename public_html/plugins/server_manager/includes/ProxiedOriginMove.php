@@ -351,7 +351,6 @@ class ProxiedOriginMove {
 		curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$error = curl_errno($ch) ? curl_error($ch) : '';
-		curl_close($ch);
 		return array('status' => $status, 'set_cookie' => $cookie, 'error' => $error);
 	}
 }

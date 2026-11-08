@@ -151,7 +151,6 @@ check(count($memories_titled($title_marker)) === 0, 'no memory was written');
 check((string)$tainted->get('rcp_workspace') === 'workspace note ' . $suffix, 'set_workspace ran inline in the same turn');
 check($ctx->queuedCount() === 1, 'the context counted one queued call');
 $calls_m = new ReflectionMethod('RecipeRunContext', 'currentToolCalls');
-$calls_m->setAccessible(true);
 $trace = json_encode($calls_m->invoke($ctx));
 check(strpos($trace, "queued for the owner's approval") !== false, 'the tool trace says the call was queued', $trace);
 $card = ActionQueue::card($pending[0]);

@@ -132,7 +132,6 @@ if (is_array($ai)) {
 				'descriptor: ' . $id . ' is the job\'s own (rebuild the vectors with --descriptors if it changed)');
 		}
 		$parse = new ReflectionMethod('PipelineRunner', 'parseVerdict');
-		$parse->setAccessible(true);
 		foreach ($ai['verdicts'] as $v) {
 			[$verdict, $error] = $parse->invoke(null, $v['answer'], $ai['descriptors'][$v['job_id']], $jobs[$v['job_id']]);
 			$label = $v['job_id'] . ': ' . mb_substr($v['answer'], 0, 50);

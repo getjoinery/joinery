@@ -136,7 +136,6 @@ try {
 	$db = DbConnector::get_instance()->get_db_link();
 	$db->exec('CREATE TEMP TABLE utr_widen (narrow varchar(8), wider varchar(8), same varchar(8))');
 	$widen = new ReflectionMethod('DatabaseUpdater', 'widenCharacterColumn');
-	$widen->setAccessible(true);
 	$updater = new DatabaseUpdater();
 	$results = array('messages' => array(), 'errors' => array());
 	$live = array('data_type' => 'character varying', 'character_maximum_length' => 8);

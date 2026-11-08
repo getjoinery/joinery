@@ -21,7 +21,6 @@ function caps_reset(): void {
 	// Mark the bootstraps loaded so capsForUser() folds only what this test
 	// registers; the real consumers have their own coverage.
 	$reflect = new ReflectionProperty('PluginBootstraps', 'loaded');
-	$reflect->setAccessible(true);
 	$reflect->setValue(null, true);
 }
 
@@ -95,7 +94,6 @@ section('A declared bootstrap missing on disk fails the whole fold closed');
 // policy; its absence must tighten the window, not widen it.
 caps_reset();
 $reflect = new ReflectionProperty('PluginBootstraps', 'not_loaded');
-$reflect->setAccessible(true);
 $reflect->setValue(null, array('mailbox'));
 $caps = VaultUnlock::capsForUser(1);
 check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS

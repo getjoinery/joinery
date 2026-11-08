@@ -295,7 +295,7 @@ check($here['secrets']['dead'] === array_sum($here['secrets']['dead_locators']),
 // take its source's key would see.
 $rc = new ReflectionClass('SecretBox');
 $wrong = $rc->newInstanceWithoutConstructor();
-$prop = $rc->getProperty('key'); $prop->setAccessible(true); $prop->setValue($wrong, random_bytes(SecretBox::KEY_BYTES));
+$prop = $rc->getProperty('key'); $prop->setValue($wrong, random_bytes(SecretBox::KEY_BYTES));
 $dead = SecretReconciler::census($wrong);
 check($dead['present'] === $here['secrets']['present'] && ($dead['present'] === 0 || $dead['dead'] > 0),
 	'with another key, the stored secrets read dead', json_encode(array_diff_key($dead, array('dead_locators' => 1))));

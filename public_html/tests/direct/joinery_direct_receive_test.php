@@ -79,9 +79,7 @@ class DirectTestHandler implements DirectKindHandler {
 // Register the kind and a recipient resolver directly, which is what a plugin
 // bootstrap does. Both are request-scoped, so nothing here outlives the test.
 $registry = new ReflectionProperty('DirectKinds', 'registry');
-$registry->setAccessible(true);
 $handlers = new ReflectionProperty('DirectKinds', 'handlers');
-$handlers->setAccessible(true);
 
 $TEST_DOMAIN = 'direct-test.invalid';
 $REAL   = 'real@' . $TEST_DOMAIN;
@@ -187,7 +185,6 @@ function direct_test_enable(string $value): void {
 		ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value");
 	$stmt->execute(array($value));
 	$settings = new ReflectionProperty('Globalvars', 'settings');
-	$settings->setAccessible(true);
 	$live = $settings->getValue(Globalvars::get_instance());
 	$live['joinery_direct_enabled'] = $value;
 	$settings->setValue(Globalvars::get_instance(), $live);
@@ -207,7 +204,6 @@ function direct_test_set_raw(string $name, ?string $value): void {
 			->execute(array($name, $value));
 	}
 	$prop = new ReflectionProperty('Globalvars', 'settings');
-	$prop->setAccessible(true);
 	$live = $prop->getValue(Globalvars::get_instance());
 	if ($value === null) { unset($live[$name]); } else { $live[$name] = $value; }
 	$prop->setValue(Globalvars::get_instance(), $live);

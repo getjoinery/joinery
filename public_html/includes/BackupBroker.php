@@ -246,7 +246,6 @@ class BackupBroker implements S3LinkSource {
 		$raw = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$err = (string)curl_error($ch);
-		curl_close($ch);
 		if ($raw === false) {
 			return array(0, null, $err);
 		}

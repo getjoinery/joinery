@@ -174,7 +174,6 @@ check($r['status'] === 200 && ($p['held_by_this_device'] ?? null) === true && ar
 	&& $p['pending_public_key'] === null && ($p['device_linked'] ?? null) === true, 'held, linked, no rotation pending', substr($r['raw'], 0, 300));
 
 $forget = new ReflectionMethod('VaultClientRotation', 'forgetScopeOnDevices');
-$forget->setAccessible(true);
 $forget->invoke(null, (int)$owner->key, 'mail');
 $r = api_request('POST', '/api/v1/action/vault_client_probe', $phone_h, array('scope' => 'mail'));
 check(($r['json']['data']['held_by_this_device'] ?? null) === false, 'after a rotation forgets the scope, the phone learns it no longer holds it');

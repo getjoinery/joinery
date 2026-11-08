@@ -418,7 +418,6 @@ check(HostedPlanNotice::level('subscribed', 200, $quiet, '', true) === 'urgent'
 	&& HostedPlanNotice::level('trial', 45, $quiet, '', true) === 'urgent',
 	'no recovery key makes the banner urgent, whatever the billing state');
 $wording = (new ReflectionClass('HostedPlanNotice'))->getMethod('wording');
-$wording->setAccessible(true);
 check(strpos($wording->invoke(null, 'trial', 'on December 1, 2026', false)[1], 'nothing to do') !== false
 	&& strpos($wording->invoke(null, 'trial', 'on December 1, 2026', true)[1], 'nothing to do') === false,
 	'a trial says there is nothing to do only while the backups it includes are actually running');
@@ -448,7 +447,6 @@ section('A site opens on trial only where a trial is configured');
 // period's end, dressed up as the end of a free period.
 $watch = new HostedTrialWatch();
 $open = (new ReflectionClass('HostedTrialWatch'))->getMethod('open_row');
-$open->setAccessible(true);
 
 $notrial = ht_provision('httest-notrial-' . $suffix, 'operator');
 $open->invoke($watch, $notrial, 0);
@@ -512,7 +510,6 @@ $ct->load();
 
 $watch = new HostedTrialWatch();
 $convert = (new ReflectionClass('HostedTrialWatch'))->getMethod('convert_if_trial_ended');
-$convert->setAccessible(true);
 
 check($convert->invoke($watch, $ct) === 0, 'a trial still running is left alone');
 $ct->load();
@@ -532,7 +529,6 @@ check($convert->invoke($watch, $ct) === 0,
 
 // And the banner never says "until already" for a date gone by.
 $phrase = (new ReflectionClass('HostedPlanNotice'))->getMethod('whenPhrase');
-$phrase->setAccessible(true);
 check($phrase->invoke(null, gmdate('Y-m-d H:i:s', time() - 864000)) === '',
 	'a past date says nothing rather than "already", which would read as "included until already"');
 

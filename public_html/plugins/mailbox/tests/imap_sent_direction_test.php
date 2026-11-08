@@ -185,7 +185,6 @@ class ImapSentDirectionTest {
 	/** Run the real stored half of ingestOne for one message through one folder. */
 	private function ingest(InboundImapFolder $folder, SentDirectionEnvelope $envelope): array {
 		$m = new ReflectionMethod(ImapIngestor::class, 'ingestOneStored');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $folder, $this->uid++,
 			new SentDirectionFetchData($envelope), $this->router,
 			$this->alias, new InboundEmailDomain($this->domain_id, TRUE), $this->recipient(),
@@ -261,7 +260,6 @@ class ImapSentDirectionTest {
 			$this->recipient(), $this->mid('sibling')));
 
 		$m = new ReflectionMethod(ImapIngestor::class, 'markDirectionOutbound');
-		$m->setAccessible(true);
 		$m->invoke($this->ingestor, intval($inbound['message_id']));
 
 		check($this->direction($inbound['message_id']) === 'inbound',

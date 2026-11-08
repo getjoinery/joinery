@@ -108,7 +108,6 @@ section('The file a person receives');
 $tarfile = $work . '/received.tar';
 $fh = fopen($tarfile, 'wb');
 $rp = new ReflectionMethod('BackupDownload', 'entries');
-$rp->setAccessible(true);
 BackupDownload::write_tar($rp->invoke(null, $s), function ($b) use ($fh) { fwrite($fh, $b); });
 fclose($fh);
 check(filesize($tarfile) === $s['download_bytes'], 'it is exactly the length announced');

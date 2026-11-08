@@ -97,7 +97,6 @@ $job_for = function (ManagedNode $node, string $primitive) {
 	return $job;
 };
 $resolve = new ReflectionMethod('AgentChannelEndpoint', 'resolve_credential_slots');
-$resolve->setAccessible(true);
 $open_slot = function (ManagedNode $node, StorageSpace $space, string $kind) use ($resolve, $job_for) {
 	$job = $job_for($node, $kind === 'upload' ? 'upload_backup' : 'backup_run');
 	$params = $resolve->invoke(null, array('credentials_b64' => '__SM_BROKER_' . (int)$space->key . '_' . $kind . '__'), $job);
@@ -266,7 +265,6 @@ if ($plan === null && strpos($plan_error, 'recovery key') !== false) {
 	check($plan !== null && $plan['broker'] instanceof BackupBroker && $plan['target']->get_credentials() === $plan['broker'],
 		'a manager plan whose slot is a broker run signs every request through it', $plan_error);
 	$dest = new ReflectionMethod('BackupRunner', 'destination_of_plan');
-	$dest->setAccessible(true);
 	check($dest->invoke(null, $plan) === 'space:' . (int)$moved->key, 'its chain follows the space the broker answers',
 		(string)$dest->invoke(null, $plan));
 	$row = new BackupHistory(NULL);
@@ -274,7 +272,6 @@ if ($plan === null && strpos($plan_error, 'recovery key') !== false) {
 	$row->set('bkh_remote_space_id', (int)$space->key);
 	$row->set('bkh_target_name', (string)$a->get('bkt_name'));
 	$by_row = new ReflectionMethod('BackupRunner', 'destination_of_row');
-	$by_row->setAccessible(true);
 	check($by_row->invoke(null, $plan, $row) === 'space:' . (int)$space->key
 		&& BackupChain::should_start_new(array('runs' => array(array('seq' => 0))), true, 7, 30, null, null, 1,
 			$by_row->invoke(null, $plan, $row), $dest->invoke(null, $plan)) === 'destination_changed',
@@ -373,7 +370,6 @@ $lk = new BackupTarget($lk->key, TRUE);
 $sl = StorageSpace::open($lk, StorageSpace::OWNER_NODE, (int)$node->key, (string)$node->get('mgn_slug'));
 harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $sl->key);
 $takes_lock = new ReflectionMethod('JobCommandBuilder', 'assert_node_takes_lock');
-$takes_lock->setAccessible(true);
 $why = '';
 try { $takes_lock->invoke(null, $node, $sl, 'back up'); } catch (Exception $e) { $why = $e->getMessage(); }
 check(strpos($why, 'locks every backup') !== false && strpos($why, JobCommandBuilder::LOCK_MIN_CORE_VERSION) !== false,
@@ -428,7 +424,6 @@ putenv('PGPASSWORD=' . (string)Globalvars::get_instance()->get_setting('dbpasswo
 putenv('PGUSER=' . (string)Globalvars::get_instance()->get_setting('dbusername', true, true));
 harness_defer(function () { putenv('PGPASSWORD'); putenv('PGUSER'); });
 $execute = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute->setAccessible(true);
 $engine_run = function ($transport) use ($open_slot, $node, $moved, $work, $tree, $dbname, $execute) {
 	list($slot) = $open_slot($node, $moved, 'backup');
 	BackupBroker::$transport_for_tests = $transport;

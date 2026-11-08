@@ -104,7 +104,6 @@ class RelayClient {
 
 	public function __destruct() {
 		if ($this->curl !== null) {
-			curl_close($this->curl);
 		}
 	}
 

@@ -247,7 +247,6 @@ class MovedSiteCheck {
 		if ($ok === false && !(curl_errno($ch) === CURLE_WRITE_ERROR && strlen($body) >= self::FETCH_BODY_CAP)) {
 			$error = curl_error($ch) ?: 'no answer';
 		}
-		curl_close($ch);
 		return ['status' => $status, 'body' => $body, 'error' => $error];
 	}
 

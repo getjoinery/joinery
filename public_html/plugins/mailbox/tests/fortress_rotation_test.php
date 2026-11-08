@@ -78,7 +78,6 @@ try {
 	section('Listeners');
 
 	$prop = new ReflectionProperty('VaultUnlock', 'client_rotation_callbacks');
-	$prop->setAccessible(true);
 	VaultUnlock::loadConsumerBootstraps();
 	check(count($prop->getValue()['mail'] ?? array()) === 1, 'the mailbox listens for mail rotations (its relay map push)');
 	$heard = array();

@@ -89,7 +89,6 @@ section('The MX-shaped vendors split priority out and put it back');
  */
 function driver_call($driver, string $method, array $args) {
 	$m = new ReflectionMethod(get_class($driver), $method);
-	$m->setAccessible(true);
 	return $m->invokeArgs($driver, $args);
 }
 

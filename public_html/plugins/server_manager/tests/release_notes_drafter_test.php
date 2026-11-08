@@ -39,9 +39,7 @@ if (!ReleaseNotesDrafter::available()) {
 }
 
 $commits_since = new ReflectionMethod('ReleaseNotesDrafter', 'commitsSince');
-$commits_since->setAccessible(true);
 $join_capped = new ReflectionMethod('ReleaseNotesDrafter', 'joinCapped');
-$join_capped->setAccessible(true);
 
 // ── Which commits are read ──
 section('Commits since the last release');
@@ -126,7 +124,6 @@ check(strpos($joined, 'left out for length') !== false, 'And says that it was cu
 section('The version a republishing site drafts through');
 
 $upstream = new ReflectionMethod('ReleaseNotesDrafter', 'upstreamMaterial');
-$upstream->setAccessible(true);
 foreach (array('0.0.1' => 'an older version than the one running', 'latest' => 'something that is not a version') as $through => $what) {
 	$why = '';
 	try {

@@ -393,7 +393,6 @@ check(JobResultProcessor::status_release_trust('text') === null
 	'what is not the shape is nothing');
 
 $expected_prop = new ReflectionProperty('ReleaseTrustView', 'expected');
-$expected_prop->setAccessible(true);
 $expected_prop->setValue(null, array('release' => array($a, $b), 'statement' => array($c),
 	'authority' => array('release' => array($b), 'statement' => array($c)), 'source' => 'the test'));
 $status = array('release_trust' => array(

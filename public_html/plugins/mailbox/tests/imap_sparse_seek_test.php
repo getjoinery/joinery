@@ -122,13 +122,11 @@ class ImapSparseSeekTest {
 
 	private function seek(SparseSeekImapClient $client, string $cutoff): array {
 		$m = new ReflectionMethod(ImapIngestor::class, 'seekCursorInner');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $client, 'INBOX', $cutoff, self::HIGH_UID);
 	}
 
 	private function window(SparseSeekImapClient $client, int $lastSeen, int $maxPerRun): array {
 		$m = new ReflectionMethod(ImapIngestor::class, 'nextOccupiedWindow');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $client, 'INBOX', $lastSeen, self::HIGH_UID, $maxPerRun);
 	}
 
@@ -170,7 +168,6 @@ class ImapSparseSeekTest {
 			$client->messages[$uid] = ($uid <= 1000) ? self::ANCIENT : self::IN_WINDOW;
 		}
 		$m = new ReflectionMethod(ImapIngestor::class, 'seekCursorInner');
-		$m->setAccessible(true);
 		$found = $m->invoke($this->ingestor, $client, 'INBOX', self::CUTOFF, 2000);
 		check($found['cursor'] === 1000, 'cursor sits exactly one below the oldest in-window message',
 			'cursor=' . $found['cursor']);

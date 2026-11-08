@@ -269,7 +269,6 @@ try {
 	$history->set('bkh_remote_space_id', $plan['broker']->space_id());
 	$history->save();
 	$execute = new ReflectionMethod('BackupRunner', 'execute_chain');
-	$execute->setAccessible(true);
 	$execute->invoke(null, $plan, $history);
 } catch (\Throwable $e) {
 	$error = $e->getMessage();

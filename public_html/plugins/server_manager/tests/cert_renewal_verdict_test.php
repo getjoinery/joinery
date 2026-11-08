@@ -35,19 +35,15 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUpt
 
 $task = new RunNodeUptimeChecks();
 $ref  = new ReflectionMethod('RunNodeUptimeChecks', 'renewal_due_ts');
-$ref->setAccessible(true);
 $due = function (int $nb, int $na) use ($ref, $task) { return $ref->invoke($task, $nb, $na); };
 
 $iss = new ReflectionMethod('RunNodeUptimeChecks', 'describe_issuer');
-$iss->setAccessible(true);
 $issuer = function (array $cert) use ($iss, $task) { return $iss->invoke($task, $cert); };
 
 $ver = new ReflectionMethod('RunNodeUptimeChecks', 'cert_alert_verdict');
-$ver->setAccessible(true);
 $verdict = function (int $now, int $nb, int $na, int $warn = 21) use ($ver, $task) { return $ver->invoke($task, $now, $nb, $na, $warn); };
 
 $gap = new ReflectionMethod('RunNodeUptimeChecks', 'www_coverage_gap');
-$gap->setAccessible(true);
 $www_gap = function (?array $cert, string $www) use ($gap, $task) { return $gap->invoke($task, $cert, $www); };
 
 section('A 90-day certificate is due for renewal 30 days before it expires');
@@ -141,9 +137,7 @@ check($www_gap(null, 'www.jeremytunnell.com') === '',
 
 section('An origin answering with somebody else\'s certificate is its own problem');
 $cn = new ReflectionMethod('RunNodeUptimeChecks', 'cert_names');
-$cn->setAccessible(true);
 $up = new ReflectionMethod('RunNodeUptimeChecks', 'uncovered_problem');
-$up->setAccessible(true);
 $names = $cn->invoke($task, $stranger);
 check($names === ['developers.getjoinery.com'], 'the names a certificate carries are read once, CN and SANs deduplicated', implode(',', $names));
 check($cn->invoke($task, $both) === ['jeremytunnell.com', 'www.jeremytunnell.com'], 'and every SAN is listed');
@@ -165,7 +159,6 @@ check(strpos($src, 'EmailSender') === false, 'the uptime task mails nothing: wha
 
 section('An expiring or unrenewed certificate is described from what was served');
 $ep = new ReflectionMethod('RunNodeUptimeChecks', 'expiry_problem');
-$ep->setAccessible(true);
 $served = ['validFrom_time_t' => $nb, 'validTo_time_t' => $na, 'serialNumberHex' => 'AB12',
 	'issuer' => ['O' => "Let's Encrypt", 'CN' => 'YE2']];
 $p = $ep->invoke($task, 'scrolldaddy.app', $served, 'overdue', '', strtotime('2026-09-10 12:00:00 UTC'));
@@ -200,7 +193,6 @@ $ph_key  = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_na
 $ph_csr  = openssl_csr_new(['commonName' => 'placeholder.example'], $ph_key);
 $ph_cert = openssl_x509_parse(openssl_csr_sign($ph_csr, null, $ph_key, 3650));
 $ss = new ReflectionMethod('RunNodeUptimeChecks', 'is_self_signed');
-$ss->setAccessible(true);
 check($ss->invoke($task, $ph_cert) === true, 'a self-signed certificate (issuer is subject) reads as the placeholder');
 check($ss->invoke($task, ['subject' => ['CN' => 'a.example'], 'issuer' => ['O' => "Let's Encrypt", 'CN' => 'YE2']]) === false,
 	'one a certificate authority signed does not');
@@ -210,7 +202,6 @@ check(RunNodeUptimeChecks::placeholder_since(['reason' => 'placeholder', 'since'
 	'first seen when the stored problem says, while it is still the placeholder');
 check(RunNodeUptimeChecks::placeholder_since(['reason' => 'overdue'], 1000) === 1000, 'another problem before it starts the clock now');
 $pp = new ReflectionMethod('RunNodeUptimeChecks', 'placeholder_problem');
-$pp->setAccessible(true);
 $p = $pp->invoke($task, 'site.example', strtotime('2026-10-24 21:08:00 UTC'), false);
 check($p['reason'] === 'placeholder' && $p['since'] === strtotime('2026-10-24 21:08:00 UTC')
 	&& strpos($p['title'], 'placeholder certificate for site.example') !== false, 'the problem names the host and when it was first seen', $p['title']);

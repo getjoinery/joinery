@@ -81,7 +81,6 @@ $plan['project_dir'] = $tree;
 $plan['database']    = $dbname;
 
 $execute = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute->setAccessible(true);
 $run = function () use ($execute, $plan) {
 	$history = new BackupHistory(NULL);
 	$history->set('bkh_type', 'project');
@@ -438,7 +437,6 @@ $db_plan['output_dir'] = $db_dir;
 $db_plan['database']   = $dbname;
 check($db_plan['mode'] === 'full' && $db_plan['type'] === 'database', 'a database-only plan is a standalone run');
 $execute_full = new ReflectionMethod('BackupRunner', 'execute_full');
-$execute_full->setAccessible(true);
 $hist_db = new BackupHistory(NULL);
 $hist_db->set('bkh_type', 'database');
 $hist_db->set('bkh_outcome', 'running');

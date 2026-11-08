@@ -329,7 +329,6 @@ function pmd_row($buyer, $node, $domain, $with_node = true) {
 /** Advance one row one tick, through the private state machine. */
 function pmd_tick(PmdPhase $phase, $row) {
 	$method = new ReflectionMethod('ProvisionManagedDomains', 'advance');
-	$method->setAccessible(true);
 	$result = $method->invoke($phase, $row);
 	$row->load();
 	return $result;

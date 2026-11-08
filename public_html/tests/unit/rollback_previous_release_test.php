@@ -149,7 +149,6 @@ ok('the permission pass runs after the swap and again after the composer step, b
 ok('there is no chmod fallback in the pass', preg_match('/function upgrade_fix_permissions\(.*?\n\t}\n/s', $src, $fm) === 1 && strpos($fm[0], 'chmod') === false);
 
 $cv = new ReflectionMethod('ComposerValidator', 'composerEnvPrefix');
-$cv->setAccessible(true);
 $prefix = $cv->invoke(new ComposerValidator());
 ok('composer runs under umask 022, whatever the caller\'s umask', strpos($prefix, 'umask 022 && ') === 0, $prefix);
 ok('and still with its own COMPOSER_HOME', strpos($prefix, 'COMPOSER_HOME=') !== false);

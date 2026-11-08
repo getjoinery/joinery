@@ -216,7 +216,6 @@ class SandboxHost {
 		$ok = curl_exec($ch);
 		$errno = curl_errno($ch);
 		$code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-		curl_close($ch);
 		$elapsed = (int)round((microtime(true) - $started) * 1000);
 
 		if ($too_large) {

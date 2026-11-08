@@ -44,7 +44,6 @@ $active_other = $db->query("SELECT amu_slug FROM amu_admin_menus WHERE amu_slug 
 check($active_other === 'joinery-ai-chat', 'an active plugin\'s entry (joinery-ai-chat) is there to be kept');
 
 $prune = new ReflectionMethod('PluginManager', 'pruneInactivePluginMenus');
-$prune->setAccessible(true);
 $manager = new PluginManager();
 
 $db->beginTransaction();

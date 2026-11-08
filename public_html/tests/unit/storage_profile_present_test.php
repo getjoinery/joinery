@@ -54,7 +54,6 @@ file_put_contents($tmp . '/' . $absent_cls . '.php', $src($absent_cls, 'tmp_neve
 StorageProfileRegistry::reset();
 StorageProfileRegistry::all();   // the real declarations first; a registration onto an empty cache would stand alone
 $register = new ReflectionMethod('StorageProfileRegistry', '_load_and_register');
-$register->setAccessible(true);
 $register->invoke(null, $absent_cls, $tmp . '/' . $absent_cls . '.php');
 
 $declared = array_map('get_class', StorageProfileRegistry::all());

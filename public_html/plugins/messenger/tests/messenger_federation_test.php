@@ -298,7 +298,6 @@ function fed_test_set(string $name, ?string $value): void {
 			->execute(array($name, $value));
 	}
 	$prop = new ReflectionProperty('Globalvars', 'settings');
-	$prop->setAccessible(true);
 	$live = $prop->getValue(Globalvars::get_instance());
 	if ($value === null) { unset($live[$name]); } else { $live[$name] = $value; }
 	$prop->setValue(Globalvars::get_instance(), $live);

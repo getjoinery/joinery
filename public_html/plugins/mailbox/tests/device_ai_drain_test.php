@@ -118,7 +118,6 @@ check($plain === "Summary with \u{00E9} and \u{1F600}", 'the same bytes come bac
 
 section('The browser accepts and refuses the answers the server does, in the same words');
 $parse = new ReflectionMethod('PipelineRunner', 'parseVerdict');
-$parse->setAccessible(true);
 foreach ($answers as $i => $a) {
 	[$verdict, $error] = $parse->invoke(null, $a[1], $descriptors[$a[0]], $a[0] === 'scan' ? $scan : $triage);
 	$j = $js['parsed'][$i];

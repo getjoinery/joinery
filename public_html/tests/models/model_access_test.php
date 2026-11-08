@@ -265,7 +265,6 @@ check(array_key_exists('usr_allowed_ips', (new User($other->key, TRUE))->export_
 section('the CLI: checked only while a person is signed in, and only in tests');
 Access::$sapi = 'cli';
 $enforced = new ReflectionMethod('SystemBase', 'access_enforced');
-$enforced->setAccessible(true);
 $session->set_api_user($other->key, null, 0);
 check(Access::$check_cli_persons && $enforced->invoke(null) === true,
 	'under the harness, a CLI write while a member is signed in is checked');

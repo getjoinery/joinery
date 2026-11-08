@@ -80,7 +80,6 @@ section('The synthesized raw is well-formed and carries the content');
 // ---------------------------------------------------------------------------
 
 $m = new ReflectionMethod('InboundEmailRouter', 'synthesizeRawForForward');
-$m->setAccessible(true);
 $raw = $m->invoke($router, $msg);
 
 check(is_string($raw) && $raw !== '', 'a raw MIME is synthesized where none was stored');

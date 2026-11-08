@@ -31,9 +31,7 @@ harness_test_mode();
 $db = DbConnector::get_instance();
 $sentinel = 2147480123;
 $queue = new ReflectionMethod('FileBlob', '_defer_reclaim');
-$queue->setAccessible(true);
 $pending = new ReflectionProperty('FileBlob', 'deferred_reclaims');
-$pending->setAccessible(true);
 
 section('the sentinel names no blob on either database');
 $on_test = (int)$db->get_db_link()->query('SELECT COUNT(*) FROM fbb_file_blobs WHERE fbb_file_blob_id = ' . $sentinel)->fetchColumn();

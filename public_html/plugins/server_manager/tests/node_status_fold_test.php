@@ -255,7 +255,6 @@ section('The plugin-installer runner is read, not trusted for its exit code');
 /** Call a private static on the processor. */
 function nsf_call($method, array $args) {
 	$m = new ReflectionMethod('JobResultProcessor', $method);
-	$m->setAccessible(true);
 	return $m->invokeArgs(null, $args);
 }
 

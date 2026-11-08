@@ -754,7 +754,6 @@ class ImapSyncerTest {
 		$service->setSpamVerdict(array(intval($msg->key)), InboundEmailMessage::SPAM_VERDICT_HAM);
 		$ingestor = new ImapIngestor($this->account, $client);
 		$markSpam = new ReflectionMethod($ingestor, 'markSpam');
-		$markSpam->setAccessible(true);
 		$markSpam->invoke($ingestor, intval($msg->key));
 		$this->ok($this->reload($msg)->get('iem_spam_verdict') === InboundEmailMessage::SPAM_VERDICT_HAM,
 			'a Junk arrival does not override an unsent Not spam');
@@ -773,7 +772,6 @@ class ImapSyncerTest {
 		$this->ok($this->reload($msg)->get('iem_spam_verdict') === InboundEmailMessage::SPAM_VERDICT_SPAM,
 			'with no unsent correction, a Junk arrival marks the row spam');
 		$clearSpam = new ReflectionMethod($ingestor, 'clearSpam');
-		$clearSpam->setAccessible(true);
 		$clearSpam->invoke($ingestor, intval($msg->key));
 		$this->ok($this->reload($msg)->get('iem_spam_verdict') === null,
 			'an INBOX arrival of a spam row clears the verdict');

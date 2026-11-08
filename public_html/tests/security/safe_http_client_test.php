@@ -122,7 +122,6 @@ foreach (array(22, 25, 53, 80, 111, 1023) as $port) {
 // listener on a high port available as a later option, so a 443-only policy
 // would foreclose a stated goal.
 $reflect = new ReflectionMethod('SafeHttpClient', 'portAllowlistFor');
-$reflect->setAccessible(true);
 foreach (array(443, 1024, 8443, 65535) as $port) {
 	$allowed = true;
 	try {
@@ -136,7 +135,6 @@ foreach (array(443, 1024, 8443, 65535) as $port) {
 // The default policy is narrower, and a caller has to opt out of it explicitly.
 $default = new SafeHttpClient(array('connect_timeout' => 1, 'timeout' => 2));
 $default_ports = new ReflectionProperty('SafeHttpClient', 'policy');
-$default_ports->setAccessible(true);
 $policy = $default_ports->getValue($default);
 check($policy['allowed_ports'] === array(80, 443), 'the default port policy is 80 and 443');
 check($policy['allow_redirects'] === false, 'redirects are off by default');

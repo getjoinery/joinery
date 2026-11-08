@@ -137,7 +137,6 @@ class OfficeEditor {
 		));
 		$body = curl_exec($ch);
 		$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		if ($code !== 200 || !is_string($body) || strpos($body, '<wopi-discovery') === false) {
 			return null;
 		}
@@ -283,7 +282,6 @@ class OfficeEditor {
 		));
 		$body = curl_exec($ch);
 		$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		if ($code !== 200 || !is_string($body)) {
 			return null;
 		}

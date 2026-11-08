@@ -132,7 +132,6 @@ class SiteCopyLiveRun {
 			if (!$throttled) { break; }
 			sleep(10 * ($try + 1));
 		}
-		curl_close($ch);
 		if (!is_array($r) || empty($r['success'])) {
 			throw new Exception('Cloudflare ' . $method . ' ' . strtok($path, '?') . ': ' . json_encode(is_array($r) ? ($r['errors'] ?? $r) : 'no answer'));
 		}
@@ -470,7 +469,6 @@ class SiteCopyLiveRun {
 		curl_setopt_array($ch, $opts);
 		$body = curl_exec($ch);
 		$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		return array('ok' => $code === 200 && $body === copy_seed_value((string)$seed['id'], 'marker'), 'code' => $code);
 	}
 

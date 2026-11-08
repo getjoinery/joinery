@@ -110,9 +110,7 @@ section('A check older than the codes is stale');
 // ledger's view of it through the same path the security page uses.
 $rr_items = function () use ($fixture_user_id) {
 	$m = new ReflectionMethod('RecoveryReadiness', 'attachLedger');
-	$m->setAccessible(true);
 	$v = new ReflectionMethod('RecoveryReadiness', 'vaultItems');
-	$v->setAccessible(true);
 	$out = array();
 	foreach ($m->invoke(null, $v->invoke(null, $fixture_user_id), $fixture_user_id) as $item) {
 		$out[$item['key']] = $item;

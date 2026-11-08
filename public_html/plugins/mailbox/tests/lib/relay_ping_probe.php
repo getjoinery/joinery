@@ -281,7 +281,6 @@ class RelayPingProbe {
 		$out = curl_exec($ch);
 		$code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$errno = curl_errno($ch);
-		curl_close($ch);
 		return array($code, (string)$out, $errno);
 	}
 

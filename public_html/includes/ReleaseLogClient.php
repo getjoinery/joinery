@@ -560,7 +560,6 @@ class ReleaseLogClient {
 		$out = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		$err = curl_error($ch);
-		curl_close($ch);
 		if ($out === false) {
 			throw new ReleaseLogBlindException("cannot reach {$url}: {$err}; a release is not published without its log entry");
 		}

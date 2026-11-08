@@ -197,7 +197,6 @@ function setup_https_probe(string $domain): array {
 	} else {
 		$out['error'] = curl_error($ch);
 	}
-	curl_close($ch);
 	return $out;
 }
 
@@ -218,7 +217,6 @@ function setup_https_public_ip(int $family): string {
 			CURLOPT_USERAGENT      => 'Joinery-Setup-HTTPS-Check',
 		));
 		$answer = trim((string)curl_exec($ch));
-		curl_close($ch);
 		if ($answer !== '' && filter_var($answer, FILTER_VALIDATE_IP)) {
 			return $answer;
 		}

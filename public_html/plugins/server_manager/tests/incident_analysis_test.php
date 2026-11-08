@@ -189,7 +189,6 @@ $e2->save();
 check(IncidentAnalyst::usage_since($since) === $before, 'Tokens on a free (local) model do not');
 PluginBootstraps::load();
 $counters = new ReflectionProperty('CostGuard', 'usage_counters');
-$counters->setAccessible(true);
 check(isset($counters->getValue()['incident_analysis']), 'The counter is registered with CostGuard');
 
 harness_finish();

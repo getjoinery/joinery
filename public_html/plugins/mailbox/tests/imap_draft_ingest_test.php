@@ -83,7 +83,6 @@ class ImapDraftIngestTest {
 
 	private function isDraft($data): bool {
 		$m = new ReflectionMethod('ImapIngestor', 'isSourceDraft');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $data);
 	}
 
@@ -117,7 +116,6 @@ class ImapDraftIngestTest {
 		section('the poll fetch asks for FLAGS, so no second round trip is needed');
 		$client = new DraftCapturingImapClient();
 		$m = new ReflectionMethod('ImapIngestor', 'fetchWindow');
-		$m->setAccessible(true);
 		$m->invoke($this->ingestor, $client, 'INBOX', 1, 50);
 
 		check($client->lastQuery instanceof Horde_Imap_Client_Fetch_Query,

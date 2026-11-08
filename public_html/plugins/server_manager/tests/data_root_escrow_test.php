@@ -443,7 +443,6 @@ $key_b = base64_encode(random_bytes(32));
 $sent = ManagementJob::createFromBuild($node->key, 'data_root_recipient',
 	array('primitive' => 'data_root_recipient', 'params' => array('public_key' => $key_a)), null, null);
 $recent = new ReflectionMethod('DataRootEscrowSync', 'recipient_sent_recently');
-$recent->setAccessible(true);
 check($recent->invoke(null, $node, $key_a) && !$recent->invoke(null, $node, $key_b),
 	'A recipient sent within the hour holds back only that key again; a rotated key goes at once (B35)');
 // A server made here, sealed to this node's key at its install, is sent the
@@ -540,7 +539,6 @@ check($inc === null, 'A node that is not locked opens none');
 // The next probe after an unlock is not locked: a failure ends the locked state and counts toward down.
 require_once(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUptimeChecks.php'));
 $apply_state = new ReflectionMethod('RunNodeUptimeChecks', 'apply_state');
-$apply_state->setAccessible(true);
 $apply_state->invoke(new RunNodeUptimeChecks(), $locked_node, false, 'HTTP 500');
 check($locked_node->get('mgn_uptime_last_status') === 'up' && !$locked_node->get('mgn_uptime_locked_since')
 	&& (int)$locked_node->get('mgn_uptime_consecutive_failures') === 1

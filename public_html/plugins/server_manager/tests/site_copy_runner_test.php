@@ -390,7 +390,6 @@ $wp15_r = SiteCopyRunner::source_root_keys($wp15_n);
 check($wp15_r['known'] === true && count($wp15_r['keys']) === 2 && $wp15_r['keys'][1]['carry'] === false,
 	'the report is read back with each key\'s fingerprint and whether it can be carried');
 $wp15_carry = new ReflectionMethod('SiteCopyRunner', 'carried_key_lines');
-$wp15_carry->setAccessible(true);
 check($wp15_carry->invoke(null, $wp15_n, array()) === '', 'unticked: nothing is carried');
 check($wp15_carry->invoke(null, $wp15_n, array('carry_root_keys' => true, 'key_fingerprints' => $wp15_fp1)) === 'ssh-ed25519 AAAAC3Nza me',
 	'ticked with the fingerprints shown: the bare key is carried, the restricted one is not');
@@ -754,7 +753,6 @@ section('The release a copy installs is asked of the site itself (B48)');
 // status check; a copy started then installed the old release. This site's
 // own pages answer with its release, under a URL that is not this node's own.
 $confirm = new ReflectionMethod('SiteCopyRunner', 'confirm_source_release');
-$confirm->setAccessible(true);
 $here = trim((string)LibraryFunctions::get_joinery_version());
 $stale = $mk_node('stale', array('mgn_site_url' => rtrim((string)LibraryFunctions::get_absolute_url(), '/') . '/login',
 	'mgn_joinery_version' => '0.8.400'));
@@ -790,7 +788,6 @@ $cs_src = $mk_node('cssrc', array_merge($source_cols, array('mgn_host' => '192.0
 	'mgn_mgh_managed_host_id' => (int)$cs_mgh->key, 'mgn_web_root' => '/var/www/html/csite/public_html',
 	'mgn_site_url' => 'https://csite.example.org', 'mgn_agent_public_key' => base64_encode(random_bytes(32)))));
 $run_steps = new ReflectionMethod('SiteCopyRunner', 'run_steps');
-$run_steps->setAccessible(true);
 $label = function (array $steps) {
 	return array_map(function ($s) { return $s['op'] . (($s['arg'] ?? '') !== '' ? ':' . $s['arg'] : '') . '/' . $s['on']; }, $steps);
 };
@@ -806,7 +803,6 @@ $threw = '';
 try { JobCommandBuilder::build_site_certificate_stage($cs_host, 'csite', 'stage', 'csite.example.org'); } catch (Exception $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'cannot hand a site its certificate') !== false, 'a host agent without the word is told so, not sent it', $threw);
 $preflight = new ReflectionMethod('SiteCopyRunner', 'host_word_refusals');
-$preflight->setAccessible(true);
 $why = implode(' | ', $preflight->invoke(null, new SiteCopy(NULL), $cs_src));
 check(strpos($why, 'site_certificate_stage') !== false || strpos($why, 'newer agent') !== false,
 	'and the preflight refuses a running container\'s copy until its host can carry the certificate', $why);

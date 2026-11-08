@@ -72,7 +72,6 @@ class FlgRouter extends InboundEmailRouter {
 	/** buildForwardMessage is private by design; the test reaches it to prove the stamp. */
 	public function build($raw, $domain, $to) {
 		$m = new ReflectionMethod(InboundEmailRouter::class, 'buildForwardMessage');
-		$m->setAccessible(true);
 		return $m->invoke($this, $raw, $this->parseEmail($raw), $domain, $to);
 	}
 }

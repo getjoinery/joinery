@@ -416,7 +416,6 @@ try {
 	$file0 = new File(intval($part0->get('ima_fil_file_id')), TRUE);
 	VaultUnlock::loadConsumerBootstraps();
 	$resolve = new ReflectionMethod('File', 'resolve_decrypt_hook');
-	$resolve->setAccessible(true);
 	$hook = $resolve->invoke(null, $file0->get('fil_source'));
 	$stored = (string)$file0->read_bytes('original');
 	$served = $hook ? call_user_func($hook, $stored, $file0) : null;

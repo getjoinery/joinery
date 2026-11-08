@@ -124,7 +124,6 @@ harness_register_row('iia_inbound_imap_accounts', 'iia_inbound_imap_account_id',
 $promote = function (int $message_id) use ($account) {
 	$ingestor = new ImapIngestor(new InboundImapAccount((int)$account->key, TRUE));
 	$m = new ReflectionMethod(ImapIngestor::class, 'markDirectionOutbound');
-	$m->setAccessible(true);
 	$m->invoke($ingestor, $message_id);
 };
 

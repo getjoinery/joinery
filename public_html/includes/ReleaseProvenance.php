@@ -86,7 +86,6 @@ class ReleaseProvenance {
 		));
 		$body = curl_exec($curl);
 		$err  = curl_error($curl);
-		curl_close($curl);
 		if ($body === false || $err !== '') {
 			return array('version' => '', 'error' => 'Could not reach ' . $source . ': ' . $err);
 		}

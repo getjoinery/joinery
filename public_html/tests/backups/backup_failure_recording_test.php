@@ -38,7 +38,6 @@ $new_running_row = function () {
 };
 
 $fail = new ReflectionMethod('BackupRunner', 'fail');
-$fail->setAccessible(true);
 
 // Kill this process's own backend, the way a PostgreSQL restart does. The
 // statement that does it cannot return, so its error is the expected outcome.

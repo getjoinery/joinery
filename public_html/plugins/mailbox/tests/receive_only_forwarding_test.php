@@ -247,7 +247,6 @@ try {
 	$pull_router = new RofRouter();
 	(new ReflectionProperty(RelaySpoolConsumer::class, 'router'))->setValue($consumer, $pull_router);
 	$ingest = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestOne');
-	$ingest->setAccessible(true);
 	$stage_entry = function (string $recipient, string $raw) use ($stage, $kp): array {
 		$id = (string)hrtime(true) . '-' . bin2hex(random_bytes(4));
 		file_put_contents($stage . '/' . $id . '.seal', (new SealedBox())->sealDek($raw, $kp['public']));
@@ -276,7 +275,6 @@ try {
 	foreach (array('relay' => new MailboxRelay(NULL), 'transport_public_key' => $kp['public'],
 			'settings' => Globalvars::get_instance()) as $prop => $val) {
 		$p = new ReflectionProperty('RelayMapExporter', $prop);
-		$p->setAccessible(true);
 		$p->setValue($exporter, $val);
 	}
 	$frag = json_decode($exporter->build()['fragment'], true);

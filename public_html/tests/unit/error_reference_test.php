@@ -166,7 +166,6 @@ check($notice->report_link_html() === '', 'A success message gets no link');
 section('An exception escaping a logic action');
 
 $safe = new ReflectionMethod('ApiLogicEndpoint', 'userSafeMessage');
-$safe->setAccessible(true);
 harness_set_setting_mem('show_errors', '0');
 check($safe->invoke(null, new RuntimeException('SQLSTATE[42P01]: relation "x" does not exist'), 'Something went wrong while doing that.')
 		=== 'Something went wrong while doing that.',
@@ -181,7 +180,6 @@ check($safe->invoke(null, new RuntimeException('raw detail'), 'generic') === 'ra
 	'A site that shows errors shows the raw text');
 
 $record = new ReflectionMethod('ApiLogicEndpoint', 'recordException');
-$record->setAccessible(true);
 ErrorReference::reset();
 $record->invoke(null, new SystemDisplayableErrorNoLog('expected refusal'));
 check(ErrorReference::current() === null, 'An expected (NoLog) refusal is not recorded');

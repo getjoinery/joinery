@@ -173,7 +173,6 @@ class BackupFetch {
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$errno  = curl_errno($ch);
 		$err    = curl_error($ch);
-		curl_close($ch);
 		fclose($fh);
 
 		if ($overran || $errno === CURLE_FILESIZE_EXCEEDED) {

@@ -76,7 +76,6 @@ ok('every declared profile answers private', !in_array(false, array_map(function
 ok('BlobStorageProfile is declared', in_array('BlobStorageProfile', $declared, true));
 
 $register = new ReflectionMethod('StorageProfileRegistry', '_load_and_register');
-$register->setAccessible(true);
 $register->invoke(null, $pub_cls, $tmp . '/' . $pub_cls . '.php');
 $register->invoke(null, $priv_cls, $tmp . '/' . $priv_cls . '.php');
 $now = array_map('get_class', StorageProfileRegistry::all());

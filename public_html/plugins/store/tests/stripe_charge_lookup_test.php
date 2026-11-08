@@ -37,7 +37,6 @@ function scl_helper($client, bool $test_mode): StripeHelper {
 	$helper = new StripeHelper();
 	$helper->test_mode = $test_mode;
 	$prop = new ReflectionProperty('StripeHelper', 'stripe');
-	$prop->setAccessible(true);
 	$prop->setValue($helper, $client);
 	return $helper;
 }

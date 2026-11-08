@@ -38,7 +38,6 @@ class ProvisioningRefusedTestChecks {
 
 function provisioning_refused_run($method, $plugin = 'office_editor', array $extra = array('fixed_by_installer' => true)) {
 	$run = new ReflectionMethod('PluginProvisioning', 'runOne');
-	$run->setAccessible(true);
 	return $run->invoke(null, $plugin, array_merge(array(
 		'key' => 'editor_installed',
 		'label' => 'Document editor installed on this server',

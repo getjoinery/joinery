@@ -258,7 +258,6 @@ class ReleaseNotesDrafter {
 		));
 		$body = curl_exec($curl);
 		$err = curl_error($curl);
-		curl_close($curl);
 		if ($body === false || $err !== '') {
 			throw new ReleaseNotesDrafterException('Could not reach the upgrade source ' . $source . ': ' . $err);
 		}

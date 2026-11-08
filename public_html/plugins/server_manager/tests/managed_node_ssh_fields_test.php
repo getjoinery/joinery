@@ -15,6 +15,7 @@
  * every save, and InstallJobExecutor before any step. These checks pin the one
  * definition both read (specs/shell_command_audit.md U2).
  *
+ * @version 1.1 - fixture names carry the HarnessTest prefix
  * @version 1.0
  */
 
@@ -40,7 +41,7 @@ foreach (array('', '-oProxyCommand=id', 'host;id', 'a b.example.com', 'bad_host.
 section('prepare() refuses a row that would hand ssh an option');
 $node = new ManagedNode(NULL);
 $node->set('mgn_slug', 'ssh-fields-' . bin2hex(random_bytes(3)));
-$node->set('mgn_name', 'ssh fields test');
+$node->set('mgn_name', 'HarnessTest ssh fields');
 $node->set('mgn_host', '203.0.113.9');
 $node->set('mgn_ssh_user', '-oProxyCommand=id>/tmp/p');
 $refused = '';
@@ -67,7 +68,7 @@ check($refused !== '' && stripos($refused, 'SSH host') !== false,
 // server) gets the column's default, root, on insert; prepare() lets it by.
 $bare = new ManagedNode(NULL);
 $bare->set('mgn_slug', 'ssh-fields-' . bin2hex(random_bytes(3)));
-$bare->set('mgn_name', 'ssh fields test');
+$bare->set('mgn_name', 'HarnessTest ssh fields');
 $bare->set('mgn_host', '203.0.113.9');
 $refused = '';
 try {

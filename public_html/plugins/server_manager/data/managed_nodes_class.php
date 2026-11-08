@@ -1081,7 +1081,6 @@ class ManagedNode extends SystemBase {
 			},
 		]);
 		curl_exec($ch);
-		curl_close($ch);
 		return $version;
 	}
 

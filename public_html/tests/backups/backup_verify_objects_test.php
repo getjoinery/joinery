@@ -120,7 +120,6 @@ $plan['objects'] = true; $plan['objects_source'] = 'listing';
 $base = 'joinery-backups/' . $slug . '/manager/';
 
 $execute_chain = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute_chain->setAccessible(true);
 $run = function () use ($execute_chain, $plan) {
 	$history = new BackupHistory(NULL);
 	$history->set('bkh_type', 'project'); $history->set('bkh_outcome', 'running');

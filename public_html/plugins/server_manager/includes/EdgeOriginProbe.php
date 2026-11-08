@@ -212,7 +212,6 @@ class EdgeOriginProbe {
 					$certs[$i] = self::certificate_of($ch);
 				}
 				curl_multi_remove_handle($mh, $ch);
-				curl_close($ch);
 			}
 			curl_multi_close($mh);
 			$rounds++;

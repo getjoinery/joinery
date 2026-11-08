@@ -106,7 +106,6 @@ check(!isset(DriveHelper::file_export($mail)['open_with']), 'a file another feat
 check(!isset(DriveHelper::file_export($docx, null, null, null, false)['open_with']), 'the bulk sync export (no urls) carries no openers');
 
 $prop = new ReflectionProperty('ApiAuth', 'current_api_key');
-$prop->setAccessible(true);
 $prop->setValue(null, array('apk_api_key_id' => -1));
 try {
 	check(!isset(DriveHelper::file_export($docx)['open_with']), 'an API-key caller (sync client, app) gets no openers');

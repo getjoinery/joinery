@@ -145,7 +145,6 @@ class MdwWatch extends ManagedDomainWatch {
 	/** Run the private orphan sweep and report how many alerts it decided on. */
 	public function sweep(): int {
 		$m = new ReflectionMethod('ManagedDomainWatch', 'sweep_unclaimed_domain_lines');
-		$m->setAccessible(true);
 		return (int)$m->invoke($this);
 	}
 	/** Record the alert instead of mailing it. */
@@ -159,7 +158,6 @@ class MdwWatch extends ManagedDomainWatch {
 	/** Run the private per-row converge check. */
 	public function converge($row): int {
 		$m = new ReflectionMethod('ManagedDomainWatch', 'converge_notice');
-		$m->setAccessible(true);
 		return (int)$m->invoke($this, $row);
 	}
 }
@@ -212,7 +210,6 @@ function mdw_params(array $job): array {
 /** Run the private per-row watcher, capturing what it pushed. */
 function mdw_watch(MdwWatch $watch, $row) {
 	$method = new ReflectionMethod('ManagedDomainWatch', 'watch');
-	$method->setAccessible(true);
 	$result = $method->invoke($watch, $row);
 	$row->load();
 	return $result;
@@ -348,7 +345,6 @@ $watch = new MdwWatch($registrar);
 $untouched = mdw_row($buyer, $node, 'mdw-untouched-' . $suffix . '.com', '+300 days',
 	RegisteredDomain::GRAD_OPERATOR);
 $custody = new ReflectionMethod('ManagedDomainWatch', 'check_custody');
-$custody->setAccessible(true);
 check($custody->invoke($watch, $untouched) === 0, 'a domain nobody asked to move is not checked');
 $untouched->load();
 check($untouched->get('rdm_graduation_state') === RegisteredDomain::GRAD_OPERATOR,
@@ -402,7 +398,6 @@ $registrar = new MdwFakeRegistrar();
 $registrar->expiry = gmdate('Y-m-d H:i:s', strtotime('+400 days'));
 $watch = new MdwWatch($registrar);
 $refresh = new ReflectionMethod('ManagedDomainWatch', 'refresh_expiry');
-$refresh->setAccessible(true);
 
 $fresh = mdw_row($buyer, $node, 'mdw-fresh-' . $suffix . '.com', '+300 days',
 	RegisteredDomain::GRAD_OPERATOR);

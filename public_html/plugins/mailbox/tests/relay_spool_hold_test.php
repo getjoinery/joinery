@@ -194,7 +194,6 @@ class RelaySpoolHoldTest {
 
 	private function testDirectNeedsNoMeta() {
 		$direct = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestDirect');
-		$direct->setAccessible(true);
 
 		// A .direct is self-describing: with the sidecar gone (older ack deleted
 		// it), classification still runs off the container.

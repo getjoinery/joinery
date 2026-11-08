@@ -30,7 +30,6 @@ harness_boot();
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 
 $discard = new ReflectionMethod('BackupRunner', 'discard_failed_run');
-$discard->setAccessible(true);
 
 $dir = sys_get_temp_dir() . '/jy_failed_run_cleanup_' . getmypid();
 @mkdir($dir, 0700, true);

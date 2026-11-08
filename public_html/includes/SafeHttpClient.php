@@ -229,7 +229,6 @@ class SafeHttpClient {
 		$errno  = curl_errno($ch);
 		$error  = curl_error($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-		curl_close($ch);
 
 		if ($overflowed) {
 			throw new SafeHttpException('Response exceeded ' . $max_bytes . ' bytes; transfer aborted.');

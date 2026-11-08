@@ -91,13 +91,11 @@ class ImapSeedScopeGuardTest {
 	private function guard(int $uid, ?string $rawDate, string $cutoff = self::CUTOFF,
 			int $seedHigh = self::SEED_HIGH): bool {
 		$m = new ReflectionMethod(ImapIngestor::class, 'outOfScopeForBackfill');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $uid, new ScopeGuardFetchData($rawDate), $cutoff, $seedHigh);
 	}
 
 	private function searchSeek(ScopeGuardImapClient $client, int $highUid): ?array {
 		$m = new ReflectionMethod(ImapIngestor::class, 'seekCursorBySearch');
-		$m->setAccessible(true);
 		return $m->invoke($this->ingestor, $client, 'INBOX', self::CUTOFF, $highUid);
 	}
 

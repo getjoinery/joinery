@@ -30,14 +30,12 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailDirectHand
 /** Call MailDirectHandler's private static parseHeaderPart. */
 function parse_header(string $block, DirectEnvelope $envelope): array {
 	$m = new ReflectionMethod('MailDirectHandler', 'parseHeaderPart');
-	$m->setAccessible(true);
 	return $m->invoke(null, $block, $envelope);
 }
 
 /** Call MailDirectHandler's private static assemble. */
 function assemble_parts(DirectEnvelope $envelope, array $parts): array {
 	$m = new ReflectionMethod('MailDirectHandler', 'assemble');
-	$m->setAccessible(true);
 	return $m->invoke(null, $envelope, $parts, null);
 }
 

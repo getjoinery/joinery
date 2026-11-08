@@ -784,7 +784,6 @@ class ReleaseVerifier {
 			CURLOPT_TIMEOUT => 600, CURLOPT_SSL_VERIFYPEER => true, CURLOPT_FAILONERROR => false));
 		curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-		curl_close($ch);
 		fclose($fh);
 		return $status;
 	}

@@ -216,7 +216,6 @@ class NodeHealthProbe {
 		$errno   = curl_errno($ch);
 		$errmsg  = curl_error($ch);
 		$status  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		$target = $url_host !== '' ? $url_host : $health_url;
 

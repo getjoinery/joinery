@@ -170,7 +170,6 @@ class ServiceClient {
 		$out = curl_exec($ch);
 		$err = curl_error($ch);
 		$http = intval(curl_getinfo($ch, CURLINFO_RESPONSE_CODE));
-		curl_close($ch);
 		return array('body' => $out, 'http' => $http, 'error' => (string)$err);
 	}
 }

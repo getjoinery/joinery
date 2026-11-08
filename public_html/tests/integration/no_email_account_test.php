@@ -67,7 +67,6 @@ if (class_exists('StripeHelper')) {
 	};
 	$helper = new StripeHelper();
 	$prop = new ReflectionProperty('StripeHelper', 'stripe');
-	$prop->setAccessible(true);
 	$prop->setValue($helper, $fake);
 
 	$found = $helper->get_customer($user, 'id');
@@ -90,7 +89,6 @@ $security_src = file_get_contents(PathHelper::getIncludePath('logic/security_log
 check(strpos($security_src, "setLabel((string)(\$user->get('usr_email') ?: \$user->get('usr_username')))") !== false,
 	'the authenticator label falls back to the username');
 $name = (new ReflectionMethod('PasskeyService', '_userName'));
-$name->setAccessible(true);
 check($name->invoke(new PasskeyService(), $user) === $handle, 'the passkey name is the username', (string)$name->invoke(new PasskeyService(), $user));
 
 section('Checkout asks a signed-in buyer with no email to add one');

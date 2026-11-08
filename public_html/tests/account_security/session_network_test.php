@@ -20,7 +20,6 @@ harness_boot();
 
 $control = (new ReflectionClass('SessionControl'))->newInstanceWithoutConstructor();
 $is_change = new ReflectionMethod('SessionControl', '_is_major_ip_change');
-$is_change->setAccessible(true);
 $changed = function (string $stored, string $current) use ($control, $is_change): bool {
 	return (bool)$is_change->invoke($control, $stored, $current);
 };
@@ -45,7 +44,6 @@ check(!$changed('', '203.0.113.7') && !$changed('garbage', '2001:db8::1'), 'noth
 
 section('one stored address per family');
 $stored_for = new ReflectionMethod('SessionControl', '_stored_address_for');
-$stored_for->setAccessible(true);
 $session_before = $_SESSION ?? array();
 $_SESSION = array('ip_address' => '203.0.113.7');
 check($stored_for->invoke($control, '203.0.9.9') === '203.0.113.7', 'a request of the sign-in family is compared with the sign-in address');
@@ -66,7 +64,6 @@ $_SESSION = $session_before;
 section('the address the check reads');
 $server_before = $_SERVER;
 $client = new ReflectionMethod('SessionControl', '_get_client_ip');
-$client->setAccessible(true);
 
 $_SERVER['REMOTE_ADDR'] = '198.51.100.5';
 $_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.7';

@@ -203,7 +203,6 @@ section('Actions a user triggers are POSTs, not links');
 // the browser perform.
 $page = new AdminPage();
 $reflect = new ReflectionMethod('PublicPageBase', 'renderActionEntry');
-$reflect->setAccessible(true);
 
 $button = $reflect->invoke($page, 'Soft Delete', array(
 	'post'   => '/admin/admin_post',
@@ -536,7 +535,6 @@ section('An action without a descriptor fails loud');
 require_once(PathHelper::getIncludePath('includes/ApiLogicEndpoint.php'));
 
 $resolve = new ReflectionMethod('ApiLogicEndpoint', 'resolveMeta');
-$resolve->setAccessible(true);
 check($resolve->invoke(null, 'no_such_action_at_all_zz') === null,
 	'an action with no descriptor resolves to no metadata');
 

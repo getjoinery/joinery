@@ -207,7 +207,6 @@ DbConnector::get_instance()->get_db_link()->prepare(
 	'UPDATE mgn_managed_nodes SET mgn_delete_time = now() WHERE mgn_managed_node_id = ?')->execute(array($old_site->key));
 
 $advance = new ReflectionMethod('ProvisionManagedDomains', 'advance');
-$advance->setAccessible(true);
 $stage = new ProvisionManagedDomains();
 check($advance->invoke($stage, nr_fresh($stranded)) === 1, 'the stage takes one step: parking it');
 $s = nr_fresh($stranded);
@@ -231,7 +230,6 @@ check(nr_fresh($s)->get('rdm_status') === RegisteredDomain::STATUS_FAILED, 'retr
 section('The domain watch sends a removed node no notice');
 
 $converge = new ReflectionMethod('ManagedDomainWatch', 'converge_notice');
-$converge->setAccessible(true);
 check($converge->invoke(new ManagedDomainWatch(), nr_fresh($active)) === 0, 'nothing moves for the removed site\'s active domain');
 $notice = DbConnector::get_instance()->get_db_link()->prepare(
 	"SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'managed_domain_notice'");

@@ -175,7 +175,6 @@ class HardeningImapServer implements ImapClient {
 		$want = null;
 		if ($query instanceof Horde_Imap_Client_Search_Query) {
 			$prop = new ReflectionProperty('Horde_Imap_Client_Search_Query', '_search');
-			$prop->setAccessible(true);
 			foreach ((array)($prop->getValue($query)['header'] ?? array()) as $h) {
 				if (strtoupper($h['header']) === 'MESSAGE-ID') { $want = $h['text']; }
 			}
@@ -366,7 +365,6 @@ class ImapHardeningTest {
 	private function testCertificateVerification() {
 		section('F1: the server certificate is verified against the host name');
 		$m = new ReflectionMethod('ImapIngestor', 'connectionParams');
-		$m->setAccessible(true);
 		$p = $m->invoke(null, array('host' => 'imap.example.com', 'connect' => '203.0.113.9'), 'me@example.com', 'ssl', 993);
 		$ssl = $p['context']['ssl'] ?? array();
 		check(($ssl['verify_peer'] ?? null) === true, 'the peer certificate is verified');
@@ -690,7 +688,6 @@ class ImapHardeningTest {
 		section('F14: a feed that keeps failing is polled less often');
 		$fx = $this->fixture(array('iia_poll_interval_seconds' => 300));
 		$claim = new ReflectionMethod('PollImapAccounts', 'claim');
-		$claim->setAccessible(true);
 		$task = new PollImapAccounts();
 		$at = function (int $failures, int $ago) use ($fx, $claim, $task) {
 			$this->exec("UPDATE iia_inbound_imap_accounts SET iia_consecutive_failures = ?, iia_last_poll_time = now() - (? * interval '1 second') WHERE iia_inbound_imap_account_id = ?",

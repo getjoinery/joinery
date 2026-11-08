@@ -140,9 +140,7 @@ $plan = $make_plan($slug);
 $base = 'joinery-backups/' . $slug . '/manager/';
 
 $execute_chain = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute_chain->setAccessible(true);
 $execute_full = new ReflectionMethod('BackupRunner', 'execute_full');
-$execute_full->setAccessible(true);
 $run = function (array $p, $full = false) use ($execute_chain, $execute_full) {
 	$history = new BackupHistory(NULL);
 	$history->set('bkh_type', $p['type']);

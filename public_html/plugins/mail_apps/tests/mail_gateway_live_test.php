@@ -168,7 +168,6 @@ $http = function (string $path, array $hdrs, string $json = '{}') use ($host) {
 	curl_setopt($ch, CURLOPT_URL, 'https://' . $host . $path);
 	$body = curl_exec($ch);
 	$code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
 	return array($code, (string)$body);
 };
 list($code, $body) = $http('/api/v1/action/password_reset_passkey_options', array('X-Joinery-App-Secret: x'));

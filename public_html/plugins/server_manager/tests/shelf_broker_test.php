@@ -136,7 +136,6 @@ $perform = function (string $method, string $url, $body = null) {
 	$raw = (string)curl_exec($ch);
 	$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 	$hsize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-	curl_close($ch);
 	$headers = substr($raw, 0, $hsize);
 	$etag = preg_match('/^ETag:\s*(.+)$/mi', $headers, $m) ? trim($m[1]) : '';
 	return array('status' => $status, 'body' => substr($raw, $hsize), 'etag' => $etag);

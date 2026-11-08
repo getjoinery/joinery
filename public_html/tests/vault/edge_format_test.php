@@ -34,7 +34,6 @@ $crypto = new VaultCrypto();
 /** Call a private SealedBox helper that takes fixed randomness (the vector's only use for it). */
 function ef_private(string $method, array $args) {
 	$m = new ReflectionMethod('SealedBox', $method);
-	$m->setAccessible(true);
 	return $m->invokeArgs(null, $args);
 }
 

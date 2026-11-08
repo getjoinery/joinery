@@ -165,7 +165,6 @@ $raw_row = function (int $id) use ($db) {
 section('MailboxSender::parseAddressList keeps names and refuses junk');
 
 $parse = new ReflectionMethod('MailboxSender', 'parseAddressList');
-$parse->setAccessible(true);
 $sender = (new ReflectionClass('MailboxSender'))->newInstanceWithoutConstructor();
 $typed = function ($raw) use ($parse, $sender) { return $parse->invoke($sender, $raw); };
 
@@ -271,7 +270,6 @@ $envelope = DirectEnvelope::fromVerified(array(
 	'nonce' => 'abcdef0123456789abcdef0123456789', 'timestamp' => '2026-09-14 10:00:00',
 ));
 $parse = new ReflectionMethod('MailDirectHandler', 'parseHeaderPart');
-$parse->setAccessible(true);
 $meta = $parse->invoke(null, $header_block, $envelope);
 check(($meta['to'] ?? '') === '"Bob" <bob@x.test>, carol@x.test' && ($meta['cc'] ?? '') === '"Dan, Jr." <dan@x.test>',
 	'the receiver reads both lists back into meta', json_encode(array($meta['to'] ?? null, $meta['cc'] ?? null)));

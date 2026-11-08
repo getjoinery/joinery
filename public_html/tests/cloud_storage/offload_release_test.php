@@ -70,7 +70,6 @@ harness_defer(function () use (&$temp_paths) { foreach ($temp_paths as $p) { if 
 $dblink = DbConnector::get_instance()->get_db_link();
 $profile  = new BlobStorageProfile();
 $sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
-$sync_row->setAccessible(true);
 
 /** A real private blob row with local bytes in the restricted directory. */
 $make_blob = function ($tag, $bytes) use (&$temp_paths, $restricted_dir) {

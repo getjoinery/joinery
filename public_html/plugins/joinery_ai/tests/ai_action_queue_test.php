@@ -470,7 +470,6 @@ if ($aq_window_capable) {
 		'a tool\'s own refusal shows without its tool-name prefix', json_encode($card['result']));
 	check($card['can_approve'] === true, 'a failed sealed action can be tried again');
 	$failure_line = new ReflectionMethod('ActionQueue', 'failureLine');
-	$failure_line->setAccessible(true);
 	check($failure_line->invoke(null, 'SealedContentEgressException: Refusing to write sealed-derived content into cal_entries.')
 			=== 'It hit an internal error before it could finish.',
 		'an unexpected exception shows as a plain internal error, not its class and message');

@@ -92,7 +92,6 @@ $history->save();
 harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $history->key);
 
 $execute = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute->setAccessible(true);
 $error = null;
 try {
 	$execute->invoke(null, $plan, $history);
@@ -107,7 +106,6 @@ check(scandir($plan['output_dir']) === $before, 'nothing was written: no chain d
 // The throw is what run() records through fail(); the recording itself is
 // pinned in backup_failure_recording_test.php.
 $fail = new ReflectionMethod('BackupRunner', 'fail');
-$fail->setAccessible(true);
 $fail->invoke(null, $history, $error);
 $reread = new BackupHistory((int)$history->key, TRUE);
 check($reread->get('bkh_outcome') === 'failed' && strpos((string)$reread->get('bkh_message'), 'is free') !== false,

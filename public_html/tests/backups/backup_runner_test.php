@@ -406,7 +406,6 @@ $cc_row('2026-08-30 04:45:00', $cc_chain, 0);
 $cc_row('2026-08-30 23:20:00', null, 0);          // the standalone whole-site run, newer
 
 $cc_call = new ReflectionMethod('BackupRunner', 'current_chain');
-$cc_call->setAccessible(true);
 list($cc_id, $cc_found) = $cc_call->invoke(null, $cc_plan);
 check($cc_id === $cc_chain,
 	'the newest CHAIN run names the chain to extend, not the newest run of any kind', var_export($cc_id, true));

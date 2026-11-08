@@ -82,7 +82,6 @@ try {
 
 	section('A table that already exists is a note, not a change');
 	$create = new ReflectionMethod('DatabaseUpdater', 'createTableIfMissing');
-	$create->setAccessible(true);
 	$r = $create->invoke($updater, 'SchemaFactsStub', LibraryFunctions::get_tables_and_columns(), $dblink);
 	check(in_array('Table zz_schema_facts_test already exists', $r['notes'] ?? array(), true),
 		'a verbose run notes that the table already exists', json_encode($r));
@@ -106,7 +105,6 @@ try {
 	section('A column added is a message; that its NOT NULL comes later is a note');
 	$dblink->exec("ALTER TABLE zz_schema_facts_test DROP COLUMN zsf_name");
 	$add = new ReflectionMethod('DatabaseUpdater', 'addMissingColumns');
-	$add->setAccessible(true);
 	$r = $add->invoke($updater, 'SchemaFactsStub', LibraryFunctions::get_tables_and_columns(), $dblink);
 	$messages = implode("\n", $r['messages'] ?? array());
 	check(strpos($messages, 'Added column: zz_schema_facts_test.zsf_name') !== false, 'the column added is a message', $messages);

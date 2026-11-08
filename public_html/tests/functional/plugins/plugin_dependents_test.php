@@ -31,7 +31,6 @@ harness_boot();
 
 $pm = PluginManager::getInstance();
 $get_dependents = new ReflectionMethod($pm, 'getDependents');
-$get_dependents->setAccessible(true);
 
 // What the manifests say: dependency name => [dependent => active?].
 $declared = array();

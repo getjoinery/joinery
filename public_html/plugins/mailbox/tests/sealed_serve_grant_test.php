@@ -314,7 +314,6 @@ $inline_part = new class {
 $router = new InboundEmailRouter();
 $ingestor = new ImapIngestor(new InboundImapAccount((int)$account->key, TRUE));
 $m = new ReflectionMethod(ImapIngestor::class, 'ingestOneStored');
-$m->setAccessible(true);
 $res = $m->invoke($ingestor, $folder_all, 900, $fetch_data, $router,
 	new InboundEmailAlias((int)$alias->key, TRUE), new InboundEmailDomain((int)$domain->key, TRUE),
 	strtolower($alias_addr), 7, false,

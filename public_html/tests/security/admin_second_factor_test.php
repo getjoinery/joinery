@@ -81,7 +81,6 @@ $evil = AdminSecondFactorNotice::forState(array(array('id' => 5, 'name' => '<b>x
 check(strpos($evil, '<b>x</b>') === false && strpos($evil, '&lt;b&gt;') !== false, 'names are escaped');
 
 $ref = new ReflectionMethod('AdminNotices', 'coreRenderers');
-$ref->setAccessible(true);
 $core = $ref->invoke(null);
 check(isset($core['second_factor']) && $core['second_factor'] === array('AdminSecondFactorNotice', 'render'), 'registered as a core notice');
 

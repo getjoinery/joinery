@@ -127,7 +127,6 @@ $plan_on = function (BackupTarget $t) use (&$base_plan) {
 };
 
 $execute_chain = new ReflectionMethod('BackupRunner', 'execute_chain');
-$execute_chain->setAccessible(true);
 // What BackupRunner::run() records before the engine starts.
 $run = function (array $p) use ($execute_chain) {
 	$history = new BackupHistory(NULL);

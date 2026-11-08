@@ -180,7 +180,6 @@ $ghost->set('ssr_locator', 'zz_never_created_' . bin2hex(random_bytes(3)) . '.se
 $ghost->set('ssr_enumerator', '');
 $ghost->set('ssr_source', '');
 $inspect = new ReflectionMethod('SecretReconciler', 'inspect_category');
-$inspect->setAccessible(true);
 // Inside a transaction, any statement that errors aborts it and the next one
 // fails: a healthy transaction afterwards means no query hit the missing table.
 $dblink->beginTransaction();

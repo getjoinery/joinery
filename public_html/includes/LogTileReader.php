@@ -149,7 +149,6 @@ class LogTileReader {
 		$body = curl_exec($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		$error = curl_error($ch);
-		curl_close($ch);
 		if ($body === false) {
 			throw new TransparencyProofException("could not fetch {$url}: {$error}");
 		}

@@ -236,7 +236,6 @@ class SiteEnginePublisher {
 		));
 		$ok = curl_exec($ch);
 		$err = curl_error($ch);
-		curl_close($ch);
 		fclose($fh);
 		if (!$ok) {
 			throw new Exception('could not fetch ' . $url . ': ' . $err);

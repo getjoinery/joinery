@@ -1521,7 +1521,6 @@ class DeploymentHelper {
         $success = curl_exec($ch);
         $error = curl_error($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         fclose($fp);
 
         if (!$success || $http_code !== 200) {
