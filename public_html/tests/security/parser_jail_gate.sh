@@ -39,6 +39,10 @@ chk "no supplementary groups" "$("$LAUNCHER" -- /usr/bin/id -G | wc -w)" "1"
 chk "environment is scrubbed" "$(SECRET=x "$LAUNCHER" -- /usr/bin/env | grep -c '^SECRET=')" "0"
 chk "stdin reaches the command" "$(printf 'hello' | "$LAUNCHER" -- /bin/cat)" "hello"
 chk "exit code passes through" "$("$LAUNCHER" -- /bin/sh -c 'exit 7'; echo $?)" "7"
+# A descriptor the caller left open (a web worker's file, session or socket)
+# stays outside the fence, and keeping it out leaves the launcher running.
+chk "an inherited descriptor does not reach the command" \
+    "$("$LAUNCHER" -- /usr/bin/php -r 'echo @fopen("php://fd/9", "r") ? "leaked" : "kept out";' 9</etc/hostname)" "kept out"
 
 echo "== what the command cannot do =="
 # No box has a world-writable tree any more, the developer's included

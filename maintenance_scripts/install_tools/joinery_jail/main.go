@@ -28,6 +28,9 @@
 // environment is discarded and replaced: a setuid binary that honours the
 // caller's environment is a privilege bug waiting for a library that reads one.
 //
+// Version 1.0.3 - inherited descriptors above 2 are marked close-on-exec, never closed: closing
+// them by number closed the Go runtime's own poller descriptor and every run died (netpoll failed).
+//
 // Version 1.0.2 - the whole fence is built on ONE OS thread. Unshare, NO_NEW_PRIVS
 // and the seccomp filter are all per-thread, and the Go scheduler moves a
 // goroutine between threads between any two calls: the filter then met a
@@ -200,9 +203,13 @@ func dropTo(uid, gid int) {
 
 // ---- stage 1: the supervisor -------------------------------------------------
 
-// closeInheritedDescriptors closes every descriptor above 2 this process was
-// started with, so none of them reaches the fenced child. It walks
-// /proc/self/fd and closes by number, skipping the directory handle itself.
+// closeInheritedDescriptors marks every descriptor above 2 close-on-exec, so
+// none of them reaches the fenced child: the kernel closes them at the exec in
+// ForkExec. It never closes one here. The Go runtime holds descriptors of its
+// own in this process (its poller's epoll and wake-up descriptors), and
+// closing those by number killed the runtime (epollwait on a closed fd,
+// fatal error: netpoll failed) before the child ever ran. The runtime opens
+// its own close-on-exec already, so marking them changes nothing for it.
 func closeInheritedDescriptors() {
 	d, err := os.Open("/proc/self/fd")
 	if err != nil {
@@ -219,7 +226,10 @@ func closeInheritedDescriptors() {
 		if convErr != nil || fd <= 2 || fd == self {
 			continue
 		}
-		_ = syscall.Close(fd)
+		if _, _, errno := syscall.RawSyscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, syscall.FD_CLOEXEC); errno != 0 && errno != syscall.EBADF {
+			d.Close()
+			fail(exitUsage, "cannot keep descriptor %d from the fenced child: %v", fd, errno)
+		}
 	}
 	d.Close()
 }
