@@ -6,6 +6,9 @@
 # the site's code check, whether the container carries the converger's cron
 # entry and has cron running, and the last N lines of its converger log.
 #
+# Version: 1.2 - a container made before the state volume is read through its running root
+#                (/proc/PID/root/var/lib/joinery/sites/SITE, no link on the way), where its
+#                converger keeps the record, stamp and log since install_host_converger 1.9.
 # Version: 1.1 - reads the converger's last run, stamp and log from the site's state volume
 #                (SITE_state at /var/lib/joinery/sites, _site_run_spec.sh 1.19), where root keeps them;
 #                a container made before that volume falls back to cache/ and logs/.
@@ -116,6 +119,20 @@ CONFIG_DIR="$(volume_dir config)"
 STATE_DIR="$(volume_dir state /var/lib/joinery/sites)"
 if [[ -n "$STATE_DIR" ]]; then
     if [[ -d "$STATE_DIR/$SITE" && ! -L "$STATE_DIR/$SITE" ]]; then STATE_DIR="$STATE_DIR/$SITE"; else STATE_DIR=""; fi
+elif [[ -n "$PID" && "$STATE" == "running" ]]; then
+    # A container made before the state volume keeps the folder in its own
+    # filesystem, read through /proc/PID/root as the cron entry is. No step of
+    # the path may be a link: the container's root could point one anywhere on
+    # this host.
+    # (JOINERY_SITE_CONVERGER_PROC stands in for /proc for the gate, only when not root.)
+    proc=/proc
+    [[ "$(id -u)" != "0" && -n "${JOINERY_SITE_CONVERGER_PROC:-}" ]] && proc="${JOINERY_SITE_CONVERGER_PROC%/}"
+    d="${proc}/${PID}/root"
+    for part in var lib joinery sites "$SITE"; do
+        d="$d/$part"
+        [[ -d "$d" && ! -L "$d" ]] || { d=""; break; }
+    done
+    STATE_DIR="$d"
 fi
 
 # A file of the site's that may be read: a regular file, not a link.

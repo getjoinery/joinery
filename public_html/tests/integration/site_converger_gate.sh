@@ -10,7 +10,8 @@
 # site_converger.sh (the site_converger observe word) driven against a stub
 # container engine whose site mounts temporary volumes: it names only a
 # container whose SITENAME is its name, reads the last-run record, the stamp,
-# the code check and the converger log from the site's own volumes, refuses
+# the code check and the converger log from the site's own volumes (a
+# container made before the state volume, from its own root), refuses
 # a link the site planted in any of them, never reads a bind mount, clamps
 # the line count, keeps every key when a fact cannot be read, and carries a
 # hostile log line as valid JSON.
@@ -135,6 +136,27 @@ STUB_STATE_SRC="$SD" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
 chk "a site folder in the state volume that is a link is not entered" "$(grep -c 1999999999 "$T/o.json")" "0"
 STUB_STATE_SRC="$T/bind" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
 chk "a state mount outside the engine's volume shape is not read" "$(grep -c 1999999999 "$T/o.json")/$(grep -c 'state line' "$T/o.json")" "0/0"
+
+echo "== a container made before the state volume is read through its own root =="
+mv "$T/state.real" "$T/state.back"
+PR="$T/proc"; CR="$PR/$SLEEPER/root/var/lib/joinery/sites"
+mkdir -p "$CR/siteone"
+echo '1793080000 converged' > "$CR/siteone/host_converger.last"
+echo 'ghi789' > "$CR/siteone/host_converger.stamp"
+for i in 1 2; do echo "root line $i"; done > "$CR/siteone/host_converger.log"
+JOINERY_SITE_CONVERGER_PROC="$PR" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "the last run is the container's own record" "$(jv "$T/o.json" last_run.at_unix)" "1793080000"
+chk "the stamp is the container's" "$(jv "$T/o.json" stamp_present)" "true"
+chk "the log is the container's" "$(jv "$T/o.json" log.lines_returned)|$(php -r '$o=json_decode(file_get_contents($argv[1]),true); echo end($o["log"]["lines"]);' "$T/o.json")" "2|root line 2"
+STUB_STATE_SRC="$SD" JOINERY_SITE_CONVERGER_PROC="$PR" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "a state volume wins over the container's root" "$(grep -c 'root line' "$T/o.json")" "0"
+mv "$CR/siteone" "$T/croot.real"; ln -s "$T/elsewhere/st" "$CR/siteone"
+JOINERY_SITE_CONVERGER_PROC="$PR" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "a site folder in the container's root that is a link is not entered" "$(grep -c 1999999999 "$T/o.json")" "0"
+rm "$CR/siteone"; mv "$T/croot.real" "$CR/siteone"
+mv "$PR/$SLEEPER/root/var/lib" "$T/lib.real"; ln -s "$T/lib.real" "$PR/$SLEEPER/root/var/lib"
+JOINERY_SITE_CONVERGER_PROC="$PR" bash "$SCRIPT" siteone 5 > "$T/o.json" 2>/dev/null
+chk "a link higher on the path is not entered" "$(grep -c 'root line' "$T/o.json")/$(grep -c 1793080000 "$T/o.json")" "0/0"
 
 echo "== a fact that cannot be read keeps its key =="
 rm -rf "$V/siteone_cache"
