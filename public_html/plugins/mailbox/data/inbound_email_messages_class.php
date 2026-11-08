@@ -106,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.51 - indexes for the Fortress raise backlog (rows by mailbox and domain not yet on the mail key)
+ *                and the lowering's settle backlog (rows by owner with an attachment manifest)
  * @version 1.50 - $read_permission = 10: reading another person's message is the reader's all-access level (mail_access_hardening WP0)
  * @version 1.49 - ai_travel_filter(): an agent or chat read keeps to each domain's AI consent
  * @version 1.48 - access_owner_is(): a message is its mailbox's grant holders' and its sealed owner's (a draft its author's),
@@ -702,6 +704,19 @@ class InboundEmailMessage extends SystemBase {
 		array('columns' => array('iem_sealed_owner_user_id', 'iem_iea_inbound_email_alias_id',
 			'iem_ied_inbound_email_domain_id'),
 			'where' => '(iem_content_sealed = true OR iem_pending_parse = true) AND iem_delete_time IS NULL'),
+		// Rows not yet on the mail key, by mailbox and domain: the Fortress
+		// raise backlog (MailboxFortressLevel), asked on every vault heartbeat.
+		// Looked up only for the user's Fortress mailboxes, whose rows are on
+		// the mail key once raised, so the probe finds nothing in a few index
+		// pages where reading the mailbox itself is the whole mailbox.
+		array('columns' => array('iem_iea_inbound_email_alias_id', 'iem_ied_inbound_email_domain_id'),
+			'where' => "iem_pending_parse = false AND (iem_sealed_key IS NULL OR NOT iem_sealed_key LIKE '"
+				. self::MAIL_KEY_LIKE . "%')"),
+		// Rows with an attachment manifest, by owner: only Fortress mail has
+		// one, and a lowered row keeps it until it settles (MailboxFortressLevel's
+		// settle backlog, asked on every vault heartbeat).
+		array('columns' => array('iem_sealed_owner_user_id'),
+			'where' => "iem_attachment_manifest IS NOT NULL AND iem_attachment_manifest <> ''"),
 		// Rows with something to teach (SpamLearning): a handful in a whole
 		// mailbox, looked up by owner on every vault heartbeat.
 		array('columns' => array('iem_sealed_owner_user_id'),

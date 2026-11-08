@@ -31,6 +31,9 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.6 - the backlog reads only the user's Fortress mailboxes, found first in the alias and domain
+ *                tables: with none, no message is read (the heartbeat asks on every beat); the settle
+ *                backlog reads by the model's manifest index
  * @version 1.5 - attachment rows are marked ima_inline_by_body: decided by the body they were written with (B5)
  * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3 - a raw reset to inline forgets its file store and key; the stored raw is deleted by its descriptor
@@ -63,12 +66,20 @@ class MailboxFortressLevel {
 	 * old owner's key; only that owner's window opens them), and not failed
 	 * within RAISE_RETRY_SECONDS. What is left over is what the receipt reports
 	 * as not moved.
+	 *
+	 * Null when $user_id has no Fortress mailbox (fortressScopeSql()): there is
+	 * no backlog, and the message table is not read to learn it.
 	 */
-	private static function backlogWhere(int $domain_id, bool $ready = false): string {
+	private static function backlogWhere(int $user_id, int $domain_id, bool $ready = false): ?string {
+		$scope = self::fortressScopeSql($user_id, $domain_id);
+		if ($scope === null) {
+			return null;
+		}
 		return "FROM iem_inbound_email_messages m
 			LEFT JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = m.iem_iea_inbound_email_alias_id
 			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = m.iem_ied_inbound_email_domain_id
-			WHERE " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_FORTRESS . "'
+			WHERE " . $scope . "
+			  AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_FORTRESS . "'
 			  AND m.iem_pending_parse = false
 			  AND (m.iem_sealed_key IS NULL OR NOT " . InboundEmailMessage::mailKeySql('m.iem_sealed_key') . ")
 			  AND (m.iem_iea_inbound_email_alias_id IN
@@ -82,24 +93,73 @@ class MailboxFortressLevel {
 	}
 
 	/**
+	 * Where $user_id's Fortress mail can be, as a condition on the message
+	 * row: the Fortress mailboxes granted to them, and the Fortress domains
+	 * they own (for mail kept for no mailbox). Read from the alias and domain
+	 * tables, a few rows each, so the message query reads only those mailboxes'
+	 * rows (by the index the model declares for this backlog) and a user with
+	 * none never reads the message table at all. A mailbox's level here falls
+	 * back to its own domain's; backlogWhere() still applies the full level
+	 * test against the message's domain, which is the same domain (a message
+	 * takes its mailbox's). Null when there is nowhere.
+	 */
+	private static function fortressScopeSql(int $user_id, int $domain_id): ?string {
+		if ($user_id <= 0) {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$fortress = InboundEmailAlias::effectiveLevelSql('a', 'd') . " = '" . InboundEmailDomain::LEVEL_FORTRESS . "'";
+		$one_domain = $domain_id > 0 ? ' AND d.ied_inbound_email_domain_id = ' . intval($domain_id) : '';
+
+		$stmt = $db->prepare('SELECT a.iea_inbound_email_alias_id FROM iea_inbound_email_aliases a
+			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
+			WHERE ' . $fortress . '
+			  AND a.iea_inbound_email_alias_id IN
+			      (SELECT ieg_iea_inbound_email_alias_id FROM ieg_inbound_email_mailbox_grants WHERE ieg_usr_user_id = :uid)'
+			. $one_domain);
+		$stmt->execute(array(':uid' => $user_id));
+		$alias_ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+		// No mailbox: the level is the domain's alone, which is what the level
+		// expression gives for an alias that is not there.
+		$stmt = $db->prepare('SELECT d.ied_inbound_email_domain_id FROM ied_inbound_email_domains d
+			LEFT JOIN iea_inbound_email_aliases a ON false
+			WHERE ' . $fortress . ' AND d.ied_owner_usr_user_id = :uid' . $one_domain);
+		$stmt->execute(array(':uid' => $user_id));
+		$domain_ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+		$where = array();
+		if ($alias_ids) {
+			$where[] = 'm.iem_iea_inbound_email_alias_id IN (' . implode(',', $alias_ids) . ')';
+		}
+		if ($domain_ids) {
+			$where[] = '(m.iem_iea_inbound_email_alias_id IS NULL AND m.iem_ied_inbound_email_domain_id IN ('
+				. implode(',', $domain_ids) . '))';
+		}
+		return $where ? '(' . implode(' OR ', $where) . ')' : null;
+	}
+
+	/**
 	 * How many of $user_id's messages are still waiting to move to their device
 	 * key; with $ready, only those a pass can take now (backlogWhere()).
 	 */
 	public static function backlogCount(int $user_id, int $domain_id = 0, bool $ready = false): int {
-		if ($user_id <= 0) {
+		$where = self::backlogWhere($user_id, $domain_id, $ready);
+		if ($where === null) {
 			return 0;
 		}
-		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT COUNT(*) ' . self::backlogWhere($domain_id, $ready));
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT COUNT(*) ' . $where);
 		$stmt->execute(array(':uid' => $user_id));
 		return intval($stmt->fetchColumn());
 	}
 
 	/** The deferred-work predicate: one indexed probe. */
 	public static function hasRaiseWork(int $user_id): bool {
-		if ($user_id <= 0) {
+		$where = self::backlogWhere($user_id, 0, true);
+		if ($where === null) {
 			return false;
 		}
-		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT 1 ' . self::backlogWhere(0, true) . ' LIMIT 1');
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT 1 ' . $where . ' LIMIT 1');
 		$stmt->execute(array(':uid' => $user_id));
 		return (bool)$stmt->fetchColumn();
 	}
@@ -124,8 +184,12 @@ class MailboxFortressLevel {
 
 	/** The raise's pending rows: those a pass can take now (backlogWhere(ready)). */
 	public static function raiseCandidates(int $user_id, int $limit): array {
+		$where = self::backlogWhere($user_id, 0, true);
+		if ($where === null) {
+			return array();
+		}
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT m.iem_inbound_email_message_id '
-			. self::backlogWhere(0, true) . ' ORDER BY m.iem_inbound_email_message_id LIMIT ' . intval($limit));
+			. $where . ' ORDER BY m.iem_inbound_email_message_id LIMIT ' . intval($limit));
 		$stmt->execute(array(':uid' => $user_id));
 		return $stmt->fetchAll(PDO::FETCH_COLUMN);
 	}
