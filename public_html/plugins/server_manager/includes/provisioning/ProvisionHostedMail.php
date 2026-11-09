@@ -47,6 +47,8 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.7 - a test site's mail goes to its plane's trap (server_manager_test_site_mail_trap), sent with
+ *   its credential and confirmed by the site before the leg is done
  * @version 1.6 - the subaccount gets its own webhook (Smtp2GoLeg::ensureWebhook)
  * @version 1.5 - the sending domain is the site's own domain (Smtp2GoLeg 1.4, B165)
  * @version 1.4 - the subaccount is created at the allowance, with no buyer email (B160)
@@ -376,6 +378,14 @@ class ProvisionHostedMail {
 			return 0;
 		}
 		if ($job && (string)$job->get('mjb_status') === 'completed') {
+			if (self::trap_of_job($job) !== '' && strpos(self::output_of_job($job), 'test_trap=on') === false) {
+				// The site took a credential and did not say its mail is
+				// trapped: a rehearsal that may now email the people it names.
+				$this->fail_leg($provision, 'The site took its mail settings but did not confirm that its mail goes to '
+					. self::trap_of_job($job) . ' (job #' . $job->key . '). Check Email test mode on the site '
+					. 'before anything there sends mail.');
+				return 1;
+			}
 			$provision->set('cvp_mail_state', 'done');
 			$provision->set('cvp_mail_error', null);
 			$provision->save();
@@ -472,7 +482,8 @@ class ProvisionHostedMail {
 			// The same values a services tenant is handed back in its enrol
 			// response; here they travel to the node's own settings script.
 			$built = JobCommandBuilder::build_hosted_mail_settings($node,
-				Smtp2GoLeg::sendValues($username, $password, $sender));
+				Smtp2GoLeg::sendValues($username, $password, $sender)
+					+ array('test_recipient' => self::test_trap($provision)));
 		} catch (Throwable $e) {
 			$this->note_transient($provision, 'Cannot push mail settings — ' . $e->getMessage());
 			return false;
@@ -485,6 +496,33 @@ class ProvisionHostedMail {
 	}
 
 	// ── Shared ────────────────────────────────────────────────────────────────
+
+	/**
+	 * Where a test site's mail goes: this plane's trap address when the
+	 * provision's server is in a test cloud account of ours (the account Discard
+	 * test site works on), else ''. A site built to rehearse a purchase then
+	 * sends every email there, through its email test mode, and nobody it names
+	 * hears from it.
+	 */
+	public static function test_trap($provision): string {
+		$trap = trim((string)Globalvars::get_instance()->get_setting('server_manager_test_site_mail_trap', false, true));
+		if ($trap === '' || !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
+			return '';
+		}
+		return TestSiteDiscard::test_account($provision) !== null ? $trap : '';
+	}
+
+	/** The trap a settings job carried, or ''. */
+	private static function trap_of_job($job): string {
+		$raw = $job->get('mjb_commands');
+		$decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+		return is_array($decoded) ? trim((string)($decoded['params']['test_recipient'] ?? '')) : '';
+	}
+
+	/** What the node answered, as stored: the script's lines are in it whatever the envelope. */
+	private static function output_of_job($job): string {
+		return (string)($job->get('mjb_output') ?: '');
+	}
 
 	/** The monthly send allowance every hosted subaccount is capped at. */
 	public static function send_allowance(): int {

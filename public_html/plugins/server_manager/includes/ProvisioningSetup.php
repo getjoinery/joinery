@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.14 - hostedStatus() carries test_site_mail_trap
  * @version 1.13 - hostedStatus() carries smtp2go_check_error: why the master key's permissions could not be read
  * @version 1.12 - hostedStatus() reads the SMTP2GO master key's missing permissions; a key missing one is not ready (B179)
  * @version 1.11 - the service user is a machine account: made with usr_is_machine, and an existing or adopted
@@ -566,6 +567,7 @@ class ProvisioningSetup {
 			// Why the permissions could not be read: SMTP2GO's refusal; '' when the call answered.
 			'smtp2go_check_error'   => $smtp2go_check_error,
 			'smtp2go_sandbox_users' => in_array(trim(self::readSetting('server_manager_smtp2go_sandbox_users')), array('', '0'), true) === false,
+			'test_site_mail_trap'   => trim(self::readSetting('server_manager_test_site_mail_trap')),
 			'webhook_present'       => trim(self::readSecret('server_manager_smtp2go_webhook_secret')) !== '',
 			'send_allowance'        => self::readSetting('server_manager_hosted_send_allowance'),
 			'shelf_allowance_gb'    => self::readSetting('server_manager_hosted_shelf_allowance_gb'),

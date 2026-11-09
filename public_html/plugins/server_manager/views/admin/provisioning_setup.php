@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.12 - the Hosted tier asks where test sites' mail goes
  * @version 2.11 - the webhook secret's help says every customer subaccount gets its own webhook carrying it
  * @version 2.10 - the webhook secret help names the webhook's URL; the
  *   SMTP2GO key's check sits beside its field, one line per permission group, as on the payments page;
@@ -524,6 +525,12 @@ $fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this 
 	['checked' => $hosted['smtp2go_sandbox_users'],
 	 'helptext' => 'Every customer SMTP user is created in SMTP2GO\'s sandbox status: accepted and counted, never '
 		. 'delivered. For a rehearsal plane. Leave off where real customers are hosted.']);
+$fw_hosted->textinput('test_site_mail_trap', 'Test sites\' mail goes to',
+	['value' => $hosted['test_site_mail_trap'],
+	 'helptext' => 'An address of ours, such as a mailbox on this site. A site whose server is in a test cloud account '
+		. 'sends every email to it, with the people it was meant for in the subject, so a rehearsal can read its mail '
+		. 'and mails nobody else. It reaches the site with its mail settings, so it applies to test sites built after it is set. '
+		. 'Empty: a test site mails the people it names.']);
 $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
 	'stored' => $hosted['webhook_present'],
 	'helptext' => 'Any long random value. Each customer\'s subaccount is given its own webhook to '

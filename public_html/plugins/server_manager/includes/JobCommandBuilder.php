@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.162 - hosted_mail_settings carries a test site's trap (test_recipient), only to agent 1.118.0+
  * @version 1.161 - this site's own publish is offered and built only where it publishes releases (SmPublishing)
  * @version 1.160 - log_table_tail takes event and hours (agent 1.113.0, sent only to agents that have them), up to
  *   LOG_EVENT_MAX_COUNT rows for an event read (specs/agent_event_log_filter.md)
@@ -6024,8 +6025,23 @@ class JobCommandBuilder {
 		if (preg_match('/[^\x20-\x7e]/', $password)) {
 			throw new Exception('A mail password is printable text on one line.');
 		}
+		$trap = trim((string)($params['test_recipient'] ?? ''));
+		if ($trap !== '' && !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
+			throw new Exception("The test site's mail trap '{$trap}' is not an address.");
+		}
+		// An agent refuses a key it does not declare, so the trap travels only
+		// when there is one, and only to an agent that takes it. A test site
+		// whose agent does not is refused here rather than given a credential
+		// that would mail the people its rehearsal names.
+		if ($trap !== '') {
+			$agent = AgentVocabulary::version($node);
+			if ($agent === '' || version_compare($agent, self::HOSTED_MAIL_TRAP_AGENT, '<')) {
+				throw new Exception("This test site's agent (" . ($agent !== '' ? $agent : 'version unknown') . ') cannot be told to send '
+					. 'its mail to ' . $trap . '; it needs ' . self::HOSTED_MAIL_TRAP_AGENT . ' or later. Apply an update to it.');
+			}
+		}
 
-		return ['primitive' => 'hosted_mail_settings', 'params' => [
+		$out = ['primitive' => 'hosted_mail_settings', 'params' => [
 			'service'  => $service,
 			'host'     => $host,
 			'port'     => $port,
@@ -6035,7 +6051,14 @@ class JobCommandBuilder {
 			'helo'     => strtolower(trim((string)($params['helo'] ?? ''))),
 			'hostname' => strtolower(trim((string)($params['hostname'] ?? ''))),
 		]];
+		if ($trap !== '') {
+			$out['params']['test_recipient'] = $trap;
+		}
+		return $out;
 	}
+
+	/** The first agent whose hosted_mail_settings takes a test site's trap. */
+	const HOSTED_MAIL_TRAP_AGENT = '1.118.0';
 
 	/**
 	 * Set the five hosting-banner facts on a site this operator hosts.

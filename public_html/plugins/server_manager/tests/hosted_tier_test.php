@@ -29,6 +29,8 @@
  *  - **A converge carries only what the node declared it accepts.** The
  *    builder's bound is the shape; the ALLOWLIST is the node's own
  *    declarations, and the plane deliberately keeps no second copy of it.
+ *  - **A test site mails only us.** Its trap travels with its credential, only
+ *    to an agent that takes it, and the site writes it before the credential.
  *
  * Everything runs inside one transaction that is rolled back, so no fixture
  * row is ever visible to the live provisioning worker.
@@ -318,6 +320,57 @@ check($cleared['params']['service'] === '' && $cleared['params']['host'] === '',
 	'an empty mail push is well-formed — that is how a credential is retired');
 $silent = JobCommandBuilder::build_hosted_plan_notice($node, array('state' => ''));
 check($silent['params']['state'] === '', 'and an empty state is what renders no banner at all');
+
+// ---------------------------------------------------------------------------
+section('A test site\'s mail goes to one address of ours');
+
+// The trap is the ninth value, for a site built in a test cloud account. An
+// agent refuses a key it does not declare, so it travels only when there is
+// one, and only to an agent that takes it: a real site's push is unchanged.
+check(!array_key_exists('test_recipient', $mail_built['params']),
+	'a push with no trap carries the eight values it always has');
+$trap_node = ht_node('httest-trap-' . $suffix);
+$trap_node->set('mgn_agent_version', JobCommandBuilder::HOSTED_MAIL_TRAP_AGENT);
+$trap_node->save();
+$trapped = JobCommandBuilder::build_hosted_mail_settings($trap_node, array(
+	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525,
+	'test_recipient' => 'joineryemailtests@dev.getjoinery.com'));
+check(($trapped['params']['test_recipient'] ?? '') === 'joineryemailtests@dev.getjoinery.com',
+	'an agent that takes it is sent the trap with the credential');
+$err = null;
+try {
+	JobCommandBuilder::build_hosted_mail_settings($node, array(
+		'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'test_recipient' => 'joineryemailtests@dev.getjoinery.com'));
+} catch (Exception $e) { $err = $e->getMessage(); }
+check($err !== null && strpos($err, JobCommandBuilder::HOSTED_MAIL_TRAP_AGENT) !== false,
+	'an older agent is refused rather than given a credential that would mail the people a rehearsal names', (string)$err);
+$err = null;
+try {
+	JobCommandBuilder::build_hosted_mail_settings($trap_node, array('service' => 'smtp', 'host' => 'mail.smtp2go.com',
+		'test_recipient' => "a@example.com\nBcc: b@example.com"));
+} catch (Exception $e) { $err = $e->getMessage(); }
+check($err !== null, 'a trap that is not one address is refused', (string)$err);
+
+// The site writes it: test mode on, to the trap. An empty one writes nothing,
+// because test mode is also a switch an owner may set for themselves.
+$was_mode = Globalvars::get_instance()->get_setting('email_test_mode', false, true);
+Setting::put('email_test_mode', '');
+Globalvars::get_instance()->forget_setting('email_test_mode');
+check(HostedMailSettingsMap::testTrap('') === array()
+	&& (string)Globalvars::get_instance()->get_setting('email_test_mode', false, true) === '',
+	'an empty trap leaves the site\'s test mode alone');
+$names = HostedMailSettingsMap::testTrap('joineryemailtests@dev.getjoinery.com');
+check($names === array('email_test_recipient', 'email_test_mode')
+	&& (string)Globalvars::get_instance()->get_setting('email_test_mode', false, true) === '1'
+	&& (string)Globalvars::get_instance()->get_setting('email_test_recipient', false, true) === 'joineryemailtests@dev.getjoinery.com',
+	'a trap turns on test mode, to that address', implode(',', $names));
+$script_src = file_get_contents(PathHelper::getIncludePath('utils/hosted_mail_settings.php'));
+check(strpos($script_src, 'testTrap') !== false
+	&& strpos($script_src, 'testTrap') < strpos($script_src, 'HostedMailSettingsMap::apply($values)'),
+	'the node-side script writes the trap before the credential');
+check(strpos($script_src, 'test_trap=on') !== false, 'and says so, for the plane to read');
+Setting::put('email_test_mode', (string)$was_mode);
+Globalvars::get_instance()->forget_setting('email_test_mode');
 
 // ---------------------------------------------------------------------------
 section('The node-side scripts own the names, and refuse what they do not know');

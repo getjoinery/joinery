@@ -23,11 +23,14 @@
  *    closed again.
  *
  *  - refused for a live-payment order, and when another site's domain sits
- *    under its own; the Docker host's node goes before the site's;
+ *    under its own, and when its box is on the Main side of the dashboard;
+ *    the Docker host's node goes before the site's;
  *  - the subscription is cancelled on the test side, and the line stamped
  *    cancelled when the provider's part did not; a subaccount SMTP2GO no
  *    longer lists counts as gone.
  *
+ * @version 1.2 - a test site's mail trap follows the same account (ProvisionHostedMail::test_trap)
+ * @version 1.1 - fixture boxes are on the Test side; a Main-side box is refused
  * @version 1.0
  */
 
@@ -126,11 +129,12 @@ check((bool)$test_account->get('oca_is_test'), 'the fixture account is flagged t
 
 $node = function (string $name, string $slug, int $host_id = 0) use (&$tsd_rows) {
 	$n = new ManagedNode(NULL);
-	$n->set('mgn_name', $name);
+	$n->set('mgn_name', 'HarnessTest ' . $name);
 	$n->set('mgn_slug', $slug);
 	$n->set('mgn_host', '192.0.2.60');
 	$n->set('mgn_ssh_user', 'root');
 	$n->set('mgn_enabled', true);
+	$n->set('mgn_cloud_account', CloudAccounts::TEST);
 	if ($host_id) { $n->set('mgn_mgh_managed_host_id', $host_id); }
 	$n->save();
 	$n->load();
@@ -165,6 +169,7 @@ $site = function (string $label, bool $test_mode = true) use ($node, $uid, $tag,
 	$host->set('mgh_host', '192.0.2.60');
 	$host->set('mgh_mgn_managed_node_id', $agent->key);
 	$host->set('mgh_provisioning_enabled', true);
+	$host->set('mgh_cloud_account', CloudAccounts::TEST);
 	$host->save();
 	$host->load();
 	$tsd_rows[] = array('mgh_managed_hosts', 'mgh_managed_host_id', (int)$host->key);
@@ -232,6 +237,33 @@ list($live) = $site('live1', false);
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $live->key);
 $why = TestSiteDiscard::refusal($live);
 check(TestSiteDiscard::offered($live) && strpos($why, 'live payment') !== false, 'a site bought with a live payment is refused, whatever account it is in', $why);
+
+// A record whose node is a main-side box (dev's own getjoinery.com record
+// pointed at its Getjoinery node): its server is not at the test account, so
+// it would read as gone and the box would be removed from the dashboard.
+$host->set('mgh_cloud_account', CloudAccounts::MAIN);
+$host->save();
+$why = TestSiteDiscard::refusal($p);
+check(strpos($why, 'Main side') !== false, 'a site whose box is on the Main side of the dashboard is refused', $why);
+$host->set('mgh_cloud_account', CloudAccounts::TEST);
+$host->save();
+
+// The same account decides where a test site's mail goes (ProvisionHostedMail).
+$was_trap = Globalvars::get_instance()->get_setting('server_manager_test_site_mail_trap', false, true);
+Setting::put('server_manager_test_site_mail_trap', '');
+Globalvars::get_instance()->forget_setting('server_manager_test_site_mail_trap');
+$no_trap = ProvisionHostedMail::test_trap($p);
+Setting::put('server_manager_test_site_mail_trap', 'joineryemailtests@dev.getjoinery.com');
+Globalvars::get_instance()->forget_setting('server_manager_test_site_mail_trap');
+$trap = ProvisionHostedMail::test_trap($p);
+$p->set('cvp_hosting_mode', 'customer');
+$customer_trap = ProvisionHostedMail::test_trap($p);
+$p->set('cvp_hosting_mode', 'operator');
+Setting::put('server_manager_test_site_mail_trap', (string)$was_trap);
+Globalvars::get_instance()->forget_setting('server_manager_test_site_mail_trap');
+check($no_trap === '' && $trap === 'joineryemailtests@dev.getjoinery.com' && $customer_trap === '',
+	'a test site\'s mail goes to the plane\'s trap when one is set, and a site in a customer\'s account is never trapped',
+	json_encode(array($no_trap, $trap, $customer_trap)));
 
 list($ordered) = TestSiteDiscard::nodes($p);
 check(count($ordered) === 2 && (int)$ordered[0]->key === (int)$agent->key && (int)$ordered[1]->key === (int)$site_node->key,

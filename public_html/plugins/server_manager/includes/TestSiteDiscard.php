@@ -40,8 +40,11 @@
  * it from age, and this is a person choosing one site to delete.
  *
  * Refused for a site bought with a live payment, whichever account its server
- * is in: that is a customer, not a test.
+ * is in: that is a customer, not a test. Refused too when a box it would
+ * remove is on the Main side of the dashboard: the provision's account and the
+ * dashboard's record must agree that the site is a test one.
  *
+ * @version 1.2 - refused when a box it would remove is on the Main side
  * @version 1.1 - each node removal is reported before the notes it caused
  * @version 1.0
  */
@@ -91,6 +94,14 @@ class TestSiteDiscard {
 			return 'Its server also hosts ' . implode(', ', $others) . ', which this would delete with it.';
 		}
 		foreach ($nodes as $node) {
+			// The provision's account says where its server was made; the
+			// dashboard's own record of the box must agree. A record pointing
+			// at a main-side box (the management node itself, say) would have
+			// its server reported gone at the test account and then the box
+			// removed from the dashboard.
+			if (CloudAccounts::of_node($node) !== CloudAccounts::TEST) {
+				return $node->get('mgn_name') . ' is on the Main side of the dashboard, not the Test side, so it is not a test site.';
+			}
 			$why = NodeRemoval::copy_refusal($node);
 			if ($why !== '') {
 				return $why;

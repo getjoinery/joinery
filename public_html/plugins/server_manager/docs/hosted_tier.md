@@ -141,7 +141,7 @@ than pretending otherwise.
    is accepted and counted but never delivered, so a site built to prove the
    pipeline can email nobody. Its username and password are the
    only credential that reaches the box, handed over by the
-   `hosted_mail_settings` primitive — which carries nine *values* whose setting
+   `hosted_mail_settings` primitive — which carries *values* whose setting
    names live in a script on the node, so this management node cannot name a
    setting on any site it manages. The password is not stored here: a
    replacement is one call away, which is a better property than a copy in this
@@ -151,6 +151,20 @@ than pretending otherwise.
    its owner account (`HostedMailSettingsMap::defaultFrom`), so password resets
    work before the owner reaches the setup wizard's mail step. An address the
    owner already chose is never overwritten.
+
+   **A test site mails only us.** Where the Hosted tier tab names an address
+   for test sites' mail (`server_manager_test_site_mail_trap`), a site whose
+   server is in a test cloud account of ours is sent it with its credential, as
+   the primitive's `test_recipient`. The site writes it first: email test mode
+   on, every message to that address with the people it was meant for in the
+   subject (`HostedMailSettingsMap::testTrap`). The mail travels the real path,
+   subaccount and send count included, and lands in a mailbox we read, such as
+   `joineryemailtests@dev.getjoinery.com` on dev. It is sent only to an agent
+   that takes it (`JobCommandBuilder::HOSTED_MAIL_TRAP_AGENT`); an older one is
+   refused rather than given a credential that would mail the people a
+   rehearsal names, and a site that took the credential without printing
+   `test_trap=on` fails the leg. Every other site is sent no trap, and an empty
+   one writes nothing, so an owner's own test mode is left alone.
 
 The send cap is the provider's own: it counts month-to-date sends against the
 subaccount's limit and refuses past it. Nothing on this platform is in the send

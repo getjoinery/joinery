@@ -77,10 +77,20 @@
  * from whether a username was supplied, because that is not a judgement the
  * wire needs to carry.
  *
+ * A NINTH VALUE, test_recipient, IS FOR TEST SITES ONLY. A plane that builds a
+ * site in a test cloud account to rehearse a purchase sends one of its own
+ * addresses, and every email the site writes goes there instead
+ * (HostedMailSettingsMap::testTrap). It is written FIRST, so the site never
+ * holds a credential it could mail anyone else with. Every other site is sent
+ * it empty, and an empty one writes nothing: unlike the credential, it does not
+ * clear, because test mode is also a switch an owner may set for themselves.
+ *
  * Prints HOSTED_MAIL_SETTINGS=ok with the names written and NEVER a value (one
  * of them is a password, and job output is stored on the management node and
  * read by people). Exits 0 on success, 2 on unusable input, 1 on a failed write.
  *
+ * @version 1.4 - a test site's trap (test_recipient): every email to one address, written before the
+ *   credential; prints test_trap=on
  * @version 1.3 - a site with no From address is given hello@ its sending domain (B166)
  * @version 1.2 - the usage example shows the hosted sending identity (the site's own domain, port 2525)
  * @version 1.1 - the names are HostedMailSettingsMap::MAP, shared with the services enrol path
@@ -148,11 +158,19 @@ $values = array(
 	'helo'     => trim((string)($supplied['helo'] ?? '')),
 	'hostname' => trim((string)($supplied['hostname'] ?? '')),
 );
+$trap = trim((string)($supplied['test_recipient'] ?? ''));
+if ($trap !== '' && !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
+	fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\nThe test trap is not one email address.\n");
+	exit(2);
+}
 
 // The nine writes, smtp_auth derived from whether a username was supplied
 // (authentication is required exactly then; the wire need not carry it).
 try {
-	$written = HostedMailSettingsMap::apply($values);
+	// The trap before the credential: the moment this site can send, a test
+	// site can send only to its plane's mailbox.
+	$trapped = HostedMailSettingsMap::testTrap($trap);
+	$written = array_merge($trapped, HostedMailSettingsMap::apply($values));
 	// A site with no From address yet gets one on the domain it now sends as;
 	// one the owner already chose is left alone (HostedMailSettingsMap::defaultFrom).
 	if ($service !== '') {
@@ -170,4 +188,9 @@ try {
 echo "HOSTED_MAIL_SETTINGS=ok\n";
 echo 'written=' . implode(',', $written) . "\n";
 echo 'service=' . ($service === '' ? '(cleared)' : $service) . "\n";
+if ($trapped) {
+	// The plane reads this: a test site whose mail was not trapped is one it
+	// must not leave able to send.
+	echo "test_trap=on\n";
+}
 exit(0);

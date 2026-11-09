@@ -9,6 +9,7 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.5 - the Hosted tier saves where test sites' mail goes (server_manager_test_site_mail_trap), an address or empty
  * @version 2.4 - where this site does not sell hosting (SmHosting), only the cloud accounts (and the test-account
  *               cleanup where a test account is held): the selling tabs are not shown and their actions refused
  * @version 2.3 - an account is added for its provider (Linode or Hetzner), with the name a provider that names none
@@ -224,6 +225,11 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 			} elseif ($action === 'save_hosted') {
 				ProvisioningSetup::writeSetting('server_manager_smtp2go_sandbox_users',
 					!empty($input['smtp2go_sandbox_users']) ? '1' : '');
+				$trap = trim($input['test_site_mail_trap'] ?? '');
+				if ($trap !== '' && !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
+					throw new Exception('Test sites\' mail goes to: \'' . $trap . '\' is not an email address.');
+				}
+				ProvisioningSetup::writeSetting('server_manager_test_site_mail_trap', $trap);
 				ProvisioningSetup::writeSetting('server_manager_hosted_send_allowance',
 					(string)max(0, (int)($input['send_allowance'] ?? 0)));
 				ProvisioningSetup::writeSetting('server_manager_hosted_shelf_allowance_gb',

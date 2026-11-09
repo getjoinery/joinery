@@ -560,6 +560,10 @@ inbox. Transport rerouting alone is not enough for that: a box running a real
 Postfix delivers "local SMTP" to the internet, and alert mail addresses real
 operators rather than fixture accounts.
 
+A Managed site built in a test cloud account to rehearse a purchase is born in
+test mode: its plane sends the trap with the site's mail credential (the Server
+Manager hosted tier doc, *A test site mails only us*).
+
 **Dry Run:**
 ```php
 email_dry_run = "1"           // Build and validate, never transmit

@@ -1227,7 +1227,7 @@ A provision whose server is in a cloud account of ours flagged test (a test-mode
 - a test-mode order's subscription, cancelled at once in Stripe's test mode (the test charge stays);
 - the site's node, and the node of its Docker host when the server hosts only this site. The provision and its hosted trial go with them; a provision that never got a node is removed with its trial directly.
 
-The safety catch is the test-account cleanup's: the account's company name, read from the provider at the click, must be `Joinery Test disposable`, or nothing is deleted. It is refused for a site bought with a live payment, while the site is still being built, while its server also hosts another site, while another site's domain sits under its own, and while a copy of the site is under way. A server tagged `keep` at the provider is deleted too: the tag spares a server from the nightly cleanup's age limit, not from a person discarding it.
+The safety catch is the test-account cleanup's: the account's company name, read from the provider at the click, must be `Joinery Test disposable`, or nothing is deleted. It is refused for a site bought with a live payment, while the site is still being built, while its server also hosts another site, while another site's domain sits under its own, while a box it would remove is on the Main side of the dashboard, and while a copy of the site is under way. A server tagged `keep` at the provider is deleted too: the tag spares a server from the nightly cleanup's age limit, not from a person discarding it.
 
 The subscription is cancelled on Stripe's test side whichever side the clicking session is on (`TestMode::on_test_side()`). One already cancelled there counts as done, and so does a mail subaccount SMTP2GO no longer lists.
 

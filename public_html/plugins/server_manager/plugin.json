@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.168",
+  "version": "1.30.169",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -486,6 +486,13 @@
       "label": "Sandbox the SMTP users this plane mints",
       "type": "checkbox",
       "helptext": "Every customer SMTP user is created in SMTP2GO's sandbox status: mail through it is accepted and counted but never delivered. For a rehearsal plane, so a site built to prove the pipeline can email nobody. Leave off on a plane that hosts real customers."
+    },
+    {
+      "name": "server_manager_test_site_mail_trap",
+      "default": "",
+      "group": "hosted",
+      "label": "Test sites' mail goes to",
+      "helptext": "An address of ours. A site whose server is in a test cloud account is given it with its mail settings, and sends every email to it (the site's email test mode), with the people it was meant for in the subject. Empty: a test site mails the people it names, like any other."
     },
     {
       "name": "server_manager_smtp2go_webhook_secret",

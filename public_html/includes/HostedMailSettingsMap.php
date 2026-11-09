@@ -17,6 +17,7 @@
  * that boundary matters: a site whose outbound mail can be pointed elsewhere
  * is a site whose password resets can be.
  *
+ * @version 1.2 - testTrap(): a test site sends all its mail to one address of its plane's
  * @version 1.1 - defaultFrom(): a site that has no From address yet gets hello@ its sending
  *   domain, replies to its owner (B166)
  * @version 1.0 - lifted from utils/hosted_mail_settings.php
@@ -116,6 +117,38 @@ class HostedMailSettingsMap {
 			}
 		}
 		return $written;
+	}
+
+	/**
+	 * Send every email this site writes to one address: the site's email test
+	 * mode (EmailSender, QueuedEmail), with the people each was meant for in
+	 * its subject. Returns the names written; empty when no address came.
+	 *
+	 * For a site its plane built in a test cloud account to rehearse a
+	 * purchase. Written BEFORE the credential (the caller's order), so the
+	 * moment this site can send, it can send only here.
+	 *
+	 * AN EMPTY ADDRESS WRITES NOTHING, the opposite of apply(): every other
+	 * site is sent an empty one, and test mode is a switch an owner may have
+	 * set for themselves. A test site is never turned into a real one, so
+	 * nothing here needs to take the trap away.
+	 *
+	 * @throws InvalidArgumentException on a value that is not one address.
+	 */
+	public static function testTrap(string $address): array {
+		$address = trim($address);
+		if ($address === '') {
+			return array();
+		}
+		if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
+			throw new InvalidArgumentException('The test trap is not one email address.');
+		}
+		$settings = Globalvars::get_instance();
+		Setting::put('email_test_recipient', $address);
+		$settings->forget_setting('email_test_recipient');
+		Setting::put('email_test_mode', '1');
+		$settings->forget_setting('email_test_mode');
+		return array('email_test_recipient', 'email_test_mode');
 	}
 
 	/** Clear every setting in the map plus smtp_auth: a dead credential must not linger. */
