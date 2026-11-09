@@ -8,6 +8,7 @@
  * so the session establishment, remember-me cookie, trusted-device cookie, and
  * pending-state teardown are defined once.
  *
+ * @version 1.2 - clears totp_pending_from_cookie with the rest of the pending state
  * @version 1.1 - the stored return is used only when it is a safe local path (SessionControl::is_safe_return)
  */
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
@@ -32,7 +33,8 @@ class Login2fa {
 		}
 
 		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
-			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
+			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires'],
+			$_SESSION['totp_pending_from_cookie']);
 
 		$session->store_session_variables($user);
 		Login::record($user->key, Login::LOGIN_FORM);

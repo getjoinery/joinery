@@ -9,11 +9,12 @@
  * The sign-in second-factor divert, over real HTTP.
  *
  * A browser holding a remember-me cookie for an account that still owes a
- * second factor is sent to /verify-totp until the factor is proved. That divert
- * lives in the session constructor, so it runs on EVERY request — including the
- * requests that exist to satisfy it. A divert that also fires on its own target
- * is an infinite redirect: the browser reports ERR_TOO_MANY_REDIRECTS and the
- * site reads as down while every component of it is healthy.
+ * second factor is sent to /verify-totp when it opens a page that needs a
+ * member (check_permission) or the sign-in form. A public page renders signed
+ * out, as to any visitor: diverting every request kept a remembered visitor
+ * from reading the public site at all. A divert that also fires on its own
+ * target is an infinite redirect: the browser reports ERR_TOO_MANY_REDIRECTS
+ * and the site reads as down while every component of it is healthy.
  *
  * The state is only reachable when a remember-me cookie outlives the
  * trusted-device cookie, because proving the factor normally grants a
@@ -26,7 +27,8 @@
  * little and the loop returns; skip too much and a browser owing a factor
  * wanders the site signed out with nothing ever asking it for the factor.
  *
- * Sections: the divert still fires for an ordinary page; the factor page
+ * Sections: the divert fires for a page that needs a member and for the
+ * sign-in form; a public page renders signed out; the factor page
  * renders instead of diverting to itself; a redirect-following browser arrives
  * rather than looping; the pending state is stashed once; the passkey actions
  * the factor page calls are answered; proving the factor returns to the page
@@ -68,15 +70,34 @@ $user->load();
 $remembered = 'tt=' . $raw_token;
 
 // ---------------------------------------------------------------------------
-section('The divert still fires for an ordinary request');
+section('The divert fires where a member is needed');
 
-$r = harness_request('GET', '/', array('cookies' => $remembered, 'accept' => null));
+$r = harness_request('GET', '/profile/security', array('cookies' => $remembered, 'accept' => null));
 check(in_array($r['status'], array(301, 302, 303), true),
-	'an ordinary page is a redirect for a remembered user owing a factor',
+	'a page that needs a member is a redirect for a remembered user owing a factor',
 	'status ' . $r['status']);
 check(strpos((string)$r['redirect_url'], '/verify-totp') !== false,
-	'the redirect target is the factor page',
+	'the redirect target is the factor page, not the sign-in form',
 	'-> ' . $r['redirect_url']);
+
+$r = harness_request('GET', '/login', array('cookies' => $remembered, 'accept' => null));
+check(strpos((string)$r['redirect_url'], '/verify-totp') !== false,
+	'the sign-in form sends a remembered user to the factor page instead of asking for a password',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
+
+// ---------------------------------------------------------------------------
+section('A public page renders signed out');
+
+// A page anyone may see. A missing page is used because every site has one:
+// it must answer as it would to any visitor (404), not divert.
+$r = harness_request('GET', '/no-such-page-divert-test', array('cookies' => $remembered, 'accept' => null));
+check(strpos((string)$r['redirect_url'], '/verify-totp') === false && $r['status'] === 404,
+	'a public page answers as to any visitor, not with a divert',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
+$r = harness_request('GET', '/api/v1/ping', array('cookies' => $remembered, 'accept' => null));
+check(strpos((string)$r['redirect_url'], '/verify-totp') === false,
+	'an API call is not diverted to an HTML page',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
 
 // ---------------------------------------------------------------------------
 section('The factor page renders instead of diverting to itself');
@@ -94,7 +115,7 @@ section('A browser that follows redirects arrives rather than looping');
 // This is the regression check proper. curl abandons the request once it passes
 // the hop cap, yielding status 0 and an empty body — the loop's exact signature,
 // and what the browser was showing.
-$r = harness_request('GET', '/', array('cookies' => $remembered, 'accept' => null, 'follow' => 5));
+$r = harness_request('GET', '/profile/security', array('cookies' => $remembered, 'accept' => null, 'follow' => 5));
 check($r['status'] === 200,
 	'following the divert reaches a page within the hop limit',
 	'status ' . $r['status'] . ' ' . $r['error']);

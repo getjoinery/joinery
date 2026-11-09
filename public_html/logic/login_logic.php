@@ -204,6 +204,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$_SESSION['totp_pending_remember'] = !empty($input['setcookie']) || !empty($input['lbx_setcookie']);
 			$_SESSION['totp_pending_return']   = $session->get_return();
 			$_SESSION['totp_pending_expires']  = time() + 600;
+			unset($_SESSION['totp_pending_from_cookie']);
 
 			if ($ajax) {
 				return LogicResult::redirect('/verify-totp');
@@ -276,6 +277,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		$alternate_homepage = $settings->get_setting('alternate_loggedin_homepage');
 		return LogicResult::redirect($alternate_homepage ?: '/profile');
+	}
+
+	// A remembered sign-in waiting on its second factor: the form would ask
+	// for a password they already gave once; the factor page finishes it.
+	if (empty($_POST)) {
+		$session->divert_to_pending_factor($session->get_return() ?: null);
 	}
 
 	$email = '';

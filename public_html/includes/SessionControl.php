@@ -110,6 +110,9 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.29 - a remembered sign-in that owes a second factor no longer diverts every page to /verify-totp: a
+ *                public page renders signed out, and only a page that needs a member (check_permission) or the
+ *                sign-in form sends the visitor to prove the factor (divert_to_pending_factor())
  * @version 1.28 - a sign-in remembered by cookie that stops for a second factor returns to the page that was asked
  *                for (pending_return_for_request()), not /profile: the session is new, so no return was saved yet
  * @version 1.27 - sessions start through SessionGuard::start() (unseal_daemon.md C4)
@@ -740,8 +743,10 @@ class SessionControl{
 
 		// 2FA check: if the user holds ANY second factor (TOTP or a step-up-capable
 		// passkey), the cadence asks it at sign-in, and there is no valid
-		// trusted-device cookie, stash a pending state and redirect to /verify-totp
-		// instead of completing the cookie auto-login. Keying on user_has_second_factor
+		// trusted-device cookie, stash a pending state instead of completing the
+		// cookie auto-login. The request then runs signed out: a public page is
+		// shown as to any visitor, and only a page that needs a member (or the
+		// sign-in form) sends them to /verify-totp (divert_to_pending_factor()). Keying on user_has_second_factor
 		// (not has_totp_enabled) closes the passkey-only-account quirk
 		// (specs/mailbox_security_levels.md § 5.4). Leave the 'tt' cookie alone so a
 		// successful factor completes the auto-login.
@@ -760,14 +765,7 @@ class SessionControl{
 				$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
 				$_SESSION['totp_pending_return']   = $this->pending_return_for_request();
 				$_SESSION['totp_pending_expires']  = time() + 600;
-			}
-			// Never divert a request that is already how the factor gets proved, or
-			// how the user backs out of it: sending the factor page to itself is an
-			// infinite redirect, and sending /logout there traps the browser with no
-			// way out. Return not-logged-in and let the request run.
-			if (!self::is_second_factor_handoff()) {
-				header('Location: /verify-totp');
-				exit();
+				$_SESSION['totp_pending_from_cookie'] = true;
 			}
 			return FALSE;
 		}
@@ -775,6 +773,29 @@ class SessionControl{
 		$this->store_session_variables($user_obj);
 		Login::record($user_obj->key, Login::LOGIN_COOKIE);
 		return TRUE;
+	}
+
+	/**
+	 * Send a visitor whose remembered sign-in is waiting on its second factor
+	 * to prove it, coming back to $return (a safe local path) once they have.
+	 *
+	 * Called where a member is actually needed: a page that checks permission,
+	 * and the sign-in form. Does nothing when no remembered sign-in is pending,
+	 * and never diverts the factor page or /logout to itself.
+	 */
+	public function divert_to_pending_factor($return = null) {
+		if (empty($_SESSION['totp_pending_from_cookie'])
+				|| empty($_SESSION['totp_pending_user_id'])
+				|| empty($_SESSION['totp_pending_expires'])
+				|| $_SESSION['totp_pending_expires'] < time()
+				|| self::is_second_factor_handoff()) {
+			return;
+		}
+		if ($return && self::is_safe_return($return)) {
+			$_SESSION['totp_pending_return'] = (string)$return;
+		}
+		header('Location: /verify-totp');
+		exit();
 	}
 
 	/**
@@ -1829,6 +1850,12 @@ class SessionControl{
 			}
 			$this->set_return(
 				parse_url($request_uri, PHP_URL_PATH) . '?' . $query_string);
+
+			// A remembered sign-in waiting on its second factor proves it here
+			// rather than signing in again.
+			if (!isset($_SESSION['loggedin'])) {
+				$this->divert_to_pending_factor($this->pending_return_for_request());
+			}
 
 			//REDIRECT TO THE LOGIN PAGE
 			if($msgtext) {

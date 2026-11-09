@@ -18,7 +18,8 @@ function verify_totp_logic(array $input): LogicResult{
 
 	if (empty($_SESSION['totp_pending_expires']) || $_SESSION['totp_pending_expires'] < time()) {
 		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
-			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
+			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires'],
+			$_SESSION['totp_pending_from_cookie']);
 		return LogicResult::redirect('/login?msgtext=session_expired');
 	}
 
@@ -29,7 +30,8 @@ function verify_totp_logic(array $input): LogicResult{
 	$pending_user = new User($_SESSION['totp_pending_user_id'], TRUE);
 	if (!$pending_user || !$pending_user->key) {
 		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
-			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);
+			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires'],
+			$_SESSION['totp_pending_from_cookie']);
 		return LogicResult::redirect('/login');
 	}
 	$page_vars['has_totp'] = $pending_user->has_totp_enabled();
