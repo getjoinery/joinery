@@ -16,6 +16,7 @@
  * the configure page, which both handlers do by reading the session's return
  * slot that this page sets.
  *
+ * @version 1.1 - the lead names every plan on sale (plans_sentence), not Managed alone
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1 (the account step)
  */
 
@@ -63,7 +64,6 @@ function start_logic(array $input): LogicResult {
 		}
 	}
 
-	$product = ManagedSiteDraft::managed_product();
 	return LogicResult::render(array(
 		'session'          => $session,
 		'settings'         => $settings,
@@ -73,7 +73,7 @@ function start_logic(array $input): LogicResult {
 		'values'           => $is_post ? $input : array(),
 		'register_active'  => (bool)$settings->get_setting('register_active'),
 		'passkeys_enabled' => (bool)$settings->get_setting('passkeys_enabled'),
-		'price_sentence'   => ManagedSiteDraft::price_sentence($product),
+		'price_sentence'   => ManagedSiteDraft::plans_sentence(),
 		'steps_html'       => ManagedSiteDraft::steps_html(1),
 	));
 }

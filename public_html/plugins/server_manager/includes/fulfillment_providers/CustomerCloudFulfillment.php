@@ -39,6 +39,9 @@
  *      there is no Connect page and no grant to wait for, and the hosted legs
  *      — mail on our provider, the trial clock, the allowance banners — apply
  *      (specs/hosted_trial_provisioning.md §4.1). This is Managed hosting.
+ *   2  a container on one of our shared starter hosts: the hosted legs as for
+ *      1, but no instance is created; the host's agent installs the site
+ *      (specs/starter_tier.md). This is Starter hosting.
  *
  * A buyer never chooses between them, because they are two products with two
  * prices and two arrangements, not one product with a switch.
@@ -46,6 +49,9 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.8 - a third reference, 2: Starter, a container on one of our shared hosts (starter_tier.md, Launch
+ *                scope step 2). The paid line's draft must be of the product's plan; a starter line is refused
+ *                before the charge while no starter host has room
  * @version 1.7 - the per-buyer limit on hosted sites (specs/hosted_abuse_response.md section 1): checkout refuses
  *                one past the account's limit; at payment an order past the account's or the card's limit is
  *                held for a person (status held, nothing built, no domain bought); approve_held() releases it
@@ -75,6 +81,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	/** The reference a product stores for each hosting mode. */
 	const REF_CUSTOMER = 0;
 	const REF_OPERATOR = 1;
+	const REF_STARTER  = 2;
 
 	/** What the buyer reads when the line's draft moved after it was added. */
 	const STALE_DRAFT_SENTENCE = 'You changed your site setup after adding it to the cart. '
@@ -90,13 +97,26 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		return array(
 			self::REF_CUSTOMER => 'Create the server in the buyer\'s own cloud account',
 			self::REF_OPERATOR => 'Create the server on the operator\'s account (hosted)',
+			self::REF_STARTER  => 'Place the site in a container on a shared starter host (hosted)',
 		);
 	}
 
 	/** Which hosting mode a stored reference means. */
 	public static function mode_for_ref(int $ref): string {
-		return ($ref === self::REF_OPERATOR) ? 'operator' : 'customer';
+		return ($ref === self::REF_OPERATOR || $ref === self::REF_STARTER) ? 'operator' : 'customer';
 	}
+
+	/** Where a stored reference's site lands: a container for Starter, an instance otherwise. */
+	public static function landing_for_ref(int $ref): string {
+		return ($ref === self::REF_STARTER) ? 'container' : 'instance';
+	}
+
+	/** What the buyer reads when the line's site was set up for the other plan. */
+	const WRONG_PLAN_SENTENCE = 'This site was set up for a different plan. '
+		. 'Remove it from the cart and continue to payment from your site setup again.';
+
+	/** What the buyer reads when the starter hosts are full. */
+	const NO_ROOM_SENTENCE = 'Starter hosting is full right now. Choose Managed, or try again later.';
 
 	/**
 	 * The one requirement: the id of the draft the buyer configured. It is
@@ -120,6 +140,15 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		$draft = ManagedSiteRequirement::draft_for_line($data, $user_id);
 		if ($draft === null) {
 			return self::STALE_DRAFT_SENTENCE;
+		}
+		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_for_ref($ref)) {
+			return self::WRONG_PLAN_SENTENCE;
+		}
+		if ($ref === self::REF_STARTER) {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+			if (ManagedHost::pick_for_provisioning('starter') === null) {
+				return self::NO_ROOM_SENTENCE;
+			}
 		}
 		// The per-buyer limit, while declining is free. The card is not known
 		// here; activation checks it, and the account again (two lines in one
@@ -147,7 +176,8 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		// Anything that stops the activation is written down and alerted with
 		// the order item id, so a person can finish it.
 		try {
-			$provision = $this->activate_draft($user, $order_item, self::mode_for_ref($ref), $order);
+			$provision = $this->activate_draft($user, $order_item, self::mode_for_ref($ref), $order,
+				self::landing_for_ref($ref));
 		} catch (\Throwable $e) {
 			$this->alert_activation_problem($user, $order_item, $e->getMessage());
 			$provision = null;
@@ -170,7 +200,8 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 * the row the first one activated. Anything else that is not exactly a
 	 * pending_payment draft owned by this buyer throws, and the caller alerts.
 	 */
-	private function activate_draft(User $user, OrderItem $order_item, string $hosting_mode, ?Order $order = null): ?CustomerCloudProvision {
+	private function activate_draft(User $user, OrderItem $order_item, string $hosting_mode, ?Order $order = null,
+			string $landing = 'instance'): ?CustomerCloudProvision {
 		if (!$order_item->key || !$user->key) {
 			throw new RuntimeException('The order item or the buyer could not be loaded.');
 		}
@@ -199,6 +230,10 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			throw new RuntimeException('Site draft #' . $draft_id . " is at '" . $draft->get('cvp_status')
 				. "', not pending_payment; the buyer edited it after adding it to the cart.");
 		}
+		if ((string)($draft->get('cvp_landing') ?: 'instance') !== $landing) {
+			throw new RuntimeException('Site draft #' . $draft_id . ' was set up for the '
+				. ($draft->is_container() ? 'Starter' : 'Managed') . ' plan, but the paid product is the other one.');
+		}
 
 		// A slug or domain a live provision already holds fails the activation
 		// closed: the row keeps the paid order item, so it is on the operator's
@@ -219,7 +254,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		// Whose account the server is born on is known only now, so the draft
 		// carries the encryption decision from here: a hosted birth's data root
 		// is encrypted by us, where this management node offers it.
-		if (CustomerCloudProvision::born_encrypted_by_default($hosting_mode)) {
+		if ($landing === 'instance' && CustomerCloudProvision::born_encrypted_by_default($hosting_mode)) {
 			$draft->set('cvp_data_root_encrypted', true);
 		}
 		$draft->set('cvp_buyer_name',

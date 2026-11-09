@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.23 - takes only rows that land on an instance of their own; a container site is its host's to install
  * @version 2.22 - a server whose data root we do not encrypt asks the provider's own disk encryption ON at create,
  *                 wherever the region offers it, rather than leaving it to the provider's default: the provider's
  *                 layer is the one every new server is born under
@@ -137,8 +138,12 @@ class ProvisionCustomerCloud {
 		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
+		// A site that lands in a container on a shared host is installed by
+		// that host's agent, never by creating an instance (starter_tier.md);
+		// this processor creates instances, so it never takes such a row.
 		$actionable = new MultiCustomerCloudProvision(array(
 			'statuses' => array('ready', 'booting', 'installing', 'failed'),
+			'landing'  => 'instance',
 			'deleted'  => false,
 		));
 		$actionable->load();

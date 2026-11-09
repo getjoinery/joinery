@@ -970,17 +970,13 @@ For nodes installed via **Install New Node**, `ProvisionPendingSsl` (scheduled h
 ## Hosting Provisioning
 
 Paid hosting orders on getjoinery become installed, SSL'd Joinery sites with
-no human touch. The **Poll Hosting Orders** scheduled task polls the
-getjoinery API each cron tick for paid orders carrying an answer to the
-configured domain Question, and fulfills each one in the mode the product
-declares in `pro_fulfillment_provider`:
+no human touch. A hosting product is fulfilled by `customer_cloud`
+(`pro_fulfillment_provider`); the **Poll Hosting Orders** scheduled task also
+files a provision for a paid order on a remote store that carries an answer
+to the configured domain Question, and reports any such order whose product
+is not `customer_cloud` (nothing builds it).
 
-- **Shared host** (the default, any other value): the pipeline picks the
-  least-loaded provisioning-enabled `ManagedHost`, assigns the next Docker
-  port, and dispatches an `install_node` job. The buyer's site is a container
-  on infrastructure the operator owns.
-- **`customer_cloud`**: the buyer's site runs on its own cloud instance. A
-  product opts in by picking **Customer cloud server** in the product-edit
+- **`customer_cloud`**: a product opts in by picking **Customer cloud server** in the product-edit
   Purchase grants picker (`CustomerCloudFulfillment`, registered with the
   store's FulfillmentRegistry from the plugin bootstrap); that stamps the provider value
   and contributes the one checkout requirement the line carries — the id of
@@ -991,7 +987,14 @@ declares in `pro_fulfillment_provider`:
     none of the operator's keys are involved. See below.
   - *the operator's account (hosted)* — the operator's own token creates it,
     there is no Connect page, and the mail, billing and banner legs apply. See
-    **[Hosted tier](hosted_tier.md)**.
+    **[Hosted tier](hosted_tier.md)**. This is Managed hosting (reference 1).
+  - *a container on a shared starter host (hosted)* — Starter hosting
+    (reference 2). No instance is created: the row's landing is `container`
+    (`cvp_landing`), it never holds an instance id, and it is installed on a
+    `ManagedHost` whose tier is `starter` (`mgh_tier`; `pick_for_provisioning`
+    places a site only on a host of its own tier). The instance processor
+    (`ProvisionCustomerCloud`) never takes such a row. Sold only through the
+    configure page, while a starter host has room.
 
 Every mode ends the same way: `install_node` completes, the welcome email goes
 out, and `ProvisionPendingSsl` turns HTTPS on once DNS resolves.
@@ -1080,8 +1083,6 @@ the sequence) soft-deletes a `draft` whose last change is older than
 `server_manager_draft_days`, and returns a `pending_payment` row that old to
 `draft` (its quote is stale). Both measure from `cvp_update_time`.
 
-**Shared-host products** are unchanged by this: they attach the domain
-Question, and the Orders poll reads its answer from the store.
 
 ### Activation — the Provisioning page
 
@@ -1090,8 +1091,7 @@ activates the pipeline. It is six tabs (`?tab=`), one subject each: **Setup**
 (the job agent, the store API connection, scheduled tasks, emails), **Hosting**
 (the cloud accounts, below; the Linode sign-in app; a new server's region,
 type, image and the Linode referral URL), **Hosted tier** (see
-[Hosted tier](hosted_tier.md)), **Shop** (the domain question, shared-host
-fulfillment, products), **Domains** (registration) and **Cleanup** (the
+[Hosted tier](hosted_tier.md)), **Shop** (the domain question, products), **Domains** (registration) and **Cleanup** (the
 test-account cleanup). Every requirement shows a live status badge, and each
 automatable step is a one-click, idempotent action backed by
 `includes/ProvisioningSetup.php` — mint the store API service user
@@ -1102,15 +1102,14 @@ at the old `provisioning@<host>` address is adopted once only when it owns the
 configured key, otherwise a new account and key replace it) and machine
 key and write the API settings (with a loopback probe badge, which asks for
 one domain answer with `numperpage=1` and, when it fails, shows why: the HTTP
-status and the API's own error, or the connection's; and key rotation), create the domain Question (shared-host products only), save the
+status and the API's own error, or the connection's; and key rotation), create the domain Question, save the
 email settings, activate the scheduled tasks (the provisioning umbrella, which
 runs the draft sweep, order polling, customer cloud, SSL and the
 managed-domain phases in one pass, plus the core Send Queued Emails task that
 drains the welcome-email queue), the domain-registrar credentials and
 promotion code, and the customer-cloud settings (referral URL, instance
-defaults). The page also shows what stays manual: attaching the question to
-shared-host products, opting a shared host in, and registering the Linode
-OAuth app. When the store
+defaults). The page also shows what stays manual: opting a starter host in and
+registering the Linode OAuth app. When the store
 is a remote site rather than the management node itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
@@ -1251,13 +1250,12 @@ The Provisioning page reports these, and cannot do them:
    product, put the Connect link
    (`https://<management-node-host>/profile/server_manager/connect_cloud`)
    in the after-purchase message; the Connect page is deliberately in no
-   member menu. For shared-host products, attach the domain question as a
-   requirement instead — the attachment is what makes an order a hosting
-   order. To sell domains on the configure page, see **Managed domain
+   member menu. To sell domains on the configure page, see **Managed domain
    registration** below.
-2. **Shared-host fulfilment only.** Opt at least one managed host in from the
-   dashboard (Edit → Max Sites + Provisioning Enabled). Its IP is sent to
-   customers as the DNS A-record target, so it must be routable.
+2. **Starter only.** Opt at least one starter host in from the dashboard
+   (Edit → Tier starter, Max Sites, Provisioning Enabled). Starter is offered
+   on the configure page only while one has room. Its IP is sent to customers
+   as the DNS A-record target, so it must be routable.
 3. **Buyer-account fulfilment only.** Register the OAuth client in Linode
    Cloud Manager (Profile → OAuth Apps → Create OAuth App, **not** public,
    callback `https://<management-node-host>/oauth_callback`) and enter the
@@ -1270,9 +1268,8 @@ The Provisioning page reports these, and cannot do them:
    customer-cloud product: configure the site on
    `/profile/server_manager/configure`, Continue to payment, pay).
 2. Wait up to 15 minutes for the next provisioning run.
-3. A new node appears under **Admin → Server Manager** at
-   `install_state = installing` (shared host), or the buyer's Connect page
-   shows progress (buyer account), or the buyer's sites page does (hosted).
+3. The buyer's Connect page shows progress (buyer account), or the buyer's
+   sites page does (hosted).
 4. When the install job completes, the welcome email reaches the buyer.
 5. Point the test domain's A record at the node IP.
 6. The node's SSL badge flips from `pending` to `active` on the next
@@ -1282,7 +1279,7 @@ The Provisioning page reports these, and cannot do them:
 
 | Symptom | Likely cause |
 |---|---|
-| No node appears after 15 min | API credentials wrong (the page's probe badge), or (shared host) the question not attached to the product — check the provisioning task's last run in Scheduled Tasks |
+| No node appears after 15 min | API credentials wrong (the page's probe badge) — check the provisioning task's last run in Scheduled Tasks |
 | `[managed-hosting] Paid but not activated: order item N` | The paid line's draft was not `pending_payment` (edited after the line was made, deleted, or another buyer's), or its name is held by a live provision. The order is paid; look at the provision on the dashboard and resolve with the buyer |
 | A site card says the name was taken before it could be registered | The registrar reported the name gone after payment (`rdm_taken_time`). The buyer chooses another name on the same card, at the paid price or less; the row returns to `pending` and registers on the next tick. If the box already exists, the operator is emailed to rename it by hand |
 | Node stuck at `install_failed` | The install job failed — open the job, fix the host, Retry |

@@ -10,18 +10,31 @@ difference between them is **whose**:
   provider, and its backups land in this fleet's backup storage. The buyer connects
   nothing, pastes no DNS record, and reads no password off a server.
 
-Nobody chooses between them at checkout. The choice is the product's: the
-`customer_cloud` fulfillment provider offers two references, and the one a
-product stores becomes `cvp_hosting_mode` on every provision it creates. Which
-of the two a deployment actually sells is a product decision; both modes are
-always available to it.
+A hosted site lands in one of two places, and this is the buyer's choice of
+**plan**, made on the configure page:
+
+- **Managed** — an instance of its own on this operator's account
+  (fulfillment reference 1).
+- **Starter** — a container on one of this operator's shared starter hosts
+  (fulfillment reference 2; `cvp_landing` `container`). Its row never holds
+  an instance id, and it lands only on a host whose tier is `starter`.
+
+Whose account a server is born on is the product's decision, not the buyer's:
+the `customer_cloud` fulfillment provider offers three references (the buyer's
+own account, 0, besides the two above), and the one a product stores becomes
+`cvp_hosting_mode` (and, for Starter, the landing) on every provision it
+creates. Which a deployment sells is a product decision.
 
 ## What the buyer sees
 
 They describe the site on one page — **`/profile/server_manager/configure`**:
-the domain (their own, or one this plane registers for them at cost, quoted
-live), the site's name, the region when more than one is offered, and the
-admin email — see the price as a sentence, and continue to payment. The cart
+the plan when more than one is on sale (Starter is offered only while its
+product is active and a starter host has room), the domain (their own, or one
+this plane registers for them at cost, quoted live), the region when more
+than one is offered, and the admin email — see the price as a sentence, and
+continue to payment. The payment button posts at the plan's product; a cart
+line whose draft is of the other plan is refused before the charge, and so is
+a Starter line while no starter host has room. The cart
 carries one line for hosting and, when a name is registered, one for the
 domain year; nothing about the site is asked there. Until they pay, the setup
 is a draft on their sites page (Continue, Edit, Delete) that holds nothing and

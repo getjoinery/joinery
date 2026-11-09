@@ -42,6 +42,8 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.29 - cvp_landing (instance or container) and cvp_mgh_managed_host_id: a starter site lands in a container
+ *                on a shared host and its row never holds an instance id (starter_tier.md, Launch scope step 1)
  * @version 1.28 - cvp_card_fingerprint and status 'held': a paid hosted order over the per-buyer limit waits for a
  *                 person (hosted_sites_held(), hosted_site_limit(); specs/hosted_abuse_response.md section 1)
  * @version 1.27 - cvp_recovery_public_key is text: an X-Wing recovery key is 1624 base64 characters
@@ -130,6 +132,9 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_mgn_managed_node_id'    => array('action' => 'permanent_delete'),
 		// A copy's provision outlives the node it copied; it just stops naming it.
 		'cvp_source_node_id'         => array('action' => 'null', 'source_table' => 'mgn_managed_nodes'),
+		// A shared host is not deleted out from under a site that lives on it.
+		'cvp_mgh_managed_host_id'    => array('action' => 'prevent', 'source_table' => 'mgh_managed_hosts',
+			'message' => 'a hosted site lives in a container on this host - move or remove it first'),
 	);
 
 	// Admin origin needs no order item, so spec-generated test rows validate;
@@ -163,6 +168,12 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_region'                 => array('type'=>'varchar(50)'),
 		'cvp_instance_type'          => array('type'=>'varchar(50)'),
 		'cvp_mgn_managed_node_id'            => array('type'=>'int8'),
+		// Where the site lands: its own cloud instance (cvp_instance_id), or a
+		// container on one of our shared hosts (cvp_mgh_managed_host_id). A
+		// container site's row never holds an instance id: the only instance in
+		// sight is its host's, and acting on that would reach every site on it.
+		'cvp_landing'                => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'instance', 'allowed_values'=>array('instance', 'container')),
+		'cvp_mgh_managed_host_id'    => array('type'=>'int8'),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
 		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
@@ -313,6 +324,7 @@ class CustomerCloudProvision extends SystemBase {
 	 */
 	private function stamp_account(): void {
 		if ((!$this->key || !$this->get('cvp_instance_id'))
+				&& !$this->is_container()
 				&& ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator'
 				&& !(int)$this->get('cvp_oca_operator_cloud_account_id')) {
 			$default = OperatorCloudAccount::default_id();
@@ -341,6 +353,11 @@ class CustomerCloudProvision extends SystemBase {
 		return $q->rowCount();
 	}
 
+	/** Does this site live in a container on a shared host, rather than on an instance of its own? */
+	public function is_container(): bool {
+		return (string)$this->get('cvp_landing') === 'container';
+	}
+
 	private function validate_row() {
 		$origin = $this->get('cvp_origin') ?: 'order';
 		if (!in_array($origin, array('order', 'admin', 'buyer'), true)) {
@@ -359,6 +376,22 @@ class CustomerCloudProvision extends SystemBase {
 		}
 		if ($origin !== 'buyer' && $this->is_pre_payment()) {
 			throw new CustomerCloudProvisionException("Only a buyer-origin provision may be at '{$status}'.");
+		}
+		$landing = (string)($this->get('cvp_landing') ?: 'instance');
+		if (!in_array($landing, array('instance', 'container'), true)) {
+			throw new CustomerCloudProvisionException("Unknown landing '{$landing}'.");
+		}
+		if ($landing === 'container') {
+			if (trim((string)$this->get('cvp_instance_id')) !== '') {
+				throw new CustomerCloudProvisionException(
+					'A site in a container holds no instance id: the instance it runs on is its host, shared with other sites.');
+			}
+			// A buyer's draft is not ours yet: payment sets the operator mode.
+			if (!$this->is_pre_payment() && ($this->get('cvp_hosting_mode') ?: 'customer') !== 'operator') {
+				throw new CustomerCloudProvisionException('A site in a container is on one of our hosts, so its hosting mode is operator.');
+			}
+		} elseif ((int)$this->get('cvp_mgh_managed_host_id')) {
+			throw new CustomerCloudProvisionException('A site on its own instance names no shared host.');
 		}
 		$domain_source = (string)$this->get('cvp_domain_source');
 		if ($domain_source !== '' && !in_array($domain_source, array('own', 'register'), true)) {

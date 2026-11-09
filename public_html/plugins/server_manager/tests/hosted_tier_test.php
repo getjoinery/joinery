@@ -146,11 +146,15 @@ section('The product decides whose account the server is born on');
 
 $provider = new CustomerCloudFulfillment();
 $options = $provider->options();
-check(count($options) === 2, 'the picker offers exactly two references', implode(' | ', $options));
+check(count($options) === 3, 'the picker offers exactly three references', implode(' | ', $options));
 check(CustomerCloudFulfillment::mode_for_ref(0) === 'customer',
 	'reference 0 is the buyer\'s own cloud account — today\'s product, unchanged');
 check(CustomerCloudFulfillment::mode_for_ref(1) === 'operator',
 	'reference 1 is the operator\'s account');
+check(CustomerCloudFulfillment::mode_for_ref(2) === 'operator'
+		&& CustomerCloudFulfillment::landing_for_ref(2) === 'container'
+		&& CustomerCloudFulfillment::landing_for_ref(1) === 'instance',
+	'reference 2 is Starter: the operator\'s, in a container on a shared host');
 check(CustomerCloudFulfillment::mode_for_ref(7) === 'customer',
 	'an unrecognised reference falls back to the buyer\'s own account, never to ours');
 

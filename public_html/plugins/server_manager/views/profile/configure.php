@@ -10,6 +10,7 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.5 - a plan choice (Starter or Managed) heads the form; the summary names the plan
  * @version 1.4 - not found where this site does not sell hosting (SmHosting)
  * @version 1.3 - the registrant's details wait for a free name; no Site name field (derived from the domain);
  *                an own domain says the site has no address or certificate until its A record is added
@@ -59,13 +60,15 @@ echo $steps_html;
 		<?php endif; ?>
 		<dt>Site admin email</dt>
 		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
+		<dt>Plan</dt>
+		<dd><?php echo htmlspecialchars($plan_label); ?></dd>
 		<dt>Price</dt>
 		<dd><?php if ($price_sentence !== '') {
 				echo htmlspecialchars($price_sentence);
 				if ($domain_sentence !== '') { echo ', ' . htmlspecialchars($domain_sentence); }
 				echo '.';
 			} else {
-				echo 'Managed hosting is not on sale right now.';
+				echo htmlspecialchars($plan_label) . ' hosting is not on sale right now.';
 			} ?></dd>
 	</dl>
 
@@ -77,8 +80,8 @@ echo $steps_html;
 			<?php echo $payment_form; ?>
 		<?php endif; ?>
 	<?php else: ?>
-		<p class="sms-error">Managed hosting is not on sale right now, so this site cannot be paid for yet.
-			Your setup is saved.</p>
+		<p class="sms-error"><?php echo htmlspecialchars($plan_label); ?> hosting is not on sale right now, so this site
+			cannot be paid for yet. Your setup is saved; Edit it to choose another plan.</p>
 	<?php endif; ?>
 
 	<div class="smc-actions">
@@ -98,7 +101,7 @@ echo $steps_html;
 <?php else: ?>
 
 <p class="smc-lead">Tell us about the site you want. Nothing is bought or created until you pay.
-	<?php if ($price_sentence !== ''): ?>Managed hosting is <strong><?php echo htmlspecialchars($price_sentence); ?></strong><?php
+	<?php if ($plans_sentence !== ''): ?><strong><?php echo htmlspecialchars($plans_sentence); ?></strong><?php
 		if ($sellable) { echo ', plus the domain year at cost if we register the name for you'; } ?>.<?php endif; ?></p>
 
 <?php if (!empty($errors)): ?>
@@ -117,6 +120,18 @@ echo $formwriter->begin_form();
 $formwriter->hiddeninput('action', '', array('value' => 'save'));
 if ($row) {
 	$formwriter->hiddeninput('cvp_customer_cloud_provision_id', '', array('value' => (int)$row->key));
+}
+
+if (count($plans) > 1) {
+	$plan_options = array();
+	foreach ($plans as $plan => $def) {
+		$plan_options[$plan] = $def['label'] . ($plan_prices[$plan] !== '' ? ', ' . preg_replace('/ from today$/', '', $plan_prices[$plan]) : '')
+			. ' — ' . $def['blurb'];
+	}
+	$formwriter->radioinput('plan', 'Plan', array(
+		'options' => $plan_options,
+		'value'   => $values['plan'],
+	));
 }
 
 $registrant_fields = array_merge(array('managed_domain_status', 'md_intro'), array_keys(ManagedDomainIntake::CONTACT_FIELDS));

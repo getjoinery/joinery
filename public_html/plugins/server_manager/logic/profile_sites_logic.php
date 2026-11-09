@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.6 - a draft's price and payment button are its own plan's product; the page offers a new site while any plan is on sale
  * @version 1.5 - mail_records: a Managed site on the buyer's own domain lists the email records SMTP2GO
  *                asked for that do not resolve yet, so its mail can be signed (B3)
  * @version 1.4 - dns_record: a built Managed site on the buyer's own domain shows its A or AAAA record until the
@@ -149,7 +150,6 @@ function profile_sites_logic(array $input): LogicResult {
 
 	// One row per site, with everything the page renders already resolved —
 	// the view asks no questions of its own.
-	$product = ManagedSiteDraft::managed_product();
 	$sites = array();
 	$needs_connect = false;
 	$in_progress = false;
@@ -187,9 +187,10 @@ function profile_sites_logic(array $input): LogicResult {
 			'hosted'          => $hosted,
 			'status'          => $status,
 			'pre_payment'     => $provision->is_pre_payment(),
-			'summary'         => $provision->is_pre_payment() ? profile_sites_draft_summary($provision, $product) : '',
+			'summary'         => $provision->is_pre_payment()
+				? profile_sites_draft_summary($provision, ManagedSiteDraft::product_for_row($provision)) : '',
 			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision))
-				? ManagedSiteDraft::payment_form($provision, $product, 'Finish payment') : '',
+				? ManagedSiteDraft::payment_form($provision, ManagedSiteDraft::product_for_row($provision), 'Finish payment') : '',
 			'in_cart'         => $status === 'pending_payment' && ManagedSiteDraft::in_cart($provision),
 			'taken'           => $taken,
 			// Offered only for a site that exists: a button that spends a
@@ -216,7 +217,7 @@ function profile_sites_logic(array $input): LogicResult {
 		'needs_connect'     => $needs_connect,
 		'in_progress'       => $in_progress,
 		'account_connected' => $account !== null && $account->get('cca_status') === 'active',
-		'managed_on_sale'   => $product !== null,
+		'managed_on_sale'   => count(ManagedSiteDraft::offered_plans()) > 0,
 		'configure_url'     => ManagedSiteDraft::CONFIGURE_URL,
 		'availability_js'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
 	));
@@ -355,7 +356,7 @@ function profile_sites_draft_summary($provision, $product): string {
 	}
 	$price = ManagedSiteDraft::price_sentence($product);
 	if ($price !== '') {
-		$parts[] = 'hosting ' . $price;
+		$parts[] = ManagedSiteDraft::PLANS[ManagedSiteDraft::plan_of($provision)]['label'] . ' hosting ' . $price;
 	}
 	return ucfirst(implode('; ', $parts)) . '.';
 }

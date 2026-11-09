@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.3 - the lead names every plan on sale
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
  * @version 1.1 - the time zone starts as the browser's (timezone-from-browser.js)
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1 (the account step)
@@ -45,7 +46,7 @@ $page->public_header(array(
 		<p class="sms-start-lead">Your site starts with an account. It is where your new site's admin password is shown to
 			you, once, and where you manage the site afterwards. Sign in if you already have one, or create one &mdash;
 			either takes a minute, and then you describe the site you want.<?php if ($price_sentence !== ''): ?>
-			Managed hosting is <strong><?php echo htmlspecialchars($price_sentence); ?></strong>; nothing is charged until
+			Hosting is <strong><?php echo htmlspecialchars($price_sentence); ?></strong>; nothing is charged until
 			you have seen the whole price.<?php endif; ?></p>
 
 		<?php echo $page->render_messages('loginbox'); ?>

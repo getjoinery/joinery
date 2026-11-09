@@ -21,6 +21,11 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.4 - two plans (starter_tier.md, Launch scope step 2): Starter lands in a container on a shared host
+ *                (fulfilment reference 2), Managed on an instance of its own (reference 1). The buyer picks one
+ *                on the configure page; the draft records it as its landing, and its product, price and payment
+ *                button follow the plan. Starter is offered only while its product is on sale and a starter host
+ *                has room.
  * @version 1.3 - a site name is at least 2 characters (install.sh refuses one letter: Docker takes no such
  *                container name); a one-letter domain label defaults to site_<label>
  * @version 1.2 - the region falls back to us-east
@@ -77,8 +82,22 @@ class ManagedSiteDraft {
 	/** The buyer's sites page. */
 	const SITES_URL = '/profile/server_manager';
 
-	/** The fulfilment reference of Managed hosting (the operator's account). */
+	/** The fulfilment reference of Managed hosting (an instance of its own on the operator's account). */
 	const MANAGED_REF = 1;
+
+	/** The fulfilment reference of Starter hosting (a container on one of our shared hosts). */
+	const STARTER_REF = 2;
+
+	/**
+	 * The plans a buyer chooses between, cheapest first. Each is one product
+	 * (found by its fulfilment reference) and one landing for the site.
+	 */
+	const PLANS = array(
+		'starter' => array('ref' => self::STARTER_REF, 'landing' => 'container', 'label' => 'Starter',
+			'blurb' => 'Your site on a server shared with other sites. Mail, backups and Drive included.'),
+		'managed' => array('ref' => self::MANAGED_REF, 'landing' => 'instance', 'label' => 'Managed',
+			'blurb' => 'Your site on a server of its own. Mail, backups and Drive included.'),
+	);
 
 	/** What a site's internal name may look like: the install directory and database name. */
 	const SITENAME_REGEX = '/^[a-z][a-z0-9_]{1,49}$/';
@@ -236,6 +255,17 @@ class ManagedSiteDraft {
 		$errors = array();
 		$user_id = (int)$user->key;
 
+		// The plan first: it decides the product the payment button posts at.
+		// One plan on sale needs no choice; a plan not on sale is refused.
+		$offered = self::offered_plans();
+		$plan = (string)($post['plan'] ?? '');
+		if (count($offered) === 1) {
+			$plan = (string)array_key_first($offered);
+		}
+		if (!isset($offered[$plan])) {
+			$errors[] = empty($offered) ? 'Hosting is not on sale right now.' : 'Choose a plan.';
+		}
+
 		$source = (string)($post['cvp_domain_source'] ?? '');
 		if (!in_array($source, array('own', 'register'), true)) {
 			return array('errors' => array('Choose whether we register the domain or you already own it.'), 'row' => null);
@@ -327,6 +357,7 @@ class ManagedSiteDraft {
 			$row->set('cvp_registrant_sealed', null);
 		}
 		// Frozen: the cart line is built from this row and must not move under it.
+		$row->set('cvp_landing', self::PLANS[$plan]['landing']);
 		$row->set('cvp_status', 'pending_payment');
 		$row->set('cvp_error', null);
 		$row->save();
@@ -337,6 +368,7 @@ class ManagedSiteDraft {
 	/** The form values a row prefills: its columns plus the opened registrant block. */
 	public static function form_values(?CustomerCloudProvision $row, User $user): array {
 		$values = array(
+			'plan'              => (string)(array_key_first(self::offered_plans()) ?? 'managed'),
 			'cvp_domain_source' => ManagedDomainIntake::sellable() ? 'register' : 'own',
 			'cvp_domain'        => '',
 			'cvp_sitename'      => '',
@@ -356,6 +388,7 @@ class ManagedSiteDraft {
 		if ($row === null) {
 			return $values;
 		}
+		$values['plan'] = self::plan_of($row);
 		foreach (array('cvp_domain_source', 'cvp_domain', 'cvp_sitename', 'cvp_region', 'cvp_buyer_email') as $col) {
 			$stored = (string)$row->get($col);
 			if ($stored !== '') {
@@ -380,12 +413,73 @@ class ManagedSiteDraft {
 	 * on sale and the pages say so.
 	 */
 	public static function managed_product() {
-		if (!class_exists('Product')) {
+		return self::product_for_plan('managed');
+	}
+
+	/** Which plan a row is: its landing names it. */
+	public static function plan_of(CustomerCloudProvision $row): string {
+		return $row->is_container() ? 'starter' : 'managed';
+	}
+
+	/**
+	 * The plans on sale now, in PLANS order: each one's product is active,
+	 * and Starter also needs a starter host with room, because a paid
+	 * starter site with nowhere to land is a refund.
+	 *
+	 * @return array<string, array> plan => PLANS entry plus 'product'
+	 */
+	public static function offered_plans(): array {
+		$out = array();
+		foreach (self::PLANS as $plan => $def) {
+			$product = self::product_for_plan($plan);
+			if ($product === null) {
+				continue;
+			}
+			if ($plan === 'starter' && !self::starter_has_room()) {
+				continue;
+			}
+			$out[$plan] = $def + array('product' => $product);
+		}
+		return $out;
+	}
+
+	/** Is there a starter host taking sites with a place free? */
+	public static function starter_has_room(): bool {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+		return ManagedHost::pick_for_provisioning('starter') !== null;
+	}
+
+	/** The product a draft pays for: its plan's. */
+	public static function product_for_row(CustomerCloudProvision $row) {
+		return self::product_for_plan(self::plan_of($row));
+	}
+
+	/**
+	 * Every plan on sale as one phrase, cheapest first:
+	 * "Starter is $4.99 a month, Managed $9.99 a month, from today"; '' when none is.
+	 */
+	public static function plans_sentence(): string {
+		$parts = array();
+		foreach (self::offered_plans() as $def) {
+			$price = self::price_sentence($def['product']);
+			if ($price !== '') {
+				$parts[] = $def['label'] . ' ' . preg_replace('/ from today$/', '', $price);
+			}
+		}
+		if (empty($parts)) {
+			return '';
+		}
+		return implode(', ', $parts) . ', from today';
+	}
+
+	/** One plan's product: active, fulfilled by customer_cloud with the plan's reference, with a version. */
+	public static function product_for_plan(string $plan) {
+		if (!class_exists('Product') || !isset(self::PLANS[$plan])) {
 			return null;
 		}
 		$products = new MultiProduct(array(
 			'pro_fulfillment_provider' => 'customer_cloud',
-			'pro_fulfillment_ref'      => self::MANAGED_REF,
+			'pro_fulfillment_ref'      => self::PLANS[$plan]['ref'],
 			'is_active'                => true,
 			'deleted'                  => false,
 		), array('pro_product_id' => 'ASC'));

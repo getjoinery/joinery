@@ -21,6 +21,7 @@
  * before the buyer confirms. Delete removes a draft; a paid site is never
  * deletable here.
  *
+ * @version 1.3 - the buyer picks a plan (Starter or Managed); the price and the payment button follow the row's plan
  * @version 1.2 - the availability check reveals the registrant's details (md_registrant) on a free name
  * @version 1.1 - a visitor without a session goes to the start page (step 1, the account), and the
  *                page carries the step strip
@@ -90,7 +91,12 @@ function profile_configure_logic(array $input): LogicResult {
 
 	// ---- Render ------------------------------------------------------------
 
-	$product = ManagedSiteDraft::managed_product();
+	$product = $row !== null ? ManagedSiteDraft::product_for_row($row) : null;
+	$plans = ManagedSiteDraft::offered_plans();
+	$plan_prices = array();
+	foreach ($plans as $plan => $def) {
+		$plan_prices[$plan] = ManagedSiteDraft::price_sentence($def['product']);
+	}
 	$mode = ($row !== null && (string)$row->get('cvp_status') === 'pending_payment') ? 'summary' : 'form';
 
 	// The form shows what was posted when it failed, the row when it exists,
@@ -121,6 +127,10 @@ function profile_configure_logic(array $input): LogicResult {
 		'sellable'         => ManagedDomainIntake::sellable(),
 		'offered_tlds'     => DomainRegistrarRegistry::offeredTldsPhrase(),
 		'product'          => $product,
+		'plans'            => $plans,
+		'plan_prices'      => $plan_prices,
+		'plan_label'       => $row !== null ? ManagedSiteDraft::PLANS[ManagedSiteDraft::plan_of($row)]['label'] : '',
+		'plans_sentence'   => ManagedSiteDraft::plans_sentence(),
 		'price_sentence'   => ManagedSiteDraft::price_sentence($product),
 		'domain_sentence'  => $row ? ManagedSiteDraft::domain_sentence($row) : '',
 		'payment_form'     => ($row && $mode === 'summary') ? ManagedSiteDraft::payment_form($row, $product) : '',

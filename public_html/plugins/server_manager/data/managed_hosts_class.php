@@ -6,6 +6,7 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.9 - mgh_tier (general or starter): pick_for_provisioning(\$tier) places a site only on a host of its tier
  * @version 1.8 - link_host_node() also links the host record the machine is itself placed in, and runs on each host
  *                report too: getjoinery's docker-prod was never named its own host, so its six sites read 'host not
  *                known' and Install security updates everywhere could not replace them (fleet_security_patching B26)
@@ -52,6 +53,10 @@ class ManagedHost extends SystemBase {
 		// Which cloud account the box lives in: main or test (CloudAccounts). Empty reads as main.
 		'mgh_cloud_account'        => array('type'=>'varchar(16)'),
 		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Which sites this host takes: starter sites (a sold $4.99 tier, the box
+		// sized and walled for it) or general ones placed by an operator. A
+		// starter site never lands on a general host, nor the other way round.
+		'mgh_tier'                 => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'general', 'allowed_values'=>array('general', 'starter')),
 		// The host's own agent identity: the paired ManagedNode that host-scope
 		// primitives (decommission_site, later certs and container install) are
 		// addressed to. The host IS a node — a plain machine-posture one — so
@@ -87,6 +92,9 @@ class ManagedHost extends SystemBase {
 		}
 		if (empty($this->get('mgh_host'))) {
 			throw new ManagedHostException('Host IP/hostname is required.');
+		}
+		if (!in_array((string)($this->get('mgh_tier') ?: 'general'), array('general', 'starter'), true)) {
+			throw new ManagedHostException("Unknown host tier '" . $this->get('mgh_tier') . "'.");
 		}
 		if ($this->get('mgh_provisioning_enabled') && (int)$this->get('mgh_max_sites') < 1) {
 			throw new ManagedHostException('Set Max Sites before turning provisioning on: it is how many sites this host can hold, and new sites are only placed up to it.');
@@ -344,21 +352,25 @@ class ManagedHost extends SystemBase {
 	}
 
 	/**
-	 * Select the least-loaded provisioning-enabled host with available capacity.
+	 * Select the least-loaded provisioning-enabled host of a tier with available capacity.
 	 * Returns a ManagedHost or null if no capacity is available.
 	 */
-	public static function pick_for_provisioning() {
+	public static function pick_for_provisioning(string $tier = 'general') {
+		if (!in_array($tier, array('general', 'starter'), true)) {
+			throw new ManagedHostException("Unknown host tier '{$tier}'.");
+		}
 		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->query(
+		$q = $db->prepare(
 			"SELECT mgh.mgh_managed_host_id " .
 			"FROM mgh_managed_hosts mgh " .
 			"LEFT JOIN mgn_managed_nodes mgn ON mgn.mgn_mgh_managed_host_id = mgh.mgh_managed_host_id AND mgn.mgn_delete_time IS NULL " .
-			"WHERE mgh.mgh_provisioning_enabled = true AND mgh.mgh_delete_time IS NULL " .
+			"WHERE mgh.mgh_provisioning_enabled = true AND mgh.mgh_delete_time IS NULL AND mgh.mgh_tier = :tier " .
 			"GROUP BY mgh.mgh_managed_host_id " .
 			"HAVING COUNT(mgn.mgn_managed_node_id) < mgh.mgh_max_sites " .
 			"ORDER BY COUNT(mgn.mgn_managed_node_id) ASC, mgh.mgh_managed_host_id ASC " .
 			"LIMIT 1"
 		);
+		$q->execute(array(':tier' => $tier));
 		$row = $q->fetch(PDO::FETCH_ASSOC);
 		if (!$row) return null;
 		return new ManagedHost($row['mgh_managed_host_id'], true);

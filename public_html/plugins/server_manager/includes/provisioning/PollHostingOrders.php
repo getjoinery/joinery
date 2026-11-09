@@ -3,7 +3,7 @@
  * PollHostingOrders - Provisioning pipeline scheduled task.
  *
  * Polls getjoinery for new paid hosting orders (answers to the configured
- * domain Question) and kicks off an install_node job for each one that
+ * domain Question) and files a customer-cloud provision for each one that
  * hasn't been processed yet. Runs every cron tick (~15 min).
  *
  * Settings required (Server Manager plugin settings):
@@ -12,6 +12,9 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
+ * @version 1.7 - the shared-host fallthrough is retired: it created install_node jobs nothing could run (a keyless
+ *               host holds no sealed root password). An order whose product is not customer_cloud is reported,
+ *               and a Starter reference (2) is refused here: Starter is sold through the configure page
  * @version 1.6 - a failed fetch of the domain answers says why (GetJoineryApiClient::last_error, B21)
  * @version 1.5 - a hosted order's provision is born with its data root encrypted where data_root_encryption_offered
  *               is on (specs/hosted_data_promise_disk_encryption.md D1a)
@@ -119,10 +122,11 @@ class PollHostingOrders {
 				continue;
 			}
 
-			// Fulfillment fork: the product declares its provider. 'customer_cloud'
-			// orders become a provision row (worked by ProvisionCustomerCloud);
-			// anything else falls through to shared-host fulfillment below.
+			// The product declares its provider. Only 'customer_cloud' orders are
+			// fulfilled here: they become a provision row worked by
+			// ProvisionCustomerCloud.
 			$fulfillment = '';
+			$ref = 0;
 			// Which account the server is born on is the PRODUCT's decision,
 			// carried in the same reference the fulfillment picker stored.
 			$hosting_mode = 'customer';
@@ -131,8 +135,14 @@ class PollHostingOrders {
 				$product = $client->get('Product/' . $product_id);
 				if (is_array($product)) {
 					$fulfillment = (string)($product['pro_fulfillment_provider'] ?? '');
-					$hosting_mode = ((int)($product['pro_fulfillment_ref'] ?? 0) === 1) ? 'operator' : 'customer';
+					$ref = (int)($product['pro_fulfillment_ref'] ?? 0);
+					$hosting_mode = ($ref === 1) ? 'operator' : 'customer';
 				}
+			}
+
+			if ($fulfillment === 'customer_cloud' && $ref === 2) {
+				$errors[] = "Order #{$order_item_id}: a Starter order cannot be fulfilled from a domain answer; Starter is sold through the configure page.";
+				continue;
 			}
 
 			if ($fulfillment === 'customer_cloud') {
@@ -176,88 +186,10 @@ class PollHostingOrders {
 				continue;
 			}
 
-			// Check for an existing non-failed node with this slug
-			// (two customers buying the same domain — needs manual resolution)
-			$existing_multi = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);
-			$existing_multi->load();
-			$existing_failed = null;
-			foreach ($existing_multi as $ex) {
-				if ($ex->get('mgn_install_state') !== 'install_failed') {
-					$errors[] = "Order #{$order_item_id}: domain '{$domain}' is already provisioned (slug: {$slug}) — manual resolution required.";
-					continue 2;
-				}
-				$existing_failed = $ex;
-			}
-
-			// Pick the least-loaded provisioning-enabled host
-			$host = ManagedHost::pick_for_provisioning();
-			if (!$host) {
-				$errors[] = "Order #{$order_item_id}: no provisioning host with available capacity — add a host or raise mgh_max_sites.";
-				continue;
-			}
-
-			// Next available Docker host port — through the single allocator, so
-			// deleted-but-possibly-still-running containers keep their ports
-			// reserved.
-			$port = JobCommandBuilder::next_container_port($host->key);
-
-			// Create or reuse a failed node record
-			if ($existing_failed) {
-				$node = $existing_failed;
-				$node->set('mgn_host',         $host->get('mgh_host'));
-				$node->set('mgn_ssh_user',     $host->get('mgh_ssh_user'));
-				$node->set('mgn_ssh_key_path', $host->get('mgh_ssh_key_path'));
-				$node->set('mgn_ssh_port',     $host->get('mgh_ssh_port'));
-				$node->set('mgn_mgh_managed_host_id',  $host->key);
-				$node->set('mgn_install_state', 'installing');
-				$node->set('mgn_ssl_state',    'pending');
-				$node->set('mgn_port',         $port);
-				$node->save();
-			} else {
-				$node = new ManagedNode(NULL);
-				$node->set('mgn_name',         $domain);
-				$node->set('mgn_slug',         $slug);
-				$node->set('mgn_host',         $host->get('mgh_host'));
-				$node->set('mgn_ssh_user',     $host->get('mgh_ssh_user'));
-				$node->set('mgn_ssh_key_path', $host->get('mgh_ssh_key_path'));
-				$node->set('mgn_ssh_port',     $host->get('mgh_ssh_port'));
-				$node->set('mgn_site_url',     'https://' . $domain);
-				$node->set('mgn_mgh_managed_host_id',  $host->key);
-				$node->set('mgn_install_state', 'installing');
-				$node->set('mgn_ssl_state',    'pending');
-				$node->set('mgn_port',         $port);
-				$node->set('mgn_enabled',      true);
-				$node->prepare();
-				$node->save();
-				$node->load();
-				$node->open_default_backup_space();
-			}
-
-			// Build install_node job steps
-			$job_params = [
-				'mode'        => 'fresh',
-				'sitename'    => $slug,
-				'domain'      => $domain,
-				'docker_mode' => 'docker',
-				'admin_email' => $admin_email,
-				'user_name'   => $user_name,
-			];
-
-			try {
-				$steps = JobCommandBuilder::build_install_node($node, $job_params);
-			} catch (Exception $e) {
-				$errors[] = "Order #{$order_item_id}: failed to build install steps — " . $e->getMessage();
-				$node->set('mgn_install_state', 'install_failed');
-				$node->save();
-				continue;
-			}
-
-			$job = ManagementJob::createJob($node->key, 'install_node', $steps, $job_params, null);
-			$job->set('mjb_external_order_item_id', $order_item_id);
-			$job->save();
-
-			$handled[] = $order_item_id; // Prevent double-processing within this cycle
-			$started++;
+			// No shared-host fallthrough: a site placed in a container on one of
+			// our hosts is a Starter order, sold and installed through the
+			// configure page and its host's agent.
+			$errors[] = "Order #{$order_item_id}: its product is not fulfilled by customer_cloud ('{$fulfillment}'), so nothing here can build it.";
 		}
 
 		$msg = "Polled getjoinery: {$started} provision(s) started, {$skipped} skipped (unpaid or empty domain).";

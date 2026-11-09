@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.8 - a container site at the end of grace has its container stopped and held by its host's agent;
+ *                nothing is owed at the provider, and an empty instance id is never read as already off
  * @version 1.7 - a new row catches up on a cancel or failed payment that came before it
  * @version 1.6 - the shutdown uses the driver of the account's own provider
  * @version 1.5 - a site is shut down with its own account's credential; the transfer pool watched is the default
@@ -484,6 +486,10 @@ class HostedTrialWatch {
 			return 0;
 		}
 
+		if ($provision->is_container()) {
+			return $this->hold_container_if_due($provision, $trial);
+		}
+
 		$instance_id = trim((string)$provision->get('cvp_instance_id'));
 		if ($instance_id !== '') {
 			try {
@@ -536,6 +542,51 @@ class HostedTrialWatch {
 		));
 		error_log('HostedTrialWatch: ' . $provision->get('cvp_domain')
 			. ' shut down after its grace period; deletion is owed to a person at the provider.');
+		return 1;
+	}
+
+	/**
+	 * The grace ran out for a site in a container: its host's agent stops the
+	 * container and keeps it stopped. The host and its other sites are not
+	 * touched, and nothing is deleted. Until the hold job is created the site
+	 * is still serving, so the trial stays in grace and the next tick retries.
+	 */
+	private function hold_container_if_due($provision, $trial): int {
+		$node = $this->node_of($provision);
+		$name = $node ? trim((string)$node->get('mgn_container_name')) : '';
+		if ($node === null || $name === '') {
+			$this->errors[] = $provision->get('cvp_domain')
+				. ': the grace has ended but the site has no container on record to stop.';
+			return 0;
+		}
+		try {
+			$host_node = JobCommandBuilder::decommission_host_node_for($node);
+			$built = JobCommandBuilder::build_hold_container($host_node, $name, 'stop');
+			ManagementJob::createFromBuild($host_node->key, 'hold_container', $built,
+				array('reason' => 'Hosting ended unpaid on ' . gmdate('Y-m-d') . '.'), null);
+		} catch (Throwable $e) {
+			$this->errors[] = $provision->get('cvp_domain')
+				. ': could not ask its host to stop the container (' . $e->getMessage() . ').';
+			return 0;
+		}
+
+		$trial->set('htr_state', HostedTrial::STATE_SHUTDOWN);
+		$trial->set('htr_shutdown_time', gmdate('Y-m-d H:i:s'));
+		$trial->save();
+
+		try {
+			$node->set('mgn_backup_policy', json_encode(array('enabled' => false)));
+			$node->set('mgn_uptime_enabled', false);
+			$node->set('mgn_notes', trim((string)$node->get('mgn_notes') . "\n"
+				. 'Hosting ended unpaid on ' . gmdate('Y-m-d') . '; container stopped and held on its host. '
+				. 'Backups and uptime checks switched off here.'));
+			$node->save();
+		} catch (Throwable $e) {
+			$this->errors[] = $provision->get('cvp_domain')
+				. ': the container is held but its monitoring could not be quietened (' . $e->getMessage() . ').';
+		}
+		error_log('HostedTrialWatch: ' . $provision->get('cvp_domain')
+			. ' container held after its grace period.');
 		return 1;
 	}
 
