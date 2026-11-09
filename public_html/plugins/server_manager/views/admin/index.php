@@ -4,6 +4,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.63 - a provision whose server is in the test cloud account offers Discard test site (TestSiteDiscard):
+ *                 its server, DNS, mail subaccount, backups, test subscription and records, in one click
  * @version 1.62 - the Main and Test tabs only where something is on the Test side
  * @version 1.61 - Publish New Upgrade is offered only where this site publishes releases (SmPublishing)
  * @version 1.60 - a held hosted order (over the per-buyer limit) offers Approve, Refuse and a link to its order
@@ -281,6 +283,40 @@ if ($_POST && ($_POST['action'] ?? '') === 'dismiss_provision') {
 	$session->save_message(new DisplayMessage(
 		$prov->get('cvp_domain') . ' dismissed. It created nothing, so nothing is left running.',
 		'Dismissed', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	header('Location: /admin/server_manager'); exit;
+}
+
+// Clear a test site away: its server at the test account, its DNS, mail,
+// backups, test subscription and records here (TestSiteDiscard). Offered only
+// for a server in a cloud account flagged test, and deletes nothing unless the
+// account's own company name says it is the disposable one.
+if ($_POST && ($_POST['action'] ?? '') === 'discard_test_provision') {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+	if (!$prov->key || $prov->get('cvp_delete_time')) {
+		$session->save_message(new DisplayMessage('That provision is no longer on the board.', 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	$domain = (string)$prov->get('cvp_domain');
+	try {
+		$result = TestSiteDiscard::discard($prov);
+	} catch (Throwable $e) {
+		// A refusal deletes nothing. Anything else stopped part way: the
+		// steps it finished are safe to repeat, so the next click carries on.
+		if (!$e instanceof DisplayableUserException) {
+			error_log('discard_test_provision #' . (int)$prov->key . ': ' . $e->getMessage());
+		}
+		$session->save_message(new DisplayMessage($domain . ' was not discarded: ' . $e->getMessage()
+			. ($e instanceof DisplayableUserException ? '' : ' It may have stopped part way; click Discard again to finish.'),
+			'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	$text = ($result['finished'] ? $domain . ' discarded. ' : $domain . ' is partly discarded. ')
+		. implode(' ', $result['done']) . ($result['failed'] ? ' Not done: ' . implode(' ', $result['failed']) : '');
+	$session->save_message(new DisplayMessage(trim($text), $result['finished'] ? 'Discarded' : 'Partly discarded', $page_regex,
+		$result['finished'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 	header('Location: /admin/server_manager'); exit;
 }
 
@@ -1149,6 +1185,21 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 									onclick="<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Refund the payment and cancel the subscription on its order page first: refusing moves no money, it only takes the order off this board.'); ?>">Refuse</button>
 							</form>
 							<?php if ($held_order_id): ?><a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $held_order_id; ?>" class="svm-host-jump">order</a><?php endif; ?>
+						<?php endif; ?>
+						<?php if ($dismiss_blockers && TestSiteDiscard::offered($prov)):
+							$discard_why = TestSiteDiscard::refusal($prov); ?>
+							<?php if ($discard_why !== ''): ?>
+								<button type="button" class="btn btn-sm btn-outline-secondary"
+									onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Discard is not possible yet. ' . $discard_why), ENT_QUOTES); ?>)">Discard test site&hellip;</button>
+							<?php else: ?>
+								<form method="post" action="/admin/server_manager" id="discard_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+									<input type="hidden" name="action" value="discard_test_provision">
+									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+									<?php echo SmAdminCsrf::field(); ?>
+									<button type="button" class="btn btn-sm btn-outline-danger"
+										onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone. Type the domain to confirm.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode((string)$prov->get('cvp_domain')), ENT_QUOTES); ?>, function(){ document.getElementById('discard_prov_<?php echo (int)$prov->key; ?>').submit(); })">Discard test site&hellip;</button>
+								</form>
+							<?php endif; ?>
 						<?php endif; ?>
 						<?php if (!$dismiss_blockers): ?>
 							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">

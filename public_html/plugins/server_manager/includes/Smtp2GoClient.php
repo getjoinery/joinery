@@ -33,6 +33,9 @@
  * site's are the same thing at the provider, so they must not be read by two
  * pieces of code that can drift apart.
  *
+ * @version 1.10 - subaccountState(): a subaccount's state as the provider lists it (TestSiteDiscard skips a closed one);
+ *   subaccounts/search is read page by page, since it ignores an id and lists every subaccount: a send count
+ *   past the first page was never found
  * @version 1.9 - missingPermissions() lets a failed call's Smtp2GoException through, so the Hosted
  *   tier tab says why it could not check instead of only that it could not
  * @version 1.8 - missingPermissions(): the endpoints below that the master key may not call, read from
@@ -100,7 +103,7 @@ class Smtp2GoClient {
 		'subaccount/edit'    => array('set a subaccount\'s monthly limit', 'Subaccounts'),
 		'subaccount/close'   => array('close a subaccount on non-payment', 'Subaccounts'),
 		'subaccount/reopen'  => array('reopen a subaccount', 'Subaccounts'),
-		'subaccounts/search' => array('read a subaccount\'s sends this month', 'Subaccounts'),
+		'subaccounts/search' => array('read a subaccount\'s sends this month and whether it is closed', 'Subaccounts'),
 		'users/smtp/add'     => array('create the SMTP user a customer\'s site sends with', 'SMTP Users'),
 		'users/smtp/remove'  => array('remove a customer\'s SMTP user', 'SMTP Users'),
 		'domain/add'         => array('register a customer\'s sending domain', 'Sender Domains'),
@@ -378,14 +381,47 @@ class Smtp2GoClient {
 	 * refuses a master key acting for a subaccount.
 	 */
 	public function monthToDateSends(string $subaccount_id): int {
-		$data = $this->post('subaccounts/search', array('id' => $subaccount_id));
-		foreach ((array)($data['subaccounts'] ?? array()) as $entry) {
-			if (is_array($entry) && (string)($entry['id'] ?? '') === $subaccount_id
-					&& isset($entry['plan_used']) && is_numeric($entry['plan_used'])) {
-				return (int)$entry['plan_used'];
-			}
+		$entry = $this->subaccountEntry($subaccount_id);
+		if ($entry !== null && isset($entry['plan_used']) && is_numeric($entry['plan_used'])) {
+			return (int)$entry['plan_used'];
 		}
 		throw new Smtp2GoException('The provider did not list subaccount ' . $subaccount_id . ' with a send count.');
+	}
+
+	/**
+	 * The subaccount's state as the provider lists it, lowercase: 'active' or
+	 * 'closed'. '' when the provider does not list it.
+	 */
+	public function subaccountState(string $subaccount_id): string {
+		$entry = $this->subaccountEntry($subaccount_id);
+		return $entry === null ? '' : strtolower(trim((string)($entry['state'] ?? '')));
+	}
+
+	/**
+	 * The subaccount's entry in subaccounts/search, or null. The search takes
+	 * no id: it answers with every subaccount, a page at a time, so the pages
+	 * are followed until ours turns up (live 2026-11-09: an id in the request
+	 * is ignored).
+	 */
+	private function subaccountEntry(string $subaccount_id): ?array {
+		$token = '';
+		for ($page = 0; $page < 1000; $page++) {
+			$body = array('page_size' => 100);
+			if ($token !== '') {
+				$body['continue_token'] = $token;
+			}
+			$data = $this->post('subaccounts/search', $body);
+			foreach ((array)($data['subaccounts'] ?? array()) as $entry) {
+				if (is_array($entry) && (string)($entry['id'] ?? '') === $subaccount_id) {
+					return $entry;
+				}
+			}
+			$token = trim((string)($data['continue_token'] ?? ''));
+			if ($token === '') {
+				return null;
+			}
+		}
+		return null;
 	}
 
 	// ── Transport ─────────────────────────────────────────────────────────────

@@ -161,7 +161,10 @@ a superadmin's own browser session, from **Admin → System → Test Mode**
 while every other visitor pays for real; a banner on every page shows it
 is on, with a Turn off button, and it ends at sign-out. An order paid in
 test mode carries `ord_test_mode`, and a hosted site bought in it is named
-with `test_` at the cloud and mail providers.
+with `test_` at the cloud and mail providers. Code acting on something that
+lives on the test side, such as a test-mode order's subscription, runs it
+inside `TestMode::on_test_side()`, which turns test mode on for that call
+alone, whatever the session and the setting say.
 
 ## Activation
 

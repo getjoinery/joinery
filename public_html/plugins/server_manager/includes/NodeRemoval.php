@@ -30,8 +30,10 @@
  *   5. A node not hosted by us has no machine guard: it keeps running, and is
  *      simply no longer managed.
  *
- * The platform never deletes an instance itself.
+ * Removal never deletes an instance itself. On the test account,
+ * TestSiteDiscard deletes the server and then removes its nodes.
  *
+ * @version 1.6 - the header names TestSiteDiscard, which deletes a test server before removing its nodes
  * @version 1.5 - a node with a copy under way, of it or as its copy's row, is refused until the copy is discarded or
  *               kept (copy_refusal, B116): the copy was left live with no source, its provision advancing every tick
  * @version 1.4 - the backups refusal names each target and folder holding them and the page where Delete all is, and

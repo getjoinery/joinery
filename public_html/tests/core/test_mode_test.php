@@ -16,6 +16,7 @@
  *
  * Run: php tests/run.php --only=tests/core/test_mode_test.php
  *
+ * @version 1.1 - on_test_side(): on for the one call, the session untouched, off again after a throw
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -59,6 +60,16 @@ check($r->redirect === '/cart', 'returns to the page it was pressed on', var_exp
 $_SESSION[TestMode::SESSION_KEY] = true;
 $r = test_mode_logic(array('action' => 'off', 'return' => '//evil.example/x'));
 check($r->redirect === null || $r->redirect === '', 'refuses to return to another site');
+
+section('One call on the test side');
+unset($_SESSION[TestMode::SESSION_KEY]);
+$inside = TestMode::on_test_side(function () { return array(TestMode::active(), TestMode::session_on()); });
+check($inside === array(true, false) && !TestMode::active(), 'on inside the call only, and the session switch untouched', json_encode($inside));
+try {
+	TestMode::on_test_side(function () { throw new RuntimeException('stop'); });
+} catch (RuntimeException $e) {
+}
+check(!TestMode::active(), 'off again after a call that throws');
 
 section('The debug setting turns it on for everyone, with no banner');
 unset($_SESSION[TestMode::SESSION_KEY]);

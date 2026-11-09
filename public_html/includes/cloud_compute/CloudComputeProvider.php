@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.15 - deleteInstance() names Discard test site among its callers
  * @version 1.14 - CloudInstanceTypes takes a region: the plans and the default plan are those it sells (B31)
  * @version 1.13 - CloudSwapWhileStopped: a swap that needs both servers off
  * @version 1.12 - CloudInstanceTypes: a provider's plans and its default region and plan; CloudTokenScopes: what a
@@ -112,9 +113,9 @@ interface CloudComputeProvider {
 
 	/**
 	 * Delete an instance. Used only for cleaning up a failed provision that
-	 * this pipeline itself created, and by the test-account cleanup on an
-	 * account whose own name says it is disposable — never for
-	 * customer-initiated teardown.
+	 * this pipeline itself created, and by the test-account cleanup and
+	 * Discard test site (TestSiteDiscard) on an account whose own name says
+	 * it is disposable — never for customer-initiated teardown.
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function deleteInstance(string $instance_id): void;

@@ -13,6 +13,8 @@
  * Code that picks a test or live credential asks active(); nothing reads the
  * session key or the debug setting for this itself.
  *
+ * @version 1.1 - on_test_side(): run one piece of work against the test side, whatever the session and
+ *   the debug setting say, for a record made on the test side (a test-mode order's subscription)
  * @version 1.0
  */
 class TestMode {
@@ -23,9 +25,27 @@ class TestMode {
 	/** The level that may turn it on for their session. */
 	const TURN_ON_LEVEL = 10;
 
+	/** @var int how many on_test_side() calls are running in this request */
+	private static $test_side = 0;
+
 	/** True when this request uses the test side of outside services. */
 	public static function active(): bool {
-		return self::session_on() || self::site_wide();
+		return self::$test_side > 0 || self::session_on() || self::site_wide();
+	}
+
+	/**
+	 * Run $fn against the test side, and return what it returns. For acting on
+	 * something that lives there, such as a test-mode order's subscription,
+	 * from a request that may itself be on the live side. Only this call is
+	 * affected: the session and the setting are not touched.
+	 */
+	public static function on_test_side(callable $fn) {
+		self::$test_side++;
+		try {
+			return $fn();
+		} finally {
+			self::$test_side--;
+		}
 	}
 
 	/** True when this browser session turned it on. */
