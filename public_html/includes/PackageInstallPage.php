@@ -37,6 +37,8 @@
  * the URL, which carries only a request id or a staged directory name that
  * is checked against staging.
  *
+ * @version 1.6 - the publishing box refuses an unsigned package as a restricted host does: its sentence, no button
+ *                (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.5 - the replace panel reads a sandboxed plugin's manifest.json, never calls one a fork, and
  *                refuses a replacement that would change a plugin's kind
  * @version 1.4 - on a host that refuses unsigned packages the warning says so and offers no button,
@@ -315,8 +317,9 @@ class PackageInstallPage {
 			// A refused replacement is still a replacement once acknowledged.
 			'replace'    => (($args['replace'] ?? false) === true),
 			'warning'    => PackageAcknowledgement::warning($verdict),
-			// The host refuses it outright: the page says so and offers no button.
-			'restricted' => HostRestrictions::has('unsigned_packages'),
+			// The machine refuses it outright: the page says why and offers no button.
+			'refusal'    => PackageAcknowledgement::refusal(),
+			'restricted' => PackageAcknowledgement::refusal() !== '',
 		);
 	}
 
@@ -337,7 +340,7 @@ class PackageInstallPage {
 			throw new Exception($why);
 		}
 		if ($refused['restricted']) {
-			throw new Exception(HostRestrictions::UNSIGNED_SENTENCE);
+			throw new Exception($refused['refusal']);
 		}
 		$stepup = $session->require_recent_second_factor($return_url, PackageAcknowledgement::STEP_UP_TTL);
 		if ($stepup) {
@@ -453,7 +456,7 @@ class PackageInstallPage {
 				. '.jy-unsigned-warning td{padding:.15rem 0}'
 				. '</style>'
 				. '<h4>This ' . $e($refused['type']) . ' was not built by Joinery</h4>'
-				. '<p>' . $e(HostRestrictions::UNSIGNED_SENTENCE) . ' It cannot be installed here.</p>'
+				. '<p>' . $e((string)($refused['refusal'] ?? HostRestrictions::UNSIGNED_SENTENCE)) . ' It cannot be installed here.</p>'
 				. '<table>' . $rows . '</table>'
 				. '</div>';
 		}

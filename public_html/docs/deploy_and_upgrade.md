@@ -1119,6 +1119,15 @@ any unverified package does. `PackageSignature::publisherBox()` is false there
 whatever `config/` holds, and the host converger never takes the publishing-box
 shortcut there.
 
+**On the publishing box** (`PackageSignature::publisherBox()`: it holds
+`config/agent_signing_key`) an uploaded unsigned plugin or page theme is refused
+the same way, with "This is the publishing box: it installs only signed plugins
+and themes" (`PackageAcknowledgement::refusal()`, which the page, `mint()` and
+the installer share). That box runs a plugin's `host_installer` as root without
+verifying it, and the acknowledgement is a database row the web tier can write,
+so an unsigned upload there would hand web-tier code to root. Its own plugins
+are written into its tree as source, and an install from disk still trusts them.
+
 The shell form still works for a self-hoster with one, and is the same code:
 
 ```
@@ -1387,7 +1396,10 @@ workers the plan gives (80) plus 20.
 
 **One site directly on a machine.** A machine runs one site directly (with its own test site,
 which shares its PHP workers); `install.sh site` refuses a second. Several sites share a
-machine as containers, each sized from a budget of its own.
+machine as containers, each sized from a budget of its own. The root helpers a site calls
+through sudo (the mail gateway, the mail listener, DKIM key removal, the office editor) and the
+document parser's jail serve that one site and its test site: a helper takes a site or domain
+name and does not check that it belongs to the caller, because on the machine there is no other.
 
 "RAM the machine owns" is the whole question, and on a shared host only the container knows
 the answer. The budget is resolved in one order, and the script skips rather than guesses:

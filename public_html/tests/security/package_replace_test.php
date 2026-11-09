@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/utils/install_extension.php]
  */
 /**
  * Replacing an installed package from an upload, and the fork model
@@ -18,6 +19,7 @@
  *
  * Run: php tests/run.php --only=tests/security/package_replace_test.php
  *
+ * @version 1.1 - declares the installer it reads as covered, so a change to it reruns this
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');

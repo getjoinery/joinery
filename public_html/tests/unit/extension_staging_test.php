@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [public_html/utils/install_extension.php]
  */
 /**
  * Uploading an extension: unpacked and checked by the web user, verified and
@@ -19,6 +20,8 @@
  *
  * Run: php tests/unit/extension_staging_test.php
  *
+ * @version 1.5 - the publishing box refuses an unverified staged package ahead of the acknowledgement (D6);
+ *                declares the installer it reads as covered
  * @version 1.4 - on a host that refuses unsigned packages the installer refuses before any acknowledgement,
  *                in both forms (specs/host_restrictions.md D3)
  * @version 1.3 - the fork mark is the live manifest, written by the staged form (specs/package_replace_on_upload.md)
@@ -173,6 +176,13 @@ $staged_restr = strpos($staged_branch, $restricted);
 check($staged_restr !== false && $staged_restr < strpos($staged_branch, '} elseif (!$acknowledged) {')
 	&& $staged_restr > strpos($staged_branch, "if (\$kind === 'style') {"),
 	'staged: a style theme still installs; then the host\'s restriction is asked, ahead of the acknowledgement');
+// The publishing box runs host installers out of its tree unverified, so the
+// staged form refuses there too, ahead of the acknowledgement
+// (specs/shell_command_audit_wp2_results.md D6).
+$staged_pub = strpos($staged_branch, '} elseif (PackageSignature::publisherBox()) {');
+check($staged_pub !== false && $staged_pub > $staged_restr && $staged_pub < strpos($staged_branch, '} elseif (!$acknowledged) {')
+	&& strpos(substr($staged_branch, $staged_pub, 500), 'exit(EXIT_UNVERIFIED);') !== false,
+	'staged: on the publishing box an unverified package is refused, acknowledged or not');
 $disk_restr = strpos($byname_branch, $restricted);
 check($disk_restr !== false && $disk_restr < strpos($byname_branch, "in_array((string)\$existing->get(\$trust_column), array('unsigned', 'unlogged'), true)"),
 	'from disk: the restriction is asked before a row saying unsigned is taken as an acknowledgement');

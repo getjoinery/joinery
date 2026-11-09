@@ -42,6 +42,13 @@
  * --acknowledged, and a row already saying 'unsigned' is no acknowledgement
  * either. A style theme still installs; nothing in it runs.
  *
+ * ON THE PUBLISHING BOX (PackageSignature::publisherBox()) the staged form
+ * refuses the same way. That box trusts its own tree, so its host installer
+ * runner runs a plugin's host_installer as root without verifying it, and the
+ * acknowledgement is a database row the web tier can write: an unsigned
+ * upload there would be web-tier code made root. Its plugins are its source,
+ * written into the tree, and the from-disk form still trusts them.
+ *
  *   php utils/install_extension.php plugin|theme --staged=<dir> [--replace] [--acknowledged]
  *   php utils/install_extension.php plugin|theme <name> --register   (the database half alone)
  *
@@ -61,6 +68,8 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.13 - the publishing box refuses an unverified staged plugin or page theme, acknowledged or not:
+ *                 it runs host installers without asking who built them (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.12 - the private copy of a staged package must itself be a real directory, and the staging
  *                 directory is deleted only after its path is re-read as a chain of real directories
  *                 (specs/shell_command_audit.md A8, A9)
@@ -734,6 +743,13 @@ try {
 				// (specs/host_restrictions.md D3).
 				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict). "
 					. HostRestrictions::unsignedRefusal() . "\n");
+				install_extension_rmtree($work);
+				exit(EXIT_UNVERIFIED);
+			} elseif (PackageSignature::publisherBox()) {
+				// This box runs host installers out of its tree unverified, and
+				// the acknowledgement is a row the web tier writes (D6).
+				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict). "
+					. PackageAcknowledgement::PUBLISHER_SENTENCE . "\n");
 				install_extension_rmtree($work);
 				exit(EXIT_UNVERIFIED);
 			} elseif (!$acknowledged) {

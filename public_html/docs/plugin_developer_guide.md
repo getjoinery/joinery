@@ -524,7 +524,8 @@ unsigned plugin and theme present.
 A host that refuses unsigned packages (a multi-tenant host, whose restrictions
 file says `unsigned_packages=refuse`) has no **Install anyway**: an unsigned
 plugin or page theme cannot be installed there at all, and only signed packages
-and style themes install.
+and style themes install. Nor does the publishing box (the one site holding the
+release signing key), whose own plugins are written into its tree as source.
 
 Signed packages — from the marketplace, or the same archive uploaded as a ZIP
 — install with no prompt, and their row records `plg_trust = 'signed'`.

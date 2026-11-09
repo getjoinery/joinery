@@ -16,7 +16,7 @@
  * on. The shell's list of what may be written (_host_restrictions.sh) is the
  * same as the reader's, the writer writes only that, and the shell asks the
  * same question the same way. The refusals themselves: the acknowledgement is
- * never minted on a restricted host.
+ * never minted on a restricted host, nor on the publishing box.
  *
  * Unprivileged, the reader is pointed at a fixture (useFile, or the
  * environment for a subprocess); as root it always reads the host's own file,
@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/host_restrictions_test.php
  *
+ * @version 1.1 - the publishing box refuses as a restricted host does (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -166,5 +167,28 @@ check(strpos($html, HostRestrictions::UNSIGNED_SENTENCE) !== false && strpos($ht
 	&& strpos($html, 'install_anyway') === false, 'the page says the host refuses it, and offers no Install anyway', $html);
 $html = PackageInstallPage::warning_html($refused + array('restricted' => false), '/admin/admin_plugins', $page);
 check(strpos($html, 'Install anyway') !== false, 'on any other host the warning and its button are as they were');
+
+section('The publishing box takes no unsigned package either');
+
+// Unrestricted, refusal() is the publishing box's sentence exactly where this
+// box holds the release key, and nothing anywhere else.
+$write("# empty\n");
+$publisher = PackageSignature::publisherBox();
+check(PackageAcknowledgement::refusal() === ($publisher ? PackageAcknowledgement::PUBLISHER_SENTENCE : ''),
+	'unrestricted: refused only on the publishing box (this box ' . ($publisher ? 'is' : 'is not') . ' one)',
+	PackageAcknowledgement::refusal());
+$threw = '';
+try {
+	PackageAcknowledgement::mint(SessionControl::get_instance());
+} catch (Exception $e) {
+	$threw = $e->getMessage();
+}
+if ($publisher) {
+	check($threw === PackageAcknowledgement::PUBLISHER_SENTENCE, 'on the publishing box mint() refuses with its sentence, before any second factor', $threw);
+}
+$html = PackageInstallPage::warning_html($refused + array('restricted' => true, 'refusal' => PackageAcknowledgement::PUBLISHER_SENTENCE),
+	'/admin/admin_plugins', $page);
+check(strpos($html, PackageAcknowledgement::PUBLISHER_SENTENCE) !== false && strpos($html, 'install_anyway') === false,
+	'the page says the publishing box refuses it, and offers no Install anyway', $html);
 
 harness_finish();

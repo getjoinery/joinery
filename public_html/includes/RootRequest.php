@@ -30,6 +30,7 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.10 - the install_package note names the publishing box, which takes no unsigned package (D6)
  * @version 1.9 - a request written into a queue that moved while it was being written is taken back and
  *                refused out loud (reviewer1 B4)
  * @version 1.8 - the queue and the transcripts are where RootState says: root's /var/lib/joinery/sites/<site>
@@ -165,8 +166,10 @@ class RootRequest {
 	 * acknowledgement is a database row, which the pool writes — so an
 	 * attacker already running code in the web tier can forge one and have
 	 * root copy PHP into the tree. That attacker is the accepted residual;
-	 * what they cannot do is run anything as root, and what a stolen admin
-	 * session cannot do is produce the marker at all.
+	 * what they cannot do is run anything as root (the publishing box, whose
+	 * host installers run unverified, takes no unsigned package at all:
+	 * PackageAcknowledgement::refusal()), and what a stolen admin session
+	 * cannot do is produce the marker at all.
 	 *
 	 * The shell command still works for a self-hoster with one:
 	 *

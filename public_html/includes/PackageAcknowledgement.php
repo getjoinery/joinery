@@ -26,12 +26,21 @@
  * utils/install_extension.php (migrations as the web user, every superadmin
  * emailed, the event log) bound what they get.
  *
+ * WHERE THERE IS NO "YES" AT ALL (refusal()): a host that refuses unsigned
+ * packages, and the publishing box. The publishing box trusts its own tree
+ * (PackageSignature::publisherBox()), so root runs a plugin's host installer
+ * there without asking who built it; an unsigned upload in that tree would be
+ * a forged marker away from root. Its own plugins are written into the tree
+ * as source, never uploaded, so it loses nothing.
+ *
  * An account with no second factor cannot acknowledge. The step-up gate is a
  * no-op for such an account (there is nothing to step up with), so without
  * this refusal the "yes" would be the session cookie alone — exactly what the
  * gate exists to be more than. Same rule as resetting another admin's factors
  * (adm/logic/admin_user_logic.php).
  *
+ * @version 1.4 - refusal(): the publishing box takes no unsigned package either, so mint() refuses there too
+ *                (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.3 - mint() refuses on a host that refuses unsigned packages (specs/host_restrictions.md D3)
  * @version 1.2 - warning() says which case it is: a package signed by Joinery but not in the public log
  *                gets its own words (spec release_transparency, D6)
@@ -54,6 +63,24 @@ class PackageAcknowledgement {
 	 */
 	const MAX_AGE = 3000;
 
+	/** Why the publishing box takes no unsigned package, for the page and the installer alike. */
+	const PUBLISHER_SENTENCE = 'This is the publishing box: it installs only signed plugins and themes. Its own plugins are written into its tree.';
+
+	/**
+	 * The sentence that says this machine installs no unsigned package,
+	 * whatever the owner answers, or '' where the warning can be answered.
+	 * Root asks the same question in utils/install_extension.php.
+	 */
+	public static function refusal(): string {
+		if (HostRestrictions::has('unsigned_packages')) {
+			return HostRestrictions::UNSIGNED_SENTENCE;
+		}
+		if (PackageSignature::publisherBox()) {
+			return self::PUBLISHER_SENTENCE;
+		}
+		return '';
+	}
+
 	/**
 	 * The page side. Returns the acknowledgement to put in the request's
 	 * `unsigned_ack`, or throws with the sentence to show the operator.
@@ -64,9 +91,10 @@ class PackageAcknowledgement {
 	 * and a page that forgot the gate must not be able to mint one.
 	 */
 	public static function mint(SessionControl $session): array {
-		if (HostRestrictions::has('unsigned_packages')) {
+		$refusal = self::refusal();
+		if ($refusal !== '') {
 			// Root refuses it whatever the answer; no step-up is asked for a no.
-			throw new Exception(HostRestrictions::UNSIGNED_SENTENCE);
+			throw new Exception($refusal);
 		}
 		$uid = (int)$session->get_user_id();
 		$user = $uid > 0 ? new User($uid, TRUE) : null;
