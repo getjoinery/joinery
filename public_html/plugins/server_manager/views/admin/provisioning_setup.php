@@ -16,7 +16,9 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
- * @version 2.10 - the webhook secret help names the webhook's URL
+ * @version 2.10 - the webhook secret help names the webhook's URL; the
+ *   SMTP2GO key's check sits beside its field, one line per permission group, as on the payments page;
+ *   the key's help says its SMTP2GO status must be Allowed, with the Emails permission off
  * @version 2.9 - the webhook secret help says how SMTP2GO's Authorization header field takes it
  * @version 2.8 - the title and tabs come from the logic: Cloud Accounts alone where this site does not sell hosting
  * @version 2.7 - the SMTP2GO master key row says why its permissions could not be read
@@ -88,6 +90,44 @@ function smps_missing_scopes(array $missing): string {
 		$out .= '<li><code>' . htmlspecialchars($scope) . '</code>: ' . htmlspecialchars($purpose) . '</li>';
 	}
 	return $out . '</ul>';
+}
+
+/**
+ * The SMTP2GO master key's check, for the box beside the key's field: one line
+ * per permission group a hosted order uses, each passed or missing, or why the
+ * check could not be made.
+ */
+function smps_smtp2go_key_check(array $hosted): string {
+	if (!$hosted['smtp2go_present']) {
+		return '<p class="text-muted mb-0">No key saved yet. Save one and this box asks SMTP2GO what it may do.</p>';
+	}
+	if ($hosted['smtp2go_check_error'] !== '') {
+		return '<p class="mb-1">' . smps_badge(false, '', 'Check failed', 'danger') . ' SMTP2GO refused the question:</p>'
+			. '<p class="small mb-0">' . htmlspecialchars($hosted['smtp2go_check_error']) . '</p>';
+	}
+	if ($hosted['smtp2go_missing'] === null) {
+		return '<p class="mb-0">' . smps_badge(false, '', 'Not checked', 'secondary')
+			. ' SMTP2GO answered but did not say what this key may do.</p>';
+	}
+	$groups = array();
+	foreach (Smtp2GoClient::ENDPOINTS_USED as $path => $spec) {
+		$groups[$spec[1]][$path] = $spec[0];
+	}
+	$out = '<p class="mb-2">' . ($hosted['smtp2go_missing']
+		? smps_badge(false, '', 'Missing permissions', 'danger') . ' A hosted order fails at the step that needs one.'
+			. ' In SMTP2GO under Sending, then API Keys, give this key the missing ones.'
+		: smps_badge(true, 'Ready', '') . ' SMTP2GO says this key has every permission a hosted order uses.') . '</p>'
+		. '<table class="table table-sm mb-0">';
+	foreach ($groups as $group => $paths) {
+		$missing = array_intersect_key($paths, (array)$hosted['smtp2go_missing']);
+		$out .= '<tr><th>' . htmlspecialchars($group) . '</th><td>'
+			. ($missing
+				? '<span style="color:#dc3545">&#10007; Missing</span><br><span class="text-muted small">Needed to '
+					. htmlspecialchars(implode('; ', $missing)) . '</span>'
+				: '<span style="color:#198754">&#10003; Allowed</span>')
+			. '</td></tr>';
+	}
+	return $out . '</table>';
 }
 
 $page = new AdminPage();
@@ -446,34 +486,6 @@ product simply cannot be fulfilled — the bring-your-own-cloud product is unaff
 		</td>
 	</tr>
 	<tr>
-		<th>SMTP2GO master key</th>
-		<td>
-			<?php if (!$hosted['smtp2go_present']): ?>
-				<?= smps_badge(false, '', 'Not set', 'warning') ?> Enter it below.
-			<?php elseif ($hosted['smtp2go_check_error'] !== ''): ?>
-				<?= smps_badge(false, '', 'Permissions not checked', 'warning') ?> Asking SMTP2GO what this key may do failed:
-				<?= htmlspecialchars($hosted['smtp2go_check_error']) ?>
-			<?php elseif ($hosted['smtp2go_missing'] === null): ?>
-				<?= smps_badge(false, '', 'Permissions not checked', 'secondary') ?> SMTP2GO did not say what this key may do.
-			<?php elseif ($hosted['smtp2go_missing']): ?>
-				<?php
-				$groups = array();
-				foreach ($hosted['smtp2go_missing'] as $spec) { $groups[$spec[1]] = $spec[1]; }
-				?>
-				<?= smps_badge(false, '', 'Missing permissions', 'danger') ?> SMTP2GO will refuse these, and a hosted
-				order fails at that step. In SMTP2GO under Sending, then API Keys, give the master key the
-				<?= htmlspecialchars(implode(', ', $groups)) ?> permission.
-				<ul class="mb-0">
-				<?php foreach ($hosted['smtp2go_missing'] as $path => $spec): ?>
-					<li><code><?= htmlspecialchars($path) ?></code>: <?= htmlspecialchars($spec[0]) ?></li>
-				<?php endforeach; ?>
-				</ul>
-			<?php else: ?>
-				<?= smps_badge(true, 'Every permission a hosted order uses', '') ?>
-			<?php endif; ?>
-		</td>
-	</tr>
-	<tr>
 		<th>Allowances</th>
 		<td>
 			<?= (int)$hosted['send_allowance'] ?> sends a month and
@@ -497,10 +509,16 @@ product simply cannot be fulfilled — the bring-your-own-cloud product is unaff
 $fw_hosted = $page->getFormWriter('form_hosted', ['action' => $base_url . '?tab=hosted']);
 echo $fw_hosted->begin_form();
 echo '<input type="hidden" name="action" value="save_hosted">';
+echo '<div class="row"><div class="col-md-6">';
 $fw_hosted->passwordinput('hosted_smtp2go_master_key', 'SMTP2GO master API key', [
 	'stored' => $hosted['smtp2go_present'],
 	'helptext' => 'The master key every customer subaccount is administered with.'
-		. ' Only a per-customer SMTP user ever reaches a customer\'s box.']);
+		. ' Only a per-customer SMTP user ever reaches a customer\'s box.'
+		. ' At SMTP2GO its status must be Allowed: Blocked turns off every API call, not only sending.'
+		. ' This site never sends with it, so leave the Emails permission off and give it only what the check beside lists.']);
+echo '</div><div class="col-md-6"><h5>SMTP2GO key check</h5>'
+	. '<div style="padding: 15px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;">'
+	. smps_smtp2go_key_check($hosted) . '</div></div></div>';
 $fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this plane mints',
 	['checked' => $hosted['smtp2go_sandbox_users'],
 	 'helptext' => 'Every customer SMTP user is created in SMTP2GO\'s sandbox status: accepted and counted, never '

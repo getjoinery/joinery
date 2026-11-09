@@ -375,6 +375,14 @@ servers go to (chosen on the **Hosting** tab; see *Cloud accounts* in the
 mail key are both present, a hosted order cannot be fulfilled — a hosted site
 without mail is a site whose owner cannot reset their own password.
 
+At SMTP2GO the master key's status is **Allowed**: Blocked turns off every API
+call, not only sending. This site never sends with the key, so it is narrowed
+with permissions instead: Subaccounts, SMTP Users and Sender Domains on, Emails
+(the API's sending) off. The tab checks
+the key with SMTP2GO each time it opens and shows each permission beside the
+key's field. The webhook points at `/ajax/smtp2go_webhook` on this site, with
+the processed event and the webhook secret under a Basic authorization header.
+
 Then, on the product: pick *Customer cloud server* under Purchase grants and
 choose **Create the server on the operator's account (hosted)**. Give it one
 monthly subscription version; nothing is attached under *Info to collect
