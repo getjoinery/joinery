@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.9 - an enrol makes sure the tenant's subaccount carries its own webhook (Smtp2GoLeg::ensureWebhook)
  * @version 1.8 - selling (specs/services_phase3_selling_nudge.md §1, §2): status carries the offer on sale and
  *               each row's renews; an unpaid row's notice names the offer and where to buy it; noticeDays()
  * @version 1.7 - the released-mail notice names the provider's two records on the site's domain
@@ -246,6 +247,18 @@ class JoineryServices {
 				$row->save();
 			}
 			Smtp2GoLeg::setLimit($client, $subaccount, self::allowance(ServiceTenant::SERVICE_MAIL));
+
+			// The subaccount reports its sends here, for the tenant's sent
+			// count. A gap is logged, never a refusal: the tenant's mail works
+			// without it.
+			try {
+				$gap = Smtp2GoLeg::ensureWebhook($client, $subaccount);
+			} catch (\Throwable $e) {
+				$gap = 'The mail provider refused the webhook: ' . $e->getMessage();
+			}
+			if ($gap !== '') {
+				error_log('JoineryServices: ' . $host . ': ' . $gap);
+			}
 
 			// The sender domain is the host's: a host change adds the new one
 			// and releases the old (D2). Same host, same domain, nothing to do.

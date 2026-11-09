@@ -22,6 +22,7 @@
  *
  * Nothing here ever puts the master key on a box.
  *
+ * @version 1.5 - ensureWebhook(): every subaccount reports its sends to this site's webhook
  * @version 1.4 - the sending identity is the customer's own domain, not mail.<domain>: the
  *   provider refuses an envelope sender whose domain has no MX or address record (B165)
  * @version 1.3 - customers send on port 2525: Linode blocks 587 (B163)
@@ -72,6 +73,38 @@ class Smtp2GoLeg {
 	/** Cap the subaccount at the allowance. Convergent; safe to repeat. */
 	public static function setLimit(Smtp2GoClient $client, string $subaccount_id, int $allowance): void {
 		$client->setSubaccountLimit($subaccount_id, $allowance);
+	}
+
+	/**
+	 * Make sure the subaccount reports its sends to this site's webhook, which
+	 * moves the customer's sent count. Convergent: a subaccount already
+	 * pointing here is left alone, so a retried step never adds a second one.
+	 * A webhook on the master account does not see a subaccount's sends, which
+	 * is why every subaccount needs its own.
+	 *
+	 * Returns '' when the webhook is in place, or why it could not be: a
+	 * missing webhook secret is a setup gap on this site, not a reason to hold
+	 * up the customer's mail, so the caller notes it and carries on.
+	 */
+	public static function ensureWebhook(Smtp2GoClient $client, string $subaccount_id): string {
+		$secret = trim(ProvisioningSetup::readSecret('server_manager_smtp2go_webhook_secret'));
+		if ($secret === '') {
+			return 'No SMTP2GO webhook secret is set on this site (Provisioning Setup, Hosted tier), so this '
+				. 'customer\'s sends are not reported here. Their mail works; the sent count stays at zero.';
+		}
+		$url = self::webhookUrl();
+		foreach ($client->listWebhooks($subaccount_id) as $hook) {
+			if (rtrim($hook['url'], '/') === $url) {
+				return '';
+			}
+		}
+		$client->addWebhook($subaccount_id, $url, $secret);
+		return '';
+	}
+
+	/** Where a subaccount's webhook points: this site's /ajax/smtp2go_webhook. */
+	public static function webhookUrl(): string {
+		return rtrim(LibraryFunctions::get_absolute_url('/ajax/smtp2go_webhook'), '/');
 	}
 
 	/**

@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.6 - the subaccount gets its own webhook (Smtp2GoLeg::ensureWebhook)
  * @version 1.5 - the sending domain is the site's own domain (Smtp2GoLeg 1.4, B165)
  * @version 1.4 - the subaccount is created at the allowance, with no buyer email (B160)
  * @version 1.3 - the provider acts are Smtp2GoLeg's, shared with the services tenant enrol
@@ -174,6 +175,17 @@ class ProvisionHostedMail {
 			$provision->save();
 		}
 		Smtp2GoLeg::setLimit($this->client, $id, self::send_allowance());
+		// The subaccount reports its sends here, which moves the site's sent
+		// count. A gap is noted for the operator, never a stop: the site's mail
+		// works without it.
+		try {
+			$gap = Smtp2GoLeg::ensureWebhook($this->client, $id);
+		} catch (Smtp2GoException $e) {
+			$gap = 'The mail provider refused the webhook: ' . $e->getMessage();
+		}
+		if ($gap !== '') {
+			$this->errors[] = $domain . ': ' . $gap;
+		}
 		$provision->set('cvp_mail_state', 'subaccount_created');
 		$provision->set('cvp_mail_error', null);
 		$provision->save();

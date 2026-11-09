@@ -32,6 +32,7 @@
  * rather than per-subaccount, so it is one piece of operator setup, not a step
  * of every customer's provisioning.
  *
+ * @version 1.7 - a header with no scheme word is read as the value alone
  * @version 1.6 - the secret is read from the header itself: base64 or unencoded Basic, or Bearer,
  *   as SMTP2GO's header field sends what is typed; a refusal logs scheme, username, lengths
  * @version 1.5 - deliveries come from Svix, which SMTP2GO sends its webhooks through:
@@ -90,13 +91,27 @@ if ($expected === '') {
 // dashboard sends the typed value as it stands after the scheme word: Basic
 // with base64(user:secret) is the standard form, but the same field takes the
 // secret or user:secret unencoded, and Bearer with the secret; each is
-// accepted. PHP's own PHP_AUTH_PW is not used: it decodes leniently, so an
-// unencoded value becomes a password of noise. hash_equals so a wrong secret
+// accepted, as is the value with no scheme word at all. PHP's own PHP_AUTH_PW
+// is not used: it decodes leniently, so an unencoded value becomes a password
+// of noise. hash_equals so a wrong secret
 // takes the same time as a right one.
 $supplied = '';
 $auth_user = '';
 $auth = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
-if (preg_match('/^(Basic|Bearer)\s+(\S+)\s*$/i', $auth, $m)) {
+if (!preg_match('/^(Basic|Bearer)\s+/i', $auth) && preg_match('/^\S+$/', trim($auth))) {
+	// No scheme word: the header is the value alone, as a webhook whose
+	// authorization type was left unset sends it.
+	$auth_value = trim($auth);
+	$decoded = base64_decode($auth_value, true);
+	if (is_string($decoded) && strpos($decoded, ':') !== false) {
+		$auth_value = $decoded;
+	}
+	if (strpos($auth_value, ':') !== false) {
+		$auth_user = substr($auth_value, 0, strpos($auth_value, ':'));
+		$auth_value = substr($auth_value, strpos($auth_value, ':') + 1);
+	}
+	$supplied = $auth_value;
+} elseif (preg_match('/^(Basic|Bearer)\s+(\S+)\s*$/i', $auth, $m)) {
 	$value = $m[2];
 	if (strtolower($m[1]) === 'basic') {
 		$decoded = base64_decode($value, true);

@@ -37,6 +37,7 @@
  *   tier tab says why it could not check instead of only that it could not
  * @version 1.8 - missingPermissions(): the endpoints below that the master key may not call, read from
  *   api_keys/permissions, so the Hosted tier tab names a key too narrow before a purchase finds it (B179)
+ * @version 1.8 - listWebhooks() and addWebhook(): each customer subaccount carries its own webhook
  * @version 1.7 - monthToDateSends() reads the subaccount's plan_used from subaccounts/search: the
  *   provider refuses stats/email_summary for a subaccount to a master key (403, live 2026-10-27; B162)
  * @version 1.6 - subaccountName(): the provider refuses some characters in a subaccount name (live
@@ -106,6 +107,8 @@ class Smtp2GoClient {
 		'domain/view'        => array('read the domain\'s DNS records', 'Sender Domains'),
 		'domain/verify'      => array('ask SMTP2GO to re-check DNS', 'Sender Domains'),
 		'domain/remove'      => array('release a domain a customer moved away from', 'Sender Domains'),
+		'webhook/view'       => array('see whether a customer\'s subaccount already reports its sends', 'Webhooks'),
+		'webhook/add'        => array('have a customer\'s subaccount report its sends here', 'Webhooks'),
 	);
 
 	/**
@@ -321,6 +324,45 @@ class Smtp2GoClient {
 			'subaccount_id' => $subaccount_id,
 			'username'      => $username,
 		));
+	}
+
+	// ── Webhooks ──────────────────────────────────────────────────────────────
+
+	/**
+	 * The webhooks configured on one subaccount, as a list of
+	 * ['id' => int, 'url' => string]. The provider documents one object or a
+	 * list under data; both are read.
+	 */
+	public function listWebhooks(string $subaccount_id): array {
+		$data = $this->post('webhook/view', array('subaccount_id' => $subaccount_id));
+		$entries = isset($data['url']) || isset($data['id']) ? array($data) : array_values($data);
+		$out = array();
+		foreach ($entries as $entry) {
+			if (is_array($entry) && isset($entry['url'])) {
+				$out[] = array('id' => (int)($entry['id'] ?? 0), 'url' => (string)$entry['url']);
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Have one subaccount report its sends to $url: the processed event, as
+	 * JSON, with $secret as the Basic authorization password.
+	 *
+	 * A webhook on the master account does not see a subaccount's sends (live
+	 * on dev 2026-11-09: none fired for a subaccount's mail, a webhook on the
+	 * subaccount did at once), so each customer's subaccount carries its own.
+	 */
+	public function addWebhook(string $subaccount_id, string $url, string $secret): int {
+		$data = $this->post('webhook/add', array(
+			'subaccount_id'     => $subaccount_id,
+			'url'               => $url,
+			'events'            => array('processed'),
+			'output_format'     => 'json',
+			'auth_header_type'  => 'basic',
+			'auth_header_value' => base64_encode('joinery:' . $secret),
+		));
+		return (int)($data['id'] ?? 0);
 	}
 
 	// ── Usage ─────────────────────────────────────────────────────────────────

@@ -157,10 +157,11 @@ subaccount's limit and refuses past it. Nothing on this platform is in the send
 path, so nothing in it can be bypassed by editing a setting on the customer's
 own box.
 
-**Delivery events arrive at `/ajax/smtp2go_webhook`**, and that webhook is
-created **by hand**, once, in the SMTP2GO console against the master account —
-it is account-wide rather than per-subaccount, so it is operator setup rather
-than a step of every customer's provisioning. It sends JSON, for the *Email
+**Delivery events arrive at `/ajax/smtp2go_webhook`**, from a webhook on each
+customer's own subaccount: a webhook on the master account does not fire for a
+subaccount's mail. Provisioning adds it right after creating the subaccount, for
+a Managed site and a services tenant alike (`Smtp2GoLeg::ensureWebhook`), and
+leaves a subaccount already pointing here alone. It sends JSON, for the *Email
 processed* event only (a message counts once, when the provider accepts it, as
 its own monthly count does), with Basic authorization whose password is the
 deployment's webhook secret; the username is not checked. The endpoint requires both that
@@ -377,11 +378,12 @@ without mail is a site whose owner cannot reset their own password.
 
 At SMTP2GO the master key's status is **Allowed**: Blocked turns off every API
 call, not only sending. This site never sends with the key, so it is narrowed
-with permissions instead: Subaccounts, SMTP Users and Sender Domains on, Emails
-(the API's sending) off. The tab checks
+with permissions instead: Subaccounts, SMTP Users, Sender Domains and Webhooks
+on, Emails (the API's sending) off. The tab checks
 the key with SMTP2GO each time it opens and shows each permission beside the
-key's field. The webhook points at `/ajax/smtp2go_webhook` on this site, with
-the processed event and the webhook secret under a Basic authorization header.
+key's field, Webhooks among them: every customer subaccount gets its own
+webhook to `/ajax/smtp2go_webhook` on this site, made with this key and carrying
+the webhook secret. Nothing is set up by hand in SMTP2GO's webhook screen.
 
 Then, on the product: pick *Customer cloud server* under Purchase grants and
 choose **Create the server on the operator's account (hosted)**. Give it one

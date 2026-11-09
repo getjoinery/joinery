@@ -16,6 +16,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.11 - the webhook secret's help says every customer subaccount gets its own webhook carrying it
  * @version 2.10 - the webhook secret help names the webhook's URL; the
  *   SMTP2GO key's check sits beside its field, one line per permission group, as on the payments page;
  *   the key's help says its SMTP2GO status must be Allowed, with the Emails permission off
@@ -525,8 +526,8 @@ $fw_hosted->checkboxinput('smtp2go_sandbox_users', 'Sandbox the SMTP users this 
 		. 'delivered. For a rehearsal plane. Leave off where real customers are hosted.']);
 $fw_hosted->passwordinput('smtp2go_webhook_secret', 'SMTP2GO webhook secret', [
 	'stored' => $hosted['webhook_present'],
-	'helptext' => 'Point the SMTP2GO webhook at ' . LibraryFunctions::get_absolute_url('/ajax/smtp2go_webhook')
-		. ' with the processed event, choose Basic under Authorization header and enter this value; joinery:value or its base64 also works.'
+	'helptext' => 'Any long random value. Each customer\'s subaccount is given its own webhook to '
+		. LibraryFunctions::get_absolute_url('/ajax/smtp2go_webhook') . ' carrying it, so nothing is set up by hand at SMTP2GO.'
 		. ' SMTP2GO does not sign its webhooks, so a spoofed one can move a banner and never a cap.']);
 $fw_hosted->textinput('send_allowance', 'Sends per month, per customer',
 	['value' => $hosted['send_allowance'],
