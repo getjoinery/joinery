@@ -39,6 +39,9 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.9 - a container site is recorded shut down only when its host's answer says the container is stopped
+ *                and held (done, not the job's status); a hold that failed or did not take is asked again once
+ *                an hour; hosted.container_held tells a person it still takes a place (reviewer2 F2-4, R2-1, R2-3)
  * @version 1.8 - a container site at the end of grace has its container stopped and held by its host's agent;
  *                nothing is owed at the provider, and an empty instance id is never read as already off
  * @version 1.7 - a new row catches up on a cancel or failed payment that came before it
@@ -64,6 +67,9 @@ class HostedTrialWatch {
 
 	/** The job type carrying a site's hosting banner to it. */
 	const JOB_TYPE = 'hosted_plan_notice';
+
+	/** How long after a grace-end hold that did not take before its host is asked again. */
+	const HOLD_RETRY_SECONDS = 3600;
 
 	/** @var array Human-readable problems for the run summary. */
 	private $errors = array();
@@ -548,8 +554,17 @@ class HostedTrialWatch {
 	/**
 	 * The grace ran out for a site in a container: its host's agent stops the
 	 * container and keeps it stopped. The host and its other sites are not
-	 * touched, and nothing is deleted. Until the hold job is created the site
-	 * is still serving, so the trial stays in grace and the next tick retries.
+	 * touched, and nothing is deleted.
+	 *
+	 * Recorded as shut down only once the host says the container is stopped
+	 * and held: its answer's `done`, not the job's status, because the host's
+	 * script ends cleanly when the stop did not finish. Until then the site may
+	 * still be serving, so the trial stays in grace and nothing downstream (the
+	 * backup prune) treats it as ended. A hold that failed, was cancelled, was
+	 * lost or did not take is asked for again, once an hour
+	 * (HOLD_RETRY_SECONDS): a host that keeps refusing (the container removed
+	 * by hand, or being replaced) is said on every tick but not sent a job on
+	 * every tick. Once held, a person is told it still takes a place on the host.
 	 */
 	private function hold_container_if_due($provision, $trial): int {
 		$node = $this->node_of($provision);
@@ -561,12 +576,57 @@ class HostedTrialWatch {
 		}
 		try {
 			$host_node = JobCommandBuilder::decommission_host_node_for($node);
-			$built = JobCommandBuilder::build_hold_container($host_node, $name, 'stop');
-			ManagementJob::createFromBuild($host_node->key, 'hold_container', $built,
-				array('reason' => 'Hosting ended unpaid on ' . gmdate('Y-m-d') . '.'), null);
 		} catch (Throwable $e) {
-			$this->errors[] = $provision->get('cvp_domain')
-				. ': could not ask its host to stop the container (' . $e->getMessage() . ').';
+			$this->errors[] = $provision->get('cvp_domain') . ': cannot find its host\'s agent (' . $e->getMessage() . ').';
+			return 0;
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_management_job_id, mjb_status,
+				EXTRACT(EPOCH FROM (now() - COALESCE(mjb_completed_time, mjb_create_time)))::int AS age
+			FROM mjb_management_jobs
+			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'hold_container' AND mjb_delete_time IS NULL
+			  AND mjb_parameters->>'provision_id' = ? AND mjb_parameters->>'grace_end' = '1'
+			ORDER BY mjb_management_job_id DESC LIMIT 1");
+		$q->execute(array((int)$host_node->key, (string)(int)$provision->key));
+		$last = $q->fetch(PDO::FETCH_ASSOC);
+		$status = $last ? (string)$last['mjb_status'] : '';
+
+		if (in_array($status, array('pending', 'queued', 'running'), true)) {
+			return 0;   // asked; the host has not answered yet
+		}
+		$held = false;
+		if ($status === 'completed') {
+			$job = new ManagementJob((int)$last['mjb_management_job_id'], TRUE);
+			if (!$job->get('mjb_result')) {
+				JobResultProcessor::process($job);
+				$job->load();
+			}
+			$result = $job->get('mjb_result');
+			$result = is_string($result) ? json_decode($result, true) : $result;
+			$held = is_array($result) && ($result['action'] ?? '') === 'stop' && ($result['done'] ?? false) === true;
+		}
+		if (!$held) {
+			if ($status !== '') {
+				$this->errors[] = $provision->get('cvp_domain') . ': its host did not hold the container (job #'
+					. (int)$last['mjb_management_job_id'] . ': '
+					. ($status === 'completed' ? 'it answered, but the container is not stopped and held' : $status)
+					. '); asked again once an hour.';
+				if ((int)$last['age'] < self::HOLD_RETRY_SECONDS) {
+					return 0;
+				}
+			}
+			try {
+				$built = JobCommandBuilder::build_hold_container($host_node, $name, 'stop');
+				ManagementJob::createFromBuild($host_node->key, 'hold_container', $built, array(
+					'reason'       => 'Hosting ended unpaid on ' . gmdate('Y-m-d') . '.',
+					'provision_id' => (int)$provision->key,
+					'grace_end'    => '1',
+				), null);
+			} catch (Throwable $e) {
+				$this->errors[] = $provision->get('cvp_domain')
+					. ': could not ask its host to stop the container (' . $e->getMessage() . ').';
+			}
 			return 0;
 		}
 
@@ -585,6 +645,15 @@ class HostedTrialWatch {
 			$this->errors[] = $provision->get('cvp_domain')
 				. ': the container is held but its monitoring could not be quietened (' . $e->getMessage() . ').';
 		}
+		$host = new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE);
+		SignalBus::dispatch('hosted.container_held', array(
+			'provision_id'    => (int)$provision->key,
+			'domain'          => (string)$provision->get('cvp_domain'),
+			'host'            => (string)($host->key ? $host->get('mgh_name') : ''),
+			'container'       => $name,
+			'buyer_email'     => (string)$provision->get('cvp_buyer_email'),
+			'shelf_ends_time' => (string)$trial->get('htr_shelf_ends_time'),
+		));
 		error_log('HostedTrialWatch: ' . $provision->get('cvp_domain')
 			. ' container held after its grace period.');
 		return 1;

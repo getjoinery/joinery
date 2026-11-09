@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+#VERSION 3.47 - --new-site-only marks its install unfinished (/etc/joinery/new-site/NAME) until it ends: a run
+#               killed outright leaves the mark beside its remains, and the next run of that install clears
+#               them instead of being refused for ever; a container engine that does not answer is a refusal,
+#               never "no such site" (a dormant copy's name check too)
+#VERSION 3.46 - --new-site-only also refuses a domain another site on this host serves, and a run that fails
+#               after its name was proved free removes what it made (remove_account.sh), so a retry starts clean
+#VERSION 3.45 - site --new-site-only (a host agent's new site): a site of that name already here (container, run
+#               spec or volume) is refused instead of rebuilt, and a busy port is refused instead of swapped for
+#               another the management node never hears of; a dormant copy in a container refuses a busy port too
+#VERSION 3.44 - site --admin-password-stdin reads the admin account's first password from one line of
+#               stdin, as shown elsewhere (JOINERY_ADMIN_PASSWORD_SHOWN): the host agent's fresh site install
+#               has no environment to pass it in, and argv is visible to every process (starter_tier.md)
 #VERSION 3.43 - every site container has a state volume (SITE_state at /var/lib/joinery/sites): root's
 #               record of the site and its converger log, kept across a rebuild (_site_run_spec.sh 1.19)
 #VERSION 3.42 - The closing summary says the site connects as its own database role and where the postgres
@@ -4498,6 +4510,8 @@ do_site_create() {
     local RELEASE_TREE_ONLY=false
     local COPY_OF=""
     local COPY_OF_KEY=""
+    local ADMIN_PASSWORD_STDIN=false
+    local NEW_SITE_ONLY=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -4578,6 +4592,14 @@ do_site_create() {
                 ;;
             --dormant)
                 DORMANT=true
+                shift
+                ;;
+            --admin-password-stdin)
+                ADMIN_PASSWORD_STDIN=true
+                shift
+                ;;
+            --new-site-only)
+                NEW_SITE_ONLY=true
                 shift
                 ;;
             --release-tree-only)
@@ -4671,6 +4693,11 @@ do_site_create() {
                 echo ""
                 echo "Site Options:"
                 echo "  --admin-email=EMAIL    Address for the admin account (default none: it signs in as admin)"
+                echo "  --admin-password-stdin The admin account's first password is one line on stdin, shown to"
+                echo "                         its owner elsewhere: the site asks for a new one at first sign-in"
+                echo "  --new-site-only        A new site and nothing else: a site of this name already here is"
+                echo "                         refused, never rebuilt, and so is a port already in use or a domain"
+                echo "                         another site here serves. A failed run removes what it made"
                 echo "  Environment (optional, secrets never on argv):"
                 echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
                 echo "    JOINERY_ADMIN_PASSWORD_SHOWN=1  that password is shown to the owner elsewhere: ask for a new one at first sign-in"
@@ -4782,6 +4809,28 @@ do_site_create() {
                 ;;
         esac
     done
+
+    # The admin account's first password, from stdin: what the host agent
+    # passes, since it hands a script no environment and argv is visible to
+    # every process on the box. Read first, before anything prints or prompts.
+    # A missing or empty line fails the install rather than falling back to a
+    # password only the machine knows: the owner is shown this one.
+    if [ "$ADMIN_PASSWORD_STDIN" = true ]; then
+        if [ "$DORMANT" = true ]; then
+            print_error "A dormant copy makes no admin account: no --admin-password-stdin"
+            exit 1
+        fi
+        local stdin_password=""
+        IFS= read -r stdin_password || true
+        if [ -z "$stdin_password" ]; then
+            print_error "--admin-password-stdin: no password on stdin"
+            exit 1
+        fi
+        JOINERY_ADMIN_PASSWORD="$stdin_password"
+        JOINERY_ADMIN_PASSWORD_SHOWN=1
+        export JOINERY_ADMIN_PASSWORD JOINERY_ADMIN_PASSWORD_SHOWN
+        unset stdin_password
+    fi
 
     # A dormant install is the target of a site copy (specs/site_copy.md): a
     # site that will be replaced whole by its source's backups, and must never
@@ -4993,6 +5042,33 @@ do_site_create() {
         fi
     fi
 
+    # --new-site-only: what a host agent passes for a new site (site_create).
+    # -y would otherwise stop and rebuild a container of the same name over
+    # its volumes: another customer's site, on a shared host. A site of that
+    # name here, by its container, run spec or any of its volumes, is refused.
+    if [ "$NEW_SITE_ONLY" = true ]; then
+        if [ "$DORMANT" = true ] || [ "$MODE" != "docker" ]; then
+            print_error "--new-site-only is a new site in a container: --docker, and never --dormant"
+            exit 1
+        fi
+        # A name or a domain this host already has is refused; what an earlier
+        # run of this same install left unfinished is cleared (its mark says so).
+        new_site_begin "$SITENAME" "$DOMAIN_NAME"
+        # From here everything named ${SITENAME} on this host is this run's own:
+        # the name was just proved free. A run that fails from here removes it
+        # whole, so a retry finds the name free again instead of refused for
+        # ever. Never set before the check above: what a refused run finds of
+        # that name is somebody else's. A run killed outright (the agent's
+        # time limit) skips this and leaves its mark beside its remains, which
+        # is how the next run knows to clear them.
+        NEW_SITE_CLEANUP_NAME="$SITENAME"
+        trap 'new_site_rc=$?; trap - EXIT; new_site_rc="$(new_site_end "$NEW_SITE_CLEANUP_NAME" "$new_site_rc")"; exit "${new_site_rc:-1}"' EXIT
+    else
+        # Any other install of this name is a person's, and takes the site as
+        # theirs: it is no longer the remains of an unfinished new-site install.
+        rm -f "$(new_site_mark "$SITENAME")" 2>/dev/null || true
+    fi
+
     if [ "$DORMANT" = true ] && [ "$DORMANT_CONTAINER" = true ]; then
         if [ "$MODE" != "docker" ] || [ "$(site_engine_kind 2>/dev/null)" != "podman" ]; then
             print_error "A dormant copy in a container goes on a host whose sites run on the site container engine, which keeps it quiet beside its other sites. This one's run on $(site_engine_kind 2>/dev/null || echo 'an engine that could not be named')."
@@ -5008,15 +5084,11 @@ do_site_create() {
         # A copy is a new site: a site of that name already here (its
         # container, its run spec or any of its volumes, by exact name) is
         # never rebuilt into one, which -y would otherwise do.
-        local copy_vol copy_clash=""
-        site_engine ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$SITENAME" && copy_clash="its container"
-        [ -e "/etc/joinery/sites/${SITENAME}/run_spec" ] && copy_clash="${copy_clash:+$copy_clash, }its run spec"
-        for copy_vol in "${ALL_SITE_VOLUMES[@]}"; do
-            if site_engine volume inspect "${SITENAME}_${copy_vol}" > /dev/null 2>&1; then
-                copy_clash="${copy_clash:+$copy_clash, }its volumes"
-                break
-            fi
-        done
+        local copy_clash=""
+        copy_clash="$(site_name_remains "$SITENAME")" || {
+            print_error "The container engine did not answer, so whether this host already has a site named ${SITENAME} cannot be told. Nothing was changed."
+            exit 1
+        }
         if [ -n "$copy_clash" ]; then
             print_error "This host already has a site named ${SITENAME} (${copy_clash}). A copy is a new site; nothing was changed."
             exit 1
@@ -5151,6 +5223,130 @@ remove_site_volumes() {
     for vol in "${ALL_SITE_VOLUMES[@]}"; do
         site_engine volume rm "${SITENAME}_${vol}" 2>/dev/null || true
     done
+}
+
+# What this host already holds of a site named NAME, by exact name: its
+# container, its run spec, any of its volumes. Prints them, or nothing when
+# the name is free. Returns 1 when the engine did not answer: "no such site"
+# is never read from silence, because the caller goes on to build over the
+# name. NEW_SITE_ROOT is a gate's scratch root.
+site_name_remains() {  # NAME
+    local name="$1" names vol found=""
+    names="$(site_engine ps -a --format '{{.Names}}' 2>/dev/null)" || return 1
+    if grep -qx -- "$name" <<< "$names"; then
+        found="its container"
+    fi
+    if [ -e "${NEW_SITE_ROOT:-}/etc/joinery/sites/${name}/run_spec" ]; then
+        found="${found:+$found, }its run spec"
+    fi
+    for vol in "${ALL_SITE_VOLUMES[@]}"; do
+        if site_engine volume inspect "${name}_${vol}" > /dev/null 2>&1; then
+            found="${found:+$found, }its volumes"
+            break
+        fi
+    done
+    printf '%s' "$found"
+}
+
+# The other site on this host whose proxy file already answers for DOMAIN (a
+# ServerName or ServerAlias), or nothing. Two files with one name and the web
+# server serves whichever loads first.
+site_domain_owner() {  # NAME DOMAIN
+    local name="$1" domain="${2,,}" vhost
+    [ -n "$domain" ] || return 0
+    for vhost in "${NEW_SITE_ROOT:-}"/etc/apache2/sites-available/*.conf; do
+        [ -f "$vhost" ] || continue
+        if [ "$(basename "$vhost" .conf)" = "$name" ]; then
+            continue
+        fi
+        if awk -v d="$domain" 'tolower($1) == "servername" || tolower($1) == "serveralias" {
+                for (i = 2; i <= NF; i++) if (tolower($i) == d) { found = 1 } }
+                END { exit found ? 0 : 1 }' "$vhost" 2>/dev/null; then
+            basename "$vhost" .conf
+            return 0
+        fi
+    done
+    return 0
+}
+
+# The mark of a new-site install that has not finished (--new-site-only): made
+# once the name is proved free, gone when the install finishes or its failure
+# has been cleaned up. A run killed outright (the host agent's time limit, a
+# power loss) leaves it beside what it had made, and it is the one thing that
+# tells the next run those remains are an install that never finished, never a
+# site somebody uses.
+new_site_mark() {  # NAME
+    printf '%s' "${NEW_SITE_ROOT:-}/etc/joinery/new-site/$1"
+}
+
+# Remove a site whole, with the removal tool beside this tree. A gate under
+# NEW_SITE_ROOT names a stand-in.
+new_site_remove() {  # NAME
+    local tool="$SCRIPT_DIR/../sysadmin_tools/remove_account.sh"
+    if [ -n "${NEW_SITE_ROOT:-}" ] && [ -n "${NEW_SITE_REMOVE_TOOL:-}" ]; then
+        tool="$NEW_SITE_REMOVE_TOOL"
+    fi
+    [ -f "$tool" ] || { echo "The removal tool ($tool) is not in this tree." >&2; return 1; }
+    bash "$tool" "$1" -y >&2
+}
+
+# --new-site-only, before anything is made: refuse a name or a domain this
+# host already has, clear what an earlier unfinished run of the same install
+# left, and mark this one unfinished. Exits 1 on a refusal, nothing changed.
+new_site_begin() {  # NAME DOMAIN
+    local name="$1" domain="$2" mark clash owner
+    mark="$(new_site_mark "$name")"
+    clash="$(site_name_remains "$name")" || {
+        print_error "The container engine did not answer, so whether this host already has a site named ${name} cannot be told. Nothing was changed."
+        exit 1
+    }
+    if [ -n "$clash" ] && [ -f "$mark" ]; then
+        print_info "An earlier install of ${name} never finished (${mark}); removing what it left (${clash})."
+        new_site_remove "$name" || {
+            print_error "What the unfinished install of ${name} left could not be removed. Nothing more was changed."
+            exit 1
+        }
+        clash="$(site_name_remains "$name")" || {
+            print_error "The container engine did not answer after the unfinished install of ${name} was removed. Nothing more was changed."
+            exit 1
+        }
+    fi
+    if [ -n "$clash" ]; then
+        print_error "This host already has a site named ${name} (${clash}). This install makes a new site only; nothing was changed."
+        exit 1
+    fi
+    owner="$(site_domain_owner "$name" "$domain")"
+    if [ -n "$owner" ]; then
+        print_error "Another site on this host (${owner}) already serves ${domain}. This install makes a new site only; nothing was changed."
+        exit 1
+    fi
+    mkdir -p "$(dirname "$mark")"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$mark"
+}
+
+# --new-site-only, as the script exits with RC: a finished install loses its
+# mark; a failed one is removed whole, so a retry finds the name free, and
+# keeps its mark only when that removal did not finish. Prints the exit code
+# the script ends with.
+new_site_end() {  # NAME RC
+    local name="$1" rc="$2" mark
+    mark="$(new_site_mark "$name")"
+    if [ "$rc" -eq 0 ]; then
+        rm -f "$mark" 2>/dev/null || true
+        if [ -e "$mark" ]; then
+            echo "The install of ${name} finished, but its unfinished mark (${mark}) could not be removed, and a site that keeps it would be taken for remains." >&2
+            rc=1
+        fi
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "The install of ${name} failed (exit ${rc}); removing what it made so it can be run again." >&2
+        if new_site_remove "$name"; then
+            rm -f "$mark" 2>/dev/null || true
+        else
+            echo "Removing the failed ${name} did not finish; the next install of it tries again." >&2
+        fi
+    fi
+    printf '%s' "$rc"
 }
 
 # The PostgreSQL major a site's database volume holds, read straight off the
@@ -5592,6 +5788,14 @@ do_site_docker() {
     if is_port_in_use $DB_PORT; then
         print_warning "Database port $DB_PORT is already in use"
         PORT_CONFLICT=1
+    fi
+
+    # A port the management node named is the one it records: a host agent's
+    # install (a new site, or a dormant copy) is refused rather than moved to
+    # a port nothing else knows about.
+    if [ $PORT_CONFLICT -eq 1 ] && { [ "$NEW_SITE_ONLY" = true ] || [ "$DORMANT_CONTAINER" = true ]; }; then
+        print_error "Port $PORT (or its database port $DB_PORT) is already in use on this host. The management node named it; nothing was changed."
+        exit 1
     fi
 
     if [ $PORT_CONFLICT -eq 1 ]; then

@@ -122,7 +122,9 @@ if ($row) {
 	$formwriter->hiddeninput('cvp_customer_cloud_provision_id', '', array('value' => (int)$row->key));
 }
 
-if (count($plans) > 1) {
+// The choice shows when there is one to make, and when the draft's own plan
+// is not on sale now: then its buyer picks the one that is, knowingly.
+if (count($plans) > 1 || ($row !== null && !isset($plans[ManagedSiteDraft::plan_of($row)]))) {
 	$plan_options = array();
 	foreach ($plans as $plan => $def) {
 		$plan_options[$plan] = $def['label'] . ($plan_prices[$plan] !== '' ? ', ' . preg_replace('/ from today$/', '', $plan_prices[$plan]) : '')

@@ -188,6 +188,23 @@ check(strpos((string)$r['redirect_url'], '/api/') === false,
 	'a pending login first seen on an API call does not return to the API',
 	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
 
+// A public page first, then the plain Sign in link: the code returns to where a
+// sign-in lands, not to the page the visitor happened to open first.
+$jar = harness_jar_new();
+harness_request('GET', '/no-such-page-divert-test', array('cookies' => $remembered, 'jar' => $jar, 'accept' => null));
+$r = harness_request('GET', '/login', array('cookies' => $remembered, 'jar' => $jar, 'accept' => null));
+check(strpos((string)$r['redirect_url'], '/verify-totp') !== false, 'the Sign in link diverts to the factor page');
+$user->set('usr_totp_last_used_step', null);
+$user->save();
+$r = harness_request('POST', '/verify-totp', array(
+	'cookies' => $remembered, 'jar' => $jar, 'encode' => 'form',
+	'body' => array('totp_code' => \OTPHP\TOTP::createFromSecret($totp_secret)->at(time())),
+));
+check(in_array($r['status'], array(301, 302, 303), true)
+		&& strpos((string)$r['redirect_url'], 'no-such-page-divert-test') === false,
+	'the code returns where a sign-in lands, not to the first public page seen',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
+
 // ---------------------------------------------------------------------------
 section('The way out stays reachable');
 
@@ -201,5 +218,9 @@ check(strpos((string)$r['redirect_url'], '/verify-totp') === false,
 check($r['status'] === 200,
 	'/logout renders its own page',
 	'status ' . $r['status']);
+$user->load();
+$left = json_decode((string)$user->get('usr_remember_tokens'), true) ?: array();
+check(!in_array(hash('sha256', $raw_token), array_column($left, 'hash'), true),
+	'and Cancel forgets this browser\'s remember-me token, not only its cookie');
 
 harness_finish();

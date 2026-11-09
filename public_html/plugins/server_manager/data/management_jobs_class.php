@@ -387,6 +387,9 @@ class ManagementJob extends SystemBase {
 		// builds the copy's image there (the agent's 75m), and a dormant copy's
 		// removal is a teardown (its 20m).
 		'site_install'          => 4800,  // 75m + slack
+		// A new Starter site on its host (specs/starter_tier.md): the same
+		// image build as a copy's install (the agent's 75m).
+		'site_create'           => 4800,  // 75m + slack
 		'discard_copy'          => 1500,  // 20m + slack
 	];
 

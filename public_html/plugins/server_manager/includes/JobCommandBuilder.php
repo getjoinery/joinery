@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.163 - build_site_create (agent 1.119.0): a new live Starter site as a container on its host, its
+ *                  admin password a slot opened at hand-out, its limits required; never a dormant copy
  * @version 1.162 - hosted_mail_settings carries a test site's trap (test_recipient), only to agent 1.118.0+
  * @version 1.161 - this site's own publish is offered and built only where it publishes releases (SmPublishing)
  * @version 1.160 - log_table_tail takes event and hours (agent 1.113.0, sent only to agents that have them), up to
@@ -2473,6 +2475,70 @@ class JobCommandBuilder {
 			'copy_of' => $copy_of, 'copy_of_key' => $copy_key];
 		if ($memory !== '') { $params['memory'] = $memory; }
 		return ['primitive' => 'site_install', 'params' => $params];
+	}
+
+	/**
+	 * Install a new, live site as a container on a host: a sold Starter site
+	 * (specs/starter_tier.md, Launch scope step 3). Addressed to the HOST's own
+	 * agent, which fetches the release from this management node, verifies it
+	 * before anything in it runs, and installs the site with the buyer's admin
+	 * account. The job carries no password: its admin_password is the slot
+	 * __SM_ADMIN_PASSWORD_<provision>__, which AgentChannelEndpoint opens from
+	 * the provision's sealed column into the signed hand-out alone; the agent
+	 * gives it to install.sh on stdin. $p: name, domain, port, release,
+	 * admin_email, provision_id, memory, cpus, disk (all required: a starter
+	 * site always has its limits).
+	 */
+	public static function build_site_create($host_node, array $p) {
+		if (!self::has_primitive($host_node, 'site_create')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot install a new site. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_create']));
+		}
+		return self::build_site_create_primitive($p);
+	}
+
+	public static function build_site_create_primitive(array $p) {
+		$name = (string)($p['name'] ?? '');
+		$domain = strtolower((string)($p['domain'] ?? ''));
+		$port = (int)($p['port'] ?? 0);
+		$release = (string)($p['release'] ?? '');
+		$email = (string)($p['admin_email'] ?? '');
+		$provision_id = (int)($p['provision_id'] ?? 0);
+		$memory = (string)($p['memory'] ?? '');
+		$cpus = (string)($p['cpus'] ?? '');
+		$disk = (string)($p['disk'] ?? '');
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will install.");
+		}
+		if (!preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
+			throw new Exception("'" . $domain . "' is not a domain a site can be installed for.");
+		}
+		if ($port < 1024 || $port > 65000) {
+			throw new Exception('A site\'s container needs a port on its host (1024 to 65000), not ' . $port . '.');
+		}
+		if (!preg_match('/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$/', $release)) {
+			throw new Exception('A site is installed at an exact release (X.Y.Z), not \'' . $release . '\'.');
+		}
+		if (!preg_match('/^[A-Za-z0-9._+-]+@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/', $email)) {
+			throw new Exception("'" . $email . "' is not an admin address the host will accept.");
+		}
+		if ($provision_id <= 0) {
+			throw new Exception('A new site names the provision whose sealed first password it is handed.');
+		}
+		if (!preg_match('/^[1-9][0-9]{0,5}[mg]$/', $memory)) {
+			throw new Exception("'" . $memory . "' is not a memory limit the host will set (a number and m or g).");
+		}
+		if (!preg_match('/^[0-9]{1,2}(\.[0-9]{1,2})?$/', $cpus)) {
+			throw new Exception("'" . $cpus . "' is not a processor ceiling the host will set (1, 0.5).");
+		}
+		if (!preg_match('/^[1-9][0-9]{0,5}[MG]$/', $disk)) {
+			throw new Exception("'" . $disk . "' is not a disk allowance the host will set (5G, 512M).");
+		}
+		return ['primitive' => 'site_create', 'params' => ['name' => $name, 'domain' => $domain, 'port' => $port,
+			'release' => $release, 'admin_email' => $email,
+			'admin_password' => '__SM_ADMIN_PASSWORD_' . $provision_id . '__',
+			'memory' => $memory, 'cpus' => $cpus, 'disk' => $disk]];
 	}
 
 	/**

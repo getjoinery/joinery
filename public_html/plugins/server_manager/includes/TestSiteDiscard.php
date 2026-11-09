@@ -6,7 +6,10 @@
  *
  * Offered only for a provision whose server is in one of our cloud accounts
  * flagged test. That covers a test-mode purchase and an admin's rehearsal
- * alike. The flag only offers the button. Nothing is deleted until the
+ * alike. A site in a container on a shared host (a Starter site) is a test
+ * site when its HOST is on the Test side of the dashboard, and its account is
+ * the host machine's own (or, for a host made by hand, the test account held
+ * here). The flag only offers the button. Nothing is deleted until the
  * account's company name, read from the provider at the click, is
  * TestCloudCleanup::COMPANY, the same safety catch the nightly test cleanup
  * uses. A live account never carries that name, so a live server can never
@@ -18,17 +21,25 @@
  * provision still names what is left, and the board still shows it.
  *
  * What goes:
- *   - the server, at the test account;
+ *   - the server, at the test account. A site in a container has no server of
+ *     its own: its host and the host's other sites are never touched. Its
+ *     container is removed by its host through Permanently Delete Site's own
+ *     job (the site approves its own removal), asked for here; nothing else
+ *     is removed until the host has verified the container gone, because the
+ *     approval is given on the site, which needs its name to still reach it.
+ *     A site that never stood up has no container to remove;
  *   - in the test zones (TestCloudCleanup::DNS_ZONES), every record at or
  *     under the site's own name, and every A and AAAA record naming the
- *     server's addresses;
+ *     server's addresses (a container site names no address of its own, so
+ *     only the records under its name go: its host's address is shared);
  *   - the mail subaccount at SMTP2GO, closed (its SMTP user and webhook go
  *     with it);
  *   - the site's backups, from every storage space its nodes own;
  *   - a test-mode order's subscription, cancelled at once in Stripe's test
  *     mode (the test charge is left as it is);
  *   - the site's node and, when the server is the site's own Docker host,
- *     the host's node; with them the provision and its hosted trial
+ *     the host's node (never a shared host's); with them the provision and
+ *     its hosted trial
  *     (ManagedNode::release_site_records). A provision that never got a node
  *     is removed with its trial directly.
  *
@@ -44,6 +55,8 @@
  * remove is on the Main side of the dashboard: the provision's account and the
  * dashboard's record must agree that the site is a test one.
  *
+ * @version 1.3 - a site in a container on a shared host (Starter): a test site by its host's side and account;
+ *                its container removed by its host, its host, the host's node and the other sites never touched
  * @version 1.2 - refused when a box it would remove is on the Main side
  * @version 1.1 - each node removal is reported before the notes it caused
  * @version 1.0
@@ -59,8 +72,58 @@ class TestSiteDiscard {
 		if ((string)$provision->get('cvp_hosting_mode') !== 'operator' || $provision->get('cvp_delete_time')) {
 			return null;
 		}
+		if ($provision->is_container()) {
+			return self::container_account($provision);
+		}
 		$account = HeldCloudAccounts::provision_account($provision);
 		return ($account !== null && $account->get('oca_is_test')) ? $account : null;
+	}
+
+	/** The shared host a container site is placed or reserved on, or null. */
+	public static function container_host(CustomerCloudProvision $provision): ?ManagedHost {
+		$host_id = (int)$provision->get('cvp_mgh_managed_host_id');
+		if ($host_id <= 0) {
+			$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+			$node = $node_id > 0 ? new ManagedNode($node_id, TRUE) : null;
+			$host_id = ($node !== null && $node->key) ? (int)$node->get('mgn_mgh_managed_host_id') : 0;
+		}
+		if ($host_id <= 0) {
+			return null;
+		}
+		$host = new ManagedHost($host_id, TRUE);
+		return ($host->key && !$host->get('mgh_delete_time')) ? $host : null;
+	}
+
+	/**
+	 * A container site's test account: its row names no account, because it
+	 * has no server of its own. It is a test site when its host is on the
+	 * Test side, and the account is the one the host machine's own record
+	 * names. A host made by hand has no such record: the test side's boxes
+	 * are then taken to be in the test account held here (a usable one
+	 * first). A host whose own record names a main account is never a test
+	 * host, whatever side it was put on.
+	 */
+	private static function container_account(CustomerCloudProvision $provision): ?OperatorCloudAccount {
+		$host = self::container_host($provision);
+		if ($host === null || CloudAccounts::of_host($host) !== CloudAccounts::TEST) {
+			return null;
+		}
+		$host_node = $host->host_node();
+		$own = $host_node ? HeldCloudAccounts::node_account($host_node) : null;
+		if ($own !== null) {
+			return $own->get('oca_is_test') ? $own : null;
+		}
+		$fallback = null;
+		foreach (OperatorCloudAccount::held() as $account) {
+			if (!$account->get('oca_is_test')) {
+				continue;
+			}
+			if ($account->usable()) {
+				return $account;
+			}
+			$fallback = $fallback ?? $account;
+		}
+		return $fallback;
 	}
 
 	/** Is the button offered? Asks no provider. */
@@ -138,6 +201,11 @@ class TestSiteDiscard {
 		if ($site === null || !$site->key) {
 			return array($nodes, $others);
 		}
+		// A site in a container on a shared host: the site's node alone. The
+		// host, its agent's node and the other sites there are not this site's.
+		if ($provision->is_container()) {
+			return array(array($site), $others);
+		}
 		$host_id = (int)$site->get('mgn_mgh_managed_host_id');
 		if ($host_id <= 0) {
 			return array(array($site), $others);
@@ -196,7 +264,17 @@ class TestSiteDiscard {
 		}
 
 		$out = array('done' => array(), 'failed' => array(), 'finished' => false);
-		self::server($provision, $driver, $out);
+		if ($provision->is_container()) {
+			// Its container first, and nothing else until it is gone: the site
+			// approves its own removal on its own pages, which its DNS records
+			// and its mail are still needed to reach.
+			self::container($provision, $out);
+			if ($out['failed']) {
+				return $out;
+			}
+		} else {
+			self::server($provision, $driver, $out);
+		}
 		self::dns($provision, array_key_exists('dns', $seams) ? $seams['dns'] : TestCloudCleanup::zone_holder(TestCloudCleanup::accounts()), $out);
 		self::mail($provision, array_key_exists('mail', $seams) ? $seams['mail'] : (Smtp2GoClient::fromSettings() ?? false), $out);
 		list($nodes) = self::nodes($provision);
@@ -228,7 +306,7 @@ class TestSiteDiscard {
 			// while the site is still on it, and a host that takes provisions
 			// retires only on its agent's removal: so it is asked once more,
 			// now that both are gone.
-			if ($host_id > 0 && ManagedHost::retire_if_empty($host_id, true)) {
+			if (!$provision->is_container() && $host_id > 0 && ManagedHost::retire_if_empty($host_id, true)) {
 				$out['done'][] = 'Its Docker host had nothing left on it and was removed from the dashboard too.';
 			}
 		} else {
@@ -264,6 +342,48 @@ class TestSiteDiscard {
 			$out['done'][] = 'Deleted server ' . ($instance['label'] ?? '') . ' (' . $id . ') at the test account.';
 		} catch (CloudComputeException $e) {
 			$out['failed'][] = 'Server ' . $id . ' was not deleted: ' . $e->getMessage();
+		}
+	}
+
+	/**
+	 * A container site's container, removed by its host. Nothing to do for a
+	 * site that was never placed, never stood a site up, or whose host has
+	 * verified it gone (NodeRemoval's own rule for removing its record).
+	 * Otherwise the host is asked through Permanently Delete Site's job, once,
+	 * and the click reports what is still owed: the removal is approved on the
+	 * site itself, so this cannot finish in one click.
+	 */
+	private static function container(CustomerCloudProvision $provision, array &$out): void {
+		list($nodes) = self::nodes($provision);
+		$site = $nodes ? end($nodes) : null;
+		if (!$site || NodeRemoval::container_refusal($site) === '') {
+			return;
+		}
+		$name = trim((string)$site->get('mgn_container_name'));
+		$after = ' The site approves its own removal on its Backups page; click Discard again once its host has verified the container gone.';
+		try {
+			$host_node = JobCommandBuilder::decommission_host_node_for($site);
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs
+				WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'decommission_node' AND mjb_delete_time IS NULL
+				  AND mjb_parameters->>'victim_node_id' = ? AND mjb_status IN ('pending', 'queued', 'running')
+				ORDER BY mjb_management_job_id DESC LIMIT 1");
+			$q->execute(array((int)$host_node->key, (string)(int)$site->key));
+			$open = (int)$q->fetchColumn();
+			if ($open > 0) {
+				$out['failed'][] = 'Its container ' . $name . ' is being removed by its host (job #' . $open . ').' . $after;
+				return;
+			}
+			$built = JobCommandBuilder::build_decommission_node($site, array());
+			$job = ManagementJob::createFromBuild($host_node->key, 'decommission_node', $built,
+				array('victim_node_id' => (int)$site->key, 'site' => JobCommandBuilder::decommission_site_name($site)), null);
+			// Its agent dies with the container: a deliberate silence.
+			$site->set('mgn_agent_quiet_time', gmdate('Y-m-d H:i:s'));
+			$site->save();
+			$out['failed'][] = 'Its host was asked to remove its container ' . $name . ' (job #' . (int)$job->key . '). Nothing else was removed yet.' . $after;
+		} catch (Throwable $e) {
+			$out['failed'][] = 'Its container ' . $name . ' could not be removed by its host: ' . $e->getMessage()
+				. ' Nothing else was removed. Remove it with Permanently Delete Site on its node\'s page, then click Discard again.';
 		}
 	}
 

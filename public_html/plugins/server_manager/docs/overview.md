@@ -891,6 +891,7 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 | `page_probe` | Render one of the site's own pages as a throwaway `anonymous`, `member` or `admin` viewer, as the `page_probe` **observe primitive**. The node refuses a page that is not on its own list (its admin menu entries and public views, no query string) or that acts on arrival (`PageProbe::REFUSED_PAGES`). Inside the one run the node makes the viewer (a member, or an administrator at permission 10), mints a one-minute grant, sends one request over its own connection carrying the grant's token — the request runs as that viewer with no cookie and no PHP session, and cannot persist anything a user could ask for — then deletes the grant and **permanently** deletes the user. It returns HTTP status, bytes, render time, statements run, peak memory, PHP warnings and errors as type and `file:line`, theme and plugin assets that fail to load, a landmark check (header, main, footer, form count) and a structure hash; never page text, HTML, form values or a warning's message. A probe that could not render the page (it could not make its viewer, say) fails its job with the node's reason — a sentence and an exception's class name, never its message. A probe that cannot finish its cleanup fails its job and says so, and the next probe sweeps the leftover | No |
 | `publish_upgrade` | Build and sign a release from a node's own tree, as a primitive of that node's **own** agent, dispatched by the management node that manages it (node detail, Updates tab, for a node that is a management node — its own report says the Server Manager plugin is active there: `server_manager` on every poll (`active` or `inactive`, stored in `mgn_agent_server_manager`), or `server_manager_active` in a check_status report — and its agent reports the primitive; a plain site never publishes and is not offered the action). A management node that manages itself is the same case pointed at its own record: it connects to itself from its Management Node page, approves the request on its own dashboard, and `ManagedNode::self_node()` is the row its Publish page dispatches to. A management node that is another plane's node is published from that plane, and its Publish page says so (`ManagedNode::managed_by()`). See `specs/publish_as_node_action.md` | No |
 | `install_node` | The bootstrap SSH session: fetch the release, `install.sh docker` (host agent), `install.sh site … --enable-agent`. Run by `InstallJobExecutor` on the plane over the provision's sealed install password | No (target must be clean) |
+| `site_create` | A new live Starter site as a container on its host, as the `site_create` primitive on the **host's own agent**: the release fetched from this management node and verified, then `install.sh site --docker … --admin-email --admin-password-stdin` with the starter limits. The admin password rides the job and is blanked from it once the host answers (`process_site_create`) | No (refuses a name the host already has) |
 | `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: over the same password, put the provision's `cvp_root_ssh_keys` (if any) in root's `authorized_keys`, write `/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf` (password and keyboard-interactive authentication off; root login off, or key-only when keys were given) and restart sshd, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
 | `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No |
@@ -994,7 +995,19 @@ is not `customer_cloud` (nothing builds it).
     `ManagedHost` whose tier is `starter` (`mgh_tier`; `pick_for_provisioning`
     places a site only on a host of its own tier). The instance processor
     (`ProvisionCustomerCloud`) never takes such a row. Sold only through the
-    configure page, while a starter host has room.
+    configure page, while a starter host has room. **Starter sites**
+    (`ProvisionStarterSites`, a phase of the provisioning umbrella) places a
+    paid row on the starter host with the most room: a node row for the site
+    (`mgn_container_name` = its site name, the host link, a port from
+    `next_container_port()`), the admin password minted and sealed, and a
+    `site_create` job on the host's own agent (`cvp_install_job_id`). Each
+    site is installed with the starter limits (`server_manager_starter_memory`
+    384m, `_cpus` 1, `_disk` 5G: eight sites share a Linode 4 GB, so set the
+    host's Max Sites to 8). When the host answers, the node is installed and
+    awaits its certificate, the site agent's key is recorded
+    (`cvp_expected_site_key`), the welcome email goes out, and the row is
+    done. With no starter host with room the paid row waits at `ready`, the
+    board says so and the operator is alerted once.
 
 Every mode ends the same way: `install_node` completes, the welcome email goes
 out, and `ProvisionPendingSsl` turns HTTPS on once DNS resolves.
@@ -1232,6 +1245,8 @@ The subscription is cancelled on Stripe's test side whichever side the clicking 
 
 Each step skips what is already gone, so a click that stops part way (a provider refused one step) is finished by the next. The records here go last, and only once every step before succeeded: until then the provision names what is left and stays on the board, and the message lists what was not done. A domain bought for the site is parked on the Domains page, as on any removal. Records for a domain outside the test zones are left.
 
+**A Starter site, in a container on a shared host.** Its row names no cloud account and no server, because the server is its host's and holds other sites. It is a test site when its host is on the Test side of the dashboard; the account the safety catch reads is the one the host machine's own record names, or, for a host made by hand, the test account held here. A host whose own record names a main account is never a test host. The same answer decides where the site's mail goes (the test-site mail trap). Discard never deletes the host's server, never removes the host's node or record, and deletes only the DNS records at or under the site's own name, since the host's address is shared. Its container is removed by its host through *Permanently Delete Site*'s job (`decommission_node`, where the site approves its own removal), which the first click queues; nothing else is removed until the host has verified the container gone, because the approval is given on the site and needs its name and mail to still work. Click **Discard** again after that and the rest goes. A site that never stood up (a failed install) has no container to remove and goes in one click.
+
 ### What stays manual
 
 The Provisioning page reports these, and cannot do them:
@@ -1280,7 +1295,7 @@ The Provisioning page reports these, and cannot do them:
 | Symptom | Likely cause |
 |---|---|
 | No node appears after 15 min | API credentials wrong (the page's probe badge) — check the provisioning task's last run in Scheduled Tasks |
-| `[managed-hosting] Paid but not activated: order item N` | The paid line's draft was not `pending_payment` (edited after the line was made, deleted, or another buyer's), or its name is held by a live provision. The order is paid; look at the provision on the dashboard and resolve with the buyer |
+| `[hosting] Paid but not activated: order item N` | The paid line's draft was not `pending_payment` (edited after the line was made, deleted, or another buyer's), or its name is held by a live provision. The order is paid; look at the provision on the dashboard and resolve with the buyer |
 | A site card says the name was taken before it could be registered | The registrar reported the name gone after payment (`rdm_taken_time`). The buyer chooses another name on the same card, at the paid price or less; the row returns to `pending` and registers on the next tick. If the box already exists, the operator is emailed to rename it by hand |
 | Node stuck at `install_failed` | The install job failed — open the job, fix the host, Retry |
 | SSL stuck at `pending` for hours | DNS not pointing at the node — `dig domain.com` |

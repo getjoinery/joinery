@@ -357,4 +357,178 @@ $out = TestSiteDiscard::discard($p4, array('dns' => new FakeDiscardDns(), 'mail'
 	'cancel' => function ($i) {}));
 check($out['finished'] && tsd_paths($history) === array('subaccounts/search'), 'counts as gone, and the discard finishes', json_encode($out));
 
+// ---------------------------------------------------------------------------
+section('A Starter site in a container on a shared host');
+
+// A shared starter host on the Test side, with another customer's site on it.
+$sh_agent = $node('starter-host ' . $tag, 'starter-host-' . $tag);
+$sh_agent->set('mgn_agent_public_key', base64_encode(str_repeat("\x0c", 32)));
+$sh_agent->set('mgn_agent_version', AgentVocabulary::FLOOR);
+$sh_agent->set('mgn_agent_primitives', 'check_status,decommission_site');
+$sh_agent->save();
+$sh = new ManagedHost(NULL);
+$sh->set('mgh_slug', 'starter-h-' . $tag);
+$sh->set('mgh_name', 'HarnessTest starter host ' . $tag);
+$sh->set('mgh_host', '192.0.2.61');
+$sh->set('mgh_tier', 'starter');
+$sh->set('mgh_max_sites', 12);
+$sh->set('mgh_provisioning_enabled', true);
+$sh->set('mgh_mgn_managed_node_id', $sh_agent->key);
+$sh->set('mgh_cloud_account', CloudAccounts::TEST);
+$sh->save();
+$sh->load();
+$tsd_rows[] = array('mgh_managed_hosts', 'mgh_managed_host_id', (int)$sh->key);
+$sh_agent->set('mgn_mgh_managed_host_id', $sh->key);
+$sh_agent->save();
+$tenant = $node('tenant.joinerytest.com ' . $tag, 'tenant-joinerytest-com-' . $tag, (int)$sh->key);
+$tenant->set('mgn_container_name', 'st900001');
+$tenant->set('mgn_joinery_version', JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION);
+$tenant->save();
+
+/** A test Starter purchase placed on the shared host: [provision, site node]. $stood_up: a site was seen on it. */
+$starter = function (string $label, bool $stood_up) use ($node, $uid, $tag, $sh, &$tsd_rows) {
+	$order = new Order(NULL);
+	$order->set('ord_usr_user_id', $uid);
+	$order->set('ord_test_mode', true);
+	$order->save();
+	$order->load();
+	harness_register_row('ord_orders', 'ord_order_id', $order->key);
+	$item = new OrderItem(NULL);
+	$item->set('odi_ord_order_id', $order->key);
+	$item->set('odi_pro_product_id', 999999002);
+	$item->set('odi_usr_user_id', $uid);
+	$item->set('odi_price', '4.99');
+	$item->set('odi_status', OrderItem::STATUS_PAID);
+	$item->set('odi_is_subscription', true);
+	$item->set('odi_subscription_status', 'active');
+	$item->save();
+	$item->load();
+	harness_register_row('odi_order_items', 'odi_order_item_id', $item->key);
+	$p = new CustomerCloudProvision(NULL);
+	$p->set('cvp_origin', 'order');
+	$p->set('cvp_external_order_item_id', $item->key);
+	$p->set('cvp_usr_user_id', $uid);
+	$p->set('cvp_domain', $label . '.joinerytest.com');
+	$p->set('cvp_slug', $label . '-joinerytest-com');
+	$p->set('cvp_status', 'done');
+	$p->set('cvp_hosting_mode', 'operator');
+	$p->set('cvp_landing', 'container');
+	$p->set('cvp_mgh_managed_host_id', (int)$sh->key);
+	$p->set('cvp_smtp2go_subaccount_id', 'sub-' . $label);
+	$p->save();
+	$p->load();
+	$tsd_rows[] = array('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', (int)$p->key);
+	$n = $node($label . '.joinerytest.com ' . $tag, $label . '-joinerytest-com-' . $tag, (int)$sh->key);
+	$n->set('mgn_container_name', 'st' . (int)$p->key);
+	$n->set('mgn_web_root', '/var/www/html/st' . (int)$p->key . '/public_html');
+	if ($stood_up) {
+		$n->set('mgn_joinery_version', JobCommandBuilder::DECOMMISSION_PANEL_MIN_CORE_VERSION);
+	}
+	$n->save();
+	$p->set('cvp_mgn_managed_node_id', $n->key);
+	$p->save();
+	$p->load();
+	return array($p, $n);
+};
+$decom_seen = array();
+$decom_jobs = function ($victim) use ($db, $sh_agent, &$tsd_rows, &$decom_seen) {
+	$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?
+		AND mjb_job_type = 'decommission_node' AND mjb_parameters->>'victim_node_id' = ? ORDER BY mjb_management_job_id");
+	$q->execute(array((int)$sh_agent->key, (string)(int)$victim->key));
+	$ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+	foreach ($ids as $id) {
+		if (!isset($decom_seen[$id])) {
+			$decom_seen[$id] = true;
+			$tsd_rows[] = array('mjb_management_jobs', 'mjb_management_job_id', $id);
+		}
+	}
+	return $ids;
+};
+
+list($sp, $sp_node) = $starter('st1', true);
+check((string)$sp->get('cvp_oca_operator_cloud_account_id') === '' && trim((string)$sp->get('cvp_instance_id')) === '',
+	'a container site\'s row names no cloud account and no server of its own');
+$acct = TestSiteDiscard::test_account($sp);
+check($acct !== null && (bool)$acct->get('oca_is_test'), 'it is a test site by its host: the host is on the Test side, and the account is a test one');
+check(TestSiteDiscard::offered($sp) && TestSiteDiscard::refusal($sp) === '',
+	'it is offered, and the other site on its host does not refuse it', TestSiteDiscard::refusal($sp));
+list($s_nodes, $s_others) = TestSiteDiscard::nodes($sp);
+check(count($s_nodes) === 1 && (int)$s_nodes[0]->key === (int)$sp_node->key && !$s_others,
+	'only the site\'s own node goes with it: never the shared host\'s node');
+
+$was_trap = Globalvars::get_instance()->get_setting('server_manager_test_site_mail_trap', false, true);
+Setting::put('server_manager_test_site_mail_trap', 'joineryemailtests@dev.getjoinery.com');
+Globalvars::get_instance()->forget_setting('server_manager_test_site_mail_trap');
+$s_trap = ProvisionHostedMail::test_trap($sp);
+$sh->set('mgh_cloud_account', CloudAccounts::MAIN);
+$sh->save();
+$main_offered = TestSiteDiscard::offered($sp);
+$main_trap = ProvisionHostedMail::test_trap($sp);
+$sh->set('mgh_cloud_account', CloudAccounts::TEST);
+$sh->save();
+Setting::put('server_manager_test_site_mail_trap', (string)$was_trap);
+Globalvars::get_instance()->forget_setting('server_manager_test_site_mail_trap');
+check($s_trap === 'joineryemailtests@dev.getjoinery.com', 'its mail goes to the plane\'s trap, as any test site\'s does', $s_trap);
+check(!$main_offered && $main_trap === '', 'the same site on a host on the Main side is a customer\'s: not offered, and never trapped');
+
+$sdns = new FakeDiscardDns();
+$sdns->add('A', 'st1.joinerytest.com', '192.0.2.61');
+$sdns->add('TXT', '_dmarc.st1.joinerytest.com', 'v=DMARC1');
+$sdns->add('A', 'tenant.joinerytest.com', '192.0.2.61');
+$s_history = array();
+$s_cancelled = array();
+$s_seams = array('dns' => $sdns, 'mail' => tsd_mail('sub-st1', 'Active', $s_history),
+	'cancel' => function ($i) use (&$s_cancelled) { $s_cancelled[] = (int)$i->key; });
+$servers_before = count($cloud->deleted);
+
+// The first click: its host is asked to remove the container, and nothing else goes.
+$out = TestSiteDiscard::discard($sp, $s_seams);
+$jobs = $decom_jobs($sp_node);
+check(!$out['finished'] && count($out['failed']) === 1 && strpos($out['failed'][0], 'was asked to remove its container st' . (int)$sp->key) !== false,
+	'the first click asks its host to remove the container', json_encode($out));
+check(count($jobs) === 1, 'through one Permanently Delete Site job on the host\'s agent, naming the site as its victim', json_encode($jobs));
+check(count($sdns->names()) === 3 && !$s_history && !$s_cancelled,
+	'and nothing else is removed yet: the site approves its own removal, which its name and mail must still reach');
+check(count($cloud->deleted) === $servers_before, 'no server is deleted at the cloud account');
+
+// A second click while that job is open asks nothing twice.
+$out = TestSiteDiscard::discard($sp, $s_seams);
+check(!$out['finished'] && strpos($out['failed'][0], 'is being removed by its host') !== false && count($decom_jobs($sp_node)) === 1,
+	'a click while the host is still at it queues no second job', json_encode($out));
+
+// Its host verified the container gone: the next click finishes.
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_result = '{}' WHERE mjb_management_job_id = ?")->execute(array($jobs[0]));
+$sp_node->load();
+$sp_node->set('mgn_site_removed_time', gmdate('Y-m-d H:i:s'));
+$sp_node->save();
+$sp->load();
+$out = TestSiteDiscard::discard($sp, $s_seams);
+check($out['finished'] && !$out['failed'], 'once its host has verified the container gone, the next click finishes', json_encode($out));
+check(count($decom_jobs($sp_node)) === 1, 'with no further job');
+$left = $sdns->names();
+sort($left);
+check($left === array('A tenant.joinerytest.com'),
+	'the records under its own name went; the other site\'s record naming the shared host\'s address stays', json_encode($left));
+check(tsd_paths($s_history) === array('subaccounts/search', 'subaccount/close') && count($s_cancelled) === 1,
+	'its mail subaccount is closed and its test subscription cancelled', json_encode(tsd_paths($s_history)));
+check(count($cloud->deleted) === $servers_before, 'still no server deleted: the host is not this site\'s');
+check($gone('mgn_managed_nodes', 'mgn_managed_node_id', $sp_node->key) && $gone('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $sp->key),
+	'the site\'s node and its provision are removed');
+$sh->load();
+check(!$gone('mgn_managed_nodes', 'mgn_managed_node_id', $sh_agent->key) && !$gone('mgn_managed_nodes', 'mgn_managed_node_id', $tenant->key)
+		&& !$sh->get('mgh_delete_time'),
+	'the shared host, its own node and the other site on it are all still here');
+
+// An install that never stood a site up has no container to remove: one click.
+list($sp2, $sp2_node) = $starter('st2', false);
+$sp2->set('cvp_status', 'failed');
+$sp2->save();
+$s2_history = array();
+$out = TestSiteDiscard::discard($sp2, array('dns' => new FakeDiscardDns(), 'mail' => tsd_mail('sub-st2', 'Active', $s2_history),
+	'cancel' => function ($i) {}));
+check($out['finished'] && !$out['failed'] && !$decom_jobs($sp2_node), 'a Starter site that never stood up goes in one click, with no job for its host', json_encode($out));
+$sh->load();
+check(!$sh->get('mgh_delete_time') && !$gone('mgn_managed_nodes', 'mgn_managed_node_id', $sh_agent->key),
+	'and the shared host is not retired with it');
+
 harness_finish();

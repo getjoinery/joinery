@@ -442,6 +442,12 @@ check($res->redirect === '/admin/admin_users?',
 	'login returns the user to the page that bounced them',
 	'redirect: ' . var_export($res->redirect, true));
 
+// What check_permission stores is the page and its own query string. A posted
+// form's fields are never made into it: after sign-in they would be in a URL,
+// a password field among them, and the POST would be replayed as a GET.
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('includes/SessionControl.php')), 'http_build_query($_POST)') === false,
+	'the page that bounced them is stored without the fields of a form posted to it');
+
 $res = login_call_with_return($dest_email, $dest_pass, null);
 check($res->redirect !== null && strpos($res->redirect, '/login') !== 0,
 	'with no stored destination, login falls back to a real page, never /login',

@@ -30,6 +30,8 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.4 - a product page offers and accepts only a draft of its own plan (its landing), so a Managed draft is
+ *                never added on the Starter product or the other way round (reviewer2 F2-5)
  * @version 1.3 - purchase_path_heading(): the step strip, at Payment, on the cart and checkout
  * @version 1.2 - the draft id and its freeze time are marked internal: the cart shows the site, the
  *                admin's order page still shows all three
@@ -124,18 +126,26 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 	}
 
 	/** The user's newest pending_payment draft, or null. */
-	public static function newest_draft_for_user(int $user_id) {
+	public static function newest_draft_for_user(int $user_id, ?string $landing = null) {
 		if ($user_id <= 0) {
 			return null;
 		}
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/customer_cloud_provisions_class.php'));
-		$rows = new MultiCustomerCloudProvision(array(
-			'user_id' => $user_id, 'origin' => 'buyer', 'status' => 'pending_payment', 'deleted' => false,
-		), array('cvp_customer_cloud_provision_id' => 'DESC'), 1);
+		$filters = array('user_id' => $user_id, 'origin' => 'buyer', 'status' => 'pending_payment', 'deleted' => false);
+		if ($landing !== null) {
+			$filters['landing'] = $landing;
+		}
+		$rows = new MultiCustomerCloudProvision($filters, array('cvp_customer_cloud_provision_id' => 'DESC'), 1);
 		foreach ($rows as $row) {
 			return $row;
 		}
 		return null;
+	}
+
+	/** Where a hosting product's site lands, from its fulfilment reference. */
+	private static function landing_of($product): string {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
+		return CustomerCloudFulfillment::landing_for_ref((int)($product ? $product->get('pro_fulfillment_ref') : 0));
 	}
 
 	/** The site as one line, for the product page, the cart and the order. */
@@ -171,8 +181,11 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 				? (int)($existing_data[self::FIELD]['answer'] ?? 0) : (int)$existing_data[self::FIELD];
 			$draft = self::draft_for_user($wanted, $user_id);
 		}
+		if ($draft !== null && (string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_of($product)) {
+			$draft = null;
+		}
 		if ($draft === null) {
-			$draft = self::newest_draft_for_user($user_id);
+			$draft = self::newest_draft_for_user($user_id, self::landing_of($product));
 		}
 
 		if ($draft !== null) {
@@ -199,11 +212,14 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		$session = SessionControl::get_instance();
 		$user_id = (int)$session->get_user_id();
 		if ($user_id <= 0) {
-			return array('Sign in and set up your site before adding Managed hosting to the cart.');
+			return array('Sign in and set up your site before adding hosting to the cart.');
 		}
 		$draft = self::draft_for_user((int)($post_data[self::FIELD] ?? 0), $user_id);
 		if ($draft === null) {
 			return array('Set up your site first, then continue to payment from there.');
+		}
+		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_of($product)) {
+			return array('That site was set up for a different plan. Continue to payment from your site setup.');
 		}
 		$this->draft = $draft;
 		return array();

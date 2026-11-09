@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.90 - Retry install on a Starter site's node puts its paid row back to ready (ProvisionStarterSites::retry)
  * @version 1.89 - never_do_accept marks only the alarm safe, remembered by path and content; never_do_clear clears
  *                 the review list (specs/never_do_false_alarms.md)
  * @version 1.88 - log_table_tail passes event and hours (the Vault windows button, agent_event_log_filter.md)
@@ -976,6 +977,22 @@ class NodeDetailActions {
 			}
 
 			case 'retry_install': {
+				// A Starter site in a container is installed by its host's agent
+				// (site_create), not by install_node: its retry puts the paid row
+				// back to ready, and the next provisioning pass installs it on the
+				// same node with the same sealed password.
+				$starter_row = CustomerCloudProvision::latest_for_node((int)$node->key);
+				if ($starter_row && $starter_row->is_container()) {
+					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionStarterSites.php'));
+					try {
+						ProvisionStarterSites::retry($starter_row);
+					} catch (Exception $e) {
+						self::fail($session, $page_regex, $e->getMessage());
+						return $base_url;
+					}
+					self::ok($session, $page_regex, 'The site\'s install will run again on its host at the next provisioning pass.');
+					return $base_url;
+				}
 				// Reuse params from the most recent install_node job for this node.
 				$prev = ManagementJob::latestForNode($node->key, 'install_node');
 				if (!$prev) {

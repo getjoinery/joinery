@@ -16,6 +16,8 @@
  * the configure page, which both handlers do by reading the session's return
  * slot that this page sets.
  *
+ * @version 1.2 - a remembered sign-in waiting on its second factor proves it, coming back to the configure page,
+ *               instead of being asked for a password (reviewer2 F1-1)
  * @version 1.1 - the lead names every plan on sale (plans_sentence), not Managed alone
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §4.1 (the account step)
  */
@@ -31,6 +33,10 @@ function start_logic(array $input): LogicResult {
 	// A member is past step 1.
 	if ($session->get_user_id()) {
 		return LogicResult::redirect($next);
+	}
+	// A remembered member who owes a code proves it, and comes back to step 2.
+	if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET') {
+		$session->divert_to_pending_factor($next);
 	}
 
 	// Every way out of this page lands on the configure page: the sign-in and

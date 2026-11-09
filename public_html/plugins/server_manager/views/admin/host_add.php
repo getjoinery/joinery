@@ -5,6 +5,7 @@
  * URL: /admin/server_manager/host_add
  *      /admin/server_manager/host_add?mgh_managed_host_id=N  (edit mode)
  *
+ * @version 1.4 - a Tier field (general or starter): a starter host takes sold Starter sites only (starter_tier.md)
  * @version 1.3 - a cloud account choice (main or test) decides which dashboard tab the host is listed under
  * @version 1.2 - Max Sites has no invented default: blank means not set, and provisioning needs it
  * @version 1.1 - host agent link (mgh_mgn_managed_node_id) and a delete action; a host is
@@ -58,7 +59,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 	$editable_fields = [
 		'mgh_name', 'mgh_slug', 'mgh_host', 'mgh_ssh_user', 'mgh_ssh_key_path',
 		'mgh_ssh_port', 'mgh_max_sites', 'mgh_provisioning_enabled', 'mgh_notes',
-		'mgh_mgn_managed_node_id', 'mgh_cloud_account',
+		'mgh_mgn_managed_node_id', 'mgh_cloud_account', 'mgh_tier',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -169,6 +170,12 @@ $formwriter->dropinput('mgh_cloud_account', 'Cloud Account', [
 
 echo '<h6 class="text-muted mt-4 mb-3">Provisioning</h6>';
 
+$formwriter->dropinput('mgh_tier', 'Tier', [
+	'options' => ['general' => 'General: sites an operator places here', 'starter' => 'Starter: sold Starter sites, and nothing else'],
+	'value' => (string)($host->get('mgh_tier') ?: 'general'),
+	'helptext' => 'A starter host takes the $4.99 Starter sites the configure page sells, and only those. Its Host address must be its public IPv4 itself: the certificate check and the buyer\'s DNS instructions read it.',
+]);
+
 $formwriter->numberinput('mgh_max_sites', 'Max Sites', [
 	'placeholder' => 'e.g. 12',
 	'helptext' => 'How many sites this machine can hold, judged from its memory and disk (a 4 GB box might take about 12). New sites are placed on it only up to this number. Required to turn provisioning on.',
@@ -176,7 +183,7 @@ $formwriter->numberinput('mgh_max_sites', 'Max Sites', [
 ]);
 
 $formwriter->checkboxinput('mgh_provisioning_enabled', 'Enable automated provisioning', [
-	'helptext' => 'When checked, this host is eligible to receive new sites from the polling task. Backfilled hosts default to off.',
+	'helptext' => 'When checked, this host is eligible to receive new sites: Starter sites when its tier is Starter. Backfilled hosts default to off.',
 	'checked' => (bool)$host->get('mgh_provisioning_enabled'),
 ]);
 

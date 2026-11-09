@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.128 - process_site_create: a new Starter site's install on its host
  * @version 1.127 - status_recovery_key(): root's record of the site's recovery key, reported by check_status
  *                  (agent 1.116.0)
  * @version 1.126 - dns_target_ip() + dns_record_type(), shared with the sites page; the welcome emails name
@@ -1879,6 +1880,56 @@ class JobResultProcessor {
 		$job->set('mjb_result', json_encode([
 			'install_state' => $node->get('mgn_install_state'),
 			'ssl_state'     => $node->get('mgn_ssl_state'),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * site_create: a new Starter site's install on its host (specs/starter_tier.md).
+	 *
+	 * The job is the HOST's; the site's own node is named in its record
+	 * (node_id). The job never held the admin password: its slot was opened
+	 * at hand-out (AgentChannelEndpoint), so there is nothing here to blank,
+	 * and a re-run resolves it again. Installed, the site's node leaves the installing state and awaits its
+	 * certificate, the site agent's key the install printed is kept for its
+	 * join, and the buyer's welcome email goes out as for any provisioned
+	 * site.
+	 */
+	private static function process_site_create($job) {
+		$params = $job->get('mjb_parameters');
+		$params = is_string($params) ? json_decode($params, true) : $params;
+		$node_id = (int)(is_array($params) ? ($params['node_id'] ?? 0) : 0);
+		$node = null;
+		if ($node_id > 0) {
+			$node = new ManagedNode($node_id, TRUE);
+			if (!$node->key) {
+				$node = null;
+			}
+		}
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = is_array($data) && isset($data['output'])
+			? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		$installed = $job->get('mjb_status') === 'completed';
+		if ($node !== null) {
+			$node->set('mgn_install_state', $installed ? null : 'install_failed');
+			if ($installed && $node->get('mgn_ssl_state') !== 'active') {
+				$node->set('mgn_ssl_state', 'pending');
+			}
+			$node->save();
+			if ($installed) {
+				try {
+					JoinAutoApproval::record_from_install($node, $text);
+				} catch (Throwable $e) {
+					error_log('site_create record_from_install: ' . $e->getMessage());
+				}
+				if ($job->get('mjb_external_order_item_id')) {
+					self::send_provisioning_welcome_email($job, $node);
+				}
+			}
+		}
+		$job->set('mjb_result', json_encode([
+			'installed' => $installed && $node !== null,
+			'site_key'  => JoinAutoApproval::site_key_from_output($text),
 		]));
 		$job->save();
 	}

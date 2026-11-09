@@ -21,6 +21,8 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.5 - a chosen plan not on sale is refused with a sentence, never swapped for the other (reviewer2 F2-6);
+ *                a re-freeze keeps the draft's own plan
  * @version 1.4 - two plans (starter_tier.md, Launch scope step 2): Starter lands in a container on a shared host
  *                (fulfilment reference 2), Managed on an instance of its own (reference 1). The buyer picks one
  *                on the configure page; the draft records it as its landing, and its product, price and payment
@@ -257,13 +259,28 @@ class ManagedSiteDraft {
 
 		// The plan first: it decides the product the payment button posts at.
 		// One plan on sale needs no choice; a plan not on sale is refused.
+		// A plan the buyer chose that is not on sale now is said, never swapped
+		// for the other one at a different price (reviewer2 F2-6). With one plan
+		// on sale and none chosen (the form shows no choice), it is that one;
+		// an existing draft keeps its own plan.
 		$offered = self::offered_plans();
 		$plan = (string)($post['plan'] ?? '');
-		if (count($offered) === 1) {
+		if ($plan === '' && $row !== null) {
+			$plan = self::plan_of($row);
+		}
+		if ($plan === '' && count($offered) === 1) {
 			$plan = (string)array_key_first($offered);
 		}
 		if (!isset($offered[$plan])) {
-			$errors[] = empty($offered) ? 'Hosting is not on sale right now.' : 'Choose a plan.';
+			if (empty($offered)) {
+				$errors[] = 'Hosting is not on sale right now.';
+			} elseif (isset(self::PLANS[$plan])) {
+				$errors[] = self::PLANS[$plan]['label'] . ' is not available right now'
+					. ($plan === 'starter' ? ': its servers are full. ' : '. ')
+					. 'Choose ' . implode(' or ', array_map(function ($d) { return $d['label']; }, $offered)) . ' instead.';
+			} else {
+				$errors[] = 'Choose a plan.';
+			}
 		}
 
 		$source = (string)($post['cvp_domain_source'] ?? '');

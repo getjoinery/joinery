@@ -183,6 +183,22 @@ check($mdraft && !$mdraft->is_container() && ManagedSiteDraft::plan_of($mdraft) 
 $r = ManagedSiteDraft::save_and_freeze(null, sp_post('shelf', 'sp-shelf-' . $run . '.com'), $buyer);
 check(!empty($r['errors']) && $r['row'] === null, 'a plan that is not on sale is refused', implode(' | ', $r['errors']));
 
+$host->set('mgh_provisioning_enabled', false);
+$host->save();
+$r = ManagedSiteDraft::save_and_freeze(null, sp_post('starter', 'sp-full-' . $run . '.com'), $buyer);
+check($r['row'] === null && strpos(implode(' ', $r['errors']), 'Starter is not available right now') !== false,
+	'Starter chosen while its servers are full is refused with a sentence, never swapped for Managed', implode(' | ', $r['errors']));
+$host->set('mgh_provisioning_enabled', true);
+$host->save();
+
+// The product page offers and accepts only a draft of its own plan.
+$req = new ManagedSiteRequirement();
+$errs = $req->validate(array('managed_site' => (int)$mdraft->key), $starter);
+check(!empty($errs), 'a Managed draft is refused on the Starter product page', implode(' | ', $errs));
+check(ManagedSiteRequirement::newest_draft_for_user((int)$buyer->key, 'container') !== null
+		&& (int)ManagedSiteRequirement::newest_draft_for_user((int)$buyer->key, 'container')->key === (int)$sdraft->key,
+	'and the Starter page offers the buyer\'s Starter draft, not their newer Managed one');
+
 // ---------------------------------------------------------------------------
 section('The wrong plan, or a full starter fleet, is refused before the charge');
 
@@ -218,6 +234,8 @@ check((string)$sdraft->get('cvp_mail_state') === 'pending', 'its mail is owed fr
 check(!$sdraft->get('cvp_data_root_encrypted'),
 	'no data-root encryption of its own, even where it is offered: the disk is its host\'s');
 check(SpFulfillment::$alerts === array(), 'nobody is alerted', json_encode(SpFulfillment::$alerts));
+check((int)$sdraft->get('cvp_mgh_managed_host_id') === (int)$host->key,
+	'its place on a starter host is reserved at payment, so the host counts it taken from now');
 
 // A Managed draft paid as Starter (a line that slipped past the check) is not built.
 list($order2, $item2) = sp_paid_line($buyer, $starter, $starter_version, $mdata);

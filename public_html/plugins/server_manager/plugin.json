@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.169",
+  "version": "1.30.170",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -306,6 +306,30 @@
       "label": "Days a site draft is kept",
       "type": "number",
       "helptext": "A Managed site draft the buyer never continued is deleted after this many days; one frozen for the cart but never paid returns to draft, because its domain quote is stale."
+    },
+    {
+      "name": "server_manager_starter_memory",
+      "default": "384m",
+      "group": "hosted",
+      "label": "Starter site memory",
+      "type": "text",
+      "helptext": "Each Starter site's memory limit, a hard cap with no swap behind it. 384m puts 8 sites on a Linode 4 GB and leaves about 900 MB for the server itself."
+    },
+    {
+      "name": "server_manager_starter_cpus",
+      "default": "1",
+      "group": "hosted",
+      "label": "Starter site processor ceiling",
+      "type": "text",
+      "helptext": "The most cores one Starter site may use (1, 0.5). Under load the server's cores are shared equally between busy sites; this stops one site taking them all."
+    },
+    {
+      "name": "server_manager_starter_disk",
+      "default": "5G",
+      "group": "hosted",
+      "label": "Starter site disk allowance",
+      "type": "text",
+      "helptext": "Each Starter site's disk allowance over all its volumes except backups (5G). 8 sites at 5G use 40 GB of a Linode 4 GB's 80 GB."
     },
     {
       "name": "server_manager_hosted_sites_per_buyer",
@@ -793,6 +817,27 @@
     }
   ],
   "signals": {
+    "hosted.container_held": {
+      "label": "A Starter site was stopped and is holding its place",
+      "description": "A Starter site's grace period ran out and its host stopped and held its container. Nothing is deleted on its own: the container keeps its place on the host until somebody removes it.",
+      "category": "Hosting",
+      "payload": {
+        "provision_id": "Customer cloud provision id",
+        "domain": "The site's domain",
+        "host": "The starter host it is on",
+        "container": "The site's container name",
+        "buyer_email": "The customer's address",
+        "shelf_ends_time": "When this customer's backups are pruned (UTC)"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "Starter site {domain} is held on {host}",
+        "body_template": "Hosting for {domain} ended unpaid. Its container {container} on {host} is stopped and held, and still takes a place there until somebody removes it. Their backups are kept until {shelf_ends_time}.",
+        "link_template": "/admin/server_manager"
+      }
+    },
     "hosted.deletion_required": {
       "label": "Hosted instance needs deleting by a person",
       "description": "A hosted site's grace period ran out. The platform has powered its instance off — the strongest thing it does on its own — and somebody has to delete it at the provider to stop the bill.",

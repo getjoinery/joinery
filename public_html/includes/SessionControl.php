@@ -110,6 +110,11 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.30 - reviewer2 F1-2..F1-5: a password-started pending factor is never replaced by the cookie's; the
+ *                stash records no return (the divert says where to come back to, or nothing, so /profile);
+ *                check_permission's return is the page asked for, read before the session's is set, and only
+ *                for a GET to a page; logout while a remembered sign-in is pending removes its token; a gated
+ *                POST's form fields are never stored as the return, only the page and its own query (R1-1)
  * @version 1.29 - a remembered sign-in that owes a second factor no longer diverts every page to /verify-totp: a
  *                public page renders signed out, and only a page that needs a member (check_permission) or the
  *                sign-in form sends the visitor to prove the factor (divert_to_pending_factor())
@@ -752,6 +757,13 @@ class SessionControl{
 		// successful factor completes the auto-login.
 		if ($this->user_has_second_factor($user_obj) && $user_obj->two_factor_cadence() === 'every_login'
 				&& !$this->has_valid_trusted_device_cookie($user_obj)) {
+			// Somebody typed a password in this browser and owes a factor: that
+			// sign-in is the one in progress, and the remembered account does
+			// not replace it (reviewer2 F1-2).
+			if (!empty($_SESSION['totp_pending_user_id']) && empty($_SESSION['totp_pending_from_cookie'])
+					&& !empty($_SESSION['totp_pending_expires']) && $_SESSION['totp_pending_expires'] >= time()) {
+				return FALSE;
+			}
 			// Stash the pending state once per pending login. This runs on every
 			// request until the factor is proved, and re-stashing would rotate the
 			// session id each time — the id the browser was just handed is the one
@@ -763,7 +775,10 @@ class SessionControl{
 				session_regenerate_id(true);
 				$_SESSION['totp_pending_user_id']  = $user_obj->key;
 				$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
-				$_SESSION['totp_pending_return']   = $this->pending_return_for_request();
+				// No return yet: the page that diverts says where to come back
+				// to (divert_to_pending_factor), else the member lands where a
+				// sign-in does.
+				$_SESSION['totp_pending_return']   = null;
 				$_SESSION['totp_pending_expires']  = time() + 600;
 				$_SESSION['totp_pending_from_cookie'] = true;
 			}
@@ -791,9 +806,7 @@ class SessionControl{
 				|| self::is_second_factor_handoff()) {
 			return;
 		}
-		if ($return && self::is_safe_return($return)) {
-			$_SESSION['totp_pending_return'] = (string)$return;
-		}
+		$_SESSION['totp_pending_return'] = ($return && self::is_safe_return($return)) ? (string)$return : null;
 		header('Location: /verify-totp');
 		exit();
 	}
@@ -804,7 +817,8 @@ class SessionControl{
 	 * The session is new, so no page has saved a return yet: the page being
 	 * asked for is the one to come back to. Only a page a person opens counts —
 	 * a GET to a safe local path that is not the API, an AJAX endpoint or a file
-	 * — and anything else falls back to whatever return the session holds.
+	 * — and anything else is no return at all (null): a POST's body never
+	 * becomes a URL to come back to.
 	 */
 	private function pending_return_for_request() {
 		$uri  = (string)($_SERVER['REQUEST_URI'] ?? '');
@@ -814,7 +828,7 @@ class SessionControl{
 			&& !self::is_second_factor_handoff()
 			&& !preg_match('#^/(api|ajax)/#', $path)
 			&& strpos(basename($path), '.') === false;
-		return $is_page ? $uri : $this->get_return();
+		return $is_page ? $uri : null;
 	}
 
 	/**
@@ -915,14 +929,20 @@ class SessionControl{
 			Login::record_logout($this->get_user_id());
 		}
 
-		// Remove this device's remember-me token from the user's token list
-		if (!empty($_COOKIE['tt']) && $this->get_user_id() && !$account_gone) {
+		// Remove this device's remember-me token from the user's token list:
+		// the signed-in member's, or the remembered account still waiting on
+		// its second factor, whose Cancel is this logout (reviewer2 F1-5).
+		$token_owner = (int)$this->get_user_id();
+		if (!$token_owner && !empty($_SESSION['totp_pending_from_cookie'])) {
+			$token_owner = (int)($_SESSION['totp_pending_user_id'] ?? 0);
+		}
+		if (!empty($_COOKIE['tt']) && $token_owner && !$account_gone) {
 			$raw_token = $_COOKIE['tt'];
 			if (preg_match('/^[0-9a-f]{64}$/', $raw_token)) {
 				try {
 					require_once(PathHelper::getIncludePath('data/users_class.php'));
 					$token_hash = hash('sha256', $raw_token);
-					$user = new User($this->get_user_id(), TRUE);
+					$user = new User($token_owner, TRUE);
 					$tokens = $user->get('usr_remember_tokens');
 					if (is_string($tokens)) $tokens = json_decode($tokens, true);
 					if (is_array($tokens)) {
@@ -1831,6 +1851,9 @@ class SessionControl{
 			$ipchange = $this->_is_major_ip_change($stored_ip, $client_ip);
 		}
 
+		// Read before the session's own return is written below, so a POST
+		// never hands the factor page its body as somewhere to come back to.
+		$pending_return = $this->pending_return_for_request();
 		if(!isset($_SESSION['loggedin']) || ($ipchange && Access::allows(Access::staffLevel(), (int)($_SESSION['permission'] ?? 0)))){
 			if ($ipchange && isset($_SESSION['loggedin'])) {
 				error_log(sprintf(
@@ -1842,19 +1865,18 @@ class SessionControl{
 					$_SERVER['REQUEST_URI'] ?? ''
 				));
 			}
+			// The page asked for, with its own query string and never a posted
+			// form's fields: after sign-in they would ride the return into a
+			// URL (a password field among them) and replay the POST as a GET.
 			$request_uri = $_SERVER['REQUEST_URI'] ?? '';
-			if (count($_POST)) {
-				$query_string = http_build_query($_POST);
-			} else {
-				$query_string = parse_url($request_uri, PHP_URL_QUERY);
-			}
+			$query_string = parse_url($request_uri, PHP_URL_QUERY);
 			$this->set_return(
 				parse_url($request_uri, PHP_URL_PATH) . '?' . $query_string);
 
 			// A remembered sign-in waiting on its second factor proves it here
 			// rather than signing in again.
 			if (!isset($_SESSION['loggedin'])) {
-				$this->divert_to_pending_factor($this->pending_return_for_request());
+				$this->divert_to_pending_factor($pending_return);
 			}
 
 			//REDIRECT TO THE LOGIN PAGE

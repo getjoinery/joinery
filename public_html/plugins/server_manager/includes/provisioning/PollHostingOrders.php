@@ -12,6 +12,8 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
+ * @version 1.8 - a paid order whose product is not a hosting product is named in the run's message, not an error
+ *               on every run; a product that cannot be read stays an error (reviewer2 F2-7)
  * @version 1.7 - the shared-host fallthrough is retired: it created install_node jobs nothing could run (a keyless
  *               host holds no sealed root password). An order whose product is not customer_cloud is reported,
  *               and a Starter reference (2) is refused here: Starter is sold through the configure page
@@ -82,6 +84,10 @@ class PollHostingOrders {
 		$started = 0;
 		$skipped = 0;
 		$errors  = [];
+		// Paid orders whose product nothing here builds: named in the run's
+		// message, but not an error on every run, since only a person changing
+		// the product (or refunding the order) can change them.
+		$unbuildable = [];
 
 		foreach ($requirements as $req) {
 			$order_item_id = (int)($req['oir_odi_order_item_id'] ?? 0);
@@ -127,6 +133,7 @@ class PollHostingOrders {
 			// ProvisionCustomerCloud.
 			$fulfillment = '';
 			$ref = 0;
+			$product_read = false;
 			// Which account the server is born on is the PRODUCT's decision,
 			// carried in the same reference the fulfillment picker stored.
 			$hosting_mode = 'customer';
@@ -134,6 +141,7 @@ class PollHostingOrders {
 			if ($product_id) {
 				$product = $client->get('Product/' . $product_id);
 				if (is_array($product)) {
+					$product_read = true;
 					$fulfillment = (string)($product['pro_fulfillment_provider'] ?? '');
 					$ref = (int)($product['pro_fulfillment_ref'] ?? 0);
 					$hosting_mode = ($ref === 1) ? 'operator' : 'customer';
@@ -189,10 +197,18 @@ class PollHostingOrders {
 			// No shared-host fallthrough: a site placed in a container on one of
 			// our hosts is a Starter order, sold and installed through the
 			// configure page and its host's agent.
-			$errors[] = "Order #{$order_item_id}: its product is not fulfilled by customer_cloud ('{$fulfillment}'), so nothing here can build it.";
+			if (!$product_read) {
+				$errors[] = "Order #{$order_item_id}: its product could not be read from the store" . ($client->last_error !== '' ? ' (' . $client->last_error . ')' : '') . '.';
+			} else {
+				$unbuildable[] = "#{$order_item_id}";
+			}
 		}
 
 		$msg = "Polled getjoinery: {$started} provision(s) started, {$skipped} skipped (unpaid or empty domain).";
+		if ($unbuildable) {
+			$msg .= ' ' . count($unbuildable) . ' paid order(s) answer the domain question with a product that is not a hosting product, so nothing builds them: '
+				. implode(', ', array_slice($unbuildable, 0, 5)) . (count($unbuildable) > 5 ? ' …' : '') . '.';
+		}
 		if ($errors) {
 			$msg .= ' ' . count($errors) . ' error(s): ' . implode('; ', array_slice($errors, 0, 3));
 			if (count($errors) > 3) $msg .= ' …';

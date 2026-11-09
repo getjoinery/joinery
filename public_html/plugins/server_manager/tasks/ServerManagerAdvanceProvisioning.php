@@ -41,6 +41,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.6 - Starter sites: a paid Starter site is installed in a container on a starter host
  * @version 1.5 - server transfers to the customer's own Linode account run before the hosted phases
  *                (specs/managed_to_self_hosted_transfer.md)
  * @version 1.4 - the services reconcile runs last (specs/services_phase2_platform.md §10 item 3)
@@ -60,6 +61,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Drafts'         => array($base . 'SweepSiteDrafts.php', 'SweepSiteDrafts'),
 			'Orders'         => array($base . 'PollHostingOrders.php', 'PollHostingOrders'),
 			'Customer cloud' => array($base . 'ProvisionCustomerCloud.php', 'ProvisionCustomerCloud'),
+			'Starter sites'  => array($base . 'ProvisionStarterSites.php', 'ProvisionStarterSites'),
 			'SSL'            => array($base . 'ProvisionPendingSsl.php', 'ProvisionPendingSsl'),
 			'Domains'        => array($base . 'ProvisionManagedDomains.php', 'ProvisionManagedDomains'),
 			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),

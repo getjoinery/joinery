@@ -98,6 +98,7 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.44 - a starter host is refused as a copy's host: its places are sold Starter sites (reviewer2 F2-8)
  * @version 1.43 - copy_encryption() says a copy not encrypted by us is born under the provider's own disk encryption,
  *                asked on where the region offers it
  * @version 1.42 - a host whose agent has not been heard from within ALIVE_WITHIN_SECONDS takes no copy (B100); an agent
@@ -990,6 +991,11 @@ class SiteCopyRunner {
 			return array('It has no agent of its own paired with this management node.');
 		}
 		$why = array();
+		// A starter host's places are sold, each with the starter limits; an
+		// operator's copy would take one with its source's limits instead.
+		if ((string)$host->get('mgh_tier') === 'starter') {
+			$why[] = 'It is a starter host: it takes only the Starter sites the configure page sells.';
+		}
 		// Its agent installs the copy and holds it quiet: it must answer.
 		$heard = self::agent_heard_at($host_node);
 		if (!$heard || time() - $heard > self::ALIVE_WITHIN_SECONDS) {

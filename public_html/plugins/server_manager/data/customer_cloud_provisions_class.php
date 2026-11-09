@@ -42,6 +42,8 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.31 - stamp_unstamped_default() leaves container rows alone: no server of a cloud account is made for them
+ * @version 1.30 - cvp_install_job_id: a container site's site_create job on its host
  * @version 1.29 - cvp_landing (instance or container) and cvp_mgh_managed_host_id: a starter site lands in a container
  *                on a shared host and its row never holds an instance id (starter_tier.md, Launch scope step 1)
  * @version 1.28 - cvp_card_fingerprint and status 'held': a paid hosted order over the per-buyer limit waits for a
@@ -174,6 +176,8 @@ class CustomerCloudProvision extends SystemBase {
 		// sight is its host's, and acting on that would reach every site on it.
 		'cvp_landing'                => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'instance', 'allowed_values'=>array('instance', 'container')),
 		'cvp_mgh_managed_host_id'    => array('type'=>'int8'),
+		// A container site's site_create job on its host (ProvisionStarterSites).
+		'cvp_install_job_id'         => array('type'=>'int8'),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
 		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
@@ -348,7 +352,8 @@ class CustomerCloudProvision extends SystemBase {
 		$q = DbConnector::get_instance()->get_db_link()->prepare("UPDATE cvp_customer_cloud_provisions
 			SET cvp_oca_operator_cloud_account_id = ?
 			WHERE cvp_hosting_mode = 'operator' AND cvp_oca_operator_cloud_account_id IS NULL
-			AND COALESCE(cvp_instance_id, '') = '' AND cvp_delete_time IS NULL");
+			AND COALESCE(cvp_instance_id, '') = '' AND cvp_delete_time IS NULL
+			AND cvp_landing = 'instance'");
 		$q->execute(array((int)$default->key));
 		return $q->rowCount();
 	}

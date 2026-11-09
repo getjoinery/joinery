@@ -97,7 +97,7 @@ class NeverDoCheck {
 	 */
 	const EXPLAINING_TYPES = array(
 		'apply_update', 'agent_converge', 'host_converge', 'run_installer', 'run_plugin_installers',
-		'install_security_updates', 'refresh_site_containers', 'recreate_site', 'site_install', 'install_node',
+		'install_security_updates', 'refresh_site_containers', 'recreate_site', 'site_install', 'site_create', 'install_node',
 		'copy_import', 'copy_restore', 'copy_stage', 'move_to_plane', 'fleet_enroll', 'take_node_id',
 		'data_root_encrypt', 'data_root_decrypt', 'data_root_enrol', 'data_root_migrate', 'data_root_rekey',
 		'data_root_provider_layer', 'data_root_recipient',

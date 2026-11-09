@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.61 - a site_create job's admin password slot (__SM_ADMIN_PASSWORD_<provision>__) is opened from the
+ *                 provision's sealed column at hand-out, never stored in the job (specs/starter_tier.md)
  * @version 1.60 - the claim takes the site's unseal daemon in one word (agent 1.112.0) and keeps it (specs/unseal_daemon.md WP3)
  * @version 1.59 - the quiet endpoint is gone: no agent is switched off, so none says it is going quiet
  * @version 1.58 - the claim takes the node's X-Wing key and its agent key's signature (agent 1.99.0) and keeps it when verified
@@ -1493,7 +1495,7 @@ class AgentChannelEndpoint {
 		} catch (\Throwable $e) {
 			$job->set('mjb_status', 'failed');
 			$job->set('mjb_error_message',
-				'The backup broker slot could not be resolved at dispatch: ' . $e->getMessage());
+				'A credential slot could not be resolved at dispatch: ' . $e->getMessage());
 			$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 			$job->save();
 			api_success(['job' => null], '', 200);
@@ -1537,6 +1539,37 @@ class AgentChannelEndpoint {
 	 * No node is handed a bucket key (specs/storage_targets.md R4): a job that
 	 * names a credential slot is refused here with the reason rather than sent.
 	 */
+	/**
+	 * A new Starter site's admin password, resolved at hand-out (site_create,
+	 * specs/starter_tier.md). The job row carries only __SM_ADMIN_PASSWORD_<provision>__;
+	 * the password is opened from the provision's sealed column into this
+	 * signed response and nowhere else, so no job row, page or backup of the
+	 * job table ever holds it. Only that provision's own install job, on its
+	 * own host's agent, while the buyer has not yet been shown the password.
+	 */
+	private static function resolve_admin_password_slot(int $provision_id, $job): string {
+		if (!$job || (string)$job->get('mjb_job_type') !== 'site_create') {
+			throw new Exception('an admin password is handed only to a site_create job');
+		}
+		$provision = new CustomerCloudProvision($provision_id, TRUE);
+		if (!$provision->key || $provision->get('cvp_delete_time') || !$provision->is_container()
+				|| (int)$provision->get('cvp_install_job_id') !== (int)$job->key) {
+			throw new Exception('provision ' . $provision_id . ' is not the starter site this job installs');
+		}
+		$host = new ManagedHost((int)$provision->get('cvp_mgh_managed_host_id'), TRUE);
+		if (!$host->key || (int)$host->get('mgh_mgn_managed_node_id') !== (int)$job->get('mjb_mgn_managed_node_id')) {
+			throw new Exception('the job is not addressed to the agent of the host the site is placed on');
+		}
+		if ($provision->admin_password_state() !== 'sealed') {
+			throw new Exception('the site\'s first password has already been shown, or was never sealed');
+		}
+		$opened = (new SecretBox())->open((string)$provision->get('cvp_admin_pass_sealed'));
+		if (($opened['state'] ?? '') !== SecretBox::OPEN_OK || (string)$opened['value'] === '') {
+			throw new Exception('the site\'s sealed first password cannot be opened');
+		}
+		return (string)$opened['value'];
+	}
+
 	private static function resolve_credential_slots($params, $job = null) {
 		if (!is_array($params)) {
 			return $params;
@@ -1548,6 +1581,10 @@ class AgentChannelEndpoint {
 			if (preg_match('/^__SM_(RUN_|NODE_)?CREDS_\d+__$/', $value)) {
 				throw new Exception('this job was built to hand the node a bucket key, which no node is given any more; '
 					. 'start it again and it goes through the backup broker');
+			}
+			if (preg_match('/^__SM_ADMIN_PASSWORD_(\d+)__$/', $value, $pm)) {
+				$params[$key] = self::resolve_admin_password_slot((int)$pm[1], $job);
+				continue;
 			}
 			if (!preg_match('/^__SM_BROKER_(\d+)_(backup|upload)__$/', $value, $m)) {
 				continue;

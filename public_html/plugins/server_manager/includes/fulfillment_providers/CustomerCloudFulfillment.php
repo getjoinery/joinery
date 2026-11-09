@@ -49,6 +49,8 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.9 - a Starter order's host place is reserved at payment (reviewer2 F2-2); the activation alert names
+ *                hosting, not Managed alone (F2-9)
  * @version 1.8 - a third reference, 2: Starter, a container on one of our shared hosts (starter_tier.md, Launch
  *                scope step 2). The paid line's draft must be of the product's plan; a starter line is refused
  *                before the charge while no starter host has room
@@ -285,6 +287,17 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$this->alert_activation_problem($user, $order_item, 'held for a person: ' . $over_limit);
 			return $draft;
 		}
+		if ($landing === 'container' && !(int)$draft->get('cvp_mgh_managed_host_id')) {
+			// The place is reserved now, at payment: the host counts it as
+			// taken from this moment (ManagedHost::pick_for_provisioning). A
+			// full fleet leaves it unreserved, and the Starter worker waits
+			// for room and says so.
+			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+			$host = ManagedHost::pick_for_provisioning('starter');
+			if ($host !== null) {
+				$draft->set('cvp_mgh_managed_host_id', (int)$host->key);
+			}
+		}
 		if ($hosting_mode === 'operator') {
 			// Nothing to connect and nobody to ask: the instance is created in
 			// the operator's default cloud account (CustomerCloudProvision stamps it).
@@ -441,12 +454,12 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			if ($to === '') {
 				return;
 			}
-			$body = "A paid Managed hosting order could not be activated.\n\n"
+			$body = "A paid hosting order (Managed or Starter) could not be activated.\n\n"
 				. 'Order item: ' . $order_item->key . "\n"
 				. 'Buyer: ' . $user->get('usr_email') . "\n"
 				. 'Reason: ' . $reason . "\n\n"
 				. "The buyer has paid. Look at the provision on /admin/server_manager and resolve it with them.\n";
-			EmailSender::quickSend($to, '[managed-hosting] Paid but not activated: order item #' . $order_item->key, $body);
+			EmailSender::quickSend($to, '[hosting] Paid but not activated: order item #' . $order_item->key, $body);
 		} catch (\Throwable $e) {
 			error_log('CustomerCloudFulfillment: activation alert also failed: ' . $e->getMessage());
 		}

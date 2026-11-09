@@ -6,6 +6,9 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.10 - places taken = the host's site nodes, not its own agent's node, plus paid starter sites reserved
+ *                on it with no node yet (reviewer2 F2-2, F2-3); a starter host's address is its IPv4; a host's
+ *                tier does not change while it holds sites or paid reservations
  * @version 1.9 - mgh_tier (general or starter): pick_for_provisioning(\$tier) places a site only on a host of its tier
  * @version 1.8 - link_host_node() also links the host record the machine is itself placed in, and runs on each host
  *                report too: getjoinery's docker-prod was never named its own host, so its six sites read 'host not
@@ -95,6 +98,38 @@ class ManagedHost extends SystemBase {
 		}
 		if (!in_array((string)($this->get('mgh_tier') ?: 'general'), array('general', 'starter'), true)) {
 			throw new ManagedHostException("Unknown host tier '" . $this->get('mgh_tier') . "'.");
+		}
+		// A starter host's address is read as an address: the certificate
+		// check compares the domain's A record to it, and the buyer's welcome
+		// email names it as the record to add.
+		if ((string)$this->get('mgh_tier') === 'starter'
+				&& filter_var(trim((string)$this->get('mgh_host')), FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+			throw new ManagedHostException('A starter host\'s Host address must be its public IPv4 address itself, not a hostname '
+				. 'or an IPv6 address: a site\'s certificate waits for the domain\'s A record to name it, and the buyer is told to add that record.');
+		}
+		// A tier is what the host's places are sold as. Changed under sites
+		// already there, a starter host turned general strands the paid sites
+		// reserved on it, and a general host turned starter counts sites that
+		// were never given the starter limits as sold places.
+		if ($this->key) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare('SELECT mgh_tier, mgh_mgn_managed_node_id FROM mgh_managed_hosts WHERE mgh_managed_host_id = ?');
+			$q->execute(array((int)$this->key));
+			$stored = $q->fetch(PDO::FETCH_ASSOC);
+			if ($stored && (string)($stored['mgh_tier'] ?: 'general') !== (string)($this->get('mgh_tier') ?: 'general')) {
+				$q = $db->prepare('SELECT
+					(SELECT COUNT(*) FROM mgn_managed_nodes WHERE mgn_mgh_managed_host_id = ? AND mgn_delete_time IS NULL
+						AND mgn_managed_node_id IS DISTINCT FROM ?) +
+					(SELECT COUNT(*) FROM cvp_customer_cloud_provisions WHERE cvp_mgh_managed_host_id = ? AND cvp_delete_time IS NULL
+						AND cvp_mgn_managed_node_id IS NULL AND cvp_status IN (\'ready\', \'held\', \'installing\'))');
+				$q->execute(array((int)$this->key, $stored['mgh_mgn_managed_node_id'], (int)$this->key));
+				$held = (int)$q->fetchColumn();
+				if ($held > 0) {
+					throw new ManagedHostException('This host holds ' . $held . ' site' . ($held === 1 ? '' : 's')
+						. ' (placed or paid for and reserved), so its tier cannot change: a tier is what its places are sold as. '
+						. 'To stop new sites landing here, switch Provisioning off instead.');
+				}
+			}
 		}
 		if ($this->get('mgh_provisioning_enabled') && (int)$this->get('mgh_max_sites') < 1) {
 			throw new ManagedHostException('Set Max Sites before turning provisioning on: it is how many sites this host can hold, and new sites are only placed up to it.');
@@ -360,14 +395,21 @@ class ManagedHost extends SystemBase {
 			throw new ManagedHostException("Unknown host tier '{$tier}'.");
 		}
 		$db = DbConnector::get_instance()->get_db_link();
+		// A place is taken by each site node on the host (the host's own agent
+		// node is the machine, not a site) and by each paid starter site
+		// reserved on it at payment whose node is not made yet: three buyers
+		// paying for the last place must not all be promised it.
+		$taken = "((SELECT COUNT(*) FROM mgn_managed_nodes mgn WHERE mgn.mgn_mgh_managed_host_id = mgh.mgh_managed_host_id " .
+			"AND mgn.mgn_delete_time IS NULL " .
+			"AND mgn.mgn_managed_node_id IS DISTINCT FROM mgh.mgh_mgn_managed_node_id) + " .
+			"(SELECT COUNT(*) FROM cvp_customer_cloud_provisions cvp WHERE cvp.cvp_mgh_managed_host_id = mgh.mgh_managed_host_id " .
+			"AND cvp.cvp_delete_time IS NULL AND cvp.cvp_mgn_managed_node_id IS NULL " .
+			"AND cvp.cvp_status IN ('ready', 'held', 'installing')))";
 		$q = $db->prepare(
-			"SELECT mgh.mgh_managed_host_id " .
-			"FROM mgh_managed_hosts mgh " .
-			"LEFT JOIN mgn_managed_nodes mgn ON mgn.mgn_mgh_managed_host_id = mgh.mgh_managed_host_id AND mgn.mgn_delete_time IS NULL " .
+			"SELECT mgh.mgh_managed_host_id FROM mgh_managed_hosts mgh " .
 			"WHERE mgh.mgh_provisioning_enabled = true AND mgh.mgh_delete_time IS NULL AND mgh.mgh_tier = :tier " .
-			"GROUP BY mgh.mgh_managed_host_id " .
-			"HAVING COUNT(mgn.mgn_managed_node_id) < mgh.mgh_max_sites " .
-			"ORDER BY COUNT(mgn.mgn_managed_node_id) ASC, mgh.mgh_managed_host_id ASC " .
+			"AND {$taken} < mgh.mgh_max_sites " .
+			"ORDER BY {$taken} ASC, mgh.mgh_managed_host_id ASC " .
 			"LIMIT 1"
 		);
 		$q->execute(array(':tier' => $tier));

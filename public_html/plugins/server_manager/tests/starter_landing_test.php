@@ -175,6 +175,9 @@ section('The end of grace holds the container, never "the instance"');
 
 $site_node = sl_node('sl-site-' . $suffix, array(
 	'mgn_container_name' => 'slsite' . $suffix, 'mgn_mgh_managed_host_id' => $starter_host->key));
+// Watched, as a serving site is: the end of grace is what switches it off.
+$site_node->set('mgn_uptime_enabled', true);
+$site_node->save();
 $ok->set('cvp_mgn_managed_node_id', $site_node->key);
 $ok->set('cvp_status', 'done');
 $ok->save();
@@ -193,9 +196,10 @@ $watch = new HostedTrialWatch();
 $shut = (new ReflectionClass('HostedTrialWatch'))->getMethod('shut_down_if_due');
 
 $trial = sl_grace_ended($ok);
-check($shut->invoke($watch, $ok, $trial) === 1, 'a container site past its grace is acted on');
+check($shut->invoke($watch, $ok, $trial) === 0, 'a container site past its grace: its host is asked to hold it');
 $trial->load();
-check((string)$trial->get('htr_state') === HostedTrial::STATE_SHUTDOWN, 'and recorded as shut down');
+check((string)$trial->get('htr_state') === HostedTrial::STATE_GRACE,
+	'and it is not recorded as shut down until the host says the container is held');
 $q = $db->prepare("SELECT mjb_job_type, mjb_mgn_managed_node_id, mjb_commands FROM mjb_management_jobs
 	WHERE mjb_mgn_managed_node_id IN (?, ?) ORDER BY mjb_management_job_id DESC");
 $q->execute(array($host_node->key, $site_node->key));
@@ -209,6 +213,56 @@ check(strpos((string)($hold['mjb_commands'] ?? ''), 'slsite' . $suffix) !== fals
 		&& strpos((string)($hold['mjb_commands'] ?? ''), '"stop"') !== false,
 	'it stops that one container by name', (string)($hold['mjb_commands'] ?? ''));
 check(count($jobs) === 1, 'and it is the only job: nothing is sent at the box as a whole');
+check($shut->invoke($watch, $ok, $trial) === 0 && count($db->query("SELECT 1 FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$host_node->key . " AND mjb_job_type = 'hold_container'")->fetchAll()) === 1,
+	'while the host has not answered, nothing more is sent');
+
+// The hold failed: not taken for a held site, and asked again an hour later,
+// not on the next tick (a host that keeps refusing is not sent a job a minute).
+$sl_holds = function () use ($db, $host_node) {
+	return $db->query("SELECT mjb_status FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$host_node->key
+		. " AND mjb_job_type = 'hold_container' ORDER BY mjb_management_job_id")->fetchAll(PDO::FETCH_COLUMN);
+};
+$sl_age_holds = function () use ($db, $host_node) {
+	$db->prepare("UPDATE mjb_management_jobs SET mjb_completed_time = now() - interval '2 hours'
+		WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'hold_container' AND mjb_status IN ('failed', 'completed')")
+		->execute(array($host_node->key));
+};
+$sl_answer = function (bool $done) use ($db, $host_node, $suffix) {
+	$answer = json_encode(array('api_version' => '1.0', 'data' => array('output' => json_encode(array(
+		'container' => 'slsite' . $suffix, 'action' => 'stop', 'done' => $done, 'held' => $done,
+		'state' => $done ? 'exited' : 'running')) . "\n", 'output_bytes' => 200)));
+	$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now(), mjb_output = ?
+		WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'hold_container' AND mjb_status = 'pending'")
+		->execute(array($answer, $host_node->key));
+};
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status = 'failed', mjb_completed_time = now() WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'hold_container'")
+	->execute(array($host_node->key));
+check($shut->invoke($watch, $ok, $trial) === 0, 'a failed hold is not taken for a held site');
+$trial->load();
+check((string)$trial->get('htr_state') === HostedTrial::STATE_GRACE && $sl_holds() === array('failed'),
+	'the site stays in grace, and its host is not asked again within the hour', json_encode($sl_holds()));
+$sl_age_holds();
+check($shut->invoke($watch, $ok, $trial) === 0 && $sl_holds() === array('failed', 'pending'),
+	'an hour on, its host is asked again', json_encode($sl_holds()));
+
+// The host answered, but the container did not stop: its script ends cleanly
+// either way, so the job is completed. That is not a held site.
+$sl_answer(false);
+check($shut->invoke($watch, $ok, $trial) === 0, 'a hold the host answered without stopping the container is not taken for a held site');
+$trial->load();
+$site_node->load();
+check((string)$trial->get('htr_state') === HostedTrial::STATE_GRACE && $site_node->get('mgn_uptime_enabled'),
+	'the site stays in grace and its uptime checks stay on: it may still be serving');
+check($sl_holds() === array('failed', 'completed'), 'and its host is not asked again within the hour', json_encode($sl_holds()));
+$sl_age_holds();
+check($shut->invoke($watch, $ok, $trial) === 0 && $sl_holds() === array('failed', 'completed', 'pending'),
+	'an hour on, its host is asked again', json_encode($sl_holds()));
+
+// The host held it: now it is shut down, quietened, and a person is told.
+$sl_answer(true);
+check($shut->invoke($watch, $ok, $trial) === 1, 'once the host says the container is stopped and held');
+$trial->load();
+check((string)$trial->get('htr_state') === HostedTrial::STATE_SHUTDOWN, 'the site is recorded as shut down');
 $site_node->load();
 check(!$site_node->get('mgn_uptime_enabled'), 'the site\'s uptime checks are switched off while it is held');
 
@@ -222,6 +276,15 @@ check($shut->invoke($watch, $orphan, $otrial) === 0, 'a container site with no c
 $otrial->load();
 check((string)$otrial->get('htr_state') === HostedTrial::STATE_GRACE,
 	'and stays in grace, so the next tick tries again, instead of reading as already off');
+
+// ---------------------------------------------------------------------------
+section('A site copy never lands on a starter host');
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SiteCopyRunner.php'));
+$copy_source = sl_node('sl-copysrc-' . $suffix);
+$why = SiteCopyRunner::host_refusals($copy_source, $starter_host);
+check((bool)array_filter($why, function ($w) { return strpos($w, 'starter host') !== false; }),
+	'the copy form names a starter host as one a copy cannot go on', implode(' | ', $why));
 
 $db->rollBack();
 harness_finish();
