@@ -53,7 +53,10 @@ awk '/^cat > "\$\{CANDIDATE\}" <<.HELPERSCRIPT./{f=1;next} /^HELPERSCRIPT$/{f=0}
     | sed -e "s#/etc/joinery#$R/etc/joinery#g" -e "s#/etc/systemd#$R/etc/systemd#g" \
           -e "s#/usr/local/lib/joinery#$R/usr/local/lib/joinery#g" -e "s#/usr/local/sbin#$R/usr/local/sbin#g" \
           -e "s#/etc/letsencrypt#$R/etc/letsencrypt#g" -e "s#/etc/sudoers.d#$R/etc/sudoers.d#g" \
-          -e "s#/etc/apache2#$R/etc/apache2#g" -e "s#/var/lib/joinery#$R/var/lib/joinery#g" > "$T/helper"
+          -e "s#/etc/apache2#$R/etc/apache2#g" -e "s#/var/lib/joinery#$R/var/lib/joinery#g" \
+          -e "s#^PATH=#PATH=$T/bin:#" > "$T/helper"
+# The helper sets its own PATH (sudo_helper_search_path_test); the last rewrite
+# puts this gate's stand-in tools in front of it, as the caller's PATH cannot.
 chk "the helper was extracted" "$(grep -c 'GATEWAY_REMOVED' "$T/helper" | awk '{print ($1 > 0)}')" "1"
 chk "no absolute path is left outside the sandbox" \
     "$(sed "s#$R#SANDBOX#g" "$T/helper" | grep -o -E '(SANDBOX)?/(etc/(joinery|systemd|letsencrypt|sudoers.d|apache2)|usr/local/(lib|sbin))' | grep -v -c '^SANDBOX' | tr -d ' ')" "0"

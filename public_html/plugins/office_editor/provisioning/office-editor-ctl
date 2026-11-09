@@ -1,5 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# Its own search path, the one stock sudo hands it (secure_path): the web user
+# runs this as root, so no tool it calls by name is looked up where the caller says.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin; export PATH
 # office-editor-ctl - start, report on and idle-stop the document editor.
+# Version: 0.4.0 - starts #!/bin/bash and sets its own PATH, so a sudoers file without secure_path
+#                  cannot hand root a tool from the caller's path (shell_command_audit D8)
 # Version: 0.3.0 - idle-check holds the open-document count to digits before bash arithmetic sees it: a
 #                  crafted metric from the editor process was a command run as root (shell_command_audit B1)
 # Version: 0.2.0 - off and remove, for switching the plugin off and uninstalling it

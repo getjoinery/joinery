@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.8 - the helper starts #!/bin/bash and sets its own PATH, so a sudoers file without
+#                secure_path cannot hand root a tool from the caller's path (shell_command_audit D8).
 # Version: 2.7 - the web user's sudoers rule names the six verbs PHP runs (on, off, status, remove, csr,
 #                install-cert) instead of the bare command, and valid_ip refuses an IPv6 scope id and the
 #                unspecified addresses (specs/shell_command_audit.md B2, B3)
@@ -227,7 +229,10 @@ fi
 HELPER="/usr/local/sbin/joinery-mail-gateway"
 CANDIDATE="$(mktemp)"
 cat > "${CANDIDATE}" <<'HELPERSCRIPT'
-#!/usr/bin/env bash
+#!/bin/bash
+# Its own search path, the one stock sudo hands it (secure_path): the web user
+# runs this as root, so no tool it calls by name is looked up where the caller says.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin; export PATH
 # joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE [MAILHOST [RELAY_IPS]]
 # joinery-mail-gateway converge
 # on:      serve SITE (sites/SITE.enabled) by MAILHOST — the deployment's mail

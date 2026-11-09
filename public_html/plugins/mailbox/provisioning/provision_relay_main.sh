@@ -16,6 +16,8 @@
 #     ordinary on-disk signing key once its sending is locked to a vault-sealed
 #     key (specs/mailbox_relay_surface_simplification.md)
 #
+# Version: 3.4 - both helpers start #!/bin/bash and set their own PATH, so a sudoers file without
+#                secure_path cannot hand root a tool from the caller's path (shell_command_audit D8).
 # Version: 3.3 - rspamd is the only mail checker (mail_checking_in_rspamd.md):
 #                joinery-mail-listener switches postfix alone, and joinery-dkim-remove
 #                deletes the key under /etc/rspamd/dkim and rewrites rspamd's list of
@@ -53,7 +55,10 @@ fi
 # runs 'off', its Restore runs 'on'. Idempotent verbs, machine-readable markers.
 LISTENER_HELPER="/usr/local/sbin/joinery-mail-listener"
 cat > "${LISTENER_HELPER}" <<'LISTENERHELPER'
-#!/usr/bin/env bash
+#!/bin/bash
+# Its own search path, the one stock sudo hands it (secure_path): the web user
+# runs this as root, so no tool it calls by name is looked up where the caller says.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin; export PATH
 # joinery-mail-listener off|on|status
 # off:    stop+disable postfix, close 25/tcp at the firewall -> LISTENER_OFF
 # on:     enable+start it, reopen 25/tcp                     -> LISTENER_ON
@@ -141,7 +146,10 @@ chmod 755 "${LISTENER_HELPER}"
 # (specs/mailbox_relay_surface_simplification.md).
 DKIM_REMOVE_HELPER="/usr/local/sbin/joinery-dkim-remove"
 cat > "${DKIM_REMOVE_HELPER}" <<'DKIMREMOVEHELPER'
-#!/usr/bin/env bash
+#!/bin/bash
+# Its own search path, the one stock sudo hands it (secure_path): the web user
+# runs this as root, so no tool it calls by name is looked up where the caller says.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin; export PATH
 # joinery-dkim-remove <domain>
 # Deletes <domain>'s signing key directory and rewrites the list of domains
 # rspamd signs for, which is whatever still has a key (the same list

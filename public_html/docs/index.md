@@ -46,6 +46,7 @@ Welcome to the Joinery platform documentation. Select a topic from the sidebar, 
 - [Passkeys](passkeys.md) -- Platform WebAuthn: sign-in, step-up confirmation, PRF secret derivation, and the consumer contract
 - [Sealed Vault](sealed_vault.md) -- Per-user encryption identity: key hierarchy, unlock window, consumer hooks, and key rotation
 - [SecretBox](secret_box.md) -- Authenticated encryption for server-held secrets at rest
+- [Shell Commands](shell_commands.md) -- The rule every shell call follows (argument list, or each value escaped where used), root helpers' own PATH, and the test that holds new calls to it
 - [OAuth2 Core](oauth2.md) -- Platform OAuth2 client, provider catalog, consumers, and callback flow
 - [File Signed URLs](file_signed_urls.md) -- Short-lived signed links for private files
 
