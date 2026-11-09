@@ -29,7 +29,8 @@
  * Sections: the divert still fires for an ordinary page; the factor page
  * renders instead of diverting to itself; a redirect-following browser arrives
  * rather than looping; the pending state is stashed once; the passkey actions
- * the factor page calls are answered; and the way out stays reachable.
+ * the factor page calls are answered; proving the factor returns to the page
+ * that was asked for; and the way out stays reachable.
  *
  * Run: php tests/account_security/second_factor_divert_test.php
  */
@@ -47,7 +48,9 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 // ---------------------------------------------------------------------------
 
 $user = make_user('2fadivert');
-$user->set('usr_totp_enabled_time', gmdate('Y-m-d H:i:s'));
+// A real secret, so a later section can prove the factor with a code.
+$totp_secret = 'JBSWY3DPEHPK3PXP';
+$user->enable_totp($totp_secret);
 
 // A remember-me cookie exactly as save_user_to_cookie() mints one: the browser
 // carries the raw token, the row carries only its hash.
@@ -131,6 +134,38 @@ foreach (array('login_2fa_passkey_options', 'login_2fa_passkey_verify') as $acti
 		$action . ' is answered, not diverted to the page that calls it',
 		'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
 }
+
+// ---------------------------------------------------------------------------
+section('Proving the factor returns to the page that was asked for');
+
+// The session is new when the divert fires, so nothing had saved a return and
+// the browser landed on /profile instead of the admin page it had opened.
+$asked = '/profile/security?from=divert_test';
+$jar = harness_jar_new();
+$r = harness_request('GET', $asked, array('cookies' => $remembered, 'jar' => $jar, 'accept' => null));
+check(strpos((string)$r['redirect_url'], '/verify-totp') !== false,
+	'the asked-for page diverts to the factor page', '-> ' . $r['redirect_url']);
+$r = harness_request('POST', '/verify-totp', array(
+	'cookies' => $remembered, 'jar' => $jar, 'encode' => 'form',
+	'body' => array('totp_code' => \OTPHP\TOTP::createFromSecret($totp_secret)->at(time())),
+));
+check(in_array($r['status'], array(301, 302, 303), true)
+		&& substr((string)$r['redirect_url'], -strlen($asked)) === $asked,
+	'a proved code returns to the page that was asked for',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
+
+// An API call is not a page a person opened: it never becomes the return.
+$jar = harness_jar_new();
+harness_request('GET', '/api/v1/ping', array('cookies' => $remembered, 'jar' => $jar, 'accept' => null));
+$user->set('usr_totp_last_used_step', null);
+$user->save();
+$r = harness_request('POST', '/verify-totp', array(
+	'cookies' => $remembered, 'jar' => $jar, 'encode' => 'form',
+	'body' => array('totp_code' => \OTPHP\TOTP::createFromSecret($totp_secret)->at(time())),
+));
+check(strpos((string)$r['redirect_url'], '/api/') === false,
+	'a pending login first seen on an API call does not return to the API',
+	'status ' . $r['status'] . ' -> ' . $r['redirect_url']);
 
 // ---------------------------------------------------------------------------
 section('The way out stays reachable');

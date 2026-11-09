@@ -7,6 +7,8 @@
  * or a passkey step-up (login_2fa_passkey_verify_logic). Both paths converge here
  * so the session establishment, remember-me cookie, trusted-device cookie, and
  * pending-state teardown are defined once.
+ *
+ * @version 1.1 - the stored return is used only when it is a safe local path (SessionControl::is_safe_return)
  */
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('data/logins_class.php'));
@@ -25,6 +27,9 @@ class Login2fa {
 
 		$remember  = !empty($_SESSION['totp_pending_remember']);
 		$returnurl = $_SESSION['totp_pending_return'] ?? null;
+		if (!SessionControl::is_safe_return($returnurl)) {
+			$returnurl = null;
+		}
 
 		unset($_SESSION['totp_pending_user_id'], $_SESSION['totp_pending_remember'],
 			$_SESSION['totp_pending_return'], $_SESSION['totp_pending_expires']);

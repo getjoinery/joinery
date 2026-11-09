@@ -110,6 +110,8 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.28 - a sign-in remembered by cookie that stops for a second factor returns to the page that was asked
+ *                for (pending_return_for_request()), not /profile: the session is new, so no return was saved yet
  * @version 1.27 - sessions start through SessionGuard::start() (unseal_daemon.md C4)
  * @version 1.26 - get_formfields()/get_formfields_array() unserialize with allowed_classes => false: the
  *                fields are strings and arrays, and an object planted in the session must not run its
@@ -756,7 +758,7 @@ class SessionControl{
 				session_regenerate_id(true);
 				$_SESSION['totp_pending_user_id']  = $user_obj->key;
 				$_SESSION['totp_pending_remember'] = false; // Already had a remember cookie
-				$_SESSION['totp_pending_return']   = $this->get_return();
+				$_SESSION['totp_pending_return']   = $this->pending_return_for_request();
 				$_SESSION['totp_pending_expires']  = time() + 600;
 			}
 			// Never divert a request that is already how the factor gets proved, or
@@ -773,6 +775,25 @@ class SessionControl{
 		$this->store_session_variables($user_obj);
 		Login::record($user_obj->key, Login::LOGIN_COOKIE);
 		return TRUE;
+	}
+
+	/**
+	 * Where a sign-in remembered by cookie goes once its second factor is proved.
+	 *
+	 * The session is new, so no page has saved a return yet: the page being
+	 * asked for is the one to come back to. Only a page a person opens counts —
+	 * a GET to a safe local path that is not the API, an AJAX endpoint or a file
+	 * — and anything else falls back to whatever return the session holds.
+	 */
+	private function pending_return_for_request() {
+		$uri  = (string)($_SERVER['REQUEST_URI'] ?? '');
+		$path = (string)strtok($uri, '?');
+		$is_page = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+			&& self::is_safe_return($uri)
+			&& !self::is_second_factor_handoff()
+			&& !preg_match('#^/(api|ajax)/#', $path)
+			&& strpos(basename($path), '.') === false;
+		return $is_page ? $uri : $this->get_return();
 	}
 
 	/**
