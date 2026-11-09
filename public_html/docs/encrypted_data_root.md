@@ -15,7 +15,7 @@ The volume holds the data root, and on an encrypted machine these move onto it, 
 | `/var/lib/php/sessions`, `/var/lib/php/tmp` | `php/sessions`, `php/tmp` | by the tick, once they exist |
 | `/etc/rspamd/dkim` | `mail/dkim` | by the tick, once it exists |
 
-`joinery_data_root.sh move-in REL TARGET` does each move with no moment the path is missing: it copies the folder's files to the place, mounts the place over the path, copies again anything written during the copy, then deletes the root disk's own copy through a private bind of `/` and leaves the path the locked mountpoint every bind leaves. The tick trims the root disk (`fstrim /`) after a move.
+`joinery_data_root.sh move-in REL TARGET` does each move with no moment the path is missing: it copies the folder's files to the place, mounts the place over the path, copies again anything written during the copy, then deletes the root disk's own copy through a private bind of `/` and leaves the path the locked mountpoint every bind leaves. PHP's sessions and temporary files, which the web user writes, move with PHP-FPM, Apache and cron stopped (a few seconds) and the folder closed to everyone but root, so nothing the web user runs can put a link in it for root's second copy to follow. A move run from inside one of those services (a cron job) is refused. The tick trims the root disk (`fstrim /`) after a move.
 
 Also on an encrypted machine:
 

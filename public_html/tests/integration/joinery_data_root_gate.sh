@@ -635,7 +635,12 @@ figs data 25*G 1*G 24*G
 # holds files hides them under hidden/, as a real mount does.
 stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"
 case "$1" in
-  list-units) cat "$GATE_T/active_units" 2>/dev/null; exit 0 ;;
+  list-units) shift; pats=(); for a in "$@"; do case "$a" in -*) ;; *) pats+=("$a") ;; esac; done
+    while read -r u rest; do
+      [ -n "$u" ] || continue
+      if [ ${#pats[@]} -eq 0 ]; then echo "$u $rest"; continue; fi
+      for p in "${pats[@]}"; do case "$u" in $p) echo "$u $rest"; break ;; esac; done
+    done < "$GATE_T/active_units" 2>/dev/null; exit 0 ;;
 esac
 case "$1 $2" in
   "start "*.mount|"stop "*.mount)
@@ -647,6 +652,7 @@ case "$1 $2" in
       if [ -f "$GATE_T/hide_on_mount" ] && [ -d "$GATE_T/root$where" ] && [ ! -L "$GATE_T/root$where" ]; then
         mkdir -p "$(dirname "$GATE_T/hidden$where")"; mv "$GATE_T/root$where" "$GATE_T/hidden$where"
       fi
+      echo "$where $(stat -c %a "$GATE_T/hidden$where" 2>/dev/null || stat -c %a "$GATE_T/root$where")" >> "$GATE_T/mode_at_mount"
       rmdir "$GATE_T/root$where" 2>/dev/null; ln -sfn "$GATE_T/root$what" "$GATE_T/root$where"
       echo "$where" > "$GATE_T/active/$2"
     else
@@ -1411,6 +1417,11 @@ mkdir -p "$R/var/log/apt" "$R/var/lib/php/sessions" "$R/etc/php/8.3/fpm/conf.d" 
 printf '[Unit]\nDescription=Record System Boot/Shutdown in UTMP\nDefaultDependencies=no\nRequiresMountsFor=/var/log/wtmp\nBefore=sysinit.target\n\n[Service]\nType=oneshot\nExecStart=/usr/lib/systemd/systemd-update-utmp reboot\n' > "$R/usr/lib/systemd/system/systemd-update-utmp.service"
 printf '[Unit]\nDescription=Flush Journal to Persistent Storage\nDefaultDependencies=no\nRequiresMountsFor=/var/log/journal /var/lib/x\n\n[Service]\nExecStart=journalctl --flush\n' > "$R/usr/lib/systemd/system/systemd-journal-flush.service"
 echo boot > "$R/var/log/syslog"; echo history > "$R/var/log/apt/history.log"; echo s > "$R/var/lib/php/sessions/sess_1"
+chmod 1733 "$R/var/lib/php/sessions"
+printf '%s\n' 'apache2.service loaded active running The Apache HTTP Server' \
+    'cron.service loaded active running Regular background program processing daemon' \
+    'php8.3-fpm.service loaded active running The PHP 8.3 FastCGI Process Manager' \
+    'ssh.service loaded active running OpenBSD Secure Shell server' > "$T/active_units"
 mkdir -p "$R$S/config/backup-ledger"
 printf '<?php\n' > "$R$S/config/Globalvars_site.php"; echo key > "$R$S/config/backup_site_key"; echo l > "$R$S/config/backup-ledger/a"
 : > "$LOG"; JOINERY_TEST_ROOT_VIEW="$T/hidden" run tick >/dev/null 2>&1
@@ -1429,6 +1440,11 @@ chk "a plain swap device is let go, an encrypted one and compressed memory (zram
     "$(grep -c '/dev/dm-\*|/dev/mapper/\*|/dev/zram\*) continue' "$SCRIPT")" "1"
 chk "/var/log, PHP's sessions and temporary files moved onto the data root" \
     "$(grep -c -e '^log /var/log$' -e '^php/sessions /var/lib/php/sessions$' -e '^php/tmp /var/lib/php/tmp$' "$B")|$(cat "$R/srv/joinery/log/syslog")|$(cat "$R/srv/joinery/log/apt/history.log")|$(cat "$R/srv/joinery/php/sessions/sess_1")" "3|boot|history|s"
+chk "PHP's sessions and temporary files each moved with PHP-FPM, Apache and cron stopped, and started again after (D4)" \
+    "$(grep -c '^systemctl stop apache2.service cron.service php8.3-fpm.service$' "$LOG")|$(grep -c '^systemctl start apache2.service cron.service php8.3-fpm.service$' "$LOG")" "2|2"
+chk "PHP's sessions closed to all but root while they move, and given back their mode on the data root (D4)" \
+    "$(awk '$1 == "/var/lib/php/sessions" { print $2 }' "$T/mode_at_mount")|$(stat -c %a "$R/srv/joinery/php/sessions")" "700|1733"
+chk "nothing the web user runs is stopped to move /var/log" "$(grep -c '^systemctl stop .*apache2' "$LOG")" "2"
 chk "no DKIM keys here, so no move for them" "$(grep -c 'mail/dkim' "$B")" "0"
 chk "the journal flushed onto it once /var/log is mounted, at each boot, and let go before it unmounts" \
     "$(grep -c -e '^Requires=var-log.mount$' -e '^ExecStart=/usr/bin/journalctl --flush$' -e '^WantedBy=joinery-data.target$' -e '^RemainAfterExit=yes$' -e '^ExecStop=/usr/bin/journalctl --smart-relinquish-var$' "$SD/joinery-journal-flush.service")|$(grep -q '^systemctl enable joinery-journal-flush.service$' "$LOG" && echo enabled)" "5|enabled"
@@ -1469,7 +1485,7 @@ echo x > "$R/var/www/html/other/config/f"; echo y > "$R/srv/joinery/sites/other/
 out="$(run move-in sites/other/config /var/www/html/other/config 2>&1)"; rc=$?
 chk "move-in to a place that holds data already: refused, nothing changed" \
     "$rc|$(grep -c 'holds data already' <<< "$out")|$(cat "$R/var/www/html/other/config/f")|$(cat "$B" | grep -c other)" "1|1|x|0"
-rm -rf "${R:?}/var/www/html/other" "${R:?}/srv/joinery/sites/other" "${T:?}/hide_on_mount" "${R:?}/dev/mapper/joinery-data" "${R:?}/etc/php"
+rm -rf "${R:?}/var/www/html/other" "${R:?}/srv/joinery/sites/other" "${T:?}/hide_on_mount" "${R:?}/dev/mapper/joinery-data" "${R:?}/etc/php" "${T:?}/active_units"
 sed -i 's/^reencrypt=.*/reencrypt=encrypt/' "$C"
 
 echo "--- a decrypt that finishes (B68) ---"

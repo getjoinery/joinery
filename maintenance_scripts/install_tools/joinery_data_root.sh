@@ -4,6 +4,10 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.35 - PHP's sessions and temporary files move onto the data root with PHP-FPM, Apache and cron
+#                stopped and the folder closed to all but root, so nothing the web user runs can put a
+#                link in it between the two copies for root's second copy to follow
+#                (specs/shell_command_audit_wp2_results.md D4)
 # Version: 1.34 - remove-site: a mount that cannot be unmounted (busy) is tried again for a few seconds, then
 #                keeps its record and its unit with the records not yet released, so a run again takes them;
 #                a mount of the site's data left by an earlier run that dropped its record goes with the rest,
@@ -319,6 +323,10 @@ LUKS_PLACES="log /var/log
 php/sessions /var/lib/php/sessions
 php/tmp /var/lib/php/tmp
 mail/dkim /etc/rspamd/dkim"
+# Of those, the folders the web user can write to: moved with what runs as the
+# web user stopped and the folder closed to it (move_in_one).
+POOL_PLACES="/var/lib/php/sessions /var/lib/php/tmp"
+POOL_UNITS=('php*-fpm.service' 'apache2.service' 'cron.service')
 # Writers of /var/log that wait for the data root, as the consumers do, while
 # /var/log is on it (an encrypted machine's, D10, or one decrypted since).
 LOG_CONSUMERS="rsyslog.service fail2ban.service sysstat.service"
@@ -1470,6 +1478,44 @@ lock_data_root_mountpoint() {
 # filesystem without the mount over them. The path is left the locked
 # mountpoint every bind leaves. Done already, it only mounts it.
 move_in_one() {  # REL TARGET
+    local target="$2" t mode rc own
+    local -a paused=()
+    t="${ROOT}${target}"
+    if [[ " ${POOL_PLACES} " != *" ${target} "* || ! -d "$t" || -L "$t" ]] \
+        || binds | awk -v x="$target" '$2 == x { f = 1 } END { exit !f }'; then
+        move_in_copy "$@"; return
+    fi
+    # A folder the web user can write to. Its files are copied twice, and the
+    # second copy writes into the folder once it is live: a link put there in
+    # between would lead root's copy anywhere. So for the move nothing that
+    # runs as the web user runs (PHP-FPM, Apache, cron: a few seconds), and the
+    # folder is closed to everyone but root, which holds against anything else
+    # the web user starts meanwhile. The second copy then finds nothing new.
+    mode="$(stat -c %a "$t")" || { say "${target} could not be read; nothing was changed"; return 1; }
+    mapfile -t paused < <(systemctl list-units --type=service --state=active --plain --no-legend "${POOL_UNITS[@]}" 2>/dev/null | awk '{ print $1 }')
+    # Run from one of them (a cron job), stopping it would stop this run.
+    own="$(ps -o unit= -p $$ 2>/dev/null | tr -d ' ')"
+    if [[ -n "$own" && " ${paused[*]} " == *" ${own} "* ]]; then
+        say "${target}: this run is part of ${own}, which the move stops; nothing was changed. Run it from elsewhere (the host converger does)"; return 1
+    fi
+    if (( ${#paused[@]} > 0 )) && ! systemctl stop "${paused[@]}"; then
+        systemctl start "${paused[@]}" || true
+        say "${target}: $(printf '%s ' "${paused[@]}")did not stop; nothing was changed, and it is tried again"; return 1
+    fi
+    if chmod 700 "$t"; then
+        move_in_copy "$@"; rc=$?
+    else
+        say "${target} could not be closed for the move; nothing was changed, and it is tried again"; rc=1
+    fi
+    # Moved, the path is the data root's folder; not moved, the root disk's.
+    chmod "$mode" "$t" || say "WARNING: ${target} could not be given back its mode ${mode}"
+    if (( ${#paused[@]} > 0 )) && ! systemctl start "${paused[@]}"; then
+        say "WARNING: not every service started again: $(printf '%s ' "${paused[@]}")"
+    fi
+    return "$rc"
+}
+
+move_in_copy() {  # REL TARGET
     local rel="$1" target="$2" t place stamp old f
     t="${ROOT}${target}"; place="${MNT}/${rel}"
     if binds | awk -v r="$rel" -v x="$target" '$1 == r && $2 == x { f = 1 } END { exit !f }'; then
