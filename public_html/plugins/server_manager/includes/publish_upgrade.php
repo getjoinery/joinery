@@ -306,6 +306,16 @@
 		$version_patch = $_REQUEST['version_patch'];
 		$verbose = isset($_GET['verbose']) ? true : false;
 
+		// The three parts become archive and directory names below, so each is
+		// a plain number or nothing is written: a part carrying a slash or ".."
+		// would name a path outside the release directories.
+		foreach (array($version_major, $version_minor, $version_patch) as $part) {
+			if (!ctype_digit((string)$part) || strlen((string)$part) > 6) {
+				publish_output('A version is three whole numbers, such as 0.8.537. Nothing has been written.');
+				exit(1);
+			}
+		}
+
 		// Same rule as the CLI path: a site running exactly what upstream
 		// delivered serves what it runs. The form below offers only the
 		// running version, so reaching here with a different one means the

@@ -16,6 +16,8 @@
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
+ * Version: 1.7.1 - every answer is declared JSON with nosniff before any branch runs; an error that
+ *                  echoed the requested name was served as text/html (reflected script)
  * Version: 1.7.0 - the catalog lists, and the download serves, the newest published archive; an extension
  *                  whose live directory has moved past its last release is offered at the released version
  * Version: 1.6.0 - serves only the archive publish built; never cuts one from the live directory
@@ -33,6 +35,14 @@ $settings = Globalvars::get_instance();
 $baseDir = $settings->get_setting('baseDir');
 $site_template = $settings->get_setting('site_template');
 $full_site_dir = $baseDir . $site_template;
+
+// Every answer here is JSON unless a branch says otherwise (the archive
+// download, the core redirect). Declared once, before any branch, because
+// the error answers echo the name the caller asked for: served as the
+// default text/html, a name carrying markup would run as script on this
+// origin for anyone who follows the link.
+header('Content-Type: application/json');
+header('X-Content-Type-Options: nosniff');
 
 /**
  * Whether an extension declaring this `audience` is listed for this caller.

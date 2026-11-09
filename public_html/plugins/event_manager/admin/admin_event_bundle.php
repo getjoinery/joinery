@@ -15,7 +15,7 @@
 		$groupmember = new GroupMember($_POST['grm_group_member_id'], TRUE);
 		$groupmember->assert_found();
 		$groupmember->remove();
-		header("Location: /plugins/event_manager/admin/admin_event_bundle?grp_group_id=".$_REQUEST['grp_group_id']);
+		header("Location: /plugins/event_manager/admin/admin_event_bundle?grp_group_id=".intval($_REQUEST['grp_group_id']));
 		exit();
 	}
 

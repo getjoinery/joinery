@@ -14,6 +14,8 @@
  *   level 5 (spec declared_permissions)
  * @version 1.3 - crown and cache invalidation build the row's entity class only when it
  *   declares $ab_testable (unseal_daemon.md C3)
+ * @version 1.4 - a panel action returns to the page it was posted from; it no longer
+ *   follows a posted abtest_redirect, which no form sent and which named any URL
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -467,7 +469,7 @@ class AbTestVersionsPanel {
 			$_SESSION['abtest_flash_error'] = $e->getMessage();
 		}
 
-		$redirect = $_POST['abtest_redirect'] ?? ($_SERVER['REQUEST_URI'] ?? '/admin/admin_ab_tests');
+		$redirect = $_SERVER['REQUEST_URI'] ?? '/admin/admin_ab_tests';
 		header('Location: ' . $redirect);
 		exit();
 	}
