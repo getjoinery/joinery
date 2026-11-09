@@ -164,6 +164,7 @@ $site = function (string $label, bool $test_mode = true) use ($node, $uid, $tag,
 	$host->set('mgh_name', '192.0.2.60');
 	$host->set('mgh_host', '192.0.2.60');
 	$host->set('mgh_mgn_managed_node_id', $agent->key);
+	$host->set('mgh_provisioning_enabled', true);
 	$host->save();
 	$host->load();
 	$tsd_rows[] = array('mgh_managed_hosts', 'mgh_managed_host_id', (int)$host->key);
@@ -304,6 +305,8 @@ $gone = function ($table, $col, $id) use ($db) {
 check($gone('mgn_managed_nodes', 'mgn_managed_node_id', $site_node->key) && $gone('mgn_managed_nodes', 'mgn_managed_node_id', $agent->key),
 	'the site\'s node and its Docker host\'s node are removed');
 check($gone('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $p->key), 'the provision is removed with them');
+$host->load();
+check((bool)$host->get('mgh_delete_time'), 'and the Docker host record, one that takes provisions, is retired');
 
 // ---------------------------------------------------------------------------
 section('A subaccount already closed');

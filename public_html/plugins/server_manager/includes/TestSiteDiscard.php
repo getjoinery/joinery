@@ -197,6 +197,8 @@ class TestSiteDiscard {
 		}
 		$domain = (string)$provision->get('cvp_domain');
 		if ($nodes) {
+			// The site's node is last, and names the host it sat on.
+			$host_id = (int)end($nodes)->get('mgn_mgh_managed_host_id');
 			foreach ($nodes as $node) {
 				try {
 					foreach ($node->remove_permanently() as $note) {
@@ -208,6 +210,13 @@ class TestSiteDiscard {
 						. ' Click Discard again to finish.';
 					return $out;
 				}
+			}
+			// Each removal asks the host to retire, but its agent goes first,
+			// while the site is still on it, and a host that takes provisions
+			// retires only on its agent's removal: so it is asked once more,
+			// now that both are gone.
+			if ($host_id > 0 && ManagedHost::retire_if_empty($host_id, true)) {
+				$out['done'][] = 'Its Docker host had nothing left on it and was removed from the dashboard too.';
 			}
 		} else {
 			$trial = HostedTrial::for_provision($provision->key);
