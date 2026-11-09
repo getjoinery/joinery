@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.13.0 - the root-only config files are left out of every archive, a root run's too
+#   (_backup_root_only_files.sh 1.1.0)
 # Version: 2.12.0 - the postgres password is read from the root-only config/db_admin.php before a config still
 #   on postgres (mail_access_hardening WP4); db_admin.php rides in the root-only config files
 # Version: 2.11.0 - --exclude NAME (repeatable): the site's backup_exclude names, left out as the chain's
@@ -489,21 +491,13 @@ print_info "Backing up database..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DB_SCRIPT="${SCRIPT_DIR}/backup_database.sh"
 
-# The config/ files readable by root only, on purpose (_backup_root_only_files.sh,
-# shared with backup_files.sh). root_only_unreadable prints each one this account
-# cannot read, one per line, and warns of each on stderr: a run that cannot read
-# them leaves them out and says so. Any other unreadable file still fails it.
+# The config/ files readable by root only, on purpose, which no archive carries,
+# a root run's included (_backup_root_only_files.sh, shared with backup_files.sh).
+# Any other unreadable file still fails the run.
 # shellcheck source=_backup_root_only_files.sh
 . "${SCRIPT_DIR}/_backup_root_only_files.sh"
-root_only_unreadable() {
-    local f
-    [ "$(id -u)" -eq 0 ] && return 0
-    for f in "${ROOT_ONLY_FILES[@]}"; do
-        if [ -e "${PROJECT_DIR}/config/${f}" ] && [ ! -r "${PROJECT_DIR}/config/${f}" ]; then
-            print_warning "config/${f} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)" >&2
-            echo "$f"
-        fi
-    done
+root_only_files() {
+    printf '%s\n' "${ROOT_ONLY_FILES[@]}"
 }
 
 if [ ! -f "$BACKUP_DB_SCRIPT" ]; then
@@ -642,7 +636,7 @@ for x in "${TREE_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="${x}/"); done
 for x in ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do RSYNC_EXCLUDES+=(--exclude="${x}"); done
 for x in "${ROOT_ONLY_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="/${x}/"); done
 if [ -z "$SUDO" ]; then
-    for f in $(root_only_unreadable); do RSYNC_EXCLUDES+=(--exclude="/config/${f}"); done
+    for f in $(root_only_files); do RSYNC_EXCLUDES+=(--exclude="/config/${f}"); done
 fi
 RSYNC_STATUS=0
 $SUDO rsync -a "${RSYNC_EXCLUDES[@]}" \
@@ -794,7 +788,7 @@ if [ "$STREAM" = true ]; then
     TAR_EXCLUDES+=(--anchored)
     for x in "${ROOT_ONLY_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="./${x}"); done
     if [ -z "$SUDO_TAR" ]; then
-        for f in $(root_only_unreadable); do TAR_EXCLUDES+=(--exclude="./config/${f}"); done
+        for f in $(root_only_files); do TAR_EXCLUDES+=(--exclude="./config/${f}"); done
     fi
     TAR_EXCLUDES+=(--no-anchored)
     # The offloaded files' local paths, literal and unanchored, matched on the

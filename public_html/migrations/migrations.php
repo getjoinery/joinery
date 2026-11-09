@@ -1929,3 +1929,13 @@
 	$migration['migration_file'] = 'upgrade_server_active_from_published.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Backups are always written to the site's own backups/ folder. The host
+	// agent reads and deletes there as root, so the folder is not a setting
+	// the web tier could point elsewhere, and the row has nothing left to read it.
+	$migration = array();
+	$migration['database_version'] = '232';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_output_dir') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'backup_output_dir';";
+	$migrations[] = $migration;

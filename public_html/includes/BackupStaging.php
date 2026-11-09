@@ -25,6 +25,7 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.9 - prepare_workspace() names the owner of a workspace this run cannot write
  * @version 1.8 - recovery_box() carries the recipient's alg, so its opener knows the seal version
  * @version 1.7 - fetch_manifest() records the artifacts a matched manifest names that the ledger lacks, so a chain
  *                the site's previous server handed over stages here (B20); stage_key() stages a chain this
@@ -237,6 +238,13 @@ class BackupStaging {
 			// named a workspace this machine cannot provide.
 			throw new BackupStagingException(
 				'could not make the restore workspace at ' . $work, BackupStagingException::MALFORMED);
+		}
+		if (!is_writable($work)) {
+			$owner = function_exists('posix_getpwuid') ? (posix_getpwuid((int)@fileowner($work))['name'] ?? '?') : '?';
+			throw new BackupStagingException(
+				'the restore workspace at ' . $work . ' is owned by ' . $owner
+				. ' and this run cannot write it; the host converger hands the backups folder to the web user',
+				BackupStagingException::MALFORMED);
 		}
 		@chmod($work, 0700);
 		return $work;

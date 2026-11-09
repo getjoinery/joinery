@@ -74,6 +74,7 @@
  *
  * Exits 0 on success, 1 on a transfer failure, 2 on a malformed request.
  *
+ * @version 1.5 - comment: the base is the site's backups/ folder, never a setting
  * @version 1.4 - writes through the management node's backup broker when the slot names a broker run, and
  *                finishes or aborts that run; a name already in backup storage is not written twice
  *                (specs/storage_targets.md WP5)
@@ -208,11 +209,9 @@ if (!BackupNaming::is_backup($filename)) {
 }
 
 // WHERE the node keeps this profile's backups — resolved HERE, by the node,
-// from its own configured working directory. BackupNaming::BACKUP_DIR is only
-// the last-resort constant; the real base is the backup_output_dir setting or
-// {siteRoot}/backups, and each profile gets its own directory beneath it. The
-// agent used to assume the constant, so on a node using the computed default it
-// looked in a directory that did not exist and reported no backups at all.
+// from its own site root. BackupNaming::BACKUP_DIR is only the last-resort
+// constant; the real base is {siteRoot}/backups, and each profile gets its own
+// directory beneath it.
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 

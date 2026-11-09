@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.8.0 - the root-only config files are left out of every archive, a root run's too
+#                  (_backup_root_only_files.sh 1.1.0), anchored to config/ so a same-named file
+#                  elsewhere in the tree is still archived
 # Version: 1.7.0 - release archives (static_files/joinery-core-*.tar.gz) are left out of the data part and
 #                  a whole-tree archive: signed downloads a publish brings back, not site data, and on a
 #                  management node most of the backup (getjoinery: 19 of them, 850 MB of a 1 GB backup)
@@ -383,20 +386,17 @@ if [ -n "$SNAR" ]; then
     TAR_ARGS+=(--listed-incremental="$SNAR" --no-check-device)
 fi
 
-# Some config/ files are readable by root only, on purpose (the list, and why,
-# is _backup_root_only_files.sh, shared with backup_project.sh). An unprivileged
-# run leaves each out and says so; any other unreadable file still fails it.
+# Some config/ files are readable by root only, on purpose, and no archive
+# carries them, a root run's included (the list, and why, is
+# _backup_root_only_files.sh, shared with backup_project.sh). Any other
+# unreadable file still fails the run.
 # shellcheck source=_backup_root_only_files.sh
 . "$(dirname "${BASH_SOURCE[0]}")/_backup_root_only_files.sh"
-if [ "$(id -u)" -ne 0 ]; then
-    for FILE_NAME in "${ROOT_ONLY_FILES[@]}"; do
-        FILE_PATH="${PROJECT_DIR}/config/${FILE_NAME}"
-        if [ -e "$FILE_PATH" ] && [ ! -r "$FILE_PATH" ]; then
-            print_warning "config/${FILE_NAME} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
-            TAR_ARGS+=(--exclude="$FILE_NAME")
-        fi
-    done
-fi
+# Anchored to the site's own config/: a file of the same name anywhere else in
+# the tree (an upload, say) is the site's data and is archived.
+for FILE_NAME in "${ROOT_ONLY_FILES[@]}"; do
+    TAR_ARGS+=(--anchored --exclude="${BASE}/config/${FILE_NAME}" --no-anchored)
+done
 
 # The tree holds files the invoking account is not meant to read (config/ keys
 # are 600 and web-user owned). Elevate the read if we can; say so plainly if we

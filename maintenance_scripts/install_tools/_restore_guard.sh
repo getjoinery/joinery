@@ -5,6 +5,8 @@
 # (specs/host_restrictions.md D5). Sourced by restore_project.sh and
 # restore_chain.sh, which is what a site copy runs.
 #
+# Version: 1.3 - config/db_admin.php and config/admin_credentials.txt are the machine's: no archive
+#                carries them (_backup_root_only_files.sh), so a restore must not delete this machine's
 # Version: 1.2 - config/release_trust is the machine's (specs/release_key_rotation.md R1)
 # Version: 1.1 - the refusal names the site the backup was taken of, which is this
 #                site itself for a restore of its own backup, not only a copy's source
@@ -12,7 +14,8 @@
 #
 # MACHINE_CONFIG_FILES are the config/ files that belong to the MACHINE, not to
 # the site a backup was taken of: this machine's database password and secret
-# key, its identity as a recipient of its own backups, and the files that
+# key, its postgres pair and first-login password note (in no archive), its
+# identity as a recipient of its own backups, and the files that
 # decide what it trusts (whose signatures count, whether the public log is
 # required, who owns the code tree, whether it is the publishing box) or that
 # its host writes. A restore keeps this machine's copy of each whenever it has
@@ -43,6 +46,8 @@ MACHINE_CONFIG_FILES=(
     config/tree_owner
     config/agent_signing_key
     config/release_statement_key
+    config/db_admin.php
+    config/admin_credentials.txt
     config/disk_allowance
     config/code_check
 )

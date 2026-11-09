@@ -146,6 +146,13 @@ done
 chk "the machine's config and backup identity are kept, but not as trust files" \
     "$(restore_guard_trust_file config/Globalvars_site.php && echo trust)|$(restore_guard_trust_file config/backup_site_key && echo trust)|$(printf '%s\n' "${MACHINE_CONFIG_FILES[@]}" | grep -c 'Globalvars_site.php\|backup_site_key')" "||2"
 chk "a file of the site's own is not the machine's" "$(restore_guard_trust_file config/mail_settings && echo trust)" ""
+# A root-only file is in no archive, so a restore that did not keep this
+# machine's copy would delete it (the chain's listing never names it).
+. "$TOOLS/../sysadmin_tools/_backup_root_only_files.sh"
+for f in "${ROOT_ONLY_FILES[@]}"; do
+    chk "config/$f, in no archive, is kept on restore" \
+        "$(printf '%s\n' "${MACHINE_CONFIG_FILES[@]}" | grep -cxF "config/$f")" "1"
+done
 
 echo "=== Both restore scripts check before they write, and keep the machine's files ==="
 RP="$SYSADMIN/restore_project.sh"

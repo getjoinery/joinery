@@ -240,7 +240,7 @@ if [ "$(id -u)" -ne 0 ] && ! sudo -n -l 2>/dev/null | grep -Eq 'NOPASSWD:([[:spa
         --name "$PROJ-ro" --archive - --report "$W/stream/report_ro" > "$W/stream/ro.enc" 2>"$W/stream/ro.err"; RC=$?
     chk "stream mode exits 0 with a root-only file it cannot read" "$RC" "0"
     chk "the report says tar 0" "$(grep -c '^TAR_RC=0$' "$W/stream/report_ro")" "1"
-    chk "it says the file was left out" "$(grep -c 'config/admin_credentials.txt is root-only' "$W/stream/ro.err")" "1"
+    chk "no warning is printed for it" "$(grep -c 'root-only' "$W/stream/ro.err")" "0"
     openssl enc -d -aes-256-cbc -pbkdf2 -pass fd:3 -in "$W/stream/ro.enc" 3< "$W/key" | tar -tz > "$W/x/ro.list"
     chk "the file is not in the archive" "$(grep -c "/config/admin_credentials.txt$" "$W/x/ro.list")" "0"
     chk "the rest of config/ is" "$(grep -c "/config/Globalvars_site.php$" "$W/x/ro.list")" "1"

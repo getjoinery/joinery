@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.18 - config/backup-ledger is made when missing: every backup runs as the web user, which cannot
+#               create it in config/ (shell_command_audit D3, reviewer2 B12)
 #VERSION 4.17 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are no longer pinned: root
 #               keeps them in /var/lib/joinery/sites/SITENAME, outside the data set (shell_command_audit D1)
 #VERSION 4.16 - config/db_admin.php (the postgres pair, site_db_role.sh) is pinned 600 root:root and left out of
@@ -491,13 +493,18 @@ done
 # accepted one.
 #
 # 0700/0600 www-data:www-data, the same posture and the same reasoning as
-# config/backup_site_key above: backups run under more than one account (the web
-# user on a scheduled run, root via the agent on a managed node), and both are
-# parties already trusted to make a backup. What is closed is everybody else.
+# config/backup_site_key above: backups run as the web user (scheduled, and the
+# agent's), and an operator may run one as root from a shell; both are parties
+# already trusted to make a backup. What is closed is everybody else. It is made
+# here when missing: the web user cannot create it in config/, and a backup
+# with no ledger to record in refuses.
 # The agent refuses a ledger that is group- or other-writable, so a future sweep
 # that widened this again would fail restores loudly rather than silently
 # accepting whatever it found.
 LEDGER_DIR="$SITE_ROOT/config/backup-ledger"
+if [ -d "$SITE_ROOT/config" ] && [ ! -e "$LEDGER_DIR" ] && [ ! -L "$LEDGER_DIR" ]; then
+    mkdir "$LEDGER_DIR"
+fi
 if [ -d "$LEDGER_DIR" ]; then
     echo "  Pinning $LEDGER_DIR to 700 www-data:www-data..."
     chown -R www-data:www-data "$LEDGER_DIR"

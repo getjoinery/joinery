@@ -147,14 +147,6 @@
       "helptext": "How far back you can restore. Every backup from the last this-many days is kept in the bucket, along with the one just before them that a restore to the first of those days starts from; older ones are deleted, and only ever after a newer backup has been confirmed uploaded — a run that failed never causes an older backup to be removed."
     },
     {
-      "name": "backup_output_dir",
-      "default": "",
-      "group": "backups",
-      "label": "Where backups are written on this machine",
-      "type": "text",
-      "helptext": "The working directory backups are built in before upload, and the one the local sweep prunes. Leave it blank and backups are written to the site's own backups folder, beside your logs and uploads — that works everywhere and is already left out of published archives. Set an absolute path only to put them somewhere else, such as a larger disk."
-    },
-    {
       "name": "backup_exclude",
       "default": "",
       "group": "backups",

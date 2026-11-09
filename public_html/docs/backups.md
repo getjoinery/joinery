@@ -814,7 +814,19 @@ private key travels in a job record. A chain another server made (the server
 this site was on before a switch-over) does not open with this machine's key:
 Prepare stages it without one (`STAGE_KEY=recovery`), and the restore's
 approval opens it with the recovery key the operator pastes to approve, in
-their browser (*Approve it on the node*, below). Once the restore completes, the run's offloaded files follow in `missing`
+their browser (*Approve it on the node*, below).
+
+Prepare runs as the site's web user, not as root: it writes only into the
+site's `backups/` folder, `backups/restore_<chain_id>/`, and that folder is the
+web user's. So do the agent's backup, download, upload, verify and
+offloaded-file restore words. A chain key root opens (the restore's
+approval, `copy_import`, `copy_take_key`) is kept in root's own state for the
+site, `/etc/joinery/sites/<site>/chain_keys/<chain_id>.key`, which the web user
+cannot read; a key Prepare recovered with `backup_site_key` is copied there
+from the workspace when the restore starts, read so that no link leads outside
+`backups/`, afresh at every restore. Each time a key is kept, any key whose
+workspace has been gone for a week is removed. The restore reads its key from
+there. Once the restore completes, the run's offloaded files follow in `missing`
 mode as the paged `restore_objects` jobs described under *Restoring a managed
 node* below. A chain taken by a machine that no longer exists goes onto a new
 one as a copy from backups (*Handing a chain to a copy*, below), or from a shell
@@ -887,7 +899,8 @@ node that dispatches them can read none of it:
   chain the source's ledger holds, by hash, size and upload time.
 - **`copy_import`, on the copy.** It checks the signature by the source key its
   dormant install recorded, the target, the expiry and that the bundle is newer
-  than the last one taken, then writes `chain.key` into `restore_<chain_id>`,
+  than the last one taken, then keeps each chain's key in
+  `/etc/joinery/sites/<site>/chain_keys/<chain_id>.key`,
   the vouch to `/etc/joinery/sites/<site>/vouched`, the history to `history`
   beside it, and the certificates.
 - **`copy_stage`, on the copy.** It downloads the chain from the source's
@@ -935,7 +948,7 @@ or written again since. The owner pastes the recovery key there, and the
 browser works out the one value that opens the recovery recipient's box and
 nothing else (`VaultCrypto.halfOpenKeyBox`): for an X-Wing box, the box's own
 AES key (X-Wing decapsulation, then HKDF-SHA256 under the `dek` scope), never
-the X-Wing shared secret. The copy finishes opening it (AES-256-GCM) and writes `chain.key` and the manifest as the vouch, exactly as `copy_import`
+the X-Wing shared secret. The copy finishes opening it (AES-256-GCM) and keeps the chain's key and the manifest as the vouch, exactly as `copy_import`
 would. The
 recovery key never leaves the browser, and the page is the copy's own, so the
 management node never sees the key or what it opens. No machine that made the
@@ -1335,8 +1348,8 @@ The ledger is `0700`/`0600`, and both the platform and the agent **refuse** one
 that group or other can write rather than reading it. Anything that can write
 the ledger can vouch for any bytes it likes, so a loose ledger does not weaken
 the check — it makes the check report success. The test is on the mode, not on
-the owner: backups legitimately run as root on a managed node and as the site
-user elsewhere. `fix_permissions.sh` pins the directory out of its sweep to
+the owner: backups run as the site's web user, the agent's included, and an
+operator may run one as root from a shell. `fix_permissions.sh` pins the directory out of its sweep to
 match.
 
 ### Ledger files in the bucket
@@ -2077,10 +2090,17 @@ in backup storage, the database included), then
 `BACKUP_WARNING` when there is one. A management node stores the level and
 size on the job result, so a run's size is a field and never prose to parse.
 
-One file is left out of an unprivileged run on purpose, and announced: the
-release signing key on a publishing box, `config/agent_signing_key`, is
-readable by root only. The root-run manager backup of that box carries it. Any
-other unreadable file fails the run rather than being skipped.
+Four `config/` files are readable by root only and are in no archive, whoever
+runs the backup: `db_admin.php` (the database's postgres pair),
+`admin_credentials.txt` (the first-login password the installer leaves), and on
+a publishing box the release signing keys, `agent_signing_key` and
+`release_statement_key` (`_backup_root_only_files.sh`). Every archive is sealed
+to the site's own backup key, which the web user can read, so a root-only file
+inside one would be readable by the web user. A restore keeps the machine's own
+copy of each (`MACHINE_CONFIG_FILES`, `_restore_guard.sh`), and a fresh install
+makes its own `db_admin.php` and `admin_credentials.txt`; a publishing box's two
+signing keys are kept offline by their owner and put back by hand. Any other unreadable file fails the
+run rather than being skipped.
 
 | Script | What it does |
 |---|---|
@@ -2311,7 +2331,6 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_full_interval_days` | `7` | Days before a chain rolls to a fresh full |
 | `backup_verify_every_days` | `7` | Days between verifications of the newest backup by opening and reading it; 0 never |
 | `backup_retention_days` | `28` | Days of restore points kept offsite; blank reads as 28 |
-| `backup_output_dir` | `/backups` | Working directory backups are built in |
 | `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`cache`, `tmp`, `logs`, …) too. `vendor/` is skipped at the site root only: there it is Composer's tree; inside `public_html` (`assets/vendor`, a plugin's own) it is signed code and is archived |
 | `backup_local_retention_days` | `7` | Days kept locally; 0 never sweeps |
 | `backup_delete_local_after_upload` | on | Remove what a run left on disk — the metadata artifact, a standalone run's envelope sidecar — once uploaded; archives and dumps stream and are never on disk |

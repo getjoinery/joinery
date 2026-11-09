@@ -87,15 +87,23 @@ chk "the run fails" "$([ "$RC" -ne 0 ] && echo fail || echo pass)" "fail"
 chk "it says nothing was archived" "$(echo "$OUT" | grep -c 'nothing was archived')" "1"
 chk "no archive is left behind" "$([ -e "$W/out/refusing.tar.gz.enc" ] && echo left || echo gone)" "gone"
 
-echo "== The root-only files are left out on purpose, and said =="
+echo "== The root-only files are in no archive, readable or not =="
+# Every archive is sealed to the site's own key, which the web user holds, so
+# a root-only file is left out even when this run could read it.
 echo secret > "$W/proj/config/agent_signing_key"; chmod 000 "$W/proj/config/agent_signing_key"
 echo secret > "$W/proj/config/release_statement_key"; chmod 000 "$W/proj/config/release_statement_key"
 echo secret > "$W/proj/config/admin_credentials.txt"; chmod 000 "$W/proj/config/admin_credentials.txt"
+echo secret > "$W/proj/config/db_admin.php"; chmod 600 "$W/proj/config/db_admin.php"
+mkdir -p "$W/proj/sub/upload"; echo mine > "$W/proj/sub/upload/db_admin.php"
 run signing ""
 chk "the run succeeds without them" "$RC" "0"
-chk "the code signing key's omission is announced" "$(echo "$OUT" | grep -c 'agent_signing_key is root-only')" "1"
-chk "the release statement key's omission is announced" "$(echo "$OUT" | grep -c 'release_statement_key is root-only')" "1"
-chk "the first-login password's omission is announced (a container site's own backup runs as the web user)" "$(echo "$OUT" | grep -c 'admin_credentials.txt is root-only')" "1"
+chk "no warning is printed for them" "$(echo "$OUT" | grep -c 'root-only')" "0"
+LIST=$(openssl enc -d -aes-256-cbc -pbkdf2 -pass fd:3 -in "$W/out/signing.tar.gz.enc" 3< "$W/key" 2>/dev/null | tar -tz 2>/dev/null)
+for f in agent_signing_key release_statement_key admin_credentials.txt db_admin.php; do
+    chk "config/$f is not in the archive" "$(echo "$LIST" | grep -c "config/$f\$")" "0"
+done
+chk "the rest of config/ is" "$([ "$(echo "$LIST" | grep -c 'config/')" -gt 0 ] && echo yes || echo no)" "yes"
+chk "a same-named file outside config/ is still archived" "$(echo "$LIST" | grep -c 'sub/upload/db_admin.php$')" "1"
 chmod 600 "$W/proj/config/agent_signing_key" "$W/proj/config/release_statement_key" "$W/proj/config/admin_credentials.txt"
 
 echo "== Any other unreadable file still fails the run =="

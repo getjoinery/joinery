@@ -81,6 +81,7 @@
  *     evicted, come back under the names the manifest gives them. An existing
  *     line is never changed: a name this ledger already holds keeps its hash.
  *
+ * @version 1.7 - comment: the installer and the converger make the directory for the web user
  * @version 1.6 - record_handed_over() and record_manifest_artifacts(): a site copied here keeps its backups
  *                from before the switch restorable (B20); each entry says its source
  * @version 1.5 - a root run hands each file it writes to the directory's owner, so the site's
@@ -474,9 +475,11 @@ class BackupLedger {
 	}
 
 	/**
-	 * Can this process record? Answered by trying to make the directory, so the
-	 * first root-run backup on a machine creates it and every later caller gets
-	 * a truthful yes or no rather than a guess about which user it is.
+	 * Can this process record? Answered by trying to make the directory, so a
+	 * caller that can create it does, and every caller gets a truthful yes or
+	 * no rather than a guess about which user it is. The installer and the host
+	 * converger (fix_permissions.sh) make it for the web user, which cannot
+	 * create it in config/.
 	 */
 	public static function is_recordable() {
 		$dir = static::dir();
