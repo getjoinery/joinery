@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.64 - the Discard test site confirmation asks for the domain once (confirmTyped adds the request)
  * @version 1.63 - a provision whose server is in the test cloud account offers Discard test site (TestSiteDiscard):
  *                 its server, DNS, mail subaccount, backups, test subscription and records, in one click
  * @version 1.62 - the Main and Test tabs only where something is on the Test side
@@ -1197,7 +1198,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 									<?php echo SmAdminCsrf::field(); ?>
 									<button type="button" class="btn btn-sm btn-outline-danger"
-										onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone. Type the domain to confirm.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode((string)$prov->get('cvp_domain')), ENT_QUOTES); ?>, function(){ document.getElementById('discard_prov_<?php echo (int)$prov->key; ?>').submit(); })">Discard test site&hellip;</button>
+										onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode((string)$prov->get('cvp_domain')), ENT_QUOTES); ?>, function(){ document.getElementById('discard_prov_<?php echo (int)$prov->key; ?>').submit(); })">Discard test site&hellip;</button>
 								</form>
 							<?php endif; ?>
 						<?php endif; ?>

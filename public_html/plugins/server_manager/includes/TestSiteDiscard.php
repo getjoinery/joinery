@@ -42,6 +42,7 @@
  * Refused for a site bought with a live payment, whichever account its server
  * is in: that is a customer, not a test.
  *
+ * @version 1.1 - each node removal is reported before the notes it caused
  * @version 1.0
  */
 
@@ -201,10 +202,11 @@ class TestSiteDiscard {
 			$host_id = (int)end($nodes)->get('mgn_mgh_managed_host_id');
 			foreach ($nodes as $node) {
 				try {
-					foreach ($node->remove_permanently() as $note) {
+					$notes = $node->remove_permanently();
+					$out['done'][] = 'Removed ' . $node->get('mgn_name') . ' from the dashboard.';
+					foreach ($notes as $note) {
 						$out['done'][] = $note;
 					}
-					$out['done'][] = 'Removed ' . $node->get('mgn_name') . ' from the dashboard.';
 				} catch (Throwable $e) {
 					$out['failed'][] = $node->get('mgn_name') . ' was not removed from the dashboard: ' . $e->getMessage()
 						. ' Click Discard again to finish.';
