@@ -715,9 +715,19 @@
 	$migration = array();
 	$migration['database_version'] = '122';
 	// Done, or nothing to rename: mlt_mailing_lists is the email_lists plugin's
-	// table and is not there on a site that never turned the plugin on.
+	// table and is not there on a site that never turned the plugin on. The
+	// schema step runs before migrations and adds mlt_provider_list_id from
+	// the model, so a site can hold both columns: then the list ids are copied
+	// across instead of renamed.
 	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'mlt_mailing_lists' AND column_name = 'mlt_mailchimp_list_id') THEN 0 ELSE 1 END AS count";
-	$migration['migration_sql'] = "ALTER TABLE mlt_mailing_lists RENAME COLUMN mlt_mailchimp_list_id TO mlt_provider_list_id";
+	$migration['migration_sql'] = "DO \$\$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'mlt_mailing_lists' AND column_name = 'mlt_provider_list_id') THEN
+			UPDATE mlt_mailing_lists SET mlt_provider_list_id = mlt_mailchimp_list_id
+			WHERE COALESCE(mlt_provider_list_id::text, '') = '' AND COALESCE(mlt_mailchimp_list_id::text, '') <> '';
+		ELSE
+			ALTER TABLE mlt_mailing_lists RENAME COLUMN mlt_mailchimp_list_id TO mlt_provider_list_id;
+		END IF;
+	END \$\$";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
@@ -735,7 +745,13 @@
 	// Done, or nothing to rename: the column left User (spec email_lists_plugin
 	// §4), so a database with neither name has nothing to do.
 	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'usr_users' AND column_name = 'usr_mailchimp_user_id') THEN 0 ELSE 1 END AS count";
-	$migration['migration_sql'] = "ALTER TABLE usr_users RENAME COLUMN usr_mailchimp_user_id TO usr_mailing_list_provider_id";
+	// Where the schema step already made usr_mailing_list_provider_id there is
+	// nothing to rename into; the column is no longer read.
+	$migration['migration_sql'] = "DO \$\$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'usr_users' AND column_name = 'usr_mailing_list_provider_id') THEN
+			ALTER TABLE usr_users RENAME COLUMN usr_mailchimp_user_id TO usr_mailing_list_provider_id;
+		END IF;
+	END \$\$";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 
