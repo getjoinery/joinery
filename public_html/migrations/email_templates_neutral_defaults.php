@@ -27,7 +27,6 @@ function email_templates_neutral_defaults() {
 		'new_account_content'    => array('32d4d61c6059f2023b2a5a54138d948ce1b5f35938f77fe46fee0eab8af04044', '81726bf4ac4f8dec5bbf51e26dd76feab16480ef3992d3c2f43d69b16328a35d'),
 		'forgotpw_content'       => array('a3addb4fd7e8600b0dfa96b52b5b69cb2e4f6ff15e4c7f722395b269ef593f3d', 'b437622b1d2e24b7164f4124e38b8eaf11bd5a52da00de8b87aaeca9cb0bdbdf'),
 		'email_change_content'   => array('561625d836c6af3d6e1eaf8b7c863dd1a56668bca60168339627a9e1efdc3963', 'c6bdac2079406d337f2cd7ee83dcaac0813a79a3f37397bf01b7e03fe2f6b260'),
-		'newsletter-1'           => array('b17e168cdaf4ea3b742d3c4e72e27df6aec9199c0fefb71544068455e844669d', '3d5db01fcbbd993ab70f7c542483ba050f17b129b90bcbe9ed688e5444715304'),
 	);
 
 	$db = DbConnector::get_instance()->get_db_link();

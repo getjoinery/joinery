@@ -12,6 +12,7 @@
  * resumes where it stopped. On the included email nothing is queued or sent
  * (CampaignRules); a test send to yourself still is.
  *
+ * @version 1.1 - campaigns go out with the mailing_list_footer footer
  * @version 1.0 - from the adm/admin_emails_send.php page
  */
 class CampaignSender {
@@ -63,6 +64,7 @@ class CampaignSender {
 		$contact_type_id = $email->get('eml_ctt_contact_type_id');
 		$out = array('sent' => 0, 'failed' => 0, 'skipped' => 0);
 
+		$footer = self::footer();
 		foreach (new MultiEmailRecipient(array('email_id' => $email->key, 'sent' => FALSE)) as $recipient) {
 			// Another pass may have sent this one since the list was read.
 			$fresh = new EmailRecipient($recipient->key, TRUE);
@@ -93,7 +95,7 @@ class CampaignSender {
 			);
 
 			$sender = new EmailSender();
-			$ok = (bool)$sender->send(self::build_message($email, $data, $address, $name, $list, $list_name));
+			$ok = (bool)$sender->send(self::build_message($email, $data, $address, $name, $list, $list_name, $footer));
 			if ($ok) {
 				$recipient->set('erc_sent_time', 'now()');
 				$recipient->set('erc_status', EmailRecipient::EMAIL_SENT);
@@ -143,7 +145,7 @@ class CampaignSender {
 	/** Send the campaign to $to alone, as a test. True when the provider took it. */
 	public static function send_test(Email $email, User $to): bool {
 		list($list, $list_name) = self::list_of($email);
-		$message = self::build_message($email, $to->export_as_array(), $to->get('usr_email'), $to->display_name(), $list, $list_name);
+		$message = self::build_message($email, $to->export_as_array(), $to->get('usr_email'), $to->display_name(), $list, $list_name, self::footer());
 		$sender = new EmailSender();
 		return (bool)$sender->send($message);
 	}
@@ -157,7 +159,25 @@ class CampaignSender {
 		return $list->key ? array($list, $list->get('mlt_name')) : array(null, null);
 	}
 
-	private static function build_message(Email $email, array $recipient_data, $address, $name, ?MailingList $list, ?string $list_name): EmailMessage {
+	/**
+	 * The footer campaigns go out with: the site's mailing_list_footer, or the
+	 * plugin's own text of it where a site has deleted that row, so a campaign
+	 * to a list always carries its unsubscribe link.
+	 *
+	 * @return string|array a template name, or ['body' => text]
+	 */
+	public static function footer() {
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT 1 FROM emt_email_templates WHERE emt_name = 'mailing_list_footer' AND emt_delete_time IS NULL LIMIT 1");
+		$q->execute();
+		if ($q->fetchColumn()) {
+			return 'mailing_list_footer';
+		}
+		return array('body' => rtrim((string)file_get_contents(PathHelper::getIncludePath('plugins/email_lists/email_templates/mailing_list_footer.html')), "\n"));
+	}
+
+	/** @param string|array $footer from footer(), worked out once per send */
+	private static function build_message(Email $email, array $recipient_data, $address, $name, ?MailingList $list, ?string $list_name, $footer): EmailMessage {
 		$message = EmailMessage::fromTemplate($email->get('eml_message_template_html'), array(
 			'subject' => $email->get('eml_subject'),
 			'preview_text' => $email->get('eml_preview_text'),
@@ -168,7 +188,7 @@ class CampaignSender {
 			'mailing_list_id' => $list ? $list->key : null,
 			'mailing_list_string' => $list_name,
 			'recipient' => $recipient_data,
-		));
+		), $footer);
 		$message->subject($email->get('eml_subject'))->to($address, $name);
 		$settings = Globalvars::get_instance();
 		if ($email->get('eml_from_address') && $email->get('eml_from_address') != $settings->get_setting('defaultemail')) {

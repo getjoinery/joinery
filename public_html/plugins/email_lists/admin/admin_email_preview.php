@@ -41,7 +41,7 @@ if ($email->get('eml_status') == Email::EMAIL_SENT) {
 		'mailing_list_id' => $mailing_list_id,
 		'mailing_list_string' => $mailing_list_string,
 		'recipient' => $recipient->export_as_array()
-	));
+	), CampaignSender::footer());
 
 	echo $message->getHtmlBody();
 }

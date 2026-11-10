@@ -111,6 +111,25 @@ try {
 		set_setting_raw('messaging_active', $was_messaging_active);
 	}
 
+	// The apps parse mailing_lists as a list of strings and drop anything else.
+	if (PluginHelper::isPluginActive('email_lists') && get_setting_raw('mailing_lists_active')) {
+		$list = new MailingList(NULL);
+		$list->set('mlt_name', 'HarnessTest dashboard ' . $suffix);
+		$list->set('mlt_link', 'harnesstest-dashboard-' . strtolower($suffix));
+		$list->set('mlt_is_active', true);
+		$list->save();
+		$list->load();
+		harness_register_row('mlt_mailing_lists', 'mlt_mailing_list_id', $list->key);
+		$list->add_registrant($user_a->key, array('source' => MailingListRegistrant::SOURCE_ADMIN));
+		// Registered after the list, so it is removed first.
+		harness_register_row('mlr_mailing_list_registrants', 'mlr_mailing_list_registrant_id', $list->is_user_in_list($user_a->key)->key);
+		$r = api_request('POST', '/api/v1/action/profile_dashboard', $headers_a, array());
+		$lists = $r['json']['data']['mailing_lists'] ?? null;
+		check(is_array($lists) && in_array('HarnessTest dashboard ' . $suffix, $lists, true)
+			&& count(array_filter($lists, 'is_string')) === count($lists),
+			'mailing_lists is the names of the member\'s lists, as strings', json_encode($lists));
+	}
+
 	// ------------------------------------------------------------------
 	section('order_list: owner scoping + pagination');
 	$order_a1 = new Order(NULL);

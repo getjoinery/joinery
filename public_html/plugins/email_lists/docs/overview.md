@@ -62,6 +62,10 @@ The email goes through core `EmailSender` (everyday mail, allowed on included em
 
 `CampaignSender` sends: `send_due()` (the `SendCampaigns` task and the "Send queued emails" button), `send_email()`, `send_test()`, and `queue_to_list()` for code that writes a campaign. Each recipient is checked again at send time: someone who left the campaign's list, or unsubscribed from its contact type, since it was queued is marked unsubscribed and not sent to. A recipient is marked sent only once the provider took the message, so a pass that stops resumes where it stopped.
 
+## Campaign templates
+
+The plugin ships two email templates, in `plugins/email_lists/email_templates/`, which migration `el_002` adds where a site has no row of that name: `newsletter-1`, the "Standard HTML Template" the campaign editor offers, and `mailing_list_footer`, the footer every campaign goes out with (`CampaignSender::footer()`; where a site has deleted that row, the plugin's own text of it, so a campaign to a list always carries its unsubscribe link). The footer's list block carries the unsubscribe link, and shows when the campaign went to a list. On a site whose `default_footer` carried that block, its body becomes the campaign footer, so an edited footer keeps its wording. Core's `default_footer` has no list block.
+
 ## Campaigns need the site's own email provider
 
 A site that sends through the included Joinery email (`EmailSender::usesIncludedMail()`) has a monthly allowance meant for its everyday mail, and one campaign to a list could use it up and stop its password resets. `CampaignRules` refuses queueing a campaign there (`Email::queue()` and `CampaignSender::queue_to_list()` throw `CampaignRefusedException`), and holds one queued before the site moved back to included email: `send_due()` leaves it queued with `eml_held_reason` set, which its page shows, and sends it on the first run after the site has its own provider. The compose and campaign pages say so before anyone writes. Lists, signups, MailChimp sync and a test send to yourself stay allowed. The weekly events digest skips with the reason instead of stacking a held campaign each week.

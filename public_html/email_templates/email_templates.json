@@ -6,7 +6,6 @@
     {"name": "blank_footer", "type": 3, "subject": "Email from Blank Footer", "file": "blank_footer.html"},
     {"name": "event_bulk_footer", "type": 3, "subject": "Email from Event Bulk Footer", "file": "event_bulk_footer.html"},
     {"name": "blank_template", "type": 2, "subject": "*subject*", "file": "blank_template.html"},
-    {"name": "newsletter-1", "type": 2, "subject": "*subject*", "file": "newsletter-1.html"},
     {"name": "activation_content", "type": 2, "subject": "Confirm your email for *site_name*", "file": "activation_content.html"},
     {"name": "new_account_content", "type": 2, "subject": "Welcome to *site_name*", "file": "new_account_content.html"},
     {"name": "forgotpw_content", "type": 2, "subject": "Reset your *site_name* password", "file": "forgotpw_content.html"},

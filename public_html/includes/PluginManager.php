@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.22 - activation runs the plugin's pending migrations, so one shipped while it was off does not wait for the next deploy; a migration whose up function returns false fails install and activation; lastActivationMigrations()
  * @version 1.21 - uninstall() queues run_plugin_remover in place of remove_plugin when the plugin's manifest declares a host_remover: one request runs the remover and then removes the files (specs/plugin_host_removal.md D6)
  * @version 1.20 - sync, syncTables, the namespace check and activation's hook pass iterate PluginHelper::activePluginRows(); runSyncHook() refuses a name that is not a plugin name (unseal_daemon.md C3)
  * @version 1.19 - activate() loads the newly active plugin's bootstrap before its content packs save anything
@@ -455,6 +456,13 @@ class PluginManager extends AbstractExtensionManager {
      *
      * @return array [outcome, message]
      */
+    /** The migrations the last activate() applied: [['plugin','id','outcome'], ...]. */
+    private $activation_migrations = array();
+
+    public function lastActivationMigrations(): array {
+        return $this->activation_migrations;
+    }
+
     private static function migrationOutcome($plugin_name, array $m) {
         $id = (string)($m['id'] ?? '');
         if (!empty($m['deferred'])) {
@@ -908,6 +916,8 @@ class PluginManager extends AbstractExtensionManager {
      * @throws Exception to roll back the transaction
      */
     protected function onActivate($name, $model, $dblink) {
+        // What this activation applies, and nothing from an earlier one.
+        $this->activation_migrations = array();
         // An uninstalled row has no tables: activating it would run the plugin
         // over nothing. Install is the way back.
         if ($model->is_uninstalled()) {
@@ -1011,6 +1021,26 @@ class PluginManager extends AbstractExtensionManager {
         $index_result = $schema_updater->manageIndexes($plugin_classes);
         if (!empty($index_result['errors'])) {
             throw new Exception("Plugin '$name' index sync failed: " . implode('; ', $index_result['errors']));
+        }
+
+        // Its pending migrations. sync() runs them only for active plugins, so
+        // one shipped while the plugin was off (or a plugin activated by the
+        // upgrade itself) would otherwise wait for the next deploy. Before the
+        // foreign keys, as at install, so a data fix can clear orphans first.
+        // A failed one (an error, or an up function that returned false) stops
+        // the activation; what was applied is kept for the caller to report.
+        $migration_errors = array();
+        foreach ($this->runPendingMigrations($name) as $migration_result) {
+            list($outcome, $message) = self::migrationOutcome($name, $migration_result);
+            if ($outcome === 'failed') {
+                $migration_errors[] = $message;
+            } elseif ($outcome === 'applied') {
+                $this->activation_migrations[] = array('plugin' => $name, 'id' => (string)($migration_result['id'] ?? ''), 'outcome' => 'applied');
+            }
+        }
+        if ($migration_errors) {
+            $this->activation_migrations = array();
+            throw new Exception("Plugin '$name' migration failed: " . implode('; ', $migration_errors));
         }
 
         // Materialize declared foreign keys on the plugin's tables
@@ -1323,8 +1353,9 @@ class PluginManager extends AbstractExtensionManager {
                 $migration_results = $this->runPendingMigrations($name);
                 $migration_errors = array();
                 foreach ($migration_results as $result) {
-                    if (!empty($result['error'])) {
-                        $migration_errors[] = $result['error'];
+                    list($outcome, $message) = self::migrationOutcome($name, $result);
+                    if ($outcome === 'failed') {
+                        $migration_errors[] = $message;
                     }
                 }
                 if (!empty($migration_errors)) {

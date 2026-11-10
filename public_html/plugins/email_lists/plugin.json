@@ -1,6 +1,6 @@
 {
     "name": "Email Lists & Campaigns",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Mailing lists, newsletter signup forms and email campaigns, with MailChimp sync. Campaigns send through the site's own email provider.",
     "author": "Joinery",
     "license": "Joinery-Commercial",

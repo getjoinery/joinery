@@ -11,6 +11,7 @@
  * conversations, mailing lists and notifications directly.
  *
  * @version 1.0.0
+ * @version 1.1.0 - an item's native payload may be a plain string
  */
 
 /** A stat card: a single headline number for a section. */
@@ -28,16 +29,19 @@ class ProfileDashboardStat {
     }
 }
 
-/** One row within a section. `data` is the raw native-app payload for this item. */
+/**
+ * One row within a section. `data` is the raw native-app payload for this
+ * item: an object, or a plain string where the apps read a list of strings.
+ */
 class ProfileDashboardItem {
-    public array $data;
+    public array|string $data;
     public string $title;
     public ?string $subtitle;
     public ?string $meta;   // may contain safe HTML
     public ?string $badge;
     public ?string $url;
 
-    public function __construct(array $data, string $title, ?string $subtitle = null, ?string $meta = null, ?string $badge = null, ?string $url = null) {
+    public function __construct(array|string $data, string $title, ?string $subtitle = null, ?string $meta = null, ?string $badge = null, ?string $url = null) {
         $this->data     = $data;
         $this->title    = $title;
         $this->subtitle = $subtitle;

@@ -125,6 +125,13 @@
 			$GLOBALS['UPDATE_DATABASE_FACTS'][$kind][] = $value;
 		}
 	}
+	// Migrations an auto-activation below ran belong in the result too.
+	function update_database_activation_facts($plugin_manager) {
+		foreach ($plugin_manager->lastActivationMigrations() as $m) {
+			update_database_fact('migrations', ['version' => $m['plugin'] . '/' . $m['id'], 'outcome' => $m['outcome'], 'rows' => null]);
+			echo "✓ Migration: " . htmlspecialchars($m['plugin'] . ': applied ' . $m['id']) . "<br>\n";
+		}
+	}
 	function update_database_schema_facts($messages) {
 		foreach ((array)$messages as $m) {
 			$m = trim(strip_tags((string)$m));
@@ -1184,8 +1191,9 @@
 					$q->execute([$name]);
 					$active = $q->fetchColumn();
 					if ($active !== false && (int)$active === 0) {
-						$pm->activate($name);   // enforces depends, runs tables/settings/activate.php/menus
+						$pm->activate($name);   // enforces depends, runs tables/migrations/settings/activate.php/menus
 						echo "✓ Activated plugin '$name'<br>\n";
+						update_database_activation_facts($pm);
 					}
 				};
 
@@ -1235,6 +1243,7 @@
 					if ($active !== false && (int)$active === 0) {
 						PluginManager::getInstance()->activate('email_lists');
 						echo "✓ Activated plugin 'email_lists'<br>\n";
+						update_database_activation_facts(PluginManager::getInstance());
 					}
 				}
 

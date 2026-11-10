@@ -50,7 +50,8 @@ class EmailTemplateRenderer {
      * 
      * @param string $inner_template Template name
      * @param string $outer_template Outer template name (null for default)
-     * @param string $footer Footer template name (null for default)
+     * @param string|array $footer Footer template name (null for default), or
+     *   ['body' => string] for a footer given as text
      */
     public function __construct($inner_template, $outer_template = null, $footer = null) {
         // Explicit check to prevent old usage pattern
@@ -77,6 +78,11 @@ class EmailTemplateRenderer {
             }
         }
         
+        // A footer given as text
+        if (is_array($footer)) {
+            $this->footer = (string)($footer['body'] ?? '');
+        }
+
         // Load footer template
         if (!$footer) {
             $templates = new MultiEmailTemplate(
@@ -125,7 +131,7 @@ class EmailTemplateRenderer {
         }
         
         // Load footer if string provided
-        if (!$this->footer && $footer) {
+        if (!$this->footer && $footer && !is_array($footer)) {
             $templates = new MultiEmailTemplate(
                 array('email_template_name' => $footer, 'deleted' => false)
             );

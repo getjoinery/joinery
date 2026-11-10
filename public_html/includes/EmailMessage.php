@@ -37,12 +37,13 @@ class EmailMessage {
     
     /**
      * Create from template
+     * @param string|array|null $footer footer template name, ['body' => text], or null for default_footer
      * @throws Exception if template is missing or malformed
      */
-    public static function fromTemplate($templateName, $values = []) {
+    public static function fromTemplate($templateName, $values = [], $footer = null) {
         try {
             // Create template directly with constructor
-            $template = new EmailTemplateRenderer($templateName);
+            $template = new EmailTemplateRenderer($templateName, null, $footer);
             $template->fill_template($values);
         } catch (EmailTemplateError $e) {
             throw new Exception('Template \'' . $templateName . '\' error: ' . $e->getMessage());

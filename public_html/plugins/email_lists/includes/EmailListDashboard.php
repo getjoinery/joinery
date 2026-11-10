@@ -3,6 +3,10 @@
  * EmailListDashboard — the member's mailing lists on their profile page and
  * the app dashboard (ProfileDashboardRegistry, spec email_lists_plugin G1).
  *
+ * The apps read mailing_lists as a list of names, so each item's payload is
+ * the list's name.
+ *
+ * @version 1.1 - each item's app payload is the list name, the shape the apps parse
  * @version 1.0 - from the Mailing Lists card core built in profile_logic,
  *   profile_dashboard_logic and the ScrollDaddy profile
  */
@@ -18,9 +22,7 @@ class EmailListDashboard {
 			if (!$list->key || $list->get('mlt_delete_time')) {
 				continue;
 			}
-			$items[] = new ProfileDashboardItem(
-				array('mailing_list_id' => (int)$list->key, 'name' => (string)$list->get('mlt_name')),
-				(string)$list->get('mlt_name'));
+			$items[] = new ProfileDashboardItem((string)$list->get('mlt_name'), (string)$list->get('mlt_name'));
 		}
 		return new ProfileDashboardSection('mailing_lists', 'Mailing Lists', '/profile/contact_preferences',
 			null, $items, 'Not subscribed to any lists.');
